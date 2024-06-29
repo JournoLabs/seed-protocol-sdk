@@ -100,3 +100,180 @@ post.title = 'Something else'
 await post.publish()
 
 ```
+
+## Usage
+
+```typescript
+import { SeedFile } from '@seedprotocol/sdk'
+
+const fileFromUrl = new SeedFile('https://example.com/file.txt')
+
+fileFromUrl.subscribe((event, status) => {
+  console.log(`Event: ${event}, Status: ${status}`)
+})
+
+await fileFromUrl.save()
+
+```
+
+```typescript
+const fileFromPath = new SeedFile('path/to/file.txt')
+
+const fileFromBlob = new SeedFile(new Blob(['Hello, World!']))
+
+const fileFromBuffer = new SeedFile(Buffer.from('Hello, World!'))
+
+const fileFromFile = new SeedFile(new File(['Hello, World!'], 'file.txt'))
+
+if (fileFromPath.isSaved) {
+  console.log('File is saved to Arweave and EAS')
+}
+```
+
+```typescript
+import { SeedFileSystem } from '@seedprotocol/sdk'
+
+const fs = new SeedFileSystem()
+
+fs.subscribe((event, status) => {
+  console.log(`Event: ${event}, Status: ${status}`)
+  if (event === 'connection.success' && status === 'connected') {
+    console.log('Connected to user\'s file system')
+  }
+  
+  if (event === 'connection.error') {
+    console.error('Error connecting to user\'s file system', event.error)
+  }
+})
+
+await fs.connect() // User prompted to connect browser wallet
+
+const files = await fs.listFiles('/')
+
+files.forEach(file => {
+  console.log(file.name)
+  console.log(file.size)
+  console.log(file.seedPath) // Each wallet address has a virtual root directory with directories and file system paths
+})
+
+```
+
+```typescript
+
+import { SeedImage } from '@seedprotocol/sdk'
+
+const imgFromUrl = new SeedImage('https://example.com/image.png')
+
+const imgFromDataUrl = new SeedImage('data:image/png;base64,iVB....')
+
+await imgFromUrl.save()
+
+const imgBlob = imgFromUrl.blob()
+const imgBuffer = imgFromUrl.buffer()
+const imgDataUrl = imgFromUrl.dataUrl()
+
+```
+
+**Note:** Model instances are called Items in the SDK. This is to avoid confusion with the `Model` function that creates the data model.
+
+```mermaid
+---
+Title: Seed Protocol SDK
+---
+%%{
+  init: {
+    'theme': 'base',
+    'themeVariables': {
+      'primaryColor': '#e0f2fe',
+      'primaryTextColor': '#0c4a6e',
+      'primaryBorderColor': '#38bdf8',
+      'lineColor': '#475569',
+      'secondaryColor': '#d9f99d',
+      'tertiaryColor': '#fff',
+      'tertiaryBorderColor': '#7e22ce',
+      'tertiaryTextColor': '#7e22ce',
+      'clusterBkg': '#fff'
+    }
+  }
+}%%
+flowchart TD
+    A{Developer}
+    B{User}
+    C{Seed Dev}
+    N{SDK}
+    Q[App Code]
+    
+    D[(sdk_config_db)]
+    E[(app_db)]
+    L[(seeds_db)]
+    
+    G[Schema/Migration files
+    browser/db/seedSchema]
+    H[Schema/Migration files
+    .seed/app/schema]
+    R[Schema/Migration files
+    node/db/sdkSchema]
+    
+    I[browser.seed.db.config.mjs]
+    J[sdk.db.config.mjs]
+    K[browser.app.db.config.mjs]
+    
+    O[files.json
+    seed/endpoint/list]
+    P[Files
+    seed/endpoint/files]
+    
+    S[$> seed init]
+    T[scripts/bin]
+    
+    subgraph SDK Code
+        C--changes Seeds or Versions-->I
+        C--changes Models or Properties-->J
+        J--generates-->R
+        I--generates-->G
+        subgraph Package Bundle 
+            R
+            G
+        end
+    end
+
+    
+
+    subgraph App Code
+    A--adds Models and Properties-->K
+      subgraph SDK 
+          D
+          H
+      end
+    A--runs-->S
+    S--calls-->T
+    T--reads-->K
+    T--generates-->D
+    T--generates-->H
+    end
+    
+    subgraph App Server 
+      H--served at endpoint-->O
+      H--served at endpoint-->P
+    end
+    
+
+    
+    subgraph Browser
+    B--adds data-->Q
+      subgraph App 
+          Q--calls SDK-->N
+          subgraph SDK 
+            E--notifies-->N
+            N<--files.json-->O
+            N<--files-->P
+            N--updates-->E
+            N--updates-->L
+              
+          end
+      end
+    end
+
+
+```
+
