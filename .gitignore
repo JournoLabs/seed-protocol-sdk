@@ -89,7 +89,7 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+/dist
 
 # Gatsby files
 .cache/
@@ -131,3 +131,8 @@ dist
 
 # Jetbrains IDE files
 .idea
+
+.DS_Store
+.seed
+
+vite/app-files
