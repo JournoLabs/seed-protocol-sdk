@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  height: 100%;
+  width: 100%;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-sans font-bold text-gray-900;
+}
+
+h1 {
+  @apply text-4xl mb-4;
+}
+
+h2 {
+  @apply text-3xl mb-2;
+}
+
+main {
+  @apply flex flex-col p-10 w-full text-gray-700;;
+}

@@ -1,0 +1,57 @@
+{
+  "compilerOptions": {
+    "target": "es6",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es6"
+    ],
+    "baseUrl": ".",
+    "allowJs": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "declaration": true,
+    "declarationMap": true,
+    "declarationDir": "./dist/types",
+    "emitDeclarationOnly": true,
+    "sourceMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "typeRoots": [
+      "./types/**/*",
+      "./node_modules/@types",
+      "**/types.ts"
+    ],
+    "outDir": "./dist",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "@/types/*": [
+        "types/*"
+      ],
+      "@/test/*": [
+        "__tests__/*"
+      ],
+      "@/sdkSchema/*": [
+        "src/node/db/sdkSchema/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "__tests__/**/*",
+    "types/**/*",
+    "scripts/**/*"
+  ]
+}

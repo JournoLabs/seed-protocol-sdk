@@ -33,10 +33,32 @@
     "fsevents": "^2.3.3"
   },
   "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/pluralize": "^0.0.33",
     "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "^9.11.1",
+    "eslint-config-prettier": "^9.1.0",
     "vite-plugin-dts": "^4.2.2",
     "vite-plugin-node-polyfills": "^0.22.0",
     "vite-plugin-static-copy": "^1.0.6",
     "vite-tsconfig-paths": "^5.0.1"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.33.12",
+    "@sqlite.org/sqlite-wasm": "^3.46.1-build3",
+    "drizzle-kit": "^0.24.2",
+    "drizzle-orm": "^0.33.0",
+    "eventemitter3": "^5.0.1",
+    "graphql": "^16.9.0",
+    "graphql-request": "^7.1.0",
+    "immer": "^10.1.1",
+    "nanoid": "^5.0.7",
+    "nanoid-dictionary": "^4.3.0",
+    "pluralize": "^8.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "use-immer": "^0.10.0",
+    "vite": "^5.4.8",
+    "xstate": "^5.18.2"
   }
 }
