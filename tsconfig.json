@@ -7,6 +7,7 @@
       "es6"
     ],
     "baseUrl": ".",
+    "inlineSources": true,
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
@@ -27,8 +28,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
+    "types": [
+      "node",
+    ],
     "typeRoots": [
-      "./types/**/*",
+      "./src/types/**/*",
       "./node_modules/@types",
       "**/types.ts"
     ],
@@ -37,21 +41,14 @@
       "@/*": [
         "src/*"
       ],
-      "@/types/*": [
-        "types/*"
-      ],
       "@/test/*": [
         "__tests__/*"
       ],
-      "@/sdkSchema/*": [
-        "src/node/db/sdkSchema/*"
-      ]
     }
   },
   "include": [
     "src/**/*",
     "__tests__/**/*",
-    "types/**/*",
     "scripts/**/*"
   ]
 }

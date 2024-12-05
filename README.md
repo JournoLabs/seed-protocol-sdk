@@ -1,18 +1,22 @@
-# [WIP] Seed Protocol SDK
+# Seed Protocol SDK
 
-This API is a work in progress. It is not yet ready for production use. These docs are for keeping the community informed
-and generating feedback.
+The official SDK for [Seed Protocol](https://seedprotocol.io/).
 
-## Current research questions
+The SDK is a heavily opinionated ORM that saves its database (SQLite) and files (OPFS) within the user's browser. All
+user data
+is fetched from, or written to, the Ethereum Attestation Service (EAS) and Arweave (More attestation services
+and decentralized storage providers will be supported in the future).
 
-- Can we use TypeORM backed by Sqlite Wasm for more performant and future-proof storage?
-  - Track this research here: [TypeORM Sqlite Wasm](https://github.com/JournoDAO/typeorm-sqlite-wasm)
-- What would the tooling look like to allow export of data model as ProtoBuf and/or JSON Schema?
-  - Looking at [ts-proto](https://github.com/stephenh/ts-proto) for Typescript 
+With all the remote storage on decentralized, public infrastructure, there's no server component to manage or rely on.
+
+The hope is that this local-first and distributed approach will make it easier for developers to build apps with Seed
+Protocol
+without ever custodying user data on their own infrastructure.
+
+The SDK is currently used and developed by [PermaPress](https://permapress.xyz), the first client for Seed Protocol.
+PermaPress is a product developed by JournoLabs (formerly JournoDAO).
 
 ## Installing
-
-This package is not yet published to npm, but when it is, this will be the command to install it:
 
 ```bash
 yarn add @seedprotocol/sdk
@@ -20,51 +24,72 @@ yarn add @seedprotocol/sdk
 
 ## Getting Started
 
-The first thing to do when integrating Seed SDK is define you data model. 
+The first thing to do when integrating Seed SDK is define your data model by placing a `schema.ts` file in the root
+of your project.
 
-For example, let's pretend we're creating a blog that uses Seed Protocol as its content store. We start by defining our `Models`, their `Properties`, and what type of data each `Property` is expecting.
+As an example, here's the actual data model for PermaPress:
 
 ```typescript=
-import {Model, Property, List, createStore} from '@seedprotocol/sdk'
+import { ImageSrc, List, Model, Relation, Text } from '@/browser/schema'
 
+@Model
+class Image {
+  @Text() storageTransactionId!: string
+  @Text() uri!: string
+  @Text() alt!: string
+  @ImageSrc() src!: string
+}
 
-const Image = Model({
-      storageTransactionId: Property.String(),
-      uri: Property.String(),
-      alt: Property.String(),
-    },)
+@Model
+class Post {
+  @Text() title!: string
+  @Text() summary!: string
+  @Relation('Image', 'ImageSrc') featureImage!: string
+  @Text('ItemStorage', '/html', '.html') html!: string
+  @Text('ItemStorage', '/json', '.json') json!: string
+  @Text() storageTransactionId!: string
+  @List('Identity') authors!: string[]
+  @Text() importUrl!: string
+}
 
-const Link = Model({
-  url: Property.String(),
-  text: Property.String(),
-},)
+@Model
+class Identity {
+  @Text() name!: string
+  @Text() profile!: string
+  @Text() displayName!: string
+  @Relation('Image', 'ImageSrc') avatarImage!: string
+  @Relation('Image', 'ImageSrc') coverImage!: string
+}
 
-const Identity = Model({
-  name: Property.String(),
-  bio: Property.String(),
-  avatarImage: Image,
-},)
+@Model
+class Link {
+  @Text() url!: string
+  @Text() text!: string
+}
 
-const Post = Model({
-  title: Property.String(),
-  summary: Property.String(),
-  featureImage: Image,
-  html: Property.String(),
-  json: Property.String(),
-  authors: Property.List(Identity,),
-},)
-
-createStore({
+const models = {
   Identity,
   Image,
   Link,
   Post,
-},)
+}
+
+const endpoints = {
+  filePaths: '/api/seed/migrations',
+  files: '/app-files',
+}
+
+export { models, endpoints }
+
+export default { models, endpoints }
+
 ```
 
-This will create a database locally in the browser with all the tables and fields necessary to support your Models. Feel free to check it out for yourself in your browser's Dev Tools.
+This will create a database locally in the browser with all the tables and fields necessary to support your Models. Feel
+free to check it out for yourself in your browser's Dev Tools.
 
-Notice that we create relationships by defining a `Property` that takes its related Model as its type. For one-to-many relationships, we use the `List` type and pass in the `Model` type we want.
+Notice that we create relationships by defining a `Property` that takes its related Model as its type. For one-to-many
+relationships, we use the `List` type and pass in the `Model` type we want.
 
 So creating a Post would look like this:
 
@@ -108,7 +133,7 @@ import { SeedFile } from '@seedprotocol/sdk'
 
 const fileFromUrl = new SeedFile('https://example.com/file.txt')
 
-fileFromUrl.subscribe((event, status) => {
+fileFromUrl.subscribe(( event, status ) => {
   console.log(`Event: ${event}, Status: ${status}`)
 })
 
@@ -119,13 +144,13 @@ await fileFromUrl.save()
 ```typescript
 const fileFromPath = new SeedFile('path/to/file.txt')
 
-const fileFromBlob = new SeedFile(new Blob(['Hello, World!']))
+const fileFromBlob = new SeedFile(new Blob([ 'Hello, World!' ]))
 
 const fileFromBuffer = new SeedFile(Buffer.from('Hello, World!'))
 
-const fileFromFile = new SeedFile(new File(['Hello, World!'], 'file.txt'))
+const fileFromFile = new SeedFile(new File([ 'Hello, World!' ], 'file.txt'))
 
-if (fileFromPath.isSaved) {
+if ( fileFromPath.isSaved ) {
   console.log('File is saved to Arweave and EAS')
 }
 ```
@@ -135,13 +160,13 @@ import { SeedFileSystem } from '@seedprotocol/sdk'
 
 const fs = new SeedFileSystem()
 
-fs.subscribe((event, status) => {
+fs.subscribe(( event, status ) => {
   console.log(`Event: ${event}, Status: ${status}`)
-  if (event === 'connection.success' && status === 'connected') {
+  if ( event === 'connection.success' && status === 'connected' ) {
     console.log('Connected to user\'s file system')
   }
-  
-  if (event === 'connection.error') {
+
+  if ( event === 'connection.error' ) {
     console.error('Error connecting to user\'s file system', event.error)
   }
 })
@@ -168,13 +193,14 @@ const imgFromDataUrl = new SeedImage('data:image/png;base64,iVB....')
 
 await imgFromUrl.save()
 
-const imgBlob = imgFromUrl.blob()
-const imgBuffer = imgFromUrl.buffer()
+const imgBlob    = imgFromUrl.blob()
+const imgBuffer  = imgFromUrl.buffer()
 const imgDataUrl = imgFromUrl.dataUrl()
 
 ```
 
-**Note:** Model instances are called Items in the SDK. This is to avoid confusion with the `Model` function that creates the data model.
+**Note:** Model instances are called Items in the SDK. This is to avoid confusion with the `Model` function that creates
+the data model.
 
 ```mermaid
 ---
@@ -202,78 +228,108 @@ flowchart TD
     C{Seed Dev}
     N{SDK}
     Q[App Code]
-    
     D[(sdk_config_db)]
     E[(app_db)]
     L[(seeds_db)]
-    
     G[Schema/Migration files
     browser/db/seedSchema]
-    H[Schema/Migration files
-    .seed/app/schema]
-    R[Schema/Migration files
-    node/db/sdkSchema]
-    
-    I[browser.seed.db.config.mjs]
-    J[sdk.db.config.mjs]
-    K[browser.app.db.config.mjs]
-    
-    O[files.json
-    seed/endpoint/list]
-    P[Files
-    seed/endpoint/files]
-    
-    S[$> seed init]
-    T[scripts/bin]
-    
-    subgraph SDK Code
-        C--changes Seeds or Versions-->I
-        C--changes Models or Properties-->J
-        J--generates-->R
-        I--generates-->G
-        subgraph Package Bundle 
-            R
-            G
-        end
-    end
+H[Schema/Migration files
+.seed/app/schema]
+R[Schema/Migration files
+node/db/sdkSchema]
 
-    
+I[browser.seed.db.config.mjs]
+J[sdk.db.config.mjs]
+K[browser.app.db.config.mjs]
 
-    subgraph App Code
-    A--adds Models and Properties-->K
-      subgraph SDK 
-          D
-          H
-      end
-    A--runs-->S
-    S--calls-->T
-    T--reads-->K
-    T--generates-->D
-    T--generates-->H
-    end
-    
-    subgraph App Server 
-      H--served at endpoint-->O
-      H--served at endpoint-->P
-    end
-    
+O[files.json
+seed/endpoint/list]
+P[Files
+seed/endpoint/files]
 
-    
-    subgraph Browser
-    B--adds data-->Q
-      subgraph App 
-          Q--calls SDK-->N
-          subgraph SDK 
-            E--notifies-->N
-            N<--files.json-->O
-            N<--files-->P
-            N--updates-->E
-            N--updates-->L
-              
-          end
-      end
-    end
+S[$> seed init]
+T[scripts/bin]
+
+subgraph SDK Code
+C--changes Seeds or Versions --> I
+C-- changes Models or Properties --> J
+J-- generates -->R
+I-- generates --> G
+subgraph Package Bundle
+R
+G
+end
+end
+
+
+
+subgraph App Code
+A-- adds Models and Properties --> K
+subgraph SDK
+D
+H
+end
+A-- runs --> S
+S-- calls --> T
+T-- reads--> K
+T-- generates --> D
+T-- generates --> H
+end
+
+subgraph App Server
+H-- served at endpoint --> O
+H-- served at endpoint --> P
+end
+
+
+
+subgraph Browser
+B-- adds data--> Q
+subgraph App
+Q-- calls SDK--> N
+subgraph SDK
+E-- notifies -->N
+N<-- files . json --> O
+N<-- files --> P
+N-- updates -->E
+N-- updates --> L
+
+end
+end
+end
 
 
 ```
 
+A[Versions From EAS]
+B[Seeds From EAS]
+C[List of Items]
+D[List of Properties]
+E{Property Machine}
+F{Item Machine}
+G{Items Machine}
+
+```mermaid
+sequenceDiagram
+    Items Service ->>+ EAS: Seeds Request
+    EAS -->>+ Items Service: Seed Attestations
+    loop Each Seed Attestation
+        Items Service ->>+ Items Service: Extract Seed Uid
+    end
+    Note over Items Service: Now we have SeedUid[]
+    Items Service ->>+ EAS: Versions Request w/ SeedUid[]
+    EAS -->>+ Items Service: Version Attestations
+    loop Each SeedUid
+        Items Service ->>+ Items Service: Sort Version Uids DESC
+    end
+    loop Each most recent Version for Seed
+        Items Service ->>+ Item Service: Create Item
+    end
+    Note over Items Service: Now we have VersionUid[] for each SeedUid<br />sorted by `createdAt` DESC
+    Item Service ->>+ EAS: Properties Request w/ VersionUid[]
+    EAS -->>+ Item Service: Properties Attestations
+    loop Each Property Attestation
+        Item Service ->>+ Property Service: Create Property Service
+    end
+    Note over Item Service: Now has all Property Services<br />under this._services
+```

@@ -1,0 +1,13 @@
+{%- macro relations(tableName, listProperties) -%}
+{%- for property, definition in listProperties -%}
+
+{% if definition.dataType == 'List' -%}
+{% set refTableName = definition.ref | pluralize | lower -%}
+export const {{ tableName }}Relations = relations({{ tableName }}, ({ many }) => ({
+  {{ refTableName }}: many({{ refTableName }}){% if not loop.last %},{% endif %}
+}));
+{% endif -%}
+{% endfor -%}
+
+export type {{ tableName }}Type = {{ tableName }}.$inferSelect
+{% endmacro -%}

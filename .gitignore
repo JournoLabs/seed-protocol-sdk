@@ -134,5 +134,6 @@ out
 
 .DS_Store
 .seed
+.cadence
 
 vite/app-files

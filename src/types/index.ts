@@ -1,11 +1,14 @@
+import { ImageSrc, Json, List, Relation, Text } from '@/browser'
 import { SeedInitBrowser } from './browser'
-import { ModelClassType }                 from './model'
-import { ImageSrc, Json, List, Relation } from '@/browser/schema'
+import { ModelClassType } from './model'
 import { PropertyType } from './property'
 
-export *                   from './model'
-export *                   from './browser'
-export *                   from './property'
+export * from './model'
+export * from './item'
+export * from './property'
+export * from './browser'
+export * from './machines'
+export * from './seedProtocol'
 
 export type Endpoints = {
   filePaths: string
@@ -45,6 +48,15 @@ export interface Seed {
 }
 
 export type Environment = 'browser' | 'node' | 'react-native'
+
+export interface SeedConstructorSync {
+  (
+    /**
+     * Initialization options.
+     */
+    options?: SeedConstructorOptions,
+  ): Partial<Seed>
+}
 
 export interface SeedConstructor {
   (

@@ -1,7 +1,10 @@
-import { ModelClassType, ModelSchema, PropertyType } from '@/types'
-import { Attestation }                               from '@/browser/gql/graphql'
-import { Item }                                      from '@/browser/schema/item'
+import { ModelClassType, ModelSchema } from '@/types'
+import { Attestation } from '@/browser/gql/graphql'
+import { Item } from '@/browser/item'
+import { ItemProperty } from '@/browser/property'
+import { PropertyType } from '@/shared/seedSchema'
 
+export type ItemType = Partial<typeof Item>
 
 export type AllItemsMachineContext = {
   times?: Record<string, unknown>
@@ -39,13 +42,49 @@ export type ItemMachineContext<T> = {
   modelNamePlural?: string
   modelName?: string
   existingItem?: Record<string, unknown>
+  propertiesUpdatedAt?: number
+  hasRemoteBackup?: boolean
+  storageTransactionId?: string
+  isPublishing?: boolean
 }
 
-export type NewItemProps<T> = {
-  seedLocalId: string | undefined
-  seedUid?: string | undefined
-  schemaUid: string | undefined
-  ModelClass?: ModelClassType
-  schemaUidsByModelName?: Map<string, string>
-  mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
-} & Partial<T>
+export type NewItemProps<T> = Partial<ItemData> &
+  Partial<T> & {
+    modelName: string
+    schemaUidsByModelName?: Map<string, string>
+    mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
+    storageTransactionId?: string
+  }
+
+export type ItemData = {
+  seedLocalId?: string
+  seedUid?: string
+  modelName?: string
+  schemaUid?: string
+  attestationCreatedAt?: number
+  latestVersionUid?: string
+  latestVersionLocalId?: string
+  versionsCount?: number
+  lastVersionPublishedAt?: number
+  lastLocalUpdateAt?: number
+  createdAt?: number
+  updatedAt?: number
+}
+
+export type ItemFindProps = {
+  modelName?: string
+  seedLocalId?: string
+  seedUid?: string
+}
+
+export type CreatePropertyInstanceProps = {
+  propertyName: string
+  seedLocalId?: string
+  seedUid?: string
+  versionLocalId?: string
+  versionUid?: string
+  itemModelName: string
+  storageTransactionId?: string
+  propertyValue: any
+  schemaUid?: string
+}

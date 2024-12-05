@@ -1,6 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { eventEmitter } from '../src/eventBus'
 import { useImmer } from 'use-immer'
+import {
+  Disclosure,
+  DisclosureButton,
+  DisclosurePanel,
+} from '@headlessui/react'
 
 const Events = () => {
   const [eventsCount, setEventsCount] = useState(0)
@@ -68,41 +73,47 @@ const Events = () => {
   }, [])
 
   return (
-    <>
-      <div className={'grid grid-cols-2 mt-12'}>
-        <h2>Listeners </h2>
-        <div className={'flex flex-row items-center'}>
-          <span className={'text-xl'}>{eventNames.length}</span>
+    <Disclosure>
+      <DisclosureButton
+        className={'max-w-lg cursor-pointer flex flex-row items-center'}
+      >
+        <div className={'grid grid-cols-2 mt-12 w-full'}>
+          <h2 className={'text-left'}>Listeners </h2>
+          <div className={'flex flex-row items-center'}>
+            <span className={'text-xl'}>{eventNames.length}</span>
+          </div>
         </div>
-      </div>
-      <div className={'grid grid-cols-2 gap-4 mt-8'}>
-        <div className={'font-bold col-span-1'}>
-          <span>Event</span>
+      </DisclosureButton>
+      <DisclosurePanel>
+        <div className={'grid grid-cols-2 gap-4 mt-8'}>
+          <div className={'font-bold col-span-1'}>
+            <span>Event</span>
+          </div>
+          <div className={'font-bold col-span-1 flex flex-row'}>
+            <span>Count</span>
+          </div>
+          {eventsCountDisplay &&
+            eventsCountDisplay.map(({ key, value }) => (
+              <Fragment key={key}>
+                <div>
+                  <span className={'font-mono bg-gray-100 rounded p-2 text-sm'}>
+                    {key}
+                  </span>
+                </div>
+                <div className={'font-mono'}>
+                  <span>{value}</span>
+                </div>
+              </Fragment>
+            ))}
+          <div className={'font-bold col-span-1 flex flex-row mt-5'}>
+            <span>Total</span>
+          </div>
+          <div className={'font-bold col-span-1 flex flex-row mt-5'}>
+            <span>{eventsCount}</span>
+          </div>
         </div>
-        <div className={'font-bold col-span-1 flex flex-row'}>
-          <span>Count</span>
-        </div>
-        {eventsCountDisplay &&
-          eventsCountDisplay.map(({ key, value }) => (
-            <Fragment key={key}>
-              <div>
-                <span className={'font-mono bg-gray-100 rounded p-2 text-sm'}>
-                  {key}
-                </span>
-              </div>
-              <div className={'font-mono'}>
-                <span>{value}</span>
-              </div>
-            </Fragment>
-          ))}
-        <div className={'font-bold col-span-1 flex flex-row mt-5'}>
-          <span>Total</span>
-        </div>
-        <div className={'font-bold col-span-1 flex flex-row mt-5'}>
-          <span>{eventsCount}</span>
-        </div>
-      </div>
-    </>
+      </DisclosurePanel>
+    </Disclosure>
   )
 }
 

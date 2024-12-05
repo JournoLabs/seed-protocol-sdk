@@ -1,21 +1,9 @@
-import { useEffect } from 'react'
+// import Test from './components/Test'
 import Events from './Events'
-import ActorList from './ActorList'
-import ModelsDisplay from './ModelsDisplay'
+import ServiceList from './ServiceList'
+import { Outlet } from 'react-router-dom'
 
 const DevApp = () => {
-  useEffect(() => {
-    console.log('DevApp mounted')
-
-    const _init = async (): Promise<void> => {}
-
-    _init()
-
-    return () => {
-      console.log('DevApp unmounted')
-    }
-  }, [])
-
   return (
     <main>
       <h1>Seed Protocol SDK</h1>
@@ -27,10 +15,10 @@ const DevApp = () => {
         It is a collection of tools and utilities that make it easy to build
         Seed Protocol applications.
       </p>
+      {/*<Test />*/}
       <Events />
-      <ActorList />
-      <h2>Models</h2>
-      <ModelsDisplay />
+      <ServiceList />
+      <Outlet />
     </main>
   )
 }

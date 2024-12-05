@@ -13,9 +13,11 @@ class Post {
   @Text() title!: string
   @Text() summary!: string
   @Relation('Image', 'ImageSrc') featureImage!: string
-  @Text() html!: string
-  @Text() json!: string
+  @Text('ItemStorage', '/html', '.html') html!: string
+  @Text('ItemStorage', '/json', '.json') json!: string
+  @Text() storageTransactionId!: string
   @List('Identity') authors!: string[]
+  @Text() importUrl!: string
 }
 
 @Model

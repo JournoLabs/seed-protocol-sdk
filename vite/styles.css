@@ -22,3 +22,19 @@ h2 {
 main {
   @apply flex flex-col p-10 w-full text-gray-700;;
 }
+
+.item-property .easy-edit-wrapper.easy-edit-hover-on {
+  font-style: unset;
+}
+
+.item-property .easy-edit-button-wrapper {
+  display: none;
+}
+
+.item-property .easy-edit-inline-wrapper, .item-property .easy-edit-inline-wrapper .easy-edit-component-wrapper {
+  @apply flex flex-row items-center w-full;
+}
+
+.item-property .easy-edit-inline-wrapper .easy-edit-component-wrapper input {
+  @apply block items-center w-full outline-0 focus:ring-0 bg-transparent text-gray-700;
+}

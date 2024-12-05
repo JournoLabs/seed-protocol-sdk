@@ -1,9 +1,33 @@
-import { isNode } from '@/shared/environment'
-import { eventEmitter } from '@/eventBus'
-import { SeedConstructorOptions, } from '@/types'
+import { isNode } from './shared/environment'
+import { initSeedSync } from './init'
 import { enableMapSet } from 'immer'
-import { ModelClassType } from '@/types'
-import { initSeedSync } from '@/init'
+
+export {
+  Model,
+  Property,
+  ImageSrc,
+  List,
+  Text,
+  Json,
+  Relation,
+} from './browser/schema'
+
+export {
+  Item,
+  ItemProperty,
+  useItems,
+  useItem,
+  useItemProperties,
+  useCreateItem,
+  useItemProperty,
+  useDeleteItem,
+  useGlobalServiceStatus,
+  useServices,
+  getGlobalService,
+  client,
+} from './browser'
+
+export { getCorrectId } from './browser/helpers'
 
 enableMapSet()
 
@@ -13,31 +37,4 @@ if (isNode()) {
   withSeed = initSeedSync()?.withSeed
 }
 
-const modelStore = new Map<string, ModelClassType>()
-
-const client = {
-  init: ({ config, addresses }: SeedConstructorOptions) => {
-    const { endpoints, models } = config
-    for (const [key, value] of Object.entries(models)) {
-      modelStore.set(key, value)
-    }
-    setupFsListeners()
-    setupAllItemsEventHandlers()
-    setupServicesEventHandlers()
-    setupPropertyEventHandlers()
-    if (areFsListenersReady()) {
-      eventEmitter.emit('fs.init')
-    }
-    if (!areFsListenersReady()) {
-      console.error('fs listeners not ready during init')
-    }
-    globalService.send({ type: 'init', endpoints, models, addresses })
-    import('@/shared/configs/seed.schema.config').then(({ models }) => {
-      for (const [key, value] of Object.entries(models)) {
-        modelStore.set(key, value)
-      }
-    })
-  },
-  }
-
-export { withSeed, client }
+export { withSeed }

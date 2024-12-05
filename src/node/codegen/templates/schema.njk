@@ -1,0 +1,11 @@
+{%- import 'header.njk' as header -%}
+{%- import 'table.njk' as table -%}
+{%- import 'relations.njk' as relations -%}
+{%- set tableName = modelName | pluralize | lower -%}
+
+{{- header.header(modelClass) -}}
+
+{{ table.table(tableName, modelName, modelClass) -}}
+
+{{ relations.relations(tableName, listProperties) -}}
+

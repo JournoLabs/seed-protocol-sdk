@@ -1,5 +1,7 @@
-import { Type } from '@sinclair/typebox'
-import { ModelValues } from '@/types/model'
+import { PropertyMetadataKey, TProperty } from '../../property'
+import { TSchema, Type } from '@sinclair/typebox'
+import { ModelConstructor, ModelValues } from '@/types'
+import { Item } from '../../item'
 
 export const TModelValues = Type.Record(Type.String(), Type.Any())
 
@@ -12,12 +14,13 @@ export const TModelClass = Type.Object({
   ),
 })
 
+export const TModelConstructor = Type.Function([TModelSchema], TModelClass)
+
 export abstract class IModelClass {
   static originalConstructor: new () => any
 
   static async create(values: ModelValues<any>): Promise<Item<any>> {
     const item = new Item<any>(values)
-    await item.initialize()
     return item
   }
 
@@ -57,7 +60,6 @@ export const Model: ModelConstructor = <
 
     static async create(values: ModelValues<any>): Promise<Item<any>> {
       const item = new Item<any>(values)
-      await item.initialize()
       return item
     }
 

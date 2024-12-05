@@ -11,6 +11,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(async () => {
   return {
+    envDir: './',
     server: {
       headers: {
         'Cross-Origin-Embedder-Policy': 'require-corp',
@@ -63,6 +64,8 @@ export default defineConfig(async () => {
           'path-browserify',
           '@zenfs/core',
           '@zenfs/dom',
+          'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
+          'chromium-bidi/lib/cjs/cdp/CdpConnection',
         ],
         output: [
           {

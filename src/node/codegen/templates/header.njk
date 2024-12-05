@@ -1,0 +1,10 @@
+{%- macro header(modelClass) -%}
+  import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+  import { relations } from 'drizzle-orm'
+  {% for property, definition in modelClass.schema -%}
+    {% if definition.dataType == 'List' -%}
+      {% set refTableName = definition.ref | pluralize | lower -%}
+      import { {{ refTableName }} } from './{{ definition.ref | lower }}Schema'
+    {% endif -%}
+  {% endfor %}
+{% endmacro %}

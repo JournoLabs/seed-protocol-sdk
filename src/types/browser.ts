@@ -1,3 +1,4 @@
+import { Endpoints } from './index'
 import { SqliteRemoteResult } from 'drizzle-orm/sqlite-proxy'
 
 export type SeedInitBrowserProps = {
@@ -19,4 +20,11 @@ export type SqliteWasmResult = {
   row: string[] | null
   rowNumber: number | null
   columnNames: string[]
+}
+
+export type SqliteWasmCallback = (result: SqliteWasmResult) => void
+
+export type ReturnObj = {
+  database: string
+  [key: string]: string | number | null | undefined | string[]
 }
