@@ -1,5 +1,5 @@
-export * from './wasm.d.ts'
+export type * from './wasm.d.ts'
 
 declare module '@seedprotocol/sdk' {
-  export * from '@/types'
+  export type * from '@/types'
 }

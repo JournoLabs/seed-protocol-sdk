@@ -1,5 +1,7 @@
 import Arweave from 'arweave'
 
+let domain = 'arweave.net'
+
 export const getArweave = (): Arweave | undefined => {
   if (
     typeof window === 'undefined' ||
@@ -32,13 +34,17 @@ export const getArweave = (): Arweave | undefined => {
 
   if (Object.keys(Arweave).includes('default')) {
     return Arweave.default.init({
-      host: 'permagate.io',
+      host: domain,
       protocol: 'https',
     })
   }
 
   return Arweave.init({
-    host: 'permagate.io',
+    host: domain,
     protocol: 'https',
   })
+}
+
+export const setArweaveDomain = (newDomain: string): void => {
+  domain = newDomain
 }

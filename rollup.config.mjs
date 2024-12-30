@@ -32,11 +32,15 @@ const config = [
       '@zenfs/core',
       '@zenfs/dom',
       'arweave',
+      'tslib',
+      'better-sqlite3',
     ],
     plugins: [
       typescript({
         include: [
           'src/index.ts',
+          'src/client.ts',
+          'src/eventBus.ts',
           'scripts/bin.ts',
           'src/seed.ts',
           'src/types/**/*.ts',
@@ -44,6 +48,16 @@ const config = [
           'src/browser/**/*.ts',
           'src/node/**/*.ts',
           'src/shared/**/*.ts',
+          'src/db/**/*.ts',
+          'src/helpers/**/*.ts',
+          'src/interfaces/**/*.ts',
+          'src/Item/**/*.ts',
+          'src/ItemProperty/**/*.ts',
+          'src/seedSchema/**/*.ts',
+          'src/stores/**/*.ts',
+          'src/services/**/*.ts',
+          'src/events/**/*.ts',
+          'src/graphql/**/*.ts',
         ],
         exclude: ['vite'],
         sourceMap: true,
@@ -60,9 +74,9 @@ const config = [
       copy({
         targets: [
           { src: 'src/**/*.ts', dest: 'dist/src' },
-          { src: 'src/browser/db/seedSchema', dest: 'dist/browser/db' },
+          { src: 'src/db/seedSchema', dest: 'dist/db' },
           { src: 'src/shared/configs', dest: 'dist/shared' },
-          { src: 'src/shared/seedSchema', dest: 'dist/shared' },
+          { src: 'src/seedSchema', dest: 'dist' },
           {
             src: 'src/node/codegen/templates/**/*',
             dest: 'dist/node/codegen/templates',

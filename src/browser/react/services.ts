@@ -4,13 +4,13 @@ import { orderBy } from 'lodash-es'
 import { produce } from 'immer'
 import { eventEmitter } from '@/eventBus'
 import pluralize from 'pluralize'
-import { getGlobalService } from '@/browser/services/global'
+import { getGlobalService } from '@/services/global'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
-import { appState } from '@/shared/seedSchema'
+import { appState } from '@/seedSchema'
 import { like } from 'drizzle-orm'
-import { getAppDb } from '@/browser/db/sqlWasmClient'
-import { MachineIds } from '@/browser/services/internal/constants'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { MachineIds } from '@/services/internal/constants'
 
 const logger = debug('app:react:services')
 
@@ -188,7 +188,7 @@ export const usePersistedSnapshots = () => {
 
   // Helper function to load persisted snapshots from the database
   const load = useCallback(async () => {
-    const appDb = getAppDb()
+    const appDb = BaseDb.getAppDb()
 
     if (!appDb) {
       return []
@@ -227,7 +227,7 @@ export const useHasSavedSnapshots = () => {
   useEffect(() => {
     if (isDbReady) {
       const _checkForSnapshots = async (): Promise<void> => {
-        const appDb = getAppDb()
+        const appDb = BaseDb.getAppDb()
 
         const rows = await appDb
           .select()

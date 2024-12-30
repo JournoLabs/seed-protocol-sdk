@@ -5,7 +5,11 @@ import { exec as execSync } from 'child_process'
 import { promisify } from 'util'
 import { pathToFileURL } from 'url'
 import process from 'node:process'
-import { SCHEMA_TS } from '@/shared/helpers/constants'
+import '../src/node/helpers/EasClient'
+import '../src/node/helpers/QueryClient'
+import '../src/node/helpers/FileManager'
+import '../src/node/helpers/ArweaveClientNode'
+import { SCHEMA_TS } from '@/helpers/constants'
 import {
   appMetaDir,
   appSchemaDir,
@@ -149,7 +153,7 @@ const init = (args: string[]) => {
     }
 
     copyFiles(
-      path.join(sdkRootDir, 'shared', 'seedSchema'),
+      path.join(sdkRootDir, 'seedSchema'),
       path.join(dotSeedDir, 'schema'),
     )
 

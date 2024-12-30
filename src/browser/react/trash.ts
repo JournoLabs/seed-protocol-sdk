@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Item } from '@/browser/item/Item'
+import { Item } from '@/browser/Item/Item'
 import { eventEmitter } from '@/eventBus'
-import { deleteItem } from '@/browser/db/write/deleteItem'
+import { deleteItem } from '@/db/write/deleteItem'
 
 export const useDeleteItem = () => {
   const [isDeletingItem, setIsDeletingItem] = useState(false)
@@ -20,7 +20,7 @@ export const useDeleteItem = () => {
     [isDeletingItem],
   )
 
-  useEffect(() => {}, [])
+  useEffect(() => { }, [])
 
   return {
     deleteItem: destroy,

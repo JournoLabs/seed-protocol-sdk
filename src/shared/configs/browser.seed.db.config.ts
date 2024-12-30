@@ -24,7 +24,7 @@ if (process.env.IS_SEED_DEV) {
 }
 
 export default defineConfig({
-  schema: `${sdkRoot}/browser/db/seedSchema/*Schema.ts`,
+  schema: `${sdkRoot}/db/seedSchema/*Schema.ts`,
   dialect: 'sqlite',
   out: `${dotSeedDir}/seed/db`,
   dbCredentials: {

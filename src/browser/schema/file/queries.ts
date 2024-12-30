@@ -1,4 +1,4 @@
-import { graphql } from '@/browser/gql'
+import { graphql } from '@/graphql/gql'
 
 export const GET_FILES_METADATA = graphql(/* GraphQL */ `
   query GetFilesMetadata($where: AttestationWhereInput!) {

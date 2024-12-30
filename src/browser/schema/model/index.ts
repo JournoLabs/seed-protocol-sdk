@@ -1,7 +1,7 @@
-import { PropertyMetadataKey, TProperty } from '../../property'
+import { PropertyMetadataKey, TProperty } from '../../ItemProperty'
 import { TSchema, Type } from '@sinclair/typebox'
 import { ModelConstructor, ModelValues } from '@/types'
-import { Item } from '../../item'
+import { Item } from '../../Item'
 
 export const TModelValues = Type.Record(Type.String(), Type.Any())
 
@@ -30,7 +30,7 @@ export abstract class IModelClass {
 }
 
 export const Model: ModelConstructor = <
-  T extends { new (...args: any[]): IModelClass },
+  T extends { new(...args: any[]): IModelClass },
 >(
   constructor: T,
 ) => {

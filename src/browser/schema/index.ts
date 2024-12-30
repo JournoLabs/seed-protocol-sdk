@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 
 export * from './model'
-export * from '../property'
+export * from '../ItemProperty'
 // export * from './file'
 export * from './image'
-export * from '../item'
+export * from '../Item'

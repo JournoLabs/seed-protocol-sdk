@@ -1,21 +1,21 @@
 import { EventObject, fromCallback } from 'xstate'
 import { fetchAllFilesMachine } from '@/browser/schema/file/fetchAll/index'
-import { ARWEAVE_HOST } from '@/browser/services/internal/constants'
+import { ARWEAVE_HOST } from '@/services/internal/constants'
 import { GET_FILES_METADATA } from '@/browser/schema/file/queries'
-import { getArweave } from '../../../helpers/arweave'
+import { getArweave } from '@/browser/helpers/arweave'
 import { fs } from '@zenfs/core'
 import {
   getDataTypeFromString,
   getMimeType,
   identifyString,
-} from '@/shared/helpers'
-import { appState } from 'src/shared/seedSchema'
+} from '@/helpers'
+import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
-import { easClient, queryClient } from '@/browser/helpers'
+import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
+import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import debug from 'debug'
-import { getAppDb } from '@/browser/db/sqlWasmClient'
-
-import { saveAppState } from '@/browser/db/write/saveAppState'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { saveAppState } from '@/db/write/saveAppState'
 
 const logger = debug('app:file:actors:fetchAll')
 
@@ -40,6 +40,9 @@ export const fetchAllMetadataRecords = fromCallback<
   const { addresses } = context
 
   const _fetchAllMetadataRecords = async () => {
+    const queryClient = BaseQueryClient.getQueryClient()
+    const easClient = BaseEasClient.getEasClient()
+
     const { filesMetadata } = await queryClient.fetchQuery({
       queryKey: ['getFilesMetadata', ...addresses],
       queryFn: async () =>
@@ -67,7 +70,7 @@ export const fetchAllMetadataRecords = fromCallback<
     sendBack({ type: 'fetchingAllMetadataRecordsSuccess', filesMetadata })
   })
 
-  return () => {}
+  return () => { }
 })
 
 export const fetchAllBinaryData = fromCallback<
@@ -93,7 +96,7 @@ export const fetchAllBinaryData = fromCallback<
       await fs.promises.mkdir('/files/images', { recursive: true })
     }
 
-    const appDb = getAppDb()
+    const appDb = BaseDb.getAppDb()
 
     if (!appDb) {
       logger('[fetchAll/actors] [fetchAllBinaryData] seedDb not available')
@@ -288,5 +291,5 @@ export const fetchAllBinaryData = fromCallback<
     sendBack({ type: 'fetchingAllBinaryDataSuccess', binaryData })
   })
 
-  return () => {}
+  return () => { }
 })

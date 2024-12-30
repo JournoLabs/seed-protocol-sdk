@@ -19,7 +19,7 @@ export default defineConfig(async () => {
       },
     },
     optimizeDeps: {
-      exclude: ['@sqlite.org/sqlite-wasm'],
+      exclude: ['@sqlite.org/sqlite-wasm',],
     },
     plugins: [
       nodePolyfills({
@@ -33,8 +33,6 @@ export default defineConfig(async () => {
       alias: {
         fs: '@zenfs/core',
         'node:fs': '@zenfs/core',
-        // fs: path.resolve('./src/shared/fsProxy'),
-        // 'node:fs': path.resolve('./src/shared/fsProxy'),
         'node:path': 'path-browserify',
         path: 'path-browserify',
       },
@@ -66,6 +64,7 @@ export default defineConfig(async () => {
           '@zenfs/dom',
           'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
           'chromium-bidi/lib/cjs/cdp/CdpConnection',
+          'better-sqlite3',
         ],
         output: [
           {
@@ -83,9 +82,9 @@ export default defineConfig(async () => {
     //   tsConfigPaths(),
     //   viteStaticCopy({
     //     targets: [
-    //       { src: 'src/browser/db/seedSchema', dest: 'browser/db' },
+    //       { src: 'src/db/seedSchema', dest: 'browser/db' },
     //       {
-    //         src: 'src/browser/db/browser.seed.db.config.ts',
+    //         src: 'src/db/browser.seed.db.config.ts',
     //         dest: 'browser/db',
     //       },
     //       {

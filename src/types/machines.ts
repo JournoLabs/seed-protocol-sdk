@@ -19,6 +19,7 @@ export type InternalMachineContext = {
   error?: string
   endpoints: Endpoints
   addresses: string[]
+  arweaveDomain?: string
   environment: string
   hasFiles: boolean
   seedDbService: any
@@ -36,6 +37,7 @@ export type GlobalMachineContext = {
   internalService?: ActorRefFrom<any>
   fileSystemService?: ActorRefFrom<typeof fileSystemMachine>
   publishItemService?: ActorRefFrom<any>
+  arweaveDomain?: string
 }
 
 export type PublishMachineContext = PublishRequestData & {

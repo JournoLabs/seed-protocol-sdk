@@ -24,10 +24,10 @@ if (process.env.IS_SEED_DEV) {
   )
 }
 
-let schemaDir = `${sdkRoot}/dist/shared/seedSchema/*.ts`
+let schemaDir = `${sdkRoot}/dist/seedSchema/*.ts`
 
 if (process.env.IS_SEED_DEV) {
-  schemaDir = `${sdkRoot}/shared/seedSchema/*.ts`
+  schemaDir = `${sdkRoot}/seedSchema/*.ts`
 }
 
 export default defineConfig({

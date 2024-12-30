@@ -1,13 +1,18 @@
 import { EventObject, fromCallback } from 'xstate'
 import { downloadMachine } from '@/browser/schema/file/download/index'
 import { GET_FILES_METADATA } from '@/browser/schema/file/queries'
-import { easClient, queryClient } from '@/browser/helpers'
+import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
+import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
+
 
 export const fetchMetadata = fromCallback<EventObject, typeof downloadMachine>(
   ({ sendBack, input: { context } }) => {
     const { addresses } = context
 
     const fetchMetadata = async () => {
+      const queryClient = BaseQueryClient.getQueryClient()
+      const easClient = BaseEasClient.getEasClient()
+
       const metadataRecords = await queryClient.fetchQuery({
         queryKey: ['getFilesMetadata', ...addresses],
         queryFn: async () =>
@@ -30,7 +35,7 @@ export const fetchMetadata = fromCallback<EventObject, typeof downloadMachine>(
       sendBack({ type: 'fetchingMetadataSuccess', metadataRecords })
     })
 
-    return () => {}
+    return () => { }
   },
 )
 
@@ -48,5 +53,5 @@ export const fetchBinaryData = fromCallback<
     sendBack({ type: 'fetchingBinaryDataSuccess' })
   })
 
-  return () => {}
+  return () => { }
 })

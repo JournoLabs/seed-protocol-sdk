@@ -1,6 +1,6 @@
-import { graphql } from '@/browser/gql'
+import { graphql } from '@/graphql/gql'
 import { TypedDocumentNode } from '@graphql-typed-document-node/core'
-import { Tag } from '@/browser/gql/graphql'
+import { Tag } from '@/graphql/gql/graphql'
 
 export const GET_TRANSACTION_TAGS = graphql(/* GraphQL */ `
   query GetTransactionTags($transactionId: ID!) {

@@ -1,6 +1,6 @@
 import { FC, HTMLAttributes, useCallback, useRef, useState } from 'react'
 import { CheckIcon, ClipboardIcon } from '@heroicons/react/24/outline'
-import { dayjs } from '../src/shared/helpers'
+import { dayjs } from '../src/helpers'
 import ImageUpload from './components/Image/ImageUpload'
 import { useItemProperty } from '../src/browser'
 import { Link, useParams } from 'react-router-dom'

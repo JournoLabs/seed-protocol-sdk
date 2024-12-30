@@ -1,9 +1,10 @@
 import { FC, useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getCorrectId } from '../../src/browser/helpers'
+import { getCorrectId } from '../../src/helpers'
 import { useItem, usePublishItem } from '../../src/browser/react/item'
 import ItemListItem from '../ItemListItem'
 import pluralize from 'pluralize'
+import testData from '../../__tests__/__fixtures__/publishPayloadInput.json'
 
 type ItemPageParams = {
   seedId: string
@@ -25,18 +26,18 @@ const ItemPage: FC = () => {
 
   const handlePublishClick = useCallback(async () => {
     if (item) {
-      const publishUploads = await item.getPublishUploads()
-      // Generate Arweave transactions and pass them into the getPublishPayload function
-      const testTransactions = publishUploads.map((upload, index) => {
-        return {
-          txId: `testing${index}`,
-          itemPropertyLocalId: upload.itemPropertyLocalId,
-          seedLocalId: upload.seedLocalId,
-          versionLocalId: upload.versionLocalId,
-          itemPropertyName: upload.itemPropertyName,
-        }
-      })
-      const payload = await item.getPublishPayload(testTransactions)
+      // const publishUploads = await item.getPublishUploads()
+      // // Generate Arweave transactions and pass them into the getPublishPayload function
+      // const testTransactions = publishUploads.map((upload, index) => {
+      //   return {
+      //     txId: `testing${index}`,
+      //     itemPropertyLocalId: upload.itemPropertyLocalId,
+      //     seedLocalId: upload.seedLocalId,
+      //     versionLocalId: upload.versionLocalId,
+      //     itemPropertyName: upload.itemPropertyName,
+      //   }
+      // })
+      const payload = await item.getPublishPayload(testData)
       console.log('payload', payload)
     }
     // await publishItem(item)

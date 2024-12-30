@@ -7,7 +7,7 @@ import { downloadMachine } from '@/browser/schema/file/download'
 
 // type DownloadService = ActorRefFrom<typeof do>
 
-export * from '../../helpers/arweave'
+export * from '@/browser/helpers/arweave'
 
 type FileConstructorData = BlobPart[] | string | File | Buffer
 

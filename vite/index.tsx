@@ -1,8 +1,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import '../src/browser/helpers/EasClient'
+import '../src/browser/helpers/FileManager'
+import '../src/browser/helpers/ArweaveClientWeb'
+import '../src/browser/db/Db'
 import './styles.css'
 import './seedInit'
-import { queryClient } from '../src/browser/helpers'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { QueryClientProvider } from '@tanstack/react-query'
 import App from './DevApp'
@@ -17,10 +20,21 @@ import {
 import ItemPage from './pages/ItemPage'
 import ModelsDisplay from './ModelsDisplay'
 import TrashPage from './pages/TrashPage'
+import { QueryClient as ReactQueryClient } from '@tanstack/react-query'
 
 dotenv.config()
 
 localStorage.debug = 'app:internal:actors:*'
+
+const queryClient = new ReactQueryClient({
+  defaultOptions: {
+    queries: {
+      networkMode: 'offlineFirst',
+      gcTime: 1000 * 60 * 60 * 24, // 24 hours
+    },
+  },
+})
+
 
 const router = createBrowserRouter(
   createRoutesFromElements(

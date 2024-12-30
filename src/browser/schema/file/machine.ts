@@ -1,7 +1,7 @@
 import { ActorRefFrom, assign, setup } from 'xstate'
 import { downloadMachine } from '@/browser/schema/file/download'
 import { uploadMachine } from '@/browser/schema/file/upload'
-import { MachineIds } from '@/browser/services/internal/constants'
+import { MachineIds } from '@/services/internal/constants'
 
 type FileSystemMachineContext = {
   addresses?: string[]

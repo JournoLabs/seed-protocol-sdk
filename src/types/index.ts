@@ -3,6 +3,7 @@ import { SeedInitBrowser } from './browser'
 import { ModelClassType } from './model'
 import { PropertyType } from './property'
 
+export * from './db'
 export * from './model'
 export * from './item'
 export * from './property'
@@ -70,7 +71,7 @@ export interface SeedConstructor {
 export interface SeedConfig {
   readonly endpoints: Endpoints
   models: Record<string, ModelClassType>
-  tables: Record<string, ModelClassType>
+  arweaveDomain?: string
 }
 
 export interface SeedConstructorOptions {

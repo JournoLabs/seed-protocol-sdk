@@ -1,7 +1,7 @@
 // import Test from './components/Test'
-import Events from './Events'
-import ServiceList from './ServiceList'
-import { Outlet } from 'react-router-dom'
+// import Events from './Events'
+// import ServiceList from './ServiceList'
+// import { Outlet } from 'react-router-dom'
 
 const DevApp = () => {
   return (
@@ -16,9 +16,9 @@ const DevApp = () => {
         Seed Protocol applications.
       </p>
       {/*<Test />*/}
-      <Events />
+      {/* <Events />
       <ServiceList />
-      <Outlet />
+      <Outlet /> */}
     </main>
   )
 }

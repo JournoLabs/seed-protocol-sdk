@@ -1,4 +1,4 @@
-import { Attestation } from '@/browser/gql/graphql'
+import { Attestation } from '@/graphql/gql/graphql'
 
 export type PropertyToUpdateWithSeed = {
   publishLocalId: string

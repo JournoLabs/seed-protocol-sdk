@@ -1,5 +1,4 @@
 import { isNode } from './shared/environment'
-import { initSeedSync } from './init'
 import { enableMapSet } from 'immer'
 
 export {
@@ -22,19 +21,23 @@ export {
   useItemProperty,
   useDeleteItem,
   useGlobalServiceStatus,
+  usePublishItem,
+  usePersistedSnapshots,
   useServices,
+  useService,
   getGlobalService,
-  client,
 } from './browser'
 
-export { getCorrectId } from './browser/helpers'
+export { getCorrectId, BaseArweaveClient, BaseEasClient, BaseFileManager, BaseQueryClient, } from './helpers'
+
+export {
+  eventEmitter,
+} from './eventBus'
 
 enableMapSet()
 
-let withSeed
+export { withSeed } from '@/node/webpack'
 
-if (isNode()) {
-  withSeed = initSeedSync()?.withSeed
-}
 
-export { withSeed }
+export { client } from './client'
+

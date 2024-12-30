@@ -1,4 +1,4 @@
-import { graphql } from '@/browser/gql'
+import { graphql } from '@/graphql/gql'
 
 export const GET_IMAGE_SEEDS = graphql(/* GraphQL */ `
   query GetImageSeeds($where: AttestationWhereInput!) {

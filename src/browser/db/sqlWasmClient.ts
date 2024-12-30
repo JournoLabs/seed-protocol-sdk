@@ -1,4 +1,4 @@
-import { SqliteConnectionManager } from '@/browser/services/db'
+import { SqliteConnectionManager } from '@/services/db'
 import {
   SqliteRemoteDatabase,
   SqliteRemoteResult,

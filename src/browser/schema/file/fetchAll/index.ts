@@ -3,7 +3,7 @@ import {
   fetchAllBinaryData,
   fetchAllMetadataRecords,
 } from '@/browser/schema/file/fetchAll/actors'
-import { Attestation } from '@/browser/gql/graphql'
+import { Attestation } from '@/graphql/gql/graphql'
 
 type FetchAllFilesMachineContext = {
   addresses: string[]
