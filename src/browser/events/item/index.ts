@@ -16,6 +16,10 @@ export const setupAllItemsEventHandlers = () => {
   // eventEmitter.addListener('item.update', itemUpdateHandler)
   eventEmitter.addListener('syncDbWithEas', syncDbWithEasHandler)
   eventEmitter.addListener('item.publish.request', publishItemRequestHandler)
+  eventEmitter.addListener(
+    'item.publish.payload.request',
+    publishItemRequestHandler,
+  )
   //
   // eventEmitter.emit('item.events.setupAllItemsEventHandlers')
   areReady = true

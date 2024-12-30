@@ -3,9 +3,9 @@ import { CheckIcon, ClipboardIcon } from '@heroicons/react/24/outline'
 import { dayjs } from '../src/shared/helpers'
 import ImageUpload from './components/Image/ImageUpload'
 import { useItemProperty } from '../src/browser'
-import EasyEdit from 'react-easy-edit'
 import { Link, useParams } from 'react-router-dom'
 import SelectOneToMany from './components/SelectOneToMany'
+import { Input } from './components/Input'
 
 const readOnlyProperties = [
   'seedLocalId',
@@ -137,14 +137,10 @@ const ItemPropertyView: FC<ItemPropertyViewProps> = ({
         }
         if (isEditable.current) {
           return (
-            <EasyEdit
-              type='text'
-              className={'w-full'}
-              onSave={handleSave}
+            <Input
+              key={itemProperty?.localId}
               value={valueFromRender}
-              cancelOnBlur={true}
-              saveOnEnter={true}
-              placeholder={'undefined'}
+              onChange={handleSave}
             />
           )
         }
@@ -176,13 +172,10 @@ const ItemPropertyView: FC<ItemPropertyViewProps> = ({
       ) {
         if (isEditable.current) {
           return (
-            <EasyEdit
-              type='text'
-              onSave={handleSave}
+            <Input
+              key={itemProperty?.localId}
               value={valueFromRender}
-              cancelOnBlur={false}
-              saveOnEnter={true}
-              placeholder={'undefined'}
+              onChange={handleSave}
             />
           )
         }
@@ -242,9 +235,7 @@ const ItemPropertyView: FC<ItemPropertyViewProps> = ({
                   {typeof status === 'object' ? Object.keys(status)[0] : status}
                 </span>
               )}
-              {!!status &&
-                status === 'idle' &&
-                getValueDisplay(itemProperty.value)}
+              {getValueDisplay(itemProperty.value)}
             </div>
             {/*<button*/}
             {/*  className={'absolute right-0 hidden mr-8 group-hover:block h-5 w-5'}*/}

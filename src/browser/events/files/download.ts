@@ -17,10 +17,10 @@ import debug from 'debug'
 import { getAppDb, isAppDbReady } from '@/browser/db/sqlWasmClient'
 import { getGlobalService } from '@/browser/services'
 import { waitFor } from 'xstate'
-import { writeAppState } from '@/browser/db/write'
 import { getMetadata } from '@/browser/db/read/getMetadata'
 import { saveMetadata } from '@/browser/db/write/saveMetadata'
 import { GET_TRANSACTION_TAGS } from '@/browser/arweave/queries'
+import { saveAppState } from '@/browser/db/write/saveAppState'
 
 const logger = debug('app:files:download')
 
@@ -141,7 +141,7 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
 
         excludedTransactions.add(transactionId)
 
-        await writeAppState(
+        await saveAppState(
           'excludedTransactions',
           JSON.stringify(Array.from(excludedTransactions)),
         )
@@ -157,7 +157,7 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
           }),
       })
 
-      if (tags && tags.length === 0) {
+      if (tags && tags.length > 0) {
         for (const { name, value } of tags) {
           if (name === 'Content-SHA-256') {
             const metadataRecord = await getMetadata({
@@ -173,13 +173,16 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
         }
       }
 
-      const fetchResponse = await queryClient.fetchQuery({
+      const dataString = await queryClient.fetchQuery({
         queryKey: ['fetchTransaction', transactionId],
-        queryFn: async () =>
-          fetch(`https://${ARWEAVE_HOST}/raw/${transactionId}`),
+        queryFn: async () => {
+          const response = await fetch(
+            `https://${ARWEAVE_HOST}/raw/${transactionId}`,
+          )
+          return await response.text()
+        },
+        networkMode: 'offlineFirst',
       })
-
-      const dataString = await fetchResponse.text()
 
       // const dataString = await arweave.transactions.getData(transactionId, {
       //   decode: true,
@@ -245,12 +248,17 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
       }
 
       const mimeType = getMimeType(dataString as string)
+      let fileExtension = mimeType
+
+      if (fileExtension && fileExtension?.startsWith('image')) {
+        fileExtension = fileExtension.replace('image/', '')
+      }
 
       let fileName = transactionId
 
       if (contentType === 'base64') {
-        if (mimeType) {
-          fileName += `.${mimeType}`
+        if (fileExtension) {
+          fileName += `.${fileExtension}`
         }
 
         // Remove the Base64 header if it exists (e.g., "data:image/png;base64,")

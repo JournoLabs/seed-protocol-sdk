@@ -18,7 +18,6 @@ import { getModel } from '@/browser/stores/modelClass'
 import { getCorrectId } from '@/browser/helpers'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/browser/property'
-import { fs } from '@zenfs/core'
 
 const logger = debug('app:property:class')
 
@@ -59,15 +58,15 @@ export class ItemProperty<PropertyType> {
     seedLocalId,
     versionLocalId,
     versionUid,
-    itemModelName,
+    modelName,
     propertyName,
     storageTransactionId,
     schemaUid,
   }: Partial<CreatePropertyInstanceProps>) {
-    const ModelClass = getModel(itemModelName)
+    const ModelClass = getModel(modelName)
 
     if (!ModelClass) {
-      throw new Error(`Model ${itemModelName} not found`)
+      throw new Error(`Model ${modelName} not found`)
     }
 
     if (!propertyName) {
@@ -81,7 +80,7 @@ export class ItemProperty<PropertyType> {
       seedUid,
       versionLocalId,
       versionUid,
-      itemModelName,
+      modelName: modelName,
       storageTransactionId,
       propertyRecordSchema: ModelClass.schema[propertyName],
       schemaUid,
@@ -151,12 +150,14 @@ export class ItemProperty<PropertyType> {
         const { context } = snapshot
         const { propertyRecordSchema } = context
 
-        // if (this.uid && !cacheHasProperty(this.uid)) {
-        //   addPropertyToCache(this)
-        // }
-        //
-        // if (!this.uid && this.localId && !cacheHasProperty(this.localId,)) {
-        //   addPropertyToCache(this)
+        // if (
+        //   context.propertyName &&
+        //   context.propertyName.includes('featureImage')
+        // ) {
+        //   console.log(
+        //     `${context.localId} context for ${snapshot.value}`,
+        //     context,
+        //   )
         // }
 
         if (context.seedLocalId) {
@@ -179,19 +180,26 @@ export class ItemProperty<PropertyType> {
 
         let renderValue
 
-        if (
-          propertyRecordSchema &&
-          propertyRecordSchema.storageType &&
-          propertyRecordSchema.storageType === 'ItemStorage' &&
-          context.resolvedValue &&
-          context.localStorageDir
-        ) {
-          const filePath = `/files/${context.localStorageDir}/${context.resolvedValue}`
-          const exists = await fs.promises.exists(filePath)
-          if (exists) {
-            renderValue = await fs.promises.readFile(filePath, 'utf-8')
-          }
-        }
+        // if (
+        //   propertyRecordSchema &&
+        //   propertyRecordSchema.storageType &&
+        //   propertyRecordSchema.storageType === 'ItemStorage' &&
+        //   context.resolvedValue &&
+        //   context.localStorageDir
+        // ) {
+        //   const filePath = `/files/${context.localStorageDir}/${context.resolvedValue}`
+        //   try {
+        //     const exists = await fs.promises.exists(filePath)
+        //     if (exists) {
+        //       renderValue = await fs.promises.readFile(filePath, 'utf-8')
+        //     }
+        //   } catch (e) {
+        //     logger(
+        //       `[ItemProperty] [${context.seedLocalId}] [${context.propertyName}] [storageType] error`,
+        //       e,
+        //     )
+        //   }
+        // }
 
         if (!renderValue) {
           renderValue = context.renderValue || context.propertyValue
@@ -219,12 +227,10 @@ export class ItemProperty<PropertyType> {
 
         this._subject.next(renderValue)
         if (context.seedLocalId) {
-          eventEmitter.emit(
-            `item.${itemModelName}.${context.seedLocalId}.update`,
-          )
+          eventEmitter.emit(`item.${modelName}.${context.seedLocalId}.update`)
         }
         if (context.seedUid) {
-          eventEmitter.emit(`item.${itemModelName}.${context.seedUid}.update`)
+          eventEmitter.emit(`item.${modelName}.${context.seedUid}.update`)
         }
       },
     )
@@ -234,7 +240,7 @@ export class ItemProperty<PropertyType> {
 
   private _updateResponseListener(event) {
     logger(
-      `[ItemProperty] [_updateResponseListener] [${this.itemModelName}.${this.seedLocalId}] ${this.propertyName} event`,
+      `[ItemProperty] [_updateResponseListener] [${this.modelName}.${this.seedLocalId}] ${this.propertyName} event`,
       event,
     )
   }
@@ -300,9 +306,6 @@ export class ItemProperty<PropertyType> {
         instance,
         refCount: refCount + 1,
       })
-      if (instance.status === 'idle') {
-        instance.getService().send({ type: 'refresh' })
-      }
       return instance
     }
     const propertyData = await getPropertyData(
@@ -345,6 +348,10 @@ export class ItemProperty<PropertyType> {
     return this._getSnapshot().context.seedUid
   }
 
+  get schemaUid() {
+    return this._getSnapshot().context.schemaUid
+  }
+
   get propertyName() {
     if (this._alias) {
       return this._alias
@@ -352,12 +359,25 @@ export class ItemProperty<PropertyType> {
     return this._getSnapshot().context.propertyName
   }
 
-  get itemModelName() {
-    return this._getSnapshot().context.itemModelName
+  get modelName() {
+    return this._getSnapshot().context.modelName
   }
 
   get propertyDef(): Static<typeof TProperty> | undefined {
     return this._getSnapshot().context.propertyRecordSchema
+  }
+
+  get localStoragePath(): string | void {
+    if (this.propertyDef && this.propertyDef.localStorageDir) {
+      return `/files${this.propertyDef.localStorageDir}/${this._getSnapshot().context.refResolvedValue}`
+    }
+    if (this._getSnapshot().context.localStorageDir) {
+      return `/files${this._getSnapshot().context.localStorageDir}/${this._getSnapshot().context.refResolvedValue}`
+    }
+  }
+
+  get versionLocalId(): string | undefined {
+    return this._getSnapshot().context.versionLocalId
   }
 
   get status() {

@@ -24,7 +24,22 @@ const ItemPage: FC = () => {
   const { publishItem, isPublishing } = usePublishItem()
 
   const handlePublishClick = useCallback(async () => {
-    await publishItem(item)
+    if (item) {
+      const publishUploads = await item.getPublishUploads()
+      // Generate Arweave transactions and pass them into the getPublishPayload function
+      const testTransactions = publishUploads.map((upload, index) => {
+        return {
+          txId: `testing${index}`,
+          itemPropertyLocalId: upload.itemPropertyLocalId,
+          seedLocalId: upload.seedLocalId,
+          versionLocalId: upload.versionLocalId,
+          itemPropertyName: upload.itemPropertyName,
+        }
+      })
+      const payload = await item.getPublishPayload(testTransactions)
+      console.log('payload', payload)
+    }
+    // await publishItem(item)
   }, [item])
 
   return (

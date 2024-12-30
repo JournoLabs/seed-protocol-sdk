@@ -1,7 +1,7 @@
 import { PropertyData } from '@/types'
 import { startCase } from 'lodash-es'
 import { metadata, MetadataType } from '@/shared/seedSchema'
-import { and, eq, max, sql } from 'drizzle-orm'
+import { and, eq, max, or, sql } from 'drizzle-orm'
 import { getAppDb, runQueryForStatement } from '@/browser/db/sqlWasmClient'
 
 export const getPropertyData = async (
@@ -11,29 +11,29 @@ export const getPropertyData = async (
 ): Promise<PropertyData | undefined> => {
   const appDb = getAppDb()
 
-  const queryBase = appDb.select().from(metadata)
+  const whereClauses: any[] = [
+    or(
+      eq(metadata.propertyName, propertyName),
+      eq(metadata.propertyName, propertyName + 'Id'),
+      eq(metadata.propertyName, propertyName + 'Ids'),
+    ),
+  ]
 
   if (seedLocalId) {
-    queryBase.where(
-      and(
-        eq(metadata.propertyName, propertyName),
-        eq(metadata.seedLocalId, seedLocalId),
-      ),
-    )
+    whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
   }
 
   if (seedUid) {
-    queryBase.where(
-      and(
-        eq(metadata.propertyName, propertyName),
-        eq(metadata.seedUid, seedUid),
-      ),
-    )
+    whereClauses.push(eq(metadata.seedUid, seedUid))
   }
 
-  const rows = (await queryBase.orderBy(
-    sql.raw(`COALESCE(attestation_created_at, created_at) DESC`),
-  )) as MetadataType[]
+  const rows = (await appDb
+    .select()
+    .from(metadata)
+    .where(and(...whereClauses))
+    .orderBy(
+      sql.raw(`COALESCE(attestation_created_at, created_at) DESC`),
+    )) as MetadataType[]
 
   if (!rows || rows.length === 0) {
     return
@@ -43,7 +43,7 @@ export const getPropertyData = async (
 
   return {
     ...row,
-    itemModelName: startCase(row.modelType),
+    modelName: startCase(row.modelType),
   }
 }
 

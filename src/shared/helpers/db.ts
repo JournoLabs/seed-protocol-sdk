@@ -135,31 +135,13 @@ export const createOrUpdate = async <T>(
       .update(table)
       .set(safeValues)
       .where(and(...valueFilters))
-    console.log('updatedRecord:', {
-      ...existingRecords[0],
-      ...safeValues,
-    })
 
     const doneWithUpdate = Date.now()
-
-    console.log(
-      '[helpers/db] [createOrUpdate] filters duration:',
-      doneWithFilters - startTime,
-    )
-    console.log(
-      '[helpers/db] [createOrUpdate] existingRecords duration:',
-      doneWithExistingRecords - doneWithFilters,
-    )
-    console.log(
-      '[helpers/db] [createOrUpdate] update duration:',
-      doneWithUpdate - doneWithExistingRecords,
-    )
 
     return existingRecords[0] as T
   } else {
     // If no record exists, create a new one
     const newRecord = await db.insert(table).values(safeValues).returning()
-    console.log('newRecord:', newRecord)
     return newRecord[0] as T
   }
 }
@@ -168,10 +150,6 @@ export const addModelsToInternalDb = async (
   models: ModelDefinitions,
 ) => {
   for (const [modelName, modelClass] of Object.entries(models)) {
-    console.log(
-      '[helpers/db] [addModelsToInternalDb] starting modelName:',
-      modelName,
-    )
     const modelRecord = await createOrUpdate<NewModelRecord>(db, modelsTable, {
       name: modelName,
     })
@@ -203,14 +181,7 @@ export const addModelsToInternalDb = async (
         properties,
         propertyValues,
       )
-
-      console.log('propertyRecord:', propertyRecord)
     }
-
-    console.log(
-      '[helpers/db] [addModelsToInternalDb] done modelName:',
-      modelName,
-    )
   }
 }
 export const getAddressesFromDb = async (): Promise<string[]> => {

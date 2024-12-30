@@ -1,7 +1,6 @@
 import { Static, Type } from '@sinclair/typebox'
 import { PropertyDataType, PropertyDefs, StorageType } from '@/types'
 
-export * from './actors'
 export * from './propertyMachine'
 export * from './ItemProperty'
 

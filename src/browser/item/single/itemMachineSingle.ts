@@ -7,6 +7,7 @@ import { initialize } from './actors/initialize'
 import { hydrateExistingItem } from './actors/hydrateExistingItem'
 import { hydrateNewItem } from './actors/hydrateNewItem'
 import { fetchDataFromEas } from './actors/fetchDataFromEas'
+import { reload } from '@/browser/item/single/actors/reload'
 
 export const itemMachineSingle = setup({
   types: {
@@ -19,6 +20,7 @@ export const itemMachineSingle = setup({
     hydrateExistingItem,
     hydrateNewItem,
     fetchDataFromEas,
+    reload,
   },
 }).createMachine({
   id: MachineIds.ITEM,
@@ -75,17 +77,7 @@ export const itemMachineSingle = setup({
         }
       }),
     },
-    // addPropertyAttestation: {
-    //   actions: assign(({ context, event }) => {
-    //     console.log('[singleItemMachine] [addPropertyAttestation] event', event)
-    //     const propertyInstances =
-    //       context.propertyInstances || new Map<string, typeof ItemProperty>()
-    //     propertyInstances.set(event.propertyName, event.propertyInstances)
-    //     return {
-    //       propertyInstances,
-    //     }
-    //   }),
-    // },
+    reload: '.reloading',
   },
   states: {
     idle: {},
@@ -150,24 +142,15 @@ export const itemMachineSingle = setup({
         input: ({ context }) => ({ context }),
       },
     },
-    // fetchingDataFromEas: {
-    //   on: {
-    //     fetchDataFromEasSuccess: 'savingDataToDb',
-    //   },
-    //   invoke: {
-    //     src: 'fetchDataFromEas',
-    //     input: ({ context }) => ({ context }),
-    //   },
-    // },
-    // savingDataToDb: {
-    //   on: {
-    //     saveDataToDbSuccess: 'idle',
-    //   },
-    //   invoke: {
-    //     src: 'saveDataToDb',
-    //     input: ({ context }) => ({ context }),
-    //   },
-    // },
+    reloading: {
+      on: {
+        reloadSuccess: 'idle',
+      },
+      invoke: {
+        src: 'reload',
+        input: ({ context }) => ({ context }),
+      },
+    },
     destroying: {
       type: 'final',
     },

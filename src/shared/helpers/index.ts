@@ -110,6 +110,9 @@ export const getExecutionTime = async (task, args) => {
   return Date.now() - start
 }
 
+export const capitalizeFirstLetter = (string: string) =>
+  string.charAt(0).toUpperCase() + string.slice(1)
+
 export const parseEasRelationPropertyName = (easPropertyName: string) => {
   // Split the input string on the first underscore
   const [singularProperty, modelName, idSegment] = easPropertyName.split('_')

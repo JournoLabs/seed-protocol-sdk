@@ -5,12 +5,15 @@ import {
   PropertyMachineContext,
   SaveValueToDbEvent,
 } from '@/types/property'
-import { createSeed, updateItemPropertyValue } from '@/browser/db/write'
+import { createSeed } from '@/browser/db/write'
 import { getDataTypeFromString, getMimeType } from '@/shared/helpers'
 import { createVersion } from '@/browser/db/write/createVersion'
 import { fs } from '@zenfs/core'
 import { getContentUrlFromPath } from '@/browser/helpers'
 import { createMetadata } from '@/browser/db/write/createMetadata'
+import { updateItemPropertyValue } from '@/browser/db/write/updateItemPropertyValue'
+import { getSchemaUidForSchemaDefinition } from '@/browser/stores/eas'
+import { getSchemaUidForModel } from '@/browser/db/read/getSchemaUidForModel'
 
 const readFileAsDataUrl = async (file: File): Promise<string> => {
   return new Promise((resolve) => {
@@ -60,6 +63,8 @@ const fetchImage = async (url: string) => {
   return base64
 }
 
+let imageSchemaUid: string | undefined
+
 export const saveImageSrc = fromCallback<
   EventObject,
   FromCallbackInput<PropertyMachineContext, SaveValueToDbEvent>
@@ -69,13 +74,14 @@ export const saveImageSrc = fromCallback<
     propertyName: propertyNameRaw,
     propertyValue: existingValue,
     propertyRecordSchema,
-    itemModelName,
+    modelName,
     seedLocalId,
     seedUid,
     versionLocalId,
     versionUid,
-    schemaUid,
   } = context
+
+  let { schemaUid } = context
 
   let newValue: ItemPropertyValueType
 
@@ -99,6 +105,10 @@ export const saveImageSrc = fromCallback<
     let fileData: string | ArrayBuffer | undefined
     let mimeType
     let fileName
+
+    if (!imageSchemaUid) {
+      imageSchemaUid = await getSchemaUidForModel('Image')
+    }
 
     if (typeof newValue === 'string') {
       newValueType = getDataTypeFromString(newValue)
@@ -159,6 +169,10 @@ export const saveImageSrc = fromCallback<
 
     const refResolvedDisplayValue = await getContentUrlFromPath(filePath)
 
+    if (!schemaUid) {
+      schemaUid = getSchemaUidForSchemaDefinition(propertyName)
+    }
+
     if (!localId) {
       await createMetadata(
         {
@@ -166,13 +180,17 @@ export const saveImageSrc = fromCallback<
           propertyValue: newImageSeedLocalId,
           seedLocalId,
           seedUid,
-          versionLocalId: imageVersionLocalId || versionLocalId,
+          versionLocalId,
           versionUid,
-          modelName: itemModelName,
+          modelName,
           schemaUid,
           refSeedType: 'image',
+          refModelUid: imageSchemaUid,
+          refSchemaUid: imageSchemaUid,
           refResolvedDisplayValue,
           refResolvedValue: fileName,
+          localStorageDir: '/images',
+          easDataType: 'bytes32',
         },
         propertyRecordSchema,
       )
@@ -180,16 +198,20 @@ export const saveImageSrc = fromCallback<
 
     if (localId) {
       await updateItemPropertyValue({
-        propertyLocalId: localId,
+        localId: localId,
         propertyName: propertyNameRaw,
         newValue: newImageSeedLocalId,
         seedLocalId,
-        versionLocalId: imageVersionLocalId || versionLocalId,
-        modelName: itemModelName,
+        versionLocalId,
+        modelName,
         schemaUid,
         refSeedType: 'image',
         refResolvedDisplayValue,
         refResolvedValue: fileName,
+        refModelUid: imageSchemaUid,
+        refSchemaUid: imageSchemaUid,
+        localStorageDir: '/images',
+        easDataType: 'bytes32',
       })
     }
 
@@ -197,9 +219,12 @@ export const saveImageSrc = fromCallback<
       type: 'updateContext',
       propertyValue: newImageSeedLocalId,
       refSeedType: 'image',
+      refSchemaUid: imageSchemaUid,
       renderValue: refResolvedDisplayValue,
-      resolvedDisplayValue: refResolvedDisplayValue,
-      resolvedValue: fileName,
+      refResolvedDisplayValue: refResolvedDisplayValue,
+      refResolvedValue: fileName,
+      localStorageDir: '/images',
+      easDataType: 'bytes32',
     })
   }
 

@@ -46,6 +46,8 @@ export type ItemMachineContext<T> = {
   hasRemoteBackup?: boolean
   storageTransactionId?: string
   isPublishing?: boolean
+  schemaUid?: string
+  latestVersionUid?: string
 }
 
 export type NewItemProps<T> = Partial<ItemData> &
@@ -67,6 +69,7 @@ export type ItemData = {
   versionsCount?: number
   lastVersionPublishedAt?: number
   lastLocalUpdateAt?: number
+  type?: string
   createdAt?: number
   updatedAt?: number
 }
@@ -83,7 +86,7 @@ export type CreatePropertyInstanceProps = {
   seedUid?: string
   versionLocalId?: string
   versionUid?: string
-  itemModelName: string
+  modelName: string
   storageTransactionId?: string
   propertyValue: any
   schemaUid?: string

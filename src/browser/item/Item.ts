@@ -23,6 +23,9 @@ import { createNewItem } from '@/browser/db/write'
 import { waitForEvent } from '@/browser/events'
 import { getItemProperties } from '@/browser/db/read/getItemProperties'
 import { VersionsType } from '@/shared/seedSchema/VersionSchema'
+import { getPublishPayload } from '@/browser/db/read/getPublishPayload'
+import { capitalizeFirstLetter } from '@/shared/helpers'
+import { getPublishUploads } from '@/browser/db/read/getPublishUploads'
 
 export class Item<T extends ModelValues<ModelSchema>> {
   private static instanceCache: Map<
@@ -119,8 +122,7 @@ export class Item<T extends ModelValues<ModelSchema>> {
       seedUid,
       versionLocalId: latestVersionLocalId,
       versionUid: latestVersionUid,
-      itemModelName: modelName,
-      schemaUid,
+      modelName: modelName,
     }
 
     if (ModelClass && ModelClass.schema) {
@@ -140,6 +142,22 @@ export class Item<T extends ModelValues<ModelSchema>> {
         })
 
         definedKeys.push(propertyName)
+
+        if (
+          propertyRecordSchema.dataType === 'Relation' &&
+          !propertyName.endsWith('Id')
+        ) {
+          definedKeys.push(`${propertyName}Id`)
+        }
+
+        if (
+          propertyRecordSchema.dataType === 'List' &&
+          !propertyName.endsWith('Ids')
+        ) {
+          const singularPropertyName = pluralize.singular(propertyName)
+          const propertyNameForSchema = `${singularPropertyName}${propertyRecordSchema.ref}Ids`
+          definedKeys.push(propertyNameForSchema)
+        }
       }
     }
 
@@ -162,8 +180,8 @@ export class Item<T extends ModelValues<ModelSchema>> {
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData>,
   ): Promise<Item<any>> {
-    if (!props.seedUid) {
-      console.log('Creating new item without seedUid')
+    if (!props.modelName && props.type) {
+      props.modelName = capitalizeFirstLetter(props.type)
     }
     if (props.seedUid || props.seedLocalId) {
       const seedId = (props.seedUid || props.seedLocalId) as string
@@ -173,6 +191,21 @@ export class Item<T extends ModelValues<ModelSchema>> {
           instance,
           refCount: refCount + 1,
         })
+        for (const [propertyName, propertyValue] of Object.entries(props)) {
+          const propertyInstances = instance.getService().getSnapshot()
+            .context.propertyInstances
+          if (!propertyInstances || !propertyInstances.has(propertyName)) {
+            continue
+          }
+          const propertyInstance = propertyInstances.get(propertyName)
+          if (!propertyInstance) {
+            continue
+          }
+          propertyInstance.getService().send({
+            type: 'updateContext',
+            propertyValue,
+          })
+        }
         return instance
       }
       if (!Item.instanceCache.has(seedId)) {
@@ -311,24 +344,36 @@ export class Item<T extends ModelValues<ModelSchema>> {
     })
   }
 
+  getPublishUploads = async () => {
+    return await getPublishUploads(this)
+  }
+
+  getPublishPayload = async (uploadedTransactions: any[]) => {
+    return await getPublishPayload(this, uploadedTransactions)
+  }
+
+  get serviceContext() {
+    return this._service.getSnapshot().context
+  }
+
   get seedLocalId(): string {
-    return this._service.getSnapshot().context.seedLocalId as string
+    return this.serviceContext.seedLocalId as string
   }
 
   get seedUid(): string | undefined {
-    return this._service.getSnapshot().context.seedUid
+    return this.serviceContext.seedUid
   }
 
   get schemaUid(): string {
-    return this.properties['schemaUid'].value
+    return this.serviceContext.schemaUid as string
   }
 
   get latestVersionUid(): VersionsType {
-    return this.properties['latestVersionUid'].value
+    return this.serviceContext.latestVersionUid as VersionsType
   }
 
   get modelName(): string {
-    return this._service.getSnapshot().context.modelName as string
+    return this.serviceContext.modelName as string
   }
 
   get properties(): Record<string, ItemProperty<any>> {

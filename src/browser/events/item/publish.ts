@@ -1,7 +1,6 @@
 import { getGlobalService } from '@/browser/services/global'
 
 type PublishItemRequestEvent = {
-  modelName?: string
   seedLocalId: string
 }
 
@@ -10,7 +9,6 @@ type PublishItemRequestHandler = (
 ) => Promise<void>
 
 export const publishItemRequestHandler: PublishItemRequestHandler = async ({
-  modelName,
   seedLocalId,
 }) => {
   const globalService = getGlobalService()
@@ -25,7 +23,6 @@ export const publishItemRequestHandler: PublishItemRequestHandler = async ({
   })
   globalService.send({
     type: 'publishItemRequest',
-    modelName,
     seedLocalId,
   })
 }

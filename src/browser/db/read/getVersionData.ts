@@ -3,7 +3,7 @@ import { versions, VersionsType } from '@/shared/seedSchema'
 import { and, eq } from 'drizzle-orm'
 
 type GetVersionDataProps = {
-  localId?: string
+  localId?: string | null
   uid?: string
   seedLocalId?: string
 }

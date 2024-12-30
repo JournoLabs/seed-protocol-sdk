@@ -16,6 +16,10 @@ export const createMetadata: CreateMetadata = async (
 
   metadataValues.localId = generateId()
 
+  if (!metadataValues.modelType && metadataValues.modelName) {
+    metadataValues.modelType = metadataValues.modelName.toLowerCase()
+  }
+
   if (
     propertyRecordSchema &&
     propertyRecordSchema.localStorageDir &&

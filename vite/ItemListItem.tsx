@@ -15,6 +15,10 @@ const ItemListItem = ({ seedLocalId, seedUid, modelName }: ItemViewProps) => {
   const { item } = useItem({ modelName, seedLocalId, seedUid })
   const { deleteItem, isDeletingItem } = useDeleteItem()
 
+  if (item && item.seedLocalId === 'sAFXuO7Uez') {
+    console.log('featureImage property')
+  }
+
   const handleDelete = useCallback(async () => {
     if (isDeletingItem) {
       return

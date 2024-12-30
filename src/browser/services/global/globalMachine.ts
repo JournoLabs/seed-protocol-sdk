@@ -16,6 +16,7 @@ import { addModelsToDb } from '@/browser/services/global/actors/addModelsToDb'
 import { internalMachine } from '@/browser/services/internal/internalMachine'
 import { itemMachineAll } from '@/browser/item/all/itemMachineAll'
 import { publishMachine } from '@/browser/services/publish/publishMachine'
+import { savePublishService } from '@/browser/services/global/actors/savePublishService'
 
 const {
   UNINITIALIZED,
@@ -38,11 +39,17 @@ const globalMachine = setup({
     initialize,
     addModelsToDb,
     getSchemaForModel,
+    savePublishService,
   },
 }).createMachine({
   id: MachineIds.GLOBAL,
   initial: UNINITIALIZED,
   context: ({ input }) => input as GlobalMachineContext,
+  on: {
+    publishItemRequest: `.${PUBLISHING_ITEM}`,
+    savePublishService: `.savingPublishService`,
+    restorePublishService: `.${PUBLISHING_ITEM}`,
+  },
   states: {
     [UNINITIALIZED]: {
       on: {
@@ -73,7 +80,7 @@ const globalMachine = setup({
         displayText: 'Booting up',
         percentComplete: 5,
       },
-      tags: ['loading'],
+      tags: ['loading', 'startup'],
     },
     [INITIALIZING]: {
       on: {
@@ -130,7 +137,7 @@ const globalMachine = setup({
           displayText: 'Initializing Seed SDK',
           percentComplete: 10,
         },
-        tags: ['loading'],
+        tags: ['loading', 'startup'],
       },
     },
     [ADDING_MODELS_TO_DB]: {
@@ -148,39 +155,52 @@ const globalMachine = setup({
         meta: {
           displayText: 'Adding models to database',
         },
-        tags: ['loading'],
+        tags: ['loading', 'startup'],
       },
     },
     [INITIALIZED]: {
-      type: 'parallel',
-      on: {
-        publishItemRequest: `.${PUBLISHING_ITEM}`,
-      },
+      // type: 'parallel',
+      // on: {
+      //   publishItemRequest: `.${PUBLISHING_ITEM}`,
+      // },
       meta: {
         displayText: 'Global service ready',
         percentComplete: 40,
       },
-      tags: ['loading'],
-      states: {
-        [PUBLISHING_ITEM]: {
-          entry: [
-            assign({
-              publishItemService: ({ spawn, event }) =>
-                spawn(publishMachine, {
-                  id: 'publishService',
-                  input: {
-                    modelName: event.modelName,
-                    localId: event.seedLocalId,
-                  },
-                }),
+      tags: ['loading', 'startup'],
+      // initial: PUBLISHING_ITEM,
+    },
+    [PUBLISHING_ITEM]: {
+      target: INITIALIZED,
+      entry: [
+        assign({
+          publishItemService: ({ spawn, event }) =>
+            spawn(publishMachine, {
+              id: 'publishService',
+              input: {
+                localId: event.seedLocalId,
+              },
             }),
-          ],
-          meta: {
-            displayText: 'Publishing item',
-          },
-          tags: ['publishing'],
-        },
+        }),
+      ],
+      meta: {
+        displayText: 'Publishing item',
       },
+      tags: ['publishing'],
+    },
+    savingPublishService: {
+      target: INITIALIZED,
+      on: {
+        savePublishServiceSuccess: INITIALIZED,
+      },
+      invoke: {
+        src: 'savePublishService',
+        input: ({ context }) => ({ context }),
+      },
+      meta: {
+        displayText: 'Saving publish service',
+      },
+      tags: ['publishing'],
     },
   },
   // on: {

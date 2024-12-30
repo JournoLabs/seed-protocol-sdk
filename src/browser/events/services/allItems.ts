@@ -1,5 +1,6 @@
 import { getGlobalService } from '@/browser/services/global'
-import { writeAppState } from '@/browser/db/write'
+
+import { saveAppState } from '@/browser/db/write/saveAppState'
 
 type SaveServiceEvent = {
   modelName: string
@@ -18,7 +19,12 @@ export const saveServiceHandler = async (event: SaveServiceEvent) => {
 
   const service = globalService.getSnapshot().context[nameOfService]
 
-  await writeAppState(
+  if (!service) {
+    console.log(`[saveServiceHandler] service not found: ${nameOfService}`)
+    return
+  }
+
+  await saveAppState(
     `snapshot__${modelName}`,
     JSON.stringify(service.getPersistedSnapshot()),
   )

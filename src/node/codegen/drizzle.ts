@@ -60,13 +60,9 @@ const generateDrizzleSchemaCode = (
 export const createDrizzleSchemaFilesFromConfig = async () => {
   const schemaFilePath = path.join(dotSeedDir, 'schema.ts') // Developer created file with model definitions
 
-  console.log('schemaFilePath:', schemaFilePath)
-
   const { models } = await getTsImport<{
     models: Record<string, ModelClassType>
   }>(schemaFilePath)
-
-  console.log('models:', models)
 
   for (const [modelName, modelClass] of Object.entries(models)) {
     const code = generateDrizzleSchemaCode(modelName, modelClass)

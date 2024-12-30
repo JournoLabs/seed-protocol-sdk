@@ -11,6 +11,13 @@ export const getArweave = (): Arweave | undefined => {
   }
 
   if (process.env.NODE_ENV === 'production') {
+    if (Object.keys(Arweave).includes('default')) {
+      return Arweave.default.init({
+        host: process.env.NEXT_PUBLIC_ARWEAVE_HOST,
+        protocol: 'https',
+      })
+    }
+
     return Arweave.init({
       host: process.env.NEXT_PUBLIC_ARWEAVE_HOST,
       protocol: 'https',

@@ -3,7 +3,7 @@ import { validateItemData } from './actors/validateItemData'
 import { PublishMachineStates } from '@/browser/services/internal/constants'
 import { PublishMachineContext } from '@/types'
 import { createPublishAttempt } from './actors/createPublishAttempt'
-import { updateMachineContext } from '@/browser/helpers'
+import { updateMachineContext } from '@/browser/helpers/updateMachineContext'
 import { preparePublishRequestData } from '@/browser/services/publish/actors/preparePublishRequestData'
 import { upload } from '@/browser/services/publish/actors/upload'
 

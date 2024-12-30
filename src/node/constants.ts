@@ -5,11 +5,7 @@ export const NODE_APP_DB_CONFIG = 'node.app.db.config.ts'
 
 const currentDir = path.dirname(new URL(import.meta.url).pathname)
 
-console.log('currentDir', currentDir)
-
 const parentToCheck = path.join(currentDir, '..')
-//
-// const isInstalled = path.basename(parentToCheck) === '@seedprotocol'
 
 let rootWithNodeModules = path.join(currentDir, '..', '..', '..', '..')
 

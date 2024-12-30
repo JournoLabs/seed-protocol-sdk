@@ -1,4 +1,4 @@
-import { camelCase, debounce, DebouncedFunc, startCase } from 'lodash-es'
+import { camelCase, DebouncedFunc, startCase, throttle } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@/browser/gql/graphql'
 import {
   metadata,
@@ -32,6 +32,7 @@ import { getModelSchemas } from '@/browser/db/read/getModelSchemas'
 import debug from 'debug'
 import { ModelSchema, PropertyType } from '@/types'
 import { createSeeds } from '@/browser/db/write/createSeeds'
+import { setSchemaUidForSchemaDefinition } from '@/browser/stores/eas'
 
 const logger = debug('app:item:events:syncDbWithEas')
 
@@ -375,10 +376,17 @@ type SaveEasPropertiesToDb = (
   props: SaveEasPropertiesToDbParams,
 ) => Promise<Record<string, unknown>>
 
+let isSavingToDb = false
+
 const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   itemProperties,
   itemSeeds,
 }) => {
+  if (isSavingToDb) {
+    return
+  }
+  isSavingToDb = true
+
   const propertyUids = itemProperties.map((property) => property.id)
 
   const models = getModels()
@@ -410,6 +418,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_name, property_value,
                                                      eas_data_type, version_uid, version_local_id, seed_uid,
                                                      seed_local_id, model_type, ref_value_type, ref_seed_type,
+                                                     ref_schema_uid,
                                                      created_at, attestation_created_at, attestation_raw,
                                                      local_storage_dir, ref_resolved_value)
   VALUES `
@@ -422,22 +431,25 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
     let propertyNameSnake = metadata.name
 
     if (!propertyNameSnake) {
-      propertyNameSnake = metadata.name
-    }
-
-    if (!propertyNameSnake) {
       console.warn(
         '[item/events] [syncDbWithEas] no propertyName found for property: ',
         property,
       )
-      return
+      continue
     }
 
     let isRelation = false
     let refValueType
     let refSeedType
+    let refSchemaUid
     let refResolvedValue
     let isList = false
+    const schemaUid = property.schemaId
+
+    setSchemaUidForSchemaDefinition({
+      text: propertyNameSnake,
+      schemaUid,
+    })
 
     if (
       (propertyNameSnake.endsWith('_id') ||
@@ -483,6 +495,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
       )
       if (relatedSeed && relatedSeed.schema && relatedSeed.schema.schemaNames) {
         refSeedType = relatedSeed.schema.schemaNames[0].name
+        refSchemaUid = relatedSeed.schemaId
       }
     }
 
@@ -492,6 +505,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
       )
       if (relatedSeeds && relatedSeeds.length > 0) {
         refSeedType = relatedSeeds[0].schema.schemaNames[0].name
+        refSchemaUid = relatedSeeds[0].schemaId
       }
     }
 
@@ -521,6 +535,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
                          '${versionLocalId}', '${seedUid}', '${seedLocalId}', 
                          '${modelType}', ${refValueType ? `'${refValueType}'` : 'NULL'}, 
                          ${refSeedType ? `'${refSeedType}'` : 'NULL'},
+                         ${refSchemaUid ? `'${refSchemaUid}'` : 'NULL'},
                          ${Date.now()}, ${attestationCreatedAt}, '${attestationRaw}',
                          ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
                          ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'})`
@@ -545,6 +560,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   }
 
   await appDb.run(sql.raw(insertPropertiesQuery))
+
+  isSavingToDb = false
 
   return { propertyUids }
 }
@@ -586,7 +603,7 @@ const getRelatedSeedsAndVersions = async () => {
   })
 }
 
-const syncDbWithEasHandler: DebouncedFunc<any> = debounce(
+const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
   async (_) => {
     const appDb = getAppDb()
 
@@ -676,7 +693,7 @@ const syncDbWithEasHandler: DebouncedFunc<any> = debounce(
       eventEmitter.emit('item.requestAll', { modelName })
     }
   },
-  10000,
+  30000,
   {
     leading: true,
     trailing: false,

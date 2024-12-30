@@ -20,7 +20,7 @@ import TrashPage from './pages/TrashPage'
 
 dotenv.config()
 
-localStorage.debug = 'app:*'
+localStorage.debug = 'app:internal:actors:*'
 
 const router = createBrowserRouter(
   createRoutesFromElements(

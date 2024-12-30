@@ -14,7 +14,7 @@ import { MachineIds } from '@/browser/services/internal/constants'
 
 const logger = debug('app:react:services')
 
-const finalStrings = ['idle', 'ready', 'done', 'success']
+const finalStrings = ['idle', 'ready', 'done', 'success', 'initialized']
 
 export const getServiceName = (service: ActorRef<any, any>) => {
   let name = 'actor'
@@ -90,8 +90,17 @@ export const useService = (service: ActorRef<any, any>) => {
   const getPercentComplete = (service: ActorRef<any, any>) => {
     let percentComplete = 0
     if (service.logic.states) {
-      const stateNames = Object.keys(service.logic.states)
-      const totalStates = stateNames.length
+      const stateNames = []
+      const startupStates = []
+
+      for (const [stateName, state] of Object.entries(service.logic.states)) {
+        if (state.tags.includes('loading')) {
+          stateNames.push(stateName)
+          startupStates.push(state)
+        }
+      }
+
+      const totalStates = startupStates.length
       const value = getServiceValue(service)
       if (finalStrings.includes(value)) {
         return 0
@@ -105,9 +114,6 @@ export const useService = (service: ActorRef<any, any>) => {
   const updateTime = useCallback(
     (interval) => {
       const context = service.getSnapshot().context
-      if (context && context.times) {
-        console.log('[ActorItem] [useEffect] context.times', context.times)
-      }
       const status = service.getSnapshot().value
       if (
         status === 'done' ||
@@ -311,7 +317,7 @@ export const useServices = () => {
       return
     }
     if (
-      getServiceValue(globalService) === 'ready' &&
+      getServiceValue(globalService) === 'initialized' &&
       getServiceValue(internalService) === 'ready'
     ) {
       const denominator = actors.length

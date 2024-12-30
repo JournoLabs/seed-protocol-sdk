@@ -83,51 +83,31 @@ export const getItemDataFromDb: GetItemDataFromDb = async ({
 
   let itemData = itemDataRows[0]
 
-  const propertiesData = await getItemProperties({ seedLocalId, seedUid })
-
-  // const initObj: ItemData = {
-  //   seedLocalId,
-  //   seedUid,
-  //   modelName,
-  // }
+  const propertiesData = await getItemProperties({
+    seedLocalId,
+    seedUid: itemData.seedUid || undefined,
+  })
 
   if (!propertiesData || propertiesData.length === 0) {
     return itemData
   }
 
-  const firstPropertyData = propertiesData[0]
-
   for (const propertyData of propertiesData) {
     const propertyName = propertyData.propertyName
 
-    const propertyValue = propertyData.propertyValue
+    let propertyValue = propertyData.propertyValue
 
-    // TODO: Find a better place for the property data below
-    // Since initObj is used to initialize an Item, the following values
-    // just overwrite each other for each property since they are Property
-    // specific.
-
-    // const refSeedType = propertyDbValues[11]
-    // if (refSeedType) {
-    //   initObj.refSeedType = refSeedType
-    // }
-    // const refValueType = propertyDbValues[12]
-    // if (refValueType) {
-    //   initObj.refValueType = refValueType
-    // }
-    //
-    // if (
-    //   refSeedType &&
-    //   refValueType === 'list' &&
-    //   propertyName.endsWith('Ids')
-    // ) {
-    //   logger('[db/queries] [getItemDataFromDb] propertyName', propertyName)
-    // }
+    if (propertyName.endsWith('Id') || propertyName.endsWith('Ids')) {
+      if (propertyData.refSeedType) {
+        const propertyNameVariant = propertyName.replace(/Ids?$/, '')
+        itemData[propertyNameVariant] = propertyValue
+      }
+    }
 
     itemData[propertyName] = propertyValue
   }
 
-  return itemData
+  if (itemData) return itemData
 }
 
 type GetItemParams = {

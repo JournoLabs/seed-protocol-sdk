@@ -1,3 +1,10 @@
+import {
+  AttestationRequestData,
+  ZERO_BYTES,
+  ZERO_BYTES32,
+} from '@ethereum-attestation-service/eas-sdk'
+import { ZERO_ADDRESS } from 'thirdweb'
+
 export const SCHEMA_NJK = 'schema.njk'
 export const SCHEMA_TS = 'schema.ts'
 
@@ -17,6 +24,15 @@ export const INTERNAL_DATA_TYPES = {
   List: {
     eas: 'bytes32[]',
   },
+  FileSrc: {
+    eas: 'string',
+  },
+  Json: {
+    eas: 'string',
+  },
+  Blob: {
+    eas: 'bytes32',
+  },
 }
 
 export const internalPropertyNames = [
@@ -30,12 +46,26 @@ export const internalPropertyNames = [
   'updatedAt',
   'versionsCount',
   'lastVersionPublishedAt',
+  'latestVersionLocalId',
   'versionLocalId',
   'lastLocalUpdateAt',
   'storageTransactionId',
   'versionUid',
   'refSeedType',
   'refValueType',
-  'resolvedValue',
-  'resolvedDisplayValue',
+  'refResolvedValue',
+  'refResolvedDisplayValue',
+  'type',
 ]
+
+export const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA =
+  '0x13c0fd59d69dbce40501a41f8b37768d26dd2e2bb0cad64615334d84f7b9bdf6'
+
+export const defaultAttestationData: AttestationRequestData = {
+  recipient: ZERO_ADDRESS,
+  revocable: true,
+  value: BigInt(0),
+  refUID: ZERO_BYTES32,
+  expirationTime: BigInt(0),
+  data: ZERO_BYTES,
+}

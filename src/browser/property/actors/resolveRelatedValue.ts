@@ -1,11 +1,15 @@
 import { EventObject, fromCallback } from 'xstate'
 import { convertTxIdToImageSrc } from '@/shared/helpers'
-import { propertyMachine } from '../propertyMachine'
 import { fs } from '@zenfs/core'
 import {
   getRelationValueData,
   getStorageTransactionIdForSeedUid,
 } from '@/browser/db/read'
+import debug from 'debug'
+import { FromCallbackInput } from '@/types/machines'
+import { PropertyMachineContext } from '@/types/property'
+
+const logger = debug('app:property:actors:resolveRelatedValue')
 
 const storageTransactionIdToContentUrl = new Map<string, string>()
 const refResolvedValueToContentUrl = new Map<string, string>()
@@ -13,7 +17,7 @@ const seedUidToContentUrl = new Map<string, string>()
 
 export const resolveRelatedValue = fromCallback<
   EventObject,
-  typeof propertyMachine
+  FromCallbackInput<PropertyMachineContext, EventObject>
 >(({ sendBack, input: { context } }) => {
   const {
     isRelation,
@@ -21,30 +25,44 @@ export const resolveRelatedValue = fromCallback<
     propertyName,
     seedUid,
     propertyRecordSchema,
-    seedLocalId,
+    populatedFromDb,
     schemaUid,
   } = context
 
   const _resolveRelatedValue = async () => {
-    if (!propertyValue || !isRelation) {
+    if (!propertyValue || !isRelation || populatedFromDb) {
       return
     }
 
-    if (seedUidToContentUrl.has(propertyValue)) {
+    let parsedValue
+
+    try {
+      parsedValue = JSON.parse(propertyValue)
+    } catch (error) {
+      logger(`${propertyName} value is not a JSON string.`)
+    }
+
+    if (!parsedValue && seedUidToContentUrl.has(propertyValue)) {
       const contentUrl = seedUidToContentUrl.get(propertyValue)
       sendBack({
-        type: 'updateRenderValue',
+        type: 'updateContext',
         renderValue: contentUrl,
       })
       sendBack({
         type: 'resolvingRelatedValueSuccess',
-        resolvedDisplayValue: contentUrl,
+        refResolvedDisplayValue: contentUrl,
       })
       return true
     }
 
     if (Array.isArray(propertyValue)) {
       // TODO: Handle array of seedUids
+      logger(`${propertyName} value is an array of seedUids`)
+      return
+    }
+
+    if (Array.isArray(parsedValue)) {
+      logger(`${propertyName} value is a stringified array of seedUids`)
       return
     }
 
@@ -56,13 +74,13 @@ export const resolveRelatedValue = fromCallback<
         const contentUrl =
           storageTransactionIdToContentUrl.get(storageTransactionId)
         sendBack({
-          type: 'updateRenderValue',
+          type: 'updateContext',
           renderValue: contentUrl,
         })
         sendBack({
           type: 'resolvingRelatedValueSuccess',
-          resolvedDisplayValue: contentUrl,
-          resolvedValue: storageTransactionId,
+          refResolvedDisplayValue: contentUrl,
+          refResolvedValue: storageTransactionId,
         })
         return true
       }
@@ -72,13 +90,13 @@ export const resolveRelatedValue = fromCallback<
         seedUidToContentUrl.set(propertyValue, contentUrl)
       }
       sendBack({
-        type: 'updateRenderValue',
+        type: 'updateContext',
         renderValue: contentUrl,
       })
       sendBack({
         type: 'resolvingRelatedValueSuccess',
-        resolvedDisplayValue: contentUrl,
-        resolvedValue: storageTransactionId,
+        refResolvedDisplayValue: contentUrl,
+        refResolvedValue: storageTransactionId,
       })
       return true
     }
@@ -99,12 +117,12 @@ export const resolveRelatedValue = fromCallback<
         if (refResolvedValueToContentUrl.has(refResolvedValue)) {
           const contentUrl = refResolvedValueToContentUrl.get(refResolvedValue)
           sendBack({
-            type: 'updateRenderValue',
+            type: 'updateContext',
             renderValue: contentUrl,
           })
           sendBack({
             type: 'resolvingRelatedValueSuccess',
-            resolvedDisplayValue: contentUrl,
+            refResolvedDisplayValue: contentUrl,
           })
           return true
         }
@@ -120,12 +138,12 @@ export const resolveRelatedValue = fromCallback<
           const contentUrl = URL.createObjectURL(fileHandler)
           refResolvedValueToContentUrl.set(refResolvedValue, contentUrl)
           sendBack({
-            type: 'updateRenderValue',
+            type: 'updateContext',
             renderValue: contentUrl,
           })
           sendBack({
             type: 'resolvingRelatedValueSuccess',
-            resolvedDisplayValue: contentUrl,
+            refResolvedDisplayValue: contentUrl,
           })
           return true
         }
@@ -133,7 +151,10 @@ export const resolveRelatedValue = fromCallback<
 
       if (typeof propertyValueFromDb === 'string') {
         // Check files for a filename that matches the propertyValue
-        if (propertyRecordSchema.dataType === 'ImageSrc') {
+        if (
+          propertyRecordSchema &&
+          propertyRecordSchema.refValueType === 'ImageSrc'
+        ) {
           let contentUrl
 
           if (storageTransactionIdToContentUrl.has(propertyValueFromDb)) {
@@ -160,12 +181,12 @@ export const resolveRelatedValue = fromCallback<
 
           if (contentUrl) {
             sendBack({
-              type: 'updateRenderValue',
+              type: 'updateContext',
               renderValue: contentUrl,
             })
             sendBack({
               type: 'resolvingRelatedValueSuccess',
-              resolvedDisplayValue: contentUrl,
+              refResolvedDisplayValue: contentUrl,
             })
             return true
           }
@@ -261,13 +282,13 @@ export const resolveRelatedValue = fromCallback<
 //         )
 //       }
 //
-//       const resolvedDisplayValue = storageIdQuery.rows[0][2]
+//       const refResolvedDisplayValue = storageIdQuery.rows[0][2]
 //       let resolvedValue = storageIdQuery.rows[0][3]
 //
-//       if (resolvedDisplayValue && resolvedValue) {
+//       if (refResolvedDisplayValue && resolvedValue) {
 //         sendBack({
 //           type: 'resolvingRelatedValueSuccess',
-//           resolvedDisplayValue,
+//           refResolvedDisplayValue,
 //           resolvedValue,
 //         })
 //         return
@@ -299,7 +320,7 @@ export const resolveRelatedValue = fromCallback<
 //
 //       sendBack({
 //         type: 'resolvingRelatedValueSuccess',
-//         resolvedDisplayValue: contentUrl,
+//         refResolvedDisplayValue: contentUrl,
 //         resolvedValue: storageId,
 //       })
 //     }

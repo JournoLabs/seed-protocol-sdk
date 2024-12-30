@@ -5,20 +5,7 @@ import {
   TPropertyDefs,
   TStorageType,
 } from '@/browser/schema'
-
-export type ItemPropertyProps = {
-  localId: string
-  uid?: string
-  propertyName?: string
-  propertyValue?: any
-  seedUid?: string
-  seedLocalId?: string
-  versionLocalId?: string
-  versionUid?: string
-  itemModelName: string
-  schemaUid?: string
-  storageTransactionId?: string
-}
+import { MetadataType } from '@/shared/seedSchema'
 
 export type PropertyDataType = Static<typeof TPropertyDataType>
 
@@ -63,37 +50,16 @@ export type PropertyData = {
   createdAt: number
   updatedAt: number
 }
-export type PropertyMachineContext = {
-  localId: string
-  uid: string
-  fetchedValue: any
+export type PropertyMachineContext = Partial<MetadataType> & {
+  populatedFromDb?: boolean
   isSaving: boolean
-  pendingFetch: boolean
-  savedData: any
-  propertyName: string
-  propertyValue: any
-  propertyValueType: string
-  propertyRelationValueType?: string
-  resolvedValue?: any
-  resolvedDisplayValue?: any
   propertyRecordSchema?: PropertyType
   isRelation: boolean
-  itemModelName: string
-  schemaUid?: string
+  modelName: string
   isDbReady: boolean
-  seedLocalId?: string
-  seedUid?: string
-  versionLocalId?: string
-  versionUid?: string
   renderValue?: any
   storageTransactionId?: string
-  refValueType?: string
-  localStorageDir?: string
   newValue?: ItemPropertyValueType
-}
-
-export type UpdateContextEvent = PropertyMachineContext & {
-  type: 'updateContext'
 }
 
 export type ItemPropertyValueType =

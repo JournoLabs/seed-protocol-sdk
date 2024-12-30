@@ -10,12 +10,13 @@ import { FromCallbackInput, GlobalMachineContext } from '@/types'
 import { getAppDb } from '@/browser/db/sqlWasmClient'
 import { appState } from '@/shared/seedSchema'
 import { like } from 'drizzle-orm'
+import { fetchSchemaUids } from '@/browser/stores/eas'
 
 const logger = debug('app:services:global:actors:initialize')
 
 export const initialize = fromCallback<
   EventObject,
-  FromCallbackInput<GlobalMachineContext>
+  FromCallbackInput<GlobalMachineContext, EventObject>
 >(({ sendBack, input: { event, context } }) => {
   const { internalService, models, endpoints } = context
 
@@ -87,16 +88,7 @@ export const initialize = fromCallback<
     }
 
     const _initEas = async (): Promise<void> => {
-      // const { easService } = await import('@/browser/eas')
-      // easService.send({ type: 'init', endpoints, models })
-      // return new Promise((resolve) => {
-      //   easSubscription = easService.subscribe((snapshot) => {
-      //     if (snapshot.value === 'ready') {
-      //       resolve()
-      //     }
-      //   })
-      //   easService.send({ type: 'init', endpoints, models })
-      // })
+      await fetchSchemaUids()
     }
 
     _initFileSystem().then(() => {
@@ -106,6 +98,9 @@ export const initialize = fromCallback<
     _initInternal()
       .then(() => {
         return _initAllItemsServices()
+      })
+      .then(() => {
+        return _initEas()
       })
       .then(() => {
         logger('[global/actors] Internal initialized')

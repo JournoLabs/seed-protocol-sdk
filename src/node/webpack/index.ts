@@ -28,8 +28,6 @@ export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   // console.log('path-browserify exists:', fs.existsSync(path.resolve(process.cwd(), './node_modules/path-browserify')))
 
   if (!isServer) {
-    console.log('config.resolve.alias:', config.resolve.alias)
-
     config.resolve.alias['fs'] = path.resolve(
       process.cwd(),
       './node_modules/@zenfs/core',

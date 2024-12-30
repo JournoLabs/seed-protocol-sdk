@@ -1,9 +1,10 @@
 import { EventObject, fromCallback } from 'xstate'
-import { itemMachineSingle } from '@/browser/item/single/itemMachineSingle'
+import { FromCallbackInput } from '@/types/machines'
+import { PropertyMachineContext } from '@/types/property'
 
 export const resolveRemoteStorage = fromCallback<
   EventObject,
-  typeof itemMachineSingle
+  FromCallbackInput<PropertyMachineContext, EventObject>
 >(({ sendBack, input: { context } }) => {
   const { propertyInstances } = context
 

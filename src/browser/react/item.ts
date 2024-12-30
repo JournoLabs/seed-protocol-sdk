@@ -251,7 +251,7 @@ export const useItems: UseItems = ({ modelName, deleted }) => {
           item.createdAt,
       ],
       ['desc'],
-    ).slice(0, 10),
+    ),
     isReadingDb,
   }
 }
@@ -335,10 +335,9 @@ type UsePublishItemReturn = {
   isPublishing: boolean
 }
 
-type PublishItemProps = [
-  item: Item<any> | undefined,
-  callback?: (result: PublishItemResult) => any | undefined,
-]
+type PublishItemProps =
+  | [Item<any> | undefined]
+  | [Item<any> | undefined, (result: PublishItemResult) => any | undefined]
 
 type PublishItem = (...props: PublishItemProps) => Promise<any>
 
@@ -352,10 +351,10 @@ export const usePublishItem = (): UsePublishItemReturn => {
       return
     }
     isLocked.current = true
-    console.log('Publishing item', item)
     setIsPublishing(true)
     try {
-      await item.publish()
+      // await item.publish()
+      const payload = await item.getPublishPayload()
       if (callback) {
         callback()
       }

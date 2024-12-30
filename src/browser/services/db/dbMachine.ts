@@ -1,4 +1,4 @@
-import { assign, emit, setup } from 'xstate'
+import { assign, setup } from 'xstate'
 import {
   DB_CHECK_STATUS_EXISTS,
   DB_CHECK_STATUS_UPDATE_PATHS,
@@ -145,11 +145,6 @@ const dbMachine = setup({
           }),
         },
         [DB_MIGRATING_SUCCESS]: 'ready',
-      },
-      entry: ({ context }) => {
-        if (context.hasFiles) {
-          emit({ type: DB_WAITING_FOR_FILES_RECEIVED })
-        }
       },
     },
     [MIGRATING]: {

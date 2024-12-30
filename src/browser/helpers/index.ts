@@ -9,7 +9,6 @@ import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persist
 import { persistQueryClient } from '@tanstack/react-query-persist-client'
 import { fs } from '@zenfs/core'
 import { basename } from 'path'
-import { ActionFunction, assign } from 'xstate'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,25 +69,4 @@ export const getContentUrlFromPath = async (
   const fileContents = await fs.promises.readFile(path)
   const fileHandler = new File([fileContents], basename(path))
   return URL.createObjectURL(fileHandler)
-}
-
-type UpdateMachineContext = {
-  actions: ActionFunction<any, any, any, any, any, any, any, any, any>[] | any
-}
-
-export const updateMachineContext: UpdateMachineContext = {
-  actions: assign(({ context, event }) => {
-    const newContext = Object.assign({}, context)
-
-    for (let i = 0; i < Object.keys(event).length; i++) {
-      const key = Object.keys(event)[i]
-      if (key === 'type') {
-        continue
-      }
-      newContext[key] = event[key]
-    }
-    return {
-      ...newContext,
-    }
-  }),
 }

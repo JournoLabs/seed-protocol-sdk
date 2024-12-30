@@ -9,10 +9,6 @@ export const itemRequestHandler = async (event) => {
   const { seedLocalId, seedUid, modelName, eventId } = event
 
   if (activeItemRequests.has(seedLocalId)) {
-    console.log(
-      '[item/events] [itemRequestHandler] already requesting item with queue size',
-      queue.size,
-    )
     queue.set(seedLocalId, event)
     return
   }
@@ -44,11 +40,6 @@ export const itemRequestHandler = async (event) => {
   queue.delete(seedLocalId)
   if (queue.size > 0 && queue.has(seedLocalId)) {
     const nextEvent = queue.get(seedLocalId)
-    console.log(
-      '[item/events] [itemRequestHandler] taking event from queue with queue size',
-      queue.size,
-      nextEvent,
-    )
     await itemRequestHandler(nextEvent)
   }
 }

@@ -65,7 +65,7 @@ const ItemList = ({ modelName }: ItemListProps) => {
         <ul className={'max-w-4xl'}>
           {items &&
             items.length > 0 &&
-            items.map((item, index) => (
+            items.slice(0, 5).map((item, index) => (
               <li key={item.seedUid || item.seedLocalId || index}>
                 <ItemListItem
                   seedLocalId={item.seedLocalId}

@@ -23,7 +23,7 @@ export const saveItemStorage = fromCallback<
     seedUid,
     propertyName,
     propertyRecordSchema,
-    itemModelName,
+    modelName,
     propertyValue: existingValue,
   } = context
 
@@ -82,7 +82,7 @@ export const saveItemStorage = fromCallback<
           const propertyDataRows = await createMetadata(
             {
               propertyName,
-              modelType: itemModelName.toLowerCase(),
+              modelType: modelName.toLowerCase(),
               seedLocalId,
               seedUid,
               versionLocalId: itemData.latestVersionLocalId,

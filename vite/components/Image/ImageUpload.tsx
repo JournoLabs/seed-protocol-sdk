@@ -1,5 +1,5 @@
 import { FC, useState } from 'react'
-import { ItemProperty } from '@/browser'
+import { ItemProperty } from '../../src/browser'
 
 type ImageUploadProps = {
   itemProperty: ItemProperty<any>

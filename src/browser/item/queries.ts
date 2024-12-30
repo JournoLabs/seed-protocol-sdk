@@ -14,6 +14,18 @@ export const GET_SCHEMAS = graphql(/* GraphQL */ `
   }
 `)
 
+export const GET_SCHEMA_BY_NAME = graphql(/* GraphQL */ `
+  query GetSchemaByName($where: SchemaWhereInput!) {
+    schema: schemata(where: $where) {
+      id
+      schema
+      schemaNames {
+        name
+      }
+    }
+  }
+`) as TypedDocumentNode<{ schema: Attestation }>
+
 export const GET_SEEDS = graphql(/* GraphQL */ `
   query GetSeeds($where: AttestationWhereInput!) {
     itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {

@@ -2,7 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { fetchAllFilesMachine } from '@/browser/schema/file/fetchAll/index'
 import { ARWEAVE_HOST } from '@/browser/services/internal/constants'
 import { GET_FILES_METADATA } from '@/browser/schema/file/queries'
-import { getArweave } from '../arweave'
+import { getArweave } from '../../../helpers/arweave'
 import { fs } from '@zenfs/core'
 import {
   getDataTypeFromString,
@@ -14,7 +14,8 @@ import { eq } from 'drizzle-orm'
 import { easClient, queryClient } from '@/browser/helpers'
 import debug from 'debug'
 import { getAppDb } from '@/browser/db/sqlWasmClient'
-import { writeAppState } from '@/browser/db/write'
+
+import { saveAppState } from '@/browser/db/write/saveAppState'
 
 const logger = debug('app:file:actors:fetchAll')
 
@@ -141,7 +142,7 @@ export const fetchAllBinaryData = fromCallback<
 
           excludedTransactions.add(transactionId)
 
-          await writeAppState(
+          await saveAppState(
             'excludedTransactions',
             JSON.stringify(Array.from(excludedTransactions)),
           )
@@ -226,13 +227,18 @@ export const fetchAllBinaryData = fromCallback<
           continue
         }
 
-        const mimeType = getMimeType(dataString as string)
+        let mimeType = getMimeType(dataString as string)
+        let fileExtension = mimeType
+
+        if (fileExtension && fileExtension?.startsWith('image')) {
+          fileExtension = fileExtension.replace('image/', '')
+        }
 
         let fileName = transactionId
 
         if (contentType === 'base64') {
           if (mimeType) {
-            fileName += `.${mimeType}`
+            fileName += `.${fileExtension}`
           }
 
           // Remove the Base64 header if it exists (e.g., "data:image/png;base64,")
@@ -246,6 +252,8 @@ export const fetchAllBinaryData = fromCallback<
           for (let i = 0; i < length; i++) {
             binaryData[i] = binaryString.charCodeAt(i)
           }
+
+          console.log(`attempting to writeFile to /files/images/${fileName}`)
 
           await fs.promises.writeFile(`/files/images/${fileName}`, binaryData, {
             encoding: 'binary',

@@ -7,11 +7,11 @@ import { initialize } from '@/browser/property/actors/initialize'
 import { resolveRelatedValue } from '@/browser/property/actors/resolveRelatedValue'
 import { hydrateFromDb } from '@/browser/property/actors/hydrateFromDb'
 import {
-  analyzeInput,
   saveImageSrc,
   saveItemStorage,
   saveRelation,
-} from '@/browser/property/actors/saveValueToDb' // import { updateMachineContext } from '@/browser/helpers'
+} from '@/browser/property/actors/saveValueToDb'
+import { analyzeInput } from '@/browser/property/actors/saveValueToDb/analyzeInput' // import { updateMachineContext } from '@/browser/helpers'
 // import { updateMachineContext } from '@/browser/helpers'
 
 export const propertyMachine = setup({
@@ -38,22 +38,7 @@ export const propertyMachine = setup({
   initial: 'waitingForDb',
   context: ({ input }) => input as PropertyMachineContext,
   on: {
-    updatePropertyValue: {
-      target: '.resolvingRelatedValue',
-      guard: ({ context }) => !context.isDbReady,
-      actions: assign(({ event }) => {
-        return {
-          propertyValue: event.propertyValue,
-        }
-      }),
-    },
-    updateRenderValue: {
-      actions: assign(({ event, context }) => {
-        return {
-          renderValue: event.renderValue,
-        }
-      }),
-    },
+    // reload: '.hydratingFromDb',
     save: {
       actions: assign({
         isSaving: true,
@@ -120,8 +105,9 @@ export const propertyMachine = setup({
         resolvingRelatedValueSuccess: {
           target: 'idle',
           actions: assign({
-            resolvedDisplayValue: ({ event }) => event.resolvedDisplayValue,
-            resolvedValue: ({ event }) => event.resolvedValue,
+            refResolvedDisplayValue: ({ event }) =>
+              event.refResolvedDisplayValue,
+            resolvedValue: ({ event }) => event.refResolvedValue,
           }),
         },
         resolvingRelatedValueDone: {

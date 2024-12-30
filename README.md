@@ -29,7 +29,7 @@ of your project.
 
 As an example, here's the actual data model for PermaPress:
 
-```typescript=
+```typescript
 import { ImageSrc, List, Model, Relation, Text } from '@/browser/schema'
 
 @Model
@@ -85,36 +85,42 @@ export default { models, endpoints }
 
 ```
 
-This will create a database locally in the browser with all the tables and fields necessary to support your Models. Feel
-free to check it out for yourself in your browser's Dev Tools.
+This will create a database locally in the browser with all the tables and fields necessary to support your Models.
 
-Notice that we create relationships by defining a `Property` that takes its related Model as its type. For one-to-many
+> [!NOTE]
+> The database is a SQLite file stored
+> in [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system).
+> We recommend using
+> the [OPFS Explorer](https://chromewebstore.google.com/detail/opfs-explorer/acndjpgkpaclldomagafnognkcgjignd)
+> browser extension to see the files managed by the SDK.
+
+Notice that we create relationships by defining a `Property` that takes its related `Model` as its type. For one-to-many
 relationships, we use the `List` type and pass in the `Model` type we want.
 
 So creating a Post would look like this:
 
-```typescript=
-import {Post, Image, Identity} from './seed/models'
-import html from './index.html'
+```typescript
+import { Post, Image, Identity } from './seed/models'
+import html                      from './index.html'
 
 const image = await Image.create({
-    src: 'https://imgr.com/image.jpg',
+  src: 'https://imgr.com/image.jpg',
 })
 
 const author = await Identity.create({
-    name: 'Keith Axline',
-    profile: 'Developer for Seed Protocol',
+  name: 'Keith Axline',
+  profile: 'Developer for Seed Protocol',
 })
 
 const authors = [
-    author
+  author
 ]
 
 const post = await Post.create({
-    title: 'Some title',
-    summary: 'My summary',
-    featureImage: image,
-    authors,
+  title: 'Some title',
+  summary: 'My summary',
+  featureImage: image,
+  authors,
 })
 
 await post.publish()
@@ -127,6 +133,18 @@ await post.publish()
 ```
 
 ## Usage
+
+### `Item`
+
+Create
+
+```typescript
+
+```
+
+### Files
+
+Subscribe to events:
 
 ```typescript
 import { SeedFile } from '@seedprotocol/sdk'
@@ -141,6 +159,8 @@ await fileFromUrl.save()
 
 ```
 
+Create files from various sources:
+
 ```typescript
 const fileFromPath = new SeedFile('path/to/file.txt')
 
@@ -154,6 +174,8 @@ if ( fileFromPath.isSaved ) {
   console.log('File is saved to Arweave and EAS')
 }
 ```
+
+Use the `SeedFileSystem`
 
 ```typescript
 import { SeedFileSystem } from '@seedprotocol/sdk'
@@ -183,6 +205,8 @@ files.forEach(file => {
 
 ```
 
+### Images
+
 ```typescript
 
 import { SeedImage } from '@seedprotocol/sdk'
@@ -198,9 +222,6 @@ const imgBuffer  = imgFromUrl.buffer()
 const imgDataUrl = imgFromUrl.dataUrl()
 
 ```
-
-**Note:** Model instances are called Items in the SDK. This is to avoid confusion with the `Model` function that creates
-the data model.
 
 ```mermaid
 ---

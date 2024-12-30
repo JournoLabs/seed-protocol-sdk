@@ -54,6 +54,8 @@ export const getItemsData: GetItemsData = async ({
       versionsCount: versionData.versionsCount,
       lastVersionPublishedAt: versionData.lastVersionPublishedAt,
       lastLocalUpdateAt: versionData.lastLocalUpdateAt,
+      latestVersionUid: versionData.latestVersionUid,
+      latestVersionLocalId: versionData.latestVersionLocalId,
       createdAt: seeds.createdAt,
     })
     .from(seeds)
