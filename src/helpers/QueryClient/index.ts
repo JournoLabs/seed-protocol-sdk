@@ -1,11 +1,14 @@
+import { isBrowser } from '../environment'
 import { BaseQueryClient } from './BaseQueryClient'
 
 let QueryClient: typeof BaseQueryClient | undefined
 
 export const initQueryClient = async () => {
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     QueryClient = (await import('../../browser/helpers/QueryClient')).QueryClient
-  } else {
+  }
+
+  if (!isBrowser()) {
     QueryClient = (await import('../../node/helpers/QueryClient')).QueryClient
   }
 }

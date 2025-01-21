@@ -16,12 +16,12 @@ import pluralize from 'pluralize'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
-import { Item } from '@/browser/Item/Item'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItemProperty } from '@/interfaces'
+import { IItem } from '@/interfaces'
+import { BaseItem } from '@/Item/BaseItem'
 
-
-const getVersionUid = (item: Item<any>) => {
+const getVersionUid = (item: IItem<any>) => {
   let versionUid
 
   if (
@@ -38,7 +38,7 @@ const getPropertyData = async (itemProperty: IItemProperty<any>) => {
   const easDataType =
     INTERNAL_DATA_TYPES[itemProperty.propertyDef!.dataType].eas
 
-  let schemaUid = itemProperty.schemaUid
+  let schemaUid: string | undefined = itemProperty.schemaUid
 
   const propertyNameForSchema = toSnakeCase(itemProperty.propertyName)
 
@@ -145,7 +145,12 @@ const processRelationProperty = async (
     seedSchemaUid,
     versionUid,
     listOfAttestations: [],
-    propertiesToUpdate: [],
+    propertiesToUpdate: [
+      {
+        publishLocalId: relationProperty.localId,
+        propertySchemaUid: relationProperty.schemaUid,
+      },
+    ],
   }
 
   const { itemBasicProperties, itemUploadProperties } =
@@ -205,9 +210,10 @@ const processListProperty = async (
     })
 
     if (!relatedItem) {
-      throw new Error(
+      console.error(
         `No related item found for list property: ${listProperty.propertyName}`,
       )
+      continue
     }
 
     if (relatedItem.seedUid) {
@@ -271,15 +277,9 @@ type UploadedTransaction = {
 }
 
 export const getPublishPayload = async (
-  item: Item<any>,
+  item: BaseItem<any>,
   uploadedTransactions: UploadedTransaction[],
 ): Promise<MultiPublishPayload> => {
-  if (item.modelName === 'Post') {
-    item.authors = [
-      'Sr0bIx9Fwj',
-      '0xc2879650e9503a303ceb46f966e55baab480b267dc20cede23ef503622eee6d7',
-    ]
-  }
 
   let multiPublishPayload: MultiPublishPayload = []
 
@@ -320,6 +320,15 @@ export const getPublishPayload = async (
     }
   }
 
+  for (const relationProperty of itemRelationProperties) {
+    multiPublishPayload = await processRelationProperty(
+      relationProperty,
+      multiPublishPayload,
+      uploadedTransactions,
+    )
+    itemBasicProperties.push(relationProperty)
+  }
+  
   itemPublishData = await processBasicProperties(
     itemBasicProperties,
     itemPublishData,
@@ -327,13 +336,6 @@ export const getPublishPayload = async (
 
   multiPublishPayload.push(itemPublishData)
 
-  for (const relationProperty of itemRelationProperties) {
-    multiPublishPayload = await processRelationProperty(
-      relationProperty,
-      multiPublishPayload,
-      uploadedTransactions,
-    )
-  }
 
   for (const listProperty of itemListProperties) {
     multiPublishPayload = await processListProperty(

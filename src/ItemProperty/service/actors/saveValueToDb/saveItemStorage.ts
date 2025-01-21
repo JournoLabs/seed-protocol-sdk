@@ -111,7 +111,7 @@ export const saveItemStorage = fromCallback<
       propertyRecordSchema.localStorageDir || propertyData.localStorageDir
     const fileName =
       propertyData.refResolvedValue ||
-      `${propertyData.seedLocalId}${propertyRecordSchema.filenameSuffix}`
+      `${propertyData.seedUid || propertyData.seedLocalId}${propertyRecordSchema.filenameSuffix}`
 
     if (!localStorageDir || !fileName) {
       throw new Error(

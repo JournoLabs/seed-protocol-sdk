@@ -1,11 +1,14 @@
+import { isBrowser } from '../environment'
 import { BaseFileManager } from './BaseFileManager'
 
 let FileManager: typeof BaseFileManager | undefined
 
 export const initFileManager = async () => {
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     FileManager = (await import('../../browser/helpers/FileManager')).FileManager
-  } else {
+  }
+
+  if (!isBrowser()) {
     FileManager = (await import('../../node/helpers/FileManager')).FileManager
   }
 }

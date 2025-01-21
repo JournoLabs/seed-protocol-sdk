@@ -1,10 +1,11 @@
 import { ActorRefFrom, Subscription } from 'xstate';
-import { PropertyMachineContext } from '@/types';
 import { BehaviorSubject } from 'rxjs';
 import { Static } from '@sinclair/typebox';
-import { TProperty } from '@/browser/ItemProperty';
+import { TProperty } from '@/schema';
+import { CreatePropertyInstanceProps } from '@/types';
 
 export interface IItemProperty<PropertyType> {
+
   readonly localId: string;
   readonly uid: string;
   readonly seedLocalId: string;

@@ -5,7 +5,7 @@ import { eventEmitter } from '@/eventBus'
 
 export const processItems = fromCallback<
   EventObject,
-  FromCallbackInput<EventObject, AllItemsMachineContext>
+  FromCallbackInput<AllItemsMachineContext>
 >(
   ({ sendBack, input: { context } }) => {
     const {

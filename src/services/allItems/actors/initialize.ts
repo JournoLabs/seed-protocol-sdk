@@ -8,7 +8,6 @@ import {
   models as modelsTable,
   modelUids,
   properties,
-  propertyUids,
 } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { SchemaWhereInput } from '@/graphql/gql/graphql'
@@ -156,80 +155,6 @@ export const initialize = fromCallback<
         uid: modelSchema.id,
       })
       .onConflictDoNothing()
-
-    const foundPropertiesDb = await appDb
-      .select({
-        id: properties.id,
-        name: properties.name,
-        dataType: properties.dataType,
-        uid: propertyUids.uid,
-      })
-      .from(properties)
-      .fullJoin(propertyUids, eq(properties.id, propertyUids.propertyId))
-      .where(eq(properties.modelId, foundModel.id))
-
-    if (foundPropertiesDb && foundPropertiesDb.length > 0) {
-      const queryVariables: { where: SchemaWhereInput } = {
-        where: {
-          OR: [],
-        },
-      }
-
-      for (const foundPropertyDb of foundPropertiesDb) {
-        if (foundPropertyDb.name && foundPropertyDb.dataType) {
-          const easDatatype = INTERNAL_DATA_TYPES[foundPropertyDb.dataType as InternalDataType].eas
-
-          let easPropertyName = toSnakeCase(foundPropertyDb.name)
-
-          if (foundPropertyDb.dataType === 'Relation') {
-            easPropertyName += '_id'
-          }
-
-          queryVariables.where.OR!.push({
-            schema: {
-              equals: `${easDatatype} ${easPropertyName}`,
-            },
-          })
-        }
-      }
-
-      const foundPropertySchemas = await queryClient.fetchQuery({
-        queryKey: [`getPropertySchemas${modelName}`],
-        queryFn: async () => easClient.request(GET_SCHEMAS, queryVariables),
-      })
-
-      const tempExclusions = ['html', 'json']
-
-      for (const foundProperty of foundPropertiesDb) {
-        if (tempExclusions.includes(foundProperty.name)) {
-          continue
-        }
-        const easDatatype = INTERNAL_DATA_TYPES[foundProperty.dataType as InternalDataType].eas
-
-        let easPropertyName = toSnakeCase(foundProperty.name)
-
-        if (foundProperty.dataType === 'Relation') {
-          easPropertyName += '_id'
-        }
-
-        const regex = new RegExp(`${easDatatype} ${easPropertyName}`)
-        const propertySchema = foundPropertySchemas.schemas.find((s) =>
-          regex.test(s.schema),
-        )
-
-        if (!propertySchema) {
-          // TODO: We should create the schema here?
-          continue
-        }
-        await appDb
-          .insert(propertyUids)
-          .values({
-            propertyId: foundProperty.id,
-            uid: propertySchema.id,
-          })
-          .onConflictDoNothing()
-      }
-    }
 
     const addresses = await getAddressesFromDb()
 

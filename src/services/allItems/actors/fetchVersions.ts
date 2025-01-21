@@ -8,7 +8,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 
 export const fetchVersions = fromCallback<
   EventObject,
-  FromCallbackInput<EventObject, AllItemsMachineContext>
+  FromCallbackInput<AllItemsMachineContext>
 >(
   ({ sendBack, input: { context } }) => {
     const { itemSeeds, modelName } = context

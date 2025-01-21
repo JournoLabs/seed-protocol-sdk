@@ -1,6 +1,6 @@
 import Transaction from 'arweave'
 import { CreateTransactionInterface } from 'arweave/web'
-import { getArweave } from '@/browser/helpers/arweave'
+import { getArweave } from '@/helpers/ArweaveClient'
 import { fs } from '@zenfs/core'
 import { getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
@@ -66,27 +66,6 @@ const processUploadProperty = async (
     })
   }
 
-  // const filePath = itemProperty.localStoragePath
-  //
-  // if (!filePath) {
-  //   throw new Error(
-  //     `No localStoragePath found for ItemProperty ${itemProperty.propertyName}`,
-  //   )
-  // }
-  //
-  // const exists = await fs.promises.exists(filePath)
-  // if (!exists) {
-  //   throw new Error(`File doesn't exist at ${filePath}`)
-  //
-  //   // const handle = await navigator.storage.getDirectory()
-  //   //
-  //   // await configureSingle({
-  //   //   backend: WebAccess,
-  //   //   handle,
-  //   // })
-  // }
-  //
-  // const mainFileContents = await fs.promises.readFile(filePath)
   let fileContents
   let transaction: Transaction
 
@@ -102,12 +81,6 @@ const processUploadProperty = async (
       if (!exists) {
         return uploads
 
-        // const handle = await navigator.storage.getDirectory()
-        //
-        // await configureSingle({
-        //   backend: WebAccess,
-        //   handle,
-        // })
       }
 
       try {

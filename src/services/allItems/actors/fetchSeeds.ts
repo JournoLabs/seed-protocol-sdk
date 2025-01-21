@@ -11,7 +11,7 @@ const logger = debug('app:allItemsActors:fetchSeeds')
 
 export const fetchSeeds = fromCallback<
   EventObject,
-  FromCallbackInput<EventObject, AllItemsMachineContext>
+  FromCallbackInput<AllItemsMachineContext>
 >(
   ({ sendBack, input: { context } }) => {
     const { queryVariables, modelName } = context

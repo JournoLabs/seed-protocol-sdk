@@ -1,38 +1,52 @@
 import { defineWorkspace } from 'vitest/config'
+import tsConfigPaths       from 'vite-tsconfig-paths'
 
 export default defineWorkspace([
   {
-    extends: './vite.config.js',
+    plugins: [
+      tsConfigPaths(),
+    ],
+    optimizeDeps: {
+      exclude: [
+        '@sqlite.org/sqlite-wasm',
+      ],
+    },
     test: {
       name: 'browser',
       environment: 'jsdom',
       globalSetup: './vitest.setup.mts',
-      setupFiles: ['./__tests__/setup.ts'],
+      dir: './__tests__/',
+      setupFiles: [ './__tests__/setup.ts' ],
       exclude: [
         '**/node_modules/**',
         'dist/**',
         'src/node/**',
-        'src/index.ts',
-        '__tests__/shared/**',
-        '__tests__/fs/**',
-        '__tests__/node/**',
-        '__tests__/scrips/**',
       ],
       pool: 'forks',
       hookTimeout: 60000,
-      // browser: {
-      //   provider: 'playwright',
-      //   enabled: true,
-      //   name: 'chromium',
-      // },
+      browser: {
+        enabled: true,
+        name: 'chromium',
+        provider: 'playwright',
+        // https://playwright.dev
+        providerOptions: {},
+      },
     },
   },
   {
-    extends: './vite.config.js',
+    plugins: [
+      tsConfigPaths(),
+    ],
     test: {
-      name: 'SDK',
+      name: 'NodeJS',
       environment: 'node',
-      exclude: ['**/node_modules/**', 'dist/**', 'src/browser/**'],
+      globalSetup: './vitest.setup.mts',
+      dir: './__tests__/',
+      setupFiles: [
+        './__tests__/node/setup.ts',
+      ],
+      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**' ],
+      hookTimeout: 60000,
     },
   },
 ])

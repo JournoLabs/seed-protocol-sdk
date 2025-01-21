@@ -27,21 +27,19 @@ import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { getPublishUploads } from '@/db/read/getPublishUploads'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
+import { createNewItem } from '@/db/write/createNewItem'
 
 
-export abstract class BaseItem<T extends ModelValues<ModelSchema>>
+export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
-  implements IItem<T> {
-  protected static instanceCache: Map<string, { instance: IItem<any>; refCount: number }> = new Map();
+  protected static instanceCache: Map<string, { instance: BaseItem<any>; refCount: number }> = new Map();
   protected _subscription: Subscription | undefined;
   protected readonly _storageTransactionId: string | undefined;
   [immerable] = true;
   protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty<any>>> = new BehaviorSubject({});
   protected readonly _service: ActorRefFrom<typeof itemMachineSingle>;
 
-  constructor(
-    initialValues: NewItemProps<T>,
-  ) {
+  constructor(initialValues: NewItemProps<T>) {
 
     const {
       modelName,
@@ -187,7 +185,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>>
 
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData>,
-  ): Promise<IItem<any>> {
+  ): Promise<BaseItem<any>> {
     if (!props.modelName && props.type) {
       props.modelName = startCase(props.type)
     }
@@ -228,10 +226,11 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>>
     if (!props.modelName) {
       throw new Error('Model name is required to create an item')
     }
-    const { seedLocalId } = await createNewItem({
+    const { seedLocalId, versionLocalId, versionUid } = await createNewItem({
       modelName: props.modelName,
     })
     props.seedLocalId = seedLocalId
+    props.latestVersionLocalId = versionLocalId
     const newInstance = new this(props)
     this.instanceCache.set(newInstance.seedUid || newInstance.seedLocalId, {
       instance: newInstance,
@@ -388,6 +387,10 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>>
 
   get properties(): Record<string, IItemProperty<any>> {
     return this._propertiesSubject.value
+  }
+
+  get attestationCreatedAt(): number {
+    return this.serviceContext.attestationCreatedAt as number
   }
 
   unload(): void {

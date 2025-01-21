@@ -22,7 +22,7 @@ export const waitForFiles = fromCallback<
           clearInterval(interval)
           resolve()
         }
-      })
+      }, 1000)
     })
   }
 

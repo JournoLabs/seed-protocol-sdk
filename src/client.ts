@@ -2,7 +2,7 @@ import { areFsListenersReady, setupFsListeners } from '@/events/files'
 import { setupAllItemsEventHandlers } from '@/events'
 import { setupServicesEventHandlers } from '@/services/events'
 import { eventEmitter } from '@/eventBus'
-import { globalService } from '@/services'
+import { globalService, } from '@/services'
 import { ModelClassType, SeedConstructorOptions } from '@/types'
 import {
   getModel,
@@ -11,7 +11,7 @@ import {
   setModel,
 } from '@/stores/modelClass'
 import { setupServiceHandlers } from '@/events/services'
-import { setArweaveDomain } from '@/browser/helpers/arweave'
+import { initArweaveClient, setArweaveDomain } from '@/helpers/ArweaveClient'
 import { initItem } from './Item'
 import { initItemProperty } from './ItemProperty'
 import { initEasClient } from './helpers/EasClient'
@@ -20,16 +20,18 @@ import { initFileManager } from './helpers/FileManager'
 import { initDb } from './db/Db'
 
 const client = {
-  init: async ({ config, addresses }: Promise<SeedConstructorOptions>) => {
+  init: async (options: SeedConstructorOptions) => {
+    const { config, addresses } = options
 
     await initItem()
     await initItemProperty()
     await initEasClient()
+    await initArweaveClient()
     await initQueryClient()
     await initFileManager()
     await initDb()
 
-    const { endpoints, models, arweaveDomain } = config
+    const { endpoints, models, arweaveDomain, filesDir, } = config
 
     if (arweaveDomain) {
       setArweaveDomain(arweaveDomain)
@@ -54,24 +56,23 @@ const client = {
       models,
       addresses,
       arweaveDomain,
+      filesDir,
     })
 
-    const { models: internalModels } = await import('@/shared/configs/seed.schema.config')
+    const { models: internalModels } = await import('@/db/configs/seed.schema.config')
     for (const [key, value] of Object.entries(internalModels)) {
       setModel(key, value)
     }
   },
   subscribe: (callback: any) => {
-    callback({
-      type: '@xstate.snapshot',
-      actorRef: globalService,
-      snapshot: globalService.getSnapshot(),
-    })
-    eventEmitter.addListener('globalService', callback)
+    const subscription = globalService.subscribe(callback)
+
+    eventEmitter.addListener('internal.globalService', callback)
 
     return {
       unsubscribe: () => {
-        eventEmitter.removeListener('globalService', callback)
+        subscription.unsubscribe()
+        eventEmitter.removeListener('internal.globalService', callback)
       },
     }
   },

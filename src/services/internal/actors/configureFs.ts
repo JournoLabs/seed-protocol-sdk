@@ -16,11 +16,11 @@ export const configureFs = fromCallback<
   EventObject,
   FromCallbackInput<InternalMachineContext>
 >(({ sendBack, input: { context } }) => {
-  const { endpoints, appDbService } = context
+  const { endpoints, appDbService, filesDir, } = context
 
   logger('[internal/actors] [configureFs] Configuring FS')
 
-  const _configureFs = async (): Promise<void> => {
+  const _configureFs = async (): Promise<boolean> => {
     logger('[internal/actors] [configureFs] calling _configureFs')
 
     logger(
@@ -42,13 +42,25 @@ export const configureFs = fromCallback<
       },
     })
 
-    const journalPath = `${BROWSER_FS_TOP_DIR}/db/meta/_journal.json`
+    const journalPath = `${filesDir || BROWSER_FS_TOP_DIR}/db/meta/_journal.json`
 
-    const journalExists = await fs.promises.exists(journalPath)
+
+    let journalExists = await fs.promises.exists(journalPath)
+
+    if (!journalExists) {
+      journalExists = fs.existsSync(journalPath)
+    }
 
     if (journalExists) {
       appDbService.send({ type: DB_WAITING_FOR_FILES_RECEIVED })
+      logger('[internal/actors] [configureFs] fs configured!')
+      return true
     }
+
+    sendBack({ type: 'shouldWaitForFiles' })
+    
+
+    return false
 
     // return new Promise<void>((resolve) => {
     //   const interval = setInterval(() => {
@@ -65,15 +77,16 @@ export const configureFs = fromCallback<
     //   }, 200)
     // })
 
-    logger('[internal/actors] [configureFs] fs configured!')
   }
 
   // Some of our dependencies use fs sync functions, which don't work with
   // OPFS. ZenFS creates an async cache of all files so that the sync functions
   // work, but we have to wait for it to be built. Otherwise things like
   // drizzleMigrate will fail since they can't see the migration files yet.
-  _configureFs().then(() => {
-    sendBack({ type: INTERNAL_CONFIGURING_FS_SUCCESS })
+  _configureFs().then((fsConfigured) => {
+    if (fsConfigured) {
+      sendBack({ type: INTERNAL_CONFIGURING_FS_SUCCESS })
+    }
     return
   })
 

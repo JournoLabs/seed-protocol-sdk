@@ -1,7 +1,9 @@
 import { metadata, MetadataType } from '@/seedSchema'
-import { generateId } from '@/helpers'
+import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
 import { PropertyType } from '@/types'
 import { BaseDb } from '../Db/BaseDb'
+import { GET_SCHEMA_BY_NAME, GET_SCHEMAS } from '@/Item/queries'
+import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType>,
@@ -20,13 +22,36 @@ export const createMetadata: CreateMetadata = async (
     metadataValues.modelType = metadataValues.modelName.toLowerCase()
   }
 
+  const isItemStorage = propertyRecordSchema && propertyRecordSchema.storageType === 'ItemStorage'
+
   if (
     propertyRecordSchema &&
     propertyRecordSchema.localStorageDir &&
-    propertyRecordSchema.storageType === 'ItemStorage'
+    isItemStorage
   ) {
-    metadataValues.refResolvedValue = `${metadataValues.seedLocalId}${propertyRecordSchema.filenameSuffix}`
+    metadataValues.refResolvedValue = `${metadataValues.seedUid || metadataValues.seedLocalId}${propertyRecordSchema.filenameSuffix}`
     metadataValues.refValueType = 'file'
+  }
+
+  if (!isItemStorage && !metadataValues.schemaUid && propertyRecordSchema) {
+    const queryClient = BaseQueryClient.getQueryClient()
+    const easClient = BaseEasClient.getEasClient()
+
+    const easDataType = INTERNAL_DATA_TYPES[propertyRecordSchema.dataType].eas
+  
+    const queryResult = await queryClient.fetchQuery({
+      queryKey: [`getSchemaByName${metadataValues.propertyName}`],
+      queryFn: async () =>
+        easClient.request(GET_SCHEMA_BY_NAME, {
+          where: {
+            schema: {
+              equals: `${easDataType} ${metadataValues.propertyName}`,
+            },
+          },
+        }),
+    })
+
+    metadataValues.schemaUid = queryResult.data[0].schema
   }
 
   return appDb

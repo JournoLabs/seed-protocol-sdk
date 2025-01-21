@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types/machines'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import {
   DB_VALIDATING_SUCCESS,
   DB_VALIDATING_WAIT,
@@ -35,8 +35,11 @@ export const validate = fromCallback<
     return exists
   }
 
-  _validate().then(() => {
-    sendBack({ type: DB_VALIDATING_SUCCESS, pathToDb, pathToDir })
-    return
+  _validate().then((allFilesExist) => {
+    if (allFilesExist) {
+      sendBack({ type: DB_VALIDATING_SUCCESS, pathToDb, pathToDir })
+      return
+    }
+    sendBack({ type: DB_VALIDATING_WAIT })
   })
 })

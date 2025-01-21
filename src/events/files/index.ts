@@ -1,32 +1,26 @@
-import { eventEmitter } from '@/eventBus'
-import { configureSingle } from '@zenfs/core'
-import { WebAccess } from '@zenfs/dom'
-import {
-  downloadAllFilesBinaryRequestHandler,
-  downloadAllFilesRequestHandler,
-} from './download'
+import { eventEmitter }                                                          from '@/eventBus'
+import { downloadAllFilesBinaryRequestHandler, downloadAllFilesRequestHandler } from './download'
+import { BaseFileManager }                                                       from '@/helpers'
+
 
 let isInitialized = false
 
-const fsInitHandler = async (_) => {
-  if (isInitialized) {
+
+const fsInitHandler = async ( _ ) => {
+  if ( isInitialized ) {
     eventEmitter.emit('fs.init.response', { success: true })
     return
   }
 
   try {
-    const handle = await navigator.storage.getDirectory()
-    // await configure({ backend: WebAccess, handle })
-    await configureSingle({
-      backend: WebAccess,
-      handle,
-    })
+
+    await BaseFileManager.initializeFileSystem()
 
     isInitialized = true
 
     eventEmitter.emit('fs.init.response', { success: true })
-  } catch (e) {
-    if (!isInitialized) {
+  } catch ( e ) {
+    if ( !isInitialized ) {
       console.error('[fs.init] error initializing fs', e)
       eventEmitter.emit('fs.init.response', {
         success: false,

@@ -17,6 +17,7 @@ import { configureFs } from '@/services/internal/actors/configureFs'
 import { saveConfig } from '@/services/internal/actors/saveConfig'
 import { loadAppDb } from '@/services/internal/actors/loadAppDb'
 import { InternalMachineContext } from '@/types'
+import { waitForFiles } from './actors/waitForFiles'
 
 const logger = debug('app:services:internal:machine')
 
@@ -41,6 +42,7 @@ export const internalMachine = setup({
   actors: {
     prepareDb,
     validateInput,
+    waitForFiles,
     configureFs,
     loadAppDb,
     saveConfig,
@@ -85,6 +87,8 @@ export const internalMachine = setup({
           actions: assign({
             endpoints: ({ event }) => event.endpoints,
             addresses: ({ event }) => event.addresses,
+            filesDir: ({ event }) => event.filesDir,
+            arweaveDomain: ({ event }) => event.arweaveDomain,
           }),
         },
       },
@@ -109,11 +113,25 @@ export const internalMachine = setup({
         input: ({ context, event }) => ({ context, event }),
       },
     },
+    waitingForFiles: {
+      on: {
+        filesReceived: {
+          target: LOADING_APP_DB,
+        },
+      },
+      invoke: {
+        src: 'waitForFiles',
+        input: ({ context, event }) => ({ context, event }),
+      },
+    },
     [CONFIGURING_FS]: {
       on: {
         [INTERNAL_CONFIGURING_FS_SUCCESS]: {
           target: LOADING_APP_DB,
           actions: assign({ hasFiles: true }),
+        },
+        shouldWaitForFiles: {
+          target: 'waitingForFiles',
         },
       },
       invoke: {

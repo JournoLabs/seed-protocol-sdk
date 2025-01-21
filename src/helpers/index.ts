@@ -1,4 +1,3 @@
-import originalDayjs from 'dayjs'
 import { customAlphabet } from 'nanoid'
 import * as nanoIdDictionary from 'nanoid-dictionary'
 import { fs } from '@zenfs/core'
@@ -6,13 +5,12 @@ import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
 
-export * from './BaseArweaveClient'
+export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
 const logger = debug('app:shared:helpers')
 
-export const dayjs = originalDayjs
 
 const { alphanumeric } = nanoIdDictionary
 
@@ -176,4 +174,30 @@ export const getContentHash = async (
   // Convert the ArrayBuffer to a hex string
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+export const isBinary = (arrayBuffer: ArrayBuffer): boolean => {
+  const view = new Uint8Array(arrayBuffer);
+
+  let nonTextCount = 0;
+  const threshold = 0.2; // Adjust as needed (e.g., 20% non-text implies binary)
+
+  for (let i = 0; i < view.length; i++) {
+      const byte = view[i];
+
+      // ASCII printable characters (32-126) and common whitespace (9, 10, 13)
+      if (
+          (byte >= 32 && byte <= 126) || // Printable ASCII
+          byte === 9 || byte === 10 || byte === 13 // Tab, LF, CR
+      ) {
+          continue;
+      }
+
+      nonTextCount++;
+      if (nonTextCount / view.length > threshold) {
+          return true; // More than threshold are non-text bytes
+      }
+  }
+
+  return false; // Fewer than threshold are non-text bytes
 }

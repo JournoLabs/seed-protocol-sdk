@@ -5,10 +5,14 @@ import { FromCallbackInput, ItemMachineContext } from '@/types'
 
 export const initialize = fromCallback<
   EventObject,
-  FromCallbackInput<EventObject, ItemMachineContext<any>>
+  FromCallbackInput<ItemMachineContext<any>>
 >(
   ({ sendBack, input: { context } }) => {
     const { seedLocalId, seedUid, ModelClass } = context
+
+    if (!ModelClass) {
+      throw new Error('ModelClass is required')
+    }
 
     const modelName = ModelClass.originalConstructor.name
     const modelNamePlural = pluralize(modelName)

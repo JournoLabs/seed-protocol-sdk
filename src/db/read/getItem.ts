@@ -1,7 +1,7 @@
-import { Item } from '@/browser/Item'
 import { getItemData } from './getItemData'
 import { GetItem } from '@/types'
-
+import { BaseItem } from '@/Item/BaseItem'
+import { startCase } from 'lodash-es'
 
 export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
   const itemInitObj = await getItemData({
@@ -24,5 +24,9 @@ export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
     return
   }
 
-  return Item.create(itemInitObj)
+  if (!itemInitObj.modelName && itemInitObj.type) {
+    itemInitObj.modelName = startCase(itemInitObj.type)
+  }
+
+  return BaseItem.create(itemInitObj)
 }

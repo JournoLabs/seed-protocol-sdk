@@ -19,6 +19,7 @@ if (process.env.IS_SEED_DEV) {
     process.cwd(),
     '__tests__',
     '__mocks__',
+    'browser',
     'project',
     '.seed',
   )

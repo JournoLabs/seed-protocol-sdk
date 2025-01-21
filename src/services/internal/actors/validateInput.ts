@@ -1,14 +1,16 @@
 import { EventObject, fromCallback } from 'xstate'
-import { INTERNAL_VALIDATING_INPUT_SUCCESS } from '@/services/internal/constants'
-import { internalMachine } from '@/services/internal/internalMachine'
+import { INTERNAL_VALIDATING_INPUT_SUCCESS, ARWEAVE_HOST } from '@/services/internal/constants'
+import { FromCallbackInput, InternalMachineContext } from '@/types'
+import { isBrowser, isNode } from '@/helpers/environment'
 
-export const validateInput = fromCallback<EventObject, typeof internalMachine>(
-  ({ sendBack, input: { event } }) => {
-    const { endpoints, addresses } = event
+export const validateInput = fromCallback<
+  EventObject,
+  FromCallbackInput<InternalMachineContext>
+>(
+  ({ sendBack, input: { context } }) => {
 
-    if (typeof window === 'undefined') {
-      throw new Error('validateInput called from non-browser context')
-    }
+    const { endpoints, addresses, arweaveDomain } = context
+    let { filesDir } = context
 
     if (!endpoints || !endpoints.filePaths || !endpoints.files) {
       throw new Error('validateInput called with invalid endpoints')
@@ -18,11 +20,23 @@ export const validateInput = fromCallback<EventObject, typeof internalMachine>(
       throw new Error('validateInput called with invalid addresses')
     }
 
+    if (!filesDir) {
+      if (isBrowser()) {
+        filesDir = '/'
+      }
+
+      if (!isBrowser()) {
+        throw new Error('validateInput called with invalid filesDir')
+      }
+    }
+
     const _validateInput = async (): Promise<void> => {
       sendBack({
         type: INTERNAL_VALIDATING_INPUT_SUCCESS,
         endpoints,
         addresses,
+        filesDir,
+        arweaveDomain: arweaveDomain || ARWEAVE_HOST,
       })
     }
 

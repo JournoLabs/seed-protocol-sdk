@@ -1,7 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from 'xstate'
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
-import { ItemProperty, TProperty } from '@/browser/ItemProperty'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { immerable } from 'immer'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
@@ -14,6 +13,7 @@ import { eventEmitter } from '@/eventBus'
 import fs from '@zenfs/core'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getCorrectId } from '@/helpers'
+import { TProperty } from '@/schema'
 
 const logger = debug('app:property:class')
 
@@ -30,7 +30,7 @@ type ItemPropertyFindProps = {
 export abstract class BaseItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   protected static instanceCache: Map<
     string,
-    { instance: IItemProperty<any>; refCount: number }
+    { instance: BaseItemProperty<any>; refCount: number }
   > = new Map()
   protected readonly _service: ItemPropertyService
   protected _subject: BehaviorSubject<any>
@@ -133,7 +133,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         const { propertyRecordSchema } = context
 
         if (context.seedLocalId) {
-          const cacheKey = ItemProperty.cacheKey(
+          const cacheKey = BaseItemProperty.cacheKey(
             context.seedLocalId,
             context.propertyName,
           )
@@ -221,7 +221,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-  ): IItemProperty<any> | undefined {
+  ): BaseItemProperty<any> | undefined {
     const { propertyName, seedLocalId, seedUid, versionLocalId, versionUid } =
       props
     if (!propertyName || (!seedLocalId && !seedUid)) {
@@ -256,12 +256,12 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         return instance
       }
       if (!this.instanceCache.has(cacheKey)) {
-        const newInstance = new ItemProperty(props)
+        const newInstance = new this(props)
         this.instanceCache.set(cacheKey, { instance: newInstance, refCount: 1 })
         return newInstance
       }
     }
-    return new ItemProperty(props)
+    return new this(props)
   }
 
   static async find({
@@ -273,7 +273,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       return
     }
     const cacheKeyId = seedUid || seedLocalId
-    const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
+    const cacheKey = BaseItemProperty.cacheKey(cacheKeyId!, propertyName)
     if (this.instanceCache.has(cacheKey)) {
       const { instance, refCount } = this.instanceCache.get(cacheKey)!
       this.instanceCache.set(cacheKey, {
@@ -290,7 +290,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     if (!propertyData) {
       return
     }
-    return ItemProperty.create(propertyData)
+    return BaseItemProperty.create(propertyData)
   }
 
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {

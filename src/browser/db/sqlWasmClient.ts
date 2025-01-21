@@ -5,12 +5,12 @@ import {
 } from 'drizzle-orm/sqlite-proxy'
 import { sql } from 'drizzle-orm'
 
-let sqlite3InitModule
-let sqliteWasmClient
+let sqlite3InitModule: any
+let sqliteWasmClient: any
 let manager: SqliteConnectionManager | undefined
 let isPreparing = false
 
-export const setSqliteWasmClient = (client) => {
+export const setSqliteWasmClient = (client: any) => {
   sqliteWasmClient = client
 }
 
@@ -58,7 +58,7 @@ export const getManager = () => {
   return manager
 }
 
-export const setManager = (m) => {
+export const setManager = (m: any) => {
   manager = m
 }
 let appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined

@@ -17,6 +17,7 @@ import { checkStatus } from '@/services/db/actors/checkStatus'
 import { connectToDb } from '@/services/db/actors/connectToDb'
 import { validate } from '@/services/db/actors/validate'
 import { migrate } from '@/services/db/actors/migrate'
+import { waitForFiles } from './actors/waitForFiles'
 
 const logger = debug('app:services:db:machine')
 
@@ -38,6 +39,7 @@ const dbMachine = setup({
     validate,
     connectToDb,
     migrate,
+    waitForFiles,
   },
 }).createMachine({
   id: MachineIds.DB,
@@ -145,6 +147,10 @@ const dbMachine = setup({
           }),
         },
         [DB_MIGRATING_SUCCESS]: 'ready',
+      },
+      invoke: {
+        src: 'waitForFiles',
+        input: ({ context }) => ({ context }),
       },
     },
     [MIGRATING]: {

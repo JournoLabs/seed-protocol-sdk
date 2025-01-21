@@ -19,7 +19,6 @@ export const hydrateFromDb = fromCallback<
     seedUid,
     seedLocalId,
     propertyName: propertyNameRaw,
-    propertyValue,
     propertyRecordSchema,
     modelName,
   } = context
@@ -116,41 +115,6 @@ export const hydrateFromDb = fromCallback<
     let propertyValueProcessed: string | string[] | undefined | null =
       propertyValueFromDb
 
-    if (propertyName && !propertyNameFromDb) {
-      logger(
-        `Property name from code is ${propertyName} but has not value in db ${propertyNameFromDb} for Property.${localId}`,
-      )
-    }
-
-    if (
-      propertyName &&
-      propertyNameFromDb &&
-      !propertyNameFromDb.includes(propertyName) &&
-      !propertyName.includes(propertyNameFromDb) &&
-      propertyNameFromDb !== propertyName
-    ) {
-      logger(
-        `Property name from db ${propertyNameFromDb} does not match property name ${propertyName} for Property.${localId}`,
-      )
-    }
-
-    if (propertyValue && propertyValueFromDb !== propertyValue) {
-      logger(
-        `Property value from db ${propertyValueFromDb} does not match property value ${propertyValue} for Property.${localId}`,
-      )
-    }
-
-    if (seedLocalIdFromDb !== seedLocalId) {
-      logger(
-        `Seed local id from db ${seedLocalIdFromDb} does not match seed local id ${seedLocalId} for Property.${localId}`,
-      )
-    }
-
-    if (seedUidFromDb !== seedUid) {
-      logger(
-        `Seed uid from db ${seedUidFromDb} does not match seed uid ${seedUid} for Property.${localId}`,
-      )
-    }
 
     if (
       propertyRecordSchema &&
@@ -194,6 +158,8 @@ export const hydrateFromDb = fromCallback<
           propertyValueFromDb &&
           propertyValueFromDb.length === 66
         ) {
+          // Here the storageTransactionId is stored on a different record and
+          // we want to add it as the refResolvedValue
           const storageTransactionQuery = await appDb
             .select({
               propertyValue: metadata.propertyValue,
@@ -202,7 +168,10 @@ export const hydrateFromDb = fromCallback<
             .where(
               and(
                 eq(metadata.seedUid, propertyValueFromDb),
-                eq(metadata.propertyName, 'storageTransactionId'),
+                or(
+                  eq(metadata.propertyName, 'storageTransactionId'),
+                  eq(metadata.propertyName, 'transactionId'),
+                ),
               ),
             )
 

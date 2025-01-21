@@ -10,6 +10,8 @@ import { useGlobalServiceStatus } from '@/browser/react/services'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
+import { IItem } from '@/interfaces'
+import { BaseItem } from '@/Item/BaseItem'
 
 const logger = debug('app:react:item')
 
@@ -184,7 +186,7 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
   }
 }
 type UseItemsReturn = {
-  items: Item<any>[]
+  items: BaseItem<any>[]
   isReadingDb: boolean
 }
 type UseItemsProps = {
@@ -192,8 +194,8 @@ type UseItemsProps = {
   deleted?: boolean
 }
 type UseItems = (props: UseItemsProps) => UseItemsReturn
-export const useItems: UseItems = ({ modelName, deleted }) => {
-  const [items, setItems] = useImmer<Item<any>[]>([])
+export const useItems: UseItems = ({ modelName, deleted=false }) => {
+  const [items, setItems] = useImmer<BaseItem<any>[]>([])
 
   const { status, internalStatus } = useGlobalServiceStatus()
 
@@ -252,7 +254,7 @@ export const useItems: UseItems = ({ modelName, deleted }) => {
       ],
       ['desc'],
     ),
-    isReadingDb,
+    isReadingDb: isReadingDb.current,
   }
 }
 export const useItemIsReady = () => {
@@ -330,7 +332,7 @@ type PublishItemResult = Error | undefined | void
 type UsePublishItemReturn = {
   publishItem: (
     item: Item<any> | undefined,
-    callback: (result: PublishItemResult) => any,
+    callback?: (result: PublishItemResult) => any,
   ) => void
   isPublishing: boolean
 }
@@ -353,8 +355,8 @@ export const usePublishItem = (): UsePublishItemReturn => {
     isLocked.current = true
     setIsPublishing(true)
     try {
-      // await item.publish()
-      const payload = await item.getPublishPayload()
+      const uploads = await item.getPublishUploads()
+      const payload = await item.getPublishPayload(uploads)
       if (callback) {
         callback()
       }

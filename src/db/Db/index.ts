@@ -1,13 +1,18 @@
+import { isBrowser } from '@/helpers/environment'
 import { BaseDb } from './BaseDb'
 
 let Db: typeof BaseDb | undefined
 
 export const initDb = async () => {
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     Db = (await import('../../browser/db/Db')).Db
-  } else {
+  }
+
+  if (!isBrowser()) {
     Db = (await import('../../node/db/Db')).Db
   }
+
+  // TODO: Add config for React Native
 }
 
 export { Db }

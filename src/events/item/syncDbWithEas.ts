@@ -5,7 +5,6 @@ import {
   MetadataType,
   modelUids,
   properties,
-  propertyUids,
   seeds,
   SeedType,
   versions,
@@ -41,92 +40,6 @@ const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
 
-const processPropertiesFoundInDb = async ({ foundModel }) => {
-  const appDb = BaseDb.getAppDb()
-
-  const foundPropertiesDb = await appDb
-    .select({
-      id: properties.id,
-      name: properties.name,
-      dataType: properties.dataType,
-      uid: propertyUids.uid,
-    })
-    .from(properties)
-    .fullJoin(propertyUids, eq(properties.id, propertyUids.propertyId))
-    .where(eq(properties.modelId, foundModel.id))
-
-  if (!foundPropertiesDb || foundPropertiesDb.length === 0) {
-    return
-  }
-
-  if (foundPropertiesDb && foundPropertiesDb.length > 0) {
-    const queryVariables: { where: SchemaWhereInput } = {
-      where: {
-        OR: [],
-      },
-    }
-
-    for (const foundPropertyDb of foundPropertiesDb) {
-      if (foundPropertyDb.name && foundPropertyDb.dataType) {
-        const easDatatype = INTERNAL_DATA_TYPES[foundPropertyDb.dataType].eas
-
-        let easPropertyName = toSnakeCase(foundPropertyDb.name)
-
-        if (foundPropertyDb.dataType === 'Relation') {
-          easPropertyName += '_id'
-        }
-
-        queryVariables.where.OR!.push({
-          schema: {
-            equals: `${easDatatype} ${easPropertyName}`,
-          },
-        })
-      }
-    }
-
-    const modelName = foundModel.name
-
-    const queryClient = BaseQueryClient.getQueryClient()
-    const easClient = BaseEasClient.getEasClient()
-
-    const foundPropertySchemas = await queryClient.fetchQuery({
-      queryKey: [`getPropertySchemas${modelName}`],
-      queryFn: async () => easClient.request(GET_SCHEMAS, queryVariables),
-    })
-
-    const tempExclusions = ['html', 'json']
-
-    for (const foundProperty of foundPropertiesDb) {
-      if (tempExclusions.includes(foundProperty.name)) {
-        continue
-      }
-      const easDatatype = INTERNAL_DATA_TYPES[foundProperty.dataType].eas
-
-      let easPropertyName = toSnakeCase(foundProperty.name)
-
-      if (foundProperty.dataType === 'Relation') {
-        easPropertyName += '_id'
-      }
-
-      const regex = new RegExp(`${easDatatype} ${easPropertyName}`)
-      const propertySchema = foundPropertySchemas.schemas.find((s) =>
-        regex.test(s.schema),
-      )
-
-      if (!propertySchema) {
-        // TODO: We should create the schema here?
-        continue
-      }
-      await appDb
-        .insert(propertyUids)
-        .values({
-          propertyId: foundProperty.id,
-          uid: propertySchema.id,
-        })
-        .onConflictDoNothing()
-    }
-  }
-}
 
 const getSeedsFromSchemaUids = async ({ schemaUids, addresses }) => {
   const AND = [
@@ -648,9 +561,6 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
         })
         .onConflictDoNothing()
 
-      await processPropertiesFoundInDb({
-        foundModel,
-      })
     }
 
     const addresses = await getAddressesFromDb()

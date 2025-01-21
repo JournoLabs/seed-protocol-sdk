@@ -9,27 +9,15 @@ import { createSeed } from '@/db/write/createSeed'
 import { getDataTypeFromString, getMimeType } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { fs } from '@zenfs/core'
-import { getContentUrlFromPath } from '@/helpers'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { eventEmitter } from '@/eventBus'
+import { ImageSize } from '@/helpers/constants'
 
-const readFileAsDataUrl = async (file: File): Promise<string> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const base64 = e.target.result.split(',')[1] // Extract the base64 string
-      const mimeType = file.type // Get the file's MIME type
-      const base64WithMimeType = `data:${mimeType};base64,${base64}`
 
-      resolve(base64WithMimeType)
-    }
-
-    reader.readAsDataURL(file)
-  })
-}
 
 const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve) => {
@@ -165,6 +153,7 @@ export const saveImageSrc = fromCallback<
         await fs.promises.writeFile(filePath, new Uint8Array(fileData))
       } catch (e) {
         fs.writeFileSync(filePath, new Uint8Array(fileData))
+        eventEmitter.emit('file-saved', filePath)
       }
     }
 
@@ -173,8 +162,16 @@ export const saveImageSrc = fromCallback<
         await fs.promises.writeFile(filePath, fileData)
       } catch (e) {
         fs.writeFileSync(filePath, fileData)
+        eventEmitter.emit('file-saved', filePath)
       }
     }
+
+
+    await BaseFileManager.resizeImage({filePath, width: ImageSize.EXTRA_SMALL, height: ImageSize.EXTRA_SMALL})
+    await BaseFileManager.resizeImage({filePath, width: ImageSize.SMALL, height: ImageSize.SMALL})
+    await BaseFileManager.resizeImage({filePath, width: ImageSize.MEDIUM, height: ImageSize.MEDIUM})
+    await BaseFileManager.resizeImage({filePath, width: ImageSize.LARGE, height: ImageSize.LARGE})
+    await BaseFileManager.resizeImage({filePath, width: ImageSize.EXTRA_LARGE, height: ImageSize.EXTRA_LARGE})
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
@@ -182,8 +179,10 @@ export const saveImageSrc = fromCallback<
       schemaUid = getSchemaUidForSchemaDefinition(propertyName)
     }
 
+    let newLocalId
+
     if (!localId) {
-      await createMetadata(
+      const result = await createMetadata(
         {
           propertyName,
           propertyValue: newImageSeedLocalId,
@@ -203,6 +202,8 @@ export const saveImageSrc = fromCallback<
         },
         propertyRecordSchema,
       )
+
+      newLocalId = result[0].localId
     }
 
     if (localId) {
@@ -226,6 +227,7 @@ export const saveImageSrc = fromCallback<
 
     sendBack({
       type: 'updateContext',
+      localId: newLocalId || localId,
       propertyValue: newImageSeedLocalId,
       refSeedType: 'image',
       refSchemaUid: imageSchemaUid,
@@ -234,6 +236,7 @@ export const saveImageSrc = fromCallback<
       refResolvedValue: fileName,
       localStorageDir: '/images',
       easDataType: 'bytes32',
+      schemaUid,
     })
   }
 

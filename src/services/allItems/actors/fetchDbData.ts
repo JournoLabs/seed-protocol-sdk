@@ -3,7 +3,7 @@ import { AllItemsMachineContext, FromCallbackInput } from '@/types'
 
 export const fetchDbData = fromCallback<
   EventObject,
-  FromCallbackInput<EventObject, AllItemsMachineContext>
+  FromCallbackInput<AllItemsMachineContext>
 >(
   ({ sendBack, input: { context } }) => {
     const { modelNamePlural, times } = context

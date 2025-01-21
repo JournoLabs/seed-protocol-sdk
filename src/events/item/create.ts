@@ -1,6 +1,6 @@
-import { Item } from '@/browser/Item'
 import { eventEmitter } from '@/eventBus'
 import { createItemCacheKey, getItemCache, updateItemCache } from './requestAll'
+import { BaseItem } from '@/Item/BaseItem'
 
 export const createItemRequestHandler = async (event) => {
   const { ModelClass, itemData } = event
@@ -18,7 +18,7 @@ export const createItemRequestHandler = async (event) => {
     return
   }
 
-  const newItem = Item.create({
+  const newItem = await BaseItem.create({
     modelName: ModelClass.originalConstructor.name,
     ...itemData,
   })

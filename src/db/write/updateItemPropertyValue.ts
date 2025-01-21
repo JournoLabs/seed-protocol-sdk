@@ -1,5 +1,4 @@
 import { escapeSqliteString } from '@/helpers/db'
-import { getAppDb, runQueryForStatement } from '@/browser'
 import { metadata, MetadataType } from '@/seedSchema'
 import { and, eq, sql } from 'drizzle-orm'
 import { getSeedData } from '@/db/read/getSeedData'
@@ -7,17 +6,22 @@ import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
 import debug from 'debug'
 import { eventEmitter } from '@/eventBus'
-
+import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('app:write:updateItemPropertyValue')
 
-const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }) => {
+const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: string, seedLocalId: string, seedUid: string }) => {
   if (!modelName || (!seedLocalId && !seedUid)) {
     return
   }
   eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
 }
 
-type UpdateItemPropertyValue = (props: Partial<MetadataType>) => Promise<void>
+type UpdateItemPropertyValueResult = {
+  localId: string
+  schemaUid: string
+}
+
+type UpdateItemPropertyValue = (props: Partial<MetadataType>) => Promise<UpdateItemPropertyValueResult | undefined>
 
 export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   localId,
@@ -51,7 +55,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     safeNewValue = escapeSqliteString(newValue)
   }
 
-  const appDb = getAppDb()
+  const appDb = BaseDb.getAppDb()
 
   const rows = await appDb
     .select()
@@ -123,7 +127,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
                                            updated_at                 = ${Date.now()}
                                        WHERE local_id = '${localId}';`
 
-      await runQueryForStatement(updatePropertyStatement)
+      await appDb.run(sql.raw(updatePropertyStatement))
 
       sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
 
@@ -167,11 +171,14 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
                                           ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
                                           ${Date.now()});`
 
-    await runQueryForStatement(newPropertyStatement)
+    await appDb.run(sql.raw(newPropertyStatement))
 
     sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
 
-    return
+    return {
+      localId: newLocalId,
+      schemaUid,
+    }
   }
 
   // Here there are no records for this property on this seed so we should create one
@@ -221,9 +228,14 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
                                         ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
                                         ${Date.now()});`
 
-  await runQueryForStatement(newPropertyStatement)
+  await appDb.run(sql.raw(newPropertyStatement))
 
   sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
+
+  return {
+    localId: newLocalId,
+    schemaUid,
+  }
 
   if (!seedLocalId && propertyName && modelName && newValue) {
     // TODO: Does this ever happen? If so, what should we do?

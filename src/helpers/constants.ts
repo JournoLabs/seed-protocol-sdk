@@ -70,3 +70,11 @@ export const defaultAttestationData: AttestationRequestData = {
   expirationTime: BigInt(0),
   data: ZERO_BYTES,
 }
+
+export enum ImageSize {
+  EXTRA_SMALL = 480,
+  SMALL = 760,
+  MEDIUM = 1024,
+  LARGE = 1440,
+  EXTRA_LARGE = 1920,
+}

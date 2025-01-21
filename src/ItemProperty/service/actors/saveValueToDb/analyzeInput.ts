@@ -97,7 +97,7 @@ export const analyzeInput = fromCallback<
       }
     }
 
-    await updateItemPropertyValue({
+    const result = await updateItemPropertyValue({
       localId,
       propertyName,
       newValue,
@@ -108,9 +108,29 @@ export const analyzeInput = fromCallback<
       schemaUid,
     })
 
+    let updatedContext: Partial<PropertyMachineContext> = {
+      propertyValue: newValue,
+    }
+
+    if (localId) {
+      updatedContext.localId = localId
+    }
+
+    if (schemaUid) {
+      updatedContext.schemaUid = schemaUid
+    }
+
+    if (!localId && result?.localId) {
+      updatedContext.localId = result.localId
+    }
+
+    if (!schemaUid && result?.schemaUid) {
+      updatedContext.schemaUid = result.schemaUid
+    }
+
     sendBack({
       type: 'updateContext',
-      propertyValue: newValue,
+      ...updatedContext,
     })
 
     return true

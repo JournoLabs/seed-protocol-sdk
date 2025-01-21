@@ -25,7 +25,7 @@ export const addModelsToDb = fromCallback<
     }
 
     const { models: SeedModels } = await import(
-      '@/shared/configs/seed.schema.config'
+      '@/db/configs/seed.schema.config'
     )
 
     const allModels = {

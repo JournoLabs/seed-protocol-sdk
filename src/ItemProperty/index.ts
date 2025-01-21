@@ -1,13 +1,15 @@
-import { IItemProperty } from '@/interfaces'
+import { isBrowser } from '@/helpers/environment'
+import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 
-let ItemProperty: IItemProperty<any> | undefined
-
+let ItemProperty: typeof BaseItemProperty | undefined
 
 export const initItemProperty = async () => {
 
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     ItemProperty = (await import('../browser/ItemProperty/ItemProperty')).ItemProperty
-  } else {
+  }
+
+  if (!isBrowser()) {
     ItemProperty = (await import('../node/ItemProperty/ItemProperty')).ItemProperty
   }
 }

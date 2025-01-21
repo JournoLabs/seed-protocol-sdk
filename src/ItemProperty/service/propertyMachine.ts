@@ -107,7 +107,7 @@ export const propertyMachine = setup({
           actions: assign({
             refResolvedDisplayValue: ({ event }) =>
               event.refResolvedDisplayValue,
-            resolvedValue: ({ event }) => event.refResolvedValue,
+            refResolvedValue: ({ event }) => event.refResolvedValue,
           }),
         },
         resolvingRelatedValueDone: {

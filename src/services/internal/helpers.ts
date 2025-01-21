@@ -1,4 +1,4 @@
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import path from 'path'
 import { Endpoints } from '@/types'
 import { BROWSER_FS_TOP_DIR } from '@/services/internal/constants'
@@ -22,7 +22,11 @@ export const createDirectories = async (dirPath: string) => {
     await createDirectories(parentDir)
   }
 
-  await fs.promises.mkdir(dirPath, { recursive: true })
+  try {
+    await fs.promises.mkdir(dirPath, { recursive: true })
+  } catch (error) {
+    logger(`[Error] Failed to create directories for ${dirPath}:`, error)
+  }
 }
 
 let busy = false
@@ -45,7 +49,7 @@ export const downloadFile = async (url: string, localFilePath: string) => {
 
     busy = true
 
-    await createDirectories(localDirPath)
+    // await createDirectories(localDirPath)
 
     const filename = path.basename(localFilePath)
 
@@ -80,22 +84,14 @@ export const downloadFile = async (url: string, localFilePath: string) => {
       }
     }
 
-    // if (filename === '_journal.json') {
-    //   const exists = await fs.promises.exists(localFilePath)
-    //   if (exists) {
-    //     await fs.promises.rm(localFilePath)
-    //   }
-    //   await fs.promises.writeFile(localFilePath, fileData)
-    // }
-    //
-    // if (filename !== '_journal.json') {
-    //   await fs.promises.writeFile(localFilePath, fileData)
-    // }
-    await fs.promises.writeFile(localFilePath, fileData)
-  } catch (error) {
-    if (JSON.stringify(error).includes('File exists')) {
-      const fileData = await fs.promises.readFile(localFilePath, 'utf-8')
+    try {
+      await fs.promises.writeFile(localFilePath, fileData)
+      logger(`[downloadFile] Wrote file async to ${localFilePath}`)
+    } catch (error) {
+      fs.writeFileSync(localFilePath, fileData)
+      logger(`[downloadFile] Wrote file sync to ${localFilePath}`)
     }
+  } catch (error) {
     logger(`[Error] Failed to download file from ${url}:`, error)
   }
 
@@ -112,8 +108,8 @@ export const fetchFilesRecursively = async (
   localPath: string,
   fileList: string[],
 ) => {
-  try {
-    for (const file of fileList) {
+  for (const file of fileList) {
+    try {
       const fileUrl = `${url}/${file}`
       const fileLocalPath = path.join(localPath, file)
 
@@ -121,9 +117,9 @@ export const fetchFilesRecursively = async (
       // logger(`[fetchFilesRecursively] fileLocalPath: ${fileLocalPath}`)
 
       await downloadFile(fileUrl, fileLocalPath)
+    } catch (error) {
+      console.error(`Failed to fetch files from ${url}:`, error)
     }
-  } catch (error) {
-    console.error(`Failed to fetch files from ${url}:`, error)
   }
 }
 

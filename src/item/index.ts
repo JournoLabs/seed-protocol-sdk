@@ -1,13 +1,15 @@
-import { IItem } from '@/interfaces'
+import { isBrowser } from '@/helpers/environment'
+import { BaseItem } from '@/Item/BaseItem'
 
-let Item: IItem<any> | undefined
+let Item: typeof BaseItem | undefined
 
 
 export const initItem = async () => {
-
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     Item = (await import('../browser/Item/Item')).Item
-  } else {
+  }
+
+  if (!isBrowser()) {
     Item = (await import('../node/Item/Item')).Item
   }
 }

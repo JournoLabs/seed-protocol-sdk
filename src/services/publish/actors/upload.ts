@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, PublishMachineContext } from '@/types'
-import { Item } from '@/browser'
+import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import { getCorrectId } from '@/helpers'
 
@@ -21,7 +21,7 @@ export const upload = fromCallback<
   const { localId } = context
 
   const _upload = async () => {
-    const item = await Item.find({ seedLocalId: localId })
+    const item = await BaseItem.find({ seedLocalId: localId })
 
     if (!item) {
       logger('no item with localId', localId)

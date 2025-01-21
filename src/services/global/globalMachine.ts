@@ -55,20 +55,21 @@ const globalMachine = setup({
       on: {
         init: {
           target: INITIALIZING,
-          guard: ({ context }) => {
-            return typeof window !== 'undefined'
-          },
           actions: [
             assign({
               isInitialized: false,
               addedModelRecordsToDb: false,
               models: ({ event }) => event.models,
               endpoints: ({ event }) => event.endpoints,
-              internalService: ({ spawn, context }) => {
+              filesDir: ({ event }) => event.filesDir,
+              internalService: ({ spawn, event }) => {
                 return spawn(internalMachine, {
                   systemId: MachineIds.INTERNAL,
                   input: {
-                    endpoints: context.endpoints,
+                    endpoints: event.endpoints,
+                    filesDir: event.filesDir,
+                    addresses: event.addresses,
+                    arweaveDomain: event.arweaveDomain,
                   },
                 })
               },

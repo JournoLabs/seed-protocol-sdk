@@ -1,10 +1,10 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, PublishMachineContext } from '@/types'
-import { Item } from '@/browser/Item'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
+import { BaseItem } from '@/Item/BaseItem'
 
 export const preparePublishRequestData = fromCallback<
   EventObject,
@@ -13,7 +13,7 @@ export const preparePublishRequestData = fromCallback<
   const { localId } = context
 
   const _preparePublishRequestData = async () => {
-    const item = await Item.find({ seedLocalId: localId })
+    const item = await BaseItem.find({ seedLocalId: localId })
 
     if (!item) {
       return false

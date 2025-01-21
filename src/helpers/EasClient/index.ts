@@ -1,11 +1,14 @@
+import { isBrowser } from '../environment'
 import { BaseEasClient } from './BaseEasClient'
 
 let EasClient: typeof BaseEasClient | undefined
 
 export const initEasClient = async () => {
-  if (typeof window !== 'undefined') {
+  if (isBrowser()) {
     EasClient = (await import('../../browser/helpers/EasClient')).EasClient
-  } else {
+  }
+
+  if (!isBrowser()) {
     EasClient = (await import('../../node/helpers/EasClient')).EasClient
   }
 }

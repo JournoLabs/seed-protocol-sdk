@@ -1,12 +1,12 @@
 import { eventEmitter } from '@/eventBus'
-import { Item } from '@/browser/Item'
 import { getItemsData } from '@/db/read/getItems'
 import debug from 'debug'
 import { getModel } from '@/stores/modelClass'
+import { BaseItem } from '@/Item/BaseItem'
 
 const logger = debug('app:events:requestAll')
 
-const cache = new Map<string, Map<string, Item<any>>>()
+const cache = new Map<string, Map<string, BaseItem<any>>>()
 
 let modelCount = 0
 
@@ -44,7 +44,7 @@ const handleRequestAll = async (event) => {
 
   for (const itemData of itemsData) {
     returnItems.push(
-      await Item.create({
+      await BaseItem.create({
         ...itemData,
         modelName,
       }),

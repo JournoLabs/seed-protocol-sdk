@@ -1,4 +1,3 @@
-import { isNode } from './shared/environment'
 import { enableMapSet } from 'immer'
 
 export {
@@ -9,11 +8,14 @@ export {
   Text,
   Json,
   Relation,
-} from './browser/schema'
+} from './schema'
+
+export { type IItem, type IItemProperty } from './interfaces'
+export { Item } from './Item'
+export { ItemProperty } from './ItemProperty'
+export { Db } from './db/Db'
 
 export {
-  Item,
-  ItemProperty,
   useItems,
   useItem,
   useItemProperties,
@@ -25,10 +27,11 @@ export {
   usePersistedSnapshots,
   useServices,
   useService,
-  getGlobalService,
 } from './browser'
 
 export { getCorrectId, BaseArweaveClient, BaseEasClient, BaseFileManager, BaseQueryClient, } from './helpers'
+
+export { getGlobalService } from './services'
 
 export {
   eventEmitter,
@@ -36,8 +39,7 @@ export {
 
 enableMapSet()
 
-export { withSeed } from '@/node/webpack'
+export { withSeed } from './node/webpack'
 
 
 export { client } from './client'
-
