@@ -5,7 +5,7 @@ import { camelCase, snakeCase } from 'lodash-es'
 import * as nunjucks from 'nunjucks'
 import { ILoader } from 'nunjucks'
 import { ModelClassType } from '@/types'
-import { SCHEMA_NJK } from '@/shared/helpers/constants'
+import { SCHEMA_NJK } from '@/helpers/constants'
 import {
   appGeneratedSchemaDir,
   dotSeedDir,

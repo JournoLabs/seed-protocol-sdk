@@ -4,8 +4,8 @@ import {
   TPropertyDataType,
   TPropertyDefs,
   TStorageType,
-} from '@/browser/schema'
-import { MetadataType } from '@/shared/seedSchema'
+} from '@/schema'
+import { MetadataType } from '@/seedSchema'
 
 export type PropertyDataType = Static<typeof TPropertyDataType>
 

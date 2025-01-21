@@ -70,6 +70,7 @@ web_modules/
 *.tgz
 
 # Yarn Integrity file
+.yarn
 .yarn-integrity
 
 # dotenv environment variable files
@@ -137,3 +138,4 @@ out
 .cadence
 
 vite/app-files
+.vite-inspect
