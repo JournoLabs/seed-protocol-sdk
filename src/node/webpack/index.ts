@@ -1,5 +1,3 @@
-import path from 'path'
-
 export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   // If you need to include directories outside of the project root
   // config.module.rules.push({
@@ -28,25 +26,30 @@ export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   // console.log('path-browserify exists:', fs.existsSync(path.resolve(process.cwd(), './node_modules/path-browserify')))
 
   if (!isServer) {
-    config.resolve.alias['fs'] = path.resolve(
-      process.cwd(),
-      './node_modules/@zenfs/core',
-    )
-    config.resolve.alias['node:fs'] = path.resolve(
-      process.cwd(),
-      './node_modules/@zenfs/core',
-    )
-    config.resolve.alias['@schema'] = path.resolve(process.cwd(), 'schema.ts')
-    // config.resolve.alias['crypto']      = path.resolve(process.cwd(), './node_modules/crypto-browserify')
-    // config.resolve.alias['node:crypto'] = path.resolve(process.cwd(), './node_modules/crypto-browserify')
-    config.resolve.alias['node:path'] = path.resolve(
-      process.cwd(),
-      './node_modules/path-browserify',
-    )
-    config.resolve.alias['path'] = path.resolve(
-      process.cwd(),
-      './node_modules/path-browserify',
-    )
+    config.resolve.alias['fs'] = '@zenfs/core'
+    config.resolve.alias['node:fs'] = '@zenfs/core'
+    config.resolve.alias['node:path'] = 'path-browserify'
+    config.resolve.alias['path'] = 'path-browserify'
+
+    // config.resolve.alias['fs'] = path.resolve(
+    //   process.cwd(),
+    //   './node_modules/@zenfs/core',
+    // )
+    // config.resolve.alias['node:fs'] = path.resolve(
+    //   process.cwd(),
+    //   './node_modules/@zenfs/core',
+    // )
+    // config.resolve.alias['@schema'] = path.resolve(process.cwd(), 'schema.ts')
+    // // config.resolve.alias['crypto']      = path.resolve(process.cwd(), './node_modules/crypto-browserify')
+    // // config.resolve.alias['node:crypto'] = path.resolve(process.cwd(), './node_modules/crypto-browserify')
+    // config.resolve.alias['node:path'] = path.resolve(
+    //   process.cwd(),
+    //   './node_modules/path-browserify',
+    // )
+    // config.resolve.alias['path'] = path.resolve(
+    //   process.cwd(),
+    //   './node_modules/path-browserify',
+    // )
   }
 
   if (isServer) {

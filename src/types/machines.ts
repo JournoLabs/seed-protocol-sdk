@@ -1,6 +1,5 @@
 import { Endpoints, Environment, ModelClassType } from './index'
 import { ActorRefFrom } from 'xstate'
-import { fileSystemMachine } from '@/browser/schema/file/machine'
 import { PublishRequestData } from './seedProtocol'
 
 export type DbServiceContext = {
@@ -19,6 +18,8 @@ export type InternalMachineContext = {
   error?: string
   endpoints: Endpoints
   addresses: string[]
+  filesDir?: string
+  arweaveDomain?: string
   environment: string
   hasFiles: boolean
   seedDbService: any
@@ -34,8 +35,9 @@ export type GlobalMachineContext = {
   addresses?: string[]
   models?: { [key: string]: ModelClassType }
   internalService?: ActorRefFrom<any>
-  fileSystemService?: ActorRefFrom<typeof fileSystemMachine>
   publishItemService?: ActorRefFrom<any>
+  arweaveDomain?: string
+  filesDir?: string
 }
 
 export type PublishMachineContext = PublishRequestData & {

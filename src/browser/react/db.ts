@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Subscription } from 'xstate'
-import { getGlobalService } from '@/browser/services/global'
+import { getGlobalService } from '@/services/global'
 import debug from 'debug'
 
 const logger = debug('app:react:db')

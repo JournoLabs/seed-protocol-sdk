@@ -1,7 +1,8 @@
 import { PropertyStates, PropertyValue } from './property'
-import { Actor } from 'xstate'
+import { Actor, AnyActorLogic } from 'xstate'
 import { Static } from '@sinclair/typebox'
-import { IModelClass, Item, TModelSchema } from '@/browser/schema'
+import { IModelClass, TModelSchema } from '@/schema'
+import { BaseItem } from '@/Item/BaseItem'
 
 export type ModelDefinitions = {
   [modelName: string]: ModelClassType
@@ -19,16 +20,16 @@ export type ModelClassType = {
   originalConstructor: () => void
   schema: ModelSchema
   schemaUid?: string
-  create: <T>(values: ModelValues<T>) => Promise<Item<T>>
+  create: (values: ModelValues<any>) => Promise<BaseItem<any>>
 }
 
-export type ModelValues<T> = Item<T> & {
+export type ModelValues<T extends Record<string, any>> = BaseItem<any> & {
   schema: ModelSchema
   ModelClass?: ModelClassType
   [key: string & keyof T]: PropertyValue
 }
 
-export type StatesMap<T> = Map<string, Actor<T>>
+export type StatesMap<T> = Map<string, Actor<T extends AnyActorLogic ? T : never>>
 
 // export type ModelSchema = {
 //   [key: string]: TObject
@@ -37,7 +38,7 @@ export type StatesMap<T> = Map<string, Actor<T>>
 export type ModelSchema = Partial<Static<typeof TModelSchema>>
 
 export type ModelConstructor = <
-  T extends { new (...args: any[]): IModelClass },
+  T extends { new(...args: any[]): IModelClass },
 >(
   constructor: T,
 ) => T & IModelClass
@@ -48,17 +49,17 @@ export interface ModelProperty {
   propertyLocalId?: string
   name: string
   dataType:
-    | 'string'
-    | 'bytes32'
-    | 'uint8'
-    | 'uint256'
-    | 'bool'
-    | 'address'
-    | 'bytes'
-    | 'int8'
-    | 'int256'
-    | 'int'
-    | 'bytes32[]'
+  | 'string'
+  | 'bytes32'
+  | 'uint8'
+  | 'uint256'
+  | 'bool'
+  | 'address'
+  | 'bytes'
+  | 'int8'
+  | 'int256'
+  | 'int'
+  | 'bytes32[]'
   modelSchemaUids: string[]
   modelLocalId?: string
   schemaName?: string

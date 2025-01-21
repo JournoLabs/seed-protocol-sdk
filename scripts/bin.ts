@@ -5,7 +5,11 @@ import { exec as execSync } from 'child_process'
 import { promisify } from 'util'
 import { pathToFileURL } from 'url'
 import process from 'node:process'
-import { SCHEMA_TS } from '@/shared/helpers/constants'
+import '../src/node/helpers/EasClient'
+import '../src/node/helpers/QueryClient'
+import '../src/node/helpers/FileManager'
+import '../src/node/helpers/ArweaveClient'
+import { SCHEMA_TS } from '../src/helpers/constants'
 import {
   appMetaDir,
   appSchemaDir,
@@ -14,8 +18,8 @@ import {
   drizzleKitPath,
   rootWithNodeModules,
   sdkRootDir,
-} from '@/node/constants'
-import { createDrizzleSchemaFilesFromConfig } from '@/node/codegen'
+} from '../src/node/constants'
+import { createDrizzleSchemaFilesFromConfig } from '../src/node/codegen'
 import { rimrafSync } from 'rimraf'
 
 const exec = promisify(execSync)
@@ -149,7 +153,7 @@ const init = (args: string[]) => {
     }
 
     copyFiles(
-      path.join(sdkRootDir, 'shared', 'seedSchema'),
+      path.join(sdkRootDir, 'seedSchema'),
       path.join(dotSeedDir, 'schema'),
     )
 

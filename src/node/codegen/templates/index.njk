@@ -8,8 +8,6 @@ import { versions } from '../../seed/schema/VersionSchema'
 import { metadata } from '../../seed/schema/MetadataSchema'
 import { models } from '../../seed/schema/ModelSchema'
 import { modelUids } from '../../seed/schema/ModelUidSchema'
-import { propertyUids } from '../../seed/schema/PropertyUidSchema'
-import { config } from '../../seed/schema/Config'
 {% for model in models %}
 export * from './{{ model.name }}Schema'
 {%- endfor %}
@@ -23,8 +21,6 @@ tablesByName.set('versions', versions)
 tablesByName.set('metadata', metadata)
 tablesByName.set('models', models)
 tablesByName.set('modelUids', modelUids)
-tablesByName.set('propertyUids', propertyUids)
-tablesByName.set('config', config)
 
 export const getTable = (table: string) => {
   return tablesByName.get(table)

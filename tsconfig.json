@@ -1,12 +1,15 @@
 {
   "compilerOptions": {
-    "target": "es6",
+    "target": "ES2020",
     "lib": [
       "dom",
       "dom.iterable",
-      "es6"
+      "WebWorker",
+      "es2022",
+      "WebWorker.AsyncIterable"
     ],
     "baseUrl": ".",
+    "importHelpers": true,
     "inlineSources": true,
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
@@ -21,7 +24,6 @@
     "emitDeclarationOnly": true,
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true,
     "esModuleInterop": true,
     "module": "preserve",
     "moduleResolution": "bundler",
@@ -30,6 +32,7 @@
     "jsx": "preserve",
     "types": [
       "node",
+      "@vitest/browser/providers/playwright"
     ],
     "typeRoots": [
       "./src/types/**/*",
@@ -43,7 +46,7 @@
       ],
       "@/test/*": [
         "__tests__/*"
-      ],
+      ]
     }
   },
   "include": [

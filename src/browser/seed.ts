@@ -2,8 +2,8 @@ import { ActorRefFrom, createActor, Snapshot, SnapshotFrom } from 'xstate'
 
 import { SeedBase } from '@/shared/seed'
 import { SeedConstructorOptions } from '@/types'
-import { CHILD_SNAPSHOT } from '@/browser/services/internal/constants'
-import { internalMachine } from '@/browser/services/internal/internalMachine'
+import { CHILD_SNAPSHOT } from '@/services/internal/constants'
+import { internalMachine } from '@/services/internal/internalMachine'
 
 class SeedBrowser extends SeedBase {
   private _internalProcess: ActorRefFrom<typeof internalMachine>

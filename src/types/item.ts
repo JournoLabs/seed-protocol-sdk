@@ -1,10 +1,10 @@
 import { ModelClassType, ModelSchema } from '@/types'
-import { Attestation } from '@/browser/gql/graphql'
-import { Item } from '@/browser/item'
-import { ItemProperty } from '@/browser/property'
-import { PropertyType } from '@/shared/seedSchema'
+import { Attestation } from '@/graphql/gql/graphql'
+import { PropertyType } from '@/seedSchema'
+import { IItem, IItemProperty } from '@/interfaces'
+import { BaseItem } from '@/Item/BaseItem'
 
-export type ItemType = Partial<typeof Item>
+export type ItemType = Partial<typeof BaseItem>
 
 export type AllItemsMachineContext = {
   times?: Record<string, unknown>
@@ -23,7 +23,7 @@ export type AllItemsMachineContext = {
   mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
   itemSeeds?: Attestation[]
   itemVersions?: Attestation[]
-  items?: Item<any>[]
+  items?: IItem<any>[]
   modelAddedToDb?: boolean
 }
 
@@ -36,7 +36,7 @@ export type ItemMachineContext<T> = {
   ModelClass?: ModelClassType
   propertiesBySchemaUid?: Map<string, Attestation[]>
   propertiesMetadata?: Map<string, PropertyType>
-  propertyInstances?: Map<string | keyof T, ItemProperty<PropertyType>>
+  propertyInstances?: Map<string | keyof T, IItemProperty<PropertyType>>
   relatedVersionsBySchemaUid?: Map<string, Attestation[]>
   modelTableName?: string
   modelNamePlural?: string
