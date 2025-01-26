@@ -10,7 +10,7 @@ import { internalPropertyNames } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
 import { eventEmitter } from '@/eventBus'
-import fs from '@zenfs/core'
+import { fs } from '@zenfs/core'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getCorrectId } from '@/helpers'
 import { TProperty } from '@/schema'
@@ -201,12 +201,13 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         }
 
         this._subject.next(renderValue)
-        if (context.seedLocalId) {
-          eventEmitter.emit(`item.${modelName}.${context.seedLocalId}.update`)
-        }
-        if (context.seedUid) {
-          eventEmitter.emit(`item.${modelName}.${context.seedUid}.update`)
-        }
+        // TODO: Maybe have this only update the property?
+        // if (context.seedLocalId) {
+        //   eventEmitter.emit(`item.${modelName}.${context.seedLocalId}.update`)
+        // }
+        // if (context.seedUid) {
+        //   eventEmitter.emit(`item.${modelName}.${context.seedUid}.update`)
+        // }
       },
     )
 

@@ -1,5 +1,8 @@
 import { fs } from '@zenfs/core'
 import * as fsNode from 'node:fs'
+import debug from 'debug'
+
+const logger = debug('app:helpers:files')
 // import * as retry from 'async-es/retry'
 
 export const listFilesInOPFSRoot = async () => {
@@ -28,13 +31,20 @@ export const listFilesInOPFSRoot = async () => {
  */
 export const waitForFile = (
   filePath: string,
-  interval: number = 500,
-  timeout: number = 10000,
+  interval: number = 1000,
+  timeout: number = 60000,
 ): Promise<boolean> => {
   return new Promise((resolve, reject) => {
     const startTime = Date.now()
 
-    const _interval = setInterval(() => {
+    let isBusy = false
+
+    const _interval = setInterval(async () => {
+      logger('waitForFile', filePath)
+      if (isBusy) {
+        return
+      }
+      isBusy = true
       if (fs.existsSync(filePath) && fsNode.existsSync(filePath)) {
         clearInterval(_interval)
         resolve(true)
@@ -43,6 +53,7 @@ export const waitForFile = (
         clearInterval(_interval)
         reject(new Error('Timeout exceeded while waiting for file'))
       }
+      isBusy = false
     }, interval)
 
     // retry(

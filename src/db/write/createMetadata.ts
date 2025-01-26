@@ -2,8 +2,10 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
 import { PropertyType } from '@/types'
 import { BaseDb } from '../Db/BaseDb'
-import { GET_SCHEMA_BY_NAME, GET_SCHEMAS } from '@/Item/queries'
+import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+import { toSnakeCase } from 'drizzle-orm/casing'
+import { Schema } from '@/graphql/gql/graphql'
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType>,
@@ -38,20 +40,25 @@ export const createMetadata: CreateMetadata = async (
     const easClient = BaseEasClient.getEasClient()
 
     const easDataType = INTERNAL_DATA_TYPES[propertyRecordSchema.dataType].eas
+
+    const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
   
     const queryResult = await queryClient.fetchQuery({
       queryKey: [`getSchemaByName${metadataValues.propertyName}`],
-      queryFn: async () =>
+      queryFn: async (): Promise<{schemas: Schema[]}> =>
         easClient.request(GET_SCHEMA_BY_NAME, {
           where: {
             schema: {
-              equals: `${easDataType} ${metadataValues.propertyName}`,
+              equals: `${easDataType} ${propertyNameSnakeCase}`,
             },
           },
         }),
     })
 
-    metadataValues.schemaUid = queryResult.data[0].schema
+    if (queryResult && queryResult.schemas.length > 0) {
+      metadataValues.schemaUid = queryResult.schemas[0].id
+    }
+
   }
 
   return appDb

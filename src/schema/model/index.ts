@@ -1,8 +1,6 @@
 import { PropertyMetadataKey, TProperty } from '../property'
 import { TSchema, Type } from '@sinclair/typebox'
 import { ModelConstructor, ModelValues } from '@/types'
-import { Item } from '@/Item'
-import { IItem } from '@/interfaces/IItem'
 import { BaseItem } from '@/Item/BaseItem'
 
 export const TModelValues = Type.Record(Type.String(), Type.Any())

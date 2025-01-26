@@ -1,8 +1,6 @@
 import { BaseFileManager }     from '@/helpers/FileManager/BaseFileManager'
-import { configureSingle, fs } from '@zenfs/core'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
-import { WebAccess }           from '@zenfs/dom'
 
 class FileManager extends BaseFileManager {
   static async readFileAsBuffer( filePath: string ): Promise<Buffer> {
@@ -12,6 +10,9 @@ class FileManager extends BaseFileManager {
   }
 
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
+
+    const fs = await import('@zenfs/core')
+
     const fileExists = await fs.promises.exists(
       path,
     )
@@ -25,7 +26,21 @@ class FileManager extends BaseFileManager {
   }
 
   static async initializeFileSystem(): Promise<void> {
+
+    const {WebAccess} = await import('@zenfs/dom')
+    const {configureSingle} = await import('@zenfs/core')
+
     const handle = await navigator.storage.getDirectory()
+    // await configure({
+    //   mounts: {
+    //     '/': {
+    //       backend: WebAccess,
+    //       handle,
+    //     },
+    //   },
+    //   disableUpdateOnRead: true,
+    //   onlySyncOnClose: true,
+    // })
     await configureSingle({
       backend: WebAccess,
       handle,

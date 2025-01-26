@@ -1,17 +1,21 @@
 import { EventObject, fromCallback } from 'xstate'
-import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { FromCallbackInput, ItemMachineContext } from '@/types'
+import debug from 'debug'
 
-export const waitForDb = fromCallback<EventObject, typeof itemMachineSingle>(
-  ({ sendBack }) => {
-    const _waitForDb = new Promise<void>((resolve) => {
-      const interval = setInterval(() => {
-        const appDb = BaseDb.getAppDb()
+const logger = debug('app:item:service:actors:waitForDb')
 
-        if (appDb) {
-          clearInterval(interval)
-          resolve()
-        }
+export const waitForDb = fromCallback<
+  EventObject,
+  FromCallbackInput<ItemMachineContext<any>>
+>(({ sendBack }) => {
+  const _waitForDb = new Promise<void>((resolve) => {
+    const interval = setInterval(() => {
+      const appDb = BaseDb.getAppDb()
+      if (appDb) {
+        clearInterval(interval)
+        resolve()
+      }
       }, 100)
     })
 

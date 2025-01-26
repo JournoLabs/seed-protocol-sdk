@@ -18,9 +18,21 @@ import { initEasClient } from './helpers/EasClient'
 import { initQueryClient } from './helpers/QueryClient'
 import { initFileManager } from './helpers/FileManager'
 import { initDb } from './db/Db'
+import debug from 'debug'
+
+const logger = debug('app:client')
 
 const client = {
+  isInitialized: false,
   init: async (options: SeedConstructorOptions) => {
+    logger('init client')
+
+    if (client.isInitialized) {
+      return
+    }
+
+    client.isInitialized = true
+
     const { config, addresses } = options
 
     await initItem()

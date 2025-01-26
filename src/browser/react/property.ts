@@ -23,13 +23,16 @@ type UseItemPropertyReturn = {
   status: string
 }
 
-type UseItemProperty = (props: UseItemPropertyProps) => UseItemPropertyReturn
+type UseItemProperty = (props: UseItemPropertyProps | undefined) => UseItemPropertyReturn
 
-export const useItemProperty: UseItemProperty = ({
-  propertyName,
-  seedLocalId,
-  seedUid,
+export const useItemProperty: UseItemProperty = (props = {
+  propertyName: '',
+  seedLocalId: '',
+  seedUid: '',
 }) => {
+
+  const { propertyName, seedLocalId, seedUid } = props
+
   const [property, setProperty] = useState<IItemProperty<any> | undefined>()
   const [isInitialized, setIsInitialized] = useState(false)
 
@@ -76,13 +79,13 @@ export const useItemProperty: UseItemProperty = ({
     setProperty(foundProperty)
     setIsInitialized(true)
     isReadingDb.current = false
-  }, [internalStatus])
+  }, [internalStatus, props])
 
   const listenerRef = useRef(readFromDb)
 
   useEffect(() => {
     listenerRef.current = readFromDb
-  }, [readFromDb])
+  }, [readFromDb, props])
 
   useEffect(() => {
     if (internalStatus === 'ready') {

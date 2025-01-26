@@ -1,4 +1,4 @@
-import fs from '@zenfs/core'
+import { fs } from '@zenfs/core'
 import path from 'path'
 import { Endpoints } from '@/types'
 import { BROWSER_FS_TOP_DIR } from '@/services/internal/constants'
@@ -17,15 +17,22 @@ export const createDirectories = async (dirPath: string) => {
   }
 
   const parentDir = path.dirname(dirPath)
-  const parentDirExists = await fs.promises.exists(parentDir)
+  let parentDirExists = await fs.promises.exists(parentDir)
   if (!parentDirExists) {
     await createDirectories(parentDir)
   }
 
-  try {
-    await fs.promises.mkdir(dirPath, { recursive: true })
-  } catch (error) {
-    logger(`[Error] Failed to create directories for ${dirPath}:`, error)
+  parentDirExists = await fs.promises.exists(parentDir)
+  if (parentDirExists) {
+    try {
+      await fs.promises.mkdir(dirPath)
+    } catch (error) {
+      logger(`[Error] Failed to create directories for ${dirPath}:`, error)
+    }
+  }
+
+  if (!parentDirExists) {
+    console.log(fs)
   }
 }
 
@@ -49,7 +56,7 @@ export const downloadFile = async (url: string, localFilePath: string) => {
 
     busy = true
 
-    // await createDirectories(localDirPath)
+    await createDirectories(localDirPath)
 
     const filename = path.basename(localFilePath)
 

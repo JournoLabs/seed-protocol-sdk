@@ -111,6 +111,7 @@ const processRelationProperty = async (
   relationProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
   uploadedTransactions: UploadedTransaction[],
+  originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
   const value = relationProperty.getService().getSnapshot()
     .context.propertyValue
@@ -147,7 +148,7 @@ const processRelationProperty = async (
     listOfAttestations: [],
     propertiesToUpdate: [
       {
-        publishLocalId: relationProperty.localId,
+        publishLocalId: originalSeedLocalId,
         propertySchemaUid: relationProperty.schemaUid,
       },
     ],
@@ -182,6 +183,7 @@ const processRelationProperty = async (
 const processListProperty = async (
   listProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
+  originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
   let value = listProperty.getService().getSnapshot().context.propertyValue
   if (!value || listProperty.uid) {
@@ -236,7 +238,7 @@ const processListProperty = async (
       listOfAttestations: [],
       propertiesToUpdate: [
         {
-          publishLocalId: listProperty.localId,
+          publishLocalId: originalSeedLocalId,
           propertySchemaUid: listProperty.schemaUid,
         },
       ],
@@ -325,8 +327,18 @@ export const getPublishPayload = async (
       relationProperty,
       multiPublishPayload,
       uploadedTransactions,
+      item.seedLocalId,
     )
     itemBasicProperties.push(relationProperty)
+  }
+
+  for (const listProperty of itemListProperties) {
+    multiPublishPayload = await processListProperty(
+      listProperty,
+      multiPublishPayload,
+      item.seedLocalId,
+    )
+    itemBasicProperties.push(listProperty)
   }
   
   itemPublishData = await processBasicProperties(
@@ -337,12 +349,7 @@ export const getPublishPayload = async (
   multiPublishPayload.push(itemPublishData)
 
 
-  for (const listProperty of itemListProperties) {
-    multiPublishPayload = await processListProperty(
-      listProperty,
-      multiPublishPayload,
-    )
-  }
+  
 
   return multiPublishPayload
 }

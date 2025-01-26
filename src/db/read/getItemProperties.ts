@@ -1,7 +1,8 @@
 import { GetItemProperties, PropertyData } from '@/types'
 import { metadata, seeds, versions } from '@/seedSchema'
-import { and, eq, getTableColumns, isNotNull, isNull, SQL } from 'drizzle-orm'
+import { and, eq, getTableColumns, isNotNull, isNull, sql, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getMetadataLatest } from './subqueries/metadataLatest'
 
 
 export const getItemProperties: GetItemProperties = async ({
@@ -21,16 +22,7 @@ export const getItemProperties: GetItemProperties = async ({
     whereClauses.push(eq(seeds.localId, seedLocalId))
   }
 
-  // const uidWhereClause: SQL = seedUid
-  //   ? eq(seeds.uid, seedUid)
-  //   : isNull(seeds.uid)
-  // const localWhereClause: SQL = seedLocalId
-  //   ? eq(seeds.localId, seedLocalId)
-  //   : isNull(seeds.localId)
-
-  // whereClauses.push(or(localWhereClause, uidWhereClause) as SQL)
   whereClauses.push(isNotNull(metadata.propertyName))
-  // whereClauses.push(isNotNull(metadata.easDataType))
 
   if (typeof edited !== 'undefined') {
     if (edited) {
@@ -41,17 +33,15 @@ export const getItemProperties: GetItemProperties = async ({
     }
   }
 
-  const metadataColumns = getTableColumns(metadata)
+  // const metadataColumns = getTableColumns(metadata)
+
+  const metadataLatest = getMetadataLatest({seedLocalId, seedUid})
 
   const propertiesData = await appDb
-    .select({
-      ...metadataColumns,
-    })
-    .from(seeds)
-    .leftJoin(metadata, eq(metadata.seedLocalId, seeds.localId))
-    .leftJoin(versions, eq(versions.localId, seeds.localId))
-    .where(and(...whereClauses))
-    .groupBy(metadata.propertyName)
+    .with(metadataLatest)
+    .select()
+    .from(metadataLatest)
+    .where(eq(metadataLatest.rowNum, 1))
 
   return propertiesData.map(data => ({
     ...data,
