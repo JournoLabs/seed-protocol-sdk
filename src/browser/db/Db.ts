@@ -4,7 +4,7 @@ import { getAppDb, getSqliteWasmClient, isAppDbReady, setAppDb } from "./sqlWasm
 import { SqliteConnectionManager } from "@/services/db";
 import debug from "debug";
 import { waitForFile } from "@/helpers/files";
-import fs from "@zenfs/core";
+import { fs } from "@zenfs/core";
 import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
@@ -101,7 +101,6 @@ class Db extends BaseDb implements IDb {
         // TODO: Add a timeout
         // TODO: Add a cancel token to the promise so we can prevent more loops starting while we're checking the successful outcome
         getSqliteWasmClient().then((sqliteWasmClient) => {
-
           if (sqliteWasmClient) {
             clearInterval(interval)
             const manager = new SqliteConnectionManager(sqliteWasmClient)

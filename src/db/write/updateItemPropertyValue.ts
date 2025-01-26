@@ -13,7 +13,7 @@ const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: s
   if (!modelName || (!seedLocalId && !seedUid)) {
     return
   }
-  eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
+  // eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
 }
 
 type UpdateItemPropertyValueResult = {

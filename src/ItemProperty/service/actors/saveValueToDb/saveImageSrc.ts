@@ -232,7 +232,7 @@ export const saveImageSrc = fromCallback<
       refSeedType: 'image',
       refSchemaUid: imageSchemaUid,
       renderValue: refResolvedDisplayValue,
-      refResolvedDisplayValue: refResolvedDisplayValue,
+      refResolvedDisplayValue,
       refResolvedValue: fileName,
       localStorageDir: '/images',
       easDataType: 'bytes32',

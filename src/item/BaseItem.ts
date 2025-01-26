@@ -110,7 +110,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       }
 
       this._propertiesSubject.next(propertiesObj)
-      eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
+      // eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
     })
 
     this._service.start()

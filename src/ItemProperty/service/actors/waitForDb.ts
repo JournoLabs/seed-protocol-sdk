@@ -1,6 +1,9 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, PropertyMachineContext } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
+import debug from 'debug'
+
+const logger = debug('app:ItemProperty:service:actors:waitForDb')
 
 export const waitForDb = fromCallback<
   EventObject,
@@ -9,7 +12,6 @@ export const waitForDb = fromCallback<
   const _waitForDb = new Promise<void>((resolve) => {
     const interval = setInterval(() => {
       const appDb = BaseDb.getAppDb()
-
       if (appDb) {
         clearInterval(interval)
         resolve()

@@ -1,4 +1,4 @@
-import { ImageSrc, List, Model, Relation, Text } from '@/browser/schema'
+import { ImageSrc, List, Model, Relation, Text } from '@/schema'
 
 @Model
 class Image {
@@ -47,6 +47,8 @@ const endpoints = {
   files: '/app-files',
 }
 
-export { models, endpoints }
+const arweaveDomain = 'arweave.net'
 
-export default { models, endpoints }
+export { models, endpoints, arweaveDomain }
+
+export default { models, endpoints, arweaveDomain }
