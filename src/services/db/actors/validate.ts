@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types/machines'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import {
   DB_VALIDATING_SUCCESS,
   DB_VALIDATING_WAIT,

@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 import debug from 'debug'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 
 const logger = debug('app:services:internal:actors:waitForFiles')
 

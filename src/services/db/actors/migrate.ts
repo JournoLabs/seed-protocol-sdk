@@ -5,9 +5,9 @@ import {
   DB_MIGRATING_SUCCESS,
 } from '@/services/internal/constants'
 import debug from 'debug'
-import { waitForFile } from '@/helpers/files'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
+import { FileManager } from '@/browser/helpers/FileManager'
 
 const logger = debug('app:services:db:actors:migrate')
 
@@ -31,7 +31,7 @@ export const migrate = fromCallback<
 
 
     if (!journalExists) {
-      await waitForFile(journalPath, 500, 60000)
+      await FileManager.waitForFile(journalPath, 500, 60000)
     }
   }
 

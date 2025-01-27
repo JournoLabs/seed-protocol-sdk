@@ -1,5 +1,5 @@
 import path from 'path'
-import { fs } from 'fs'
+import fs from 'fs'
 import pluralize from 'pluralize'
 import { camelCase, snakeCase } from 'lodash-es'
 import * as nunjucks from 'nunjucks'

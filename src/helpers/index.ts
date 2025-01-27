@@ -1,6 +1,6 @@
 import { customAlphabet } from 'nanoid'
 import * as nanoIdDictionary from 'nanoid-dictionary'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'

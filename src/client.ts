@@ -19,6 +19,8 @@ import { initQueryClient } from './helpers/QueryClient'
 import { initFileManager } from './helpers/FileManager'
 import { initDb } from './db/Db'
 import debug from 'debug'
+import { appState } from './seedSchema'
+import { BaseDb } from './db/Db/BaseDb'
 
 const logger = debug('app:client')
 
@@ -75,6 +77,23 @@ const client = {
     for (const [key, value] of Object.entries(internalModels)) {
       setModel(key, value)
     }
+  },
+  setAddresses: (addresses: string[]) => {
+    const appDb = BaseDb.getAppDb()
+    if (!appDb) {
+      throw new Error('App DB not found')
+    }
+    appDb.insert(appState)
+    .values({
+      key: 'addresses',
+      value: JSON.stringify(addresses),
+    })
+    .onConflictDoUpdate({
+      target: appState.key,
+      set: {
+        value: JSON.stringify(addresses),
+      },
+    })
   },
   subscribe: (callback: any) => {
     const subscription = globalService.subscribe(callback)

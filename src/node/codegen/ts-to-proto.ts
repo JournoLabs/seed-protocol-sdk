@@ -1,6 +1,6 @@
 import { Decorator, Project } from 'ts-morph'
 import { Field, Type } from 'protobufjs'
-import { fs } from 'fs'
+import fs from 'fs'
 
 type TsToProtoOptions = {
   tsFilePath: string

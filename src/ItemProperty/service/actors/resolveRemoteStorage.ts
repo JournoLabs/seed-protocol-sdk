@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 
 export const resolveRemoteStorage = fromCallback<
   EventObject,

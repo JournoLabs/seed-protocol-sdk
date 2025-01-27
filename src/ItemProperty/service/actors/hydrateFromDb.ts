@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { and, eq, or, sql } from 'drizzle-orm'
 import debug from 'debug'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import { metadata } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateMetadata } from '@/db/write/updateMetadata'

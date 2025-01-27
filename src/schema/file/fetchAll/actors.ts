@@ -3,7 +3,7 @@ import { fetchAllFilesMachine } from '@/schema/file/fetchAll/index'
 import { ARWEAVE_HOST } from '@/services/internal/constants'
 import { GET_FILES_METADATA } from '@/schema/file/queries'
 import { getArweave } from '@/helpers/ArweaveClient'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import {
   getDataTypeFromString,
   getMimeType,

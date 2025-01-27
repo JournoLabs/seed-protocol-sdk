@@ -8,7 +8,7 @@ import {
 import { createSeed } from '@/db/write/createSeed'
 import { getDataTypeFromString, getMimeType } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getSchemaUidForSchemaDefinition } from '@/stores/eas'

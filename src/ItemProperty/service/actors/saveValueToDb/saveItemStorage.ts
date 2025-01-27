@@ -11,7 +11,7 @@ import { getItemData } from '@/db/read/getItemData'
 import { and, eq } from 'drizzle-orm'
 import { metadata } from '@/seedSchema'
 import { createMetadata } from '@/db/write/createMetadata'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 
 export const saveItemStorage = fromCallback<
   EventObject,

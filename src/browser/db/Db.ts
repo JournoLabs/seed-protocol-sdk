@@ -3,13 +3,12 @@ import { IDb } from "@/interfaces/IDb";
 import { getAppDb, getSqliteWasmClient, isAppDbReady, setAppDb } from "./sqlWasmClient";
 import { SqliteConnectionManager } from "@/services/db";
 import debug from "debug";
-import { waitForFile } from "@/helpers/files";
-import { fs } from "@zenfs/core";
 import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
 import { BROWSER_FS_TOP_DIR } from "@/services/internal/constants";
+import { FileManager } from "@/browser/helpers/FileManager";
 const logger = debug('app:browser:db:Db')
 
 export const dbExec = async (dbId, params, sql, dbName, retries = 2) => {
@@ -112,7 +111,7 @@ class Db extends BaseDb implements IDb {
     })
   }
 
-  static connectToDb(pathToDir: string, dbName: string) {
+  static async connectToDb(pathToDir: string, dbName: string): Promise<string> {
 
     return new Promise((resolve, reject) => {
       const interval = setInterval(() => {
@@ -154,6 +153,8 @@ class Db extends BaseDb implements IDb {
   }
 
   static async migrate(pathToDbDir: string, dbName: string, dbId: string): Promise<void> {
+
+    const fs = await import('@zenfs/core')
 
     const schemaGlobString = `${BROWSER_FS_TOP_DIR}/schema/*`
 
@@ -262,7 +263,7 @@ class Db extends BaseDb implements IDb {
       )
     } catch (error) {
 
-      await waitForFile(`${pathToDbDir}/meta/_journal.json`)
+      await FileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
 
       await this.migrate(pathToDbDir, dbName)
 
