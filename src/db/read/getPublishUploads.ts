@@ -1,7 +1,7 @@
 import Transaction from 'arweave'
 import { CreateTransactionInterface } from 'arweave/web'
 import { getArweave } from '@/helpers/ArweaveClient'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import { getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'

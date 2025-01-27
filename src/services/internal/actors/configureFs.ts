@@ -6,7 +6,7 @@ import {
   DB_WAITING_FOR_FILES_RECEIVED,
   INTERNAL_CONFIGURING_FS_SUCCESS,
 } from '@/services/internal/constants'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import debug from 'debug'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 

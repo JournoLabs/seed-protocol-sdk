@@ -1,5 +1,6 @@
-import { fs } from '@zenfs/core';
+import fs from '@zenfs/core';
 import imageResize from './imageResize'
+import { FileManager } from '@/browser/helpers/FileManager';
 
 
 
@@ -66,11 +67,7 @@ export class ImageResizer {
 
     const widthDir = `${imageDir}/${width}`
 
-    const widthDirExists = await fs.promises.exists(widthDir)
-
-    if (!widthDirExists) {
-      await fs.promises.mkdir(widthDir)
-    }
+    await FileManager.createDirIfNotExists(widthDir)
 
     for (const imageFile of imageFiles) {
       const resizedImageExists = await fs.promises.exists(`${widthDir}/${imageFile}`)

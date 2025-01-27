@@ -1,5 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { getSchemaUidForSchemaDefinition } from '@/stores/eas'

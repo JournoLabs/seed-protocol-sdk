@@ -1,4 +1,4 @@
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import * as fsNode from 'node:fs'
 import debug from 'debug'
 

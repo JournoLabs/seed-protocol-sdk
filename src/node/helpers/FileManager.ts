@@ -37,8 +37,21 @@ class FileManager extends BaseFileManager {
     })
   }
 
+  static async pathExists(filePath: string): Promise<boolean> {
+    return new Promise(( resolve, reject ) => {
+      reject(new Error('Not implemented'))
+    })
+  }
+
+  static async createDirIfNotExists(filePath: string): Promise<void> {
+    return new Promise(( resolve, reject ) => {
+      reject(new Error('Not implemented'))
+    })
+  }
+
 }
 
 BaseFileManager.setPlatformClass(FileManager)
 
 export { FileManager }
+

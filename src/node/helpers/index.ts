@@ -1,6 +1,6 @@
 // import { customAlphabet } from 'nanoid'
 // import { alphanumeric } from 'nanoid-dictionary'
-import { fs }            from 'fs'
+import fs            from 'fs'
 import * as tsImport from 'ts-import'
 import { LoadMode }  from 'ts-import'
 import path          from 'path'

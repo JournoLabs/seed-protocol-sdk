@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { convertTxIdToImageSrc } from '@/helpers'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import debug from 'debug'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'

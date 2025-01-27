@@ -2,7 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types'
 import { DB_WAITING_FOR_FILES_RECEIVED } from '@/services/internal/constants'
 import debug from 'debug'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 
 const logger = debug('app:services:db:actors:waitForFiles')
 

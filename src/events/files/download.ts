@@ -1,6 +1,6 @@
 import { syncDbFiles } from '@/services/internal/helpers'
 import { eventEmitter } from '@/eventBus'
-import { fs } from '@zenfs/core'
+import fs from '@zenfs/core'
 import { ARWEAVE_HOST } from '@/services/internal/constants'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
@@ -22,6 +22,7 @@ import { getArweave } from '@/helpers/ArweaveClient'
 
 
 const logger = debug('app:files:download')
+
 
 export const downloadAllFilesRequestHandler = async ({
   endpoints,
@@ -78,21 +79,10 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
       }),
   })
 
-  if (!(await fs.promises.exists('/files'))) {
-    await fs.promises.mkdir('/files', { recursive: true })
-  }
-
-  if (!(await fs.promises.exists('/files/html'))) {
-    await fs.promises.mkdir('/files/html', { recursive: true })
-  }
-
-  if (!(await fs.promises.exists('/files/json'))) {
-    await fs.promises.mkdir('/files/json', { recursive: true })
-  }
-
-  if (!(await fs.promises.exists('/files/images'))) {
-    await fs.promises.mkdir('/files/images', { recursive: true })
-  }
+  await BaseFileManager.createDirIfNotExists('/files')
+  await BaseFileManager.createDirIfNotExists('/files/html')
+  await BaseFileManager.createDirIfNotExists('/files/json')
+  await BaseFileManager.createDirIfNotExists('/files/images')
 
   const appDb = BaseDb.getAppDb()
 

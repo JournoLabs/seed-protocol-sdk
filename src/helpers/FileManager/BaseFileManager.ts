@@ -1,6 +1,6 @@
 export abstract class BaseFileManager {
-  private fileSystemInitialized = false
-  private initializing = false
+  private static fileSystemInitialized = false
+  private static initializing = false
 
   static PlatformClass: typeof BaseFileManager
 
@@ -36,5 +36,17 @@ export abstract class BaseFileManager {
 
   static resizeAllImages( { width, height }: ResizeAllImagesParams ): Promise<void> {
     return this.PlatformClass.resizeAllImages({ width, height })
+  }
+
+  static pathExists(filePath: string): Promise<boolean> {
+    return this.PlatformClass.pathExists(filePath)
+  }
+
+  static createDirIfNotExists(filePath: string): Promise<void> {
+    return this.PlatformClass.createDirIfNotExists(filePath)
+  }
+
+  static async waitForFile(filePath: string): Promise<boolean> {
+    return this.PlatformClass.waitForFile(filePath)
   }
 }
