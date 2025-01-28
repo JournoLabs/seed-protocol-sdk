@@ -226,7 +226,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     if (!props.modelName) {
       throw new Error('Model name is required to create an item')
     }
-    const { seedLocalId, versionLocalId, versionUid } = await createNewItem({
+    const { seedLocalId, versionLocalId, } = await createNewItem({
       modelName: props.modelName,
     })
     props.seedLocalId = seedLocalId
@@ -267,9 +267,9 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
   static async all(
     modelName?: string,
     deleted?: boolean,
-  ): Promise<IItem<any>[]> {
+  ): Promise<BaseItem<any>[]> {
     const itemsData = await getItemsData({ modelName, deleted })
-    const itemInstances: IItem<any>[] = []
+    const itemInstances: BaseItem<any>[] = []
     for (const itemData of itemsData) {
       itemInstances.push(
         await BaseItem.create({
@@ -381,6 +381,10 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     return this.serviceContext.latestVersionUid as VersionsType
   }
 
+  get latestVersionLocalId(): string {
+    return this.serviceContext.latestVersionLocalId as string
+  }
+
   get modelName(): string {
     return this.serviceContext.modelName as string
   }
@@ -391,6 +395,14 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
 
   get attestationCreatedAt(): number {
     return this.serviceContext.attestationCreatedAt as number
+  }
+
+  get versionsCount(): number {
+    return this.serviceContext.versionsCount as number
+  }
+
+  get lastVersionPublishedAt(): number {
+    return this.serviceContext.lastVersionPublishedAt as number
   }
 
   unload(): void {

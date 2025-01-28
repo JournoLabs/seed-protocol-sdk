@@ -3,6 +3,8 @@ import { getModel } from '@/stores/modelClass'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
+import { toSnakeCase } from 'drizzle-orm/casing'
+import { eventEmitter } from '@/eventBus'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -26,7 +28,7 @@ export const createNewItem = async ({
 
   const newSeedId = await createSeed({ type: seedType })
 
-  const newVersionId = await createVersion({ seedLocalId: newSeedId })
+  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
   const propertySchemas = getModel(modelName)?.schema
 
@@ -48,6 +50,8 @@ export const createNewItem = async ({
       propertyRecordSchema,
     )
   }
+
+  eventEmitter.emit('item.requestAll', { modelName })
 
   return {
     modelName,
