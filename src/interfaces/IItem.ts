@@ -17,7 +17,10 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   readonly seedUid?: string
   readonly schemaUid: string
   readonly latestVersionUid: VersionsType
+  readonly latestVersionLocalId: string
   readonly modelName: string
   readonly properties: Record<string, IItemProperty<any>>
   readonly attestationCreatedAt: number
+  readonly versionsCount: number
+  readonly lastVersionPublishedAt: number
 } 

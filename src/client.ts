@@ -20,7 +20,6 @@ import { initFileManager } from './helpers/FileManager'
 import { initDb } from './db/Db'
 import debug from 'debug'
 import { appState } from './seedSchema'
-import { BaseDb } from './db/Db/BaseDb'
 
 const logger = debug('app:client')
 
@@ -78,7 +77,14 @@ const client = {
       setModel(key, value)
     }
   },
-  setAddresses: (addresses: string[]) => {
+  setAddresses: async(addresses: string[]) => {
+    const {BaseDb} = await import('./db/Db/BaseDb')
+    if (!BaseDb) {
+      throw new Error('BaseDb not found')
+    }
+    if (!BaseDb.PlatformClass) {
+      await initDb()
+    }
     const appDb = BaseDb.getAppDb()
     if (!appDb) {
       throw new Error('App DB not found')

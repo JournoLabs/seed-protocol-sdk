@@ -11,7 +11,7 @@ import { BROWSER_FS_TOP_DIR } from "@/services/internal/constants";
 import { FileManager } from "@/browser/helpers/FileManager";
 const logger = debug('app:browser:db:Db')
 
-export const dbExec = async (dbId, params, sql, dbName, retries = 2) => {
+export const dbExec = async (dbId: string, params: any[], sql: string, dbName: string, retries = 2) => {
   const rowsToReturnRaw: SqliteWasmResult[] = []
   const rowsValues: string[][] = []
 

@@ -10,7 +10,6 @@ import { useGlobalServiceStatus } from '@/browser/react/services'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
-import { IItem } from '@/interfaces'
 import { BaseItem } from '@/Item/BaseItem'
 
 const logger = debug('app:react:item')
@@ -238,6 +237,8 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       listenerRef.current()
     })
 
+    readFromDb()
+
     return () => {
       eventEmitter.removeListener('item.requestAll', readFromDb)
     }
@@ -257,6 +258,7 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
     isReadingDb: isReadingDb.current,
   }
 }
+
 export const useItemIsReady = () => {
   const [itemListenersReady, setItemListenersReady] = useState(false)
 
