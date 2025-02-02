@@ -24,7 +24,7 @@ export const createNewItem = async ({
     throw new Error('A model name is required for createNewItem')
   }
 
-  const seedType = modelName.toLowerCase()
+  const seedType = toSnakeCase(modelName)
 
   const newSeedId = await createSeed({ type: seedType })
 

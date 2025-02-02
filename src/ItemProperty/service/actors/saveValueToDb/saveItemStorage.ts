@@ -78,10 +78,16 @@ export const saveItemStorage = fromCallback<
           propertyData = queryRows[0]
         }
 
-        if (!propertyData) {
+        if (!propertyData && newValue) {
+
+          const filename = `${seedUid || seedLocalId}${propertyRecordSchema.filenameSuffix}`
+          const writeToPath = `/files/${propertyRecordSchema.localStorageDir}/${filename}`
+          await fs.promises.writeFile(writeToPath, newValue as string)
+
           const propertyDataRows = await createMetadata(
             {
               propertyName,
+              propertyValue: filename,
               modelType: modelName.toLowerCase(),
               seedLocalId,
               seedUid,
