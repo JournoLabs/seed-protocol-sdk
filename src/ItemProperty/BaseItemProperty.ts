@@ -202,8 +202,8 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
         this._subject.next(renderValue)
         // TODO: Maybe have this only update the property?
-        // if (context.seedLocalId) {
-        //   eventEmitter.emit(`item.${modelName}.${context.seedLocalId}.update`)
+        // if (context.seedLocalId || context.seedUid) {
+        //   eventEmitter.emit(`property.${context.seedUid || context.seedLocalId}.${propertyName}.update`)
         // }
         // if (context.seedUid) {
         //   eventEmitter.emit(`item.${modelName}.${context.seedUid}.update`)

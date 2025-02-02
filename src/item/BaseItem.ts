@@ -228,6 +228,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     }
     const { seedLocalId, versionLocalId, } = await createNewItem({
       modelName: props.modelName,
+      ...props,
     })
     props.seedLocalId = seedLocalId
     props.latestVersionLocalId = versionLocalId

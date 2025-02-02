@@ -6,6 +6,8 @@ import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { Schema } from '@/graphql/gql/graphql'
+import path from 'path'
+import fs from '@zenfs/core'
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType>,
@@ -21,19 +23,22 @@ export const createMetadata: CreateMetadata = async (
   metadataValues.localId = generateId()
 
   if (!metadataValues.modelType && metadataValues.modelName) {
-    metadataValues.modelType = metadataValues.modelName.toLowerCase()
+    metadataValues.modelType = toSnakeCase(metadataValues.modelName)
   }
 
   const isItemStorage = propertyRecordSchema && propertyRecordSchema.storageType === 'ItemStorage'
 
-  if (
-    propertyRecordSchema &&
-    propertyRecordSchema.localStorageDir &&
-    isItemStorage
-  ) {
-    metadataValues.refResolvedValue = `${metadataValues.seedUid || metadataValues.seedLocalId}${propertyRecordSchema.filenameSuffix}`
-    metadataValues.refValueType = 'file'
-  }
+  // if (
+  //   propertyRecordSchema &&
+  //   propertyRecordSchema.localStorageDir &&
+  //   isItemStorage
+  // ) {
+  //   const filename = `${metadataValues.seedUid || metadataValues.seedLocalId}${propertyRecordSchema.filenameSuffix}`
+  //   const filePath = path.join(propertyRecordSchema.localStorageDir, filename)
+  //   await fs.promises.writeFile(filePath, metadataValues.propertyValue)
+  //   metadataValues.propertyValue = filename
+  //   metadataValues.refValueType = 'file'
+  // }
 
   if (!isItemStorage && !metadataValues.schemaUid && propertyRecordSchema) {
     const queryClient = BaseQueryClient.getQueryClient()

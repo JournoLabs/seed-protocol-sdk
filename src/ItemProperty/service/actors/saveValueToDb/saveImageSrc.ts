@@ -175,10 +175,6 @@ export const saveImageSrc = fromCallback<
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
-    if (!schemaUid) {
-      schemaUid = getSchemaUidForSchemaDefinition(propertyName)
-    }
-
     let newLocalId
 
     if (!localId) {
