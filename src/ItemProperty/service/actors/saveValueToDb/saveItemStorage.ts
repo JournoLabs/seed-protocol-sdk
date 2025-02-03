@@ -12,6 +12,7 @@ import { and, eq } from 'drizzle-orm'
 import { metadata } from '@/seedSchema'
 import { createMetadata } from '@/db/write/createMetadata'
 import fs from '@zenfs/core'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 export const saveItemStorage = fromCallback<
   EventObject,
@@ -82,7 +83,7 @@ export const saveItemStorage = fromCallback<
 
           const filename = `${seedUid || seedLocalId}${propertyRecordSchema.filenameSuffix}`
           const writeToPath = `/files/${propertyRecordSchema.localStorageDir}/${filename}`
-          await fs.promises.writeFile(writeToPath, newValue as string)
+          await BaseFileManager.saveFile(writeToPath, newValue as string | Blob | ArrayBuffer)
 
           const propertyDataRows = await createMetadata(
             {
@@ -127,7 +128,7 @@ export const saveItemStorage = fromCallback<
 
     const filePath = `/files/${localStorageDir}/${fileName}`
     try {
-      await fs.promises.writeFile(filePath, newValue)
+      await BaseFileManager.saveFile(filePath, newValue as string | Blob | ArrayBuffer)
     } catch (error) {
       fs.writeFileSync(filePath, newValue)
     }

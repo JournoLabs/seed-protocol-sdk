@@ -207,6 +207,47 @@ class FileManager extends BaseFileManager {
       // )
     })
   }
+
+  static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
+    try {
+      // Get a handle to the OPFS root directory
+      const root = await navigator.storage.getDirectory();
+      
+      // Split the file path into directory and file name
+      const pathParts = filePath.split('/');
+      const fileName = pathParts.pop();
+      if (!fileName) throw new Error('Invalid file path');
+
+      // Traverse directories and create them if they don't exist
+      let currentDir = root;
+      for (const part of pathParts) {
+        if (part !== '') {
+          currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+        }
+      }
+
+      // Get the file handle and create the file if it doesn't exist
+      const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+
+      // Create a writable stream and write the content
+      const writable = await fileHandle.createWritable();
+      
+      if (typeof content === 'string') {
+          await writable.write(content);
+      } else if (content instanceof Blob) {
+          await writable.write(content);
+      } else if (content instanceof ArrayBuffer) {
+          await writable.write(new Blob([content]));
+      } else {
+          throw new Error('Unsupported content type');
+      }
+
+      await writable.close();
+      console.log(`File written successfully: ${filePath}`);
+  } catch (error) {
+      console.error(`Error writing to OPFS: ${error.message}`);
+  }
+  }
 }
 
 BaseFileManager.setPlatformClass(FileManager)
