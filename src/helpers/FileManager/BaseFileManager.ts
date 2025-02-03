@@ -49,4 +49,8 @@ export abstract class BaseFileManager {
   static async waitForFile(filePath: string): Promise<boolean> {
     return this.PlatformClass.waitForFile(filePath)
   }
+
+  static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
+    return this.PlatformClass.saveFile(filePath, content)
+  }
 }

@@ -150,7 +150,7 @@ export const saveImageSrc = fromCallback<
 
     if (fileData instanceof ArrayBuffer) {
       try {
-        await fs.promises.writeFile(filePath, new Uint8Array(fileData))
+        await BaseFileManager.saveFile(filePath, new Uint8Array(fileData))
       } catch (e) {
         fs.writeFileSync(filePath, new Uint8Array(fileData))
         eventEmitter.emit('file-saved', filePath)
@@ -159,7 +159,7 @@ export const saveImageSrc = fromCallback<
 
     if (typeof fileData === 'string') {
       try {
-        await fs.promises.writeFile(filePath, fileData)
+        await BaseFileManager.saveFile(filePath, fileData)
       } catch (e) {
         fs.writeFileSync(filePath, fileData)
         eventEmitter.emit('file-saved', filePath)
