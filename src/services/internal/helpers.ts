@@ -12,7 +12,7 @@ const logger = debug('app:services:internal:helpers')
  * @param {string} dirPath - The directory path to create.
  */
 export const createDirectories = async (dirPath: string) => {
-  const dirPathExists = await fs.promises.exists(dirPath)
+  const dirPathExists = await BaseFileManager.pathExists(dirPath)
   if (dirPathExists) {
     return
   }

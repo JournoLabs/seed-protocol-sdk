@@ -28,13 +28,6 @@ export const fetchSeeds = fromCallback<
       const queryClient = BaseQueryClient.getQueryClient()
       const easClient = BaseEasClient.getEasClient()
 
-      const cachedResults = queryClient.getQueryData(queryKey)
-
-      logger(
-        `[allItemsActors] [fetchSeeds] cachedResults ${Date.now()}`,
-        cachedResults,
-      )
-
       const results = await queryClient.fetchQuery({
         queryKey,
         queryFn: async () => easClient.request(GET_SEEDS, queryVariables),

@@ -1,4 +1,5 @@
 import { GraphQLClient } from 'graphql-request'
+import { EAS_ENDPOINT }  from '@/services/internal/constants'
 
 export abstract class BaseEasClient {
   static PlatformClass: typeof BaseEasClient
@@ -8,6 +9,6 @@ export abstract class BaseEasClient {
   }
 
   static getEasClient(): GraphQLClient {
-    return this.PlatformClass.getEasClient()
+    return new GraphQLClient(EAS_ENDPOINT)
   }
 } 

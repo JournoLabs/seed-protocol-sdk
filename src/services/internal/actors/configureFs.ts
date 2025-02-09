@@ -9,6 +9,7 @@ import {
 import fs from '@zenfs/core'
 import debug from 'debug'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
+import { isBrowser } from '@/helpers/environment'
 
 const logger = debug('app:internal:actors:configureFs')
 
@@ -32,15 +33,18 @@ export const configureFs = fromCallback<
       isFsInitialized(),
     )
 
-    await waitForEvent({
-      req: {
-        eventLabel: 'fs.downloadAll.request',
-        data: { endpoints },
-      },
-      res: {
-        eventLabel: 'fs.downloadAll.success',
-      },
-    })
+    if (isBrowser()) {
+      await waitForEvent({
+        req: {
+          eventLabel: 'fs.downloadAll.request',
+          data: { endpoints },
+        },
+        res: {
+          eventLabel: 'fs.downloadAll.success',
+        },
+      })
+    }
+
 
     const journalPath = `${filesDir || BROWSER_FS_TOP_DIR}/db/meta/_journal.json`
 

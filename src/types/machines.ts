@@ -58,3 +58,9 @@ export type FromCallbackInput<T, P = undefined> = {
   context: T
   event?: P
 }
+
+export type ClientManagerContext = {
+  isInitialized: boolean
+  addressesSet: boolean
+  isSaving: boolean
+}

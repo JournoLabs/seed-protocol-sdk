@@ -28,7 +28,6 @@ export const initialize = fromCallback<
     throw new Error('models is required')
   }
 
-
   let environment = getEnvironment()
 
   let internalSubscription: Subscription | undefined
@@ -43,11 +42,12 @@ export const initialize = fromCallback<
   const _initInternal = async (): Promise<void> => {
     return new Promise((resolve) => {
       internalSubscription = internalService.subscribe((snapshot) => {
-        logger('[sdk] [internal] snapshot', snapshot)
+        logger('[sdk] [internal] snapshot.value', snapshot.value)
         if (snapshot.value === 'ready') {
           resolve()
         }
       })
+      logger('[sdk] [internal] sending init')
       internalService.send({
         type: 'init',
         endpoints,

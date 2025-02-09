@@ -18,25 +18,22 @@ export const loadAppDb = fromCallback<
   let subscription: Subscription | undefined
 
   const _loadAppDb = async (): Promise<void> => {
+    if (appDbService.getSnapshot().value === 'ready') {
+      return
+    }
     return new Promise((resolve) => {
-      if (appDbService.getSnapshot().value === 'ready') {
-        return resolve()
-      }
-      subscription = appDbService.subscribe({
-        next: (snapshot) => {
-          if (snapshot.value === 'ready') {
-            return resolve()
-          }
+      subscription = appDbService.subscribe((snapshot) => {
+        if (snapshot.value === 'ready') {
+          return resolve()
+        }
 
-          sendBack({ type: DB_ON_SNAPSHOT, dbName: DB_NAME_APP, snapshot })
-        },
+        sendBack({ type: DB_ON_SNAPSHOT, dbName: DB_NAME_APP, snapshot })
       })
     })
   }
 
   _loadAppDb().then(() => {
     sendBack({ type: INTERNAL_LOADING_APP_DB_SUCCESS })
-    logger('[sdk] [internal/actors] Successfully loaded app DB')
   })
 
   return () => {

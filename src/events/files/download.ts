@@ -19,6 +19,7 @@ import { saveAppState } from '@/db/write/saveAppState'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient } from '@/helpers'
 import { getArweave } from '@/helpers/ArweaveClient'
+import { isBrowser } from '@/helpers/environment'
 
 
 const logger = debug('app:files:download')
@@ -28,6 +29,11 @@ export const downloadAllFilesRequestHandler = async ({
   endpoints,
   eventId,
 }) => {
+
+  if (!isBrowser()) {
+    return
+  }
+
   await syncDbFiles(endpoints)
 
   eventEmitter.emit('fs.downloadAll.success', { eventId })

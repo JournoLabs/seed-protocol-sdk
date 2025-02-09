@@ -8,6 +8,7 @@ import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 import fs from '@zenfs/core'
 import { FileManager } from '@/browser/helpers/FileManager'
+import { isBrowser } from '@/helpers/environment'
 
 const logger = debug('app:services:db:actors:migrate')
 
@@ -29,8 +30,7 @@ export const migrate = fromCallback<
 
     journalExists = await fs.promises.exists(journalPath)
 
-
-    if (!journalExists) {
+    if (!journalExists && isBrowser()) {
       await FileManager.waitForFile(journalPath, 500, 60000)
     }
   }
@@ -41,11 +41,15 @@ export const migrate = fromCallback<
 
   _checkForFiles()
     .then(() => {
+      if (!isBrowser()) {
+        return _migrate()
+      }
       if (journalExists) {
         return _migrate()
       }
     })
     .then(() => {
+      console.log('sending db migrating success')
       sendBack({ type: DB_MIGRATING_SUCCESS, dbName })
     })
 

@@ -3,6 +3,7 @@ import { DbServiceContext, FromCallbackInput } from '@/types'
 import { DB_WAITING_FOR_FILES_RECEIVED } from '@/services/internal/constants'
 import debug from 'debug'
 import fs from '@zenfs/core'
+import { isBrowser } from '@/helpers/environment'
 
 const logger = debug('app:services:db:actors:waitForFiles')
 
@@ -10,6 +11,12 @@ export const waitForFiles = fromCallback<
   EventObject,
   FromCallbackInput<DbServiceContext>
 >(({ sendBack, input: { context } }) => {
+
+  if (!isBrowser()) {
+    sendBack({ type: DB_WAITING_FOR_FILES_RECEIVED })
+    return
+  }
+
   const { pathToDbDir } = context
 
   const _waitForFiles = async (): Promise<void> => {

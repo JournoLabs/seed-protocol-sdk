@@ -1,16 +1,24 @@
-import { BaseDb } from "@/db/Db/BaseDb";
-import { IDb } from "@/interfaces";
-import nodeAppDbConfig from "./node.app.db.config";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { defineConfig, } from "drizzle-kit";
-import path from "path";
+import { BaseDb }         from "@/db/Db/BaseDb";
+import { IDb }            from "@/interfaces";
+import nodeAppDbConfig                    from "./node.app.db.config";
+import { BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
+import { defineConfig, }                  from "drizzle-kit";
+import path               from "path";
 import { DrizzleConfig, } from "drizzle-orm";
-import Database from "better-sqlite3";
+import { isBrowser }      from '@/helpers/environment'
+import {migrate}          from 'drizzle-orm/better-sqlite3/migrator'
+import fs from 'fs'
+import debug from 'debug'
+import { appState } from '@/seedSchema'
 
-const getConfig = (filesDir: string) => {
+const logger = debug('app:node:db:Db')
 
-  const dotSeedDir = path.join(filesDir, '.seed')
+const getConfig = (dotSeedDir: string) => {
+
   let schemaDir = `${dotSeedDir}/schema/*Schema.ts`
+  if (!isBrowser()) {
+    schemaDir = path.join(process.cwd(), 'schema')
+  }
 
   const nodeDbConfig = defineConfig({
     schema: schemaDir,
@@ -25,12 +33,13 @@ const getConfig = (filesDir: string) => {
 }
 
 class Db extends BaseDb implements IDb {
+  static db: BetterSQLite3Database
   constructor() {
     super()
   }
 
   static getAppDb() {
-    return drizzle(nodeAppDbConfig)
+    return this.db
   }
 
   static isAppDbReady() {
@@ -40,36 +49,31 @@ class Db extends BaseDb implements IDb {
   static async prepareDb(filesDir: string) {
     const nodeDbConfig = getConfig(filesDir)
 
-    let db
+    this.db = drizzle({
+      ...nodeDbConfig,
+      logger: true,
+    })
 
-    try {
-      db = drizzle(nodeDbConfig)
-    } catch (error) {
-      console.error(error)
+    if (!this.db) {
+      throw new Error('Db not found')
     }
 
-    try {
-      const client = new Database(nodeDbConfig.dbCredentials.url)
-      db = drizzle({ client })
-    } catch (error) {
-      console.error(error)
-    }
-
-    return db
+    return this.db
   }
 
   static async connectToDb(pathToDir: string, dbName: string) {
 
-    const nodeDbConfig = getConfig(pathToDir)
-
     return {
-      id: drizzle(nodeDbConfig).$client.name
+      id: this.db.constructor.name
     }
   }
 
   static async migrate(pathToDbDir: string, dbName: string, dbId: string) {
-    const nodeDbConfig = getConfig(pathToDbDir)
-    return drizzle(nodeDbConfig)
+    migrate(this.db, { migrationsFolder: pathToDbDir })
+    const queryResult = await this.db.select().from(appState)
+    logger('queryResult', queryResult)
+
+    return this.db
   }
 }
 
