@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import path from 'path'
-import fs from 'fs'
-import { exec as execSync } from 'child_process'
-import { promisify } from 'util'
+import fs                        from 'fs'
+import { exec as execCallback, execSync, } from 'child_process'
+import { promisify }             from 'util'
 import { pathToFileURL } from 'url'
 import process from 'node:process'
 import '../src/node/helpers/EasClient'
@@ -22,7 +22,7 @@ import {
 import { createDrizzleSchemaFilesFromConfig } from '../src/node/codegen'
 import { rimrafSync } from 'rimraf'
 
-const exec = promisify(execSync)
+const exec = promisify(execCallback)
 
 let a
 
@@ -41,8 +41,11 @@ const init = (args: string[]) => {
 
     // Remove dotSeedDir to start fresh each time
     if (fs.existsSync(dotSeedDir)) {
-      fs.rmSync(dotSeedDir, { recursive: true })
+      fs.rmSync(dotSeedDir, { recursive: true, force: true })
     }
+
+    console.log('[Seed Protocol] dotSeedDir', dotSeedDir)
+    console.log('[Seed Protocol] sdkRootDir', sdkRootDir)
 
     const drizzleKitCommand = `npx --yes tsx ${drizzleKitPath}`
 
@@ -107,24 +110,23 @@ const init = (args: string[]) => {
 
     const copyDotSeedFilesToAppFiles = async (_appFilesDirPath: string) => {
       console.log('[Seed Protocol] Copying dot seed files to app files')
-      return new Promise<void>((resolve) => {
-        fs.promises.rm(_appFilesDirPath, { recursive: true }).then(() => {
-          console.log(`[Seed Protocol] Removed old app files`)
-          console.log(`[Seed Protocol] making dir at ${_appFilesDirPath}`)
-          fs.mkdirSync(_appFilesDirPath, { recursive: true })
-          console.log('[Seed Protocol] copying app files')
-          fs.cpSync(dotSeedDir, _appFilesDirPath, { recursive: true })
-          console.log(
-            '[Seed Protocol] removing sqlite3 files and index.ts files',
-          )
-          rimrafSync(`${_appFilesDirPath}/**/*.sqlite3`, {
-            glob: true,
-          })
-          rimrafSync(`${_appFilesDirPath}/**/index.ts`, {
-            glob: true,
-          })
-          resolve()
-        })
+      const exists = await fs.promises.access(_appFilesDirPath).then(() => true).catch(() => false)
+      if (exists) {
+        await fs.promises.rm(_appFilesDirPath, { recursive: true, force: true })
+      }
+      console.log(`[Seed Protocol] Removed old app files`)
+      console.log(`[Seed Protocol] making dir at ${_appFilesDirPath}`)
+      fs.mkdirSync(_appFilesDirPath, { recursive: true })
+      console.log('[Seed Protocol] copying app files')
+      fs.cpSync(dotSeedDir, _appFilesDirPath, { recursive: true })
+      console.log(
+        '[Seed Protocol] removing sqlite3 files and index.ts files',
+      )
+      rimrafSync(`${_appFilesDirPath}/**/*.sqlite3`, {
+        glob: true,
+      })
+      rimrafSync(`${_appFilesDirPath}/**/index.ts`, {
+        glob: true,
       })
     }
 
@@ -138,12 +140,15 @@ const init = (args: string[]) => {
     }
 
     const updateSchema = async (pathToConfig: string, pathToMeta: string) => {
+      console.log('pathToMeta:', pathToMeta)
+      console.log('pathToConfig:', pathToConfig)
       if (!fs.existsSync(pathToMeta)) {
-        await runCommand(
+        console.log(`${drizzleKitCommand} generate --config=${pathToConfig}`)
+        execSync(
           `${drizzleKitCommand} generate --config=${pathToConfig}`,
         )
       }
-      await runCommand(`${drizzleKitCommand} migrate --config=${pathToConfig}`)
+      execSync(`${drizzleKitCommand} migrate --config=${pathToConfig}`)
     }
 
     const runCommands = async () => {

@@ -2,6 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 import debug from 'debug'
 import fs from '@zenfs/core'
+import { isBrowser } from '@/helpers/environment'
 
 const logger = debug('app:services:internal:actors:waitForFiles')
 
@@ -9,6 +10,12 @@ export const waitForFiles = fromCallback<
   EventObject,
   FromCallbackInput<InternalMachineContext>
 >(({ sendBack, input: { context } }) => {
+
+  if (!isBrowser()) {
+    sendBack({ type: 'filesReceived' })
+    return
+  }
+
   const { endpoints } = context
 
   const filesDir = endpoints.files

@@ -1,5 +1,5 @@
-import { models }        from '../__mocks__/project/schema'
-import { BaseItem }      from '@/Item/BaseItem'
+import { models }   from '@/test/__mocks__/node/project/schema'
+import { BaseItem } from '@/Item/BaseItem'
 import { getIdentities } from './identities'
 
 const { Post } = models

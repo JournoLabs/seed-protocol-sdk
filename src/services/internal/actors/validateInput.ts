@@ -16,10 +16,6 @@ export const validateInput = fromCallback<
       throw new Error('validateInput called with invalid endpoints')
     }
 
-    if (!addresses || !addresses.length) {
-      throw new Error('validateInput called with invalid addresses')
-    }
-
     if (!filesDir) {
       if (isBrowser()) {
         filesDir = '/'

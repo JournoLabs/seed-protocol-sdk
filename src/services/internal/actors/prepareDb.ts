@@ -15,9 +15,9 @@ export const prepareDb = fromCallback<
   }
 
   const _prepareDb = async (): Promise<void> => {
-    const manager = await BaseDb.prepareDb(filesDir)
-    if (manager) {
-      sendBack({ type: 'prepareDbSuccess', manager })
+    const appDb = await BaseDb.prepareDb(filesDir)
+    if (appDb) {
+      sendBack({ type: 'prepareDbSuccess'})
     }
 
   }

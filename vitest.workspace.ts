@@ -14,13 +14,14 @@ export default defineWorkspace([
     test: {
       name: 'browser',
       environment: 'jsdom',
-      globalSetup: './vitest.setup.mts',
+      globalSetup: './vitest.setup.ts',
       dir: './__tests__/',
       setupFiles: [ './__tests__/setup.ts' ],
       exclude: [
         '**/node_modules/**',
         'dist/**',
         'src/node/**',
+        '__tests__/node/**',
       ],
       pool: 'forks',
       hookTimeout: 60000,
@@ -29,7 +30,6 @@ export default defineWorkspace([
         name: 'chromium',
         provider: 'playwright',
         // https://playwright.dev
-        providerOptions: {},
       },
     },
   },
@@ -40,13 +40,12 @@ export default defineWorkspace([
     test: {
       name: 'NodeJS',
       environment: 'node',
-      globalSetup: './vitest.setup.mts',
+      globalSetup: './vitest.setup.ts',
       dir: './__tests__/',
       setupFiles: [
-        './__tests__/node/setup.ts',
+        './__tests__/setup.ts',
       ],
-      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**' ],
-      hookTimeout: 60000,
+      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**' ],
     },
   },
 ])

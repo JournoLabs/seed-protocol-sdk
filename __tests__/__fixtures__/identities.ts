@@ -1,5 +1,5 @@
 import { BaseItem } from '@/Item/BaseItem'
-import { models }   from '../__mocks__/project/schema'
+import { models }   from '@/test/__mocks__/node/project/schema'
 
 const { Identity } = models
 

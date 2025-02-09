@@ -14,9 +14,7 @@ class FileManager extends BaseFileManager {
   }
 
   static async initializeFileSystem(): Promise<void> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+    return // No need to initialize file system in node
   }
 
   static async downloadAllFiles(): Promise<void> {

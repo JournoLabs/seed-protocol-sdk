@@ -65,12 +65,14 @@ export const internalMachine = setup({
           target: VALIDATING_INPUT,
           actions: [
             assign({
-              appDbService: ({ spawn }) =>
-                spawn(dbMachine, {
+              appDbService: ({context, spawn }) => {
+                return spawn(dbMachine, {
                   input: {
                     dbName: DB_NAME_APP,
+                    pathToDir: context?.filesDir,
                   },
-                }),
+                })
+              },
             }),
           ],
         },
@@ -175,6 +177,7 @@ export const internalMachine = setup({
     },
     ready: {
       entry: () => {
+        console.log('[sdk] [internal/index] Ready!')
         logger('[sdk] [internal/index] Ready!')
       },
       meta: {

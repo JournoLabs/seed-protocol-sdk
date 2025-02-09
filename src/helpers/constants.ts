@@ -78,3 +78,5 @@ export enum ImageSize {
   LARGE = 1440,
   EXTRA_LARGE = 1920,
 }
+
+export const CLIENT_NOT_INITIALIZED = 'ClientManager is not initialized. Please call init() first.'
