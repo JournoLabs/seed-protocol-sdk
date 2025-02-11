@@ -3,9 +3,9 @@ import { execSync } from 'node:child_process'
 import copy from 'rollup-plugin-copy'
 import tsConfigPaths from 'rollup-plugin-tsconfig-paths'
 import commonjs from '@rollup/plugin-commonjs'
-import nodeResolve from '@rollup/plugin-node-resolve'
-import webWorkerLoader from 'rollup-plugin-web-worker-loader'
-import polyfillNode from 'rollup-plugin-polyfill-node'
+// import nodeResolve from '@rollup/plugin-node-resolve'
+// import webWorkerLoader from 'rollup-plugin-web-worker-loader'
+// import polyfillNode from 'rollup-plugin-polyfill-node'
 
 const postProcess = () => {
   return {
@@ -47,6 +47,7 @@ const config = [
           'scripts/bin.ts',
           'src/seed.ts',
           'src/types/**/*.ts',
+          'src/client/**/*.ts',
           'src/init.ts',
           'src/browser/**/*.ts',
           'src/node/**/*.ts',

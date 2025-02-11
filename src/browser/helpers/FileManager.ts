@@ -6,25 +6,13 @@ import debug from 'debug'
 const logger = debug('app:browser:helpers:FileManager')
 
 class FileManager extends BaseFileManager {
-  static async readFileAsBuffer( filePath: string ): Promise<Buffer> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
-  }
 
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
 
-    const fs = await import('@zenfs/core')
-
-    const fileExists = await fs.promises.exists(
-      path,
-    )
+    const fileExists = await this.pathExists(path)
     if ( fileExists ) {
-      const fileContents = await fs.promises.readFile(
-        path,
-      )
-      const fileHandler  = new File([ fileContents ], path)
-      return URL.createObjectURL(fileHandler)
+      const file = await this.readFile(path)
+      return URL.createObjectURL(file)
     }
   }
 
@@ -232,7 +220,7 @@ class FileManager extends BaseFileManager {
       // Create a writable stream and write the content
       const writable = await fileHandle.createWritable();
       
-      if (typeof content === 'string') {
+      if (typeof content === 'string' || content instanceof Uint8Array) {
           await writable.write(content);
       } else if (content instanceof Blob) {
           await writable.write(content);
@@ -247,6 +235,50 @@ class FileManager extends BaseFileManager {
   } catch (error) {
       console.error(`Error writing to OPFS: ${error.message}`);
   }
+  }
+
+  static async readFile(filePath: string): Promise<File> {
+    try {
+      // Get a handle to the OPFS root directory
+      const root = await navigator.storage.getDirectory();
+      
+       // Split the file path into directory and file name
+       const pathParts = filePath.split('/');
+       const fileName = pathParts.pop();
+       if (!fileName) throw new Error('Invalid file path');
+ 
+       // Traverse directories to reach the target file
+       let currentDir = root;
+       for (const part of pathParts) {
+         if (part !== '') {
+           currentDir = await currentDir.getDirectoryHandle(part, { create: false });
+         }
+       }
+ 
+       // Get the file handle
+       const fileHandle = await currentDir.getFileHandle(fileName, { create: false });
+ 
+       // Get the file and read it as an ArrayBuffer
+       return await fileHandle.getFile();
+    } catch (error) {
+      console.error(`Error reading from OPFS: ${error.message}`);
+      throw error;
+    }
+  }
+
+  static async readFileAsBuffer(filePath: string): Promise<Buffer> {
+    try {
+
+      // Get the file and read it as an ArrayBuffer
+      const file = await this.readFile(filePath)
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Convert ArrayBuffer to Buffer
+      return Buffer.from(arrayBuffer);
+    } catch (error) {
+      console.error(`Error reading from OPFS: ${error.message}`);
+      throw error;
+    }
   }
 }
 
