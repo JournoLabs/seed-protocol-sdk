@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
@@ -55,8 +55,8 @@
     "@tanstack/react-virtual": "^3.11.2",
     "@vitejs/plugin-legacy": "^6.0.0",
     "@xstate/react": "^5.0.0",
-    "@zenfs/core": "^1.6.12",
-    "@zenfs/dom": "1.1.0",
+    "@zenfs/core": "^1.9.5",
+    "@zenfs/dom": "^1.1.5",
     "arweave": "^1.15.5",
     "crypto-browserify": "^3.12.1",
     "debug": "^4.4.0",

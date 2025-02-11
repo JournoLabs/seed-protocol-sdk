@@ -53,4 +53,8 @@ export abstract class BaseFileManager {
   static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
     return this.PlatformClass.saveFile(filePath, content)
   }
+
+  static async readFile(filePath: string): Promise<File> {
+    return this.PlatformClass.readFile(filePath)
+  }
 }

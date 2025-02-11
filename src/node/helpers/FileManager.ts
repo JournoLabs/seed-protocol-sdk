@@ -3,10 +3,6 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 class FileManager extends BaseFileManager {
 
-  static async readFileAsBuffer( filePath: string ): Promise<Buffer> {
-    return await fsAsync.readFile(filePath)
-  }
-
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
     return new Promise(( resolve, reject ) => {
       reject(new Error('Not implemented'))
@@ -45,6 +41,14 @@ class FileManager extends BaseFileManager {
     return new Promise(( resolve, reject ) => {
       reject(new Error('Not implemented'))
     })
+  }
+
+  static async readFileAsBuffer( filePath: string ): Promise<Buffer> {
+    return await fsAsync.readFile(filePath)
+  }
+
+  static async readFile(filePath: string): Promise<File> {
+    return new File([await fsAsync.readFile(filePath)], filePath)
   }
 
 }

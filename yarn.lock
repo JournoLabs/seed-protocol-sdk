@@ -4154,8 +4154,8 @@ __metadata:
     "@vitejs/plugin-react": ^4.3.4
     "@vitest/browser": ^2.1.8
     "@xstate/react": ^5.0.0
-    "@zenfs/core": ^1.6.12
-    "@zenfs/dom": 1.1.0
+    "@zenfs/core": ^1.9.5
+    "@zenfs/dom": ^1.1.5
     arweave: ^1.15.5
     better-sqlite3: ^11.7.0
     crypto-browserify: ^3.12.1
@@ -4930,13 +4930,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/wicg-file-system-access@npm:^2020.9.2":
-  version: 2020.9.8
-  resolution: "@types/wicg-file-system-access@npm:2020.9.8"
-  checksum: 08ef73d68e9a5596d0d17f0f9651745cb9edf98afdee3f9fe852c44123e7b5254ede38c151ebea5127e4a4a59fcd850ce762e56b1278079afff3aadf53dc0776
-  languageName: node
-  linkType: hard
-
 "@types/ws@npm:^8.0.0, @types/ws@npm:^8.5.4":
   version: 8.5.14
   resolution: "@types/ws@npm:8.5.14"
@@ -5373,7 +5366,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@zenfs/core@npm:^1.6.12":
+"@zenfs/core@npm:^1.9.5":
   version: 1.9.5
   resolution: "@zenfs/core@npm:1.9.5"
   dependencies:
@@ -5391,20 +5384,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@zenfs/dom@npm:1.1.0":
-  version: 1.1.0
-  resolution: "@zenfs/dom@npm:1.1.0"
-  dependencies:
-    fake-indexeddb: ^6.0.0
-    file-system-access: ^1.0.4
+"@zenfs/dom@npm:^1.1.5":
+  version: 1.1.5
+  resolution: "@zenfs/dom@npm:1.1.5"
   peerDependencies:
-    "@zenfs/core": ^1.6.4
-  dependenciesMeta:
-    fake-indexeddb:
-      optional: true
-    file-system-access:
-      optional: true
-  checksum: 8e4eeb7b7fe16339cf44c81aaa0c7a4ef5035412ac41fec6e9cc742e6530fa98589e34b2d943fd8a67ec7472d1f9b3e48dea0ad0aebe00f7ba7daf51b58d7148
+    "@zenfs/core": ^1.9.1
+    utilium: ^1.2.10
+  checksum: 019a517b75b38c157035398454ff472f6e62887b0fa42784cdfc7f58d7a4964a47f8e2c8b9f9cb5de2fb56ef881fa3e8bdfff3cce274df579c6bab693c4ddecf
   languageName: node
   linkType: hard
 
@@ -8272,13 +8258,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fake-indexeddb@npm:^6.0.0":
-  version: 6.0.0
-  resolution: "fake-indexeddb@npm:6.0.0"
-  checksum: c55bb1f54c1c910a6ca9e18b376ebecc51a29eceb829550d415aa34c2e246730a76dd35dc4fd6d8ae5c5790b9b4f180859e9457bcb73f2d167cc87aa04b6201e
-  languageName: node
-  linkType: hard
-
 "fast-deep-equal@npm:^3.1.1, fast-deep-equal@npm:^3.1.3":
   version: 3.1.3
   resolution: "fast-deep-equal@npm:3.1.3"
@@ -8372,7 +8351,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fetch-blob@npm:^3.0.0, fetch-blob@npm:^3.1.2, fetch-blob@npm:^3.1.4":
+"fetch-blob@npm:^3.1.2, fetch-blob@npm:^3.1.4":
   version: 3.2.0
   resolution: "fetch-blob@npm:3.2.0"
   dependencies:
@@ -8406,21 +8385,6 @@ __metadata:
   dependencies:
     flat-cache: ^4.0.0
   checksum: f67802d3334809048c69b3d458f672e1b6d26daefda701761c81f203b80149c35dea04d78ea4238969dd617678e530876722a0634c43031a0957f10cc3ed190f
-  languageName: node
-  linkType: hard
-
-"file-system-access@npm:^1.0.4":
-  version: 1.0.4
-  resolution: "file-system-access@npm:1.0.4"
-  dependencies:
-    "@types/wicg-file-system-access": ^2020.9.2
-    fetch-blob: ^3.0.0
-    node-domexception: ^1.0.0
-    web-streams-polyfill: ^3.1.0
-  dependenciesMeta:
-    web-streams-polyfill:
-      optional: true
-  checksum: 7daab766aab035a4815bf33ce6aa05560491610612e9c0c5fbd7a1756852a547bec22cc58e83192fa4ecc435b519eff2c574b69c8e71691fc717d4f30f65925e
   languageName: node
   linkType: hard
 
@@ -14302,7 +14266,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"web-streams-polyfill@npm:^3.0.3, web-streams-polyfill@npm:^3.1.0":
+"web-streams-polyfill@npm:^3.0.3":
   version: 3.3.3
   resolution: "web-streams-polyfill@npm:3.3.3"
   checksum: 21ab5ea08a730a2ef8023736afe16713b4f2023ec1c7085c16c8e293ee17ed085dff63a0ad8722da30c99c4ccbd4ccd1b2e79c861829f7ef2963d7de7004c2cb

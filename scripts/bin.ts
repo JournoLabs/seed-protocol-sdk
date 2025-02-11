@@ -130,15 +130,6 @@ const init = (args: string[]) => {
       })
     }
 
-    const runCommand = async (command: string) => {
-      const { stdout, stderr } = await exec(command)
-      if (stderr) {
-        console.error(stderr)
-        return
-      }
-      console.log(stdout)
-    }
-
     const updateSchema = async (pathToConfig: string, pathToMeta: string) => {
       console.log('pathToMeta:', pathToMeta)
       console.log('pathToConfig:', pathToConfig)
