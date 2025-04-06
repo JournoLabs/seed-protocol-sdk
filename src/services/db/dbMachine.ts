@@ -19,7 +19,7 @@ import { validate } from '@/services/db/actors/validate'
 import { migrate } from '@/services/db/actors/migrate'
 import { waitForFiles } from './actors/waitForFiles'
 
-const logger = debug('app:services:db:machine')
+const logger = debug('seedSdk:services:db:machine')
 
 const {
   CHECKING_STATUS,
@@ -65,10 +65,6 @@ const dbMachine = setup({
       }),
     },
   },
-  // always: {
-  //   target: `.${CHECKING_STATUS}`,
-  //   guard: ({ context, event }) => context.hasFiles && event.type === 'updateHasFiles',
-  // },
   states: {
     idle: {
       on: {
@@ -121,11 +117,9 @@ const dbMachine = setup({
       on: {
         [DB_VALIDATING_SUCCESS]: {
           target: MIGRATING,
-          // guard: ({ context }) => context.hasFiles,
         },
         [DB_VALIDATING_WAIT]: {
           target: WAITING_FOR_FILES,
-          // guard: ({ context }) => !context.hasFiles,
         },
       },
       invoke: {
@@ -137,7 +131,6 @@ const dbMachine = setup({
         percentComplete: 80,
       },
     },
-    // Here we're waiting for migration and schema files to be downloaded
     [WAITING_FOR_FILES]: {
       on: {
         [DB_WAITING_FOR_FILES_RECEIVED]: {

@@ -12,6 +12,4 @@ class ItemProperty extends BaseItemProperty<PropertyType> implements IItemProper
 
 }
 
-BaseItemProperty.setPlatformClass(ItemProperty)
-
 export { ItemProperty }

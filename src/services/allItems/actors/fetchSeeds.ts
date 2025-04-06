@@ -7,7 +7,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import debug from 'debug'
 
 
-const logger = debug('app:allItemsActors:fetchSeeds')
+const logger = debug('seedSdk:allItemsActors:fetchSeeds')
 
 export const fetchSeeds = fromCallback<
   EventObject,

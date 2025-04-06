@@ -1,7 +1,7 @@
 import { eventEmitter } from '@/eventBus'
 import debug from 'debug'
 
-const logger = debug('app:services:events')
+const logger = debug('seedSdk:services:events')
 
 const handleServiceSaveState = (event: any) => {
   const { state, serviceId } = event

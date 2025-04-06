@@ -11,7 +11,6 @@ import { getItemData } from '@/db/read/getItemData'
 import { and, eq } from 'drizzle-orm'
 import { metadata } from '@/seedSchema'
 import { createMetadata } from '@/db/write/createMetadata'
-import fs from '@zenfs/core'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 export const saveItemStorage = fromCallback<
@@ -130,6 +129,7 @@ export const saveItemStorage = fromCallback<
     try {
       await BaseFileManager.saveFile(filePath, newValue as string | Blob | ArrayBuffer)
     } catch (error) {
+      const fs = await BaseFileManager.getFs()
       fs.writeFileSync(filePath, newValue)
     }
 

@@ -7,7 +7,7 @@ import { initialize } from '@/ItemProperty/service/actors/initialize'
 import { resolveRelatedValue } from '@/ItemProperty/service/actors/resolveRelatedValue'
 import { hydrateFromDb } from '@/ItemProperty/service/actors/hydrateFromDb'
 import {
-  saveImageSrc,
+  saveImage,
   saveItemStorage,
   saveRelation,
 } from '@/ItemProperty/service/actors/saveValueToDb'
@@ -29,7 +29,7 @@ export const propertyMachine = setup({
     resolveRelatedValue,
     resolveRemoteStorage,
     analyzeInput,
-    saveImageSrc,
+    saveImage,
     saveRelation,
     saveItemStorage,
   },
@@ -138,7 +138,7 @@ export const propertyMachine = setup({
             saveValueToDbSuccess: {
               target: 'doneSaving',
             },
-            saveImageSrc: 'savingImageSrc',
+            saveImage: 'savingImage',
             saveRelation: 'savingRelation',
             saveItemStorage: 'savingItemStorage',
           },
@@ -147,12 +147,12 @@ export const propertyMachine = setup({
             input: ({ context, event }) => ({ context, event }),
           },
         },
-        savingImageSrc: {
+        savingImage: {
           on: {
-            saveImageSrcSuccess: 'doneSaving',
+            saveImageSuccess: 'doneSaving',
           },
           invoke: {
-            src: 'saveImageSrc',
+            src: 'saveImage',
             input: ({ context, event }) => ({ context, event }),
           },
         },

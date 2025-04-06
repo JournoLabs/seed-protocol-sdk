@@ -1,8 +1,6 @@
-import fs from '@zenfs/core'
-import * as fsNode from 'node:fs'
 import debug from 'debug'
-
-const logger = debug('app:helpers:files')
+import { BaseFileManager } from './FileManager/BaseFileManager'
+const logger = debug('seedSdk:helpers:files')
 // import * as retry from 'async-es/retry'
 
 export const listFilesInOPFSRoot = async () => {
@@ -45,7 +43,7 @@ export const waitForFile = (
         return
       }
       isBusy = true
-      if (fs.existsSync(filePath) && fsNode.existsSync(filePath)) {
+      if (await BaseFileManager.pathExists(filePath)) {
         clearInterval(_interval)
         resolve(true)
       }

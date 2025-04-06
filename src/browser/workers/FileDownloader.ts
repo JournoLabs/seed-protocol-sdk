@@ -1,7 +1,8 @@
 import { saveAppState } from '@/db/write/saveAppState.js';
 import filesDownload from './filesDownload.js'
+import debug from 'debug'
 
-
+const logger = debug('seedSdk:browser:workers:FileDownloader')
 
 export class FileDownloader {
   private cores: number
@@ -34,7 +35,7 @@ export class FileDownloader {
 
     return new Promise((resolve, reject) => {
       worker.onmessage = (e) => {
-        console.log('filesDownload main thread onmessage', e.data);
+        logger('filesDownload main thread onmessage', e.data);
 
         if (e.data.message === 'excludeTransaction') {
           localExcludedTransactions.add(e.data.transactionId)
@@ -57,6 +58,7 @@ export class FileDownloader {
       worker.postMessage({
         transactionIds,
         arweaveHost,
+        debug: logger.enabled,
       });
     })
   }

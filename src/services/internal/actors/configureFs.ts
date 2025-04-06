@@ -6,12 +6,11 @@ import {
   DB_WAITING_FOR_FILES_RECEIVED,
   INTERNAL_CONFIGURING_FS_SUCCESS,
 } from '@/services/internal/constants'
-import fs from '@zenfs/core'
 import debug from 'debug'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 import { isBrowser } from '@/helpers/environment'
-
-const logger = debug('app:internal:actors:configureFs')
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+const logger = debug('seedSdk:internal:actors:configureFs')
 
 export const configureFs = fromCallback<
   EventObject,
@@ -49,9 +48,10 @@ export const configureFs = fromCallback<
     const journalPath = `${filesDir || BROWSER_FS_TOP_DIR}/db/meta/_journal.json`
 
 
-    let journalExists = await fs.promises.exists(journalPath)
+    let journalExists = await BaseFileManager.pathExists(journalPath)
 
     if (!journalExists) {
+      const fs = await BaseFileManager.getFs()
       journalExists = fs.existsSync(journalPath)
     }
 

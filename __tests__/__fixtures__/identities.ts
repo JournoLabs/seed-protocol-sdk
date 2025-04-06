@@ -1,12 +1,10 @@
 import { BaseItem } from '@/Item/BaseItem'
-import { models }   from '@/test/__mocks__/node/project/schema'
 
-const { Identity } = models
 
 export const getIdentities = async ( numIdentities: number ): Promise<BaseItem<any>[]> => {
   const identities: BaseItem<any>[] = []
   for ( let i = 0; i < numIdentities; i++ ) {
-    const identity = await Identity.create({
+    const identity = await BaseItem.create({
       modelName: 'Identity',
       name: `Identity ${i}`,
       profile: `Profile for identity ${i}`,

@@ -45,7 +45,7 @@ const getPropertyData = async (itemProperty: IItemProperty<any>) => {
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
   if (!schemaUid) {
-    schemaUid = getSchemaUidForSchemaDefinition(schemaDef)
+    schemaUid = await getSchemaUidForSchemaDefinition({ schemaText: schemaDef })
     if (!schemaUid) {
       const schema = await getSchemaForItemProperty({
         propertyName: 'version',
@@ -107,15 +107,23 @@ const processBasicProperties = async (
   return itemPublishData
 }
 
-const processRelationProperty = async (
-  relationProperty: IItemProperty<any>,
+
+const processRelationOrImageProperty = async (
+  relationOrImageProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
   uploadedTransactions: UploadedTransaction[],
   originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
-  const value = relationProperty.getService().getSnapshot()
+
+  if (!relationOrImageProperty.schemaUid) {
+    throw new Error(
+      `Schema uid not found for relation or image property: ${relationOrImageProperty.propertyName}`,
+    )
+  }
+
+  const value = relationOrImageProperty.getService().getSnapshot()
     .context.propertyValue
-  if (!value || relationProperty.uid) {
+  if (!value || relationOrImageProperty.uid) {
     return multiPublishPayload
   }
 
@@ -128,18 +136,28 @@ const processRelationProperty = async (
 
   if (!relatedItem) {
     throw new Error(
-      `No related item found for relation property: ${relationProperty.propertyName}`,
+      `No related item found for relation or image property: ${relationOrImageProperty.propertyName}`,
     )
   }
 
   const versionUid = getVersionUid(relatedItem)
 
+  let modelName: string
+
+  if (relationOrImageProperty.propertyDef?.dataType === 'Image') {
+    modelName = 'Image'
+  }
+
+  if (relationOrImageProperty.propertyDef?.dataType === 'Relation') {
+    modelName = relationOrImageProperty.propertyDef!.ref as string
+  }
+
   const seedSchemaUid = await getSchemaUidForModel(
-    relationProperty.propertyDef!.ref as string,
+    modelName!,
   )
 
   let publishPayload: PublishPayload = {
-    localId: relationProperty.localId,
+    localId: relationOrImageProperty.localId,
     seedIsRevocable: true,
     versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
     seedUid: seedUid || ZERO_BYTES32,
@@ -149,7 +167,7 @@ const processRelationProperty = async (
     propertiesToUpdate: [
       {
         publishLocalId: originalSeedLocalId,
-        propertySchemaUid: relationProperty.schemaUid,
+        propertySchemaUid: relationOrImageProperty.schemaUid,
       },
     ],
   }
@@ -185,6 +203,13 @@ const processListProperty = async (
   multiPublishPayload: MultiPublishPayload,
   originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
+
+  if (!listProperty.schemaUid) {
+    throw new Error(
+      `Schema uid not found for list property: ${listProperty.propertyName}`,
+    )
+  }
+
   let value = listProperty.getService().getSnapshot().context.propertyValue
   if (!value || listProperty.uid) {
     return multiPublishPayload
@@ -224,8 +249,18 @@ const processListProperty = async (
 
     const versionUid = getVersionUid(relatedItem)
 
+    let modelName: string
+
+    if (listProperty.propertyDef?.dataType === 'Relation') {
+      modelName = listProperty.propertyDef!.ref as string
+    }
+
+    if (listProperty.propertyDef?.dataType === 'Image') {
+      modelName = 'Image'
+    }
+
     const seedSchemaUid = await getSchemaUidForModel(
-      listProperty.propertyDef!.ref as string,
+      modelName!,
     )
 
     let publishPayload: PublishPayload = {
@@ -304,10 +339,13 @@ export const getPublishPayload = async (
 
   const {
     itemBasicProperties,
-    itemRelationProperties,
     itemListProperties,
     itemUploadProperties,
+    itemImageProperties,
+    itemRelationProperties,
   } = getSegmentedItemProperties(item)
+
+  const relationAndImageProperties = [...itemRelationProperties, ...itemImageProperties]
 
   if (itemUploadProperties.length === 1) {
     const uploadProperty = itemUploadProperties[0]
@@ -322,8 +360,8 @@ export const getPublishPayload = async (
     }
   }
 
-  for (const relationProperty of itemRelationProperties) {
-    multiPublishPayload = await processRelationProperty(
+  for (const relationProperty of relationAndImageProperties) {
+    multiPublishPayload = await processRelationOrImageProperty(
       relationProperty,
       multiPublishPayload,
       uploadedTransactions,

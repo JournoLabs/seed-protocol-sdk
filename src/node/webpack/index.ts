@@ -1,3 +1,9 @@
+// import path from "path";
+// import { fileURLToPath } from "url";
+
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
+
 export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   // If you need to include directories outside of the project root
   // config.module.rules.push({
@@ -26,6 +32,34 @@ export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   // console.log('path-browserify exists:', fs.existsSync(path.resolve(process.cwd(), './node_modules/path-browserify')))
 
   if (!isServer) {
+    // config.plugins.push(
+    //   new webpack.NormalModuleReplacementPlugin(/node:/, (resource: any) => {
+    //     resource.request = resource.request.replace(/^node:/, '')
+    //   }),
+    // )
+    // config.plugins.push(
+    //   new webpack.NormalModuleReplacementPlugin(
+    //     /^(node:)?fs$/,
+    //     (resource: any) => {
+    //       resource.request = '@zenfs/core';
+    //     }
+    //   )
+    // )
+
+    // config.module.rules.push({
+    //   test: /\.js$/,
+    //   exclude: '/node_modules/@seedprotocol/sdk/node', // Exclude the 'node-files' directory
+    //   use: {
+    //     loader: 'babel-loader',
+    //     options: {
+    //       presets: ['next/babel'],
+    //     },
+    //   },
+    // });
+
+
+    // config.resolve.alias['fs/promises'] = '@zenfs/core/promises';
+
     config.resolve.alias['fs'] = '@zenfs/core'
     config.resolve.alias['node:fs'] = '@zenfs/core'
     config.resolve.alias['node:path'] = 'path-browserify'

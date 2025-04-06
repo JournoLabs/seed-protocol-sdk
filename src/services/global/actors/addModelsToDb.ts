@@ -9,7 +9,7 @@ import { FromCallbackInput, GlobalMachineContext } from '@/types'
 import debug from 'debug'
 import { GET_SCHEMAS } from '@/Item/queries'
 
-const logger = debug('app:services:global:actors:addModelsToDb')
+const logger = debug('seedSdk:services:global:actors:addModelsToDb')
 
 export const addModelsToDb = fromCallback<
   EventObject,

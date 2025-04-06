@@ -3,7 +3,7 @@ import { FromCallbackInput, PropertyMachineContext } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
 import debug from 'debug'
 
-const logger = debug('app:ItemProperty:service:actors:waitForDb')
+const logger = debug('seedSdk:ItemProperty:service:actors:waitForDb')
 
 export const waitForDb = fromCallback<
   EventObject,

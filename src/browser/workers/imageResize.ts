@@ -1,5 +1,3 @@
-import path from "path";
-
 type BrowserImageResizerConfigBase = {
 	/**
 	 * Algorithm used for downscaling
@@ -497,8 +495,11 @@ const imageResize = async (filePath: string, width: number, height: number) => {
 }
 
 onmessage = async (e) => {
+  const { filePath, width, height, debug } = e.data
+  if (!debug) {
+    console.log = () => {}
+  }
   console.log('[imageResize] onmessage', e.data)
-  const { filePath, width, height } = e.data
   await imageResize(filePath, width, height)
   console.log(`[imageResize] Done`, filePath)
 }

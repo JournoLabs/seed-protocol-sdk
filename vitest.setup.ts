@@ -10,7 +10,8 @@ export const setup = async () => {
   execSync(`rm -rf ./__tests__/__mocks__/node/project/.seed`, {stdio: 'inherit'})
   execSync(`rm -rf ./__tests__/__mocks__/browser/project/.seed`, {stdio: 'inherit'})
 
-  execSync(`npx tsx ./scripts/bin.ts init ./__tests__/__mocks__/node/project`, {stdio: 'inherit'})
+  // execSync(`npx tsx ./scripts/bin.ts init ./__tests__/__mocks__/node/project`, {stdio: 'inherit'})
+  // execSync(`npx tsx ./scripts/bin.ts init ./__tests__/__mocks__/browser/project`, {stdio: 'inherit'})
 
   console.log('Finished running init script')
 
@@ -23,4 +24,7 @@ export const teardown = async () => {
 
   execSync(`rm -rf ./__tests__/__mocks__/node/project/.seed`, {stdio: 'inherit'})
   execSync(`rm -rf ./__tests__/__mocks__/browser/project/.seed`, {stdio: 'inherit'})
+
+  execSync(`rm -rf ./__tests__/__mocks__/node/project/seed-files`, {stdio: 'inherit'})
+  execSync(`rm -rf ./__tests__/__mocks__/browser/project/seed-files`, {stdio: 'inherit'})
 }

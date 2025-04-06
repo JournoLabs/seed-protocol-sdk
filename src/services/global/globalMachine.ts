@@ -13,10 +13,10 @@ import { eventEmitter } from '@/eventBus'
 import { initialize } from '@/services/global/actors/initialize'
 import { getSchemaForModel } from '@/services/global/actors/getSchemaForModel'
 import { addModelsToDb } from '@/services/global/actors/addModelsToDb'
-import { internalMachine } from '@/services/internal/internalMachine'
 import { itemMachineAll } from '../allItems/itemMachineAll'
 import { publishMachine } from '@/services/publish/publishMachine'
 import { savePublishService } from '@/services/global/actors/savePublishService'
+import { internalMachine } from '../internal/internalMachine'
 
 const {
   UNINITIALIZED,
@@ -204,13 +204,6 @@ const globalMachine = setup({
       tags: ['publishing'],
     },
   },
-  // on: {
-  //   '*': {
-  //     actions: emit(({ event }) => {
-  //       return event
-  //     }),
-  //   },
-  // },
 })
 
 const globalService = createActor(globalMachine, {

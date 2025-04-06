@@ -1,4 +1,4 @@
-import { getGlobalService } from '@/services/global'
+import { getGlobalService } from '@/services/global/globalMachine'
 
 import { saveAppState } from '@/db/write/saveAppState'
 
@@ -20,7 +20,6 @@ export const saveServiceHandler = async (event: SaveServiceEvent) => {
   const service = globalService.getSnapshot().context[nameOfService]
 
   if (!service) {
-    console.log(`[saveServiceHandler] service not found: ${nameOfService}`)
     return
   }
 

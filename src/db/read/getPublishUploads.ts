@@ -1,15 +1,13 @@
 import Transaction from 'arweave'
 import { CreateTransactionInterface } from 'arweave/web'
 import { getArweave } from '@/helpers/ArweaveClient'
-import fs from '@zenfs/core'
-import { getCorrectId } from '@/helpers'
+import { BaseFileManager, getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { getContentHash } from '@/helpers'
 import { BaseItem } from '@/Item/BaseItem'
-
-const logger = debug('app:item:getPublishUploads')
+const logger = debug('seedSdk:item:getPublishUploads')
 
 
 export const prepareArweaveTransaction = async (
@@ -31,6 +29,43 @@ export const prepareArweaveTransaction = async (
 
   return tx
 }
+
+
+const getImageUploads = async (itemImageProperties: IItemProperty<any>[]) => {
+  const uploads: PublishUpload[] = []
+
+  for (const itemImageProperty of itemImageProperties) {
+
+    const filePath = `/files/images/${itemImageProperty.refResolvedValue}`
+
+    if (!filePath) {
+      continue
+    }
+
+    const exists = await BaseFileManager.pathExists(filePath)
+    if (!exists) {
+      continue
+    }
+
+    const fileContents = await BaseFileManager.readFileAsString(filePath)
+
+    const contentHash = await getContentHash(fileContents)
+
+    const transaction = await prepareArweaveTransaction(fileContents, contentHash)
+
+    uploads.push({
+      itemPropertyName: itemImageProperty.propertyName,
+      itemPropertyLocalId: itemImageProperty.localId,
+      seedLocalId: itemImageProperty.seedLocalId!,
+      versionLocalId: itemImageProperty.versionLocalId!,
+      transactionToSign: transaction,
+    })
+  }
+
+  return uploads
+}
+
+
 export type UploadProperty = {
   itemProperty: IItemProperty<any>
   childProperties: IItemProperty<any>[]
@@ -55,7 +90,7 @@ const processUploadProperty = async (
       continue
     }
 
-    const exists = await fs.promises.exists(filePath)
+    const exists = await BaseFileManager.pathExists(filePath)
     if (!exists) {
       continue
     }
@@ -77,15 +112,16 @@ const processUploadProperty = async (
         return uploads
       }
 
-      const exists = await fs.promises.exists(filePath)
+      const exists = await BaseFileManager.pathExists(filePath)
       if (!exists) {
         return uploads
 
       }
 
       try {
-        fileContents = await fs.promises.readFile(filePath)
+        fileContents = await BaseFileManager.readFileAsString(filePath)
       } catch (e) {
+        const fs = await BaseFileManager.getFs()
         fileContents = fs.readFileSync(filePath)
       }
     }
@@ -101,6 +137,8 @@ const processUploadProperty = async (
 
     for (const childUpload of childUploads) {
       let childUploadContents
+
+      const fs = await BaseFileManager.getFs()
 
       try {
         childUploadContents = await fs.promises.readFile(
@@ -126,7 +164,7 @@ const processUploadProperty = async (
     fileContents.byteLength,
   )
 
-  const contentHash = await getContentHash(null, uint8Array)
+  const contentHash = await getContentHash(uint8Array)
 
   transaction = await prepareArweaveTransaction(fileContents, contentHash)
 
@@ -147,6 +185,8 @@ const processUploadProperty = async (
 
   return uploads
 }
+
+
 export type PublishUpload = {
   itemPropertyName: string
   itemPropertyLocalId: string
@@ -168,7 +208,7 @@ export const getPublishUploads = async (
   //   }
   // }
 
-  const { itemUploadProperties, itemRelationProperties } =
+  const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     getSegmentedItemProperties(item)
 
   for (const uploadProperty of itemUploadProperties) {
@@ -178,6 +218,9 @@ export const getPublishUploads = async (
       relatedItemProperty,
     )
   }
+
+  const imageUploads = await getImageUploads(itemImageProperties)
+  uploads.push(...imageUploads)
 
   for (const relationProperty of itemRelationProperties) {
     const propertyValue = relationProperty.getService().getSnapshot()

@@ -51,7 +51,9 @@ export const clientManagerMachine = setup({
           }),
         },
         setAddresses: {
-          actions: ['setAddresses'],
+          actions: [
+            {type: 'setAddresses'}
+          ],
         },
       },
     },

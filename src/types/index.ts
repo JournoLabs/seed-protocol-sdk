@@ -1,6 +1,5 @@
 
 import { ModelClassType } from './model'
-import { PropertyType } from './property'
 
 export * from './db'
 export * from './model'

@@ -48,7 +48,7 @@ export const analyzeInput = fromCallback<
 
     if (
       propertyRecordSchema.refValueType &&
-      propertyRecordSchema.refValueType !== 'ImageSrc' &&
+      propertyRecordSchema.refValueType !== 'Image' &&
       propertyRecordSchema.dataType === 'Relation'
     ) {
       sendBack({
@@ -59,11 +59,11 @@ export const analyzeInput = fromCallback<
     }
 
     if (
-      propertyRecordSchema.refValueType === 'ImageSrc' ||
-      propertyRecordSchema.dataType === 'ImageSrc'
+      propertyRecordSchema.refValueType === 'Image' ||
+      propertyRecordSchema.dataType === 'Image'
     ) {
       sendBack({
-        type: 'saveImageSrc',
+        type: 'saveImage',
         newValue,
       })
       return false

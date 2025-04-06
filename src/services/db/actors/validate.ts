@@ -1,10 +1,10 @@
 import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types/machines'
-import fs from '@zenfs/core'
 import {
   DB_VALIDATING_SUCCESS,
   DB_VALIDATING_WAIT,
 } from '@/services/internal/constants'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 export const validate = fromCallback<
   EventObject,
@@ -24,7 +24,10 @@ export const validate = fromCallback<
     let exists = false
 
     for (const path of pathsToCheck) {
-      exists = await fs.promises.exists(path)
+      if (!path) {
+        continue
+      }
+      exists = await BaseFileManager.pathExists(path)
       if (!exists) {
         sendBack({
           type: DB_VALIDATING_WAIT,

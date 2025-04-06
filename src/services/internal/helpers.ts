@@ -1,11 +1,9 @@
-import fs from '@zenfs/core'
 import path from 'path'
 import { Endpoints } from '@/types'
-import { BROWSER_FS_TOP_DIR } from '@/services/internal/constants'
 import debug from 'debug'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
-const logger = debug('app:services:internal:helpers')
+const logger = debug('seedSdk:services:internal:helpers')
 
 /**
  * Recursively create directories if they don't exist.
@@ -17,7 +15,7 @@ export const createDirectories = async (dirPath: string) => {
     return
   }
 
-  const parentDir = path.dirname(dirPath)
+  const parentDir = BaseFileManager.getParentDirPath(dirPath)
   let parentDirExists = await BaseFileManager.pathExists(parentDir)
   if (!parentDirExists) {
     await createDirectories(parentDir)
@@ -118,11 +116,11 @@ class FileDownloadManager {
         console.error(`No file data from ${url}`)
         return
       }
-      const localDirPath = path.dirname(localFilePath)
+      const localDirPath = BaseFileManager.getParentDirPath(localFilePath)
   
       await createDirectories(localDirPath)
   
-      const filename = path.basename(localFilePath)
+      const filename = BaseFileManager.getFilenameFromPath(localFilePath)
   
       const regex = /(\d+)[\w_]+\.(sql|json)$/
   
@@ -135,6 +133,7 @@ class FileDownloadManager {
       }
   
       if (migrationNumber) {
+        const fs = await BaseFileManager.getFs()
         const filesInDir = await fs.promises.readdir(localDirPath)
         for (const file of filesInDir) {
           if (file === filename) {
@@ -156,10 +155,11 @@ class FileDownloadManager {
       }
   
       try {
-  
+        const fs = await BaseFileManager.getFs()
         await fs.promises.writeFile(localFilePath, fileData)
         logger(`[downloadFile] Wrote file async to ${localFilePath}`)
       } catch (error) {
+        const fs = await BaseFileManager.getFs()
         fs.writeFileSync(localFilePath, fileData)
         logger(`[downloadFile] Wrote file sync to ${localFilePath}`)
       }
@@ -186,7 +186,7 @@ class FileDownloadManager {
                     success = true;
                     break; // Move to next file
                 } catch (error) {
-                    console.error(`Error downloading ${fileUrl}:`, error);
+                    logger(`Error downloading ${fileUrl}:`, error);
                     this.filesToDownload.set(fileUrl, attempts + 1);
                 }
             }
@@ -249,6 +249,7 @@ export const confirmFilesExist = async (filePaths: string[]) => {
   let everythingDownloaded = false
 
   for (const filePath of filePaths) {
+    const fs = await BaseFileManager.getFs()
     everythingDownloaded = await fs.promises.exists(filePath)
   }
 

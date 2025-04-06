@@ -1,4 +1,4 @@
-import { EventObject, fromCallback, Subscription } from 'xstate'
+import { EventObject, fromCallback, Subscription, waitFor } from 'xstate'
 import { getEnvironment } from '@/helpers/environment'
 import {
   GLOBAL_INITIALIZING_CREATE_ALL_ITEMS_SERVICES,
@@ -12,7 +12,7 @@ import { appState } from '@/seedSchema'
 import { like } from 'drizzle-orm'
 import { fetchSchemaUids } from '@/stores/eas'
 
-const logger = debug('app:services:global:actors:initialize')
+const logger = debug('seedSdk:services:global:actors:initialize')
 
 export const initialize = fromCallback<
   EventObject,
@@ -28,33 +28,21 @@ export const initialize = fromCallback<
     throw new Error('models is required')
   }
 
-  let environment = getEnvironment()
-
-  let internalSubscription: Subscription | undefined
+  const environment = getEnvironment()
   let easSubscription: Subscription | undefined
 
-  const _initFileSystem = async (): Promise<void> => {
-    return
-    // return new Promise((resolve) => {
-    // })
-  }
-
   const _initInternal = async (): Promise<void> => {
-    return new Promise((resolve) => {
-      internalSubscription = internalService.subscribe((snapshot) => {
-        logger('[sdk] [internal] snapshot.value', snapshot.value)
-        if (snapshot.value === 'ready') {
-          resolve()
-        }
-      })
-      logger('[sdk] [internal] sending init')
-      internalService.send({
-        type: 'init',
-        endpoints,
-        addresses,
-        arweaveDomain,
-      })
+    internalService.send({
+      type: 'init',
+      endpoints,
+      addresses,
+      arweaveDomain,
     })
+    await waitFor(internalService, (snapshot) => {
+      logger('snapshot.value:', snapshot.value)
+      return snapshot.value === 'ready'
+    })
+    logger('[sdk] [internal] sending init')
   }
 
   const _initAllItemsServices = async (): Promise<void> => {
@@ -65,7 +53,10 @@ export const initialize = fromCallback<
       .from(appState)
       .where(like(appState.key, 'snapshot__%'))
 
-    const payloadObj = {
+    const payloadObj: {
+      create: Record<string, any>,
+      restore: Record<string, any>,
+    } = {
       create: {},
       restore: {},
     }
@@ -94,10 +85,6 @@ export const initialize = fromCallback<
     await fetchSchemaUids()
   }
 
-  _initFileSystem().then(() => {
-    logger('[global/actors] File system initialized')
-  })
-
   _initInternal()
     .then(() => {
       return _initAllItemsServices()
@@ -108,17 +95,12 @@ export const initialize = fromCallback<
     .then(() => {
       logger('[global/actors] Internal initialized')
       sendBack({ type: GLOBAL_INITIALIZING_INTERNAL_SERVICE_READY })
-      internalSubscription?.unsubscribe()
     })
 
-  // _initEas().then(() => {
-  //   logger('EAS initialized')
-  // })
 
   sendBack({ type: GLOBAL_INITIALIZING_SEND_CONFIG, environment })
 
   return () => {
-    internalSubscription?.unsubscribe()
     easSubscription?.unsubscribe()
   }
 })

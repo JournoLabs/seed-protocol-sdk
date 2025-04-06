@@ -57,7 +57,7 @@ export const tsToProto: TsToProto = ({
           case 'Text':
             type.add(new Field(propName, type.fieldsArray.length + 1, 'string'))
             break
-          case 'ImageSrc':
+          case 'Image':
             type.add(new Field(propName, type.fieldsArray.length + 1, 'string'))
             break
           case 'Relation':

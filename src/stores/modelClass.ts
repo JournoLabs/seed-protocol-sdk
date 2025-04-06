@@ -2,6 +2,7 @@ import { ModelClassType } from '@/types'
 
 const modelStore = new Map<string, ModelClassType>()
 
+
 export const getModels = (): Record<string, ModelClassType> => {
   return Object.fromEntries(modelStore)
 }

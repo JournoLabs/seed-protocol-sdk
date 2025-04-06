@@ -1,10 +1,7 @@
 import { describe, it, beforeAll, afterAll } from 'vitest'
-import { drizzle } from 'drizzle-orm/libsql/node'
-import appDbConfig from '../../src/db/configs/node.app.db.config'
 
 
 describe('Drizzle ORM with better-sqlite3', () => {
-  let db: ReturnType<typeof drizzle>
 
   beforeAll(() => {
 

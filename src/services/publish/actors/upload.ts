@@ -4,7 +4,7 @@ import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import { getCorrectId } from '@/helpers'
 
-const logger = debug('app:services:publish:actors:upload')
+const logger = debug('seedSdk:services:publish:actors:upload')
 
 type UploadItem = {
   sourceFilePath: string
@@ -49,7 +49,7 @@ export const upload = fromCallback<
 
       if (
         editedProperty.propertyDef.refValueType &&
-        editedProperty.propertyDef.refValueType === 'ImageSrc'
+        editedProperty.propertyDef.refValueType === 'Image'
       ) {
         const context = editedProperty.getService().getSnapshot().context
         const imageSeedId = context.propertyValue

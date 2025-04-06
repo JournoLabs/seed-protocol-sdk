@@ -1,88 +1,92 @@
-import { SqliteConnectionManager } from '@/services/db'
-import {
-  SqliteRemoteDatabase,
-  SqliteRemoteResult,
-} from 'drizzle-orm/sqlite-proxy'
-import { sql } from 'drizzle-orm'
+// // import { SqliteConnectionManager } from '@/services/db/connectionManager'
+// import {
+//   SqliteRemoteDatabase,
+//   SqliteRemoteResult,
+// } from 'drizzle-orm/sqlite-proxy'
+// import { sql } from 'drizzle-orm'
+// import debug from 'debug'
+// import { sqlite3Worker1Promiser } from '@sqlite.org/sqlite-wasm'
+// import { DB_NAME_APP } from '@/services/internal/constants'
 
-let sqlite3InitModule: any
-let sqliteWasmClient: any
-let manager: SqliteConnectionManager | undefined
-let isPreparing = false
+// const logger = debug('seedSdk:browser:db:sqlWasmClient')
 
-export const setSqliteWasmClient = (client: any) => {
-  sqliteWasmClient = client
-}
+// let sqliteWasmClient: any
+// let appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
 
-export const getSqliteWasmClient = async () => {
-  if (sqliteWasmClient) {
-    return sqliteWasmClient
-  }
-  if (typeof window === 'undefined') {
-    throw new Error('validateInput called from non-browser context')
-  }
+// let dbId: string | undefined
+// let filesDir: string | undefined
+// let pathToDb: string | undefined
 
-  if (isPreparing) {
-    return
-  }
+// // export const setSqliteWasmClient = (client: any) => {
+// //   sqliteWasmClient = client
+// // }
 
-  isPreparing = true
+// export const initSqliteWasmClient = async (filesDirExternal: string) => {
+//   if (sqliteWasmClient) {
+//     return dbId
+//   }
 
-  if (!sqlite3InitModule) {
-    sqlite3InitModule = await import('@sqlite.org/sqlite-wasm')
-  }
+//   filesDir = filesDirExternal
 
-  if (!window.sqlite3Worker1Promiser) {
-    await sqlite3InitModule()
-  }
+//   const promiser = await new Promise<(event: string, config: Record<string, unknown>) => Promise<any>>((resolve) => {
+//     const _promiser = sqlite3Worker1Promiser({
+//       onready: () => {
+//         resolve(_promiser);
+//       },
+//     });
+//   });
 
-  if (!window.sqlite3Worker1Promiser) {
-    console.error('window.sqlite3Worker1Promiser not found')
-    isPreparing = false
-    return
-  }
+//   if (!promiser) {
+//     throw new Error('Failed to create promiser')
+//   }
 
-  try {
-    sqliteWasmClient = await window.sqlite3Worker1Promiser.v2().catch((err) => {
-      console.error('Error initializing sqliteWasmClient:', err)
-      isPreparing = false
-    })
-  } catch (err) {
-    console.error('Error initializing sqliteWasmClient:', err)
-    isPreparing = false
-  }
-  return sqliteWasmClient
-}
+//   sqliteWasmClient = promiser
 
-export const getManager = () => {
-  return manager
-}
+//   const responseGet = await sqliteWasmClient('config-get', {});
 
-export const setManager = (m: any) => {
-  manager = m
-}
-let appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
-export const setAppDb = (db: SqliteRemoteDatabase<Record<string, unknown>>) => {
-  appDb = db
-}
-export const getAppDb = () => {
-  if (!appDb) {
-    throw new Error('getAppDb: appDb is undefined')
-  }
+//   logger('[Db.prepareDb] Running SQLite3 version', responseGet.result.version.libVersion);
 
-  return appDb
-}
-export const isAppDbReady = () => {
-  return !!appDb
-}
-type RunQueryForStatement = (
-  statement: string,
-) => Promise<SqliteRemoteResult<unknown>>
+//   const responseOpen = await sqliteWasmClient('open', {
+//     filename: `file:${filesDir}/db/${DB_NAME_APP}.sqlite3?vfs=opfs`,
+//   });
+//   const { dbId: dbIdFromOpen } = responseOpen;
+//   logger(
+//     '[Db.prepareDb] OPFS is available, created persisted database at',
+//     responseOpen.result.filename.replace(/^file:(.*?)\?vfs=opfs/, '$1'),
+//   );
 
-export const runQueryForStatement: RunQueryForStatement = async (
-  statement: string,
-) => {
-  const appDb = getAppDb()
+//   logger('[Db.prepareDb] dbId', dbId)  
 
-  return appDb.run(sql.raw(statement))
-}
+//   dbId = dbIdFromOpen
+
+//   return dbId
+// }
+
+// export const getSqliteWasmClient = () => {
+//   return sqliteWasmClient
+// }
+
+// export const setAppDb = (db: SqliteRemoteDatabase<Record<string, unknown>>) => {
+//   appDb = db
+// }
+// export const getAppDb = () => {
+//   if (!appDb) {
+//     throw new Error('getAppDb: appDb is undefined')
+//   }
+
+//   return appDb
+// }
+// export const isAppDbReady = () => {
+//   return !!appDb
+// }
+// type RunQueryForStatement = (
+//   statement: string,
+// ) => Promise<SqliteRemoteResult<unknown>>
+
+// export const runQueryForStatement: RunQueryForStatement = async (
+//   statement: string,
+// ) => {
+//   const appDb = getAppDb()
+
+//   return appDb.run(sql.raw(statement))
+// }

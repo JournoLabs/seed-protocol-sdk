@@ -4,11 +4,13 @@ import {
   BROWSER_FS_TOP_DIR,
   DB_CHECK_STATUS_EXISTS,
   DB_CHECK_STATUS_UPDATE_PATHS,
+  DB_CHECK_STATUS_DOES_NOT_EXIST,
 } from '@/services/internal/constants'
 import debug from 'debug'
 import { isBrowser } from '@/helpers/environment'
+import { BaseFileManager } from '@/helpers'
 
-const logger = debug('app:services:db:actors:checkStatus')
+const logger = debug('seedSdk:services:db:actors:checkStatus')
 
 export const checkStatus = fromCallback<
   EventObject,
@@ -19,8 +21,6 @@ export const checkStatus = fromCallback<
 
 
   logger('[db/actors] checkStatus context', context)
-  console.log('[db/actors] checkStatus context', context)
-  console.log('[db/actors] checkStatus event', event)
   if (isBrowser()) {
     pathToDir = BROWSER_FS_TOP_DIR
   }
@@ -35,23 +35,19 @@ export const checkStatus = fromCallback<
   })
 
   const _checkStatus = async (): Promise<void> => {
-    // logger('[db/actors] _checkStatus pathToDb', pathToDb)
-    // const exists = await fs.promises.exists(pathToJournal)
-    // if (exists) {
-    //   sendBack({
-    //     type: DB_CHECK_STATUS_EXISTS,
-    //   })
-    //   return
-    // }
-    //
-    // return new Promise((resolve) => {
-    //   sendBack({ type: DB_CHECK_STATUS_DOES_NOT_EXIST })
-    //
-    // })
+    logger('[db/actors] _checkStatus pathToDb', pathToDb)
+    const exists = await BaseFileManager.pathExists(pathToDb)
+    if (exists) {
+      sendBack({
+        type: DB_CHECK_STATUS_EXISTS,
+      })
+      return
+    }
+    
+    sendBack({ type: DB_CHECK_STATUS_DOES_NOT_EXIST })
   }
 
   _checkStatus().then(() => {
-    sendBack({ type: DB_CHECK_STATUS_EXISTS })
     return
   })
 })

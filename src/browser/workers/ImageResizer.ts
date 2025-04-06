@@ -1,7 +1,8 @@
-import fs from '@zenfs/core';
 import imageResize from './imageResize'
-import { FileManager } from '@/browser/helpers/FileManager';
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
+import debug from 'debug'
 
+const logger = debug('seedSdk:browser:workers:ImageResizer')
 
 
 export class ImageResizer {
@@ -22,7 +23,7 @@ export class ImageResizer {
     if (this.workersArchive.has(filePath)) {
       const savedWorker = this.workersArchive.get(filePath)
       savedWorker?.terminate()
-      console.log('[ImageResizer.resize] Terminated worker for filePath due to incoming request', filePath)
+      logger('[ImageResizer.resize] Terminated worker for filePath due to incoming request', filePath)
       this.workersArchive.delete(filePath)
     }
 
@@ -32,11 +33,11 @@ export class ImageResizer {
 
     return new Promise((resolve, reject) => {
       worker.onmessage = (e) => {
-        console.log('[ImageResizer.resize] main thread onmessage', e.data);
+        logger('[ImageResizer.resize] main thread onmessage', e.data);
         if (e.data.done) {
           const savedWorker = this.workersArchive.get(filePath)
           savedWorker?.terminate()
-          console.log('[ImageResizer.resize] Terminated worker for filePath due to done', filePath)
+          logger('[ImageResizer.resize] Terminated worker for filePath due to done', filePath)
           this.workersArchive.delete(filePath)
           resolve(e.data)
         }
@@ -50,11 +51,14 @@ export class ImageResizer {
         filePath,
         width,
         height,
+        debug: logger.enabled,
       });
     })
   }
 
   public async resizeAll({width, height}: ResizeAllImagesParams) {
+
+    const fs = await BaseFileManager.getFs()
 
     const imageDir = '/files/images'
     let imageFilesStats = await fs.promises.readdir(imageDir, {
@@ -67,10 +71,10 @@ export class ImageResizer {
 
     const widthDir = `${imageDir}/${width}`
 
-    await FileManager.createDirIfNotExists(widthDir)
+    await BaseFileManager.createDirIfNotExists(widthDir)
 
     for (const imageFile of imageFiles) {
-      const resizedImageExists = await fs.promises.exists(`${widthDir}/${imageFile}`)
+      const resizedImageExists = await BaseFileManager.pathExists(`${widthDir}/${imageFile}`)
       if (!resizedImageExists) {
         await this.resize({filePath: `${imageDir}/${imageFile}`, width, height})
       }

@@ -3,8 +3,8 @@ import { fetchAllFilesMachine } from '@/schema/file/fetchAll/index'
 import { ARWEAVE_HOST } from '@/services/internal/constants'
 import { GET_FILES_METADATA } from '@/schema/file/queries'
 import { getArweave } from '@/helpers/ArweaveClient'
-import fs from '@zenfs/core'
 import {
+  BaseFileManager,
   getDataTypeFromString,
   getMimeType,
   identifyString,
@@ -17,7 +17,7 @@ import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { saveAppState } from '@/db/write/saveAppState'
 
-const logger = debug('app:file:actors:fetchAll')
+const logger = debug('seedSdk:file:actors:fetchAll')
 
 type FileType = {
   mimeType: string
@@ -80,6 +80,8 @@ export const fetchAllBinaryData = fromCallback<
   const { filesMetadata, addresses } = context
 
   const _fetchAllBinaryData = async () => {
+    const fs = await BaseFileManager.getFs()
+
     if (!(await fs.promises.exists('/files'))) {
       await fs.promises.mkdir('/files', { recursive: true })
     }
@@ -176,13 +178,13 @@ export const fetchAllBinaryData = fromCallback<
         // if (dataUint8Array && dataUint8Array instanceof Uint8Array) {
         // }
 
-        let contentType = identifyString(dataString)
+        let contentType = identifyString(dataString as string)
         if (
           contentType !== 'json' &&
           contentType !== 'base64' &&
           contentType !== 'html'
         ) {
-          const possibleImageType = getDataTypeFromString(dataString)
+          const possibleImageType = getDataTypeFromString(dataString as string)
           if (!possibleImageType) {
             logger(
               `[fetchAll/actors] [fetchAllBinaryData] transaction ${transactionId} data not in expected format: ${possibleImageType}`,
