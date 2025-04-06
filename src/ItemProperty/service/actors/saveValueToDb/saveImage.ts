@@ -8,15 +8,12 @@ import {
 import { createSeed } from '@/db/write/createSeed'
 import { getDataTypeFromString, getMimeType } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
-import fs from '@zenfs/core'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { getSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { eventEmitter } from '@/eventBus'
 import { ImageSize } from '@/helpers/constants'
-
 
 
 const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
@@ -54,7 +51,7 @@ const fetchImage = async (url: string) => {
 
 let imageSchemaUid: string | undefined
 
-export const saveImageSrc = fromCallback<
+export const saveImage = fromCallback<
   EventObject,
   FromCallbackInput<PropertyMachineContext, SaveValueToDbEvent>
 >(({ sendBack, input: { context, event } }) => {
@@ -83,7 +80,7 @@ export const saveImageSrc = fromCallback<
     return
   }
 
-  const _saveImageSrc = async (): Promise<void> => {
+  const _saveImage = async (): Promise<void> => {
     let propertyName = propertyNameRaw
 
     if (!propertyNameRaw.endsWith('Id')) {
@@ -152,6 +149,7 @@ export const saveImageSrc = fromCallback<
       try {
         await BaseFileManager.saveFile(filePath, new Uint8Array(fileData))
       } catch (e) {
+        const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, new Uint8Array(fileData))
         eventEmitter.emit('file-saved', filePath)
       }
@@ -161,6 +159,7 @@ export const saveImageSrc = fromCallback<
       try {
         await BaseFileManager.saveFile(filePath, fileData)
       } catch (e) {
+        const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, fileData)
         eventEmitter.emit('file-saved', filePath)
       }
@@ -236,7 +235,7 @@ export const saveImageSrc = fromCallback<
     })
   }
 
-  _saveImageSrc().then(() => {
-    sendBack({ type: 'saveImageSrcSuccess' })
+  _saveImage().then(() => {
+    sendBack({ type: 'saveImageSuccess' })
   })
 })

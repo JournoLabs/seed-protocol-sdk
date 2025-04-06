@@ -2,7 +2,7 @@ import { ActorRefFrom, Subscription } from 'xstate';
 import { BehaviorSubject } from 'rxjs';
 import { Static } from '@sinclair/typebox';
 import { TProperty } from '@/schema';
-import { CreatePropertyInstanceProps } from '@/types';
+import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty';
 
 export interface IItemProperty<PropertyType> {
 
@@ -15,6 +15,7 @@ export interface IItemProperty<PropertyType> {
   readonly modelName: string;
   readonly propertyDef: Static<typeof TProperty> | undefined;
   readonly localStoragePath: string | void;
+  readonly localStorageDir: string | void;
   readonly versionLocalId: string | undefined;
   readonly status: any;
   readonly alias: string | undefined;
@@ -25,4 +26,9 @@ export interface IItemProperty<PropertyType> {
   save(): Promise<void>;
   unload(): void;
   getService(): ActorRefFrom<any>;
+  find(props: {
+    propertyName: string;
+    seedLocalId?: string;
+    seedUid?: string;
+  }): Promise<BaseItemProperty<any> | undefined>;
 } 

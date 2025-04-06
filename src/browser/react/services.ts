@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ActorRef } from 'xstate'
+import { ActorRef, InspectedEventEvent } from 'xstate'
 import { orderBy } from 'lodash-es'
 import { produce } from 'immer'
 import { eventEmitter } from '@/eventBus'
 import pluralize from 'pluralize'
-import { getGlobalService } from '@/services/global'
+import { getGlobalService } from '@/services/global/globalMachine'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
 import { appState } from '@/seedSchema'
@@ -12,7 +12,7 @@ import { like } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { MachineIds } from '@/services/internal/constants'
 
-const logger = debug('app:react:services')
+const logger = debug('seedSdk:react:services')
 
 const finalStrings = ['idle', 'ready', 'done', 'success', 'initialized']
 
@@ -51,7 +51,7 @@ export const getServiceValue = (
 }
 
 export const getServiceUniqueKey = (service: ActorRef<any, any>) => {
-  if (!service || !service.logic || !service.logic.config) {
+  if (!service || !service.logic || !service.logic.config || !service._snapshot) {
     return
   }
   const config = service.logic.config
@@ -175,7 +175,7 @@ export const usePersistedSnapshots = () => {
   const save = useCallback(async () => {
     for (const actor of services) {
       const uniqueKey = getServiceUniqueKey(actor)
-      console.log(
+      logger(
         `would save to db with snapshot__${uniqueKey}:`,
         JSON.stringify(actor.getPersistedSnapshot()),
       )
@@ -207,7 +207,7 @@ export const usePersistedSnapshots = () => {
     }
     const initialize = async () => {
       const persistedSnapshots = await load()
-      console.log('persistedSnapshots:', persistedSnapshots)
+      logger('persistedSnapshots:', persistedSnapshots)
       setInitialized(true)
     }
 
@@ -253,47 +253,51 @@ export const useServices = () => {
   const actorsMap = new Map<string, ActorRef<any, any>>()
 
   useEffect(() => {
-    const globalServiceListener = (event) => {
-      if (event && event.type === 'init') {
+    const globalServiceListener = (eventObj: InspectedEventEvent) => {
+      if (eventObj && eventObj.event && eventObj.event.type === 'init') {
         return
       }
       if (
-        event.actorRef &&
-        event.actorRef.logic &&
-        event.actorRef.logic.config
+        !eventObj || 
+        !eventObj.actorRef || 
+        !eventObj.actorRef.logic || 
+        !eventObj.actorRef.logic.config ||
+        !eventObj.actorRef._snapshot
       ) {
-        const service = event.actorRef
-        const services = [service]
+        return
+      }
+      
+      const service = eventObj.actorRef
+      const services = [service]
 
-        if (service.logic.config.id === MachineIds.GLOBAL) {
-          const context = service.getSnapshot().context
-          const keys = Object.keys(context)
-          for (const key of keys) {
-            if (!key.startsWith('internal') && key.endsWith('Service')) {
-              const allItemsService = context[key]
-              services.push(allItemsService)
-            }
+      if (service.logic.config.id === MachineIds.GLOBAL) {
+        const context = service.getSnapshot().context
+        const keys = Object.keys(context)
+        for (const key of keys) {
+          if (!key.startsWith('internal') && key.endsWith('Service')) {
+            const allItemsService = context[key]
+            services.push(allItemsService)
           }
         }
-
-        services.forEach((innerService) => {
-          const uniqueKey = getServiceUniqueKey(innerService)
-          if (!uniqueKey) {
-            return
-          }
-          innerService.uniqueKey = uniqueKey
-          actorsMap.set(uniqueKey, innerService)
-        })
-
-        let actorsArray = Array.from(actorsMap.values())
-        actorsArray = orderBy(actorsArray, (a) => a.logic.config.id, ['asc'])
-
-        setActors(
-          produce(actors, (draft) => {
-            return actorsArray
-          }),
-        )
       }
+
+      services.forEach((innerService) => {
+        const uniqueKey = getServiceUniqueKey(innerService)
+        if (!uniqueKey) {
+          return
+        }
+        innerService.uniqueKey = uniqueKey
+        actorsMap.set(uniqueKey, innerService)
+      })
+
+      let actorsArray = Array.from(actorsMap.values())
+      actorsArray = orderBy(actorsArray, (a) => a.logic.config.id, ['asc'])
+
+      setActors(
+        produce(actors, (draft) => {
+          return actorsArray
+        }),
+      )
     }
 
     eventEmitter.addListener('inspect.globalService', globalServiceListener)

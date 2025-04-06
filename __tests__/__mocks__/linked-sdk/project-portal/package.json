@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@seedprotocol/sdk": "portal:../seed-protocol-sdk"
+  }
+}

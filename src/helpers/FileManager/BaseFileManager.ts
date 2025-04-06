@@ -57,4 +57,24 @@ export abstract class BaseFileManager {
   static async readFile(filePath: string): Promise<File> {
     return this.PlatformClass.readFile(filePath)
   }
+
+  static async readFileAsBuffer(filePath: string): Promise<Buffer> {
+    return this.PlatformClass.readFileAsBuffer(filePath)
+  }
+
+  static async readFileAsString(filePath: string): Promise<string> {
+    return this.PlatformClass.readFileAsString(filePath)
+  }
+
+  static async getFs(): Promise<any> {
+    return this.PlatformClass.getFs()
+  }
+
+  static getParentDirPath(filePath: string): string {
+    return this.PlatformClass.getParentDirPath(filePath)
+  }
+
+  static getFilenameFromPath(filePath: string): string {
+    return this.PlatformClass.getFilenameFromPath(filePath)
+  }
 }

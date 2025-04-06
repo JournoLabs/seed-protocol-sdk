@@ -1,4 +1,3 @@
-
 export default `(
   ${
     function () {
@@ -310,6 +309,10 @@ const downloadFiles = async ({
 }
 
 onmessage = async (e) => {
+  const { debug } = e.data
+  if (!debug) {
+    console.log = () => {}
+  }
   console.log({
     message: 'filesDownload onmessage',
     data: e.data,

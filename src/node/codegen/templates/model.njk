@@ -1,0 +1,14 @@
+@Model
+class {{ modelName }} {
+  {% for property in properties -%}
+  {% if property.type == 'Relation' -%}
+  @Relation('{{ property.targetModel }}') {{ property.name }}!: {{ property.type | seedTypeToJsType }}
+  {% elif property.type == 'List' -%}
+  @List('{{ property.targetModel or property.ref }}') {{ property.name }}!: {{ property.type | seedTypeToJsType }}
+  {% elif property.type == 'File' -%}
+  @File('{{ property.storageType }}', '{{ property.storagePath }}') {{ property.name }}!: {{ property.type | seedTypeToJsType }}
+  {% else -%}
+  @{{ property.type }}() {{ property.name }}!: {{ property.type | seedTypeToJsType }}
+  {% endif -%}
+  {% endfor -%}
+}

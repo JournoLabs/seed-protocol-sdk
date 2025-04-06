@@ -1,0 +1,47 @@
+{
+  "name": "TestModel",
+  "properties": [
+    {
+      "type": "Text",
+      "name": "name"
+    },
+    {
+      "type": "Date",
+      "name": "birthdate"
+    },
+    {
+      "type": "Number",
+      "name": "age"
+    },
+    {
+      "type": "Boolean",
+      "name": "isAlive"
+    },
+    {
+      "type": "List",
+      "name": "nicknames",
+      "ref": "Text"
+    },
+    {
+      "type": "Relation",
+      "name": "bestFriend",
+      "targetModel": "TestModel"
+    },
+    {
+      "type": "List",
+      "name": "friends",
+      "targetModel": "TestModel"
+    },
+    {
+      "type": "Image",
+      "name": "profilePic"
+    },
+    {
+      "type": "File",
+      "name": "resume",
+      "storageType": "ItemStorage",
+      "storagePath": "/resumes"
+    }
+  ]
+}
+

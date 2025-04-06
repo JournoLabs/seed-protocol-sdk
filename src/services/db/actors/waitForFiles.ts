@@ -2,10 +2,9 @@ import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types'
 import { DB_WAITING_FOR_FILES_RECEIVED } from '@/services/internal/constants'
 import debug from 'debug'
-import fs from '@zenfs/core'
 import { isBrowser } from '@/helpers/environment'
-
-const logger = debug('app:services:db:actors:waitForFiles')
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+const logger = debug('seedSdk:services:db:actors:waitForFiles')
 
 export const waitForFiles = fromCallback<
   EventObject,
@@ -22,7 +21,7 @@ export const waitForFiles = fromCallback<
   const _waitForFiles = async (): Promise<void> => {
     return new Promise((resolve) => {
       const interval = setInterval(async () => {
-        const journalExists = await fs.promises.exists(
+        const journalExists = await BaseFileManager.pathExists(
           `${pathToDbDir}/meta/_journal.json`,
         )
         if (journalExists) {

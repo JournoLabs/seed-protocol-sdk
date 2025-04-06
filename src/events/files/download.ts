@@ -1,6 +1,5 @@
 import { syncDbFiles } from '@/services/internal/helpers'
 import { eventEmitter } from '@/eventBus'
-import fs from '@zenfs/core'
 import { ARWEAVE_HOST } from '@/services/internal/constants'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
@@ -10,7 +9,7 @@ import {
 } from '@/helpers'
 import { GET_FILES_METADATA } from '@/schema/file/queries'
 import debug from 'debug'
-import { getGlobalService } from '@/services'
+import { getGlobalService } from '@/services/global/globalMachine'
 import { waitFor } from 'xstate'
 import { getMetadata } from '@/db/read/getMetadata'
 import { saveMetadata } from '@/db/write/saveMetadata'
@@ -22,7 +21,7 @@ import { getArweave } from '@/helpers/ArweaveClient'
 import { isBrowser } from '@/helpers/environment'
 
 
-const logger = debug('app:files:download')
+const logger = debug('seedSdk:files:download')
 
 
 export const downloadAllFilesRequestHandler = async ({
@@ -192,8 +191,6 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
       logger(error)
     }
   }
-
-  console.log('[download] Calling downloadAllFiles with transactionIdsToDownload', transactionIdsToDownload)
 
   await BaseFileManager.downloadAllFiles({
     transactionIds: transactionIdsToDownload,

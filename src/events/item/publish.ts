@@ -1,4 +1,4 @@
-import { getGlobalService } from '@/services/global'
+import { getGlobalService } from '@/services/global/globalMachine'
 
 type PublishItemRequestEvent = {
   seedLocalId: string

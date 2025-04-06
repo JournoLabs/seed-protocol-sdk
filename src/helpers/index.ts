@@ -1,15 +1,15 @@
 import { customAlphabet } from 'nanoid'
+import { Message, sha3_256, }             from 'js-sha3'
 import * as nanoIdDictionary from 'nanoid-dictionary'
-import fs from '@zenfs/core'
 import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
-
+import { BaseFileManager } from './FileManager/BaseFileManager'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
-const logger = debug('app:shared:helpers')
+const logger = debug('seedSdk:shared:helpers')
 
 
 const { alphanumeric } = nanoIdDictionary
@@ -109,16 +109,18 @@ export const getDataTypeFromString = (
   return null
 }
 
-export const convertTxIdToImageSrc = async (
+export const convertTxIdToImage = async (
   txId: string,
 ): Promise<string | undefined> => {
   const imageFilePath = `/files/images/${txId}`
-  const fileExists = await fs.promises.exists(imageFilePath)
+  const fileExists = await BaseFileManager.pathExists(imageFilePath)
   if (!fileExists) {
-    logger(`[ItemView] [updateImageSrc] ${imageFilePath} does not exist`)
+    logger(`[ItemView] [updateImage] ${imageFilePath} does not exist`)
     return
   }
-  const uint = await fs.promises.readFile(imageFilePath)
+  const buffer = await BaseFileManager.readFileAsBuffer(imageFilePath)
+
+  const uint = new Uint8Array(buffer)
 
   const imageBlob = new Blob([uint])
 
@@ -154,27 +156,33 @@ export const parseEasRelationPropertyName = (easPropertyName: string) => {
 }
 
 export const getContentHash = async (
-  base64: string | null | undefined,
-  uint: Uint8Array | undefined,
+  data: Message
 ): Promise<string> => {
-  let data
-
-  if (base64 && !uint) {
-    const encoder = new TextEncoder()
-    data = encoder.encode(base64)
-  }
-
-  if (uint) {
-    data = uint
-  }
-
-  // Hash the data with SHA-256
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data as Uint8Array)
-
-  // Convert the ArrayBuffer to a hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+  return sha3_256(data)
 }
+
+// export const getContentHash = async (
+//   base64: string | null | undefined,
+//   uint: Uint8Array | undefined,
+// ): Promise<string> => {
+//   let data
+
+//   if (base64 && !uint) {
+//     const encoder = new TextEncoder()
+//     data = encoder.encode(base64)
+//   }
+
+//   if (uint) {
+//     data = uint
+//   }
+
+//   // Hash the data with SHA-256
+//   const hashBuffer = await crypto.subtle.digest('SHA-256', data as Uint8Array)
+
+//   // Convert the ArrayBuffer to a hex string
+//   const hashArray = Array.from(new Uint8Array(hashBuffer))
+//   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+// }
 
 export const isBinary = (arrayBuffer: ArrayBuffer): boolean => {
   const view = new Uint8Array(arrayBuffer);

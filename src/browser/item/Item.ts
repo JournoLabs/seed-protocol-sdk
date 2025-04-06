@@ -13,5 +13,3 @@ export class Item<T extends ModelValues<ModelSchema>> extends BaseItem<T> implem
   }
 
 }
-
-BaseItem.setPlatformClass(Item)

@@ -6,7 +6,7 @@ import {
 } from '@/types'
 import debug from 'debug'
 
-const logger = debug('app:services:global:actors:getSchemaForModel')
+const logger = debug('seedSdk:services:global:actors:getSchemaForModel')
 
 export const getSchemaForModel = fromCallback<
   EventObject,

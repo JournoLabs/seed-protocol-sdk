@@ -1,13 +1,12 @@
-import { EventObject, fromCallback } from 'xstate'
-import { convertTxIdToImageSrc } from '@/helpers'
-import fs from '@zenfs/core'
-import debug from 'debug'
+import { EventObject, fromCallback }           from 'xstate'
+import { BaseFileManager, convertTxIdToImage } from '@/helpers'
+import debug                                   from 'debug'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
 import { getRelationValueData } from '@/db/read/getRelationValueData'
 
-const logger = debug('app:property:actors:resolveRelatedValue')
+const logger = debug('seedSdk:property:actors:resolveRelatedValue')
 
 const storageTransactionIdToContentUrl = new Map<string, string>()
 const refResolvedValueToContentUrl = new Map<string, string>()
@@ -83,7 +82,7 @@ export const resolveRelatedValue = fromCallback<
         return true
       }
 
-      const contentUrl = await convertTxIdToImageSrc(storageTransactionId)
+      const contentUrl = await convertTxIdToImage(storageTransactionId)
       if (contentUrl) {
         seedUidToContentUrl.set(propertyValue, contentUrl)
       }
@@ -125,15 +124,14 @@ export const resolveRelatedValue = fromCallback<
           return true
         }
 
-        const fileExists = await fs.promises.exists(
+        const fileExists = await BaseFileManager.pathExists(
           '/files/images/' + refResolvedValue,
         )
         if (fileExists) {
-          const fileContents = await fs.promises.readFile(
+          const file = await BaseFileManager.readFile(
             '/files/images/' + refResolvedValue,
           )
-          const fileHandler = new File([fileContents], refResolvedValue)
-          const contentUrl = URL.createObjectURL(fileHandler)
+          const contentUrl = URL.createObjectURL(file)
           refResolvedValueToContentUrl.set(refResolvedValue, contentUrl)
           sendBack({
             type: 'updateContext',
@@ -151,7 +149,7 @@ export const resolveRelatedValue = fromCallback<
         // Check files for a filename that matches the propertyValue
         if (
           propertyRecordSchema &&
-          propertyRecordSchema.refValueType === 'ImageSrc'
+          propertyRecordSchema.refValueType === 'Image'
         ) {
           let contentUrl
 
@@ -161,15 +159,14 @@ export const resolveRelatedValue = fromCallback<
           }
 
           if (!contentUrl) {
-            const imageFileExists = await fs.promises.exists(
+            const imageFileExists = await BaseFileManager.pathExists(
               `/images/${propertyValue}`,
             )
             if (imageFileExists) {
-              const fileContents = await fs.promises.readFile(
+              const file = await BaseFileManager.readFile(
                 `/images/${propertyValue}`,
               )
-              const fileHandler = new File([fileContents], propertyValue)
-              contentUrl = URL.createObjectURL(fileHandler)
+              contentUrl = URL.createObjectURL(file)
               storageTransactionIdToContentUrl.set(
                 propertyValueFromDb,
                 contentUrl,
@@ -297,7 +294,7 @@ export const resolveRelatedValue = fromCallback<
 //         storageId,
 //       )
 //
-//       const contentUrl = await convertTxIdToImageSrc(storageId)
+//       const contentUrl = await convertTxIdToImage(storageId)
 //
 //       if (!contentUrl) {
 //         throw new Error(

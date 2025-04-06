@@ -1,14 +1,14 @@
 import { useImmer } from 'use-immer'
-import { Item } from '@/browser/Item'
+import { Item } from '@/browser/Item/Item'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
 import { eventEmitter } from '@/eventBus'
 import { ItemProperty } from '@/browser/ItemProperty/ItemProperty'
 import { useGlobalServiceStatus } from '@/browser/react/services'
-import { IItemProperty } from '@/interfaces'
+import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 
-const logger = debug('app:react:property')
+const logger = debug('seedSdk:react:property')
 
 type UseItemPropertyProps = {
   propertyName: string
@@ -17,7 +17,7 @@ type UseItemPropertyProps = {
 }
 
 type UseItemPropertyReturn = {
-  property: IItemProperty<any> | undefined
+  property: BaseItemProperty<any> | undefined
   isInitialized: boolean
   value: any
   status: string
@@ -33,7 +33,7 @@ export const useItemProperty: UseItemProperty = (props = {
 
   const { propertyName, seedLocalId, seedUid } = props
 
-  const [property, setProperty] = useState<IItemProperty<any> | undefined>()
+  const [property, setProperty] = useState<BaseItemProperty<any> | undefined>()
   const [isInitialized, setIsInitialized] = useState(false)
 
   const { internalStatus } = useGlobalServiceStatus()

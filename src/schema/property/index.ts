@@ -6,10 +6,11 @@ export const TPropertyDataType = Type.Union([
   Type.Literal('Number'),
   Type.Literal('List'),
   Type.Literal('Relation'),
-  Type.Literal('ImageSrc'),
-  Type.Literal('FileSrc'),
+  Type.Literal('Image'),
   Type.Literal('Json'),
-  Type.Literal('Blob'),
+  Type.Literal('File'),
+  Type.Literal('Boolean'),
+  Type.Literal('Date'),
 ])
 
 export const TStorageType = Type.Union([
@@ -57,7 +58,7 @@ export const Property: PropertyDefs = {
     TObject: Type.String(),
   }),
   Json: () => ({ dataType: 'Json' }),
-  Blob: () => ({ dataType: 'Blob' }),
+  File: () => ({ dataType: 'File' }),
   Number: () => ({ dataType: 'Number' }),
   List: (ref: string, refValueType?: PropertyDataType) => ({
     dataType: 'List',
@@ -69,7 +70,9 @@ export const Property: PropertyDefs = {
     ref,
     refValueType,
   }),
-  ImageSrc: () => ({ dataType: 'ImageSrc' }),
+  Image: () => ({ dataType: 'Image' }),
+  Boolean: () => ({ dataType: 'Boolean' }),
+  Date: () => ({ dataType: 'Date' }),
 }
 
 export const PropertyMetadataKey = Symbol('property')
@@ -103,10 +106,12 @@ export const Text = (
   filenameSuffix?: string,
 ) => PropertyConstructor(Property.Text(storageType, srcDir, filenameSuffix))
 export const Number = () => PropertyConstructor(Property.Number())
-export const Json = () => PropertyConstructor(Property.Json())
-export const Blob = () => PropertyConstructor(Property.Blob())
-export const ImageSrc = () => PropertyConstructor(Property.ImageSrc())
+export const Json  = () => PropertyConstructor(Property.Json())
+export const File  = () => PropertyConstructor(Property.File())
+export const Image = () => PropertyConstructor(Property.Image())
 export const Relation = (ref: string, refValueType?: PropertyDataType) =>
   PropertyConstructor(Property.Relation(ref, refValueType)) // Adjust for actual relation type
 export const List = (ref: string, reValueType?: PropertyDataType) =>
   PropertyConstructor(Property.List(ref, reValueType)) // Adjust for actual list type
+export const Boolean = () => PropertyConstructor(Property.Boolean())
+export const Date = () => PropertyConstructor(Property.Date())

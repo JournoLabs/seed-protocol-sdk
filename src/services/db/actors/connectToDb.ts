@@ -1,11 +1,10 @@
 import { EventObject, fromCallback } from 'xstate'
 import { DbServiceContext, FromCallbackInput } from '@/types'
-import { getSqliteWasmClient } from '@/db/sqlWasmClient'
 import { DB_CREATING_SUCCESS } from '@/services/internal/constants'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 
-const logger = debug('app:services:db:actors:connectToDb')
+const logger = debug('seedSdk:services:db:actors:connectToDb')
 
 export const connectToDb = fromCallback<
   EventObject,
@@ -20,14 +19,15 @@ export const connectToDb = fromCallback<
   }
 
   let isConnecting = false
-  let dbId: string | undefined
 
   const _connectToDb = async (): Promise<void> => {
     if (isConnecting) {
       return
     }
     isConnecting = true
-    const dbId = await BaseDb.connectToDb(pathToDir, dbName)
+
+
+    const dbId = await BaseDb.connectToDb(pathToDir,)
     if (dbId) {
       sendBack({ type: DB_CREATING_SUCCESS, dbId, })
     }

@@ -1,7 +1,9 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import fs from '@zenfs/core'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import path from 'path'
+
 
 export const resolveRemoteStorage = fromCallback<
   EventObject,
@@ -20,22 +22,23 @@ export const resolveRemoteStorage = fromCallback<
   const storageTransactionId = propertyInstances.get('storageTransactionId')
 
   const _resolveRemoteStorage = async (): Promise<void> => {
-    const path = await import('path-browserify')
 
-    const filesDirExists = await fs.promises.exists('/files')
+    const filesDirExists = await BaseFileManager.pathExists('/files')
 
     if (!filesDirExists) {
-      await fs.promises.mkdir('/files')
+      await BaseFileManager.createDirIfNotExists('/files')
     }
 
     const htmlDir = path.join('/files', 'html')
 
-    const htmlExists = await fs.promises.exists(htmlDir)
+    const htmlExists = await BaseFileManager.pathExists(htmlDir)
+
+    const fs = await BaseFileManager.getFs()
 
     if (htmlExists) {
       const htmlFiles = await fs.promises.readdir(htmlDir)
       const matchingHtmlFile = htmlFiles.find(
-        (file) => file === `${storageTransactionId}.html`,
+        (file: string) => file === `${storageTransactionId}.html`,
       )
       if (matchingHtmlFile) {
         const htmlString = await fs.promises.readFile(
@@ -61,7 +64,7 @@ export const resolveRemoteStorage = fromCallback<
     if (jsonExists) {
       const jsonFiles = await fs.promises.readdir(jsonDir)
       const matchingJsonFile = jsonFiles.find(
-        (file) => file === `${storageTransactionId}.json`,
+        (file: string) => file === `${storageTransactionId}.json`,
       )
       if (matchingJsonFile) {
         const jsonString = await fs.promises.readFile(

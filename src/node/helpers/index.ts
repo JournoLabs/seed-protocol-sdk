@@ -1,5 +1,3 @@
-// import { customAlphabet } from 'nanoid'
-// import { alphanumeric } from 'nanoid-dictionary'
 import fs            from 'fs'
 import * as tsImport from 'ts-import'
 import { LoadMode }  from 'ts-import'
@@ -8,7 +6,7 @@ import { glob }      from 'glob'
 import { rimraf }    from 'rimraf'
 import debug         from 'debug'
 
-const logger = debug('app:helpers')
+const logger = debug('seedSdk:helpers')
 
 export const getTsImport = async <T>(filePath: string): Promise<T> => {
   // Check if the config file exists
@@ -17,15 +15,28 @@ export const getTsImport = async <T>(filePath: string): Promise<T> => {
     throw new Error(`Typescript file not found at ${filePath}`)
   }
 
-  return await tsImport.load(filePath, {
-    mode: LoadMode.Compile,
-    compileOptions: {
-      compilerOptions: {
-        experimentalDecorators: true,
-        emitDecoratorMetadata: true,
+  let result
+
+  try {
+    result = await tsImport.load(filePath, {
+      mode: LoadMode.Compile,
+      compileOptions: {
+        compilerOptions: {
+          experimentalDecorators: true,
+          emitDecoratorMetadata: true,
+        },
       },
-    },
-  })
+    }).catch((e) => {
+      logger('Error loading ts file:', e)
+      throw e
+    })
+
+  } catch ( e ) {
+    console.error(e)
+  }
+
+
+  return result
 }
 
 export const deleteFilesWithExtension = async (

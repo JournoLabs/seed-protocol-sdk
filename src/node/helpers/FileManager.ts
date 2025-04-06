@@ -1,5 +1,6 @@
 import * as fsAsync        from 'fs/promises'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import path                from 'path'
 
 class FileManager extends BaseFileManager {
 
@@ -51,9 +52,15 @@ class FileManager extends BaseFileManager {
     return new File([await fsAsync.readFile(filePath)], filePath)
   }
 
-}
+  static getParentDirPath(filePath: string): string {
+    return path.dirname(filePath)
+  }
 
-BaseFileManager.setPlatformClass(FileManager)
+  static getFilenameFromPath(filePath: string): string {
+    return path.basename(filePath)
+  }
+
+}
 
 export { FileManager }
 

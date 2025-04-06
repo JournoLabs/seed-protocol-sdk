@@ -1,18 +1,41 @@
 import { eventEmitter }                                                          from '@/eventBus'
 import { downloadAllFilesBinaryRequestHandler, downloadAllFilesRequestHandler } from './download'
 import { BaseFileManager }                                                       from '@/helpers'
+import { isBrowser } from '@/helpers/environment'
 
 
 let isInitialized = false
 
 
-const fsInitHandler = async ( _ ) => {
+const fsInitHandler = async () => {
   if ( isInitialized ) {
     eventEmitter.emit('fs.init.response', { success: true })
     return
   }
 
   try {
+
+    // console.log('fsInitHandler isBrowser', isBrowser())
+
+    // console.log({
+    //   environment: process.env.NEXT_RUNTIME || 'unknown',
+    //   isServer: typeof window === 'undefined',
+    //   nodeEnv: process.env.NODE_ENV,
+    //   // Log what's available in global scope
+    //   hasWindow: typeof window !== 'undefined',
+    //   hasDocument: typeof document !== 'undefined',
+    // })
+
+    if (
+      isBrowser()
+    ) {
+      const FileManager = (await import('../../browser/helpers/FileManager')).FileManager
+      BaseFileManager.setPlatformClass(FileManager)
+    }
+
+    // if (!isBrowser()) {
+    //   await import('@/node/helpers/FileManager')
+    // }
 
     await BaseFileManager.initializeFileSystem()
 

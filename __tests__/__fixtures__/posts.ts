@@ -1,8 +1,6 @@
-import { models }   from '@/test/__mocks__/node/project/schema'
 import { BaseItem } from '@/Item/BaseItem'
 import { getIdentities } from './identities'
 
-const { Post } = models
 
 export const getPosts = async ( numPosts: number ): Promise<BaseItem<any>[]> => {
   const posts: BaseItem<any>[] = []

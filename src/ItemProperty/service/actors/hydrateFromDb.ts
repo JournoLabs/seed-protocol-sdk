@@ -1,15 +1,15 @@
 import { EventObject, fromCallback } from 'xstate'
 import { and, eq, or, sql } from 'drizzle-orm'
 import debug from 'debug'
-import fs from '@zenfs/core'
 import { metadata } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import path from 'path'
+import { BaseFileManager } from '@/helpers'
 
-const logger = debug('app:property:actors:hydrateFromDb')
+const logger = debug('seedSdk:property:actors:hydrateFromDb')
 
 export const hydrateFromDb = fromCallback<
   EventObject,
@@ -25,10 +25,25 @@ export const hydrateFromDb = fromCallback<
 
   let propertyName = propertyNameRaw
 
-  if (
+  const isRelation =
     propertyRecordSchema &&
     propertyRecordSchema.ref &&
-    propertyRecordSchema.dataType === 'Relation' &&
+    propertyRecordSchema.dataType === 'Relation'
+
+  const isImage =
+    propertyRecordSchema &&
+    propertyRecordSchema.dataType === 'Image'
+
+  const isFile =
+    propertyRecordSchema &&
+    propertyRecordSchema.dataType === 'File'
+
+  if (
+    (
+      isRelation || 
+      isImage ||
+      isFile
+    ) &&
     !propertyNameRaw.endsWith('Id')
   ) {
     propertyName = propertyNameRaw + 'Id'
@@ -46,14 +61,9 @@ export const hydrateFromDb = fromCallback<
   const _hydrateFromDb = async () => {
     const appDb = BaseDb.getAppDb()
 
-    const isRelation =
-      propertyRecordSchema &&
-      propertyRecordSchema.ref &&
-      propertyRecordSchema.dataType === 'Relation'
-
     const whereClauses = []
 
-    if (isRelation) {
+    if (isRelation || isImage || isFile) {
       let missingPropertyNameVariant
       if (propertyName.endsWith('Id')) {
         missingPropertyNameVariant = propertyName.slice(0, -2)
@@ -107,19 +117,15 @@ export const hydrateFromDb = fromCallback<
       versionLocalId: versionLocalIdFromDb,
       versionUid: versionUidFromDb,
       refValueType,
-      localStorageDir,
     } = firstRow
 
-    let { refResolvedDisplayValue, refResolvedValue } = firstRow
+    let { refResolvedDisplayValue, refResolvedValue, localStorageDir } = firstRow
 
     let propertyValueProcessed: string | string[] | undefined | null =
       propertyValueFromDb
 
 
-    if (
-      propertyRecordSchema &&
-      propertyRecordSchema.refValueType === 'ImageSrc'
-    ) {
+    if (isImage) {
       let shouldReadFromFile = true
 
       if (
@@ -130,10 +136,17 @@ export const hydrateFromDb = fromCallback<
         try {
           const response = await fetch(refResolvedDisplayValue, {
             method: 'HEAD',
+          }).catch((error) => {
+            // No-op
+            shouldReadFromFile = true
           })
 
+          if (!response || !response.ok) {
+            shouldReadFromFile = true
+          }
+
           // Check if the status is in the 200-299 range
-          if (response.ok) {
+          if (response && response.ok) {
             shouldReadFromFile = false
           }
         } catch (error) {
@@ -145,8 +158,7 @@ export const hydrateFromDb = fromCallback<
         let dir = localStorageDir
         if (
           !dir &&
-          propertyRecordSchema &&
-          propertyRecordSchema.refValueType === 'ImageSrc'
+          isImage
         ) {
           dir = 'images'
         }
@@ -154,7 +166,6 @@ export const hydrateFromDb = fromCallback<
         dir = dir!.replace(/^\//, '')
 
         if (
-          !refResolvedValue &&
           propertyValueFromDb &&
           propertyValueFromDb.length === 66
         ) {
@@ -187,8 +198,9 @@ export const hydrateFromDb = fromCallback<
         }
 
         const dirPath = `/files/${dir}`
+        const fs = await BaseFileManager.getFs()
         const files = await fs.promises.readdir(dirPath)
-        const matchingFiles = files.filter((file) => {
+        const matchingFiles = files.filter((file: string) => {
           return path.basename(file).includes(refResolvedValue!)
         })
         let fileExists = false
@@ -199,15 +211,18 @@ export const hydrateFromDb = fromCallback<
           filename = matchingFiles[0]
           filePath = `/files/${dir}/${filename}`
         }
+        localStorageDir = `/${dir}`
         if (fileExists && filename && filePath) {
-          const fileContents = await fs.promises.readFile(filePath)
-          const fileHandler = new File([fileContents], filename)
-          refResolvedDisplayValue = URL.createObjectURL(fileHandler)
+          const file = await BaseFileManager.readFile(filePath)
+          refResolvedDisplayValue = URL.createObjectURL(file)
           await updateMetadata({
             localId,
             refResolvedValue: filename,
+            refResolvedDisplayValue: refResolvedDisplayValue,
+            localStorageDir,
           })
         }
+
       }
     }
 
@@ -243,20 +258,20 @@ export const hydrateFromDb = fromCallback<
       propertyRecordSchema.storageType &&
       propertyRecordSchema.storageType === 'ItemStorage'
     ) {
-      const { Item } = await import(`@/browser/Item`)
-      const item = await Item.find({
+      const { BaseItem } = await import(`@/Item/BaseItem`)
+      const item = await BaseItem.find({
         seedLocalId,
         modelName,
       })
       if (item) {
         const filePath = `/files/${localStorageDir}/${refResolvedValue}`
-        const exists = await fs.promises.exists(filePath)
+        const exists = await BaseFileManager.pathExists(filePath)
 
         if (!exists) {
           return
         }
 
-        const renderValue = await fs.promises.readFile(filePath, 'utf8')
+        const renderValue = await BaseFileManager.readFileAsString(filePath)
         const property = item.properties[propertyName]
         property.getService().send({ type: 'updateContext', renderValue })
         return

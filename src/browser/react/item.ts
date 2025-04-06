@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createNewItem } from '@/db/write/createNewItem'
-import { Item } from '@/browser/Item'
+import { Item } from '../Item/Item'
 import { eventEmitter } from '@/eventBus'
 import { useImmer } from 'use-immer'
 import { orderBy } from 'lodash-es'
 import { getAreItemEventHandlersReady } from '@/events'
 import debug from 'debug'
-import { useGlobalServiceStatus } from '@/browser/react/services'
+import { useGlobalServiceStatus, useIsDbReady } from '../react/services'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
 import { BaseItem } from '@/Item/BaseItem'
 
-const logger = debug('app:react:item')
-
-type UseItemProps = {
-  modelName: string
-  seedLocalId?: string
-  seedUid?: string
-}
+const logger = debug('seedSdk:react:item')
 
 type UseItemReturn<T extends ModelValues<T>> = {
   item: Item<T> | undefined
@@ -26,67 +20,26 @@ type UseItemReturn<T extends ModelValues<T>> = {
   itemStatus: string | Record<string, unknown> | undefined
 }
 
-type UseItem<T> = (props: UseItemProps) => UseItemReturn<T>
+type UseItemProps = {
+  modelName: string
+  seedLocalId?: string
+  seedUid?: string
+}
+
+type UseItem = <T extends ModelValues<T>>(props: UseItemProps) => UseItemReturn<T>
 
 type ItemData<T> = Record<string, Partial<T>>
 
-export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
-  // const [itemSubscription, setItemSubscription] = useState<
-  //   Subscription | undefined
-  // >()
-  //
-  // const queryClient = useQueryClient()
-  //
-  // const { data: item } = useQuery({
-  //   queryKey: ['item', modelName, seedLocalId, seedUid],
-  //   queryFn: async () =>
-  //     Item.find({
-  //       modelName,
-  //       seedLocalId,
-  //       seedUid,
-  //     }),
-  //   networkMode: 'offlineFirst',
-  // })
-  //
-  // const updateItem = async (newItem: Item<any>) => {
-  //   queryClient.setQueryData(['item', modelName, seedLocalId, seedUid], newItem)
-  // }
-  //
-  // useEffect(() => {
-  //   if (item && item.subscribe && !itemSubscription) {
-  //     const subscription = item.subscribe(async (_) => {
-  //       const newItem = await Item.find({ modelName, seedLocalId, seedUid })
-  //       if (!newItem) {
-  //         logger(
-  //           '[useItem] [itemSubscription] no item found',
-  //           modelName,
-  //           seedLocalId,
-  //         )
-  //         return
-  //       }
-  //       updateItem(newItem)
-  //     })
-  //     setItemSubscription(subscription)
-  //   }
-  //
-  //   return () => {
-  //     itemSubscription?.unsubscribe()
-  //   }
-  // }, [item, itemSubscription])
-  //
-  // return {
-  //   item,
-  //   itemData: {},
-  //   itemStatus: undefined,
-  // }
-
-  const [itemData, setItemData] = useImmer<ItemData<any>>({})
-  const [item, setItem] = useState<Item<any> | undefined>()
+export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLocalId, seedUid }: UseItemProps) => {
+  const [itemData, setItemData] = useImmer<ItemData<T>>({})
+  const [item, setItem] = useState<Item<T> | undefined>()
   const [itemSubscription, setItemSubscription] = useState<
     Subscription | undefined
   >()
 
   const { status, internalStatus } = useGlobalServiceStatus()
+
+  const isDbReady = useIsDbReady()
 
   const isReadingDb = useRef(false)
 
@@ -96,10 +49,10 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
   )
 
   const updateItem = useCallback(
-    (newItem: Item<any>) => {
+    (newItem: Item<T>) => {
       setItemData((draft) => {
         Object.keys(newItem.properties).forEach((propertyName) => {
-          const value = newItem[propertyName]
+          const value = newItem.properties[propertyName].value
           draft[propertyName] = value
         })
       })
@@ -109,6 +62,7 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
 
   const readFromDb = useCallback(async () => {
     if (
+      !isDbReady ||
       isReadingDb.current ||
       internalStatus !== 'ready' ||
       (!seedUid && !seedLocalId)
@@ -120,16 +74,17 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
       modelName,
       seedLocalId,
       seedUid,
-    })
+    }) as Item<T> | undefined
+    
     if (!foundItem) {
       logger('[useItem] [getItemFromDb] no item found', modelName, seedLocalId)
       isReadingDb.current = false
       return
     }
-    setItem(() => foundItem)
+    setItem(foundItem)
     updateItem(foundItem)
     isReadingDb.current = false
-  }, [internalStatus])
+  }, [internalStatus, isDbReady])
 
   const listenerRef = useRef(readFromDb)
 
@@ -146,7 +101,12 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
   useEffect(() => {
     if (item && !itemSubscription) {
       const subscription = item.subscribe(async (_) => {
-        const newItem = await Item.find({ modelName, seedLocalId, seedUid })
+        const newItem = await Item.find({ 
+          modelName, 
+          seedLocalId, 
+          seedUid 
+        }) as Item<T> | undefined
+        
         if (!newItem) {
           logger(
             '[useItem] [itemSubscription] no item found',
@@ -156,7 +116,7 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
           return
         }
         updateItem(newItem)
-        setItem(() => newItem)
+        setItem(newItem)
       })
       setItemSubscription(subscription)
     }
@@ -184,15 +144,19 @@ export const useItem: UseItem<any> = ({ modelName, seedLocalId, seedUid }) => {
     itemStatus,
   }
 }
+
 type UseItemsReturn = {
   items: BaseItem<any>[]
   isReadingDb: boolean
 }
+
 type UseItemsProps = {
   modelName?: string
   deleted?: boolean
 }
+
 type UseItems = (props: UseItemsProps) => UseItemsReturn
+
 export const useItems: UseItems = ({ modelName, deleted=false }) => {
   const [items, setItems] = useImmer<BaseItem<any>[]>([])
 
@@ -287,6 +251,7 @@ export const useItemIsReady = () => {
     isReady: itemListenersReady,
   }
 }
+
 export const useCreateItem = <T>(modelName: string) => {
   const [isCreatingItem, setIsCreatingItem] = useState(false)
 
@@ -339,9 +304,10 @@ type UsePublishItemReturn = {
   isPublishing: boolean
 }
 
-type PublishItemProps =
-  | [Item<any> | undefined]
-  | [Item<any> | undefined, (result: PublishItemResult) => any | undefined]
+type PublishItemProps = [
+  Item<any> | undefined,
+  ((result: PublishItemResult) => any) | undefined
+]
 
 type PublishItem = (...props: PublishItemProps) => Promise<any>
 
@@ -350,7 +316,7 @@ export const usePublishItem = (): UsePublishItemReturn => {
 
   const isLocked = useRef(false)
 
-  const publishItem: PublishItem = useCallback(async (item, callback?) => {
+  const publishItem = useCallback(async (item: Item<any> | undefined, callback?: (result: PublishItemResult) => any) => {
     if (!item || isLocked.current) {
       return
     }

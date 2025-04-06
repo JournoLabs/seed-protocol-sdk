@@ -20,7 +20,7 @@
     "emitDecoratorMetadata": true,
     "declaration": true,
     "declarationMap": true,
-    "declarationDir": "./dist/types",
+    "declarationDir": "./dist",
     "emitDeclarationOnly": true,
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
@@ -31,8 +31,7 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "types": [
-      "node",
-      "@vitest/browser/providers/playwright"
+      "node"
     ],
     "typeRoots": [
       "./src/types/**/*",

@@ -6,8 +6,7 @@ import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { Schema } from '@/graphql/gql/graphql'
-import path from 'path'
-import fs from '@zenfs/core'
+
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType>,

@@ -7,7 +7,7 @@ import debug                    from 'debug'
 import { getTableColumns, sql } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/sqlite-core'
 
-const logger = debug('app:services:internal:actors:saveConfig')
+const logger = debug('seedSdk:services:internal:actors:saveConfig')
 
 export const saveConfig = fromCallback<
   EventObject,

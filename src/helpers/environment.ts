@@ -7,7 +7,7 @@ export const isNode = (): boolean => {
 }
 
 export const isBrowser = (): boolean => {
-  return !isElectron() && typeof window !== 'undefined' && typeof window.document !== 'undefined'
+  return !isElectron() && typeof document !== 'undefined' && typeof window !== 'undefined'
 }
 
 export const isReactNative = (): boolean => {

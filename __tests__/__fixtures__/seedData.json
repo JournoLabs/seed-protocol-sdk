@@ -1,0 +1,54 @@
+{
+  "appState": [
+    {
+      "key": "test_key",
+      "value": "test_value",
+      "createdAt": 1710000000000,
+      "updatedAt": 1710000000000
+    }
+  ],
+  "config": [
+    {
+      "key": "test_config",
+      "text": "test_config_value"
+    }
+  ],
+  "models": [
+    {
+      "name": "TestModel"
+    }
+  ],
+  "modelUids": [
+    {
+      "uid": "test_model_uid",
+      "modelId": 1
+    }
+  ],
+  "metadata": [
+    {
+      "localId": "test_metadata_id",
+      "propertyName": "test_property",
+      "propertyValue": "test_value",
+      "createdAt": 1710000000000,
+      "updatedAt": 1710000000000
+    }
+  ],
+  "seeds": [
+    {
+      "localId": "test_seed_id",
+      "type": "test_type",
+      "schemaUid": "test_schema_uid",
+      "createdAt": 1710000000000,
+      "updatedAt": 1710000000000
+    }
+  ],
+  "versions": [
+    {
+      "localId": "test_version_id",
+      "seedLocalId": "test_seed_id",
+      "note": "Test version",
+      "createdAt": 1710000000000,
+      "updatedAt": 1710000000000
+    }
+  ]
+} 

@@ -7,7 +7,7 @@ import { getVersionData } from "./subqueries/versionData"
 import { seeds } from "@/seedSchema"
 import { getSeedData } from "./getSeedData"
 
-const logger = debug('app:db:read:getItemData')
+const logger = debug('seedSdk:db:read:getItemData')
 
 export const getItemData: GetItemData = async ({
   modelName,

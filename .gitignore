@@ -140,3 +140,7 @@ out
 vite/app-files
 .vite-inspect
 .working
+
+# Test mocks
+!__mocks__/**/node_modules/
+!__mocks__/**/node_modules/**/*

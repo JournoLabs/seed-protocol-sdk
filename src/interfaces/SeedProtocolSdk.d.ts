@@ -8,7 +8,7 @@ export interface SeedProtocolSdk {
   // Exported types
   Model: typeof import('@/schema').Model;
   Property: typeof import('@/schema').Property;
-  ImageSrc: typeof import('@/schema').ImageSrc;
+  Image: typeof import('@/schema').Image;
   List: typeof import('@/schema').List;
   Text: typeof import('@/schema').Text;
   Json: typeof import('@/schema').Json;

@@ -4,7 +4,7 @@ import debug from 'debug'
 import { getModel } from '@/stores/modelClass'
 import { BaseItem } from '@/Item/BaseItem'
 
-const logger = debug('app:events:requestAll')
+const logger = debug('seedSdk:events:requestAll')
 
 const cache = new Map<string, Map<string, BaseItem<any>>>()
 

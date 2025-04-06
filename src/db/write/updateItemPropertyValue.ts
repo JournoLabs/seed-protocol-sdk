@@ -7,7 +7,7 @@ import { generateId } from '@/helpers'
 import debug from 'debug'
 import { eventEmitter } from '@/eventBus'
 import { BaseDb } from '@/db/Db/BaseDb'
-const logger = debug('app:write:updateItemPropertyValue')
+const logger = debug('seedSdk:write:updateItemPropertyValue')
 
 const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: string, seedLocalId: string, seedUid: string }) => {
   if (!modelName || (!seedLocalId && !seedUid)) {

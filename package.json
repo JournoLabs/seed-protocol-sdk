@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.1",
+  "version": "0.3.9",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
@@ -30,11 +30,10 @@
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
-  "resolutions": {
-    "vite": "^6.0.6"
-  },
   "optionalDependencies": {
     "@tanstack/react-query": "^5.62.11",
+    "@zenfs/core": "^2.0.0",
+    "@zenfs/dom": "^1.1.6",
     "better-sqlite3": "^11.7.0",
     "fsevents": "^2.3.3",
     "react": "^19.0.0",
@@ -47,7 +46,7 @@
     "@misskey-dev/browser-image-resizer": "^2024.1.0",
     "@pianity/arsnap-adapter": "^0.2.0",
     "@sinclair/typebox": "^0.34.13",
-    "@sqlite.org/sqlite-wasm": "^3.47.2-build1",
+    "@sqlite.org/sqlite-wasm": "^3.49.1-build2",
     "@statelyai/inspect": "^0.4.0",
     "@tanstack/query-sync-storage-persister": "^5.62.8",
     "@tanstack/react-query-devtools": "^5.62.8",
@@ -55,22 +54,21 @@
     "@tanstack/react-virtual": "^3.11.2",
     "@vitejs/plugin-legacy": "^6.0.0",
     "@xstate/react": "^5.0.0",
-    "@zenfs/core": "^1.9.5",
-    "@zenfs/dom": "^1.1.5",
     "arweave": "^1.15.5",
     "crypto-browserify": "^3.12.1",
     "debug": "^4.4.0",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.4",
-    "drizzle-orm": "^0.39.2",
+    "drizzle-orm": "^0.39.3",
     "eventemitter3": "^5.0.1",
     "glob": "^11.0.0",
     "globals": "^15.14.0",
     "graphql": "^16.10.0",
     "graphql-request": "^7.1.2",
     "immer": "^10.1.1",
+    "js-sha3": "^0.9.3",
     "lodash-es": "^4.17.21",
-    "nanoid": "^5.0.9",
+    "nanoid": "^5.1.5",
     "nanoid-dictionary": "^4.3.0",
     "nunjucks": "^3.2.4",
     "path-browserify": "^1.0.1",
@@ -81,11 +79,12 @@
     "rimraf": "^6.0.1",
     "rxjs": "^7.8.1",
     "threads": "^1.7.0",
-    "ts-import": "^5.0.0-beta.0",
+    "ts-import": "5.0.0-beta.0",
     "ts-morph": "^24.0.0",
     "ts-proto": "^2.6.0",
     "tslib": "^2.8.1",
     "use-immer": "^0.11.0",
+    "webpack": "^5.98.0",
     "xstate": "^5.19.0"
   },
   "devDependencies": {
@@ -139,7 +138,7 @@
     "prettier": "^3.4.2",
     "prettier-eslint": "^16.3.0",
     "prettier-plugin-organize-imports": "^4.1.0",
-    "rollup": "^4.34.6",
+    "rollup": "^4.29.1",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-css-only": "^4.5.2",
     "rollup-plugin-dts": "^6.1.1",
@@ -152,6 +151,7 @@
     "supports-color": "^10.0.0",
     "ts-api-utils": "~2.0.0",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.19.3",
     "typescript": "~5.7.2",
     "vite-plugin-inspect": "^10.0.6",
     "vite-plugin-node-polyfills": "^0.22.0",
@@ -160,19 +160,14 @@
     "vitest": "^3.0.5",
     "vitest-browser-react": "^0.0.4"
   },
-  "peerDependencies": {
-    "@tanstack/react-query": "^5.62.11",
-    "better-sqlite3": "^11.7.0",
-    "rxjs": "^7.8.1"
-  },
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/types/src/index.d.ts",
+        "types": "./dist/src/index.d.ts",
         "default": "./dist/main.js"
       },
       "require": {
-        "types": "./dist/types/src/index.d.ts",
+        "types": "./dist/src/index.d.ts",
         "default": "./dist/main.js"
       }
     }

@@ -10,9 +10,9 @@ export const initArweaveClient = async () => {
     ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
   }
 
-  if (!isBrowser()) {
-    ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
-  }
+  // if (!isBrowser()) {
+  //   ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
+  // }
 }
 
 

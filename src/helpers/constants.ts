@@ -16,7 +16,7 @@ export const INTERNAL_DATA_TYPES = {
   Number: {
     eas: 'uint8',
   },
-  ImageSrc: {
+  Image: {
     eas: 'string',
   },
   Relation: {
@@ -25,7 +25,7 @@ export const INTERNAL_DATA_TYPES = {
   List: {
     eas: 'bytes32[]',
   },
-  FileSrc: {
+  File: {
     eas: 'string',
   },
   Json: {
@@ -36,27 +36,35 @@ export const INTERNAL_DATA_TYPES = {
   },
 }
 
-export const internalPropertyNames = [
+export const INTERNAL_PROPERTY_NAMES = [
   'localId',
   'uid',
   'seedLocalId',
   'seedUid',
   'schemaUid',
   'attestationCreatedAt',
+  'attestationRaw',
   'createdAt',
   'updatedAt',
-  'versionsCount',
   'lastVersionPublishedAt',
   'latestVersionLocalId',
-  'versionLocalId',
+  'latestVersionUid',
   'lastLocalUpdateAt',
+  'modelName',
   'storageTransactionId',
-  'versionUid',
   'refSeedType',
   'refValueType',
   'refResolvedValue',
   'refResolvedDisplayValue',
   'type',
+  // Image
+  'src',
+  'alt',
+  //
+  'versionLocalId',
+  'versionsCount',
+  'versionUid',
+  '_markedForDeletion',
 ]
 
 export const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA =
@@ -80,3 +88,5 @@ export enum ImageSize {
 }
 
 export const CLIENT_NOT_INITIALIZED = 'ClientManager is not initialized. Please call init() first.'
+
+export const INIT_SCRIPT_SUCCESS_MESSAGE = '[Seed Protocol] Finished running init script'

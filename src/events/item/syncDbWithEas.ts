@@ -4,7 +4,6 @@ import {
   metadata,
   MetadataType,
   modelUids,
-  properties,
   seeds,
   SeedType,
   versions,
@@ -13,15 +12,12 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   generateId,
   parseEasRelationPropertyName,
-  toSnakeCase,
 } from '@/helpers'
 import {
   GET_PROPERTIES,
-  GET_SCHEMAS,
   GET_SEEDS,
   GET_VERSIONS,
 } from '@/Item/queries'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { escapeSqliteString, getAddressesFromDb } from '@/helpers/db'
 import { eventEmitter } from '@/eventBus'
 import { getModelNames, getModels } from '@/stores/modelClass'
@@ -32,8 +28,7 @@ import { createSeeds } from '@/db/write/createSeeds'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-
-
+import { getItemPropertiesFromEas, getItemVersionsFromEas, getModelSchemasFromEas } from '@/browser/helpers/eas'
 
 
 const relationValuesToExclude = [
@@ -159,7 +154,11 @@ type SaveEasVersionsToDbParams = {
 
 type SaveEasVersionsToDb = (
   props: SaveEasVersionsToDbParams,
-) => Promise<Record<string, unknown>>
+) => Promise<SaveEasVersionsToDbReturn>
+
+type SaveEasVersionsToDbReturn = {
+  versionUids: string[]
+}
 
 const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
   const versionUids = itemVersions.map((version) => version.id)
@@ -532,19 +531,13 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
   async (_) => {
     const appDb = BaseDb.getAppDb()
 
-    const { modelSchemas, schemaStringToModelRecord } = await getModelSchemas()
+    const { schemaStringToModelRecord } = await getModelSchemas()
 
-    if (
-      !modelSchemas ||
-      !modelSchemas.schemas ||
-      modelSchemas.schemas.length === 0
-    ) {
-      throw new Error(`No schemas found for models`)
-    }
+    const modelSchemas = await getModelSchemasFromEas()
 
     const schemaUids: string[] = []
 
-    for (const modelSchema of modelSchemas.schemas) {
+    for (const modelSchema of modelSchemas) {
       const foundModel = schemaStringToModelRecord.get(modelSchema.schema)
 
       if (!foundModel) {
@@ -576,35 +569,16 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
       itemSeeds,
     })
 
-    const queryClient = BaseQueryClient.getQueryClient()
-    const easClient = BaseEasClient.getEasClient()
-
-    const { itemVersions } = await queryClient.fetchQuery({
-      queryKey: [`getVersionsForAllModels`],
-      queryFn: async () =>
-        easClient.request(GET_VERSIONS, {
-          where: {
-            refUID: {
-              in: seedUids,
-            },
-          },
-        }),
+    const itemVersions = await getItemVersionsFromEas({
+      seedUids
     })
 
     const { versionUids } = await saveEasVersionsToDb({
       itemVersions,
     })
 
-    const { itemProperties } = await queryClient.fetchQuery({
-      queryKey: [`getPropertiesForAllModels`],
-      queryFn: async () =>
-        easClient.request(GET_PROPERTIES, {
-          where: {
-            refUID: {
-              in: versionUids,
-            },
-          },
-        }),
+    const itemProperties = await getItemPropertiesFromEas({
+      versionUids,
     })
 
     const { propertyUids } = saveEasPropertiesToDb({

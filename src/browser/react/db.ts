@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Subscription } from 'xstate'
-import { getGlobalService } from '@/services/global'
+import { getGlobalService } from '@/services/global/globalMachine'
 import debug from 'debug'
 
-const logger = debug('app:react:db')
+const logger = debug('seedSdk:react:db')
 
 export const useDbsAreReady = () => {
   const [dbsAreReady, setDbsAreReady] = useState(false)

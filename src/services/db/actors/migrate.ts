@@ -6,11 +6,10 @@ import {
 } from '@/services/internal/constants'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
-import fs from '@zenfs/core'
-import { FileManager } from '@/browser/helpers/FileManager'
 import { isBrowser } from '@/helpers/environment'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
-const logger = debug('app:services:db:actors:migrate')
+const logger = debug('seedSdk:services:db:actors:migrate')
 
 
 
@@ -28,10 +27,10 @@ export const migrate = fromCallback<
   const _checkForFiles = async (): Promise<void> => {
     const journalPath = `/${pathToDbDir}/meta/_journal.json`
 
-    journalExists = await fs.promises.exists(journalPath)
+    journalExists = await BaseFileManager.pathExists(journalPath)
 
     if (!journalExists && isBrowser()) {
-      await FileManager.waitForFile(journalPath, 500, 60000)
+      await BaseFileManager.waitForFile(journalPath,)
     }
   }
 
@@ -49,7 +48,7 @@ export const migrate = fromCallback<
       }
     })
     .then(() => {
-      console.log('sending db migrating success')
+      logger('sending db migrating success')
       sendBack({ type: DB_MIGRATING_SUCCESS, dbName })
     })
 

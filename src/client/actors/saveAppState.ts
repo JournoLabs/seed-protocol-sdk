@@ -5,7 +5,7 @@ import { EventObject } from "xstate";
 import debug from "debug";
 import { appState } from "@/seedSchema";
 
-const logger = debug('app:client:writeToDb')
+const logger = debug('seedSdk:client:writeToDb')
 
 export const saveAppState = fromCallback<
 EventObject, 
@@ -23,9 +23,7 @@ FromCallbackInput<ClientManagerContext>
         throw new Error('App DB not found')
       }
 
-      console.log(`key: ${key} value: ${value}`)
-
-      appDb.insert(appState)
+      const result = await appDb.insert(appState)
         .values({
           key: key,
           value: JSON.stringify(value),
@@ -36,6 +34,8 @@ FromCallbackInput<ClientManagerContext>
             value: JSON.stringify(value),
           },
         })
+
+      logger('result', result)
       
     }
 

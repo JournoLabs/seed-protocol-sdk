@@ -1,6 +1,6 @@
 import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
-import { internalPropertyNames } from '@/helpers/constants'
+import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { VersionsType } from '@/seedSchema/VersionSchema'
 import { getModel } from '@/stores/modelClass'
 
@@ -86,7 +86,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       const propertiesObj: Record<string, IItemProperty<any>> = {}
 
       for (const [key, propertyInstance] of context.propertyInstances) {
-        if (typeof key !== 'string' || internalPropertyNames.includes(key)) {
+        if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) {
           propertiesObj[key.toString()] = propertyInstance
           continue
         }
@@ -122,7 +122,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       seedUid,
       versionLocalId: latestVersionLocalId,
       versionUid: latestVersionUid,
-      modelName: modelName,
+      modelName,
     }
 
     if (ModelClass && ModelClass.schema) {

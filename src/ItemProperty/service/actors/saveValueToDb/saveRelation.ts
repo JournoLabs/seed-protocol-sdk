@@ -53,9 +53,9 @@ export const saveRelation = fromCallback<
       newValueType = 'file'
     }
 
-    if (propertyRecordSchema.dataType === 'ImageSrc') {
+    if (propertyRecordSchema.dataType === 'Image') {
       sendBack({
-        type: 'saveImageSrc',
+        type: 'saveImage',
         newValue,
         newValueType,
       })

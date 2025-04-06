@@ -6,6 +6,7 @@ export const getSegmentedItemProperties = (item: IItem<any>) => {
   const itemRelationProperties = []
   const itemListProperties = []
   const itemUploadProperties: UploadProperty[] = []
+  const itemImageProperties = []
   const itemStorageProperties = []
   let itemStorageTransactionProperty: UploadProperty | undefined
 
@@ -18,12 +19,14 @@ export const getSegmentedItemProperties = (item: IItem<any>) => {
       itemProperty.propertyDef.storageType &&
       itemProperty.propertyDef.storageType === 'ItemStorage'
 
-    const isImageSrc =
-      itemProperty.propertyDef.dataType === 'Relation' &&
-      itemProperty.propertyDef.refValueType === 'ImageSrc'
 
     const isStorageTransaction =
       itemProperty.propertyName === 'storageTransactionId'
+
+    if (itemProperty.propertyDef.dataType === 'Image') {
+      itemImageProperties.push(itemProperty)
+      continue
+    }
 
     if (itemProperty.propertyDef.dataType === 'Relation') {
       itemRelationProperties.push(itemProperty)
@@ -61,5 +64,6 @@ export const getSegmentedItemProperties = (item: IItem<any>) => {
     itemRelationProperties,
     itemListProperties,
     itemUploadProperties,
+    itemImageProperties,
   }
 }

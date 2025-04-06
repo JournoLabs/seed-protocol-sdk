@@ -1,19 +1,16 @@
 import { BaseDb }         from "@/db/Db/BaseDb";
 import { IDb }            from "@/interfaces";
-import nodeAppDbConfig                    from "./node.app.db.config";
-import { BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
-import { defineConfig, }                  from "drizzle-kit";
 import path               from "path";
 import { DrizzleConfig, } from "drizzle-orm";
 import { isBrowser }      from '@/helpers/environment'
-import {migrate}          from 'drizzle-orm/better-sqlite3/migrator'
-import fs from 'fs'
 import debug from 'debug'
 import { appState } from '@/seedSchema'
 
-const logger = debug('app:node:db:Db')
+const logger = debug('seedSdk:node:db:Db')
 
-const getConfig = (dotSeedDir: string) => {
+const getConfig = async (dotSeedDir: string) => {
+
+  const { defineConfig } = await import('drizzle-kit')
 
   let schemaDir = `${dotSeedDir}/schema/*Schema.ts`
   if (!isBrowser()) {
@@ -33,7 +30,8 @@ const getConfig = (dotSeedDir: string) => {
 }
 
 class Db extends BaseDb implements IDb {
-  static db: BetterSQLite3Database
+  static db: any
+
   constructor() {
     super()
   }
@@ -47,7 +45,9 @@ class Db extends BaseDb implements IDb {
   }
 
   static async prepareDb(filesDir: string) {
-    const nodeDbConfig = getConfig(filesDir)
+    const nodeDbConfig = await getConfig(filesDir)
+
+    const {drizzle} = await import('drizzle-orm/better-sqlite3')
 
     this.db = drizzle({
       ...nodeDbConfig,
@@ -69,6 +69,7 @@ class Db extends BaseDb implements IDb {
   }
 
   static async migrate(pathToDbDir: string, dbName: string, dbId: string) {
+    const {migrate} = await import('drizzle-orm/better-sqlite3/migrator')
     migrate(this.db, { migrationsFolder: pathToDbDir })
     const queryResult = await this.db.select().from(appState)
     logger('queryResult', queryResult)

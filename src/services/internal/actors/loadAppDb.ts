@@ -1,4 +1,4 @@
-import { EventObject, fromCallback, Subscription } from 'xstate'
+import { EventObject, fromCallback, Subscription, waitFor } from 'xstate'
 import {
   DB_NAME_APP,
   DB_ON_SNAPSHOT,
@@ -7,7 +7,7 @@ import {
 import debug from 'debug'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 
-const logger = debug('app:services:internal:actors:loadAppDb')
+const logger = debug('seedSdk:services:internal:actors:loadAppDb')
 
 export const loadAppDb = fromCallback<
   EventObject,
@@ -18,18 +18,10 @@ export const loadAppDb = fromCallback<
   let subscription: Subscription | undefined
 
   const _loadAppDb = async (): Promise<void> => {
-    if (appDbService.getSnapshot().value === 'ready') {
-      return
-    }
-    return new Promise((resolve) => {
-      subscription = appDbService.subscribe((snapshot) => {
-        if (snapshot.value === 'ready') {
-          return resolve()
-        }
-
-        sendBack({ type: DB_ON_SNAPSHOT, dbName: DB_NAME_APP, snapshot })
-      })
+    await waitFor(appDbService, (snapshot) => {
+      return snapshot.value === 'ready'
     })
+    sendBack({ type: DB_ON_SNAPSHOT, dbName: DB_NAME_APP, snapshot: appDbService.getSnapshot() })
   }
 
   _loadAppDb().then(() => {

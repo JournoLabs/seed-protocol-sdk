@@ -22,6 +22,7 @@ export default defineWorkspace([
         'dist/**',
         'src/node/**',
         '__tests__/node/**',
+        '__tests__/bin/**'
       ],
       pool: 'forks',
       hookTimeout: 60000,
@@ -45,7 +46,18 @@ export default defineWorkspace([
       setupFiles: [
         './__tests__/setup.ts',
       ],
-      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**' ],
+      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**', '__tests__/bin/**' ],
+    },
+  },
+  {
+    plugins: [
+      tsConfigPaths(),
+    ],
+    test: {
+      name: 'CLI',
+      environment: 'node',
+      dir: './__tests__/',
+      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**', '__tests__/node/**' ],
     },
   },
 ])

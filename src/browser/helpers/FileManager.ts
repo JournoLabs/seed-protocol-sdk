@@ -2,10 +2,16 @@ import { BaseFileManager }     from '@/helpers/FileManager/BaseFileManager'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
 import debug from 'debug'
+import path                    from 'path-browserify'
 
-const logger = debug('app:browser:helpers:FileManager')
+const logger = debug('seedSdk:browser:helpers:FileManager')
 
 class FileManager extends BaseFileManager {
+
+  static async getFs() {
+    const fs = await import('@zenfs/core')
+    return fs
+  }
 
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
 
@@ -18,8 +24,9 @@ class FileManager extends BaseFileManager {
 
   static async initializeFileSystem(): Promise<void> {
 
+    const fs = await this.getFs()
     const {WebAccess} = await import('@zenfs/dom')
-    const {configureSingle} = await import('@zenfs/core')
+    const {configureSingle} = fs
 
     const handle = await navigator.storage.getDirectory()
     // await configure({
@@ -92,13 +99,13 @@ class FileManager extends BaseFileManager {
   }
 
   static async createDirIfNotExists(filePath: string): Promise<void> {
-    if (!(await FileManager.pathExists(filePath))) {
+    if (!(await this.pathExists(filePath))) {
       try {
-        const fs = await import('@zenfs/core')
+        const fs = await this.getFs()
         await fs.promises.mkdir(filePath)
       } catch (error) {
         // This is a no-op. We tried to create a directory that already exists.
-        console.log('Attempted to create a directory that already exists')
+        logger('Attempted to create a directory that already exists')
       }
     }
   }
@@ -112,12 +119,17 @@ class FileManager extends BaseFileManager {
    */
   static async waitForFile(filePath: string, interval: number = 1000, timeout: number = 60000): Promise<boolean> {
 
-    const fs = await import('@zenfs/core')
-    const fsNode = await import('node:fs')
+    // const fs = await this.getFs()
+    // const fsNode = await import('node:fs')
+    const pathExists = await this.pathExists(filePath)
+
+    if (pathExists) {
+      return true
+    }
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now()
-  
+
       let isBusy = false
 
       const cancelableInterval = new CancelableInterval(async (stop) => {
@@ -126,11 +138,12 @@ class FileManager extends BaseFileManager {
           return
         }
         isBusy = true
-        // TODO: Needs to read from OPFS
-        if (fs.existsSync(filePath) && fsNode.existsSync(filePath)) {
-          stop()
-          resolve(true)
-        }
+        // // TODO: Needs to read from OPFS
+        // const exists = await BaseFileManager.pathExists(filePath)
+        // if (exists) {
+        //   stop()
+        //   resolve(true)
+        // }
 
         const pathExists = await this.pathExists(filePath)
         if (pathExists) {
@@ -231,7 +244,7 @@ class FileManager extends BaseFileManager {
       }
 
       await writable.close();
-      console.log(`File written successfully: ${filePath}`);
+      logger(`File written successfully: ${filePath}`);
   } catch (error) {
       console.error(`Error writing to OPFS: ${error.message}`);
   }
@@ -266,23 +279,34 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static async readFileAsBuffer(filePath: string): Promise<Buffer> {
+  static async readFileAsBuffer(filePath: string): Promise<Blob> {
     try {
 
       // Get the file and read it as an ArrayBuffer
       const file = await this.readFile(filePath)
       const arrayBuffer = await file.arrayBuffer();
 
-      // Convert ArrayBuffer to Buffer
-      return Buffer.from(arrayBuffer);
+      // Convert ArrayBuffer to Blob
+      return new Blob([arrayBuffer]);
     } catch (error) {
       console.error(`Error reading from OPFS: ${error.message}`);
       throw error;
     }
   }
-}
 
-BaseFileManager.setPlatformClass(FileManager)
+  static async readFileAsString(filePath: string): Promise<string> {
+    const blob = await this.readFileAsBuffer(filePath)
+    return blob.text()
+  }
+
+  static getParentDirPath(filePath: string): string {
+    return path.dirname(filePath)
+  }
+
+  static getFilenameFromPath(filePath: string): string {
+    return path.basename(filePath)
+  }
+}
 
 type AsyncTask = (stop: () => void) => Promise<void>
 
@@ -308,7 +332,7 @@ class CancelableInterval {
                 await this.taskWithCancellation(signal);
             } catch (error) {
                 if (error instanceof DOMException && error.name === 'AbortError') {
-                  console.log('Previous task was canceled.');
+                  logger('Previous task was canceled.');
                 } else {
                   console.error('Task error:', error);
                 }

@@ -12,14 +12,14 @@ import {
 import { dbMachine } from '@/services/db/dbMachine'
 import debug from 'debug'
 import { validateInput } from '@/services/internal/actors/validateInput'
-import { prepareDb } from '@/services/internal/actors/prepareDb'
+// import { prepareDb } from '@/services/internal/actors/prepareDb'
 import { configureFs } from '@/services/internal/actors/configureFs'
 import { saveConfig } from '@/services/internal/actors/saveConfig'
 import { loadAppDb } from '@/services/internal/actors/loadAppDb'
 import { InternalMachineContext } from '@/types'
 import { waitForFiles } from './actors/waitForFiles'
 
-const logger = debug('app:services:internal:machine')
+const logger = debug('seedSdk:services:internal:machine')
 
 const { inspect } = createBrowserInspector({
   autoStart: false,
@@ -40,7 +40,7 @@ export const internalMachine = setup({
     input: {} as Partial<InternalMachineContext> | undefined,
   },
   actors: {
-    prepareDb,
+    // prepareDb,
     validateInput,
     waitForFiles,
     configureFs,
@@ -85,7 +85,7 @@ export const internalMachine = setup({
     [VALIDATING_INPUT]: {
       on: {
         [INTERNAL_VALIDATING_INPUT_SUCCESS]: {
-          target: 'preparingDb',
+          target: CONFIGURING_FS,
           actions: assign({
             endpoints: ({ event }) => event.endpoints,
             addresses: ({ event }) => event.addresses,
@@ -104,17 +104,17 @@ export const internalMachine = setup({
       },
       tags: ['loading'],
     },
-    preparingDb: {
-      on: {
-        prepareDbSuccess: {
-          target: CONFIGURING_FS,
-        },
-      },
-      invoke: {
-        src: 'prepareDb',
-        input: ({ context, event }) => ({ context, event }),
-      },
-    },
+    // preparingDb: {
+    //   on: {
+    //     prepareDbSuccess: {
+    //       target: CONFIGURING_FS,
+    //     },
+    //   },
+    //   invoke: {
+    //     src: 'prepareDb',
+    //     input: ({ context, event }) => ({ context, event }),
+    //   },
+    // },
     waitingForFiles: {
       on: {
         filesReceived: {
@@ -177,7 +177,6 @@ export const internalMachine = setup({
     },
     ready: {
       entry: () => {
-        console.log('[sdk] [internal/index] Ready!')
         logger('[sdk] [internal/index] Ready!')
       },
       meta: {
@@ -203,39 +202,3 @@ export const internalMachine = setup({
     },
   },
 })
-
-// const internalService = createActor(internalMachine, {
-//   input: {},
-//   inspect: (inspEvent) => {
-//     if (inspEvent.type === '@xstate.snapshot') {
-//       if (
-//         inspEvent.event &&
-//         inspEvent.event.snapshot &&
-//         inspEvent.event.snapshot.value
-//       ) {
-//         logger(
-//           `[internalService] ${inspEvent.event.snapshot.value}`,
-//           inspEvent,
-//         )
-//         return
-//       }
-//
-//       if (inspEvent.snapshot && inspEvent.snapshot.value) {
-//         logger(`[internalService] ${inspEvent.snapshot.value}`, inspEvent)
-//         return
-//       }
-//
-//       // logger(`[internalService] Uncaught event`, inspEvent)
-//     }
-//   },
-// })
-
-// internalService.subscribe((snapshot) => {
-//   globalService.send({ type: INTERNAL_SERVICE_SNAPSHOT, snapshot })
-// })
-//
-// internalService.on(CHILD_SNAPSHOT, (emitted) => {
-//   globalService.send({ ...emitted })
-// })
-
-// internalService.start()

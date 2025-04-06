@@ -6,16 +6,17 @@ import { immerable } from 'immer'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
 import { getModel } from '@/stores/modelClass'
 import { propertyMachine } from './service/propertyMachine'
-import { internalPropertyNames } from '@/helpers/constants'
+import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { eventEmitter } from '@/eventBus'
-import fs from '@zenfs/core'
 import { getPropertyData } from '@/db/read/getPropertyData'
-import { getCorrectId } from '@/helpers'
+import { BaseFileManager, getCorrectId } from '@/helpers'
 import { TProperty } from '@/schema'
+import { eventEmitter } from '@/eventBus'
+import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
-const logger = debug('app:property:class')
+
+const logger = debug('seedSdk:property:class')
 
 type ItemPropertyService = ActorRefFrom<typeof propertyMachine>
 type ItemPropertySnapshot = SnapshotFrom<typeof propertyMachine>
@@ -66,7 +67,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       seedUid,
       versionLocalId,
       versionUid,
-      modelName: modelName,
+      modelName,
       storageTransactionId,
       propertyRecordSchema: ModelClass.schema[propertyName],
       schemaUid,
@@ -74,8 +75,17 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
 
 
-    if (!internalPropertyNames.includes(propertyName)) {
+    if (!INTERNAL_PROPERTY_NAMES.includes(propertyName)) {
       let propertyNameWithoutId
+
+      if (propertyName.endsWith('Id')) {
+        propertyNameWithoutId = propertyName.slice(0, -2)
+      }
+
+      if (propertyName.endsWith('Ids')) {
+        propertyNameWithoutId = propertyName.slice(0, -3)
+        propertyNameWithoutId = pluralize(propertyNameWithoutId)
+      }
 
       const propertyRecordSchema =
         ModelClass.schema[propertyNameWithoutId || propertyName]
@@ -147,18 +157,46 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
         let renderValue
 
-        if (
+        const isImage =
+          propertyRecordSchema &&
+          propertyRecordSchema.dataType === 'Image'
+
+        const isFile =
+          propertyRecordSchema &&
+          propertyRecordSchema.dataType === 'File'
+
+        const isItemStorage = 
           propertyRecordSchema &&
           propertyRecordSchema.storageType &&
           propertyRecordSchema.storageType === 'ItemStorage' &&
           context.refResolvedValue &&
           context.localStorageDir
+
+        if (!this._schemaUid && context.schemaUid) {
+          this._schemaUid = context.schemaUid
+        }
+
+        if (
+          isImage ||
+          isFile ||
+          isItemStorage
         ) {
           const filePath = `/files/${context.localStorageDir}/${context.refResolvedValue}`
           try {
-            const exists = await fs.promises.exists(filePath)
-            if (exists) {
-              renderValue = await fs.promises.readFile(filePath, 'utf-8')
+            const exists = await BaseFileManager.pathExists(filePath)
+            if (exists && isItemStorage) {
+              renderValue = await BaseFileManager.readFileAsString(filePath,)
+            }
+            if (exists && isImage) {
+              if (context.refResolvedDisplayValue) {
+                renderValue = context.refResolvedDisplayValue
+              } 
+              if (!context.refResolvedDisplayValue) {
+                renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
+              }
+            }
+            if (exists && isFile) {
+              renderValue = await BaseFileManager.readFileAsString(filePath,)
             }
             if (!exists) {
               renderValue = 'No file found'
@@ -179,7 +217,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         let transformedPropertyName = propertyName
 
         const skipTransform =
-          internalPropertyNames.includes(propertyName) || !!this._alias
+          INTERNAL_PROPERTY_NAMES.includes(propertyName) || !!this._alias
 
         if (!skipTransform && transformedPropertyName.endsWith('Id')) {
           transformedPropertyName = transformedPropertyName.slice(0, -2)
@@ -307,52 +345,66 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     return this._service.getSnapshot() as ItemPropertySnapshot
   }
 
+  private _getSnapshotContext(): PropertyMachineContext {
+    return this._getSnapshot().context
+  }
+
   get localId() {
-    return this._getSnapshot().context.localId
+    return this._getSnapshotContext().localId
   }
 
   get uid() {
-    return this._getSnapshot().context.uid
+    return this._getSnapshotContext().uid
   }
 
   get seedLocalId() {
-    return this._getSnapshot().context.seedLocalId
+    return this._getSnapshotContext().seedLocalId
   }
 
   get seedUid() {
-    return this._getSnapshot().context.seedUid
+    return this._getSnapshotContext().seedUid
   }
 
   get schemaUid() {
-    return this._getSnapshot().context.schemaUid
+    return this._getSnapshotContext().schemaUid
   }
 
   get propertyName() {
     if (this._alias) {
       return this._alias
     }
-    return this._getSnapshot().context.propertyName
+    return this._getSnapshotContext().propertyName
   }
 
   get modelName() {
-    return this._getSnapshot().context.modelName
+    return this._getSnapshotContext().modelName
   }
 
   get propertyDef(): Static<typeof TProperty> | undefined {
-    return this._getSnapshot().context.propertyRecordSchema
+    return this._getSnapshotContext().propertyRecordSchema
+  }
+
+  get localStorageDir(): string | void {
+    if (this.propertyDef && this.propertyDef.localStorageDir) {
+      return this.propertyDef.localStorageDir
+    }
+    if (this._getSnapshot().context.localStorageDir) {
+      return this._getSnapshot().context.localStorageDir
+    }
+  }
+
+  get refResolvedValue(): string | undefined {
+    return this._getSnapshotContext().refResolvedValue
   }
 
   get localStoragePath(): string | void {
-    if (this.propertyDef && this.propertyDef.localStorageDir) {
-      return `/files${this.propertyDef.localStorageDir}/${this._getSnapshot().context.refResolvedValue}`
-    }
-    if (this._getSnapshot().context.localStorageDir) {
-      return `/files${this._getSnapshot().context.localStorageDir}/${this._getSnapshot().context.refResolvedValue}`
+    if (this.localStorageDir) {
+      return `/files${this.localStorageDir}/${this.refResolvedValue}`
     }
   }
 
   get versionLocalId(): string | undefined {
-    return this._getSnapshot().context.versionLocalId
+    return this._getSnapshotContext().versionLocalId
   }
 
   get status() {
@@ -367,6 +419,9 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     // logger(
     //   `[XXXXXXXXXX] [value] [get] subjectValue: ${this._subject.value} serviceValue: ${this._service.getSnapshot().context.renderValue}`,
     // )
+    if (this._dataType === 'Image') {
+      return this._getSnapshot().context.refResolvedValue
+    }
     return this._subject.value
   }
 

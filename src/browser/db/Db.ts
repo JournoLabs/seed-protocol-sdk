@@ -1,160 +1,110 @@
 import { BaseDb } from "@/db/Db/BaseDb";
 import { IDb } from "@/interfaces/IDb";
-import { getAppDb, getSqliteWasmClient, isAppDbReady, setAppDb } from "./sqlWasmClient";
-import { SqliteConnectionManager } from "@/services/db";
 import debug from "debug";
 import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
-import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
-import { BROWSER_FS_TOP_DIR } from "@/services/internal/constants";
-import { FileManager } from "@/browser/helpers/FileManager";
-const logger = debug('app:browser:db:Db')
+import { BROWSER_FS_TOP_DIR, DB_NAME_APP } from "@/services/internal/constants";
+import { BaseFileManager } from "@/helpers";
 
-export const dbExec = async (dbId: string, params: any[], sql: string, dbName: string, retries = 2) => {
-  const rowsToReturnRaw: SqliteWasmResult[] = []
-  const rowsValues: string[][] = []
+const logger = debug('seedSdk:browser:db:Db')
 
-  const sqliteWasmClient = await getSqliteWasmClient()
-
-  // For a single exec command, the callback potentially gets called several times -- once for each row.
-  // So we need to collect all rows into a final array to return (execResult).
-  const rowsToReturn = await new Promise((resolve, reject) => {
-    sqliteWasmClient('exec', {
-      dbId,
-      sql,
-      bind: params,
-      callback: (result) => {
-        // Checks if this is the final callback of the query
-        if (!result || !result.row || !result.rowNumber) {
-          const returnResult = []
-          // Before returning the array, we process it to match the expected output format
-          // const rowsToReturnProcessed = rowsToReturnRaw.reduce((acc, curr) => {
-          //   if (
-          //     Array.isArray(curr.row) &&
-          //     curr.row?.length > 0 &&
-          //     curr.columnNames.length > 0
-          //   ) {
-          //     const returnObj: ReturnObj = {
-          //       database: dbName,
-          //     }
-          //
-          //     const values = []
-          //
-          //     curr.columnNames.forEach((colName, index: number) => {
-          //       if (curr.row && curr.row[index]) {
-          //         returnObj[colName] = curr.row[index]
-          //         values.push(curr.row[index])
-          //       }
-          //     })
-          //     // rowsValueStrings.push(`(${values.join(', ')})`)
-          //     acc.push(returnObj)
-          //   }
-          //   return acc
-          // }, [] as string[])
-          for (const currRow of rowsToReturnRaw) {
-            // const values: string[] = []
-            // currRow.columnNames.forEach((colName, index: number) => {
-            //   if (currRow.row) {
-            //     values.push(currRow.row[index])
-            //   }
-            // })
-            // logger(`[db/actors] [dbExec] currRow`, currRow)
-            returnResult.push(currRow.row)
-          }
-          resolve(returnResult)
-        } else {
-          // If not the final response, add this row to the return array
-          rowsToReturnRaw.push(result)
-        }
-      },
-    }).catch(async (error) => {
-      reject(error)
-    })
-  })
-
-  // logger(`[db/actors] [dbExec] rowsToReturn`, rowsToReturn)
-  // logger(`[db/actors] [dbExec] rowsValues`, rowsValues)
-
-  return rowsToReturn || []
-}
 
 class Db extends BaseDb implements IDb {
+
+  static sqliteWasmClient: any
+  static filesDir: string | undefined
+  static pathToDb: string | undefined
+  static dbId: string | undefined
+  static appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
+
   constructor() {
     super()
   }
 
   static getAppDb() {
-    return getAppDb()
+    return this.appDb
   }
 
   static isAppDbReady() {
-    return isAppDbReady()
+    return !!this.appDb
   }
 
-  static prepareDb(filesDir: string) {
+  static async connectToDb(filesDir: string,): Promise<string | undefined> {
 
-    return new Promise((resolve, reject) => {
-      let sqliteWasmClient
-      const interval = setInterval(() => {
-        // TODO: Add a timeout
-        // TODO: Add a cancel token to the promise so we can prevent more loops starting while we're checking the successful outcome
-        getSqliteWasmClient().then((sqliteWasmClient) => {
-          if (sqliteWasmClient) {
-            clearInterval(interval)
-            const manager = new SqliteConnectionManager(sqliteWasmClient)
-            resolve(manager)
-          }
-        })
+    if (Db.sqliteWasmClient) {
+      return this.dbId
+    }
 
-      }, 200)
-    })
+    this.filesDir = filesDir
+
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    let promiser
+
+    try {
+
+        let sqlite3Worker1Promiser
+
+        const sqliteWasm = await import('@sqlite.org/sqlite-wasm')
+
+        if (sqliteWasm && sqliteWasm.sqlite3Worker1Promiser) {
+          sqlite3Worker1Promiser = sqliteWasm.sqlite3Worker1Promiser
+        }
+
+        if (!sqlite3Worker1Promiser && window.sqlite3Worker1Promiser) {
+          sqlite3Worker1Promiser = window.sqlite3Worker1Promiser
+        }
+
+        if (!sqlite3Worker1Promiser) {
+          throw new Error('Failed to load sqlite3Worker1Promiser')
+        }
+
+        promiser = await new Promise<(event: string, config: Record<string, unknown>) => Promise<any>>((resolve) => {
+          const _promiser = sqlite3Worker1Promiser({
+            onready: () => {
+              resolve(_promiser);
+            },
+          });
+        }).catch((error) => {
+          console.error('Error from sqlite proxy server: ', JSON.stringify(error))
+        });
+
+    } catch ( e ) {
+      console.error('Error from sqlite proxy server: ', JSON.stringify(e))
+    }
+
+
+    if (!promiser) {
+      throw new Error('Failed to create promiser')
+    }
+
+    this.sqliteWasmClient = promiser
+
+    const responseGet = await this.sqliteWasmClient('config-get', {});
+
+    logger('[Db.prepareDb] Running SQLite3 version', responseGet.result.version.libVersion);
+
+    const responseOpen = await this.sqliteWasmClient('open', {
+      filename: `file:${filesDir}/db/${DB_NAME_APP}.sqlite3?vfs=opfs`,
+    });
+    const { dbId } = responseOpen;
+    logger(
+      '[Db.prepareDb] OPFS is available, created persisted database at',
+      responseOpen.result.filename.replace(/^file:(.*?)\?vfs=opfs/, '$1'),
+    );
+
+    logger('[Db.prepareDb] dbId', dbId)  
+
+    this.dbId = dbId
+
+    return dbId
   }
 
-  static async connectToDb(pathToDir: string, dbName: string): Promise<string> {
-
-    return new Promise((resolve, reject) => {
-      const interval = setInterval(() => {
-
-        // TODO: Add a timeout
-        // TODO: Add a cancel token to the promise so we can prevent more loops starting while we're checking the successful outcome
-        getSqliteWasmClient().then((sqliteWasmClient) => {
-
-          if (!sqliteWasmClient) {
-            return
-          }
-
-          //@ts-ignore
-          sqliteWasmClient('config-get', {}).then((response) => {
-            logger(response)
-            logger('Running SQLite3 version', response.result.version.libVersion)
-
-            //@ts-ignore
-            sqliteWasmClient('open', {
-              filename: `file:${pathToDir}/db/${dbName}.sqlite3?vfs=opfs`,
-            }).then((response: { dbId: string, result: { filename: string } }) => {
-
-              logger(response)
-              const dbId = response.dbId
-              logger(
-                'OPFS is available, created persisted database at',
-                response.result.filename.replace(/^file:(.*?)\?vfs=opfs$/, '$1'),
-              )
-
-              if (dbId) {
-                clearInterval(interval)
-                resolve(dbId)
-              }
-            })
-          })
-        })
-      }, 500)
-    })
-  }
-
-  static async migrate(pathToDbDir: string, dbName: string, dbId: string): Promise<void> {
-
-    const fs = await import('@zenfs/core')
+  static async migrate(pathToDbDir: string, dbName: string,): Promise<void> {
 
     const schemaGlobString = `${BROWSER_FS_TOP_DIR}/schema/*`
 
@@ -166,7 +116,7 @@ class Db extends BaseDb implements IDb {
           //   sql,
           // )
 
-          const finalResult = await dbExec(dbId, params, sql, dbName)
+          const finalResult = await this.exec(sql, params)
 
           // logger(`finalResult with method: ${method}`, finalResult)
           // Drizzle always waits for {rows: string[][]} or {rows: string[]} for the return value.
@@ -187,9 +137,8 @@ class Db extends BaseDb implements IDb {
     )
 
     try {
+      const zenfs = await BaseFileManager.getFs()
 
-      const filesInRoot = await fs.promises.readdir('/')
-      logger('filesInRoot', filesInRoot)
       const migrations = readMigrationFiles({
         migrationsFolder: pathToDbDir,
       })
@@ -243,7 +192,7 @@ class Db extends BaseDb implements IDb {
             }
           }
           if (shouldRebuildDb) {
-            await fs.promises.unlink(`${pathToDbDir}/${dbName}.sqlite3`)
+            await zenfs.promises.unlink(`${pathToDbDir}/${dbName}.sqlite3`)
           }
         }
       }
@@ -263,13 +212,24 @@ class Db extends BaseDb implements IDb {
       )
     } catch (error) {
 
-      await FileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
+      await BaseFileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
 
-      await this.migrate(pathToDbDir, dbName)
+      const journalExists = await BaseFileManager.pathExists(
+        `${pathToDbDir}/meta/_journal.json`,
+      )
+
+      if (journalExists) {
+        await this.migrate(pathToDbDir, dbName,)
+      }
+
+      if (!journalExists) {
+        throw new Error('Failed to migrate database')
+      }
+
 
     }
 
-    setAppDb(drizzleDb)
+    this.appDb = drizzleDb
     // const createTempTableQuery = await appDb.run(
     //   sql.raw(
     //     `CREATE TEMP TABLE IF NOT EXISTS temp_last_inserted_id (id INTEGER, table TEXT);`,
@@ -327,8 +287,40 @@ class Db extends BaseDb implements IDb {
     //           )
     //         }
   }
-}
 
-BaseDb.setPlatformClass(Db)
+  static async exec(sql: string, params: any[]) {
+    const rowsToReturnRaw: SqliteWasmResult[] = []
+    const rowsValues: string[][] = []
+  
+    // For a single exec command, the callback potentially gets called several times -- once for each row.
+    // So we need to collect all rows into a final array to return (execResult).
+    const rowsToReturn = await new Promise((resolve, reject) => {
+
+
+     this.sqliteWasmClient('exec', {
+        dbId:this.dbId,
+        sql,
+        bind: params,
+        callback: (result) => {
+          // Checks if this is the final callback of the query
+          if (!result || !result.row || !result.rowNumber) {
+            const returnResult = []
+            for (const currRow of rowsToReturnRaw) {
+              returnResult.push(currRow.row)
+            }
+            resolve(returnResult)
+          } else {
+            // If not the final response, add this row to the return array
+            rowsToReturnRaw.push(result)
+          }
+        },
+      }).catch(async (error) => {
+        reject(error)
+      })
+    })
+  
+    return rowsToReturn || []
+  }
+}
 
 export { Db }
