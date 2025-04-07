@@ -108,12 +108,9 @@ const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
         return
       }
       const newPath = `${baseDir}/${closestWidth}/${matchingFile?.name}`
-      logger('newPath', newPath)
       const exists = await FileManager.pathExists(newPath)
-      logger('exists', exists)
       if (exists) {
         const contentUrl = await FileManager.getContentUrlFromPath(newPath)
-        logger('contentUrl', contentUrl)
         if (contentUrl) {
           contentUrlCache.set(cacheKey, contentUrl)
           setSizedContentUrl(contentUrl)

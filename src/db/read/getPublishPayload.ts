@@ -20,6 +20,9 @@ import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties
 import { IItemProperty } from '@/interfaces'
 import { IItem } from '@/interfaces'
 import { BaseItem } from '@/Item/BaseItem'
+import debug from 'debug'
+import {ethers} from 'ethers'
+const logger = debug('seedSdk:db:getPublishPayload')
 
 const getVersionUid = (item: IItem<any>) => {
   let versionUid
@@ -70,7 +73,7 @@ const processBasicProperties = async (
   itemPublishData: PublishPayload,
 ): Promise<PublishPayload> => {
   for (const basicProperty of itemBasicProperties) {
-    const value = basicProperty.getService().getSnapshot().context.propertyValue
+    let value = basicProperty.getService().getSnapshot().context.propertyValue
 
     if (!value || basicProperty.uid) {
       continue
@@ -81,7 +84,23 @@ const processBasicProperties = async (
 
     const propertyNameForSchema = toSnakeCase(basicProperty.propertyName)
 
-    const data = [
+    if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
+      throw new Error(`Invalid value for property: ${basicProperty.propertyName}. Expected an array of bytes32, got ${value}.`)
+    }
+
+    if (schemaDef.startsWith('bytes32[]')) {
+      const newValues = []
+      for (const seedId of value) {
+        if (seedId.length !== 66 && !seedId.startsWith('0x')) {
+          newValues.push(ethers.encodeBytes32String(seedId))
+          continue
+        }
+        newValues.push(seedId)
+      }
+      value = newValues
+    }
+
+    let data = [
       {
         name: propertyNameForSchema,
         type: easDataType,
@@ -251,7 +270,7 @@ const processListProperty = async (
 
     let modelName: string
 
-    if (listProperty.propertyDef?.dataType === 'Relation') {
+    if (listProperty.propertyDef?.ref) {
       modelName = listProperty.propertyDef!.ref as string
     }
 

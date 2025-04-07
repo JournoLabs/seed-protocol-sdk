@@ -151,7 +151,11 @@ const processUploadProperty = async (
       compositeFileContents += `${separator}${childUpload.propertyName}${separator}${childUploadContents}`
     }
 
-    fileContents = Buffer.from(compositeFileContents)
+    if (typeof document !== 'undefined') {
+      fileContents = new TextEncoder().encode(compositeFileContents)
+    } else {
+      fileContents = Buffer.from(compositeFileContents)
+    }
   }
 
   if (!fileContents) {

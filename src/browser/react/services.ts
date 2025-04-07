@@ -161,6 +161,13 @@ export const useIsDbReady = () => {
     }
   }, [internalStatus])
 
+  useEffect(() => {
+    if (internalStatus === 'ready') {
+      setIsDbReady(true)
+    }
+  }, [])
+  
+
   return isDbReady
 }
 
