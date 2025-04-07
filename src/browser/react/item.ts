@@ -39,8 +39,6 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 
   const { status, internalStatus } = useGlobalServiceStatus()
 
-  const isDbReady = useIsDbReady()
-
   const isReadingDb = useRef(false)
 
   const itemStatus = useSelector(
@@ -62,7 +60,6 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 
   const readFromDb = useCallback(async () => {
     if (
-      !isDbReady ||
       isReadingDb.current ||
       internalStatus !== 'ready' ||
       (!seedUid && !seedLocalId)
@@ -84,7 +81,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     setItem(foundItem)
     updateItem(foundItem)
     isReadingDb.current = false
-  }, [internalStatus, isDbReady])
+  }, [internalStatus,])
 
   const listenerRef = useRef(readFromDb)
 

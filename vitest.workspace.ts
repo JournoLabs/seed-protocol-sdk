@@ -22,7 +22,9 @@ export default defineWorkspace([
         'dist/**',
         'src/node/**',
         '__tests__/node/**',
-        '__tests__/bin/**'
+        '__tests__/bin/**',
+        '__tests__/schema/**',
+        '__tests__/scripts/**',
       ],
       pool: 'forks',
       hookTimeout: 60000,
