@@ -1,3 +1,4 @@
+import { InferSelectModel } from 'drizzle-orm'
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const seeds = sqliteTable(
@@ -26,4 +27,4 @@ export const seeds = sqliteTable(
   // },
 )
 
-export type SeedType = seeds.$inferSelect
+export type SeedType = InferSelectModel<typeof seeds>

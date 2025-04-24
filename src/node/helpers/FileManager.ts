@@ -33,15 +33,11 @@ class FileManager extends BaseFileManager {
   }
 
   static async pathExists(filePath: string): Promise<boolean> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+    return await fsAsync.access(filePath).then(() => true).catch(() => false)
   }
 
   static async createDirIfNotExists(filePath: string): Promise<void> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+    await fsAsync.mkdir(filePath, { recursive: true })
   }
 
   static async readFileAsBuffer( filePath: string ): Promise<Buffer> {

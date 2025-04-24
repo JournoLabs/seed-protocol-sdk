@@ -1,5 +1,6 @@
 import { customAlphabet } from 'nanoid'
-import { Message, sha3_256, }             from 'js-sha3'
+import * as sha3           from 'js-sha3'
+import { Message } from 'js-sha3'
 import * as nanoIdDictionary from 'nanoid-dictionary'
 import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
@@ -11,6 +12,7 @@ export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
 const logger = debug('seedSdk:shared:helpers')
 
+const { sha3_256, } = sha3
 
 const { alphanumeric } = nanoIdDictionary
 

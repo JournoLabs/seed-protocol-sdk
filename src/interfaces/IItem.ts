@@ -1,6 +1,6 @@
 import { ActorRefFrom, Subscription } from 'xstate'
 import { ModelSchema, ModelValues, PropertyData } from '@/types'
-import { VersionsType } from '@/seedSchema/VersionSchema'
+import { VersionsType } from '@/seedSchema'
 import { IItemProperty } from './IItemProperty'
 
 export interface IItem<T extends ModelValues<ModelSchema>> {

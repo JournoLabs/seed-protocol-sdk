@@ -104,6 +104,30 @@ export const runAddModel = async () => {
   return output
 }
 
+export const runRpcServer = async () => {
+  try {
+    let rpcServerPath = path.resolve(process.cwd(), 'scripts', 'rpcServer.ts');
+
+  if (rpcServerPath.includes('__tests__')) {
+    rpcServerPath = path.join(process.cwd(), '..', '..', '..', '..', 'scripts', 'rpcServer.ts');
+  }
+
+  const command = `npx tsx ${rpcServerPath}`
+
+  const output = execSync(command, {
+    stdio: 'pipe',
+    env: {
+      ...process.env,
+    },
+  }).toString()
+
+    return output
+  } catch (error: any) {
+    console.error('Error running rpc server:', error.message)
+    throw error
+  }
+}
+
 export const runInit = async ({
   projectType,
   args,

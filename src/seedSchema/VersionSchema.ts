@@ -1,4 +1,5 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { InferSelectModel } from 'drizzle-orm'
 
 export const versions = sqliteTable('versions', {
   localId: text('local_id').unique(),
@@ -13,4 +14,4 @@ export const versions = sqliteTable('versions', {
   attestationRaw: text('attestation_raw'),
 })
 
-export type VersionsType = versions.$inferSelect
+export type VersionsType = InferSelectModel<typeof versions>

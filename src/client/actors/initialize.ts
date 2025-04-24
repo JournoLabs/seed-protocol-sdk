@@ -11,9 +11,8 @@ import { setupAllItemsEventHandlers } from "@/events/item";
 import { setupServiceHandlers } from "@/events/services";
 import { getGlobalService, } from "@/services/global/globalMachine";
 import { GlobalState } from "@/services/internal/constants";
-import { isBrowser } from "@/helpers/environment";
+import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
-import { BaseDb } from "@/db/Db/BaseDb";
 import { BaseArweaveClient, BaseQueryClient } from "@/helpers";
 import { BaseItem } from '@/Item/BaseItem'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
@@ -37,20 +36,39 @@ FromCallbackInput<ClientManagerContext, EventObject>
   const _initialize = async () => {
     const { config, addresses } = options
 
+    const BaseDb = (await import('../../db/Db/BaseDb')).BaseDb
+
+    let FileManager: typeof BaseFileManager
+    let Db: typeof BaseDb
+    let QueryClient: typeof BaseQueryClient
+    let ArweaveClient: typeof BaseArweaveClient
+    let Item: typeof BaseItem
+    let ItemProperty: typeof BaseItemProperty
+
     if (isBrowser()) {
-      const FileManager = (await import('../../browser/helpers/FileManager')).FileManager
-      const Db = (await import('../../browser/db/Db')).Db
-      const QueryClient = (await import('../../browser/helpers/QueryClient')).QueryClient
-      const ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
-      const Item = (await import('../../browser/Item/Item')).Item
-      const ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
-      BaseFileManager.setPlatformClass(FileManager)
-      BaseDb.setPlatformClass(Db)
-      BaseQueryClient.setPlatformClass(QueryClient)
-      BaseArweaveClient.setPlatformClass(ArweaveClient)
-      BaseItem.setPlatformClass(Item)
-      BaseItemProperty.setPlatformClass(ItemProperty)
+      FileManager = (await import('../../browser/helpers/FileManager')).FileManager
+      Db = (await import('../../browser/db/Db')).Db
+      QueryClient = (await import('../../browser/helpers/QueryClient')).QueryClient
+      ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
+      Item = (await import('../../browser/Item/Item')).Item
+      ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
     }
+    
+    if (isNode()) {
+      FileManager = (await import('../../node/helpers/FileManager')).FileManager
+      Db = (await import('../../node/db/Db')).Db
+      QueryClient = (await import('../../node/helpers/QueryClient')).QueryClient
+      ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
+      Item = (await import('../../node/Item/Item')).Item
+      ItemProperty = (await import('../../node/ItemProperty/ItemProperty')).ItemProperty
+    }
+    
+    BaseFileManager.setPlatformClass(FileManager!)
+    BaseDb.setPlatformClass(Db!)
+    BaseQueryClient.setPlatformClass(QueryClient!)
+    BaseArweaveClient.setPlatformClass(ArweaveClient!)
+    BaseItem.setPlatformClass(Item!)
+    BaseItemProperty.setPlatformClass(ItemProperty!)
     
     const { models, endpoints, arweaveDomain, } = config
     

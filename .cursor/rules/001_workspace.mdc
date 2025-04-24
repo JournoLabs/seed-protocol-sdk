@@ -1,0 +1,9 @@
+---
+description: Brief overview of project purpose and main functions
+globs: **/*
+---
+Tech Stack:
+
+- Typescript
+- Drizzle ORM
+- Stately.ai Xstate

@@ -58,7 +58,7 @@ export abstract class BaseFileManager {
     return this.PlatformClass.readFile(filePath)
   }
 
-  static async readFileAsBuffer(filePath: string): Promise<Buffer> {
+  static async readFileAsBuffer(filePath: string): Promise<Buffer | Blob> {
     return this.PlatformClass.readFileAsBuffer(filePath)
   }
 

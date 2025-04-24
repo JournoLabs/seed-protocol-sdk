@@ -1,4 +1,4 @@
-import { ClientManager } from '@/client/ClientManager'
+import { ClientManager } from './ClientManager'
 
 
 export { ClientManager as client }

@@ -1,6 +1,6 @@
 import { int, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
-
+import { InferInsertModel, InferSelectModel } from 'drizzle-orm'
 export const models = sqliteTable('models', {
   id: int('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
@@ -42,5 +42,5 @@ export const propertiesRelations = relations(properties, ({ one }) => ({
   refModel: one(models),
 }))
 
-export type NewPropertyRecord = typeof properties.$inferInsert
-export type PropertyType = typeof properties.$inferSelect
+export type NewPropertyRecord = InferInsertModel<typeof properties>
+export type PropertyType = InferSelectModel<typeof properties>

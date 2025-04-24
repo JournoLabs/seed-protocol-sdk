@@ -14,9 +14,9 @@ describe('Client in node', () => {
   })
 
   testConfig.endpoints = {
-      files: './__tests__/__mocks__/node/project/.seed',
-      filePaths: 'api/seed/migrations',
-    }
+    files: './__tests__/__mocks__/node/project/.seed',
+    filePaths: 'api/seed/migrations',
+  }
 
   it.concurrent('initializes properly with one address', async ({expect}) => {
     expect(testClient).toBeDefined()

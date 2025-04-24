@@ -51,6 +51,7 @@
   "include": [
     "src/**/*",
     "__tests__/**/*",
-    "scripts/**/*"
+    "scripts/**/*", 
+    "rollup.typia-proto.js"  
   ]
 }
