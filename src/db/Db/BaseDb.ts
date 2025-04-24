@@ -16,6 +16,10 @@ export abstract class BaseDb implements IDb {
     return this.PlatformClass.getAppDb()
   }
 
+  static prepareDb(filesDir: string): Promise<BaseSQLiteDatabase> {
+    return this.PlatformClass.prepareDb(filesDir)
+  }
+
   static isAppDbReady(): boolean {
     return this.PlatformClass.isAppDbReady()
   }

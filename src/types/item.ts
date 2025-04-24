@@ -1,3 +1,4 @@
+import { tags } from 'typia';
 import { ModelClassType, ModelSchema } from '@/types'
 import { Attestation } from '@/graphql/gql/graphql'
 import { PropertyType } from '@/seedSchema'
@@ -58,20 +59,20 @@ export type NewItemProps<T> = Partial<ItemData> &
     storageTransactionId?: string
   }
 
-export type ItemData = {
-  seedLocalId?: string
-  seedUid?: string
-  modelName?: string
-  schemaUid?: string
-  attestationCreatedAt?: number
-  latestVersionUid?: string
-  latestVersionLocalId?: string
-  versionsCount?: number
-  lastVersionPublishedAt?: number
-  lastLocalUpdateAt?: number
-  type?: string
-  createdAt?: number
-  updatedAt?: number
+export interface ItemData {
+  seedLocalId?: string;
+  seedUid?: string;
+  modelName?: string;
+  schemaUid?: string;
+  attestationCreatedAt?: number & tags.Type<"int64">;
+  latestVersionUid?: string;
+  latestVersionLocalId?: string;
+  versionsCount?: number & tags.Type<"int32">;
+  lastVersionPublishedAt?: number & tags.Type<"int64">;
+  lastLocalUpdateAt?: number & tags.Type<"int64">;
+  type?: string;
+  createdAt?: number & tags.Type<"int64">;
+  updatedAt?: number & tags.Type<"int64">;
 }
 
 export type ItemFindProps = {

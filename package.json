@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
@@ -23,10 +23,13 @@
     "compile": "graphql-codegen --config codegen.ts",
     "watch": "graphql-codegen -w",
     "build:publish": "rm -rf dist && NODE_ENV=production rollup -c && npm publish --access public",
-    "test:browser": "vitest --workspace=vitest.workspace.browser.ts"
+    "test:browser": "vitest --workspace=vitest.workspace.browser.ts",
+    "rpc-server": "tsx scripts/rpcServer.ts"
   },
   "bin": {
-    "seed": "dist/bin.js"
+    "seed": "dist/bin.js",
+    "add-model": "dist/addModel.js",
+    "rpc-server": "dist/rpcServer.js"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
@@ -42,6 +45,8 @@
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.7.0",
     "@ethersproject/providers": "^5.7.2",
+    "@grpc/grpc-js": "^1.13.3",
+    "@grpc/proto-loader": "^0.7.15",
     "@libsql/client": "^0.14.0",
     "@misskey-dev/browser-image-resizer": "^2024.1.0",
     "@pianity/arsnap-adapter": "^0.2.0",
@@ -153,6 +158,7 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.19.3",
     "typescript": "~5.7.2",
+    "typia": "^9.1.1",
     "vite-plugin-inspect": "^10.0.6",
     "vite-plugin-node-polyfills": "^0.22.0",
     "vite-plugin-static-copy": "^2.2.0",

@@ -1,5 +1,5 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-
+import { InferSelectModel } from 'drizzle-orm'
 export const appState = sqliteTable('appState', {
   key: text('key').unique(),
   value: text('value'),
@@ -7,4 +7,4 @@ export const appState = sqliteTable('appState', {
   updatedAt: int('updated_at'),
 })
 
-export type appStateType = appState.$inferSelect
+export type appStateType = InferSelectModel<typeof appState>

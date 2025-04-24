@@ -16,13 +16,7 @@ import { getTsImport } from '@/node/helpers'
 import { ModelClassType } from '@/types/model'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
-import { appState } from '@/seedSchema/AppStateSchema'
-import { config } from '@/seedSchema/ConfigSchema'
-import { metadata } from '@/seedSchema/MetadataSchema'
-import { models } from '@/seedSchema/ModelSchema'
-import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { seeds } from '@/seedSchema/SeedSchema'
-import { versions } from '@/seedSchema/VersionSchema'
+import { appState, metadata, models, modelUids, seeds, versions } from '@/seedSchema'
 import { commandExists } from '@/helpers/scripts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -280,10 +274,10 @@ const init = (args: string[],) => {
         path.join(dotSeedDir, 'schema'),
       )
 
-      copyDirectoryRecursively(
-        path.join(pathResolver.getSdkRootDir(), 'node', 'codegen'),
-        path.join(dotSeedDir, 'codegen'),
-      )
+      // copyDirectoryRecursively(
+      //   path.join(pathResolver.getSdkRootDir(), 'node', 'codegen'),
+      //   path.join(dotSeedDir, 'codegen'),
+      // )
 
       console.log('copying', schemaFilePath, path.join(dotSeedDir, 'schema.ts'))
 

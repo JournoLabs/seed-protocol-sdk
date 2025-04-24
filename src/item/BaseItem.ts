@@ -1,7 +1,7 @@
 import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
-import { VersionsType } from '@/seedSchema/VersionSchema'
+import { VersionsType } from '@/seedSchema'
 import { getModel } from '@/stores/modelClass'
 
 import {

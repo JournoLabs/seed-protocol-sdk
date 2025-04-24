@@ -1,4 +1,5 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { InferSelectModel } from 'drizzle-orm'
 
 export const metadata = sqliteTable('metadata', {
   localId: text('local_id').unique(),
@@ -25,4 +26,4 @@ export const metadata = sqliteTable('metadata', {
   updatedAt: int('updated_at'),
 })
 
-export type MetadataType = metadata.$inferSelect
+export type MetadataType = InferSelectModel<typeof metadata>

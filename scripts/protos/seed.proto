@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package seed;
+
+// Main service definition
+service SeedService {
+  // Model operations
+  rpc GetModels (Empty) returns (ModelsResponse);
+  rpc GetModel (ModelRequest) returns (ModelResponse);
+  
+  // Item operations
+  rpc CreateItem (CreateItemRequest) returns (ItemResponse);
+  rpc GetItem (ItemRequest) returns (ItemResponse);
+  rpc UpdateItem (UpdateItemRequest) returns (ItemResponse);
+  rpc DeleteItem (ItemRequest) returns (StatusResponse);
+  rpc PublishItem (ItemRequest) returns (StatusResponse);
+  
+  // Query operations
+  rpc QueryItems (QueryRequest) returns (ItemsResponse);
+}
+
+// Empty message for requests that don't need parameters
+message Empty {}
+
+// Request to get a specific model
+message ModelRequest {
+  string model_name = 1;
+}
+
+// Response containing all available models
+message ModelsResponse {
+  repeated ModelDefinition models = 1;
+}
+
+// Response containing a single model definition
+message ModelResponse {
+  ModelDefinition model = 1;
+}
+
+// Model definition with properties
+message ModelDefinition {
+  string name = 1;
+  repeated PropertyDefinition properties = 2;
+}
+
+// Property definition for a model
+message PropertyDefinition {
+  string name = 1;
+  string type = 2;
+  string relation_model = 3;  // If property is a relation, the model it relates to
+  bool is_list = 4;          // If property is a list of items
+}
+
+// Request to create a new item
+message CreateItemRequest {
+  string model_name = 1;
+  map<string, string> properties = 2;
+}
+
+// Request to get a specific item
+message ItemRequest {
+  string id = 1;
+  string model_name = 2;
+}
+
+// Request to update an existing item
+message UpdateItemRequest {
+  string id = 1;
+  string model_name = 2;
+  map<string, string> properties = 3;
+}
+
+// Response containing an item
+message ItemResponse {
+  string id = 1;
+  string model_name = 2;
+  map<string, string> properties = 3;
+}
+
+// Response containing multiple items
+message ItemsResponse {
+  repeated ItemResponse items = 1;
+}
+
+// Query request to filter items
+message QueryRequest {
+  string model_name = 1;
+  map<string, string> filters = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+// Simple status response
+message StatusResponse {
+  bool success = 1;
+  string message = 2;
+}

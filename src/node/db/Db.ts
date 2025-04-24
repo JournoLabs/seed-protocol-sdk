@@ -2,7 +2,6 @@ import { BaseDb }         from "@/db/Db/BaseDb";
 import { IDb }            from "@/interfaces";
 import path               from "path";
 import { DrizzleConfig, } from "drizzle-orm";
-import { isBrowser }      from '@/helpers/environment'
 import debug from 'debug'
 import { appState } from '@/seedSchema'
 
@@ -12,10 +11,7 @@ const getConfig = async (dotSeedDir: string) => {
 
   const { defineConfig } = await import('drizzle-kit')
 
-  let schemaDir = `${dotSeedDir}/schema/*Schema.ts`
-  if (!isBrowser()) {
-    schemaDir = path.join(process.cwd(), 'schema')
-  }
+  let schemaDir = path.join(process.cwd(), 'schema')
 
   const nodeDbConfig = defineConfig({
     schema: schemaDir,
@@ -64,7 +60,7 @@ class Db extends BaseDb implements IDb {
   static async connectToDb(pathToDir: string, dbName: string) {
 
     return {
-      id: this.db.constructor.name
+      id: this.db ? this.db.constructor.name : ''
     }
   }
 
