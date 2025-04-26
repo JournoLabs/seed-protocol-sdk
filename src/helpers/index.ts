@@ -1,6 +1,4 @@
 import { customAlphabet } from 'nanoid'
-import * as sha3           from 'js-sha3'
-import { Message } from 'js-sha3'
 import * as nanoIdDictionary from 'nanoid-dictionary'
 import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
@@ -11,8 +9,6 @@ export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
 const logger = debug('seedSdk:shared:helpers')
-
-const { sha3_256, } = sha3
 
 const { alphanumeric } = nanoIdDictionary
 
@@ -157,34 +153,6 @@ export const parseEasRelationPropertyName = (easPropertyName: string) => {
   }
 }
 
-export const getContentHash = async (
-  data: Message
-): Promise<string> => {
-  return sha3_256(data)
-}
-
-// export const getContentHash = async (
-//   base64: string | null | undefined,
-//   uint: Uint8Array | undefined,
-// ): Promise<string> => {
-//   let data
-
-//   if (base64 && !uint) {
-//     const encoder = new TextEncoder()
-//     data = encoder.encode(base64)
-//   }
-
-//   if (uint) {
-//     data = uint
-//   }
-
-//   // Hash the data with SHA-256
-//   const hashBuffer = await crypto.subtle.digest('SHA-256', data as Uint8Array)
-
-//   // Convert the ArrayBuffer to a hex string
-//   const hashArray = Array.from(new Uint8Array(hashBuffer))
-//   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
-// }
 
 export const isBinary = (arrayBuffer: ArrayBuffer): boolean => {
   const view = new Uint8Array(arrayBuffer);
