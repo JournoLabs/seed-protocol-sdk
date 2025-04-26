@@ -42,7 +42,7 @@ const config = [
     input: {
       main: 'src/index.ts',
       bin: 'scripts/bin.ts',
-      addModel: 'scripts/addModel.ts',
+      // addModel: 'scripts/addModel.ts',
     },
     output: [
       {
