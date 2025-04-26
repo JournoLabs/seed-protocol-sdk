@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.10",
+  "version": "0.3.14",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
@@ -41,7 +41,6 @@
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.7.0",
-    "@ethersproject/providers": "^5.7.2",
     "@libsql/client": "^0.14.0",
     "@misskey-dev/browser-image-resizer": "^2024.1.0",
     "@pianity/arsnap-adapter": "^0.2.0",
@@ -51,8 +50,6 @@
     "@tanstack/query-sync-storage-persister": "^5.62.8",
     "@tanstack/react-query-devtools": "^5.62.8",
     "@tanstack/react-query-persist-client": "^5.62.8",
-    "@tanstack/react-virtual": "^3.11.2",
-    "@vitejs/plugin-legacy": "^6.0.0",
     "@xstate/react": "^5.0.0",
     "arweave": "^1.15.5",
     "crypto-browserify": "^3.12.1",
@@ -73,7 +70,6 @@
     "nunjucks": "^3.2.4",
     "path-browserify": "^1.0.1",
     "pluralize": "^8.0.0",
-    "promise-async": "^0.2.0",
     "protobufjs": "^7.4.0",
     "reflect-metadata": "^0.2.2",
     "rimraf": "^6.0.1",
