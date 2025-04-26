@@ -5,7 +5,7 @@ import { BaseFileManager, getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
-import { getContentHash } from '@/helpers'
+import { getContentHash } from '@/helpers/crypto'
 import { BaseItem } from '@/Item/BaseItem'
 const logger = debug('seedSdk:item:getPublishUploads')
 
