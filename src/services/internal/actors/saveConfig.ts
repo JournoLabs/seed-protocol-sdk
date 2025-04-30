@@ -4,8 +4,6 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { FromCallbackInput, InternalMachineContext } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
-import { getTableColumns, sql } from 'drizzle-orm'
-import { getTableConfig } from 'drizzle-orm/sqlite-core'
 
 const logger = debug('seedSdk:services:internal:actors:saveConfig')
 
@@ -14,6 +12,8 @@ export const saveConfig = fromCallback<
   FromCallbackInput<InternalMachineContext>
 >(({ sendBack, input: { context } }) => {
 
+  logger('saveConfig starting')
+
   const { endpoints, addresses, arweaveDomain } = context
 
   if (!endpoints) {
@@ -21,7 +21,6 @@ export const saveConfig = fromCallback<
   }
 
   const _saveConfig = async (): Promise<void> => {
-    // logger('[sdk] [internal/actors] starting _saveConfig')
     const appDb = BaseDb.getAppDb()
 
     if (!appDb) {
@@ -29,32 +28,6 @@ export const saveConfig = fromCallback<
     }
     const endpointsValueString = JSON.stringify(endpoints)
     const addressesValueString = JSON.stringify(addresses)
-
-    const tableColumns = getTableColumns(appState)
-
-    logger('tableColumns', tableColumns)
-
-    const {
-      columns,
-      indexes,
-      foreignKeys,
-      checks,
-      primaryKeys,
-      name,
-    } = getTableConfig(appState);
-
-    logger('columns', columns)
-    logger('indexes', indexes)
-    logger('foreignKeys', foreignKeys)
-    logger('checks', checks)
-    logger('primaryKeys', primaryKeys)
-    logger('name', name)
-
-    logger('calling select on db')
-
-    const queryResult = await appDb.select().from(appState)
-
-    logger('queryResult', queryResult)
 
     // TODO: Figure out how to define on conflict with multiple rows added
     await appDb
@@ -69,9 +42,10 @@ export const saveConfig = fromCallback<
         value: endpointsValueString,
         },
       })
-    // logger('[sdk] [internal/actors] Saving addresses to db')
-    await appDb
-      .insert(appState)
+
+    if (addresses) {
+      await appDb
+        .insert(appState)
       .values({
         key: 'addresses',
         value: addressesValueString,
@@ -82,6 +56,8 @@ export const saveConfig = fromCallback<
           value: addressesValueString,
         },
       })
+    }
+
     await appDb
       .insert(appState)
       .values({
@@ -94,11 +70,10 @@ export const saveConfig = fromCallback<
           value: arweaveDomain || 'arweave.net',
         },
       })
-      logger('[sdk] [internal/actors] Should be done saving')
     }
 
   _saveConfig().then(() => {
-    logger('[sdk] [internal/actors] Successfully saved config')
+    logger('saveConfig success')
     return sendBack({ type: INTERNAL_SAVING_CONFIG_SUCCESS })
   })
 

@@ -70,6 +70,10 @@ export abstract class BaseFileManager {
     return this.PlatformClass.getFs()
   }
 
+  static getPathModule(): any {
+    return this.PlatformClass.getPathModule()
+  }
+
   static getParentDirPath(filePath: string): string {
     return this.PlatformClass.getParentDirPath(filePath)
   }

@@ -2,7 +2,6 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import path from 'path'
 
 
 export const resolveRemoteStorage = fromCallback<
@@ -28,6 +27,8 @@ export const resolveRemoteStorage = fromCallback<
     if (!filesDirExists) {
       await BaseFileManager.createDirIfNotExists('/files')
     }
+
+    const path = BaseFileManager.getPathModule()
 
     const htmlDir = path.join('/files', 'html')
 

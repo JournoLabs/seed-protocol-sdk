@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
