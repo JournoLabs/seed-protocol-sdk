@@ -306,6 +306,10 @@ class FileManager extends BaseFileManager {
   static getFilenameFromPath(filePath: string): string {
     return path.basename(filePath)
   }
+
+  static getPathModule(): any {
+    return path
+  }
 }
 
 type AsyncTask = (stop: () => void) => Promise<void>

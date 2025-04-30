@@ -56,6 +56,9 @@ class FileManager extends BaseFileManager {
     return path.basename(filePath)
   }
 
+  static getPathModule(): any {
+    return path
+  }
 }
 
 export { FileManager }

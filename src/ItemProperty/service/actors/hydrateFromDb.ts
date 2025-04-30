@@ -6,7 +6,6 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import path from 'path'
 import { BaseFileManager } from '@/helpers'
 
 const logger = debug('seedSdk:property:actors:hydrateFromDb')
@@ -199,6 +198,7 @@ export const hydrateFromDb = fromCallback<
 
         const dirPath = `/files/${dir}`
         const fs = await BaseFileManager.getFs()
+        const path = BaseFileManager.getPathModule()
         const files = await fs.promises.readdir(dirPath)
         const matchingFiles = files.filter((file: string) => {
           return path.basename(file).includes(refResolvedValue!)

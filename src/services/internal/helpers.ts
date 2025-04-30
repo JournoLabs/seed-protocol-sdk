@@ -1,7 +1,6 @@
-import path from 'path'
 import { Endpoints } from '@/types'
-import debug from 'debug'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import debug from 'debug'
 
 const logger = debug('seedSdk:services:internal:helpers')
 
@@ -149,6 +148,7 @@ class FileDownloadManager {
             existingFileMigrationNumber &&
             existingFileMigrationNumber === migrationNumber
           ) {
+            const path = BaseFileManager.getPathModule()
             await fs.promises.unlink(path.join(localDirPath, file))
           }
         }
