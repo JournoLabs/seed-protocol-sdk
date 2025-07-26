@@ -263,7 +263,7 @@ flowchart TD
     G[Schema/Migration files
     browser/db/seedSchema]
 H[Schema/Migration files
-.seed/app/schema]
+.seed/schema]
 R[Schema/Migration files
 node/db/sdkSchema]
 

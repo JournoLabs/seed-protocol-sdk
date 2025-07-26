@@ -19,10 +19,10 @@ if (process.env.IS_SEED_DEV) {
 }
 
 export default defineConfig({
-  schema: [`${dotSeedDir}/app/schema/*Schema.ts`],
+  schema: [`${dotSeedDir}/schema/*Schema.ts`],
   dialect: 'sqlite',
-  out: `${dotSeedDir}/app/db`,
+  out: `${dotSeedDir}/db`,
   dbCredentials: {
-    url: `${dotSeedDir}/app/db/app_db.sqlite3`,
+    url: `${dotSeedDir}/db/app_db.sqlite3`,
   },
 })
