@@ -19,7 +19,11 @@ PermaPress is a product developed by JournoLabs (formerly JournoDAO).
 ## Installing
 
 ```bash
-yarn add @seedprotocol/sdk
+npm install @seedprotocol/sdk
+# or
+pnpm add @seedprotocol/sdk
+# or
+bun add @seedprotocol/sdk
 ```
 
 ## Getting Started

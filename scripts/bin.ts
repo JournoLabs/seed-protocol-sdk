@@ -41,6 +41,12 @@ function copyDirectoryRecursively(sourceDir: string, targetDir: string) {
 
   // Process each entry
   for (const entry of entries) {
+    // Skip __tests__ directories to prevent recursive copying
+    if (entry === '__tests__') {
+      console.log(`Skipping __tests__ directory: ${path.join(sourceDir, entry)}`);
+      continue;
+    }
+
     const sourcePath = path.join(sourceDir, entry);
     const targetPath = path.join(targetDir, entry);
     
@@ -259,7 +265,10 @@ const init = (args: string[],) => {
         console.log(`[Seed Protocol] making dir at ${outputDirPath}`)
         fs.mkdirSync(outputDirPath, { recursive: true })
         console.log('[Seed Protocol] copying app files')
-        fs.cpSync(dotSeedDir, outputDirPath, { recursive: true })
+        
+        // Use copyDirectoryRecursively instead of fs.cpSync to exclude __tests__ directories
+        copyDirectoryRecursively(dotSeedDir, outputDirPath)
+        
         console.log('[Seed Protocol] removing sqlite3 files and index.ts files')
         rimrafSync(`${outputDirPath}/**/*.sqlite3`, { glob: true })
         rimrafSync(`${outputDirPath}/**/index.ts`, { glob: true })

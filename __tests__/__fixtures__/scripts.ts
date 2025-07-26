@@ -1,55 +1,21 @@
-import path                from 'path'
-import { execSync, spawn } from 'child_process'
-import { fileURLToPath } from 'url'
+import { execSync } from 'child_process'
+import path from 'path'
+import fs from 'fs'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-const testModel = {
+export const testModel = {
   name: 'TestModel',
-  properties: [
-    {
-      type: 'Text',
-      name: 'name',
-    },
-    {
-      type: 'Date',
-      name: 'birthdate',
-    },
-    {
-      type: 'Number',
-      name: 'age',
-    },
-    {
-      type: 'Boolean',
-      name: 'isAlive',
-    },
-    {
-      type: 'List',
-      name: 'nicknames',
-      ref: 'Text',
-    },
-    {
-      type: 'Relation',
-      name: 'bestFriend',
-      targetModel: 'TestModel',
-    },
-    {
-      type: 'List',
-      name: 'friends',
-      targetModel: 'TestModel',
-    },
-    {
-      type: 'Image',
-      name: 'profilePic',
-    },
-    {
-      type: 'File',
-      name: 'resume',
-      storageType: 'ItemStorage',
-      storagePath: '/resumes',
-    }
-  ]
+  properties: {
+    name: { type: 'string' },
+    age: { type: 'number' },
+    isActive: { type: 'boolean' }
+  }
+}
+
+export const testModel_singleLine = {
+  name: 'TestModelSingleLine',
+  properties: {
+    title: { type: 'string' }
+  }
 }
 
 type RunCommandWithOutputArgs = {
@@ -61,27 +27,15 @@ type RunCommandWithOutputArgs = {
 type RunCommandWithOutput = (args: RunCommandWithOutputArgs) => Promise<string>
 
 export const runCommandWithOutput: RunCommandWithOutput = async ({command, args, options}) => {
-  let output = ''
-
-  await new Promise<void>((resolve) => {
-    const {stdout, stderr} = spawn(
-      command,
-      args,
-      options,
-    );
-
-    stdout.on('data', (data) => {
-      output += data.toString()
-    });
-    stderr.on('data', (data) => {
-      output += data.toString()
-    });
-    stdout.on('close', () => {
-      resolve()
-    })
-  }).catch((err) => {
-    console.error(err)
-  })
+  const output = execSync(`${command} ${args.join(' ')}`, {
+    stdio: 'pipe',
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      IS_SEED_DEV: 'true',
+    },
+    ...options,
+  }).toString()
 
   return output
 }
@@ -94,6 +48,11 @@ export const runAddModel = async () => {
   const dotSeedDir = path.resolve(nodeProjectDir, '.seed');
   const sourceSchemaFilePath = path.resolve(schemaDirPath, 'seed.config.ts');
   const outputFilePath = path.resolve(dotSeedDir, 'schemaTestOutput.ts');
+
+  // Ensure the .seed directory exists
+  if (!fs.existsSync(dotSeedDir)) {
+    fs.mkdirSync(dotSeedDir, { recursive: true })
+  }
 
   const output = await runCommandWithOutput({
     command: 'npx',
@@ -108,18 +67,20 @@ export const runRpcServer = async () => {
   try {
     let rpcServerPath = path.resolve(process.cwd(), 'scripts', 'rpcServer.ts');
 
-  if (rpcServerPath.includes('__tests__')) {
-    rpcServerPath = path.join(process.cwd(), '..', '..', '..', '..', 'scripts', 'rpcServer.ts');
-  }
+    if (rpcServerPath.includes('__tests__')) {
+      rpcServerPath = path.join(process.cwd(), '..', '..', '..', '..', 'scripts', 'rpcServer.ts');
+    }
 
-  const command = `npx tsx ${rpcServerPath}`
+    const command = `npx tsx ${rpcServerPath}`
 
-  const output = execSync(command, {
-    stdio: 'pipe',
-    env: {
-      ...process.env,
-    },
-  }).toString()
+    const output = execSync(command, {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        IS_SEED_DEV: 'true',
+      },
+    }).toString()
 
     return output
   } catch (error: any) {
@@ -136,11 +97,28 @@ export const runInit = async ({
   args: string[]
 }): Promise<string> => {
   try {
-
     let binPath = path.join(process.cwd(), 'scripts', 'bin.ts')
 
     if (binPath.includes('__tests__')) {
       binPath = path.join(process.cwd(), '..', '..', '..', '..', 'scripts', 'bin.ts')
+    }
+
+    // Ensure the target directory exists
+    const targetDir = args[0] || path.join(process.cwd(), '__tests__', '__mocks__', projectType, 'project')
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true })
+    }
+
+    // Create a basic seed.config.ts if it doesn't exist
+    const configPath = path.join(targetDir, 'seed.config.ts')
+    if (!fs.existsSync(configPath)) {
+      const configContent = `export default {
+  models: {},
+  endpoints: {
+    localOutputDir: './seed-files'
+  }
+}`
+      fs.writeFileSync(configPath, configContent)
     }
 
     const command = `npx tsx ${binPath} init ${args.join(' ')}`
@@ -149,6 +127,8 @@ export const runInit = async ({
       stdio: 'pipe',
       env: {
         ...process.env,
+        NODE_ENV: 'test',
+        IS_SEED_DEV: 'true',
       },
     }).toString()
 

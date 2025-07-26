@@ -25,14 +25,21 @@ export default defineWorkspace([
         '__tests__/bin/**',
         '__tests__/schema/**',
         '__tests__/scripts/**',
+        '__tests__/db/**',
       ],
       pool: 'forks',
       hookTimeout: 60000,
+      testTimeout: 30000,
       browser: {
         enabled: true,
         name: 'chromium',
         provider: 'playwright',
         // https://playwright.dev
+      },
+      environmentOptions: {
+        jsdom: {
+          resources: 'usable',
+        },
       },
     },
   },
@@ -48,7 +55,15 @@ export default defineWorkspace([
       setupFiles: [
         './__tests__/setup.ts',
       ],
-      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**', '__tests__/bin/**' ],
+      exclude: [ 
+        '**/node_modules/**', 
+        'dist/**', 
+        'src/browser/**', 
+        '__tests__/browser/**', 
+        '__tests__/bin/**',
+        '__tests__/scripts/**',
+      ],
+      testTimeout: 30000,
     },
   },
   {
@@ -58,8 +73,20 @@ export default defineWorkspace([
     test: {
       name: 'CLI',
       environment: 'node',
+      globalSetup: './vitest.setup.ts',
       dir: './__tests__/',
-      exclude: [ '**/node_modules/**', 'dist/**', 'src/browser/**', '__tests__/browser/**', '__tests__/node/**' ],
+      setupFiles: [
+        './__tests__/setup.ts',
+      ],
+      exclude: [ 
+        '**/node_modules/**', 
+        'dist/**', 
+        'src/browser/**', 
+        '__tests__/browser/**', 
+        '__tests__/node/**',
+        '__tests__/db/**',
+      ],
+      testTimeout: 120000,
     },
   },
 ])

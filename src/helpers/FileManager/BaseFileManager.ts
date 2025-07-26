@@ -67,6 +67,22 @@ export abstract class BaseFileManager {
   }
 
   static async getFs(): Promise<any> {
+    if (!this.PlatformClass) {
+      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+    }
+    if (this.PlatformClass === BaseFileManager) {
+      throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
+    }
+    // Add additional safety check to prevent infinite recursion
+    if (this.PlatformClass.getFs === this.getFs) {
+      throw new Error('Circular reference detected: PlatformClass.getFs is the same as BaseFileManager.getFs')
+    }
+    // Check if we're calling ourselves recursively
+    const stack = new Error().stack || ''
+    const getFsCalls = (stack.match(/getFs/g) || []).length
+    if (getFsCalls > 10) {
+      throw new Error('Infinite recursion detected in getFs')
+    }
     return this.PlatformClass.getFs()
   }
 

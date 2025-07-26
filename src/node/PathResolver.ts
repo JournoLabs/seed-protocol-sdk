@@ -174,7 +174,7 @@ export class PathResolver {
       appSchemaDir: path.join(dotSeedDir, 'schema'),
       appDbDir: path.join(dotSeedDir, 'db'),
       appMetaDir: path.join(dotSeedDir, 'db', 'meta'),
-      drizzleDbConfigPath: path.join(this.getSdkRootDir(), 'node', 'db', NODE_APP_DB_CONFIG),
+      drizzleDbConfigPath: path.join(this.getSdkRootDir(), NODE_APP_DB_CONFIG),
       drizzleKitPath,
       templatePath: path.join(this.getSdkRootDir(), 'node', 'codegen', 'templates')
     }

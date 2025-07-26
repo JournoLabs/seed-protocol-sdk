@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
@@ -16,7 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "build:watch": "tsc -w -p tsconfig.json",
     "build:release": "npm run clean && tsc -p tsconfig.release.json",
-    "lint": "eslint . --ext .ts --ext .mts",
+    "lint": "eslint .",
     "test": "vitest run",
     "prettier": "prettier --config .prettierrc --write .",
     "test:watch": "vitest",
@@ -37,16 +37,13 @@
     "@tanstack/react-query": "^5.62.11",
     "@zenfs/core": "^2.0.0",
     "@zenfs/dom": "^1.1.6",
-    "fsevents": "^2.3.3",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "fsevents": "^2.3.3"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.7.0",
     "@grpc/grpc-js": "^1.13.3",
     "@grpc/proto-loader": "^0.7.15",
     "@libsql/client": "^0.14.0",
-    "better-sqlite3": "^11.7.0",
     "@misskey-dev/browser-image-resizer": "^2024.1.0",
     "@pianity/arsnap-adapter": "^0.2.0",
     "@sinclair/typebox": "^0.34.13",
@@ -57,6 +54,7 @@
     "@tanstack/react-query-persist-client": "^5.62.8",
     "@xstate/react": "^5.0.0",
     "arweave": "^1.15.5",
+    "better-sqlite3": "^11.7.0",
     "crypto-browserify": "^3.12.1",
     "debug": "^4.4.0",
     "dotenv": "^16.4.7",
@@ -111,7 +109,6 @@
     "@tanstack/react-query": "^5.62.11",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.1.0",
-    "@testing-library/react-hooks": "^8.0.1",
     "@types/better-sqlite3": "^7.6.12",
     "@types/debug": "^4.1.12",
     "@types/express": "^5.0.0",
@@ -125,10 +122,12 @@
     "@types/pluralize": "^0.0.33",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
     "@typescript-eslint/parser": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "@vitest/browser": "^2.1.8",
+    "@vitest/browser": "^3.2.4",
     "eslint": "9.17.0",
     "eslint-config-prettier": "^9.1.0",
     "express": "^4.21.2",
@@ -159,7 +158,7 @@
     "vite-plugin-node-polyfills": "^0.22.0",
     "vite-plugin-static-copy": "^2.2.0",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.5",
+    "vitest": "^3.2.4",
     "vitest-browser-react": "^0.0.4"
   },
   "exports": {
@@ -174,5 +173,7 @@
       }
     }
   },
-  "packageManager": "yarn@4.5.3+sha512.3003a14012e2987072d244c720506549c1aab73ee728208f1b2580a9fd67b92d61ba6b08fe93f6dce68fd771e3af1e59a0afa28dd242dd0940d73b95fedd4e90"
+  "trustedDependencies": [
+    "protobufjs"
+  ]
 }

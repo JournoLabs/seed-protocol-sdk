@@ -174,6 +174,10 @@ const processRelationOrImageProperty = async (
   const seedSchemaUid = await getSchemaUidForModel(
     modelName!,
   )
+  
+  if (!seedSchemaUid) {
+    throw new Error(`Schema UID not found for model: ${modelName}`)
+  }
 
   let publishPayload: PublishPayload = {
     localId: relationOrImageProperty.localId,
@@ -281,6 +285,10 @@ const processListProperty = async (
     const seedSchemaUid = await getSchemaUidForModel(
       modelName!,
     )
+    
+    if (!seedSchemaUid) {
+      throw new Error(`Schema UID not found for model: ${modelName}`)
+    }
 
     let publishPayload: PublishPayload = {
       localId: relatedItem.seedLocalId,
@@ -344,6 +352,15 @@ export const getPublishPayload = async (
   // First we need to determine all Seeds to publish
 
   // That means the Seed of the Item, plus any Seeds pointed to by Relations
+
+  // Check if the item has a schema UID
+  if (!item.schemaUid) {
+    const schemaUid = await getSchemaUidForModel(item.modelName)
+    if (!schemaUid) {
+      throw new Error(`Schema UID not found for model: ${item.modelName}`)
+    }
+    item.schemaUid = schemaUid
+  }
 
   let itemPublishData: PublishPayload = {
     localId: item.seedLocalId,
