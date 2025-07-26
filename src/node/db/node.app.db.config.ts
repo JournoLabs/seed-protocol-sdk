@@ -1,7 +1,7 @@
 import { defineConfig } from 'drizzle-kit'
 import dotenv from 'dotenv'
 import { DrizzleConfig } from 'drizzle-orm'
-import { PathResolver } from '../PathResolver'
+import { PathResolver } from '@/node/PathResolver'
 
 dotenv.config()
 

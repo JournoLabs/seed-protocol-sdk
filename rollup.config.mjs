@@ -47,6 +47,7 @@ const config = [
       bin: 'scripts/bin.ts',
       addModel: 'scripts/addModel.ts',
       rpcServer: 'scripts/rpcServer.ts',
+      'node.app.db.config': 'src/node/db/node.app.db.config.ts',
     },
     output: [
       {
@@ -164,10 +165,7 @@ const config = [
             src: 'src/node/codegen/templates/**/*',
             dest: 'dist/node/codegen/templates',
           },
-          {
-            src: 'src/node/db/node.app.db.config.ts',
-            dest: 'dist/node/db',
-          },
+          // Removed node.app.db.config.ts copy - it will be compiled by TypeScript plugin
           {
             src: 'scripts/seedData.json',
             dest: 'dist',
