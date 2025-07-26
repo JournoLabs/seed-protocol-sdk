@@ -59,8 +59,8 @@ export default defineConfig({
               dest: 'dist/node/codegen/templates',
             },
             {
-              src: 'src/node/db/node.app.db.config.ts',
-              dest: 'dist/node/db',
+              src: 'src/db/configs/node.app.db.config.ts',
+              dest: 'dist/db/configs',
             },
           ],
           hook: 'writeBundle',

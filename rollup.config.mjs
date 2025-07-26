@@ -47,7 +47,7 @@ const config = [
       bin: 'scripts/bin.ts',
       addModel: 'scripts/addModel.ts',
       rpcServer: 'scripts/rpcServer.ts',
-      'node/db/node.app.db.config': 'src/node/db/node.app.db.config.ts',
+      'db/configs/node.app.db.config': 'src/db/configs/node.app.db.config.ts',
     },
     output: [
       {

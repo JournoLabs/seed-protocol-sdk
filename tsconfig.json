@@ -30,28 +30,19 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "types": [
-      "node"
-    ],
-    "typeRoots": [
-      "./src/types/**/*",
-      "./node_modules/@types",
-      "**/types.ts"
-    ],
+    "types": ["node"],
+    "typeRoots": ["./src/types/**/*", "./node_modules/@types", "**/types.ts"],
     "outDir": "./dist",
     "paths": {
-      "@/*": [
-        "src/*"
-      ],
-      "@/test/*": [
-        "__tests__/*"
-      ]
+      "@/*": ["src/*"],
+      "@/test/*": ["__tests__/*"]
     }
   },
   "include": [
     "src/**/*",
     "__tests__/**/*",
-    "scripts/**/*", 
-    "rollup.typia-proto.js"  
-  ]
+    "scripts/**/*",
+    "rollup.typia-proto.js"
+  ],
+  "exclude": ["__tests__/__fixtures__/invalid-type.ts"]
 }

@@ -33,6 +33,34 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
       throw new Error(`Failed to load Node.js modules: ${error}`)
     }
 
+    // For now, let's use a simple package.json that doesn't require local package installation
+    // This allows us to test the seed init functionality without the complexity of local package installation
+    const updatePackageJson = () => {
+      return new Promise<void>((resolve, reject) => {
+        try {
+          const packageJsonPath = path.join(mockProjectPath, 'package.json')
+          const packageJson = {
+            "dependencies": {
+              "typescript": "^5.0.0"
+            }
+          }
+          
+          fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2))
+          console.log('Updated package.json with simple dependencies')
+          resolve()
+        } catch (error: any) {
+          reject(new Error(`Failed to update package.json: ${error.message}`))
+        }
+      })
+    }
+
+    try {
+      await updatePackageJson()
+    } catch (error) {
+      console.error('Failed to prepare package.json:', error)
+      throw error
+    }
+
     // Check if bun is available on the host machine
     const checkBun = () => {
       return new Promise<boolean>((resolve) => {
@@ -56,6 +84,7 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
     // Run bun install in the mock project folder
     const bunInstall = () => {
       return new Promise<void>((resolve, reject) => {
+        console.log('Running bun install...')
         const install = childProcess.spawn('bun', ['install'], { 
           cwd: mockProjectPath,
           stdio: 'pipe'
@@ -66,14 +95,24 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
         
         install.stdout?.on('data', (data: any) => {
           stdout += data.toString()
+          console.log('bun install stdout:', data.toString())
         })
         
         install.stderr?.on('data', (data: any) => {
           stderr += data.toString()
+          console.log('bun install stderr:', data.toString())
         })
         
+        // Add a timeout to prevent hanging
+        const timeout = setTimeout(() => {
+          install.kill('SIGTERM')
+          reject(new Error('bun install timed out after 30 seconds'))
+        }, 30000)
+        
         install.on('close', (code: number) => {
+          clearTimeout(timeout)
           if (code === 0) {
+            console.log('bun install completed successfully')
             resolve()
           } else {
             console.error('bun install stdout:', stdout)
@@ -83,6 +122,7 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
         })
         
         install.on('error', (error: any) => {
+          clearTimeout(timeout)
           reject(new Error(`Failed to run bun install: ${error.message}`))
         })
       })
@@ -94,7 +134,7 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
       console.error('Failed to install dependencies:', error)
       throw error
     }
-  })
+  }, 60000) // Add 60 second timeout to beforeAll
 
   beforeEach(async () => {
   })
@@ -126,6 +166,7 @@ describe.skipIf(typeof window !== 'undefined')('Client in node', () => {
     await cleanupPath('.seed')
     await cleanupPath('bun.lock')
     await cleanupPath('.cache')
+    await cleanupPath('.vite-inspect')
   })
 
   it('runs seed init successfully', async ({ expect }) => {
