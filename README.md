@@ -24,10 +24,14 @@ yarn add @seedprotocol/sdk
 
 ## Getting Started
 
-The first thing to do when integrating Seed SDK is define your data model by placing a `schema.ts` file in the root
-of your project.
+The first thing to do when integrating Seed SDK is define your data model by creating a configuration file in the root
+of your project. The SDK supports the following file names (in order of preference):
 
-As an example, here's the actual data model for PermaPress:
+- `seed.config.ts` (recommended)
+- `seed.schema.ts` 
+- `schema.ts` (legacy)
+
+As an example, here's the actual data model for PermaPress using `seed.config.ts`:
 
 ```typescript
 import { ImageSrc, List, Model, Relation, Text } from '@/browser/schema'

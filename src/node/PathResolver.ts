@@ -1,6 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { NODE_APP_DB_CONFIG } from './constants'
+import { findSeedConfigFile } from '@/helpers'
 
 export class PathResolver {
   private static instance: PathResolver
@@ -110,8 +111,8 @@ export class PathResolver {
         // This should be {localDir}/seed-protocol-sdk/src
         return path.join(rootWithNodeModules, 'src')
       default:
-        // This should be {projectDir}/node_modules/@seedprotocol/sdk
-        return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk',)
+        // This should be {projectDir}/node_modules/@seedprotocol/sdk/dist
+        return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
     }
   }
 
@@ -136,6 +137,15 @@ export class PathResolver {
       return path.join(process.cwd(), '__tests__', '__mocks__', process.env.SEED_SDK_TEST_PROJECT_TYPE, 'project', '.seed')
     }
     return path.join(schemaFileDir || process.cwd(), '.seed')
+  }
+
+  /**
+   * Finds the Seed Protocol config file in the given directory
+   * @param searchDir - Directory to search for the config file
+   * @returns The path to the found config file, or null if not found
+   */
+  findConfigFile(searchDir: string = process.cwd()): string | null {
+    return findSeedConfigFile(searchDir)
   }
 
   /**

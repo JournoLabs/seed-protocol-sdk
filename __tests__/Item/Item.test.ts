@@ -1,7 +1,7 @@
 import { beforeEach, describe, it } from 'vitest'
 import { getPosts }                 from '../__fixtures__/posts'
 import { client as seedClient } from '@/client'
-import config                   from '@/test/__mocks__/node/project/schema'
+import config                   from '@/test/__mocks__/node/project/seed.config'
 
 describe('Item', () => {
 

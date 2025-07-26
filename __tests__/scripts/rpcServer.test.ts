@@ -9,7 +9,7 @@ import { ClientManager } from '@/client/ClientManager'
 import { client as sdkClient }                              from "@/client"
 import { commandExists } from '@/helpers/scripts'
 import { execSync } from 'child_process'
-import config                                  from '@/test/__mocks__/node/project/schema'
+import config                                  from '@/test/__mocks__/node/project/seed.config'
 import { CLIENT_NOT_INITIALIZED }        from '@/helpers/constants'
 
 const __filename = fileURLToPath(import.meta.url)

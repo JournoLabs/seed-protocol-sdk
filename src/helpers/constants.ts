@@ -7,7 +7,12 @@ import {
 
 
 export const SCHEMA_NJK = 'schema.njk'
-export const SCHEMA_TS = 'schema.ts'
+// Primary config file name for Seed Protocol SDK
+export const SEED_CONFIG_FILE = 'seed.config.ts'
+// Fallback config file names (in order of preference)
+export const SEED_CONFIG_FALLBACKS = ['seed.schema.ts', 'schema.ts']
+// Legacy constant for backward compatibility
+export const SCHEMA_TS = SEED_CONFIG_FILE
 
 export const INTERNAL_DATA_TYPES = {
   Text: {

@@ -14,9 +14,7 @@ import { createDrizzleSchemaFilesFromConfig } from '@/node/codegen'
 import { rimrafSync } from 'rimraf'
 import { getTsImport } from '@/node/helpers'
 import { ModelClassType } from '@/types/model'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import Database from 'better-sqlite3'
-import { appState, metadata, models, modelUids, seeds, versions } from '@/seedSchema'
+import { appState, config, metadata, models, modelUids, seeds, versions } from '@/seedSchema'
 import { commandExists } from '@/helpers/scripts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -65,6 +63,21 @@ const seedDatabase = async (seedDataPath: string) => {
   console.log('[Seed Protocol] Running seed script')
 
   try {
+    // Import better-sqlite3 dynamically to handle optional dependency
+    let drizzle: any
+    let Database: any
+    
+          try {
+        const drizzleModule = await import('drizzle-orm/better-sqlite3')
+        const betterSqlite3Module = await import('better-sqlite3')
+        drizzle = drizzleModule.drizzle
+        Database = betterSqlite3Module
+    } catch (importError) {
+      console.error('[Seed Protocol] Error: better-sqlite3 is required for seeding the database.')
+      console.error('[Seed Protocol] Please install better-sqlite3: npm install better-sqlite3')
+      process.exit(1)
+    }
+    
     // Read the seed data file
     const seedData = JSON.parse(fs.readFileSync(seedDataPath, 'utf-8'))
     
@@ -144,11 +157,12 @@ const init = (args: string[],) => {
       console.log('[Seed Protocol] schemaFileDir', schemaFileDir)
 
       if (!schemaFileDir) {
-        const defaultSchemaFilePath = path.join(process.cwd(), 'schema.ts')
-        if (fs.existsSync(defaultSchemaFilePath)) {
-          schemaFileDir = process.cwd()
+        // Use the new config file finding logic
+        const foundConfigFile = pathResolver.findConfigFile()
+        if (foundConfigFile) {
+          schemaFileDir = path.dirname(foundConfigFile)
         } else {
-          console.error('No schema file path provided and no default schema file found.')
+          console.error('No config file found. Please create a seed.config.ts, seed.schema.ts, or schema.ts file in your project root.')
           return
         }
       }
@@ -162,7 +176,12 @@ const init = (args: string[],) => {
         sdkRootDir,
       } = pathResolver.getAppPaths(schemaFileDir)
 
-      const schemaFilePath = path.join(schemaFileDir, SCHEMA_TS)
+      // Find the actual config file in the schema file directory
+      const configFilePath = pathResolver.findConfigFile(schemaFileDir)
+      if (!configFilePath) {
+        console.error('Config file not found in the specified directory.')
+        return
+      }
 
       // Remove dotSeedDir to start fresh each time
       if (fs.existsSync(dotSeedDir)) {
@@ -228,7 +247,7 @@ const init = (args: string[],) => {
         const { endpoints } = await getTsImport<{
           models: Record<string, ModelClassType>,
           endpoints: Record<string, string>
-        }>(schemaFilePath)
+        }>(configFilePath)
 
         const outputDirPath = endpoints.localOutputDir || _appFilesDirPath
 
@@ -262,7 +281,7 @@ const init = (args: string[],) => {
           execSync(`npm install -g tsx`, {stdio: 'inherit'})
         }
 
-        await createDrizzleSchemaFilesFromConfig(schemaFilePath, undefined)
+        await createDrizzleSchemaFilesFromConfig(configFilePath, undefined)
         ensureIndexExports(appSchemaDir!)
         await updateSchema(drizzleDbConfigPath, appMetaDir!)
         const seedDataFilePath = path.join(__dirname, 'seedData.json')
@@ -279,9 +298,9 @@ const init = (args: string[],) => {
       //   path.join(dotSeedDir, 'codegen'),
       // )
 
-      console.log('copying', schemaFilePath, path.join(dotSeedDir, 'schema.ts'))
+      console.log('copying', configFilePath, path.join(dotSeedDir, 'seed.config.ts'))
 
-      fs.copyFileSync(schemaFilePath, path.join(dotSeedDir, 'schema.ts'))
+      fs.copyFileSync(configFilePath, path.join(dotSeedDir, 'seed.config.ts'))
 
       runCommands()
         .then(() => {
@@ -311,7 +330,8 @@ console.log('calledFrom', calledFrom)
 if (
   calledFrom.endsWith('node_modules/.bin/seed') ||
   import.meta.url.endsWith('@seedprotocol/sdk/node/bin.js') ||
-  import.meta.url.endsWith('scripts/bin.ts')
+  import.meta.url.endsWith('scripts/bin.ts') ||
+  import.meta.url.endsWith('dist/bin.js')
 ) {
   // module was not imported but called directly
   init(a)

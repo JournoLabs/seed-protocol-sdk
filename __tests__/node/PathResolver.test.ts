@@ -112,7 +112,7 @@ describe('PathResolver', () => {
 
       const linkedProjectDir = path.join(originalCwd!, '__tests__', '__mocks__', 'linked-sdk', 'project-link')
 
-      const schemaFileDir = path.join(linkedProjectDir, 'schema.ts')
+      const schemaFileDir = path.join(linkedProjectDir, 'seed.config.ts')
 
       process.chdir(linkedProjectDir)
 

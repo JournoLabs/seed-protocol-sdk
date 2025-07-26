@@ -43,4 +43,4 @@ const arweaveDomain = 'arweave.net'
 
 export { models, endpoints, arweaveDomain }
 
-export default { models, endpoints, arweaveDomain }
+export default { models, endpoints, arweaveDomain } 

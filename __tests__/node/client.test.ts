@@ -1,6 +1,6 @@
 import { client }                              from "@/client"
 import { beforeEach, describe, it, } from "vitest"
-import config                                  from '@/test/__mocks__/node/project/schema'
+import config                                  from '@/test/__mocks__/node/project/seed.config'
 import { ClientManager }                       from '@/client/ClientManager'
 import { CLIENT_NOT_INITIALIZED }        from '@/helpers/constants'
 

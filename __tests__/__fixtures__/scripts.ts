@@ -92,7 +92,7 @@ export const runAddModel = async () => {
   const nodeProjectDir = path.resolve(projectRoot, '__tests__', '__mocks__', 'node', 'project',)
   const schemaDirPath = path.resolve(nodeProjectDir);
   const dotSeedDir = path.resolve(nodeProjectDir, '.seed');
-  const sourceSchemaFilePath = path.resolve(schemaDirPath, 'schema.ts');
+  const sourceSchemaFilePath = path.resolve(schemaDirPath, 'seed.config.ts');
   const outputFilePath = path.resolve(dotSeedDir, 'schemaTestOutput.ts');
 
   const output = await runCommandWithOutput({

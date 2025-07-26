@@ -1,10 +1,10 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.3.16",
+  "version": "0.3.18",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "engines": {
-    "node": ">= 20 < 23"
+    "node": ">= 20 <= 24"
   },
   "files": [
     "dist"
@@ -37,7 +37,6 @@
     "@tanstack/react-query": "^5.62.11",
     "@zenfs/core": "^2.0.0",
     "@zenfs/dom": "^1.1.6",
-    "better-sqlite3": "^11.7.0",
     "fsevents": "^2.3.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -47,6 +46,7 @@
     "@grpc/grpc-js": "^1.13.3",
     "@grpc/proto-loader": "^0.7.15",
     "@libsql/client": "^0.14.0",
+    "better-sqlite3": "^11.7.0",
     "@misskey-dev/browser-image-resizer": "^2024.1.0",
     "@pianity/arsnap-adapter": "^0.2.0",
     "@sinclair/typebox": "^0.34.13",

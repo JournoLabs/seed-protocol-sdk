@@ -76,7 +76,8 @@ export const createDrizzleSchemaFilesFromConfig = async (
   const { dotSeedDir, appSchemaDir } = pathResolver.getAppPaths()
   console.log('createDrizzleSchemaFilesFromConfig', configFilePath, outputDirPath)
 
-  const schemaFilePath = configFilePath || path.join(dotSeedDir, 'schema.ts') // Developer created file with model definitions
+  // Use provided config file path or find the config file in the project root
+  const schemaFilePath = configFilePath || pathResolver.findConfigFile() || path.join(dotSeedDir, 'seed.config.ts')
   console.log('schemaFilePath', schemaFilePath)
 
   const { models, } = await getTsImport<{

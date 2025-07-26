@@ -5,7 +5,7 @@ import { describe, it, beforeAll } from 'vitest'
 import path                                                                    from 'path'
 import process                                                                 from 'node:process'
 
-// Users/admin/Documents/Work/JournoLabs/seed-protocol-sdk/__tests__/__mocks__/project/.seed/schema.ts
+// Users/admin/Documents/Work/JournoLabs/seed-protocol-sdk/__tests__/__mocks__/project/.seed/seed.config.ts
 
 describe('Model decorator with properties', () => {
   const projectRoot = path.resolve(process.cwd(),)
@@ -14,7 +14,7 @@ describe('Model decorator with properties', () => {
   let Link: ModelClassType | undefined
 
   beforeAll(async () => {
-    const schemaFilePath = path.resolve(projectRoot, '__tests__', '__mocks__', 'node', 'project', 'schema.ts')
+    const schemaFilePath = path.resolve(projectRoot, '__tests__', '__mocks__', 'node', 'project', 'seed.config.ts')
     const { models } = await import(schemaFilePath)
     Post = models.Post
     Identity = models.Identity

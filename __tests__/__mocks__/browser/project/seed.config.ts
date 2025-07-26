@@ -28,19 +28,33 @@ class Link {
   @Text() text!: string
 }
 
+@Model
+class TestModel {
+  @Text() name!: string
+  @Date() birthdate!: string
+  @Number() age!: number
+  @Boolean() isAlive!: boolean
+  @List('Text') nicknames!: string[]
+  @Relation('TestModel') bestFriend!: string
+  @Image() profilePic!: string
+}
+
+
 const models = {
   Identity,
   Link,
   Post,
+  TestModel,
 }
 
 const endpoints = {
   filePaths: '/api/seed/migrations',
   files: '/app-files',
+  localOutputDir: 'seed-files',
 }
 
 const arweaveDomain = 'arweave.net'
 
 export { models, endpoints, arweaveDomain }
 
-export default { models, endpoints, arweaveDomain }
+export default { models, endpoints, arweaveDomain } 
