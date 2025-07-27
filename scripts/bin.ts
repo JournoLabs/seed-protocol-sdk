@@ -90,7 +90,7 @@ const seedDatabase = async (seedDataPath: string) => {
     // Connect to the database
     const dotSeedDir = pathResolver.getDotSeedDir()
     const dbPath = path.join(dotSeedDir, 'db', 'app_db.sqlite3')
-    const sqlite = new Database(dbPath)
+    const sqlite = new Database.default(dbPath)
     const db = drizzle(sqlite)
     
     // Seed each table based on the provided data
