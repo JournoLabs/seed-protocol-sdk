@@ -221,9 +221,22 @@ const init = (args: string[],) => {
           // Get all file names in the directory
           const files = fs.readdirSync(dirPath)
 
-          // Filter for .ts files excluding index.ts
+          // Filter for .ts files excluding index.ts and only include actual schema files
+          const validSchemaFiles = [
+            'AppStateSchema',
+            'ConfigSchema', 
+            'MetadataSchema',
+            'ModelSchema',
+            'ModelUidSchema',
+            'PropertyUidSchema',
+            'SeedSchema',
+            'VersionSchema'
+          ]
+          
           const tsFiles = files.filter(
-            (file) => file.endsWith('.ts') && file !== 'index.ts',
+            (file) => file.endsWith('.ts') && 
+                     file !== 'index.ts' && 
+                     validSchemaFiles.includes(path.basename(file, '.ts'))
           )
 
           // Check if index.ts exists, create it if it doesn't
