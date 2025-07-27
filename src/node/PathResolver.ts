@@ -86,8 +86,9 @@ export class PathResolver {
     const rootWithNodeModules = this.getRootWithNodeModules()
     const processCwd = process.cwd()
 
-    if (process.cwd().includes('__mocks__')) {
-      return path.join(rootWithNodeModules, 'src')
+    // For test environment, always return the SDK root directory
+    if (env === 'test') {
+      return rootWithNodeModules
     }
 
     if (env === 'linked-sdk') {
@@ -105,11 +106,11 @@ export class PathResolver {
 
     switch (env) {
       case 'sdk-dev':
-        // This should be {localDir}/seed-protocol-sdk/src
-        return path.join(rootWithNodeModules, 'src')
+        // This should be {localDir}/seed-protocol-sdk (the SDK root directory)
+        return rootWithNodeModules
       case 'test':
-        // This should be {localDir}/seed-protocol-sdk/src
-        return path.join(rootWithNodeModules, 'src')
+        // This should be {localDir}/seed-protocol-sdk (the SDK root directory)
+        return rootWithNodeModules
       default:
         // This should be {projectDir}/node_modules/@seedprotocol/sdk/dist
         return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
@@ -174,9 +175,9 @@ export class PathResolver {
       appSchemaDir: path.join(dotSeedDir, 'schema'),
       appDbDir: path.join(dotSeedDir, 'db'),
       appMetaDir: path.join(dotSeedDir, 'db', 'meta'),
-      drizzleDbConfigPath: path.join(this.getSdkRootDir(), NODE_APP_DB_CONFIG),
+      drizzleDbConfigPath: path.join(this.getSdkRootDir(), 'src', NODE_APP_DB_CONFIG),
       drizzleKitPath,
-      templatePath: path.join(this.getSdkRootDir(), 'node', 'codegen', 'templates')
+      templatePath: path.join(this.getSdkRootDir(), 'src', 'node', 'codegen', 'templates')
     }
   }
 } 

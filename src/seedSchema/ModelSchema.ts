@@ -1,8 +1,8 @@
-import { int, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import { integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 import { InferInsertModel, InferSelectModel } from 'drizzle-orm'
 export const models = sqliteTable('models', {
-  id: int('id').primaryKey({ autoIncrement: true }),
+  id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
 })
 
@@ -16,15 +16,15 @@ export type ModelRecordType = typeof models.$inferSelect
 export const properties = sqliteTable(
   'properties',
   {
-    id: int('id').primaryKey({ autoIncrement: true }),
+    id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     dataType: text('data_type').notNull(),
     readEndpoint: text('read_endpoint'),
     updateEndpoint: text('update_endpoint'),
-    modelId: int('model_id')
+    modelId: integer('model_id')
       .notNull()
       .references(() => models.id),
-    refModelId: int('ref_model_id').references(() => models.id),
+    refModelId: integer('ref_model_id').references(() => models.id),
     refValueType: text('ref_value_type'),
   },
   (table) => {

@@ -65,7 +65,7 @@ function copyDirectoryRecursively(sourceDir: string, targetDir: string) {
   }
 }
 
-const seedDatabase = async (seedDataPath: string) => {
+const seedDatabase = async (seedDataPath: string, dotSeedDir?: string) => {
   console.log('[Seed Protocol] Running seed script')
 
   try {
@@ -73,11 +73,11 @@ const seedDatabase = async (seedDataPath: string) => {
     let drizzle: any
     let Database: any
     
-          try {
-        const drizzleModule = await import('drizzle-orm/better-sqlite3')
-        const betterSqlite3Module = await import('better-sqlite3')
-        drizzle = drizzleModule.drizzle
-        Database = betterSqlite3Module
+    try {
+      const drizzleModule = await import('drizzle-orm/better-sqlite3')
+      const betterSqlite3Module = await import('better-sqlite3')
+      drizzle = drizzleModule.drizzle
+      Database = betterSqlite3Module.default
     } catch (importError) {
       console.error('[Seed Protocol] Error: better-sqlite3 is required for seeding the database.')
       console.error('[Seed Protocol] Please install better-sqlite3: npm install better-sqlite3')
@@ -88,44 +88,55 @@ const seedDatabase = async (seedDataPath: string) => {
     const seedData = JSON.parse(fs.readFileSync(seedDataPath, 'utf-8'))
     
     // Connect to the database
-    const dotSeedDir = pathResolver.getDotSeedDir()
-    const dbPath = path.join(dotSeedDir, 'db', 'app_db.sqlite3')
-    const sqlite = new Database.default(dbPath)
+    const actualDotSeedDir = dotSeedDir || pathResolver.getDotSeedDir()
+    const dbDir = path.join(actualDotSeedDir, 'db')
+    const dbPath = path.join(dbDir, 'app_db.sqlite3')
+    
+    // Ensure the database directory exists
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true })
+    }
+    
+    const sqlite = new Database(dbPath)
     const db = drizzle(sqlite)
+    
+    // Import the generated schema files
+    const schemaPath = path.join(actualDotSeedDir, 'schema')
+    const { appState: generatedAppState, config: generatedConfig, metadata: generatedMetadata, models: generatedModels, modelUids: generatedModelUids, seeds: generatedSeeds, versions: generatedVersions } = await import(schemaPath + '/index.ts')
     
     // Seed each table based on the provided data
     if (seedData.appState && seedData.appState.length > 0) {
-      await db.insert(appState).values(seedData.appState)
+      await db.insert(generatedAppState).values(seedData.appState)
       console.log('Seeded appState table')
     }
     
     if (seedData.config && seedData.config.length > 0) {
-      await db.insert(config).values(seedData.config)
+      await db.insert(generatedConfig).values(seedData.config)
       console.log('Seeded config table')
     }
     
     if (seedData.models && seedData.models.length > 0) {
-      await db.insert(models).values(seedData.models)
+      await db.insert(generatedModels).values(seedData.models)
       console.log('Seeded models table')
     }
     
     if (seedData.modelUids && seedData.modelUids.length > 0) {
-      await db.insert(modelUids).values(seedData.modelUids)
+      await db.insert(generatedModelUids).values(seedData.modelUids)
       console.log('Seeded modelUids table')
     }
     
     if (seedData.metadata && seedData.metadata.length > 0) {
-      await db.insert(metadata).values(seedData.metadata)
+      await db.insert(generatedMetadata).values(seedData.metadata)
       console.log('Seeded metadata table')
     }
     
     if (seedData.seeds && seedData.seeds.length > 0) {
-      await db.insert(seeds).values(seedData.seeds)
+      await db.insert(generatedSeeds).values(seedData.seeds)
       console.log('Seeded seeds table')
     }
     
     if (seedData.versions && seedData.versions.length > 0) {
-      await db.insert(versions).values(seedData.versions)
+      await db.insert(generatedVersions).values(seedData.versions)
       console.log('Seeded versions table')
     }
     
@@ -191,7 +202,12 @@ const init = (args: string[],) => {
 
       // Remove dotSeedDir to start fresh each time
       if (fs.existsSync(dotSeedDir)) {
-        fs.rmSync(dotSeedDir, { recursive: true, force: true })
+        try {
+          fs.rmSync(dotSeedDir, { recursive: true, force: true })
+        } catch (error) {
+          // If rmSync fails, try using rimraf as fallback
+          rimrafSync(dotSeedDir, { force: true })
+        }
       }
 
       console.log('[Seed Protocol] dotSeedDir', dotSeedDir)
@@ -210,17 +226,15 @@ const init = (args: string[],) => {
             (file) => file.endsWith('.ts') && file !== 'index.ts',
           )
 
-          // Check if index.ts exists
+          // Check if index.ts exists, create it if it doesn't
           const indexFilePath = path.join(dirPath, 'index.ts')
-          try {
-            fs.accessSync(indexFilePath)
-          } catch (error) {
-            console.error(`index.ts not found in the directory: ${dirPath}`)
-            return
+          let indexContent = ''
+          
+          if (fs.existsSync(indexFilePath)) {
+            indexContent = fs.readFileSync(indexFilePath, 'utf8')
+          } else {
+            console.log(`Creating index.ts in directory: ${dirPath}`)
           }
-
-          // Read the content of index.ts
-          const indexContent = fs.readFileSync(indexFilePath, 'utf8')
 
           // Create export statements for each .ts file
           const exportStatements = tsFiles.map(
@@ -275,13 +289,35 @@ const init = (args: string[],) => {
       }
 
       const updateSchema = async (pathToConfig: string, pathToMeta: string) => {
-        if (!fs.existsSync(pathToMeta)) {
-          console.log(`${drizzleKitCommand} generate --config=${pathToConfig}`)
-          execSync(
-            `${drizzleKitCommand} generate --config=${pathToConfig}`,
-          )
+        try {
+          // Create a project-specific Drizzle Kit configuration
+          const projectConfigPath = path.join(dotSeedDir, 'drizzle.config.ts')
+          const projectConfig = `import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: '${path.join(dotSeedDir, 'schema')}',
+  dialect: 'sqlite',
+  out: '${path.join(dotSeedDir, 'db')}',
+  dbCredentials: {
+    url: '${path.join(dotSeedDir, 'db', 'app_db.sqlite3')}',
+  },
+})`
+          
+          fs.writeFileSync(projectConfigPath, projectConfig)
+          
+          if (!fs.existsSync(pathToMeta)) {
+            console.log(`${drizzleKitCommand} generate --config=${projectConfigPath}`)
+            execSync(
+              `${drizzleKitCommand} generate --config=${projectConfigPath}`,
+              { stdio: 'inherit' }
+            )
+          }
+          console.log(`${drizzleKitCommand} migrate --config=${projectConfigPath}`)
+          execSync(`${drizzleKitCommand} migrate --config=${projectConfigPath}`, { stdio: 'inherit' })
+        } catch (error) {
+          console.error('[Seed Protocol] Error running Drizzle Kit commands:', error)
+          throw error
         }
-        execSync(`${drizzleKitCommand} migrate --config=${pathToConfig}`)
       }
 
       const runCommands = async () => {
@@ -290,15 +326,15 @@ const init = (args: string[],) => {
           execSync(`npm install -g tsx`, {stdio: 'inherit'})
         }
 
-        await createDrizzleSchemaFilesFromConfig(configFilePath, undefined)
+        await createDrizzleSchemaFilesFromConfig(configFilePath, appSchemaDir)
         ensureIndexExports(appSchemaDir!)
         await updateSchema(drizzleDbConfigPath, appMetaDir!)
         const seedDataFilePath = path.join(__dirname, 'seedData.json')
-        await seedDatabase(seedDataFilePath)
+        await seedDatabase(seedDataFilePath, dotSeedDir)
       }
 
       copyDirectoryRecursively(
-        path.join(pathResolver.getSdkRootDir(), 'seedSchema'),
+        path.join(pathResolver.getSdkRootDir(), 'src', 'seedSchema'),
         path.join(dotSeedDir, 'schema'),
       )
 
