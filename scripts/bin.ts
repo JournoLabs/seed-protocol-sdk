@@ -10,7 +10,7 @@ import '@/node/helpers/FileManager'
 import '@/node/helpers/ArweaveClient'
 import { INIT_SCRIPT_SUCCESS_MESSAGE, SCHEMA_TS } from '@/helpers/constants'
 import { PathResolver } from '@/node/PathResolver'
-import { createDrizzleSchemaFilesFromConfig } from '@/node/codegen'
+
 import { rimrafSync } from 'rimraf'
 import { getTsImport } from '@/node/helpers'
 import { ModelClassType } from '@/types/model'
@@ -206,7 +206,7 @@ const init = (args: string[],) => {
           fs.rmSync(dotSeedDir, { recursive: true, force: true })
         } catch (error) {
           // If rmSync fails, try using rimraf as fallback
-          rimrafSync(dotSeedDir, { force: true })
+          rimrafSync(dotSeedDir)
         }
       }
 
@@ -216,64 +216,7 @@ const init = (args: string[],) => {
 
       const drizzleKitCommand = `npx --yes tsx ${drizzleKitPath}`
 
-      const ensureIndexExports = (dirPath: string): void => {
-        try {
-          // Get all file names in the directory
-          const files = fs.readdirSync(dirPath)
 
-          // Filter for .ts files excluding index.ts and only include actual schema files
-          const validSchemaFiles = [
-            'AppStateSchema',
-            'ConfigSchema', 
-            'MetadataSchema',
-            'ModelSchema',
-            'ModelUidSchema',
-            'PropertyUidSchema',
-            'SeedSchema',
-            'VersionSchema'
-          ]
-          
-          const tsFiles = files.filter(
-            (file) => file.endsWith('.ts') && 
-                     file !== 'index.ts' && 
-                     validSchemaFiles.includes(path.basename(file, '.ts'))
-          )
-
-          // Check if index.ts exists, create it if it doesn't
-          const indexFilePath = path.join(dirPath, 'index.ts')
-          let indexContent = ''
-          
-          if (fs.existsSync(indexFilePath)) {
-            indexContent = fs.readFileSync(indexFilePath, 'utf8')
-          } else {
-            console.log(`Creating index.ts in directory: ${dirPath}`)
-          }
-
-          // Create export statements for each .ts file
-          const exportStatements = tsFiles.map(
-            (file) => `export * from './${path.basename(file, '.ts')}';`,
-          )
-
-          // Check if each export statement is already present in index.ts
-          const missingExports = exportStatements.filter(
-            (statement) => !indexContent.includes(statement),
-          )
-
-          if (missingExports.length > 0) {
-            // Append missing export statements to index.ts
-            const newContent =
-              indexContent + '\n' + missingExports.join('\n') + '\n'
-            fs.writeFileSync(indexFilePath, newContent, 'utf8')
-            console.log(
-              `Updated index.ts with missing exports:\n${missingExports.join('\n')}`,
-            )
-          } else {
-            console.log('All exports are already present in index.ts')
-          }
-        } catch (error) {
-          console.error(`Error processing directory: ${dirPath}`, error)
-        }
-      }
 
       const copyDotSeedFilesToAppFiles = async (_appFilesDirPath: string) => {
         console.log('[Seed Protocol] Copying dot seed files to app files')
@@ -339,13 +282,12 @@ export default defineConfig({
           execSync(`npm install -g tsx`, {stdio: 'inherit'})
         }
 
-        await createDrizzleSchemaFilesFromConfig(configFilePath, appSchemaDir)
-        ensureIndexExports(appSchemaDir!)
         await updateSchema(drizzleDbConfigPath, appMetaDir!)
         const seedDataFilePath = path.join(__dirname, 'seedData.json')
         await seedDatabase(seedDataFilePath, dotSeedDir)
       }
 
+      // Copy the schema files from src/seedSchema to .seed/schema
       copyDirectoryRecursively(
         path.join(pathResolver.getSdkRootDir(), 'src', 'seedSchema'),
         path.join(dotSeedDir, 'schema'),
