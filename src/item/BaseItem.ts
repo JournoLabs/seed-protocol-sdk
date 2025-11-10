@@ -25,8 +25,9 @@ import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
-import { getPublishUploads } from '@/db/read/getPublishUploads'
-import { getPublishPayload } from '@/db/read/getPublishPayload'
+// Dynamic imports to break circular dependencies
+// import { getPublishUploads } from '@/db/read/getPublishUploads'
+// import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { createNewItem } from '@/db/write/createNewItem'
 
 
@@ -354,10 +355,14 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
   }
 
   getPublishUploads = async () => {
+    // Use dynamic import to break circular dependency
+    const { getPublishUploads } = await import('@/db/read/getPublishUploads')
     return await getPublishUploads(this)
   }
 
   getPublishPayload = async (uploadedTransactions: any[]) => {
+    // Use dynamic import to break circular dependency
+    const { getPublishPayload } = await import('@/db/read/getPublishPayload')
     return await getPublishPayload(this, uploadedTransactions)
   }
 

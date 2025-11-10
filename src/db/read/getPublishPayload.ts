@@ -1,13 +1,13 @@
-import { getItem } from '@/db/read/getItem'
+// Dynamic import to break circular dependency with getItem -> BaseItem
+// import { getItem } from '@/db/read/getItem'
 import {
   defaultAttestationData,
   INTERNAL_DATA_TYPES,
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+  ZERO_BYTES32,
 } from '@/helpers/constants'
 import {
   AttestationRequest,
-  SchemaEncoder,
-  ZERO_BYTES32,
 } from '@ethereum-attestation-service/eas-sdk'
 
 import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
@@ -68,6 +68,16 @@ const getPropertyData = async (itemProperty: IItemProperty<any>) => {
   }
 }
 
+// Lazy import SchemaEncoder to avoid module resolution issues with ts-import
+let SchemaEncoderClass: typeof import('@ethereum-attestation-service/eas-sdk').SchemaEncoder | null = null
+const getSchemaEncoder = async () => {
+  if (!SchemaEncoderClass) {
+    const easSdk = await import('@ethereum-attestation-service/eas-sdk')
+    SchemaEncoderClass = easSdk.SchemaEncoder
+  }
+  return SchemaEncoderClass
+}
+
 const processBasicProperties = async (
   itemBasicProperties: IItemProperty<any>[],
   itemPublishData: PublishPayload,
@@ -108,6 +118,7 @@ const processBasicProperties = async (
       },
     ]
 
+    const SchemaEncoder = await getSchemaEncoder()
     const dataEncoder = new SchemaEncoder(schemaDef)
 
     const encodedData = dataEncoder.encodeData(data)
@@ -148,6 +159,8 @@ const processRelationOrImageProperty = async (
 
   const { localId: seedLocalId, uid: seedUid } = getCorrectId(value)
 
+  // Use dynamic import to break circular dependency
+  const { getItem } = await import('@/db/read/getItem')
   const relatedItem = await getItem({
     seedLocalId,
     seedUid,
@@ -254,6 +267,8 @@ const processListProperty = async (
   for (const seedId of value) {
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(seedId)
 
+    // Use dynamic import to break circular dependency
+    const { getItem } = await import('@/db/read/getItem')
     const relatedItem = await getItem({
       seedLocalId,
       seedUid,

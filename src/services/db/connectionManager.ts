@@ -5,12 +5,12 @@ type SqliteDatabase = {
 }
 
 class SqliteConnectionManager {
-  private sqliteModule: SqliteDatabase
+  private sqliteModule: new () => SqliteDatabase
   private idleTimeout: number
   private databases: { [key: string]: SqliteDatabase }
   private idleTimers: { [key: string]: NodeJS.Timeout }
 
-  constructor(sqliteModule: SqliteDatabase, idleTimeout: number = 300000) {
+  constructor(sqliteModule: new () => SqliteDatabase, idleTimeout: number = 300000) {
     // Default idle timeout: 5 minutes
     this.sqliteModule = sqliteModule
     this.idleTimeout = idleTimeout

@@ -26,7 +26,8 @@ export type ModelClassType = {
 export type ModelValues<T extends Record<string, any>> = BaseItem<any> & {
   schema: ModelSchema
   ModelClass?: ModelClassType
-  [key: string & keyof T]: PropertyValue
+} & {
+  [K in keyof T]: PropertyValue
 }
 
 export type StatesMap<T> = Map<string, Actor<T extends AnyActorLogic ? T : never>>

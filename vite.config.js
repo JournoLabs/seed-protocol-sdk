@@ -6,11 +6,11 @@ import { resolve } from 'node:path'
 // import { apiRoutes } from './vite/plugin/api'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 // import react from '@vitejs/plugin-react'
-// import tsConfigPaths from 'vite-tsconfig-paths'
+import tsConfigPaths from 'vite-tsconfig-paths'
 // import { dts } from 'rollup-plugin-dts'
 
 // import typescript from '@rollup/plugin-typescript'
-import tsConfigPaths from 'rollup-plugin-tsconfig-paths'
+import rollupTsConfigPaths from 'rollup-plugin-tsconfig-paths'
 import copy from 'rollup-plugin-copy'
 import Inspect from 'vite-plugin-inspect'
 // import vitePlugin from './vite-plugin'
@@ -23,6 +23,90 @@ export default defineConfig({
       outputDir: './.vite-inspect',
     }),
   ],
+  test: {
+    projects: [
+      {
+        name: 'browser',
+        plugins: [
+          tsConfigPaths(),
+        ],
+        optimizeDeps: {
+          exclude: [
+            '@sqlite.org/sqlite-wasm',
+          ],
+        },
+        environment: 'jsdom',
+        globalSetup: './vitest.setup.ts',
+        dir: './__tests__/',
+        setupFiles: [ './__tests__/setup.ts' ],
+        exclude: [
+          '**/node_modules/**',
+          'dist/**',
+          'src/node/**',
+          '__tests__/node/**',
+          '__tests__/bin/**',
+          '__tests__/schema/**',
+          '__tests__/scripts/**',
+          '__tests__/db/**',
+        ],
+        pool: 'forks',
+        hookTimeout: 60000,
+        testTimeout: 30000,
+        browser: {
+          enabled: true,
+          provider: 'playwright',
+          instances: ['chromium'],
+        },
+        environmentOptions: {
+          jsdom: {
+            resources: 'usable',
+          },
+        },
+      },
+      {
+        name: 'NodeJS',
+        plugins: [
+          tsConfigPaths(),
+        ],
+        environment: 'node',
+        globalSetup: './vitest.setup.ts',
+        dir: './__tests__/',
+        setupFiles: [
+          './__tests__/setup.ts',
+        ],
+        exclude: [ 
+          '**/node_modules/**', 
+          'dist/**', 
+          'src/browser/**', 
+          '__tests__/browser/**', 
+          '__tests__/bin/**',
+          '__tests__/scripts/**',
+        ],
+        testTimeout: 30000,
+      },
+      {
+        name: 'CLI',
+        plugins: [
+          tsConfigPaths(),
+        ],
+        environment: 'node',
+        globalSetup: './vitest.setup.ts',
+        dir: './__tests__/',
+        setupFiles: [
+          './__tests__/setup.ts',
+        ],
+        exclude: [ 
+          '**/node_modules/**', 
+          'dist/**', 
+          'src/browser/**', 
+          '__tests__/browser/**', 
+          '__tests__/node/**',
+          '__tests__/db/**',
+        ],
+        testTimeout: 120000,
+      },
+    ],
+  },
   build: {
     lib: {
       entry: {
@@ -47,7 +131,7 @@ export default defineConfig({
         },
       ],
       plugins: [
-        tsConfigPaths(),
+        rollupTsConfigPaths(),
         copy({
           targets: [
             { src: 'src/**/*.ts', dest: 'dist/src' },

@@ -39,9 +39,7 @@ export const preparePublishRequestData = fromCallback<
 
     const editedProperties = await item.getEditedProperties()
 
-    const { modelSchemas, schemaStringToModelRecord } = await getModelSchemas({
-      sdkConfigDb: appDb,
-    })
+    // const { modelSchemas, schemaStringToModelRecord } = await getModelSchemas()
 
     // const dataEncoder = new SchemaEncoder(modelProperty.schemaDefinition,)
     // const encodedData = dataEncoder.encodeData(data,)

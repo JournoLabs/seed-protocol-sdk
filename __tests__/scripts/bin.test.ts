@@ -55,14 +55,261 @@ describe('bin.ts', () => {
       process.chdir(originalCwd)
       process.env.NODE_ENV = originalNodeEnv
     }, 120000);
+
+    describe('schema file copying behavior', () => {
+      it('should copy schema files from src/seedSchema to .seed/schema', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        try {
+          // Clean up any existing .seed directory
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+          
+          await runInit({projectType: 'node', args: [projectDir]})
+          
+          // Check that .seed/schema directory exists
+          const schemaDir = path.join(projectDir, '.seed', 'schema')
+          expect(fs.existsSync(schemaDir)).toBe(true)
+          
+          // Get the list of files in the source directory
+          const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+          const sourceFiles = fs.readdirSync(sourceSchemaDir).filter(file => file.endsWith('.ts'))
+          
+          // Get the list of files in the target directory
+          const targetFiles = fs.readdirSync(schemaDir).filter(file => file.endsWith('.ts'))
+          
+          // Should have copied all the source files
+          expect(targetFiles.length).toBeGreaterThan(0)
+          expect(targetFiles).toEqual(expect.arrayContaining(sourceFiles))
+          
+          // Verify that the files are exact copies (not generated)
+          for (const file of sourceFiles) {
+            const sourcePath = path.join(sourceSchemaDir, file)
+            const targetPath = path.join(schemaDir, file)
+            
+            expect(fs.existsSync(targetPath)).toBe(true)
+            
+            const sourceContent = fs.readFileSync(sourcePath, 'utf-8')
+            const targetContent = fs.readFileSync(targetPath, 'utf-8')
+            
+            // Files should be identical (not generated)
+            expect(targetContent).toBe(sourceContent)
+          }
+          
+        } finally {
+          // Clean up
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+        }
+      }, 120000)
+
+      it('should not generate additional schema files', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        try {
+          // Clean up any existing .seed directory
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+          
+          await runInit({projectType: 'node', args: [projectDir]})
+          
+          const schemaDir = path.join(projectDir, '.seed', 'schema')
+          const targetFiles = fs.readdirSync(schemaDir).filter(file => file.endsWith('.ts'))
+          
+          // Should not have generated files that weren't in the source
+          const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+          const sourceFiles = fs.readdirSync(sourceSchemaDir).filter(file => file.endsWith('.ts'))
+          
+          // All target files should have corresponding source files
+          for (const targetFile of targetFiles) {
+            expect(sourceFiles).toContain(targetFile)
+          }
+          
+        } finally {
+          // Clean up
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+        }
+      }, 120000)
+
+      it('should not create index.ts file in schema directory', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        try {
+          // Clean up any existing .seed directory
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+          
+          await runInit({projectType: 'node', args: [projectDir]})
+          
+          const schemaDir = path.join(projectDir, '.seed', 'schema')
+          const files = fs.readdirSync(schemaDir)
+          
+          // Should not have an index.ts file (it should only copy the source index.ts if it exists)
+          const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+          const sourceIndexExists = fs.existsSync(path.join(sourceSchemaDir, 'index.ts'))
+          
+          if (sourceIndexExists) {
+            // If source has index.ts, target should have it as a copy
+            expect(files).toContain('index.ts')
+          } else {
+            // If source doesn't have index.ts, target shouldn't have it
+            expect(files).not.toContain('index.ts')
+          }
+          
+        } finally {
+          // Clean up
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+        }
+      }, 120000)
+
+      it('should not create .js, .d.ts, or .map files', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        try {
+          // Clean up any existing .seed directory
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+          
+          await runInit({projectType: 'node', args: [projectDir]})
+          
+          const schemaDir = path.join(projectDir, '.seed', 'schema')
+          const files = fs.readdirSync(schemaDir)
+          
+          // Should not have any compiled or generated files
+          const compiledFiles = files.filter(file => 
+            file.endsWith('.js') || 
+            file.endsWith('.d.ts') || 
+            file.endsWith('.map')
+          )
+          
+          expect(compiledFiles).toHaveLength(0)
+          
+        } finally {
+          // Clean up
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+        }
+      }, 120000)
+    })
+
+    describe('failure modes', () => {
+      it('should handle missing src/seedSchema directory gracefully', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        process.chdir(projectDir)
+        
+        // Temporarily rename the source schema directory
+        const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+        const tempSchemaDir = path.join(originalCwd, 'src', 'seedSchema_temp')
+        
+        try {
+          fs.renameSync(sourceSchemaDir, tempSchemaDir)
+          
+          // Should fail gracefully with a clear error message
+          await expect(runInit({projectType: 'node', args: []})).rejects.toThrow()
+          
+        } finally {
+          // Restore the directory
+          if (fs.existsSync(tempSchemaDir)) {
+            fs.renameSync(tempSchemaDir, sourceSchemaDir)
+          }
+          process.chdir(originalCwd)
+        }
+      }, 120000)
+
+      it('should handle missing source schema directory gracefully', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        // Temporarily rename the source schema directory
+        const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+        const tempSchemaDir = path.join(originalCwd, 'src', 'seedSchema_temp')
+        
+        try {
+          fs.renameSync(sourceSchemaDir, tempSchemaDir)
+          
+          // Should fail gracefully with a clear error message
+          await expect(runInit({projectType: 'node', args: [projectDir]})).rejects.toThrow()
+          
+        } finally {
+          // Restore the directory
+          if (fs.existsSync(tempSchemaDir)) {
+            fs.renameSync(tempSchemaDir, sourceSchemaDir)
+          }
+        }
+      }, 120000)
+
+      it('should handle corrupted source schema files', async () => {
+        const originalCwd = process.cwd()
+        const projectDir = path.join(originalCwd, '__tests__', '__mocks__', 'node', 'project')
+        
+        // Temporarily corrupt a source schema file
+        const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+        const testFile = path.join(sourceSchemaDir, 'AppStateSchema.ts')
+        const originalContent = fs.readFileSync(testFile, 'utf-8')
+        
+        try {
+          // Write invalid content to the source file
+          fs.writeFileSync(testFile, 'invalid typescript content {')
+          
+          // Should still copy the file (copying doesn't validate content)
+          await runInit({projectType: 'node', args: [projectDir]})
+          
+          const targetFile = path.join(projectDir, '.seed', 'schema', 'AppStateSchema.ts')
+          expect(fs.existsSync(targetFile)).toBe(true)
+          
+          const targetContent = fs.readFileSync(targetFile, 'utf-8')
+          expect(targetContent).toBe('invalid typescript content {')
+          
+        } finally {
+          // Restore the original content
+          fs.writeFileSync(testFile, originalContent)
+          
+          // Clean up
+          const dotSeedDir = path.join(projectDir, '.seed')
+          if (fs.existsSync(dotSeedDir)) {
+            fs.rmSync(dotSeedDir, { recursive: true, force: true })
+          }
+        }
+      }, 120000)
+    })
   });
 
   describe('seed command', () => {
     beforeEach(async () => {
+      // Clean up any existing .seed directory
+      const projectDir = path.join(process.cwd(), '__tests__', '__mocks__', 'node', 'project')
+      const dotSeedDir = path.join(projectDir, '.seed')
+      if (fs.existsSync(dotSeedDir)) {
+        fs.rmSync(dotSeedDir, { recursive: true, force: true })
+      }
+      
       // Initialize the database first
       await runInit({
         projectType: 'node', 
-        args: ['./__tests__/__mocks__/node/project']
+        args: [projectDir]
       })
     })
 

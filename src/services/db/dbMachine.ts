@@ -88,7 +88,7 @@ const dbMachine = setup({
       },
       invoke: {
         src: 'checkStatus',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as DbServiceContext }),
       },
       meta: {
         displayText: 'Checking DB status',
@@ -106,7 +106,7 @@ const dbMachine = setup({
       },
       invoke: {
         src: 'connectToDb',
-        input: ({ context }) => ({ context }),
+        input: ({ context }) => ({ context: context as DbServiceContext }),
       },
       meta: {
         displayText: 'Connecting to local DB',
@@ -124,7 +124,7 @@ const dbMachine = setup({
       },
       invoke: {
         src: 'validate',
-        input: ({ context }) => ({ context }),
+        input: ({ context }) => ({ context: context as DbServiceContext }),
       },
       meta: {
         displayText: 'Validating DB',
@@ -143,7 +143,7 @@ const dbMachine = setup({
       },
       invoke: {
         src: 'waitForFiles',
-        input: ({ context }) => ({ context }),
+        input: ({ context }) => ({ context: context as DbServiceContext }),
       },
     },
     [MIGRATING]: {
@@ -155,7 +155,7 @@ const dbMachine = setup({
       },
       invoke: {
         src: 'migrate',
-        input: ({ context }) => ({ context }),
+        input: ({ context }) => ({ context: context as DbServiceContext }),
       },
       meta: {
         displayText: 'Migrating DB',

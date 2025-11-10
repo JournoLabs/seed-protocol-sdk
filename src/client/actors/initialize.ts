@@ -16,6 +16,7 @@ import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseQueryClient } from "@/helpers";
 import { BaseItem } from '@/Item/BaseItem'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -44,6 +45,7 @@ FromCallbackInput<ClientManagerContext, EventObject>
     let ArweaveClient: typeof BaseArweaveClient
     let Item: typeof BaseItem
     let ItemProperty: typeof BaseItemProperty
+    let PathResolver: typeof BasePathResolver
 
     if (isBrowser()) {
       FileManager = (await import('../../browser/helpers/FileManager')).FileManager
@@ -52,15 +54,18 @@ FromCallbackInput<ClientManagerContext, EventObject>
       ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
       Item = (await import('../../browser/Item/Item')).Item
       ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
+      PathResolver = (await import('../../browser/helpers/PathResolver')).PathResolver
     }
     
     if (isNode()) {
+      console.log('isNode')
       FileManager = (await import('../../node/helpers/FileManager')).FileManager
       Db = (await import('../../node/db/Db')).Db
       QueryClient = (await import('../../node/helpers/QueryClient')).QueryClient
       ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
       Item = (await import('../../node/Item/Item')).Item
       ItemProperty = (await import('../../node/ItemProperty/ItemProperty')).ItemProperty
+      PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
     }
     
     BaseFileManager.setPlatformClass(FileManager!)
@@ -69,6 +74,7 @@ FromCallbackInput<ClientManagerContext, EventObject>
     BaseArweaveClient.setPlatformClass(ArweaveClient!)
     BaseItem.setPlatformClass(Item!)
     BaseItemProperty.setPlatformClass(ItemProperty!)
+    BasePathResolver.setPlatformClass(PathResolver!)
     
     const { models, endpoints, arweaveDomain, } = config
     
@@ -88,6 +94,7 @@ FromCallbackInput<ClientManagerContext, EventObject>
     setupServicesEventHandlers()
     setupServiceHandlers()
     if (areFsListenersReady()) {
+      console.log('areFsListenersReady true')
       eventEmitter.emit('fs.init')
     }
     if (!areFsListenersReady()) {
@@ -99,6 +106,8 @@ FromCallbackInput<ClientManagerContext, EventObject>
 
     const globalService = getGlobalService()
 
+    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+
     globalService.send({
       type: 'init',
       endpoints,
@@ -108,13 +117,19 @@ FromCallbackInput<ClientManagerContext, EventObject>
       filesDir: files,
     })
 
+    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+
     const { models: internalModels } = await import('@/db/configs/seed.schema.config')
     for (const [key, value] of Object.entries(internalModels)) {
       setModel(key, value)
     }
 
     setModel('Image', Image)
-
+    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+    console.log('waitFor globalService')
+    globalService.subscribe((snapshot) => {
+      console.log('globalService snapshot.value:', snapshot.value)
+    })
     await waitFor(globalService, (snapshot) => {
       logger('snapshot.value', snapshot.value)
       return snapshot.value === GlobalState.INITIALIZED

@@ -74,7 +74,7 @@ describe('Integration Tests', () => {
       }
     }, 120000) // 2 minute timeout
 
-    it('should generate valid schema files', async () => {
+    it('should copy valid schema files from source', async () => {
       process.chdir(testProjectDir)
       
       try {
@@ -83,8 +83,18 @@ describe('Integration Tests', () => {
         const schemaDir = path.join(testProjectDir, '.seed', 'schema')
         const schemaFiles = fs.readdirSync(schemaDir)
         
-        // Should have generated schema files
+        // Should have copied schema files
         expect(schemaFiles.length).toBeGreaterThan(0)
+        
+        // Get source schema files for comparison
+        const originalCwd = process.cwd()
+        const sourceSchemaDir = path.join(originalCwd, 'src', 'seedSchema')
+        const sourceFiles = fs.readdirSync(sourceSchemaDir).filter(file => file.endsWith('.ts'))
+        
+        // Should have copied all source files
+        expect(schemaFiles.filter(file => file.endsWith('.ts'))).toEqual(
+          expect.arrayContaining(sourceFiles)
+        )
         
         // Check each schema file for validity
         for (const file of schemaFiles) {
@@ -101,15 +111,19 @@ describe('Integration Tests', () => {
             const closeBrackets = (content.match(/\}/g) || []).length
             expect(openBrackets).toBe(closeBrackets)
             
-            // Should not have invalid imports
-            expect(content).not.toMatch(/import.*from '\.\/[^']*Schema'/)
-            
             // Should have proper Drizzle table definitions
             expect(content).toContain('sqliteTable')
+            
+            // Should be identical to source file (not generated)
+            const sourcePath = path.join(sourceSchemaDir, file)
+            if (fs.existsSync(sourcePath)) {
+              const sourceContent = fs.readFileSync(sourcePath, 'utf-8')
+              expect(content).toBe(sourceContent)
+            }
           }
         }
       } catch (error) {
-        console.error('Schema generation failed:', error)
+        console.error('Schema copying failed:', error)
         throw error
       }
     }, 120000)

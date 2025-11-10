@@ -96,7 +96,7 @@ export const internalMachine = setup({
       },
       invoke: {
         src: 'validateInput',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as InternalMachineContext }),
       },
       meta: {
         displayText: 'Validating input',
@@ -123,7 +123,7 @@ export const internalMachine = setup({
       },
       invoke: {
         src: 'waitForFiles',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as InternalMachineContext }),
       },
     },
     [CONFIGURING_FS]: {
@@ -138,7 +138,7 @@ export const internalMachine = setup({
       },
       invoke: {
         src: 'configureFs',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as InternalMachineContext }),
       },
       meta: {
         displayText: 'Downloading app files',
@@ -157,7 +157,7 @@ export const internalMachine = setup({
       },
       invoke: {
         src: 'loadAppDb',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as InternalMachineContext }),
       },
     },
     // Save developer's config to DB
@@ -167,7 +167,7 @@ export const internalMachine = setup({
       },
       invoke: {
         src: 'saveConfig',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context: context as InternalMachineContext }),
       },
       meta: {
         displayText: 'Saving configuration',

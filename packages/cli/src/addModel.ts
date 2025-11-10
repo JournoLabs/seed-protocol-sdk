@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+// @ts-nocheck - SDK exports exist but TypeScript can't see them in dist types yet
 
 import fs from 'fs';
-import { generateModelCode } from '../src/node/codegen/drizzle';
+import { generateModelCode } from '@seedprotocol/sdk';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -90,18 +91,20 @@ if (fileContents.includes(`class ${jsonModel.name}`)) {
   process.exit(0);
 }
 
-const newModelCode = generateModelCode({
-  modelName: jsonModel.name,
-  properties: jsonModel.properties,
-});
+(async () => {
+  try {
+    const newModelCode = await generateModelCode({
+      modelName: jsonModel.name,
+      properties: jsonModel.properties,
+    });
 
-const updatedSchema = injectModel(fileContents, newModelCode);
+    const updatedSchema = injectModel(fileContents, newModelCode);
 
-// Write the new table file
-try {
-  fs.writeFileSync(outputFilePath, updatedSchema, 'utf-8');
-  console.log(`Wrote updated schema file to ${outputFilePath}`);
-} catch (error) {
-  console.error('Error writing Drizzle table file:', error);
-  process.exit(1);
-} 
+    // Write the new table file
+    fs.writeFileSync(outputFilePath, updatedSchema, 'utf-8');
+    console.log(`Wrote updated schema file to ${outputFilePath}`);
+  } catch (error) {
+    console.error('Error writing Drizzle table file:', error);
+    process.exit(1);
+  }
+})(); 

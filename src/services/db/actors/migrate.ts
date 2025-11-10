@@ -1,5 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
-import { DbServiceContext, FromCallbackInput, SqliteWasmResult } from '@/types'
+import { DbServiceContext, FromCallbackInput, } from '@/types'
 import {
   BROWSER_FS_TOP_DIR,
   DB_MIGRATING_SUCCESS,
@@ -35,6 +35,9 @@ export const migrate = fromCallback<
   }
 
   const _migrate = async (): Promise<void> => {
+    if (!pathToDbDir || !dbId) {
+      throw new Error('pathToDbDir and dbId are required for migration')
+    }
     await BaseDb.migrate(pathToDbDir, dbName, dbId)
   }
 

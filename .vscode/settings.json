@@ -1,0 +1,11 @@
+{
+  "cSpell.words": [
+    "Axline",
+    "codegen"
+  ],
+  "vitest.workspaceConfig": "./vitest.workspace.ts",
+  "vitest.commandLine": "npm run test:watch",
+  "vitest.nodeEnv": {
+    "NODE_ENV": "test"
+  }
+}

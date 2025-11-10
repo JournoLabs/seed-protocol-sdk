@@ -9,7 +9,8 @@ import {
 } from '@/helpers'
 import { GET_FILES_METADATA } from '@/schema/file/queries'
 import debug from 'debug'
-import { getGlobalService } from '@/services/global/globalMachine'
+// Dynamic import to break circular dependency with globalMachine
+// import { getGlobalService } from '@/services/global/globalMachine'
 import { waitFor } from 'xstate'
 import { getMetadata } from '@/db/read/getMetadata'
 import { saveMetadata } from '@/db/write/saveMetadata'
@@ -47,6 +48,8 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
   }
 
   if (!BaseDb.isAppDbReady()) {
+    // Use dynamic import to break circular dependency
+    const { getGlobalService } = await import('@/services/global/globalMachine')
     const globalService = getGlobalService()
     const internalService = globalService.getSnapshot().context.internalService
     if (internalService) {

@@ -19,7 +19,7 @@ export const initialize = fromCallback<
     const modelTableName = modelNamePlural.toLowerCase()
 
     const _intialize = async (): Promise<void> => {
-      const existingItem = await getExistingItem({ seedUid, seedLocalId })
+      const existingItem = await getExistingItem({ seedUid: seedUid || undefined, seedLocalId: seedLocalId || undefined })
 
       if (existingItem) {
         sendBack({

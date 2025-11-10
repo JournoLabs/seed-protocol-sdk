@@ -1,28 +1,26 @@
 import { defineConfig } from 'drizzle-kit'
 import dotenv from 'dotenv'
-import process from 'node:process'
-import path from 'path'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 dotenv.config()
 
-let dotSeedDir = path.join(process.cwd(), '.seed')
+// Use PathResolver to get the correct .seed directory path regardless of environment
+// If SEED_DOT_SEED_DIR is set (e.g., by Db.ts), use it; otherwise use PathResolver
+const pathResolver = BasePathResolver.getInstance()
+const dotSeedDir = process.env.SEED_DOT_SEED_DIR || pathResolver.getDotSeedDir()
 
-if (process.env.IS_SEED_DEV) {
-  dotSeedDir = path.join(
-    process.cwd(),
-    '__tests__',
-    '__mocks__',
-    'browser',
-    'project',
-    '.seed',
-  )
+// Export a function that can be called with a custom dotSeedDir, or use the default
+export const getDrizzleConfig = (customDotSeedDir?: string) => {
+  const seedDir = customDotSeedDir || dotSeedDir
+  return defineConfig({
+    schema: [`${seedDir}/schema/*Schema.ts`],
+    dialect: 'sqlite',
+    out: `${seedDir}/db`,
+    dbCredentials: {
+      url: `${seedDir}/db/app_db.sqlite3`,
+    },
+  })
 }
 
-export default defineConfig({
-  schema: [`${dotSeedDir}/schema/*Schema.ts`],
-  dialect: 'sqlite',
-  out: `${dotSeedDir}/db`,
-  dbCredentials: {
-    url: `${dotSeedDir}/db/app_db.sqlite3`,
-  },
-})
+// Default export for drizzle-kit CLI usage
+export default getDrizzleConfig()

@@ -1,44 +1,56 @@
 import path                     from 'path'
 import pluralize                from 'pluralize'
 import { camelCase, snakeCase } from 'lodash-es'
-import * as nunjucks            from 'nunjucks'
-import { ILoader }              from 'nunjucks'
 import { ModelClassType }       from '@/types'
+
+// Define ILoader type locally to avoid importing from nunjucks (prevents bundling issues)
+type ILoader = {
+  getSource(name: string): { path: string; src: string; noCache: boolean }
+}
 import { SCHEMA_NJK }           from '@/helpers/constants'
 import { getTsImport }          from '@/node/helpers'
 import fs                       from 'fs'
-import {PathResolver} from '@/node/PathResolver'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import debug          from 'debug'
 
 const logger = debug('seedSdk:codegen:drizzle')
 
+// Lazy load nunjucks to avoid bundling issues when only PathResolver is used
+let nunjucksEnv: any = null
 
-const TemplateLoader: ILoader = {
-  getSource: (name: string) => {
-    const pathResolver = PathResolver.getInstance()
-    const { templatePath } = pathResolver.getAppPaths()
-    let templateFilePath = templatePath
-    if (name.includes(templatePath)) {
-      templateFilePath = name
-    } else {
-      templateFilePath = path.join(templatePath, path.basename(name))
-    }
-    const src = fs.readFileSync(templateFilePath, 'utf-8')
+const getNunjucksEnv = async () => {
+  if (!nunjucksEnv) {
+    const nunjucks = await import('nunjucks')
+    
+    const TemplateLoader: ILoader = {
+      getSource: (name: string) => {
+        const pathResolver = BasePathResolver.getInstance()
+        const { templatePath } = pathResolver.getAppPaths()
+        let templateFilePath = templatePath
+        if (name.includes(templatePath)) {
+          templateFilePath = name
+        } else {
+          templateFilePath = path.join(templatePath, path.basename(name))
+        }
+        const src = fs.readFileSync(templateFilePath, 'utf-8')
 
-    return {
-      path: name,
-      src,
-      noCache: false,
+        return {
+          path: name,
+          src,
+          noCache: false,
+        }
+      },
     }
-  },
+
+    // Configure Nunjucks
+    nunjucksEnv = new nunjucks.Environment(TemplateLoader)
+
+    nunjucksEnv.addFilter('camelCase', camelCase)
+    nunjucksEnv.addFilter('snakeCase', snakeCase)
+    nunjucksEnv.addFilter('pluralize', pluralize)
+  }
+  return nunjucksEnv
 }
-
-// Configure Nunjucks
-const env = new nunjucks.Environment(TemplateLoader)
-
-env.addFilter('camelCase', camelCase)
-env.addFilter('snakeCase', snakeCase)
-env.addFilter('pluralize', pluralize)
 
 const refNamesToExcludeFromRelations = [
   'Text',
@@ -47,18 +59,19 @@ const refNamesToExcludeFromRelations = [
   'Date',
 ]
 
-export const generateDrizzleSchemaCode = (
+export const generateDrizzleSchemaCode = async (
   modelName: string,
   modelClass: ModelClassType,
-): string => {
+): Promise<string> => {
   const listProperties = Object.entries(modelClass.schema).filter(
     ([key, propertyDef]) => propertyDef?.dataType === 'List' && !refNamesToExcludeFromRelations.includes(propertyDef?.ref!),
   )
 
-  const pathResolver = PathResolver.getInstance()
+  const pathResolver = BasePathResolver.getInstance()
   const { templatePath } = pathResolver.getAppPaths()
   const filePath = path.join(templatePath, SCHEMA_NJK)
 
+  const env = await getNunjucksEnv()
   const schemaCode = env.render(filePath, {
     modelName,
     modelClass,
@@ -72,7 +85,7 @@ export const createDrizzleSchemaFilesFromConfig = async (
   configFilePath: string | undefined,
   outputDirPath: string | undefined,
 ) => {
-  const pathResolver = PathResolver.getInstance()
+  const pathResolver = BasePathResolver.getInstance()
   const { dotSeedDir, appSchemaDir } = pathResolver.getAppPaths()
   console.log('createDrizzleSchemaFilesFromConfig', configFilePath, outputDirPath)
 
@@ -87,7 +100,7 @@ export const createDrizzleSchemaFilesFromConfig = async (
   const writeToDir = outputDirPath || appSchemaDir
 
   for (const [modelName, modelClass] of Object.entries(models)) {
-    const code = generateDrizzleSchemaCode(modelName, modelClass)
+    const code = await generateDrizzleSchemaCode(modelName, modelClass)
 
     if (!fs.existsSync(writeToDir)) {
       fs.mkdirSync(writeToDir)
@@ -124,15 +137,16 @@ export const createDrizzleSchemaFilesFromConfig = async (
 };
 
 
-export const generateModelCode = (values: Record<string, any>): string => {
+export const generateModelCode = async (values: Record<string, any>): Promise<string> => {
   const { modelName, properties } = values;
-  const pathResolver = PathResolver.getInstance()
+  const pathResolver = BasePathResolver.getInstance()
   const { templatePath } = pathResolver.getAppPaths()
 
   if (modelName === 'Text' || modelName === 'TestModel') {
     logger(`Model name is ${modelName}.`)
   }
 
+  const nunjucks = await import('nunjucks')
   const njkEnv = new nunjucks.Environment(new nunjucks.FileSystemLoader(templatePath))
   njkEnv.addFilter('seedTypeToJsType', seedTypeToJsType)
   return njkEnv.render('model.njk', { modelName, properties })

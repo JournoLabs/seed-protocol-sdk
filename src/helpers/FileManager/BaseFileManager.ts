@@ -73,11 +73,8 @@ export abstract class BaseFileManager {
     if (this.PlatformClass === BaseFileManager) {
       throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
     }
-    // Add additional safety check to prevent infinite recursion
-    if (this.PlatformClass.getFs === this.getFs) {
-      throw new Error('Circular reference detected: PlatformClass.getFs is the same as BaseFileManager.getFs')
-    }
-    // Check if we're calling ourselves recursively
+    // Check if we're calling ourselves recursively (more reliable than function reference comparison)
+    // This will catch actual infinite recursion regardless of how the code is bundled/transpiled
     const stack = new Error().stack || ''
     const getFsCalls = (stack.match(/getFs/g) || []).length
     if (getFsCalls > 10) {

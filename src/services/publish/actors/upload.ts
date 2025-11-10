@@ -51,9 +51,11 @@ export const upload = fromCallback<
         editedProperty.propertyDef.refValueType &&
         editedProperty.propertyDef.refValueType === 'Image'
       ) {
-        const context = editedProperty.getService().getSnapshot().context
-        const imageSeedId = context.propertyValue
-        const { localId, uid } = getCorrectId(imageSeedId)
+        const snapshot = editedProperty.getService().getSnapshot()
+        const context = 'context' in snapshot ? snapshot.context : null
+        if (!context) return
+        // const imageSeedId = context.propertyValue
+        // const { localId, uid } = getCorrectId(imageSeedId)
       }
 
       if (

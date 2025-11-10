@@ -144,3 +144,5 @@ vite/app-files
 # Test mocks
 !__mocks__/**/node_modules/
 !__mocks__/**/node_modules/**/*
+
+packages/cli/dist

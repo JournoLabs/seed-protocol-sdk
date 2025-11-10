@@ -1,19 +1,10 @@
 import path from 'path'
 import fs from 'fs'
-import { NODE_APP_DB_CONFIG } from './constants'
+import { NODE_APP_DB_CONFIG } from '../constants'
 import { findSeedConfigFile } from '@/helpers'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
-export class PathResolver {
-  private static instance: PathResolver
-  private constructor() {}
-
-  static getInstance(): PathResolver {
-    if (!PathResolver.instance) {
-      PathResolver.instance = new PathResolver()
-    }
-    return PathResolver.instance
-  }
-
+class PathResolver extends BasePathResolver {
   /**
    * Detects the current environment based on filesystem structure and package.json
    */
@@ -190,4 +181,9 @@ export class PathResolver {
       templatePath
     }
   }
-} 
+}
+
+BasePathResolver.setPlatformClass(PathResolver)
+
+export { PathResolver }
+

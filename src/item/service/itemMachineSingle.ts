@@ -1,6 +1,6 @@
 import { assign, setup } from 'xstate'
 import { MachineIds } from '@/services/internal/constants'
-import { ItemMachineContext } from '@/types'
+import { ItemMachineContext, HydrateExistingItemEvent } from '@/types'
 import { waitForDb } from './actors/waitForDb'
 import { initialize } from './actors/initialize'
 import { hydrateExistingItem } from './actors/hydrateExistingItem'
@@ -121,7 +121,10 @@ export const itemMachineSingle = setup({
       },
       invoke: {
         src: 'hydrateExistingItem',
-        input: ({ event, context }) => ({ event, context }),
+        input: ({ event, context }) => ({ 
+          event: event as HydrateExistingItemEvent, 
+          context 
+        }),
       },
     },
     hydratingNewItem: {
@@ -135,10 +138,10 @@ export const itemMachineSingle = setup({
     },
     fetchingRemoteData: {
       on: {
-        fetchRemoteDataSuccess: 'idle',
+        fetchDataFromEasSuccess: 'idle',
       },
       invoke: {
-        src: 'fetchRemoteData',
+        src: 'fetchDataFromEas',
         input: ({ context }) => ({ context }),
       },
     },

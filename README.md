@@ -26,6 +26,20 @@ pnpm add @seedprotocol/sdk
 bun add @seedprotocol/sdk
 ```
 
+### Module System Support
+
+The SDK supports both ESM and CommonJS module systems:
+
+**ESM (Recommended):**
+```javascript
+import { Model, Property, Item } from '@seedprotocol/sdk'
+```
+
+**CommonJS:**
+```javascript
+const { Model, Property, Item } = require('@seedprotocol/sdk')
+```
+
 ## Getting Started
 
 The first thing to do when integrating Seed SDK is define your data model by creating a configuration file in the root

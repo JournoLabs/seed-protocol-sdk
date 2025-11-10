@@ -1,0 +1,23 @@
+{
+  "appState": [
+  ],
+  "config": [
+  ],
+  "models": [
+    {
+      "name": "Image"
+    }
+  ],
+  "modelUids": [
+    {
+      "uid": "0x5442a1004fe4152a06ed806367a989942f7051bad21bbed5b98d855509f79aed",
+      "modelId": 1
+    }
+  ],
+  "metadata": [
+  ],
+  "seeds": [
+  ],
+  "versions": [
+  ]
+}

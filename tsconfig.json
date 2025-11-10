@@ -31,7 +31,6 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "types": ["node"],
-    "typeRoots": ["./src/types/**/*", "./node_modules/@types", "**/types.ts"],
     "outDir": "./dist",
     "paths": {
       "@/*": ["src/*"],

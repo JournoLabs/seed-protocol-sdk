@@ -1,11 +1,11 @@
 import { defineConfig } from 'drizzle-kit'
 import dotenv from 'dotenv'
 import { DrizzleConfig } from 'drizzle-orm'
-import { PathResolver } from '@/node/PathResolver'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 dotenv.config()
 
-const pathResolver = PathResolver.getInstance()
+const pathResolver = BasePathResolver.getInstance()
 
 const {
   appSchemaDir,

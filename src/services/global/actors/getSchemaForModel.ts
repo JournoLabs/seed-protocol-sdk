@@ -12,6 +12,11 @@ export const getSchemaForModel = fromCallback<
   EventObject,
   FromCallbackInput<GlobalMachineContext, GetSchemaForModelEvent>
 >(({ sendBack, input: { context, event } }) => {
+  if (!event) {
+    console.warn('No event found')
+    return
+  }
+
   const { modelName } = event
 
   if (!modelName) {
@@ -36,7 +41,7 @@ export const getSchemaForModel = fromCallback<
 
   logger('[service/actor] [getSchemaForModel] model:', model)
 
-  sendBack({ type: 'schemaForModel', schema: model.schema })
+  sendBack({ type: 'schemaForModel', schema: model[1].schema })
 
   return () => {}
 })

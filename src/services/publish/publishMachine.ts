@@ -19,7 +19,7 @@ const {
 export const publishMachine = setup({
   types: {
     context: {} as PublishMachineContext,
-    input: {} as PublishMachineContext,
+    input: {} as Partial<PublishMachineContext>,
   },
   actors: {
     validateItemData,
@@ -30,7 +30,7 @@ export const publishMachine = setup({
 }).createMachine({
   id: 'publish',
   initial: VALIDATING_ITEM_DATA,
-  context: ({ input }) => input,
+  context: ({ input }) => input as PublishMachineContext,
   on: {
     updateContext: updateMachineContext,
   },

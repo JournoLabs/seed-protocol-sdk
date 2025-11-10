@@ -6,6 +6,9 @@ export * from './react'
 export * from './Item'
 export * from './ItemProperty'
 
+// Initialize PathResolver for browser
+import './helpers/PathResolver'
+
 const logger = debug('seedSdk:browser:index')
 
 eventEmitter.on('file-saved', (filePath) => {

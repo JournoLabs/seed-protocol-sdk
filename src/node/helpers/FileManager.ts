@@ -1,8 +1,13 @@
 import * as fsAsync        from 'fs/promises'
+import * as fs             from 'fs'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import path                from 'path'
 
 class FileManager extends BaseFileManager {
+
+  static async getFs() {
+    return fs
+  }
 
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
     return new Promise(( resolve, reject ) => {

@@ -36,7 +36,7 @@ const relationValuesToExclude = [
 ]
 
 
-const getSeedsFromSchemaUids = async ({ schemaUids, addresses }) => {
+const getSeedsFromSchemaUids = async ({ schemaUids, addresses }: { schemaUids: string[], addresses: string[] }) => {
   const AND = [
     {
       OR: [] as Record<string, unknown>[],
@@ -108,9 +108,15 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
 
   if (existingSeedRecordsRows && existingSeedRecordsRows.length > 0) {
     for (const row of existingSeedRecordsRows) {
-      existingSeedUids.add(row.uid)
-      seedUidToLocalId.set(row.uid, row.localId)
-      seedUidToModelType.set(row.uid, row.type)
+      if (row.uid) {
+        existingSeedUids.add(row.uid)
+        if (row.localId) {
+          seedUidToLocalId.set(row.uid, row.localId)
+        }
+        if (row.type) {
+          seedUidToModelType.set(row.uid, row.type)
+        }
+      }
     }
   }
 

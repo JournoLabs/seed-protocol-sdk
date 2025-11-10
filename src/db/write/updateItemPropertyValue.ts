@@ -9,7 +9,7 @@ import { eventEmitter } from '@/eventBus'
 import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
 
-const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: string, seedLocalId: string, seedUid: string }) => {
+const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: string | null | undefined, seedLocalId: string | null | undefined, seedUid: string | null | undefined }) => {
   if (!modelName || (!seedLocalId && !seedUid)) {
     return
   }
@@ -134,8 +134,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       return
     }
 
-    const seedDataFromDb = await getSeedData({ seedLocalId })
-    const versionDataFromDb = await getVersionData({ localId: versionLocalId })
+    const seedDataFromDb = seedLocalId ? await getSeedData({ seedLocalId }) : null
+    const versionDataFromDb = versionLocalId ? await getVersionData({ localId: versionLocalId }) : null
 
     // Here we don't have a local-only record so we need to create a new one
     const newLocalId = generateId()
@@ -216,12 +216,12 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
                                 VALUES ('${newLocalId}',
                                         '${propertyName}',
                                         '${safeNewValue}',
-                                        '${modelName?.toLowerCase()}',
+                                        '${modelName?.toLowerCase() || ''}',
                                         ${seedUid ? `'${seedUid}'` : 'NULL'},
-                                        '${seedLocalId}',
-                                        '${versionLocalId}',
+                                        '${seedLocalId || ''}',
+                                        '${versionLocalId || ''}',
                                         ${versionUid ? `'${versionUid}'` : 'NULL'},
-                                        '${schemaUid}',
+                                        '${schemaUid || ''}',
                                         ${refSeedType ? `'${refSeedType}'` : 'NULL'},
                                         ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
                                         ${refResolvedDisplayValue ? `'${refResolvedDisplayValue}'` : 'NULL'},

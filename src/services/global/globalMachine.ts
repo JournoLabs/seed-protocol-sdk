@@ -1,4 +1,4 @@
-import { ActorRefFrom, assign, createActor, raise, setup } from 'xstate'
+import { ActorRefFrom, assign, createActor, raise, setup, Snapshot } from 'xstate'
 import { createBrowserInspector } from '@statelyai/inspect'
 import {
   GLOBAL_ADDING_MODELS_TO_DB_SUCCESS,
@@ -104,24 +104,27 @@ const globalMachine = setup({
               for (const [modelName, ModelClass] of Object.entries(
                 event.create,
               )) {
+                console.log('spawning itemMachineAll for modelName:', modelName)
+                const typedModelClass = ModelClass as ModelClassType
                 const service = spawn(itemMachineAll, {
                   systemId: modelName,
                   input: {
                     modelName,
-                    ModelClass,
-                    modelSchema: (ModelClass as ModelClassType)!.schema,
+                    ModelClass: typedModelClass,
+                    modelSchema: typedModelClass.schema,
                     items: [],
                   },
                 })
                 allItemsServices[`${modelName}Service`] = service
+                console.log('allItemsServices:', allItemsServices)
               }
 
               for (const [modelName, snapshot] of Object.entries(
                 event.restore,
               )) {
                 const service = createActor(itemMachineAll, {
-                  snapshot,
-                })
+                  snapshot: snapshot as Snapshot<typeof itemMachineAll>,
+                } as any)
                 service.start()
                 allItemsServices[`${modelName}Service`] = service
               }
@@ -177,7 +180,7 @@ const globalMachine = setup({
         assign({
           publishItemService: ({ spawn, event }) =>
             spawn(publishMachine, {
-              id: 'publishService',
+              systemId: 'publishService',
               input: {
                 localId: event.seedLocalId,
               },

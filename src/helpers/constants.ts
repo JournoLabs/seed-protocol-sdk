@@ -1,9 +1,12 @@
 import {
   AttestationRequestData,
-  ZERO_BYTES,
-  ZERO_BYTES32,
-  ZERO_ADDRESS,
 } from '@ethereum-attestation-service/eas-sdk'
+import { ZeroAddress } from 'ethers'
+
+// Define zero constants ourselves since they're not exported from eas-sdk in newer versions
+export const ZERO_ADDRESS = ZeroAddress
+export const ZERO_BYTES = '0x'
+export const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000'
 
 
 export const SCHEMA_NJK = 'schema.njk'

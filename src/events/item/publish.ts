@@ -1,5 +1,4 @@
-import { getGlobalService } from '@/services/global/globalMachine'
-
+// Dynamic import to break circular dependency with globalMachine
 type PublishItemRequestEvent = {
   seedLocalId: string
 }
@@ -11,6 +10,8 @@ type PublishItemRequestHandler = (
 export const publishItemRequestHandler: PublishItemRequestHandler = async ({
   seedLocalId,
 }) => {
+  // Use dynamic import to break circular dependency
+  const { getGlobalService } = await import('@/services/global/globalMachine')
   const globalService = getGlobalService()
   globalService.subscribe((snapshot) => {
     if (

@@ -71,6 +71,9 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       storageTransactionId,
       propertyRecordSchema: ModelClass.schema[propertyName],
       schemaUid,
+      isSaving: false,
+      isRelation: false,
+      isDbReady: false,
     }
 
 
@@ -130,7 +133,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
     this._subject = new BehaviorSubject(propertyValue)
     this._service = createActor(propertyMachine, {
-      input: serviceInput,
+      input: serviceInput as PropertyMachineContext,
     })
 
     this._subscription = this._service.subscribe(
@@ -142,7 +145,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         const { context } = snapshot
         const { propertyRecordSchema } = context
 
-        if (context.seedLocalId) {
+        if (context.seedLocalId && context.propertyName) {
           const cacheKey = BaseItemProperty.cacheKey(
             context.seedLocalId,
             context.propertyName,
@@ -280,7 +283,10 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         return instance
       }
       if (!this.instanceCache.has(cacheKey)) {
-        const newInstance = new this(props)
+        if (!this.PlatformClass) {
+          throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+        }
+        const newInstance = new this.PlatformClass(props)
         this.instanceCache.set(cacheKey, {
           instance: newInstance,
           refCount: 1,
@@ -295,12 +301,18 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         return instance
       }
       if (!this.instanceCache.has(cacheKey)) {
-        const newInstance = new this(props)
+        if (!this.PlatformClass) {
+          throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+        }
+        const newInstance = new this.PlatformClass(props)
         this.instanceCache.set(cacheKey, { instance: newInstance, refCount: 1 })
         return newInstance
       }
     }
-    return new this(props)
+    if (!this.PlatformClass) {
+      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+    }
+    return new this.PlatformClass(props)
   }
 
   static async find({
@@ -350,23 +362,23 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
   }
 
   get localId() {
-    return this._getSnapshotContext().localId
+    return this._getSnapshotContext().localId ?? ''
   }
 
   get uid() {
-    return this._getSnapshotContext().uid
+    return this._getSnapshotContext().uid ?? ''
   }
 
   get seedLocalId() {
-    return this._getSnapshotContext().seedLocalId
+    return this._getSnapshotContext().seedLocalId ?? ''
   }
 
   get seedUid() {
-    return this._getSnapshotContext().seedUid
+    return this._getSnapshotContext().seedUid ?? ''
   }
 
   get schemaUid() {
-    return this._getSnapshotContext().schemaUid
+    return this._getSnapshotContext().schemaUid ?? ''
   }
 
   get propertyName() {
