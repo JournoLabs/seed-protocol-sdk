@@ -4,9 +4,6 @@ import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
 import { BaseFileManager } from './FileManager/BaseFileManager'
-import { SEED_CONFIG_FILE, SEED_CONFIG_FALLBACKS } from './constants'
-import fs from 'fs'
-import path from 'path'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
@@ -14,29 +11,6 @@ export * from './FileManager/BaseFileManager'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary
-
-/**
- * Finds the Seed Protocol config file in the given directory
- * @param searchDir - Directory to search for the config file (defaults to process.cwd())
- * @returns The path to the found config file, or null if not found
- */
-export const findSeedConfigFile = (searchDir: string = process.cwd()): string | null => {
-  // First try the primary config file name
-  const primaryPath = path.join(searchDir, SEED_CONFIG_FILE)
-  if (fs.existsSync(primaryPath)) {
-    return primaryPath
-  }
-
-  // Then try fallback names in order
-  for (const fallbackName of SEED_CONFIG_FALLBACKS) {
-    const fallbackPath = path.join(searchDir, fallbackName)
-    if (fs.existsSync(fallbackPath)) {
-      return fallbackPath
-    }
-  }
-
-  return null
-}
 
 export const generateId = (): string => {
   return customAlphabet(alphanumeric, 10)()

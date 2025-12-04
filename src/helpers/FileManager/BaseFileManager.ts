@@ -5,6 +5,12 @@ export abstract class BaseFileManager {
   static PlatformClass: typeof BaseFileManager
 
   static setPlatformClass( platformClass: typeof BaseFileManager ) {
+    if (!platformClass) {
+      throw new Error('Cannot set PlatformClass to undefined or null. Ensure the platform-specific FileManager is properly imported.')
+    }
+    if (platformClass === BaseFileManager) {
+      throw new Error('Cannot set PlatformClass to BaseFileManager itself. Use a platform-specific implementation (e.g., node/FileManager or browser/FileManager).')
+    }
     this.PlatformClass = platformClass
   }
 
@@ -72,6 +78,11 @@ export abstract class BaseFileManager {
     }
     if (this.PlatformClass === BaseFileManager) {
       throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
+    }
+    // Check if the getFs method is the same as BaseFileManager.getFs (catches cases where
+    // PlatformClass doesn't properly override getFs or bundling causes method sharing)
+    if (this.PlatformClass.getFs === BaseFileManager.getFs) {
+      throw new Error('Circular reference detected: PlatformClass.getFs is the same as BaseFileManager.getFs')
     }
     // Check if we're calling ourselves recursively (more reliable than function reference comparison)
     // This will catch actual infinite recursion regardless of how the code is bundled/transpiled

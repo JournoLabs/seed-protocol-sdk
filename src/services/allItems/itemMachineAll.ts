@@ -12,7 +12,7 @@ import { processItems } from '../allItems/actors/processItems'
 
 export const itemMachineAll = setup({
   types: {
-    context: {} as Partial<AllItemsMachineContext>,
+    context: {} as AllItemsMachineContext,
     input: {} as Partial<AllItemsMachineContext> | undefined,
   },
   actors: {

@@ -48,10 +48,10 @@ export const ClientManager = {
     return clientManager;
   },
   init: async (options: any) => {
-    clientManager.subscribe((snapshot) => {
-      console.log('ClientManager snapshot.value:', snapshot.value);
-      console.log('ClientManager snapshot.context.isInitialized:', snapshot.context.isInitialized);
-    });
+    // clientManager.subscribe((snapshot) => {
+    //   console.log('ClientManager snapshot.value:', snapshot.value);
+    //   console.log('ClientManager snapshot.context.isInitialized:', snapshot.context.isInitialized);
+    // });
     clientManager.send({ type: 'init', options });
     await waitFor(clientManager, (snapshot) => snapshot.context.isInitialized);
   },

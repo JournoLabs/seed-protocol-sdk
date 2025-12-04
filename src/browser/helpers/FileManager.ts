@@ -9,8 +9,8 @@ const logger = debug('seedSdk:browser:helpers:FileManager')
 class FileManager extends BaseFileManager {
 
   static async getFs() {
-    const fs = await import('@zenfs/core')
-    return fs
+    const zenfs = await import('@zenfs/core')
+    return zenfs
   }
 
   static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
@@ -24,9 +24,9 @@ class FileManager extends BaseFileManager {
 
   static async initializeFileSystem(): Promise<void> {
 
-    const fs = await this.getFs()
+    const zenfs = await this.getFs()
     const {WebAccess} = await import('@zenfs/dom')
-    const {configureSingle} = fs
+    const {configureSingle} = zenfs
 
     const handle = await navigator.storage.getDirectory()
     // await configure({
@@ -101,8 +101,8 @@ class FileManager extends BaseFileManager {
   static async createDirIfNotExists(filePath: string): Promise<void> {
     if (!(await this.pathExists(filePath))) {
       try {
-        const fs = await this.getFs()
-        await fs.promises.mkdir(filePath)
+        const zenfs = await this.getFs()
+        await zenfs.promises.mkdir(filePath)
       } catch (error) {
         // This is a no-op. We tried to create a directory that already exists.
         logger('Attempted to create a directory that already exists')

@@ -6,7 +6,8 @@ const logger = debug('seedSdk:services:events')
 const handleServiceSaveState = (event: any) => {
   const { state, serviceId } = event
   logger(`[browser] [service.saveState.request] serviceId: ${serviceId}`)
-  localStorage.setItem(`seed_sdk_service_${serviceId}`, JSON.stringify(state))
+  // TODO: This is called from Node as well. Do we need it? If so, need to generalize this to all platforms.
+  // localStorage.setItem(`seed_sdk_service_${serviceId}`, JSON.stringify(state))
 }
 
 export const setupServicesEventHandlers = () => {

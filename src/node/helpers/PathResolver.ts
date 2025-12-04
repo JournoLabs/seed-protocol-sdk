@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { NODE_APP_DB_CONFIG } from '../constants'
-import { findSeedConfigFile } from '@/helpers'
+import { SEED_CONFIG_FILE, SEED_CONFIG_FALLBACKS } from '@/helpers/constants'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 class PathResolver extends BasePathResolver {
@@ -137,7 +137,21 @@ class PathResolver extends BasePathResolver {
    * @returns The path to the found config file, or null if not found
    */
   findConfigFile(searchDir: string = process.cwd()): string | null {
-    return findSeedConfigFile(searchDir)
+    // First try the primary config file name
+    const primaryPath = path.join(searchDir, SEED_CONFIG_FILE)
+    if (fs.existsSync(primaryPath)) {
+      return primaryPath
+    }
+
+    // Then try fallback names in order
+    for (const fallbackName of SEED_CONFIG_FALLBACKS) {
+      const fallbackPath = path.join(searchDir, fallbackName)
+      if (fs.existsSync(fallbackPath)) {
+        return fallbackPath
+      }
+    }
+
+    return null
   }
 
   /**

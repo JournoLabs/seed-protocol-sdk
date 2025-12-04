@@ -8,6 +8,7 @@ const ENV = (typeof process !== 'undefined' && process.env)
 const MACHINE_ID_SCOPE = '@seedSdk'
 
 export enum MachineIds {
+  CLIENT_MANAGER = `${MACHINE_ID_SCOPE}/clientManager`,
   GLOBAL      = `${MACHINE_ID_SCOPE}/global`,
   INTERNAL    = `${MACHINE_ID_SCOPE}/internal`,
   DB          = `${MACHINE_ID_SCOPE}/db`,
@@ -19,6 +20,23 @@ export enum MachineIds {
 }
 
 const { INTERNAL, DB, GLOBAL, EAS, MODEL } = MachineIds
+
+export enum ClientManagerState {
+  UNINITIALIZED = 'uninitialized',
+  PLATFORM_CLASSES_INIT = 'platformClassesInit',
+  FILE_SYSTEM_INIT = 'fileSystemInit',
+  DB_INIT = 'dbInit',
+  GLOBAL_SERVICE_INIT = 'globalServiceInit',
+  IDLE = 'idle',
+}
+
+export enum ClientManagerEvents {
+  UPDATE_CONTEXT = 'updateContext',
+  GLOBAL_SERVICE_READY = 'globalServiceReady',
+  PLATFORM_CLASSES_READY = 'platformClassesReady',
+  FILE_SYSTEM_READY = 'fileSystemReady',
+  DB_READY = 'dbReady',
+}
 
 export enum GlobalState {
   UNINITIALIZED       = 'uninitialized',
@@ -112,7 +130,7 @@ export const CHILD_SNAPSHOT                = 'childSnapshot'
 
 export const INTERNAL_SERVICE_SNAPSHOT = 'internalServiceSnapshot'
 
-export const DB_NAME_APP        = 'app_db'
+export const DB_NAME_APP        = 'seed'
 export const BROWSER_FS_TOP_DIR = 'app-files'
 
 export const EAS_ENDPOINT =

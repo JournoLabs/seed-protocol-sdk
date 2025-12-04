@@ -7,6 +7,7 @@ import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
 import { BROWSER_FS_TOP_DIR, DB_NAME_APP } from "@/services/internal/constants";
 import { BaseFileManager } from "@/helpers";
+import * as schema from '@/seedSchema'
 
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -31,13 +32,14 @@ class Db extends BaseDb implements IDb {
     return !!this.appDb
   }
 
-  static async connectToDb(filesDir: string,): Promise<string | undefined> {
-
+  static async prepareDb(filesDir: string) {
+    console.log('prepareDb', filesDir)
     if (Db.sqliteWasmClient) {
       return this.dbId
     }
 
     this.filesDir = filesDir
+    this.pathToDb = `${filesDir}/db/${DB_NAME_APP}.db`
 
     if (typeof document === 'undefined') {
       return
@@ -89,7 +91,7 @@ class Db extends BaseDb implements IDb {
     logger('[Db.prepareDb] Running SQLite3 version', responseGet.result.version.libVersion);
 
     const responseOpen = await this.sqliteWasmClient('open', {
-      filename: `file:${filesDir}/db/${DB_NAME_APP}.sqlite3?vfs=opfs`,
+      filename: `file:${filesDir}/db/${DB_NAME_APP}.db?vfs=opfs`,
     });
     const { dbId } = responseOpen;
     logger(
@@ -97,24 +99,35 @@ class Db extends BaseDb implements IDb {
       responseOpen.result.filename.replace(/^file:(.*?)\?vfs=opfs/, '$1'),
     );
 
-    logger('[Db.prepareDb] dbId', dbId)  
+    logger('[Db.prepareDb] dbId', dbId)
+    
+    await this.migrate()
 
     this.dbId = dbId
-
-    return dbId
   }
 
-  static async migrate(pathToDbDir: string, dbName: string,): Promise<void> {
+  static async connectToDb(filesDir: string,): Promise<string | undefined> {
+
+
+
+    return this.dbId
+  }
+
+  static async migrate(): Promise<void> {
 
     const schemaGlobString = `${BROWSER_FS_TOP_DIR}/schema/*`
+    const pathToDbDir = `${this.filesDir}/db`
+    const dbName = DB_NAME_APP
+
+    logger('[Db.migrate] running migrations')
 
     const drizzleDb = drizzle(
-      async (sql, params, method) => {
+      async (sql, params,) => {
         try {
-          // logger(
-          //   `executing sql on ${dbName} with id: ${dbId} and method: ${method}`,
-          //   sql,
-          // )
+          logger(
+            `executing sql`,
+            sql,
+          )
 
           const finalResult = await this.exec(sql, params)
 
@@ -131,7 +144,7 @@ class Db extends BaseDb implements IDb {
         }
       },
       {
-        schema: schemaGlobString,
+        schema,
         // logger: true,
       },
     )
@@ -139,9 +152,13 @@ class Db extends BaseDb implements IDb {
     try {
       const zenfs = await BaseFileManager.getFs()
 
+      logger('[Db.migrate] getting migrations')
+
       const migrations = readMigrationFiles({
         migrationsFolder: pathToDbDir,
       })
+
+      logger('[Db.migrate] migrations', migrations)
 
       if (migrations.length > 0) {
         const incomingMigrationHashes = migrations.map(
@@ -197,6 +214,8 @@ class Db extends BaseDb implements IDb {
         }
       }
 
+      logger('[Db.migrate] running migrations')
+
       await drizzleMigrate(
         drizzleDb,
         async (queriesToRun) => {
@@ -212,24 +231,26 @@ class Db extends BaseDb implements IDb {
       )
     } catch (error) {
 
-      await BaseFileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
+      // await BaseFileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
 
-      const journalExists = await BaseFileManager.pathExists(
-        `${pathToDbDir}/meta/_journal.json`,
-      )
+      // const journalExists = await BaseFileManager.pathExists(
+      //   `${pathToDbDir}/meta/_journal.json`,
+      // )
 
-      if (journalExists) {
-        await this.migrate(pathToDbDir, dbName,)
-      }
+      // if (journalExists) {
+      //   await this.migrate(pathToDbDir, dbName,)
+      // }
 
-      if (!journalExists) {
-        throw new Error('Failed to migrate database')
-      }
+      // if (!journalExists) {
+      //   throw new Error('Failed to migrate database')
+      // }
 
 
     }
 
     this.appDb = drizzleDb
+
+    // Old code for migrating the database
     // const createTempTableQuery = await appDb.run(
     //   sql.raw(
     //     `CREATE TEMP TABLE IF NOT EXISTS temp_last_inserted_id (id INTEGER, table TEXT);`,

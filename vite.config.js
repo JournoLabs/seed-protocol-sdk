@@ -33,6 +33,7 @@ export default defineConfig({
         optimizeDeps: {
           exclude: [
             '@sqlite.org/sqlite-wasm',
+            '@seedprotocol/cli',
           ],
         },
         environment: 'jsdom',
@@ -82,7 +83,19 @@ export default defineConfig({
           '__tests__/bin/**',
           '__tests__/scripts/**',
         ],
+        optimizeDeps: {
+          exclude: [
+            '@seedprotocol/cli',
+          ],
+        },
         testTimeout: 30000,
+        pool: 'forks',
+        poolOptions: {
+          forks: {
+            singleFork: true,
+          },
+        },
+        fileParallelism: false,
       },
       {
         name: 'CLI',
@@ -111,7 +124,6 @@ export default defineConfig({
     lib: {
       entry: {
         main: resolve(__dirname, 'src/index.ts'),
-        bin: resolve(__dirname, 'scripts/bin.ts'),
       },
       name: 'Seed Protocol SDK',
     },
@@ -121,7 +133,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'src/index.ts',
-        bin: 'scripts/bin.ts',
       },
       output: [
         {

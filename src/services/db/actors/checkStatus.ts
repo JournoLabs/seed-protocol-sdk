@@ -9,6 +9,7 @@ import {
 import debug from 'debug'
 import { isBrowser } from '@/helpers/environment'
 import { BaseFileManager } from '@/helpers'
+import { BaseDb } from '@/db/Db/BaseDb'
 
 const logger = debug('seedSdk:services:db:actors:checkStatus')
 
@@ -25,7 +26,7 @@ export const checkStatus = fromCallback<
     pathToDir = BROWSER_FS_TOP_DIR
   }
   const pathToDbDir = `${pathToDir}/db`
-  const pathToDb = `${pathToDbDir}/${dbName}.sqlite3`
+  const pathToDb = `${pathToDbDir}/${dbName}.db`
 
   sendBack({
     type: DB_CHECK_STATUS_UPDATE_PATHS,
@@ -36,14 +37,24 @@ export const checkStatus = fromCallback<
 
   const _checkStatus = async (): Promise<void> => {
     logger('[db/actors] _checkStatus pathToDb', pathToDb)
-    const exists = await BaseFileManager.pathExists(pathToDb)
+    let exists = await BaseFileManager.pathExists(pathToDb)
     if (exists) {
       sendBack({
         type: DB_CHECK_STATUS_EXISTS,
       })
       return
     }
-    
+    if (!pathToDir) {
+      throw new Error('pathToDir is required')
+    }
+    await BaseDb.prepareDb(pathToDir)
+    exists = await BaseFileManager.pathExists(pathToDb)
+    if (exists) {
+      sendBack({
+        type: DB_CHECK_STATUS_EXISTS,
+      })
+      return
+    }
     sendBack({ type: DB_CHECK_STATUS_DOES_NOT_EXIST })
   }
 

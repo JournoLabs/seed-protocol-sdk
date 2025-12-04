@@ -170,12 +170,12 @@ describe('Configuration Validation', () => {
         // Should have correct paths in built file
         expect(configContent).toContain('schema: [`${dotSeedDir}/schema/*Schema.ts`]')
         expect(configContent).toContain('out: `${dotSeedDir}/db`')
-        expect(configContent).toContain('url: `${dotSeedDir}/db/app_db.sqlite3`')
+        expect(configContent).toContain('url: `${dotSeedDir}/db/seed.db`')
         
         // Should not have incorrect paths
         expect(configContent).not.toContain('schema: [`${dotSeedDir}/app/schema/*Schema.ts`]')
         expect(configContent).not.toContain('out: `${dotSeedDir}/app/db`')
-        expect(configContent).not.toContain('url: `${dotSeedDir}/app/db/app_db.sqlite3`')
+        expect(configContent).not.toContain('url: `${dotSeedDir}/app/db/seed.db`')
       }
     })
   })

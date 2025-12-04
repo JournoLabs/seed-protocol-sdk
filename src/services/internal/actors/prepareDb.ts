@@ -16,6 +16,13 @@ export const prepareDb = fromCallback<
   }
 
   const _prepareDb = async (): Promise<void> => {
+    if (
+      !BaseDb.PlatformClass || 
+      !BaseDb.PlatformClass.prepareDb ||
+      typeof BaseDb.PlatformClass.prepareDb !== 'function'
+    ) {
+      throw new Error('prepareDb is not a method on BaseDb')
+    }
 
     const appDb = await BaseDb.prepareDb(filesDir)
     if (appDb) {

@@ -33,7 +33,6 @@ export const initialize = fromCallback<
 
   const _initInternal = async (): Promise<void> => {
     logger('[global/actors] [initialize] Sending init to internal service')
-    console.log('[global/actors] [initialize] Sending init to internal service')
     internalService.send({
       type: 'init',
       endpoints,
@@ -46,29 +45,24 @@ export const initialize = fromCallback<
       const snapshot = internalService.getSnapshot()
       const currentState = 'value' in snapshot ? snapshot.value : snapshot.status
       logger('[global/actors] [initialize] Internal service state:', currentState)
-      console.log('[global/actors] [initialize] Internal service state:', currentState)
     }, 1000)
     
     try {
       await waitFor(internalService, (snapshot) => {
         const state = 'value' in snapshot ? snapshot.value : snapshot.status
         logger('[global/actors] [initialize] Waiting for ready, current state:', state)
-        console.log('[global/actors] [initialize] Waiting for ready, current state:', state)
         return state === 'ready'
       }, { timeout: 30000 }) // 30 second timeout
       clearInterval(stateCheckInterval)
       logger('[sdk] [internal] Internal service ready')
-      console.log('[sdk] [internal] Internal service ready')
     } catch (error: any) {
       clearInterval(stateCheckInterval)
       const snapshot = internalService.getSnapshot()
       const finalState = 'value' in snapshot ? snapshot.value : snapshot.status
       logger('[global/actors] [initialize] Timeout waiting for internal service ready. Final state:', finalState)
-      console.error('[global/actors] [initialize] Timeout waiting for internal service ready. Final state:', finalState)
       // In test environments, continue anyway
       if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
         logger('[global/actors] [initialize] Continuing despite timeout in test environment')
-        console.log('[global/actors] [initialize] Continuing despite timeout in test environment')
       } else {
         throw error
       }
@@ -84,28 +78,28 @@ export const initialize = fromCallback<
         .from(appState)
         .where(like(appState.key, 'snapshot__%'))
 
-    const payloadObj: {
-      create: Record<string, any>,
-      restore: Record<string, any>,
-    } = {
-      create: {},
-      restore: {},
-    }
-
-    const modelNamesRestored: string[] = []
-
-    if (rows && rows.length > 0) {
-      for (const row of rows) {
-        const modelName = row.key.replace('snapshot__', '')
-        payloadObj.restore[modelName] = JSON.parse(row.value)
-        modelNamesRestored.push(modelName)
+      const payloadObj: {
+        create: Record<string, any>,
+        restore: Record<string, any>,
+      } = {
+        create: {},
+        restore: {},
       }
-    }
-    for (const [modelName, ModelClass] of Object.entries(models)) {
-      if (!modelNamesRestored.includes(modelName)) {
-        payloadObj.create[modelName] = ModelClass
+
+      const modelNamesRestored: string[] = []
+
+      if (rows && rows.length > 0) {
+        for (const row of rows) {
+          const modelName = row.key.replace('snapshot__', '')
+          payloadObj.restore[modelName] = JSON.parse(row.value)
+          modelNamesRestored.push(modelName)
+        }
       }
-    }
+      for (const [modelName, ModelClass] of Object.entries(models)) {
+        if (!modelNamesRestored.includes(modelName)) {
+          payloadObj.create[modelName] = ModelClass
+        }
+      }
       sendBack({
         type: GLOBAL_INITIALIZING_CREATE_ALL_ITEMS_SERVICES,
         ...payloadObj,
@@ -138,16 +132,12 @@ export const initialize = fromCallback<
   // Use async/await for better error handling
   ;(async () => {
     try {
-      await _initInternal()
-      console.log('[global/actors] sending all items services')
+      // await _initInternal()
       await _initAllItemsServices()
-      console.log('[global/actors] sending eas')
       await _initEas()
       
       logger('[global/actors] Internal initialized')
-      console.log('[global/actors] Internal initialized')
       sendBack({ type: GLOBAL_INITIALIZING_INTERNAL_SERVICE_READY })
-      console.log('[global/actors] sending config')
       sendBack({ type: GLOBAL_INITIALIZING_SEND_CONFIG, environment })
     } catch (error: any) {
       // Handle errors gracefully - always send events to allow state machine to progress

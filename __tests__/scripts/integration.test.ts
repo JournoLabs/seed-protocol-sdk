@@ -134,7 +134,7 @@ describe('Integration Tests', () => {
       try {
         execSync('npx seed init', { stdio: 'pipe' })
         
-        const dbConfigPath = path.join(testProjectDir, '.seed', 'db', 'app_db.sqlite3')
+        const dbConfigPath = path.join(testProjectDir, '.seed', 'db', 'seed.db')
         
         // Database file should be created
         expect(fs.existsSync(dbConfigPath)).toBe(true)

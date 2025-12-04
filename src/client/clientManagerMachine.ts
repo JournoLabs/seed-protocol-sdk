@@ -1,43 +1,118 @@
-import { ClientManagerContext } from "@/types"
+import { ClientManagerContext, SeedConstructorOptions } from "@/types"
 import { assign, setup } from "xstate"
-import { initialize } from "./actors/initialize"
-import { setAddresses } from "./actions/setAddresses"
+import { platformClassesInit } from "./actors/platformClassesInit"
+import { saveAppState } from "./actors/saveAppState"
+import { fileSystemInit } from "./actors/fileSystemInit"
+import { dbInit } from "./actors/dbInit"
+import { ClientManagerEvents, ClientManagerState } from "@/services/internal/constants"
+import { MachineIds } from "@/services/internal/constants"
+import { globalServiceInit } from "./actors/globalServiceInit"
+
+const {
+  UNINITIALIZED,
+  PLATFORM_CLASSES_INIT,
+  FILE_SYSTEM_INIT,
+  DB_INIT,
+  GLOBAL_SERVICE_INIT,
+  IDLE,
+} = ClientManagerState
+
+const {
+  UPDATE_CONTEXT,
+  GLOBAL_SERVICE_READY,
+  PLATFORM_CLASSES_READY,
+  FILE_SYSTEM_READY,
+  DB_READY,
+} = ClientManagerEvents
+
+type InitEvent = {
+  type: 'init'
+  options: SeedConstructorOptions
+}
 
 export const clientManagerMachine = setup({
   types: {
     context: {} as ClientManagerContext,
     input: {} as ClientManagerContext | undefined,
   },
-  actions: {
-    setAddresses,
-  },
   actors: {
-    initialize,
+    platformClassesInit,
+    fileSystemInit,
+    dbInit,
+    globalServiceInit,
+    saveAppState,
   },
 }).createMachine({
-  id: 'clientManager',
-  initial: 'uninitialized',
+  id: MachineIds.CLIENT_MANAGER,
+  initial: UNINITIALIZED,
   context: ({ input }) => input as ClientManagerContext,
+  on: {
+    [UPDATE_CONTEXT]: {
+      actions: assign(({ event, context }) => {
+        console.log('updateContext event:', event)
+        return {
+          ...context,
+          ...event.context,
+        }
+      }),
+    },
+  },
   states: {
-    uninitialized: {
+    [UNINITIALIZED]: {
       on: {
         init: {
-          target: 'initializing',
+          target: PLATFORM_CLASSES_INIT,
         },
       },
     },
-    initializing: {
+    [PLATFORM_CLASSES_INIT]: {
       on: {
-        initialized: {
-          target: 'idle',
+        platformClassesReady: {
+          target: FILE_SYSTEM_INIT,
         },
       },
       invoke: {
-        src: 'initialize',
-        input: ({ event, context }) => ({ event, context }),
+        src: 'platformClassesInit',
+        input: ({ event, context }) => ({ 
+          event: event as InitEvent, 
+          context 
+        }),
       },
     },
-    idle: {
+    [FILE_SYSTEM_INIT]: {
+      on: {
+        [FILE_SYSTEM_READY]: {
+          target: DB_INIT,
+        },
+      },
+      invoke: {
+        src: 'fileSystemInit',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    [DB_INIT]: {
+      on: {
+        [DB_READY]: {
+          target: GLOBAL_SERVICE_INIT,
+        },
+      },
+      invoke: {
+        src: 'dbInit',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    globalServiceInit: {
+      on: {
+        [GLOBAL_SERVICE_READY]: {
+          target: IDLE,
+        },
+      },
+      invoke: {
+        src: 'globalServiceInit',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    [IDLE]: {
       entry: assign({
         isInitialized: true,
       }),
@@ -52,7 +127,19 @@ export const clientManagerMachine = setup({
         },
         setAddresses: {
           actions: [
-            {type: 'setAddresses'}
+            assign(({ event, spawn }) => {
+              const { addresses } = event
+              spawn('saveAppState', {
+                input: {
+                  key: 'addresses',
+                  value: addresses,
+                },
+              })
+              return {
+                addresses,
+                isSaving: true,
+              }
+            })
           ],
         },
       },

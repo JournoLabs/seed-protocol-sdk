@@ -319,7 +319,7 @@ describe('bin.ts', () => {
       expect(output).toContain('[Seed Protocol] Successfully seeded database')
 
       // Verify the seeded data
-      const dbPath = './__tests__/__mocks__/node/project/.seed/db/app_db.sqlite3'
+      const dbPath = './__tests__/__mocks__/node/project/.seed/db/seed.db'
       const sqlite = new Database(dbPath)
       const db = drizzle(sqlite, { schema })
 

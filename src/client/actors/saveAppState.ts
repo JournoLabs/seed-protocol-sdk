@@ -1,15 +1,18 @@
-import { FromCallbackInput } from "@/types";
 import { fromCallback } from "xstate";
-import { ClientManagerContext } from "@/types";
 import { EventObject } from "xstate";
 import debug from "debug";
 import { appState } from "@/seedSchema";
 
 const logger = debug('seedSdk:client:writeToDb')
 
+type SaveAppStateInput = {
+  key: string
+  value: any
+}
+
 export const saveAppState = fromCallback<
 EventObject, 
-FromCallbackInput<ClientManagerContext>
+SaveAppStateInput
 >(
   ({sendBack, input: {key, value}}) => {
 

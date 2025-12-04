@@ -4,6 +4,19 @@
   "description": "CLI tool for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "cli": "./dist/bin.js",
     "seed": "./dist/bin.js",
@@ -19,7 +32,7 @@
   },
   "scripts": {
     "build": "tsc && rollup -c",
-    "prepublishOnly": "npm run build && npm pkg set dependencies.@seedprotocol/sdk=^0.3.32"
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")"
   },
   "dependencies": {
     "@seedprotocol/sdk": "file:../../",

@@ -1,6 +1,7 @@
 import { Endpoints, Environment, ModelClassType } from './index'
 import { ActorRefFrom } from 'xstate'
 import { PublishRequestData } from './seedProtocol'
+import { Image } from '@/schema/image/model'
 
 export type DbServiceContext = {
   dbName: string
@@ -63,4 +64,9 @@ export type ClientManagerContext = {
   isInitialized: boolean
   addressesSet: boolean
   isSaving: boolean
+  endpoints?: Endpoints
+  addresses?: string[]
+  models?: { [key: string]: ModelClassType | typeof Image }
+  arweaveDomain?: string
+  filesDir?: string
 }

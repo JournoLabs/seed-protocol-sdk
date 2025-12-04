@@ -88,6 +88,10 @@ const config = [
       'react',
       'react-dom',
       'typia',
+      'child_process',
+      'node:child_process',
+      'url',
+      'node:url',
     ],
     plugins: [
       typescript({

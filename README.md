@@ -272,7 +272,7 @@ flowchart TD
     N{SDK}
     Q[App Code]
     D[(sdk_config_db)]
-    E[(app_db)]
+    E[(seed)]
     L[(seeds_db)]
     G[Schema/Migration files
     browser/db/seedSchema]

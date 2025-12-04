@@ -43,15 +43,12 @@ export const connectToDb = fromCallback<
       }
 
       logger('[db/actors] Connecting to database')
-      console.log('[db/actors] Connecting to database')
       const dbId = await BaseDb.connectToDb(pathToDir,)
       if (dbId) {
         logger('[db/actors] Database connected successfully, dbId:', dbId)
-        console.log('[db/actors] Database connected successfully, dbId:', dbId)
         sendBack({ type: DB_CREATING_SUCCESS, dbId, })
       } else {
         logger('[db/actors] Warning: connectToDb returned no dbId')
-        console.warn('[db/actors] Warning: connectToDb returned no dbId')
         // In test environments, still send success to allow state machine to progress
         if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
           logger('[db/actors] Sending success despite no dbId in test environment')
@@ -60,11 +57,9 @@ export const connectToDb = fromCallback<
       }
     } catch (error: any) {
       logger('[db/actors] Error connecting to database:', error)
-      console.error('[db/actors] Error connecting to database:', error)
       // In test environments, still send success to allow state machine to progress
       if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
         logger('[db/actors] Sending success despite error in test environment')
-        console.log('[db/actors] Sending success despite error in test environment')
         sendBack({ type: DB_CREATING_SUCCESS, dbId: 'test-db-id', })
       } else {
         throw error
@@ -81,11 +76,9 @@ export const connectToDb = fromCallback<
     })
     .catch((error: any) => {
       logger('[db/actors] Error in connectToDb promise chain:', error)
-      console.error('[db/actors] Error in connectToDb promise chain:', error)
       // In test environments, still send success to allow state machine to progress
       if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
         logger('[db/actors] Sending success despite error in promise chain (test environment)')
-        console.log('[db/actors] Sending success despite error in promise chain (test environment)')
         sendBack({ type: DB_CREATING_SUCCESS, dbId: 'test-db-id', })
       } else {
         throw error

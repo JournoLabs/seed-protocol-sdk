@@ -52,10 +52,10 @@ export * from '../types'
 export { PathResolver } from './helpers/PathResolver'
 export { BasePathResolver } from '../helpers/PathResolver/BasePathResolver'
 export { getTsImport } from './helpers'
-export { commandExists } from '../helpers/scripts'
+export { commandExists, runSeedInit, findSeedBinary } from './helpers/scripts'
 export { INIT_SCRIPT_SUCCESS_MESSAGE, SCHEMA_TS } from '../helpers/constants'
-// Note: Codegen functions (createDrizzleSchemaFilesFromConfig, generateModelCode) are not exported
-// to avoid bundling nunjucks/fsevents. Import directly from './codegen/drizzle' if needed for CLI scripts.
+// Codegen functions exported for CLI usage (Node.js only, so bundling concerns don't apply)
+export { createDrizzleSchemaFilesFromConfig, generateModelCode } from './codegen/drizzle'
 
 // Side effect imports for CLI
 import './helpers/EasClient'

@@ -20,6 +20,10 @@ export const addModelsToDb = fromCallback<
   const _addModelsToDb = async () => {
     const appDb = BaseDb.getAppDb()
 
+    if (!appDb) {
+      throw new Error('Database not ready')
+    }
+
     if (!models) {
       return
     }

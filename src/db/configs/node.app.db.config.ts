@@ -17,7 +17,7 @@ export const getDrizzleConfig = (customDotSeedDir?: string) => {
     dialect: 'sqlite',
     out: `${seedDir}/db`,
     dbCredentials: {
-      url: `${seedDir}/db/app_db.sqlite3`,
+      url: `${seedDir}/db/seed.db`,
     },
   })
 }

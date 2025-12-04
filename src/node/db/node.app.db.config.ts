@@ -17,6 +17,6 @@ export default defineConfig({
   dialect: 'sqlite',
   out: `${dotSeedDir}/db`,
   dbCredentials: {
-    url: `${dotSeedDir}/db/app_db.sqlite3`,
+    url: `${dotSeedDir}/db/seed.db`,
   },
 }) as DrizzleConfig

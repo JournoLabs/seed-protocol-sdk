@@ -1,16 +1,13 @@
-import { ClientManagerContext, FromCallbackInput, ModelClassType } from '@/types'
+import { ClientManagerContext, FromCallbackInput, ModelClassType, SeedConstructorOptions } from '@/types'
 import { fromCallback, EventObject, waitFor }                      from "xstate";
 import debug                                       from 'debug'
-import { areFsListenersReady } from "@/events/files";
 import { setModel } from "@/stores/modelClass";
 import { setArweaveDomain } from "@/helpers/ArweaveClient";
-import { eventEmitter } from "@/eventBus";
-import { setupFsListeners } from "@/events/files";
 import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";
 import { setupServiceHandlers } from "@/events/services";
-import { getGlobalService, } from "@/services/global/globalMachine";
-import { GlobalState } from "@/services/internal/constants";
+// import { getGlobalService, } from "@/services/global/globalMachine";
+// import { GlobalState } from "@/services/internal/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseQueryClient } from "@/helpers";
@@ -21,20 +18,30 @@ import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
-export const initialize = fromCallback<
+type InitEvent = {
+  type: 'init'
+  options: SeedConstructorOptions
+}
+
+export const platformClassesInit = fromCallback<
 EventObject, 
-FromCallbackInput<ClientManagerContext, EventObject>
+FromCallbackInput<ClientManagerContext, InitEvent>
 >(({sendBack, input: {context, event}}) => {
   logger('initialize from ClientManager')
   const { isInitialized } = context
-  const { options, } = event
+  
+  if (!event || !('options' in event)) {
+    throw new Error('Initialize event must include options')
+  }
+  
+  const { options } = event
 
   if (isInitialized) {
     sendBack({type: 'initialized'})
     return
   }
 
-  const _initialize = async () => {
+  const _platformClassesInit = async () => {
     const { config, addresses } = options
 
     const BaseDb = (await import('../../db/Db/BaseDb')).BaseDb
@@ -55,9 +62,7 @@ FromCallbackInput<ClientManagerContext, EventObject>
       Item = (await import('../../browser/Item/Item')).Item
       ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../browser/helpers/PathResolver')).PathResolver
-    }
-    
-    if (isNode()) {
+    } else if (isNode()) {
       console.log('isNode')
       FileManager = (await import('../../node/helpers/FileManager')).FileManager
       Db = (await import('../../node/db/Db')).Db
@@ -66,78 +71,82 @@ FromCallbackInput<ClientManagerContext, EventObject>
       Item = (await import('../../node/Item/Item')).Item
       ItemProperty = (await import('../../node/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
+    } else {
+      throw new Error(`Unable to determine environment. isBrowser()=${isBrowser()}, isNode()=${isNode()}. Platform-specific implementations could not be loaded.`)
     }
     
-    BaseFileManager.setPlatformClass(FileManager!)
+    if (!FileManager) {
+      throw new Error('FileManager is undefined. Platform-specific FileManager could not be loaded.')
+    }
+    
+    BaseFileManager.setPlatformClass(FileManager)
     BaseDb.setPlatformClass(Db!)
     BaseQueryClient.setPlatformClass(QueryClient!)
     BaseArweaveClient.setPlatformClass(ArweaveClient!)
     BaseItem.setPlatformClass(Item!)
     BaseItemProperty.setPlatformClass(ItemProperty!)
     BasePathResolver.setPlatformClass(PathResolver!)
+
+
     
     const { models, endpoints, arweaveDomain, } = config
+
+    sendBack({ type: 'updateContext', context: { 
+      models, 
+      endpoints, 
+      arweaveDomain, 
+      addresses, 
+      filesDir: endpoints?.files,
+    } })
     
-    const {files} = endpoints
-
-    await BaseDb.connectToDb(files,)
-
     if (arweaveDomain) {
       setArweaveDomain(arweaveDomain)
     }
 
     for (const [key, value] of Object.entries(models)) {
-      setModel(key, value)
+      setModel(key, value as ModelClassType)
     }
-    setupFsListeners()
     setupAllItemsEventHandlers()
     setupServicesEventHandlers()
     setupServiceHandlers()
-    if (areFsListenersReady()) {
-      console.log('areFsListenersReady true')
-      eventEmitter.emit('fs.init')
-    }
-    if (!areFsListenersReady()) {
-      console.error('fs listeners not ready during init')
-    }
 
-    const {Image} = await import('@/schema/image/model')
-    models['Image'] = Image
+    // const {Image} = await import('@/schema/image/model')
+    // models['Image'] = Image
 
-    const globalService = getGlobalService()
+    // const globalService = getGlobalService()
 
-    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
 
-    globalService.send({
-      type: 'init',
-      endpoints,
-      models,
-      addresses,
-      arweaveDomain,
-      filesDir: files,
-    })
+    // globalService.send({
+    //   type: 'init',
+    //   endpoints,
+    //   models,
+    //   addresses,
+    //   arweaveDomain,
+    //   filesDir: files,
+    // })
 
-    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
 
-    const { models: internalModels } = await import('@/db/configs/seed.schema.config')
-    for (const [key, value] of Object.entries(internalModels)) {
-      setModel(key, value)
-    }
+    // const { models: internalModels } = await import('@/db/configs/seed.schema.config')
+    // for (const [key, value] of Object.entries(internalModels)) {
+    //   setModel(key, value as unknown as ModelClassType)
+    // }
 
-    setModel('Image', Image)
-    console.log('globalService snapshot.value:', globalService.getSnapshot().value)
-    console.log('waitFor globalService')
-    globalService.subscribe((snapshot) => {
-      console.log('globalService snapshot.value:', snapshot.value)
-    })
-    await waitFor(globalService, (snapshot) => {
-      logger('snapshot.value', snapshot.value)
-      return snapshot.value === GlobalState.INITIALIZED
-    })
-    logger('globalService initialized')
+    // setModel('Image', Image as unknown as ModelClassType)
+    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
+    // console.log('waitFor globalService')
+    // globalService.subscribe((snapshot) => {
+    //   console.log('globalService snapshot.value:', snapshot.value)
+    // })
+    // await waitFor(globalService, (snapshot) => {
+    //   logger('snapshot.value', snapshot.value)
+    //   return snapshot.value === GlobalState.INITIALIZED
+    // })
+    // logger('globalService initialized')
   }
 
-  _initialize().then(() => {
-    sendBack({type: 'initialized'})
+  _platformClassesInit().then(() => {
+    sendBack({type: 'platformClassesReady'})
   })
 })

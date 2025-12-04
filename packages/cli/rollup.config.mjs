@@ -27,6 +27,7 @@ const postProcess = () => {
 
 export default {
   input: {
+    index: 'src/index.ts',
     bin: 'src/bin.ts',
     addModel: 'src/addModel.ts',
   },

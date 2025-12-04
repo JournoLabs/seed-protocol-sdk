@@ -18,7 +18,7 @@ describe('Drizzle ORM with better-sqlite3', () => {
     //
     // await fsAsync.mkdir(dbDir, { recursive: true })
     //
-    // const dbPath = path.join(dbDir, 'app_db.sqlite3')
+    // const dbPath = path.join(dbDir, 'seed.db')
     //
     // const client = new Database(dbPath)
     // db = drizzle(client)

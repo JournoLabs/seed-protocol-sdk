@@ -97,10 +97,15 @@ export const runInit = async ({
   args: string[]
 }): Promise<string> => {
   try {
-    let binPath = path.join(process.cwd(), 'scripts', 'bin.ts')
+    // Get the path to the CLI bin file
+    let binPath = path.join(process.cwd(), 'packages', 'cli', 'src', 'bin.ts')
 
-    if (binPath.includes('__tests__')) {
-      binPath = path.join(process.cwd(), '..', '..', '..', '..', 'scripts', 'bin.ts')
+    // If we're in __tests__ directory, adjust the path
+    if (process.cwd().includes('__tests__')) {
+      binPath = path.join(process.cwd(), '..', 'packages', 'cli', 'src', 'bin.ts')
+    } else if (!fs.existsSync(binPath)) {
+      // Try alternative path if the above doesn't work
+      binPath = path.resolve(process.cwd(), 'packages', 'cli', 'src', 'bin.ts')
     }
 
     // Ensure the target directory exists
@@ -144,7 +149,17 @@ export const runSeed = async (seedDataPath: string): Promise<string> => {
     process.env.IS_SEED_DEV = 'true'
     process.env.NODE_ENV = 'test'
 
-    const binPath = path.join(process.cwd(), 'scripts', 'bin.ts')
+    // Get the path to the CLI bin file
+    let binPath = path.join(process.cwd(), 'packages', 'cli', 'src', 'bin.ts')
+
+    // If we're in __tests__ directory, adjust the path
+    if (process.cwd().includes('__tests__')) {
+      binPath = path.join(process.cwd(), '..', 'packages', 'cli', 'src', 'bin.ts')
+    } else if (!fs.existsSync(binPath)) {
+      // Try alternative path if the above doesn't work
+      binPath = path.resolve(process.cwd(), 'packages', 'cli', 'src', 'bin.ts')
+    }
+
     const command = `npx tsx ${binPath} seed ${seedDataPath}`
 
     const output = execSync(command, {
