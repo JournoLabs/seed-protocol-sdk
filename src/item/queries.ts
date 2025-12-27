@@ -27,8 +27,8 @@ export const GET_SCHEMA_BY_NAME = graphql(/* GraphQL */ `
 `) as TypedDocumentNode<{ schemas: Schema[] }>
 
 export const GET_SEEDS = graphql(/* GraphQL */ `
-  query GetSeeds($where: AttestationWhereInput!) {
-    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {
+  query GetSeeds($where: AttestationWhereInput!, $take: Int) {
+    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take) {
       id
       decodedDataJson
       attester

@@ -1,9 +1,12 @@
 import { integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 import { InferInsertModel, InferSelectModel } from 'drizzle-orm'
+
+
 export const models = sqliteTable('models', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
+  schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
 })
 
 export const modelsRelations = relations(models, ({ many }) => ({
@@ -19,13 +22,12 @@ export const properties = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     dataType: text('data_type').notNull(),
-    readEndpoint: text('read_endpoint'),
-    updateEndpoint: text('update_endpoint'),
     modelId: integer('model_id')
       .notNull()
       .references(() => models.id),
     refModelId: integer('ref_model_id').references(() => models.id),
     refValueType: text('ref_value_type'),
+    schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
   },
   (table) => {
     return {

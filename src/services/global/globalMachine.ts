@@ -26,6 +26,11 @@ const {
   ADDING_MODELS_TO_DB,
 } = GlobalState
 
+const modelsWithoutEasSchemas = [
+  'Seed',
+  'Metadata',
+]
+
 const { inspect } = createBrowserInspector({
   autoStart: false,
 })
@@ -104,7 +109,9 @@ const globalMachine = setup({
               for (const [modelName, ModelClass] of Object.entries(
                 event.create,
               )) {
-                console.log('spawning itemMachineAll for modelName:', modelName)
+                if (modelsWithoutEasSchemas.includes(modelName)) {
+                  continue
+                }
                 const typedModelClass = ModelClass as ModelClassType
                 const service = spawn(itemMachineAll, {
                   systemId: modelName,
@@ -116,7 +123,6 @@ const globalMachine = setup({
                   },
                 })
                 allItemsServices[`${modelName}Service`] = service
-                console.log('allItemsServices:', allItemsServices)
               }
 
               for (const [modelName, snapshot] of Object.entries(

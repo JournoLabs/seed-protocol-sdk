@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1765976502903,
+      "tag": "0000_married_malice",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1766010851770,
+      "tag": "0001_sweet_bruce_banner",
+      "breakpoints": true
+    }
+  ]
+}

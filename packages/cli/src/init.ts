@@ -93,7 +93,6 @@ export const runInit = async (schemaFileDir?: string, appFilesDirPath?: string) 
     dotSeedDir,
     appSchemaDir,
     appMetaDir,
-    drizzleDbConfigPath,
     drizzleKitPath,
     sdkRootDir,
   } = pathResolver.getAppPaths(schemaFileDir)
@@ -206,7 +205,7 @@ export const runInit = async (schemaFileDir?: string, appFilesDirPath?: string) 
     rimrafSync(`${outputDirPath}/**/index.ts`, { glob: true })
   }
 
-  const updateSchema = async (pathToConfig: string, pathToMeta: string) => {
+  const updateSchema = async (pathToMeta: string) => {
     try {
       // Create a project-specific Drizzle Kit configuration
       const projectConfigPath = path.join(dotSeedDir, 'drizzle.config.ts')
@@ -247,7 +246,7 @@ export default defineConfig({
 
     await createDrizzleSchemaFilesFromConfig(configFilePath, appSchemaDir)
     ensureIndexExports(appSchemaDir!)
-    await updateSchema(drizzleDbConfigPath, appMetaDir!)
+    await updateSchema(appMetaDir!)
     const seedDataFilePath = path.join(__dirname, 'seedData.json')
     await seedDatabase(seedDataFilePath, dotSeedDir)
   }

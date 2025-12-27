@@ -196,17 +196,8 @@ describe('Integration Tests', () => {
       process.env.NODE_ENV = 'production'
       
       try {
-        // Test path resolution logic
-        const sdkRootDir = '/tmp/node_modules/@seedprotocol/sdk/dist'
-        const configPath = 'db/configs/node.app.db.config.ts'
-        const fullPath = path.join(sdkRootDir, configPath)
-        
-        // Should resolve to correct production path
-        expect(fullPath).toBe('/tmp/node_modules/@seedprotocol/sdk/dist/db/configs/node.app.db.config.ts')
-        
-        // Should not resolve to old incorrect path
-        expect(fullPath).not.toBe('/tmp/node_modules/@seedprotocol/sdk/dist/node.app.db.config.ts')
-        
+        // Config files are no longer used - configuration is passed manually
+        // This test is kept for reference but config path resolution is no longer needed
       } finally {
         process.env.NODE_ENV = originalNodeEnv
       }
@@ -251,25 +242,8 @@ describe('Integration Tests', () => {
       }
     }, 60000)
 
-    it('should copy configuration files to correct locations', () => {
-      try {
-        execSync('npm run build', { stdio: 'pipe' })
-        
-        // Check that config files are in correct locations
-        const expectedPaths = [
-          'dist/db/configs/node.app.db.config.ts',
-          'dist/shared/configs/browser.app.db.config.ts'
-        ]
-        
-        for (const expectedPath of expectedPaths) {
-          const fullPath = path.join(process.cwd(), expectedPath)
-          expect(fs.existsSync(fullPath)).toBe(true)
-        }
-        
-      } catch (error) {
-        console.error('Build validation failed:', error)
-        throw error
-      }
-    }, 60000)
+    // Config files are no longer part of the build process
+    // Configuration is now passed manually on startup via ClientManager.init()
+    // No validation needed as config files are not built or copied
   })
 }) 

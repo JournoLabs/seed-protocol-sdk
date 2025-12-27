@@ -1,6 +1,7 @@
 export abstract class BaseFileManager {
   private static fileSystemInitialized = false
   private static initializing = false
+  private static workingDir: string | undefined
 
   static PlatformClass: typeof BaseFileManager
 
@@ -14,14 +15,22 @@ export abstract class BaseFileManager {
     this.PlatformClass = platformClass
   }
 
-  static async initializeFileSystem(): Promise<void> {
+  static async initializeFileSystem(workingDir?: string): Promise<void> {
     if (this.initializing || this.fileSystemInitialized) {
       return Promise.resolve()
     }
     this.initializing = true
-    await this.PlatformClass.initializeFileSystem()
+    await this.PlatformClass.initializeFileSystem(workingDir)
     this.fileSystemInitialized = true
     this.initializing = false
+    this.workingDir = workingDir
+  }
+
+  static getWorkingDir(): string {
+    if (!this.workingDir) {
+      throw new Error('Working directory is not set')
+    }
+    return this.workingDir
   }
 
   static getContentUrlFromPath( path: string ): Promise<string | undefined> {
@@ -56,12 +65,24 @@ export abstract class BaseFileManager {
     return this.PlatformClass.waitForFile(filePath)
   }
 
+  static async waitForFileWithContent(filePath: string, interval?: number, timeout?: number): Promise<boolean> {
+    return this.PlatformClass.waitForFileWithContent(filePath, interval, timeout)
+  }
+
   static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
     return this.PlatformClass.saveFile(filePath, content)
   }
 
+  static saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
+    return this.PlatformClass.saveFileSync(filePath, content)
+  }
+
   static async readFile(filePath: string): Promise<File> {
     return this.PlatformClass.readFile(filePath)
+  }
+
+  static readFileSync(filePath: string): File {
+    return this.PlatformClass.readFileSync(filePath)
   }
 
   static async readFileAsBuffer(filePath: string): Promise<Buffer | Blob> {
@@ -92,6 +113,20 @@ export abstract class BaseFileManager {
       throw new Error('Infinite recursion detected in getFs')
     }
     return this.PlatformClass.getFs()
+  }
+
+  static getFsSync(): any {
+    if (!this.PlatformClass) {
+      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+    }
+    if (this.PlatformClass === BaseFileManager) {
+      throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
+    }
+    // Check if getFsSync method exists on platform class
+    if (typeof this.PlatformClass.getFsSync !== 'function') {
+      throw new Error('PlatformClass does not implement getFsSync()')
+    }
+    return this.PlatformClass.getFsSync()
   }
 
   static getPathModule(): any {

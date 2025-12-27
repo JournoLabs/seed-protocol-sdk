@@ -147,15 +147,10 @@ export default defineConfig({
           targets: [
             { src: 'src/**/*.ts', dest: 'dist/src' },
             { src: 'src/db/seedSchema', dest: 'dist/db' },
-            { src: 'src/db/configs', dest: 'dist/shared' },
             { src: 'src/seedSchema', dest: 'dist' },
             {
               src: 'src/node/codegen/templates/**/*',
               dest: 'dist/node/codegen/templates',
-            },
-            {
-              src: 'src/db/configs/node.app.db.config.ts',
-              dest: 'dist/db/configs',
             },
           ],
           hook: 'writeBundle',
@@ -224,10 +219,6 @@ export default defineConfig({
 //     //       {
 //     //         src: 'src/node/codegen/templates/**/*',
 //     //         dest: 'dist/node/codegen/templates',
-//     //       },
-//     //       {
-//     //         src: 'src/node/db/node.app.db.config.ts',
-//     //         dest: 'dist/node/db',
 //     //       },
 //     //     ],
 //     //   }),

@@ -283,7 +283,6 @@ node/db/sdkSchema]
 
 I[browser.seed.db.config.mjs]
 J[sdk.db.config.mjs]
-K[browser.app.db.config.mjs]
 
 O[files.json
 seed/endpoint/list]

@@ -52,7 +52,11 @@ export const processItems = fromCallback<
 
     _processItems().then(() => {
       sendBack({ type: 'processItemsSuccess' })
-      const modelName = ModelClass.originalConstructor.name
+      const modelName = ModelClass?.originalConstructor?.name || context.modelName
+      if (!modelName) {
+        console.error('[processItems] No modelName available')
+        return
+      }
       eventEmitter.emit('item.requestAll', {
         modelName,
       })

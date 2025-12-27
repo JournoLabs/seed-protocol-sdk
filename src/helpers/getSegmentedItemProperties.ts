@@ -1,5 +1,6 @@
 import { UploadProperty } from '@/db/read/getPublishUploads'
 import { IItem } from '@/interfaces'
+import { ModelPropertyDataTypes } from '@/schema'
 
 export const getSegmentedItemProperties = (item: IItem<any>) => {
   const itemBasicProperties = []
@@ -23,17 +24,17 @@ export const getSegmentedItemProperties = (item: IItem<any>) => {
     const isStorageTransaction =
       itemProperty.propertyName === 'storageTransactionId'
 
-    if (itemProperty.propertyDef.dataType === 'Image') {
+    if (itemProperty.propertyDef.dataType === ModelPropertyDataTypes.Image) {
       itemImageProperties.push(itemProperty)
       continue
     }
 
-    if (itemProperty.propertyDef.dataType === 'Relation') {
+    if (itemProperty.propertyDef.dataType === ModelPropertyDataTypes.Relation) {
       itemRelationProperties.push(itemProperty)
       continue
     }
 
-    if (itemProperty.propertyDef.dataType === 'List') {
+    if (itemProperty.propertyDef.dataType === ModelPropertyDataTypes.List) {
       itemListProperties.push(itemProperty)
       continue
     }

@@ -12,42 +12,25 @@ import * as schema from '@/seedSchema'
 
 const logger = debug('seedSdk:node:db:Db')
 
-const getConfig = async (dotSeedDir: string) => {
-  // Use PathResolver to get the correct path to the drizzle config file
-  const { BasePathResolver } = await import('@/helpers/PathResolver/BasePathResolver')
-  const pathResolver = BasePathResolver.getInstance()
-  const { drizzleDbConfigPath } = pathResolver.getAppPaths()
-  
-  try {
-    // Dynamically import the config file
-    // In production, it will be at dist/db/configs/node.app.db.config.js
-    // In dev/test, it will be at src/db/configs/node.app.db.config.ts
-    const configModule = await import(drizzleDbConfigPath)
-    
-    // If the module exports getDrizzleConfig function, use it with the dotSeedDir
-    if (configModule.getDrizzleConfig && typeof configModule.getDrizzleConfig === 'function') {
-      return configModule.getDrizzleConfig(dotSeedDir)
-    }
-    
-    // Otherwise, use the default export
-    if (configModule.default) {
-      return configModule.default
-    }
-  } catch (error: any) {
-    // If import fails (e.g., in production with .js extension or path issues), fall back to creating config inline
-    logger('[node/db/Db] Could not import drizzle config file, creating inline config:', error.message)
-  }
-  
-  // Fallback: create config inline using PathResolver for schema directory
+export interface DbConfig {
+  dbUrl?: string
+  schemaDir?: string
+  outDir?: string
+}
+
+const getConfig = async (dotSeedDir: string, config?: DbConfig) => {
+  // Create config inline - config values can be passed in or use defaults
   const { defineConfig } = await import('drizzle-kit')
-  const appSchemaDir = path.join(dotSeedDir, 'schema')
+  const appSchemaDir = config?.schemaDir || path.join(dotSeedDir, 'schema')
+  const outDir = config?.outDir || `${dotSeedDir}/db`
+  const dbUrl = config?.dbUrl || `${dotSeedDir}/db/seed.db`
 
   const nodeDbConfig = defineConfig({
     schema: appSchemaDir,
     dialect: 'sqlite',
-    out: `${dotSeedDir}/db`,
+    out: outDir,
     dbCredentials: {
-      url: `${dotSeedDir}/db/seed.db`,
+      url: dbUrl,
     }
   }) as DrizzleConfig & { dbCredentials: { url: string } }
 
@@ -69,17 +52,21 @@ class Db extends BaseDb implements IDb {
     return true
   }
 
-  static async prepareDb(filesDir: string) {
-    console.log('prepareDb', filesDir)
-    const nodeDbConfig = await getConfig(filesDir)
+  static async prepareDb(filesDir: string, config?: DbConfig) {
+    const nodeDbConfig = await getConfig(filesDir, config)
     const dbPath = nodeDbConfig.dbCredentials?.url || path.join(filesDir, 'db', 'seed.db')
 
-    const dbDirExists = fs.existsSync(`${filesDir}/db`)
+    // Ensure the database directory exists
+    const dbDir = path.dirname(dbPath)
+    const dbDirExists = fs.existsSync(dbDir)
     if (!dbDirExists) {
-      fs.mkdirSync(`${filesDir}/db`, { recursive: true })
+      fs.mkdirSync(dbDir, { recursive: true })
     }
   
-    const dbUrl = `file:${filesDir}/db/seed.db`
+    // Use the dbUrl from config if provided, otherwise construct from filesDir
+    const dbUrl = config?.dbUrl 
+      ? (config.dbUrl.startsWith('file:') ? config.dbUrl : `file:${path.resolve(config.dbUrl)}`)
+      : `file:${path.resolve(dbPath)}`
     const client = createClient({ url: dbUrl })
   
     const db = drizzle(client, {schema})
@@ -87,10 +74,6 @@ class Db extends BaseDb implements IDb {
     const { apply, hasDataLoss, warnings, statementsToExecute } = await pushSQLiteSchema(schema, db);
     
     // You can inspect what will happen before applying
-    console.log('Statements to execute:', statementsToExecute);
-    console.log('Has data loss:', hasDataLoss);
-    console.log('Warnings:', warnings);
-    
     await apply();
 
     this.db = db

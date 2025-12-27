@@ -31,7 +31,6 @@ export abstract class BasePathResolver {
     appSchemaDir: string
     appDbDir: string
     appMetaDir: string
-    drizzleDbConfigPath: string
     drizzleKitPath: string
     templatePath: string
   }

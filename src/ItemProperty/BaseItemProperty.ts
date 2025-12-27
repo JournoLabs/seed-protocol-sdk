@@ -11,7 +11,9 @@ import debug from 'debug'
 import pluralize from 'pluralize'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { BaseFileManager, getCorrectId } from '@/helpers'
-import { TProperty } from '@/schema'
+// Dynamic import to break circular dependency: schema/index -> ... -> BaseItemProperty -> schema/index
+// Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
+import type { TProperty } from '@/schema'
 import { eventEmitter } from '@/eventBus'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
@@ -97,6 +99,8 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
         serviceInput.propertyRecordSchema = propertyRecordSchema
 
+        // Use string literals to avoid circular dependency in constructor
+        // ModelPropertyDataTypes values are stable string constants
         if (propertyRecordSchema.dataType === 'Relation') {
           this._isRelation = true
         }
@@ -142,6 +146,9 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
           return
         }
 
+        // Use dynamic import to break circular dependency
+        const { ModelPropertyDataTypes } = await import('@/schema')
+
         const { context } = snapshot
         const { propertyRecordSchema } = context
 
@@ -162,11 +169,11 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
 
         const isImage =
           propertyRecordSchema &&
-          propertyRecordSchema.dataType === 'Image'
+          propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
 
         const isFile =
           propertyRecordSchema &&
-          propertyRecordSchema.dataType === 'File'
+          propertyRecordSchema.dataType === ModelPropertyDataTypes.File
 
         const isItemStorage = 
           propertyRecordSchema &&
@@ -397,7 +404,8 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
   }
 
   get localStorageDir(): string | void {
-    if (this.propertyDef && this.propertyDef.localStorageDir) {
+    const propertyDef = this.propertyDef
+    if (propertyDef && propertyDef.localStorageDir) {
       return this.propertyDef.localStorageDir
     }
     if (this._getSnapshot().context.localStorageDir) {
@@ -431,6 +439,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     // logger(
     //   `[XXXXXXXXXX] [value] [get] subjectValue: ${this._subject.value} serviceValue: ${this._service.getSnapshot().context.renderValue}`,
     // )
+    // Use string literal to avoid circular dependency
     if (this._dataType === 'Image') {
       return this._getSnapshot().context.refResolvedValue
     }

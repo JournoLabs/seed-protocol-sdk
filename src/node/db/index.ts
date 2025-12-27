@@ -1,26 +1,25 @@
-export * from '@/db/configs/seed.schema.config'
-export * from '@/db/configs/browser.app.db.config'
+// Internal models (Seed, Version, Metadata) are now defined in seed-protocol-v1.json schema
+// and loaded automatically via processSchemaFiles
 // OLD CODE: import { BetterSQLite3Database, drizzle } from 'drizzle-orm/better-sqlite3'
 import { drizzle } from 'drizzle-orm/libsql'
 import { createClient } from '@libsql/client'
-import nodeAppDbConfig from '@/db/configs/node.app.db.config'
 import path from 'path'
 
 // OLD CODE: let appDb: BetterSQLite3Database | undefined
 let appDb: any | undefined
 
-export const getAppDb = () => {
+export interface AppDbConfig {
+  dbUrl: string
+}
+
+export const getAppDb = (config?: AppDbConfig) => {
   if (!appDb) {
-    // OLD CODE: appDb = drizzle(nodeAppDbConfig)
-    
-    // NEW CODE: Create libsql client from config and pass to drizzle
-    const dbUrl = nodeAppDbConfig.dbCredentials?.url
-    if (!dbUrl) {
-      throw new Error('Database URL not found in config')
+    if (!config || !config.dbUrl) {
+      throw new Error('Database URL is required. Please provide config with dbUrl when initializing the SDK.')
     }
     
     // Convert file path to file: URL for libsql if needed
-    const clientUrl = dbUrl.startsWith('file:') ? dbUrl : `file:${path.resolve(dbUrl)}`
+    const clientUrl = config.dbUrl.startsWith('file:') ? config.dbUrl : `file:${path.resolve(config.dbUrl)}`
     const client = createClient({ url: clientUrl })
     appDb = drizzle(client)
   }

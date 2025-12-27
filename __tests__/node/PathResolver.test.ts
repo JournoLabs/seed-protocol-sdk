@@ -2,7 +2,6 @@ import { describe, it, beforeEach, afterEach } from 'vitest'
 import path             from 'path'
 import { PathResolver } from '@/node/PathResolver'
 import process                                     from 'node:process'
-import { NODE_APP_DB_CONFIG } from '@/node/constants'
 
 
 describe('PathResolver', () => {
@@ -101,7 +100,6 @@ describe('PathResolver', () => {
       expect(appPaths.appSchemaDir).toContain('.seed/schema')
       expect(appPaths.appDbDir).toContain('.seed/db')
       expect(appPaths.appMetaDir).toContain('.seed/db/meta')
-      expect(appPaths.drizzleDbConfigPath).toContain(NODE_APP_DB_CONFIG)
       expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
       expect(appPaths.templatePath).toContain('codegen/templates')
     })
@@ -122,7 +120,6 @@ describe('PathResolver', () => {
       expect(appPaths.appSchemaDir).toContain('.seed/schema')
       expect(appPaths.appDbDir).toContain('.seed/db')
       expect(appPaths.appMetaDir).toContain('.seed/db/meta')
-      expect(appPaths.drizzleDbConfigPath).toContain(NODE_APP_DB_CONFIG)
       expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
       expect(appPaths.templatePath).toContain('codegen/templates')
 

@@ -71,11 +71,8 @@ describe('PathResolver - Production Environment', () => {
     const pathResolver = PathResolver.getInstance()
     const appPaths = pathResolver.getAppPaths(process.cwd())
     
-    // Should resolve drizzle config path correctly
-    expect(appPaths.drizzleDbConfigPath).toContain('dist/db/configs/node.app.db.config')
-    
     // Should resolve drizzle kit path correctly
-    expect(appPaths.drizzleKitPath).toContain('dist/node/codegen')
+    expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
     
     // Should resolve SDK root dir correctly
     expect(appPaths.sdkRootDir).toContain('dist')

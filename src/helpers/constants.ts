@@ -98,3 +98,9 @@ export enum ImageSize {
 export const CLIENT_NOT_INITIALIZED = 'ClientManager is not initialized. Please call init() first.'
 
 export const INIT_SCRIPT_SUCCESS_MESSAGE = '[Seed Protocol] Finished running init script'
+
+export enum SeedModels {
+  Seed = 'Seed',
+  Metadata = 'Metadata',
+  Version = 'Version',
+}

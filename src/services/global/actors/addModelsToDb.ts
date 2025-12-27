@@ -28,14 +28,9 @@ export const addModelsToDb = fromCallback<
       return
     }
 
-    const { models: SeedModels } = await import(
-      '@/db/configs/seed.schema.config'
-    )
-
-    const allModels = {
-      ...SeedModels,
-      ...models,
-    }
+    // Internal models (Seed, Version, Metadata) are now loaded via seed-protocol-v1.json schema
+    // They should already be in context.models from processSchemaFiles
+    const allModels = { ...models }
 
     let hasModelsInDb = true // Start as true - we'll set to false if we can't process any model
     const schemaDefsByModelName = new Map<

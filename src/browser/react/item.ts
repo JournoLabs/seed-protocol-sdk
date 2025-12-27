@@ -11,11 +11,13 @@ import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
 import { BaseItem } from '@/Item/BaseItem'
+import { GlobalState } from '@/services/internal/constants'
+import { IItem } from '@/interfaces'
 
 const logger = debug('seedSdk:react:item')
 
 type UseItemReturn<T extends ModelValues<T>> = {
-  item: Item<T> | undefined
+  item: IItem<T> | undefined
   itemData: ItemData<T>
   itemStatus: string | Record<string, unknown> | undefined
 }
@@ -37,7 +39,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     Subscription | undefined
   >()
 
-  const { status, internalStatus } = useGlobalServiceStatus()
+  const { status, } = useGlobalServiceStatus()
 
   const isReadingDb = useRef(false)
 
@@ -61,7 +63,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const readFromDb = useCallback(async () => {
     if (
       isReadingDb.current ||
-      internalStatus !== 'ready' ||
+      status !== GlobalState.INITIALIZED ||
       (!seedUid && !seedLocalId)
     ) {
       return
@@ -81,7 +83,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     setItem(foundItem)
     updateItem(foundItem)
     isReadingDb.current = false
-  }, [internalStatus,])
+  }, [status,])
 
   const listenerRef = useRef(readFromDb)
 
@@ -90,10 +92,10 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }, [readFromDb])
 
   useEffect(() => {
-    if (internalStatus === 'ready') {
+    if (status === GlobalState.INITIALIZED) {
       listenerRef.current()
     }
-  }, [internalStatus, status])
+  }, [status,])
 
   useEffect(() => {
     if (item && !itemSubscription) {
@@ -143,7 +145,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 }
 
 type UseItemsReturn = {
-  items: BaseItem<any>[]
+  items: IItem<any>[]
   isReadingDb: boolean
 }
 
@@ -155,16 +157,16 @@ type UseItemsProps = {
 type UseItems = (props: UseItemsProps) => UseItemsReturn
 
 export const useItems: UseItems = ({ modelName, deleted=false }) => {
-  const [items, setItems] = useImmer<BaseItem<any>[]>([])
+  const [items, setItems] = useImmer<IItem<any>[]>([])
 
-  const { status, internalStatus } = useGlobalServiceStatus()
+  const { status, } = useGlobalServiceStatus()
 
   const modelNameRef = useRef<string | undefined>(modelName)
 
   const isReadingDb = useRef(false)
 
   const readFromDb = useCallback(async () => {
-    if (isReadingDb.current || internalStatus !== 'ready') {
+    if (isReadingDb.current || status !== GlobalState.INITIALIZED || !modelNameRef.current || modelNameRef.current === '') {
       return
     }
     isReadingDb.current = true
@@ -172,19 +174,23 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
     setItems(() => [])
     setItems(() => allItems)
     isReadingDb.current = false
-  }, [internalStatus])
+  }, [status, modelName,])
 
   const listenerRef = useRef(readFromDb)
+
+  useEffect(() => {
+    modelNameRef.current = modelName
+  }, [modelName])
 
   useEffect(() => {
     listenerRef.current = readFromDb
   }, [readFromDb])
 
   useEffect(() => {
-    if (internalStatus === 'ready') {
+    if (status === GlobalState.INITIALIZED) {
       listenerRef.current()
     }
-  }, [internalStatus, status])
+  }, [status, modelName])
 
   useEffect(() => {
     eventEmitter.addListener('item.requestAll', (event) => {
@@ -223,7 +229,7 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
 export const useItemIsReady = () => {
   const [itemListenersReady, setItemListenersReady] = useState(false)
 
-  const itemEventListenersHandler = useCallback((_) => {
+  const itemEventListenersHandler = useCallback((_: any) => {
     setItemListenersReady(true)
   }, [])
 
@@ -249,13 +255,13 @@ export const useItemIsReady = () => {
   }
 }
 
-export const useCreateItem = <T>(modelName: string) => {
+export const useCreateItem = <T>() => {
   const [isCreatingItem, setIsCreatingItem] = useState(false)
 
   const { isReady } = useItemIsReady()
 
   const createItem = useCallback(
-    async (itemData) => {
+    async (modelName: string, itemData?: Partial<ItemData<T>>) => {
       if (!isReady) {
         console.error(
           `[useCreateItem] [createItem] called before listeners are ready`,
@@ -273,6 +279,10 @@ export const useCreateItem = <T>(modelName: string) => {
       }
 
       setIsCreatingItem(true)
+
+      if (!itemData) {
+        itemData = {} as Partial<ItemData<T>>
+      }
 
       const { seedLocalId } = await createNewItem({ modelName, ...itemData })
 

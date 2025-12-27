@@ -33,6 +33,9 @@ export { getModels, getModel, getModelNames } from '../stores/modelClass'
 // Helper exports
 export { getCorrectId } from '../helpers'
 
+// Import exports
+export * from '../imports'
+
 // Event bus
 export { eventEmitter } from '../eventBus'
 

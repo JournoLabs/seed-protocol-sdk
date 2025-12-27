@@ -6,6 +6,8 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { getDataTypeFromString } from '@/helpers'
+// Dynamic import to break circular dependency: schema/index -> ... -> saveRelation -> schema/index
+// import { ModelPropertyDataTypes } from '@/schema'
 
 export const saveRelation = fromCallback<
   EventObject,
@@ -32,6 +34,9 @@ export const saveRelation = fromCallback<
   }
 
   const _saveRelation = async (): Promise<boolean> => {
+    // Use dynamic import to break circular dependency
+    const { ModelPropertyDataTypes } = await import('@/schema')
+    
     let refResolvedDisplayValue
     let refSeedType
     let propertyName = propertyNameRaw
@@ -53,7 +58,7 @@ export const saveRelation = fromCallback<
       newValueType = 'file'
     }
 
-    if (propertyRecordSchema.dataType === 'Image') {
+    if (propertyRecordSchema.dataType === ModelPropertyDataTypes.Image) {
       sendBack({
         type: 'saveImage',
         newValue,

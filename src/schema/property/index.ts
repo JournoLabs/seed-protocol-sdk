@@ -1,16 +1,34 @@
 import { Static, Type } from '@sinclair/typebox'
 import { PropertyDataType, PropertyDefs, StorageType } from '@/types'
+import { TValidationRules } from '@/schema/validation'
+
+/**
+ * Enum for all property data types
+ */
+export enum ModelPropertyDataTypes {
+  Text = 'Text',
+  Number = 'Number',
+  List = 'List',
+  Relation = 'Relation',
+  Image = 'Image',
+  Json = 'Json',
+  File = 'File',
+  Boolean = 'Boolean',
+  Date = 'Date',
+  Html = 'Html',
+}
 
 export const TPropertyDataType = Type.Union([
-  Type.Literal('Text'),
-  Type.Literal('Number'),
-  Type.Literal('List'),
-  Type.Literal('Relation'),
-  Type.Literal('Image'),
-  Type.Literal('Json'),
-  Type.Literal('File'),
-  Type.Literal('Boolean'),
-  Type.Literal('Date'),
+  Type.Literal(ModelPropertyDataTypes.Text),
+  Type.Literal(ModelPropertyDataTypes.Number),
+  Type.Literal(ModelPropertyDataTypes.List),
+  Type.Literal(ModelPropertyDataTypes.Relation),
+  Type.Literal(ModelPropertyDataTypes.Image),
+  Type.Literal(ModelPropertyDataTypes.Json),
+  Type.Literal(ModelPropertyDataTypes.File),
+  Type.Literal(ModelPropertyDataTypes.Boolean),
+  Type.Literal(ModelPropertyDataTypes.Date),
+  Type.Literal(ModelPropertyDataTypes.Html),
 ])
 
 export const TStorageType = Type.Union([
@@ -24,11 +42,14 @@ export const TProperty = Type.Object({
   dataType: TPropertyDataType,
   ref: Type.Optional(Type.String()),
   modelId: Type.Optional(Type.Number()),
+  modelName: Type.Optional(Type.String()),
   refModelId: Type.Optional(Type.Number()),
+  refModelName: Type.Optional(Type.String()),
   refValueType: Type.Optional(TPropertyDataType),
   storageType: Type.Optional(TStorageType),
   localStorageDir: Type.Optional(Type.String()),
   filenameSuffix: Type.Optional(Type.String()),
+  validation: Type.Optional(TValidationRules),
 })
 
 export const TPropertyConstructor = Type.Function(
@@ -51,28 +72,28 @@ export const Property: PropertyDefs = {
     localStorageDir?: string,
     filenameSuffix?: string,
   ) => ({
-    dataType: 'Text',
+    dataType: ModelPropertyDataTypes.Text,
     storageType,
     localStorageDir,
     filenameSuffix,
     TObject: Type.String(),
   }),
-  Json: () => ({ dataType: 'Json' }),
-  File: () => ({ dataType: 'File' }),
-  Number: () => ({ dataType: 'Number' }),
+  Json: () => ({ dataType: ModelPropertyDataTypes.Json }),
+  File: () => ({ dataType: ModelPropertyDataTypes.File }),
+  Number: () => ({ dataType: ModelPropertyDataTypes.Number }),
   List: (ref: string, refValueType?: PropertyDataType) => ({
-    dataType: 'List',
+    dataType: ModelPropertyDataTypes.List,
     ref,
     refValueType,
   }),
   Relation: (ref, refValueType?: PropertyDataType) => ({
-    dataType: 'Relation',
+    dataType: ModelPropertyDataTypes.Relation,
     ref,
     refValueType,
   }),
-  Image: () => ({ dataType: 'Image' }),
-  Boolean: () => ({ dataType: 'Boolean' }),
-  Date: () => ({ dataType: 'Date' }),
+  Image: () => ({ dataType: ModelPropertyDataTypes.Image }),
+  Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
+  Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
 }
 
 export const PropertyMetadataKey = Symbol('property')

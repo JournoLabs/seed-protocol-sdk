@@ -17,7 +17,6 @@ import {
 import { immerable } from 'immer'
 import { BehaviorSubject } from 'rxjs'
 import { ActorRefFrom, Subscription, createActor } from 'xstate'
-import { eventEmitter } from '@/eventBus'
 import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { waitForEvent } from '@/events'
@@ -25,6 +24,8 @@ import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
+// Dynamic import to break circular dependency: schema/index -> ... -> BaseItem -> schema/index
+// import { ModelPropertyDataTypes } from '@/schema'
 // Dynamic imports to break circular dependencies
 // import { getPublishUploads } from '@/db/read/getPublishUploads'
 // import { getPublishPayload } from '@/db/read/getPublishPayload'
@@ -37,7 +38,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
   protected _subscription: Subscription | undefined;
   protected readonly _storageTransactionId: string | undefined;
   [immerable] = true;
-  protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty<any>>> = new BehaviorSubject({});
+  protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty>> = new BehaviorSubject({});
   protected readonly _service: ActorRefFrom<typeof itemMachineSingle>;
 
   constructor(initialValues: NewItemProps<T>) {
@@ -84,7 +85,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
         return
       }
 
-      const propertiesObj: Record<string, IItemProperty<any>> = {}
+      const propertiesObj: Record<string, IItemProperty> = {}
 
       for (const [key, propertyInstance] of context.propertyInstances) {
         if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) {
@@ -111,7 +112,6 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       }
 
       this._propertiesSubject.next(propertiesObj)
-      // eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
     })
 
     this._service.start()
@@ -144,6 +144,8 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
 
         definedKeys.push(propertyName)
 
+        // Use string literals to avoid circular dependency in constructor
+        // ModelPropertyDataTypes values are stable string constants
         if (
           propertyRecordSchema.dataType === 'Relation' &&
           !propertyName.endsWith('Id')
@@ -395,7 +397,103 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     return this.serviceContext.modelName as string
   }
 
+  /**
+   * Helper method to determine if a property key is a model-specific property
+   * (as opposed to an internal/common property)
+   * 
+   * Since properties are transformed in the subscription to match schema keys
+   * (e.g., "authorId" -> "author", "tagIds" -> "tags"), the transformed key
+   * should match a schema key directly. We also check the property instance's
+   * original propertyName to handle edge cases.
+   */
+  protected _isModelProperty(key: string, modelSchemaKeys: string[]): boolean {
+    // Direct match with schema (transformed keys should match schema keys)
+    if (modelSchemaKeys.includes(key)) {
+      return true
+    }
+
+    // Check property instances to see if this key corresponds to a model property
+    // This handles cases where the transformation might not perfectly match
+    const serviceContext = this.serviceContext
+    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty<any>> | undefined
+    
+    if (propertyInstances) {
+      for (const [originalKey, propertyInstance] of propertyInstances) {
+        // Skip internal properties
+        if (INTERNAL_PROPERTY_NAMES.includes(originalKey as string)) {
+          continue
+        }
+
+        // Reconstruct the transformation to see if it matches our key
+        let transformedKey = originalKey as string
+        
+        if (propertyInstance.alias) {
+          transformedKey = propertyInstance.alias
+        } else if (originalKey.endsWith('Ids')) {
+          transformedKey = pluralize(originalKey.slice(0, -3))
+        } else if (originalKey.endsWith('Id')) {
+          transformedKey = originalKey.slice(0, -2)
+        }
+        
+        // If the transformed key matches, check if it's a model property
+        if (transformedKey === key) {
+          // Check if the base property name (without Id/Ids) is in the schema
+          const baseName = originalKey.endsWith('Id') 
+            ? originalKey.slice(0, -2)
+            : originalKey.endsWith('Ids')
+            ? pluralize(originalKey.slice(0, -3))
+            : originalKey
+          
+          // Also check the alias if it exists
+          const checkName = propertyInstance.alias || baseName
+          return modelSchemaKeys.includes(checkName)
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Returns only properties that are defined in the Model's schema
+   * (excludes internal/common properties)
+   */
   get properties(): Record<string, IItemProperty<any>> {
+    const allProps = this._propertiesSubject.value
+    const ModelClass = getModel(this.modelName)
+    const modelSchemaKeys = ModelClass?.schema ? Object.keys(ModelClass.schema) : []
+
+    // Filter to only include properties defined in the Model schema or derived from it
+    return Object.fromEntries(
+      Object.entries(allProps).filter(([key]) => {
+        // Exclude internal properties
+        if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+          return false
+        }
+        // Include if it's a model property or derived from one
+        return this._isModelProperty(key, modelSchemaKeys)
+      })
+    )
+  }
+
+  /**
+   * Returns only internal/common properties that are shared across all Items
+   * (e.g., seedLocalId, seedUid, createdAt, etc.)
+   */
+  get internalProperties(): Record<string, IItemProperty<any>> {
+    const allProps = this._propertiesSubject.value
+    return Object.fromEntries(
+      Object.entries(allProps).filter(([key]) =>
+        INTERNAL_PROPERTY_NAMES.includes(key)
+      )
+    )
+  }
+
+  /**
+   * Returns all properties (both model-specific and internal)
+   * Useful for backward compatibility or debugging
+   */
+  get allProperties(): Record<string, IItemProperty<any>> {
     return this._propertiesSubject.value
   }
 
@@ -409,6 +507,19 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
 
   get lastVersionPublishedAt(): number {
     return this.serviceContext.lastVersionPublishedAt as number
+  }
+
+  get createdAt(): number | undefined {
+    // Try to get from serviceContext first
+    if (this.serviceContext.createdAt !== undefined) {
+      return this.serviceContext.createdAt as number
+    }
+    // Try to get from allProperties if it exists as a property
+    const createdAtProp = this.allProperties.createdAt
+    if (createdAtProp) {
+      return createdAtProp.value as number | undefined
+    }
+    return undefined
   }
 
   unload(): void {

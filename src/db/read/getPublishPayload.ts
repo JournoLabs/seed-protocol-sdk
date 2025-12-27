@@ -22,6 +22,7 @@ import { IItem } from '@/interfaces'
 import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import {ethers} from 'ethers'
+import { ModelPropertyDataTypes } from '@/schema'
 const logger = debug('seedSdk:db:getPublishPayload')
 
 const getVersionUid = (item: IItem<any>) => {
@@ -176,11 +177,11 @@ const processRelationOrImageProperty = async (
 
   let modelName: string
 
-  if (relationOrImageProperty.propertyDef?.dataType === 'Image') {
+  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
     modelName = 'Image'
   }
 
-  if (relationOrImageProperty.propertyDef?.dataType === 'Relation') {
+  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Relation) {
     modelName = relationOrImageProperty.propertyDef!.ref as string
   }
 
@@ -293,7 +294,7 @@ const processListProperty = async (
       modelName = listProperty.propertyDef!.ref as string
     }
 
-    if (listProperty.propertyDef?.dataType === 'Image') {
+    if (listProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
       modelName = 'Image'
     }
 

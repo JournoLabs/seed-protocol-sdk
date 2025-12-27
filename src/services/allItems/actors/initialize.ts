@@ -7,11 +7,8 @@ import { toSnakeCase } from '@/helpers'
 import {
   models as modelsTable,
   modelUids,
-  properties,
 } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
-import { SchemaWhereInput } from '@/graphql/gql/graphql'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { getAddressesFromDb } from '@/helpers/db'
 import { eventEmitter } from '@/eventBus'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -45,8 +42,6 @@ type Times = {
     end: number | null
   }
 }
-
-type InternalDataType = keyof typeof INTERNAL_DATA_TYPES;
 
 export const initialize = fromCallback<
   EventObject,

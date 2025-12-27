@@ -1,3 +1,7 @@
+// NOTE: This template is deprecated. Models are now created from JSON schema files.
+// This template is kept for backward compatibility but should not be used for new models.
+// Use JSON schema files instead and load them via Schema.create() and Model.create()
+
 @Model
 class {{ modelName }} {
   {% for property in properties -%}

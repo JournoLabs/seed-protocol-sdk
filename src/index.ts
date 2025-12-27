@@ -1,47 +1,98 @@
 // import SeedImage from './browser/react/SeedImage'
 // import { enableMapSet } from 'immer'
 
-// export {
-//   Model,
-//   Property,
-//   Image,
-//   List,
-//   Text,
-//   Json,
-//   Relation,
-//   Boolean,
-//   Number,
-//   Date,
-// } from './schema'
+export {
+  Model,
+  Property,
+  Image,
+  List,
+  Text,
+  Json,
+  Relation,
+  Boolean,
+  Number,
+  Date,
+  ModelPropertyDataTypes,
+} from './schema'
 
 export { BaseItem as Item } from './Item/BaseItem'
-// export { BaseItemProperty as ItemProperty } from './ItemProperty/BaseItemProperty'
+export { BaseItemProperty as ItemProperty } from './ItemProperty/BaseItemProperty'
+export { ModelProperty } from './ModelProperty/ModelProperty'
+export { Schema } from './schema/Schema'
 
-// export {
-//   useItems,
-//   useItem,
-//   useItemProperties,
-//   useCreateItem,
-//   useItemProperty,
-//   useDeleteItem,
+export {
+  useItems,
+  useItem,
+  useItemProperties,
+  useCreateItem,
+  useItemProperty,
+  useDeleteItem,
+  useModels,
+  useSchema,
+  useSchemas,
+  useCreateSchema,
+  useAllSchemaVersions,
+  useModelProperties,
+  useModelProperty,
 //   useGlobalServiceStatus,
 //   usePublishItem,
 //   usePersistedSnapshots,
 //   useServices,
 //   useService,
-//   useModels,
-// } from './browser/react'
+} from './browser/react'
 
 
 // export { SeedImage }
 
+export type { IItemProperty } from './interfaces/IItemProperty'
+
 export { BaseFileManager as FileManager } from './helpers'
+export { BaseEasClient as EasClient } from './helpers'
 // export {FileManager as FileManagerBrowser} from './browser/helpers/FileManager'
 // export {Db as DbBrowser} from './browser/db/Db'
 
 // export {models, versions, seeds, metadata, appState, config, modelUids, } from './seedSchema'
 
-// export {getModels, getModel, getModelNames,} from './stores/modelClass'
+export {getModels, getModel, getModelNames,} from './stores/modelClass'
+
+export {
+  getModelSchemasFromEas, 
+  getItemVersionsFromEas, 
+  getItemPropertiesFromEas, 
+  getSchemaUidBySchemaName,
+  getSeedsFromSchemaUids,
+  getSeedsBySchemaName,
+} from './eas'
+
+export { SeedModels } from './helpers/constants'
+
+export { getFeedItemsBySchemaName } from './feed'
+
+export { 
+  createSchema, 
+  readSchema, 
+  listCompleteSchemaFiles as listSchemas,
+  getSchemaNameFromId,
+} from './helpers/schema'
+
+export { getPropertySchema } from './helpers/property'
+
+export {
+  updateModelProperties,
+  renameModelProperty,
+  deletePropertyFromModel,
+  deleteModelFromSchema,
+  type SchemaPropertyUpdate,
+  type SchemaModelUpdate,
+} from './helpers/updateSchema'
+
+export { 
+  importJsonSchema, 
+  readJsonImportFile, 
+  transformImportToSchemaFile, 
+} from './imports'
+
+export { seedVitePlugin } from './vite'
 
 // export { getCorrectId, } from './helpers'
 
@@ -54,6 +105,8 @@ export { BaseFileManager as FileManager } from './helpers'
 // export { withSeed } from './node/webpack'
 
 // export type { PublishUpload } from './db/read/getPublishUploads'
+export type { Schema as SchemaType } from './helpers/schema'
+export type { ModelClassType as ModelClass } from './types'
 
 // PathResolver - Platform-specific implementation
 // Auto-initializes based on environment when imported

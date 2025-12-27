@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
 export type Maybe<T> = T | null;
-export type InputMaybe<T> = Maybe<T>;
+export type InputMaybe<T> = T | null | undefined;
 export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 export type MakeOptional<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]?: Maybe<T[SubKey]> };
 export type MakeMaybe<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]: Maybe<T[SubKey]> };
@@ -605,16 +605,17 @@ export type AttestationWhereUniqueInput = {
   id?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** Block Schema */
 export type Block = {
   __typename?: 'Block';
   /** The block height. */
   height: Scalars['Int']['output'];
   /** The block ID. */
-  id: Scalars['ID']['output'];
+  id?: Maybe<Scalars['ID']['output']>;
   /** The previous block ID. */
-  previous: Scalars['ID']['output'];
+  previous?: Maybe<Scalars['ID']['output']>;
   /** The block timestamp (UTC). */
-  timestamp: Scalars['Int']['output'];
+  timestamp?: Maybe<Scalars['Int']['output']>;
 };
 
 /**
@@ -633,19 +634,11 @@ export type BlockEdge = {
   /**
    * The cursor value for fetching the next page.
    *
-   * Pass this to the \`after\` parameter in \`blocks(after: $cursor)\`, the next page will start from the next item after this.
+   * Pass this to the after parameter in blocks(after: $cursor), the next page will start from the next item after this.
    */
   cursor: Scalars['String']['output'];
   /** A block object. */
   node: Block;
-};
-
-/** Find blocks within a given range */
-export type BlockFilter = {
-  /** Maximum block height to filter to */
-  max?: InputMaybe<Scalars['Int']['input']>;
-  /** Minimum block height to filter from */
-  min?: InputMaybe<Scalars['Int']['input']>;
 };
 
 export type BoolFieldUpdateOperationsInput = {
@@ -674,6 +667,11 @@ export type Bundle = {
   /** ID of the containing data bundle. */
   id: Scalars['ID']['output'];
 };
+
+export enum CacheControlScope {
+  Private = 'PRIVATE',
+  Public = 'PUBLIC'
+}
 
 export type EnsName = {
   __typename?: 'EnsName';
@@ -861,7 +859,7 @@ export type MetaData = {
   __typename?: 'MetaData';
   /** Size of the associated data in bytes. */
   size: Scalars['String']['output'];
-  /** Type is derrived from the \`content-type\` tag on a transaction. */
+  /** Type is derived from the \`content-type\` tag on a transaction. */
   type?: Maybe<Scalars['String']['output']>;
 };
 
@@ -1623,14 +1621,14 @@ export type QueryAttestationsArgs = {
 
 
 export type QueryBlockArgs = {
-  id: Scalars['String']['input'];
+  id?: InputMaybe<Scalars['String']['input']>;
 };
 
 
 export type QueryBlocksArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
-  height?: InputMaybe<BlockFilter>;
+  height?: InputMaybe<RangeFilter>;
   ids?: InputMaybe<Array<Scalars['ID']['input']>>;
   sort?: InputMaybe<SortOrder>;
 };
@@ -1978,10 +1976,11 @@ export type QueryTransactionArgs = {
 
 export type QueryTransactionsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
-  block?: InputMaybe<BlockFilter>;
+  block?: InputMaybe<RangeFilter>;
   bundledIn?: InputMaybe<Array<Scalars['ID']['input']>>;
   first?: InputMaybe<Scalars['Int']['input']>;
   ids?: InputMaybe<Array<Scalars['ID']['input']>>;
+  ingested_at?: InputMaybe<RangeFilter>;
   owners?: InputMaybe<Array<Scalars['String']['input']>>;
   recipients?: InputMaybe<Array<Scalars['String']['input']>>;
   sort?: InputMaybe<SortOrder>;
@@ -1992,6 +1991,14 @@ export enum QueryMode {
   Default = 'default',
   Insensitive = 'insensitive'
 }
+
+/** Filter with a min and max */
+export type RangeFilter = {
+  /** Maximum integer to filter to */
+  max?: InputMaybe<Scalars['Int']['input']>;
+  /** Minimum integer to filter from */
+  min?: InputMaybe<Scalars['Int']['input']>;
+};
 
 export type Schema = {
   __typename?: 'Schema';
@@ -2767,6 +2774,10 @@ export enum SortOrder {
   HeightAsc = 'HEIGHT_ASC',
   /** Results are sorted by the transaction block height in descending order, with the most recent and unconfirmed/pending transactions appearing first. */
   HeightDesc = 'HEIGHT_DESC',
+  /** Results are sorted by the transaction ingestion time in ascending order, with the oldest ingested transactions appearing first. */
+  IngestedAtAsc = 'INGESTED_AT_ASC',
+  /** Results are sorted by the transaction ingestion time in descending order, with the most recently ingested transactions appearing first. */
+  IngestedAtDesc = 'INGESTED_AT_DESC',
   Asc = 'asc',
   Desc = 'desc'
 }
@@ -2808,6 +2819,7 @@ export type StringWithAggregatesFilter = {
   startsWith?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** Tag Schema */
 export type Tag = {
   __typename?: 'Tag';
   /** UTF-8 tag name */
@@ -2816,32 +2828,48 @@ export type Tag = {
   value: Scalars['String']['output'];
 };
 
-/** Find transactions with the folowing tag name and value */
+/** Find transactions with the following tag name and value */
 export type TagFilter = {
+  /** How tag names and values are matched. Defaults to EXACT. */
+  match?: TagMatch;
   /** The tag name */
-  name: Scalars['String']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
   /** The operator to apply to to the tag filter. Defaults to EQ (equal). */
-  op?: InputMaybe<TagOperator>;
+  op?: TagOperator;
   /**
    * An array of values to match against. If multiple values are passed then transactions with _any_ matching tag value from the set will be returned.
    *
    * e.g.
    *
-   * \`{name: "app-name", values: ["app-1"]}\`
+   * `{name: "app-name", values: ["app-1"]}`
    *
-   * Returns all transactions where the \`app-name\` tag has a value of \`app-1\`.
+   * Returns all transactions where the `app-name` tag has a value of `app-1`.
    *
-   * \`{name: "app-name", values: ["app-1", "app-2", "app-3"]}\`
+   * `{name: "app-name", values: ["app-1", "app-2", "app-3"]}`
    *
-   * Returns all transactions where the \`app-name\` tag has a value of either \`app-1\` _or_ \`app-2\` _or_ \`app-3\`.
+   * Returns all transactions where the `app-name` tag has a value of either `app-1` _or_ `app-2` _or_ `app-3`.
    */
-  values: Array<Scalars['String']['input']>;
+  values?: InputMaybe<Array<Scalars['String']['input']>>;
 };
+
+/** The method used to determine if tags match. */
+export enum TagMatch {
+  /** An exact match */
+  Exact = 'EXACT',
+  /** Fuzzy match containing all search terms */
+  FuzzyAnd = 'FUZZY_AND',
+  /** Fuzzy match containing at least one search term */
+  FuzzyOr = 'FUZZY_OR',
+  /** A wildcard match */
+  Wildcard = 'WILDCARD'
+}
 
 /** The operator to apply to a tag value. */
 export enum TagOperator {
   /** Equal */
-  Eq = 'EQ'
+  Eq = 'EQ',
+  /** Not equal */
+  Neq = 'NEQ'
 }
 
 export type Timestamp = {
@@ -3024,6 +3052,7 @@ export type TimestampWhereUniqueInput = {
   id?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** Transaction Structure */
 export type Transaction = {
   __typename?: 'Transaction';
   anchor: Scalars['String']['output'];
@@ -3037,6 +3066,8 @@ export type Transaction = {
   data: MetaData;
   fee: Amount;
   id: Scalars['ID']['output'];
+  /** When this transaction was made available for querying */
+  ingested_at?: Maybe<Scalars['Int']['output']>;
   owner: Owner;
   /**
    * @deprecated Don't use, kept for backwards compatability only!
@@ -3055,6 +3086,8 @@ export type Transaction = {
  */
 export type TransactionConnection = {
   __typename?: 'TransactionConnection';
+  /** The number of transactions that match this query. */
+  count?: Maybe<Scalars['String']['output']>;
   edges: Array<TransactionEdge>;
   pageInfo: PageInfo;
 };
@@ -3065,23 +3098,12 @@ export type TransactionEdge = {
   /**
    * The cursor value for fetching the next page.
    *
-   * Pass this to the \`after\` parameter in \`transactions(after: $cursor)\`, the next page will start from the next item after this.
+   * Pass this to the `after` parameter in ` transactions(after: $cursor)`, the next page will start from the next item after this.
    */
   cursor: Scalars['String']['output'];
   /** A transaction object. */
   node: Transaction;
 };
-
-export type AttestationFieldsFragment = { __typename?: 'Attestation', id: string, decodedDataJson: string, attester: string, refUID: string, revoked: boolean, schemaId: string, txid: string, timeCreated: number, time: number, isOffchain: boolean, schema: { __typename?: 'Schema', schemaNames: Array<{ __typename?: 'SchemaName', name: string }> } } & { ' $fragmentName'?: 'AttestationFieldsFragment' };
-
-export type SchemaFieldsFragment = { __typename?: 'Schema', id: string, resolver: string, revocable: boolean, schema: string, index: string, time: number, txid: string, creator: string, schemaNames: Array<{ __typename?: 'SchemaName', name: string }> } & { ' $fragmentName'?: 'SchemaFieldsFragment' };
-
-export type GetTransactionTagsQueryVariables = Exact<{
-  transactionId: Scalars['ID']['input'];
-}>;
-
-
-export type GetTransactionTagsQuery = { __typename?: 'Query', tags?: { __typename?: 'Transaction', id: string, tags: Array<{ __typename?: 'Tag', name: string, value: string }> } | null };
 
 export type GetSchemasQueryVariables = Exact<{
   where: SchemaWhereInput;
@@ -3099,6 +3121,7 @@ export type GetSchemaByNameQuery = { __typename?: 'Query', schemas: Array<{ __ty
 
 export type GetSeedsQueryVariables = Exact<{
   where: AttestationWhereInput;
+  take?: InputMaybe<Scalars['Int']['input']>;
 }>;
 
 
@@ -3148,6 +3171,17 @@ export type GetAllPropertiesForAllVersionsQuery = { __typename?: 'Query', allPro
     & { ' $fragmentRefs'?: { 'AttestationFieldsFragment': AttestationFieldsFragment } }
   )> };
 
+export type AttestationFieldsFragment = { __typename?: 'Attestation', id: string, decodedDataJson: string, attester: string, refUID: string, revoked: boolean, schemaId: string, txid: string, timeCreated: number, time: number, isOffchain: boolean, schema: { __typename?: 'Schema', schemaNames: Array<{ __typename?: 'SchemaName', name: string }> } } & { ' $fragmentName'?: 'AttestationFieldsFragment' };
+
+export type SchemaFieldsFragment = { __typename?: 'Schema', id: string, resolver: string, revocable: boolean, schema: string, index: string, time: number, txid: string, creator: string, schemaNames: Array<{ __typename?: 'SchemaName', name: string }> } & { ' $fragmentName'?: 'SchemaFieldsFragment' };
+
+export type GetTransactionTagsQueryVariables = Exact<{
+  transactionId: Scalars['ID']['input'];
+}>;
+
+
+export type GetTransactionTagsQuery = { __typename?: 'Query', tags?: { __typename?: 'Transaction', id: string, tags: Array<{ __typename?: 'Tag', name: string, value: string }> } | null };
+
 export type GetFilesMetadataQueryVariables = Exact<{
   where: AttestationWhereInput;
 }>;
@@ -3165,7 +3199,7 @@ export type GetArweaveTransactionsQueryVariables = Exact<{
 }>;
 
 
-export type GetArweaveTransactionsQuery = { __typename?: 'Query', transactions: { __typename?: 'TransactionConnection', edges: Array<{ __typename?: 'TransactionEdge', cursor: string, node: { __typename?: 'Transaction', id: string, anchor: string, signature: string, block?: { __typename?: 'Block', id: string, height: number } | null, data: { __typename?: 'MetaData', size: string, type?: string | null }, tags: Array<{ __typename?: 'Tag', name: string, value: string }> } }>, pageInfo: { __typename?: 'PageInfo', hasNextPage: boolean } } };
+export type GetArweaveTransactionsQuery = { __typename?: 'Query', transactions: { __typename?: 'TransactionConnection', edges: Array<{ __typename?: 'TransactionEdge', cursor: string, node: { __typename?: 'Transaction', id: string, anchor: string, signature: string, block?: { __typename?: 'Block', id?: string | null, height: number } | null, data: { __typename?: 'MetaData', size: string, type?: string | null }, tags: Array<{ __typename?: 'Tag', name: string, value: string }> } }>, pageInfo: { __typename?: 'PageInfo', hasNextPage: boolean } } };
 
 export type GetImageSeedsQueryVariables = Exact<{
   where: AttestationWhereInput;
@@ -3193,15 +3227,15 @@ export type GetSchemaUidsQuery = { __typename?: 'Query', schemaUids: Array<{ __t
 
 export const AttestationFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"attestationFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Attestation"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]} as unknown as DocumentNode<AttestationFieldsFragment, unknown>;
 export const SchemaFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"schemaFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Schema"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"resolver"}},{"kind":"Field","name":{"kind":"Name","value":"revocable"}},{"kind":"Field","name":{"kind":"Name","value":"schema"}},{"kind":"Field","name":{"kind":"Name","value":"index"}},{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"creator"}}]}}]} as unknown as DocumentNode<SchemaFieldsFragment, unknown>;
-export const GetTransactionTagsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetTransactionTags"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"transactionId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"tags"},"name":{"kind":"Name","value":"transaction"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"transactionId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"value"}}]}}]}}]}}]} as unknown as DocumentNode<GetTransactionTagsQuery, GetTransactionTagsQueryVariables>;
 export const GetSchemasDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSchemas"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SchemaWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"schemas"},"name":{"kind":"Name","value":"schemata"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"schema"}},{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}}]}}]} as unknown as DocumentNode<GetSchemasQuery, GetSchemasQueryVariables>;
 export const GetSchemaByNameDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSchemaByName"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SchemaWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"schemas"},"name":{"kind":"Name","value":"schemata"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"schema"}},{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}}]}}]} as unknown as DocumentNode<GetSchemaByNameQuery, GetSchemaByNameQueryVariables>;
-export const GetSeedsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSeeds"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"itemSeeds"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]}}]} as unknown as DocumentNode<GetSeedsQuery, GetSeedsQueryVariables>;
+export const GetSeedsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSeeds"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"take"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"itemSeeds"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}},{"kind":"Argument","name":{"kind":"Name","value":"take"},"value":{"kind":"Variable","name":{"kind":"Name","value":"take"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]}}]} as unknown as DocumentNode<GetSeedsQuery, GetSeedsQueryVariables>;
 export const GetSeedIdsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSeedIds"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"itemSeedIds"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}}]}}]}}]} as unknown as DocumentNode<GetSeedIdsQuery, GetSeedIdsQueryVariables>;
 export const GetStorageTransactionIdDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetStorageTransactionId"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"storageTransactionId"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}}]}}]}}]} as unknown as DocumentNode<GetStorageTransactionIdQuery, GetStorageTransactionIdQueryVariables>;
 export const GetVersionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetVersions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"itemVersions"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"attestationFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"attestationFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Attestation"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]} as unknown as DocumentNode<GetVersionsQuery, GetVersionsQueryVariables>;
 export const GetPropertiesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetProperties"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"itemProperties"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"attestationFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"attestationFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Attestation"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]} as unknown as DocumentNode<GetPropertiesQuery, GetPropertiesQueryVariables>;
 export const GetAllPropertiesForAllVersionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetAllPropertiesForAllVersions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"allProperties"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"attestationFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"attestationFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Attestation"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]} as unknown as DocumentNode<GetAllPropertiesForAllVersionsQuery, GetAllPropertiesForAllVersionsQueryVariables>;
+export const GetTransactionTagsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetTransactionTags"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"transactionId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"tags"},"name":{"kind":"Name","value":"transaction"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"transactionId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"value"}}]}}]}}]}}]} as unknown as DocumentNode<GetTransactionTagsQuery, GetTransactionTagsQueryVariables>;
 export const GetFilesMetadataDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetFilesMetadata"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"filesMetadata"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"attestationFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"attestationFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Attestation"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]} as unknown as DocumentNode<GetFilesMetadataQuery, GetFilesMetadataQueryVariables>;
 export const GetArweaveTransactionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetArweaveTransactions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"owners"}},"type":{"kind":"ListType","type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"after"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transactions"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"owners"},"value":{"kind":"Variable","name":{"kind":"Name","value":"owners"}}},{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"after"},"value":{"kind":"Variable","name":{"kind":"Name","value":"after"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"edges"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"cursor"}},{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"anchor"}},{"kind":"Field","name":{"kind":"Name","value":"signature"}},{"kind":"Field","name":{"kind":"Name","value":"block"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"height"}}]}},{"kind":"Field","name":{"kind":"Name","value":"data"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"size"}},{"kind":"Field","name":{"kind":"Name","value":"type"}}]}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"value"}}]}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"pageInfo"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"hasNextPage"}}]}}]}}]}}]} as unknown as DocumentNode<GetArweaveTransactionsQuery, GetArweaveTransactionsQueryVariables>;
 export const GetImageSeedsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetImageSeeds"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"AttestationWhereInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","alias":{"kind":"Name","value":"imageSeeds"},"name":{"kind":"Name","value":"attestations"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"ListValue","values":[{"kind":"ObjectValue","fields":[{"kind":"ObjectField","name":{"kind":"Name","value":"timeCreated"},"value":{"kind":"EnumValue","value":"desc"}}]}]}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"decodedDataJson"}},{"kind":"Field","name":{"kind":"Name","value":"attester"}},{"kind":"Field","name":{"kind":"Name","value":"schema"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"schemaNames"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}},{"kind":"Field","name":{"kind":"Name","value":"refUID"}},{"kind":"Field","name":{"kind":"Name","value":"revoked"}},{"kind":"Field","name":{"kind":"Name","value":"schemaId"}},{"kind":"Field","name":{"kind":"Name","value":"txid"}},{"kind":"Field","name":{"kind":"Name","value":"timeCreated"}},{"kind":"Field","name":{"kind":"Name","value":"time"}},{"kind":"Field","name":{"kind":"Name","value":"isOffchain"}}]}}]}}]} as unknown as DocumentNode<GetImageSeedsQuery, GetImageSeedsQueryVariables>;

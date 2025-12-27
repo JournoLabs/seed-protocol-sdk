@@ -10,7 +10,7 @@ import { setupServiceHandlers } from "@/events/services";
 // import { GlobalState } from "@/services/internal/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
-import { BaseArweaveClient, BaseQueryClient } from "@/helpers";
+import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
 import { BaseItem } from '@/Item/BaseItem'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
@@ -53,6 +53,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     let Item: typeof BaseItem
     let ItemProperty: typeof BaseItemProperty
     let PathResolver: typeof BasePathResolver
+    let EasClient: typeof BaseEasClient
 
     if (isBrowser()) {
       FileManager = (await import('../../browser/helpers/FileManager')).FileManager
@@ -62,6 +63,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       Item = (await import('../../browser/Item/Item')).Item
       ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../browser/helpers/PathResolver')).PathResolver
+      EasClient = (await import('../../browser/helpers/EasClient')).EasClient
     } else if (isNode()) {
       console.log('isNode')
       FileManager = (await import('../../node/helpers/FileManager')).FileManager
@@ -71,6 +73,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       Item = (await import('../../node/Item/Item')).Item
       ItemProperty = (await import('../../node/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
+      EasClient = (await import('../../node/helpers/EasClient')).EasClient
     } else {
       throw new Error(`Unable to determine environment. isBrowser()=${isBrowser()}, isNode()=${isNode()}. Platform-specific implementations could not be loaded.`)
     }
@@ -82,6 +85,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     BaseFileManager.setPlatformClass(FileManager)
     BaseDb.setPlatformClass(Db!)
     BaseQueryClient.setPlatformClass(QueryClient!)
+    BaseEasClient.setPlatformClass(EasClient!)
     BaseArweaveClient.setPlatformClass(ArweaveClient!)
     BaseItem.setPlatformClass(Item!)
     BaseItemProperty.setPlatformClass(ItemProperty!)
@@ -89,14 +93,15 @@ FromCallbackInput<ClientManagerContext, InitEvent>
 
 
     
-    const { models, endpoints, arweaveDomain, } = config
+    const { models, endpoints, arweaveDomain, dbConfig, filesDir } = config
 
     sendBack({ type: 'updateContext', context: { 
       models, 
       endpoints, 
       arweaveDomain, 
       addresses, 
-      filesDir: endpoints?.files,
+      filesDir: filesDir || endpoints?.files,
+      dbConfig,
     } })
     
     if (arweaveDomain) {
@@ -110,40 +115,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     setupServicesEventHandlers()
     setupServiceHandlers()
 
-    // const {Image} = await import('@/schema/image/model')
-    // models['Image'] = Image
-
-    // const globalService = getGlobalService()
-
-    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
-
-    // globalService.send({
-    //   type: 'init',
-    //   endpoints,
-    //   models,
-    //   addresses,
-    //   arweaveDomain,
-    //   filesDir: files,
-    // })
-
-    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
-
-    // const { models: internalModels } = await import('@/db/configs/seed.schema.config')
-    // for (const [key, value] of Object.entries(internalModels)) {
-    //   setModel(key, value as unknown as ModelClassType)
-    // }
-
-    // setModel('Image', Image as unknown as ModelClassType)
-    // console.log('globalService snapshot.value:', globalService.getSnapshot().value)
-    // console.log('waitFor globalService')
-    // globalService.subscribe((snapshot) => {
-    //   console.log('globalService snapshot.value:', snapshot.value)
-    // })
-    // await waitFor(globalService, (snapshot) => {
-    //   logger('snapshot.value', snapshot.value)
-    //   return snapshot.value === GlobalState.INITIALIZED
-    // })
-    // logger('globalService initialized')
   }
 
   _platformClassesInit().then(() => {

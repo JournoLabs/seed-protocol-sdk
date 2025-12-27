@@ -5,6 +5,8 @@ import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
 import { getRelationValueData } from '@/db/read/getRelationValueData'
+// Dynamic import to break circular dependency: schema/index -> ... -> resolveRelatedValue -> schema/index
+// import { ModelPropertyDataTypes } from '@/schema'
 
 const logger = debug('seedSdk:property:actors:resolveRelatedValue')
 
@@ -27,6 +29,9 @@ export const resolveRelatedValue = fromCallback<
   } = context
 
   const _resolveRelatedValue = async () => {
+    // Use dynamic import to break circular dependency
+    const { ModelPropertyDataTypes } = await import('@/schema')
+    
     if (!propertyValue || !isRelation || populatedFromDb) {
       return
     }
@@ -107,7 +112,7 @@ export const resolveRelatedValue = fromCallback<
       // This handles a local-only relation value and resolves from the filesystem
       if (
         refResolvedValue &&
-        propertyRecordSchema.dataType === 'Relation' &&
+        propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation &&
         propertyValueFromDb.length === 10 &&
         propertyRecordSchema.ref
       ) {
@@ -149,7 +154,7 @@ export const resolveRelatedValue = fromCallback<
         // Check files for a filename that matches the propertyValue
         if (
           propertyRecordSchema &&
-          propertyRecordSchema.refValueType === 'Image'
+          propertyRecordSchema.refValueType === ModelPropertyDataTypes.Image
         ) {
           let contentUrl
 

@@ -37,7 +37,7 @@ The test `should use correct Database constructor syntax` would have failed when
 - Checks that built config files have correct content
 
 **How it would have caught the issue**:
-The tests `should validate node.app.db.config.ts has correct paths` and `should validate browser.app.db.config.ts has correct paths` would have failed when the config files contained `.seed/app/schema` instead of `.seed/schema`.
+The tests would have validated that config files had correct paths. Note: Config files have been removed from the SDK - configuration is now passed manually on startup via `ClientManager.init()`.
 
 ### 4. `integration.test.ts` - End-to-End Integration Tests
 **Would have caught**: All issues in real-world scenarios

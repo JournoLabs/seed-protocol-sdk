@@ -4,8 +4,12 @@ import { GraphQLClient } from "graphql-request"
 
 class EasClient extends BaseEasClient {
   static getEasClient() {
-    return new GraphQLClient(EAS_ENDPOINT)
+    if (!this.easClient) {
+      this.easClient = new GraphQLClient(EAS_ENDPOINT)
+    }
+    return this.easClient
   }
+
 }
 
 BaseEasClient.setPlatformClass(EasClient)

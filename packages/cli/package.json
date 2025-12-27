@@ -32,7 +32,11 @@
   },
   "scripts": {
     "build": "tsc && rollup -c",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")"
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")",
+    "dev": "tsx src/bin.ts",
+    "dev:init": "tsx src/bin.ts init",
+    "dev:export-sql": "tsx src/bin.ts export-sql",
+    "dev:seed": "tsx src/bin.ts seed"
   },
   "dependencies": {
     "@seedprotocol/sdk": "file:../../",

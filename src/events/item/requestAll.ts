@@ -53,7 +53,7 @@ const handleRequestAll = async (event) => {
 
   if (modelName === 'Identity' && modelCount <= 1) {
     logger(
-      `[XXXXXX] [handleRequestAll] ${ModelClass?.originalConstructor.name}:`,
+      `[XXXXXX] [handleRequestAll] ${ModelClass?.originalConstructor?.name || modelName}:`,
       returnItems.length,
     )
     eventEmitter.emit(`item.${modelName}.requestAll.response`, {

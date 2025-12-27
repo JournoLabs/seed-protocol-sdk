@@ -1,4 +1,4 @@
-import { getSchemaUidBySchemaName } from '@/browser/helpers/eas'
+import { getSchemaUidBySchemaName } from '@/eas'
 import { toSnakeCase } from '@/helpers'
 import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 

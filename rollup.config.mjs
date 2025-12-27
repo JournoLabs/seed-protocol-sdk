@@ -7,8 +7,8 @@ import alias from '@rollup/plugin-alias'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { typiaProto } from './rollup-typia-proto.js'
+import json from '@rollup/plugin-json'
 // import nodeResolve from '@rollup/plugin-node-resolve'
-// import json from '@rollup/plugin-json'
 // import webWorkerLoader from 'rollup-plugin-web-worker-loader'
 // import polyfillNode from 'rollup-plugin-polyfill-node'
 
@@ -66,7 +66,6 @@ const config = [
       // bin: 'scripts/bin.ts',
       // addModel: 'scripts/addModel.ts',
       // rpcServer: 'scripts/rpcServer.ts',
-      'db/configs/node.app.db.config': 'src/db/configs/node.app.db.config.ts',
     },
     output: [
       {
@@ -82,6 +81,7 @@ const config = [
       'path-browserify',
       '@zenfs/core',
       '@zenfs/dom',
+      'sqlocal',
       'arweave',
       'tslib',
       'better-sqlite3',
@@ -92,8 +92,10 @@ const config = [
       'node:child_process',
       'url',
       'node:url',
+      'js-yaml',
     ],
     plugins: [
+      json(),
       typescript({
         exclude: ['__tests__/**/*'],
         jsx: 'react',
@@ -176,8 +178,8 @@ const config = [
       copy({
         targets: [
           { src: 'src/db/seedSchema', dest: 'dist/db' },
-          { src: 'src/db/configs', dest: 'dist/db' },
           { src: 'src/seedSchema', dest: 'dist' },
+          { src: 'src/db/drizzle', dest: 'dist/db/drizzle' },
           {
             src: 'src/node/codegen/templates/**/*',
             dest: 'dist/node/codegen/templates',
@@ -202,7 +204,6 @@ const config = [
       // 'bin.cjs': 'scripts/bin.ts',
       // 'addModel.cjs': 'scripts/addModel.ts',
       // 'rpcServer.cjs': 'scripts/rpcServer.ts',
-      'db/configs/node.app.db.config.cjs': 'src/db/configs/node.app.db.config.ts',
     },
     output: [
       {
@@ -226,6 +227,7 @@ const config = [
       'typia',
     ],
     plugins: [
+      json(),
       alias({
         entries: [
           { find: /^@\/(.*)$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'src/$1') }
@@ -245,7 +247,6 @@ const config = [
       copy({
         targets: [
           { src: 'src/db/seedSchema', dest: 'dist/db' },
-          { src: 'src/db/configs', dest: 'dist/db' },
           { src: 'src/seedSchema', dest: 'dist' },
           {
             src: 'src/node/codegen/templates/**/*',

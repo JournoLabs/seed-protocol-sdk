@@ -26,7 +26,10 @@ export enum ClientManagerState {
   PLATFORM_CLASSES_INIT = 'platformClassesInit',
   FILE_SYSTEM_INIT = 'fileSystemInit',
   DB_INIT = 'dbInit',
+  SAVE_CONFIG = 'saveConfig',
   GLOBAL_SERVICE_INIT = 'globalServiceInit',
+  ADD_MODELS_TO_STORE = 'addModelsToStore',
+  PROCESS_SCHEMA_FILES = 'processSchemaFiles',
   IDLE = 'idle',
 }
 
@@ -36,6 +39,11 @@ export enum ClientManagerEvents {
   PLATFORM_CLASSES_READY = 'platformClassesReady',
   FILE_SYSTEM_READY = 'fileSystemReady',
   DB_READY = 'dbReady',
+  SAVE_CONFIG_SUCCESS = 'saveConfigSuccess',
+  SAVE_APP_STATE_SUCCESS = 'saveAppStateSuccess',
+  SET_ADDRESSES = 'setAddresses',
+  ADD_MODELS_TO_STORE_SUCCESS = 'addModelsToStoreSuccess',
+  PROCESS_SCHEMA_FILES_SUCCESS = 'processSchemaFilesSuccess',
 }
 
 export enum GlobalState {

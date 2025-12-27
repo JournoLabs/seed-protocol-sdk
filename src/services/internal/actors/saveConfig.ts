@@ -28,7 +28,6 @@ export const saveConfig = fromCallback<
         // In test environments, continue anyway
         if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
           logger('[internal/actors] [saveConfig] App DB not found, but continuing in test environment')
-          console.log('[internal/actors] [saveConfig] App DB not found, but continuing in test environment')
           return
         }
         throw new Error('App DB not found')

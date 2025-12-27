@@ -3,6 +3,7 @@ import { FromCallbackInput, PublishMachineContext } from '@/types'
 import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import { getCorrectId } from '@/helpers'
+import { ModelPropertyDataTypes } from '@/schema'
 
 const logger = debug('seedSdk:services:publish:actors:upload')
 
@@ -49,7 +50,7 @@ export const upload = fromCallback<
 
       if (
         editedProperty.propertyDef.refValueType &&
-        editedProperty.propertyDef.refValueType === 'Image'
+        editedProperty.propertyDef.refValueType === ModelPropertyDataTypes.Image
       ) {
         const snapshot = editedProperty.getService().getSnapshot()
         const context = 'context' in snapshot ? snapshot.context : null

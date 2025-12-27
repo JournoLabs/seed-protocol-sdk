@@ -9,6 +9,8 @@ import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 
 import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+// Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
+// import { ModelPropertyDataTypes } from '@/schema'
 import { TypedData } from '@ethereum-attestation-service/eas-sdk/dist/offchain/typed-data-handler'
 
 export const analyzeInput = fromCallback<
@@ -44,12 +46,15 @@ export const analyzeInput = fromCallback<
   }
 
   const _analyzeInput = async (): Promise<boolean> => {
+    // Use dynamic import to break circular dependency
+    const { ModelPropertyDataTypes } = await import('@/schema')
+    
     let propertyName = propertyNameRaw
 
     if (
       propertyRecordSchema.refValueType &&
-      propertyRecordSchema.refValueType !== 'Image' &&
-      propertyRecordSchema.dataType === 'Relation'
+      propertyRecordSchema.refValueType !== ModelPropertyDataTypes.Image &&
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation
     ) {
       sendBack({
         type: 'saveRelation',
@@ -59,8 +64,8 @@ export const analyzeInput = fromCallback<
     }
 
     if (
-      propertyRecordSchema.refValueType === 'Image' ||
-      propertyRecordSchema.dataType === 'Image'
+      propertyRecordSchema.refValueType === ModelPropertyDataTypes.Image ||
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
     ) {
       sendBack({
         type: 'saveImage',

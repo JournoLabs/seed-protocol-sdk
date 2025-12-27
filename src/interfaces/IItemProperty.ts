@@ -4,7 +4,7 @@ import { Static } from '@sinclair/typebox';
 import { TProperty } from '@/schema';
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty';
 
-export interface IItemProperty<PropertyType> {
+export interface IItemProperty {
 
   readonly localId: string;
   readonly uid: string;

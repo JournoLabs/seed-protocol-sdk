@@ -1,0 +1,572 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://seedprotocol.org/schemas/data-model/v1",
+  "title": "Seed Protocol Data Model Schema",
+  "description": "Schema for defining data models in Seed Protocol",
+  "type": "object",
+  "required": ["$schema", "version", "metadata", "models"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to this schema document",
+      "format": "uri"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for this schema, generated when first written to JSON file"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Schema version number, incremented on each change",
+      "minimum": 1
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "createdAt", "updatedAt"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for this data model"
+        },
+        "description": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "description": "Model definitions keyed by model name",
+      "additionalProperties": {
+        "$ref": "#/$defs/ModelDefinition"
+      }
+    },
+    "enums": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/EnumDefinition"
+      }
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Migration"
+      }
+    }
+  },
+  "$defs": {
+    "ModelDefinition": {
+      "type": "object",
+      "required": ["properties"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this model, generated when first written to JSON file"
+        },
+        "description": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PropertyDefinition"
+          }
+        },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Constraint"
+          }
+        }
+      }
+    },
+    "PropertyDefinition": {
+      "oneOf": [
+        {"$ref": "#/$defs/TextProperty"},
+        {"$ref": "#/$defs/NumberProperty"},
+        {"$ref": "#/$defs/BooleanProperty"},
+        {"$ref": "#/$defs/DateProperty"},
+        {"$ref": "#/$defs/JsonProperty"},
+        {"$ref": "#/$defs/ImageSrcProperty"},
+        {"$ref": "#/$defs/RelationProperty"},
+        {"$ref": "#/$defs/ListProperty"}
+      ]
+    },
+    "TextProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Text"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaultValue": {
+          "type": "string"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "storage": {
+          "$ref": "#/$defs/StorageConfig"
+        },
+        "validation": {
+          "$ref": "#/$defs/ValidationRules"
+        }
+      }
+    },
+    "NumberProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaultValue": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "precision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "validation": {
+          "$ref": "#/$defs/ValidationRules"
+        }
+      }
+    },
+    "BooleanProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaultValue": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DateProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Date"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "defaultValue": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "JsonProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Json"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema for validating the stored JSON"
+        }
+      }
+    },
+    "ImageSrcProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "ImageSrc"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "RelationProperty": {
+      "type": "object",
+      "required": ["type", "model"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "Relation"
+        },
+        "model": {
+          "type": "string",
+          "description": "Name of the related model"
+        },
+        "accessor": {
+          "type": "string",
+          "description": "Property accessor for the relation"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "onDelete": {
+          "type": "string",
+          "enum": ["cascade", "setNull", "restrict"],
+          "default": "restrict"
+        }
+      }
+    },
+    "ListProperty": {
+      "type": "object",
+      "required": ["type", "items"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this property, generated when first written to JSON file"
+        },
+        "type": {
+          "const": "List"
+        },
+        "items": {
+          "oneOf": [
+            {"$ref": "#/$defs/RelationProperty"},
+            {"$ref": "#/$defs/TextProperty"},
+            {"$ref": "#/$defs/NumberProperty"}
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "StorageConfig": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ItemStorage", "External"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "extension": {
+          "type": "string",
+          "pattern": "^\\."
+        }
+      }
+    },
+    "ValidationRules": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression pattern"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "enum": {
+          "type": "array",
+          "items": {}
+        },
+        "custom": {
+          "type": "string",
+          "description": "Reference to custom validator function"
+        }
+      }
+    },
+    "Constraint": {
+      "type": "object",
+      "required": ["type", "fields"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["unique", "check"]
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "expression": {
+          "type": "string"
+        }
+      }
+    },
+    "EnumDefinition": {
+      "type": "object",
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "Migration": {
+      "type": "object",
+      "required": ["version", "timestamp", "description", "changes"],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        },
+        "rollback": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        }
+      }
+    },
+    "Change": {
+      "oneOf": [
+        {"$ref": "#/$defs/AddModelChange"},
+        {"$ref": "#/$defs/RemoveModelChange"},
+        {"$ref": "#/$defs/AddPropertyChange"},
+        {"$ref": "#/$defs/RemovePropertyChange"},
+        {"$ref": "#/$defs/ModifyPropertyChange"},
+        {"$ref": "#/$defs/RenameModelChange"},
+        {"$ref": "#/$defs/RenamePropertyChange"}
+      ]
+    },
+    "AddModelChange": {
+      "type": "object",
+      "required": ["type", "model", "definition"],
+      "properties": {
+        "type": {
+          "const": "addModel"
+        },
+        "model": {
+          "type": "string"
+        },
+        "definition": {
+          "$ref": "#/$defs/ModelDefinition"
+        }
+      }
+    },
+    "RemoveModelChange": {
+      "type": "object",
+      "required": ["type", "model"],
+      "properties": {
+        "type": {
+          "const": "removeModel"
+        },
+        "model": {
+          "type": "string"
+        }
+      }
+    },
+    "AddPropertyChange": {
+      "type": "object",
+      "required": ["type", "model", "property", "definition"],
+      "properties": {
+        "type": {
+          "const": "addProperty"
+        },
+        "model": {
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        },
+        "definition": {
+          "$ref": "#/$defs/PropertyDefinition"
+        }
+      }
+    },
+    "RemovePropertyChange": {
+      "type": "object",
+      "required": ["type", "model", "property"],
+      "properties": {
+        "type": {
+          "const": "removeProperty"
+        },
+        "model": {
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        }
+      }
+    },
+    "ModifyPropertyChange": {
+      "type": "object",
+      "required": ["type", "model", "property", "from", "to"],
+      "properties": {
+        "type": {
+          "const": "modifyProperty"
+        },
+        "model": {
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/PropertyDefinition"
+        },
+        "to": {
+          "$ref": "#/$defs/PropertyDefinition"
+        }
+      }
+    },
+    "RenameModelChange": {
+      "type": "object",
+      "required": ["type", "from", "to"],
+      "properties": {
+        "type": {
+          "const": "renameModel"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    },
+    "RenamePropertyChange": {
+      "type": "object",
+      "required": ["type", "model", "from", "to"],
+      "properties": {
+        "type": {
+          "const": "renameProperty"
+        },
+        "model": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

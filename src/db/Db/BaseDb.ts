@@ -3,6 +3,8 @@ import { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 
 export abstract class BaseDb implements IDb {
 
+  static filesDir: string | undefined
+
   constructor() {
   }
 

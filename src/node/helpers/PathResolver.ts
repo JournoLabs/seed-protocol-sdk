@@ -1,8 +1,10 @@
 import path from 'path'
 import fs from 'fs'
-import { NODE_APP_DB_CONFIG } from '../constants'
 import { SEED_CONFIG_FILE, SEED_CONFIG_FALLBACKS } from '@/helpers/constants'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
+import debug from 'debug'
+
+const logger = debug('seedSdk:node:helpers:PathResolver')
 
 class PathResolver extends BasePathResolver {
   /**
@@ -86,14 +88,11 @@ class PathResolver extends BasePathResolver {
       // For linked packages, find the package directory
       const pkgJson = JSON.parse(fs.readFileSync(path.join(processCwd, 'package.json'), 'utf8'))
       const sdkPath = pkgJson.dependencies?.['@seedprotocol/sdk'] || pkgJson.devDependencies?.['@seedprotocol/sdk']
-      console.log(sdkPath)
       if (sdkPath === 'link:@seedprotocol/sdk') {
-        return path.join(processCwd, 'node_modules', '@seedprotocol', 'sdk', 'src')
+        return path.join(processCwd, 'node_modules', '@seedprotocol', 'sdk',)
       }
       return path.resolve(processCwd, sdkPath.replace(/^(link:|portal:)/, ''))
     }
-
-    console.log('getSdkRootDir', rootWithNodeModules, env)
 
     switch (env) {
       case 'sdk-dev':
@@ -166,9 +165,7 @@ class PathResolver extends BasePathResolver {
 
     if (env === 'linked-sdk') {
       const sdkRootDir = this.getSdkRootDir()
-      console.log(`sdkRootDir: ${sdkRootDir}`)
       const sdkPackageDir = path.dirname(sdkRootDir)
-      console.log(`sdkPackageDir: ${sdkPackageDir}`)
       const sdkNodeModulesDir = path.join(sdkPackageDir, 'node_modules')
       drizzleKitPath = path.join(sdkNodeModulesDir, 'drizzle-kit', 'bin.cjs')
     }
@@ -183,6 +180,17 @@ class PathResolver extends BasePathResolver {
       templatePath = path.join(this.getSdkRootDir(), 'src', 'node', 'codegen', 'templates')
     }
 
+    logger('env', env)
+
+    logger('getAppPaths', {
+      sdkRootDir: this.getSdkRootDir(),
+      dotSeedDir,
+      nodeModulesDir,
+      appSchemaDir: path.join(dotSeedDir, 'schema'),
+      appDbDir: path.join(dotSeedDir, 'db'),
+      appMetaDir: path.join(dotSeedDir, 'db', 'meta'),
+    })
+
     return {
       sdkRootDir: this.getSdkRootDir(),
       dotSeedDir,
@@ -190,7 +198,6 @@ class PathResolver extends BasePathResolver {
       appSchemaDir: path.join(dotSeedDir, 'schema'),
       appDbDir: path.join(dotSeedDir, 'db'),
       appMetaDir: path.join(dotSeedDir, 'db', 'meta'),
-      drizzleDbConfigPath: path.join(this.getSdkRootDir(), 'src', NODE_APP_DB_CONFIG),
       drizzleKitPath,
       templatePath
     }

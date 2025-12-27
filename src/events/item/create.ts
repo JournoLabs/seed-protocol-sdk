@@ -18,8 +18,14 @@ export const createItemRequestHandler = async (event) => {
     return
   }
 
+  const modelName = ModelClass?.originalConstructor?.name
+  if (!modelName) {
+    console.error('[createItemRequestHandler] ModelClass.originalConstructor.name is undefined', { ModelClass })
+    throw new Error('ModelClass.originalConstructor.name is required')
+  }
+
   const newItem = await BaseItem.create({
-    modelName: ModelClass.originalConstructor.name,
+    modelName,
     ...itemData,
   })
 

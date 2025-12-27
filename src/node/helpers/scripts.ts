@@ -160,9 +160,6 @@ export const runSeedInit = async (
   const { apply, hasDataLoss, warnings, statementsToExecute } = await pushSQLiteSchema(schema, db);
   
   // You can inspect what will happen before applying
-  console.log('Statements to execute:', statementsToExecute);
-  console.log('Has data loss:', hasDataLoss);
-  console.log('Warnings:', warnings);
   
   await apply();
 

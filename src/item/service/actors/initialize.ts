@@ -8,13 +8,16 @@ export const initialize = fromCallback<
   FromCallbackInput<ItemMachineContext<any>>
 >(
   ({ sendBack, input: { context } }) => {
-    const { seedLocalId, seedUid, ModelClass } = context
+    const { seedLocalId, seedUid, ModelClass, modelName: contextModelName } = context
 
     if (!ModelClass) {
       throw new Error('ModelClass is required')
     }
 
-    const modelName = ModelClass.originalConstructor.name
+    const modelName = ModelClass?.originalConstructor?.name || contextModelName
+    if (!modelName) {
+      throw new Error('ModelClass.originalConstructor.name or modelName is required')
+    }
     const modelNamePlural = pluralize(modelName)
     const modelTableName = modelNamePlural.toLowerCase()
 

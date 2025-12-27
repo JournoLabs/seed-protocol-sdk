@@ -2,6 +2,7 @@ import path                     from 'path'
 import pluralize                from 'pluralize'
 import { camelCase, snakeCase } from 'lodash-es'
 import { ModelClassType }       from '@/types'
+import { ModelPropertyDataTypes } from '@/schema'
 
 // Define ILoader type locally to avoid importing from nunjucks (prevents bundling issues)
 type ILoader = {
@@ -53,10 +54,10 @@ const getNunjucksEnv = async () => {
 }
 
 const refNamesToExcludeFromRelations = [
-  'Text',
-  'Number',
-  'Boolean',
-  'Date',
+  ModelPropertyDataTypes.Text,
+  ModelPropertyDataTypes.Number,
+  ModelPropertyDataTypes.Boolean,
+  ModelPropertyDataTypes.Date,
 ]
 
 export const generateDrizzleSchemaCode = async (
@@ -64,7 +65,7 @@ export const generateDrizzleSchemaCode = async (
   modelClass: ModelClassType,
 ): Promise<string> => {
   const listProperties = Object.entries(modelClass.schema).filter(
-    ([key, propertyDef]) => propertyDef?.dataType === 'List' && !refNamesToExcludeFromRelations.includes(propertyDef?.ref!),
+    ([key, propertyDef]) => propertyDef?.dataType === ModelPropertyDataTypes.List && !refNamesToExcludeFromRelations.includes(propertyDef?.ref!),
   )
 
   const pathResolver = BasePathResolver.getInstance()
@@ -87,11 +88,9 @@ export const createDrizzleSchemaFilesFromConfig = async (
 ) => {
   const pathResolver = BasePathResolver.getInstance()
   const { dotSeedDir, appSchemaDir } = pathResolver.getAppPaths()
-  console.log('createDrizzleSchemaFilesFromConfig', configFilePath, outputDirPath)
 
   // Use provided config file path or find the config file in the project root
   const schemaFilePath = configFilePath || pathResolver.findConfigFile() || path.join(dotSeedDir, 'seed.config.ts')
-  console.log('schemaFilePath', schemaFilePath)
 
   const { models, } = await getTsImport<{
     models: Record<string, ModelClassType>
@@ -115,21 +114,21 @@ export const createDrizzleSchemaFilesFromConfig = async (
  // Helper to determine TypeScript type based on property type
  const seedTypeToJsType = (propertyType: string): string => {
   switch (propertyType) {
-    case 'Text':
+    case ModelPropertyDataTypes.Text:
       return 'string';
-    case 'Number':
+    case ModelPropertyDataTypes.Number:
       return 'number';
-    case 'Boolean':
+    case ModelPropertyDataTypes.Boolean:
       return 'boolean';
-    case 'Date':
+    case ModelPropertyDataTypes.Date:
       return 'string';
-    case 'List':
+    case ModelPropertyDataTypes.List:
       return 'string[]';
-    case 'Relation':
+    case ModelPropertyDataTypes.Relation:
       return 'string';
-    case 'Image':
+    case ModelPropertyDataTypes.Image:
       return 'string';
-    case 'File':
+    case ModelPropertyDataTypes.File:
       return 'string';
     default:
       return 'any';
@@ -142,7 +141,7 @@ export const generateModelCode = async (values: Record<string, any>): Promise<st
   const pathResolver = BasePathResolver.getInstance()
   const { templatePath } = pathResolver.getAppPaths()
 
-  if (modelName === 'Text' || modelName === 'TestModel') {
+  if (modelName === ModelPropertyDataTypes.Text || modelName === 'TestModel') {
     logger(`Model name is ${modelName}.`)
   }
 

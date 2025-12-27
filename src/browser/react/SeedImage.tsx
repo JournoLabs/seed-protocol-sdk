@@ -1,7 +1,7 @@
 import React, { FC, HTMLAttributes, useState, useEffect, DetailedHTMLProps, ImgHTMLAttributes } from 'react'
 import debug                                                                                    from 'debug'
 import { FileManager } from "../helpers/FileManager"
-import { useItemProperty } from "./property"
+import { useItemProperty } from "./itemProperty"
 import { BaseItemProperty } from "@/ItemProperty/BaseItemProperty"
 
 const logger = debug('seedSdk:react:SeedImage')

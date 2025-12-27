@@ -7,13 +7,19 @@ import { dbInit } from "./actors/dbInit"
 import { ClientManagerEvents, ClientManagerState } from "@/services/internal/constants"
 import { MachineIds } from "@/services/internal/constants"
 import { globalServiceInit } from "./actors/globalServiceInit"
+import { addModelsToStore } from "./actors/addModelsToStore"
+import { saveConfig } from "./actors/saveConfig"
+import { processSchemaFiles } from "./actors/processSchemaFiles"
 
 const {
   UNINITIALIZED,
   PLATFORM_CLASSES_INIT,
   FILE_SYSTEM_INIT,
   DB_INIT,
+  SAVE_CONFIG,
+  PROCESS_SCHEMA_FILES,
   GLOBAL_SERVICE_INIT,
+  ADD_MODELS_TO_STORE,
   IDLE,
 } = ClientManagerState
 
@@ -23,6 +29,11 @@ const {
   PLATFORM_CLASSES_READY,
   FILE_SYSTEM_READY,
   DB_READY,
+  SAVE_CONFIG_SUCCESS,
+  SAVE_APP_STATE_SUCCESS,
+  SET_ADDRESSES,
+  ADD_MODELS_TO_STORE_SUCCESS,
+  PROCESS_SCHEMA_FILES_SUCCESS,
 } = ClientManagerEvents
 
 type InitEvent = {
@@ -39,8 +50,11 @@ export const clientManagerMachine = setup({
     platformClassesInit,
     fileSystemInit,
     dbInit,
+    saveConfig,
     globalServiceInit,
     saveAppState,
+    addModelsToStore,
+    processSchemaFiles,
   },
 }).createMachine({
   id: MachineIds.CLIENT_MANAGER,
@@ -67,7 +81,7 @@ export const clientManagerMachine = setup({
     },
     [PLATFORM_CLASSES_INIT]: {
       on: {
-        platformClassesReady: {
+        [PLATFORM_CLASSES_READY]: {
           target: FILE_SYSTEM_INIT,
         },
       },
@@ -93,7 +107,7 @@ export const clientManagerMachine = setup({
     [DB_INIT]: {
       on: {
         [DB_READY]: {
-          target: GLOBAL_SERVICE_INIT,
+          target: SAVE_CONFIG,
         },
       },
       invoke: {
@@ -101,7 +115,40 @@ export const clientManagerMachine = setup({
         input: ({ context }) => ({ context }),
       },
     },
-    globalServiceInit: {
+    [SAVE_CONFIG]: {
+      on: {
+        [SAVE_CONFIG_SUCCESS]: {
+          target: PROCESS_SCHEMA_FILES,
+        },
+      },
+      invoke: {
+        src: 'saveConfig',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    [PROCESS_SCHEMA_FILES]: {
+      on: {
+        [PROCESS_SCHEMA_FILES_SUCCESS]: {
+          target: ADD_MODELS_TO_STORE,
+        },
+      },
+      invoke: {
+        src: 'processSchemaFiles',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    [ADD_MODELS_TO_STORE]: {
+      on: {
+        [ADD_MODELS_TO_STORE_SUCCESS]: {
+          target: GLOBAL_SERVICE_INIT,
+        },
+      },
+      invoke: {
+        src: 'addModelsToStore',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    [GLOBAL_SERVICE_INIT]: {
       on: {
         [GLOBAL_SERVICE_READY]: {
           target: IDLE,
@@ -117,7 +164,7 @@ export const clientManagerMachine = setup({
         isInitialized: true,
       }),
       on: {
-        saveAppStateSuccess: {
+        [SAVE_APP_STATE_SUCCESS]: {
           actions: assign(({ event }) => {
             const { key, value } = event
             return {
@@ -125,7 +172,7 @@ export const clientManagerMachine = setup({
             }
           }),
         },
-        setAddresses: {
+        [SET_ADDRESSES]: {
           actions: [
             assign(({ event, spawn }) => {
               const { addresses } = event

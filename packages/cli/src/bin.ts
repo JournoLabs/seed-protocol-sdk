@@ -16,6 +16,7 @@ import {
   versions,
 } from '@seedprotocol/sdk/node'
 import { runInit } from './init'
+import { runExportSql } from './export-sql'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -171,6 +172,15 @@ program
   .argument('<seedDataPath>', 'Path to the seed data JSON file')
   .action(async (seedDataPath: string) => {
     await seedDatabase(seedDataPath)
+  })
+
+program
+  .command('export-sql')
+  .description('Export SQL statements for initializing the database')
+  .argument('[schemaPath]', 'Path to the schema file directory')
+  .argument('[outputPath]', 'Path to the output SQL file (defaults to init.sql in schema directory)')
+  .action(async (schemaPath?: string, outputPath?: string) => {
+    await runExportSql(schemaPath, outputPath)
   })
 
 // Parse command line arguments

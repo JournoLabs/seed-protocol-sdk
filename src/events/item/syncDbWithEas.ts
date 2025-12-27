@@ -28,50 +28,13 @@ import { createSeeds } from '@/db/write/createSeeds'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { getItemPropertiesFromEas, getItemVersionsFromEas, getModelSchemasFromEas } from '@/browser/helpers/eas'
+import { getItemPropertiesFromEas, getItemVersionsFromEas, getModelSchemasFromEas, getSeedsFromSchemaUids } from '@/eas'
 
 
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
 
-
-const getSeedsFromSchemaUids = async ({ schemaUids, addresses }: { schemaUids: string[], addresses: string[] }) => {
-  const AND = [
-    {
-      OR: [] as Record<string, unknown>[],
-    },
-  ]
-
-  for (const schemaUid of schemaUids) {
-    AND[0].OR.push({
-      decodedDataJson: {
-        contains: schemaUid,
-      },
-    })
-  }
-
-  const queryClient = BaseQueryClient.getQueryClient()
-  const easClient = BaseEasClient.getEasClient()
-
-  const { itemSeeds } = await queryClient.fetchQuery({
-    queryKey: [`getSeedsForAllModels`],
-    queryFn: async () =>
-      easClient.request(GET_SEEDS, {
-        where: {
-          attester: {
-            in: addresses,
-          },
-          schemaId: {
-            in: schemaUids,
-          },
-          AND,
-        },
-      }),
-  })
-
-  return itemSeeds
-}
 
 const seedUidToLocalId = new Map<string, string>()
 const seedUidToModelType = new Map<string, string>()
@@ -299,9 +262,14 @@ type SaveEasPropertiesToDbParams = {
   itemSeeds: Attestation[]
 }
 
+type SaveEasPropertiesToDbReturn = {
+  propertyUids: string[]
+  propertyUidToLocalId?: Map<string, string>
+}
+
 type SaveEasPropertiesToDb = (
   props: SaveEasPropertiesToDbParams,
-) => Promise<Record<string, unknown>>
+) => Promise<SaveEasPropertiesToDbReturn>
 
 let isSavingToDb = false
 
@@ -310,7 +278,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   itemSeeds,
 }) => {
   if (isSavingToDb) {
-    return
+    return { propertyUids: [] }
   }
   isSavingToDb = true
 
@@ -547,7 +515,12 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
       const foundModel = schemaStringToModelRecord.get(modelSchema.schema)
 
       if (!foundModel) {
-        throw new Error(`Model not found for schema ${modelSchema.schema}`)
+        // Skip schemas that don't have a corresponding model in the user's config
+        // This can happen with "bytes32 image" if there's no Image model defined
+        console.warn(
+          `[item/events] [syncDbWithEas] Model not found for schema ${modelSchema.schema}, skipping`
+        )
+        continue
       }
 
       schemaUids.push(modelSchema.id)
@@ -562,10 +535,16 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
 
     }
 
+    // If no schemas were found, skip the rest of the sync process
+    // This can happen when models exist but don't have schemas registered in EAS yet
+    if (schemaUids.length === 0) {
+      return
+    }
+
     const addresses = await getAddressesFromDb()
 
     const itemSeeds = await getSeedsFromSchemaUids({
-      schemaUids: schemaUids,
+      schemaUids,
       addresses,
     })
 
@@ -587,7 +566,7 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
       versionUids,
     })
 
-    const { propertyUids } = saveEasPropertiesToDb({
+    const { propertyUids } = await saveEasPropertiesToDb({
       itemProperties,
       itemSeeds,
     })

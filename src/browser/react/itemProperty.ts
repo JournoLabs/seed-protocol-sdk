@@ -6,7 +6,8 @@ import debug from 'debug'
 import { eventEmitter } from '@/eventBus'
 import { ItemProperty } from '@/browser/ItemProperty/ItemProperty'
 import { useGlobalServiceStatus } from '@/browser/react/services'
-import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
+import { IItemProperty } from '@/interfaces'
+import { GlobalState } from '@/services/internal/constants'
 
 const logger = debug('seedSdk:react:property')
 
@@ -17,7 +18,7 @@ type UseItemPropertyProps = {
 }
 
 type UseItemPropertyReturn = {
-  property: BaseItemProperty<any> | undefined
+  property: IItemProperty<any> | undefined
   isInitialized: boolean
   value: any
   status: string
@@ -33,10 +34,10 @@ export const useItemProperty: UseItemProperty = (props = {
 
   const { propertyName, seedLocalId, seedUid } = props
 
-  const [property, setProperty] = useState<BaseItemProperty<any> | undefined>()
+  const [property, setProperty] = useState<IItemProperty<any> | undefined>()
   const [isInitialized, setIsInitialized] = useState(false)
 
-  const { internalStatus } = useGlobalServiceStatus()
+  const { status, } = useGlobalServiceStatus()
 
   const isReadingDb = useRef(false)
 
@@ -47,14 +48,14 @@ export const useItemProperty: UseItemProperty = (props = {
     return snapshot.context.renderValue || snapshot.context.propertyValue
   })
 
-  const status = useSelector(
+  const itemPropertyStatus = useSelector(
     property?.getService(),
     (snapshot) => snapshot?.value as string,
   )
 
   const readFromDb = useCallback(async () => {
     if (
-      internalStatus !== 'ready' ||
+      status !== GlobalState.INITIALIZED ||
       isReadingDb.current ||
       (!seedLocalId && !seedUid)
     ) {
@@ -79,7 +80,7 @@ export const useItemProperty: UseItemProperty = (props = {
     setProperty(foundProperty)
     setIsInitialized(true)
     isReadingDb.current = false
-  }, [internalStatus, props])
+  }, [status, props])
 
   const listenerRef = useRef(readFromDb)
 
@@ -88,10 +89,10 @@ export const useItemProperty: UseItemProperty = (props = {
   }, [readFromDb, props])
 
   useEffect(() => {
-    if (internalStatus === 'ready') {
+    if (status === GlobalState.INITIALIZED) {
       readFromDb()
     }
-  }, [internalStatus])
+  }, [status,])
 
   useEffect(() => {
     eventEmitter.addListener(
@@ -112,7 +113,7 @@ export const useItemProperty: UseItemProperty = (props = {
     property,
     isInitialized,
     value,
-    status,
+    status: itemPropertyStatus,
   }
 }
 export const useItemProperties = (item?: Item<any>) => {

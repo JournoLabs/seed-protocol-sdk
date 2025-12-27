@@ -11,13 +11,16 @@ export const hydrateExistingItem = fromCallback<
   FromCallbackInput<ItemMachineContext<any>, HydrateExistingItemEvent>
 >(({ sendBack, input: { event, context } }) => {
   const { existingItem } = event!
-  const { seedUid, seedLocalId, ModelClass } = context
+  const { seedUid, seedLocalId, ModelClass, modelName: contextModelName } = context
 
   if (!ModelClass) {
     throw new Error('ModelClass not found')
   }
 
-  const modelName = ModelClass.originalConstructor.name
+  const modelName = ModelClass?.originalConstructor?.name || contextModelName
+  if (!modelName) {
+    throw new Error('ModelClass.originalConstructor.name or modelName is required')
+  }
 
   const _checkForItemOnAllItemsService = async (): Promise<boolean> => {
     if (!existingItem.seedLocalId && !existingItem.seedUid) {

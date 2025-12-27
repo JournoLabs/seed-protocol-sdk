@@ -7,6 +7,8 @@ import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseFileManager } from '@/helpers'
+// Dynamic import to break circular dependency: schema/index -> ... -> hydrateFromDb -> schema/index
+// import { ModelPropertyDataTypes } from '@/schema'
 
 const logger = debug('seedSdk:property:actors:hydrateFromDb')
 
@@ -24,45 +26,32 @@ export const hydrateFromDb = fromCallback<
 
   let propertyName = propertyNameRaw
 
-  const isRelation =
-    propertyRecordSchema &&
-    propertyRecordSchema.ref &&
-    propertyRecordSchema.dataType === 'Relation'
-
-  const isImage =
-    propertyRecordSchema &&
-    propertyRecordSchema.dataType === 'Image'
-
-  const isFile =
-    propertyRecordSchema &&
-    propertyRecordSchema.dataType === 'File'
-
-  if (
-    (
-      isRelation || 
-      isImage ||
-      isFile
-    ) &&
-    !propertyNameRaw.endsWith('Id')
-  ) {
-    propertyName = propertyNameRaw + 'Id'
-  }
-
-  if (
-    propertyRecordSchema &&
-    propertyRecordSchema.ref &&
-    propertyRecordSchema.dataType === 'List' &&
-    !propertyNameRaw.endsWith('Ids')
-  ) {
-    propertyName = propertyNameRaw + 'Ids'
-  }
+  // Note: isRelation, isImage, isFile checks moved inside async function
+  // to use dynamically imported ModelPropertyDataTypes
 
   const _hydrateFromDb = async () => {
+    // Use dynamic import to break circular dependency
+    const { ModelPropertyDataTypes } = await import('@/schema')
+    
     const appDb = BaseDb.getAppDb()
 
     const whereClauses = []
 
-    if (isRelation || isImage || isFile) {
+    // Re-check types with dynamically imported ModelPropertyDataTypes
+    const isRelationDynamic =
+      propertyRecordSchema &&
+      propertyRecordSchema.ref &&
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation
+
+    const isImageDynamic =
+      propertyRecordSchema &&
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
+
+    const isFileDynamic =
+      propertyRecordSchema &&
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.File
+
+    if (isRelationDynamic || isImageDynamic || isFileDynamic) {
       let missingPropertyNameVariant
       if (propertyName.endsWith('Id')) {
         missingPropertyNameVariant = propertyName.slice(0, -2)
@@ -124,7 +113,7 @@ export const hydrateFromDb = fromCallback<
       propertyValueFromDb
 
 
-    if (isImage) {
+    if (isImageDynamic) {
       let shouldReadFromFile = true
 
       if (
@@ -157,7 +146,7 @@ export const hydrateFromDb = fromCallback<
         let dir = localStorageDir
         if (
           !dir &&
-          isImage
+          isImageDynamic
         ) {
           dir = 'images'
         }
@@ -228,7 +217,7 @@ export const hydrateFromDb = fromCallback<
 
     if (
       propertyRecordSchema &&
-      propertyRecordSchema.dataType === 'List' &&
+      propertyRecordSchema.dataType === ModelPropertyDataTypes.List &&
       propertyRecordSchema.ref &&
       typeof propertyValueFromDb === 'string'
     ) {

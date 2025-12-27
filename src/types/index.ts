@@ -31,11 +31,18 @@ export interface WebpackConfigContext {
 export type Environment = 'browser' | 'node' | 'react-native'
 
 
+export interface DbConfig {
+  dbUrl?: string
+  schemaDir?: string
+  outDir?: string
+}
+
 export interface SeedConfig {
   readonly endpoints: Endpoints
   models: Record<string, ModelClassType>
   arweaveDomain?: string
   filesDir?: string
+  dbConfig?: DbConfig
 }
 
 export interface SeedConstructorOptions {

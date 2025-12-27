@@ -17,7 +17,11 @@ FromCallbackInput<ClientManagerContext>
   }
 
   const _fileSystemInit = async () => {
-    await BaseFileManager.initializeFileSystem()
+    const { filesDir } = context
+    if (!filesDir) {
+      throw new Error('filesDir is required')
+    }
+    await BaseFileManager.initializeFileSystem(filesDir)
     eventEmitter.emit('fs.init')
   }
 

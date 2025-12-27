@@ -1,7 +1,7 @@
 import { PropertyStates, PropertyValue } from './property'
 import { Actor, AnyActorLogic } from 'xstate'
 import { Static }                               from '@sinclair/typebox'
-import { IModelClass, TModelSchema, TProperty } from '@/schema'
+import { TModelSchema, TProperty } from '@/schema'
 import { BaseItem }                             from '@/Item/BaseItem'
 
 export type ModelDefinitions = {
@@ -38,12 +38,6 @@ export type StatesMap<T> = Map<string, Actor<T extends AnyActorLogic ? T : never
 
 export type ModelSchema = Partial<Static<typeof TModelSchema>>
 
-export type ModelConstructor = <
-  T extends { new(...args: any[]): IModelClass },
->(
-  constructor: T,
-) => T & IModelClass
-
-// export type ModelConstructor = Static<TModelConstructor>
+// ModelConstructor type removed - decorator pattern no longer supported
 
 export type ModelProperty = typeof TProperty

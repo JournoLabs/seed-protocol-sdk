@@ -6369,7 +6369,7 @@
       {
         "kind": "OBJECT",
         "name": "Block",
-        "description": null,
+        "description": "Block Schema",
         "isOneOf": null,
         "fields": [
           {
@@ -6393,13 +6393,9 @@
             "description": "The block ID.",
             "args": [],
             "type": {
-              "kind": "NON_NULL",
-              "name": null,
-              "ofType": {
-                "kind": "SCALAR",
-                "name": "ID",
-                "ofType": null
-              }
+              "kind": "SCALAR",
+              "name": "ID",
+              "ofType": null
             },
             "isDeprecated": false,
             "deprecationReason": null
@@ -6409,13 +6405,9 @@
             "description": "The previous block ID.",
             "args": [],
             "type": {
-              "kind": "NON_NULL",
-              "name": null,
-              "ofType": {
-                "kind": "SCALAR",
-                "name": "ID",
-                "ofType": null
-              }
+              "kind": "SCALAR",
+              "name": "ID",
+              "ofType": null
             },
             "isDeprecated": false,
             "deprecationReason": null
@@ -6425,13 +6417,9 @@
             "description": "The block timestamp (UTC).",
             "args": [],
             "type": {
-              "kind": "NON_NULL",
-              "name": null,
-              "ofType": {
-                "kind": "SCALAR",
-                "name": "Int",
-                "ofType": null
-              }
+              "kind": "SCALAR",
+              "name": "Int",
+              "ofType": null
             },
             "isDeprecated": false,
             "deprecationReason": null
@@ -6502,7 +6490,7 @@
         "fields": [
           {
             "name": "cursor",
-            "description": "The cursor value for fetching the next page.\n\nPass this to the \\`after\\` parameter in \\`blocks(after: $cursor)\\`, the next page will start from the next item after this.",
+            "description": "The cursor value for fetching the next page.\n\nPass this to the after parameter in blocks(after: $cursor), the next page will start from the next item after this.",
             "args": [],
             "type": {
               "kind": "NON_NULL",
@@ -6535,42 +6523,6 @@
         ],
         "inputFields": null,
         "interfaces": [],
-        "enumValues": null,
-        "possibleTypes": null
-      },
-      {
-        "kind": "INPUT_OBJECT",
-        "name": "BlockFilter",
-        "description": "Find blocks within a given range",
-        "isOneOf": false,
-        "fields": null,
-        "inputFields": [
-          {
-            "name": "max",
-            "description": "Maximum block height to filter to",
-            "type": {
-              "kind": "SCALAR",
-              "name": "Int",
-              "ofType": null
-            },
-            "defaultValue": null,
-            "isDeprecated": false,
-            "deprecationReason": null
-          },
-          {
-            "name": "min",
-            "description": "Minimum block height to filter from",
-            "type": {
-              "kind": "SCALAR",
-              "name": "Int",
-              "ofType": null
-            },
-            "defaultValue": null,
-            "isDeprecated": false,
-            "deprecationReason": null
-          }
-        ],
-        "interfaces": null,
         "enumValues": null,
         "possibleTypes": null
       },
@@ -6743,6 +6695,30 @@
         "inputFields": null,
         "interfaces": [],
         "enumValues": null,
+        "possibleTypes": null
+      },
+      {
+        "kind": "ENUM",
+        "name": "CacheControlScope",
+        "description": null,
+        "isOneOf": null,
+        "fields": null,
+        "inputFields": null,
+        "interfaces": null,
+        "enumValues": [
+          {
+            "name": "PRIVATE",
+            "description": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "PUBLIC",
+            "description": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          }
+        ],
         "possibleTypes": null
       },
       {
@@ -8416,7 +8392,7 @@
           },
           {
             "name": "type",
-            "description": "Type is derrived from the \\`content-type\\` tag on a transaction.",
+            "description": "Type is derived from the \\`content-type\\` tag on a transaction.",
             "args": [],
             "type": {
               "kind": "SCALAR",
@@ -13946,13 +13922,9 @@
                 "name": "id",
                 "description": null,
                 "type": {
-                  "kind": "NON_NULL",
-                  "name": null,
-                  "ofType": {
-                    "kind": "SCALAR",
-                    "name": "String",
-                    "ofType": null
-                  }
+                  "kind": "SCALAR",
+                  "name": "String",
+                  "ofType": null
                 },
                 "defaultValue": null,
                 "isDeprecated": false,
@@ -14000,7 +13972,7 @@
                 "description": "Find blocks within a given block height range.",
                 "type": {
                   "kind": "INPUT_OBJECT",
-                  "name": "BlockFilter",
+                  "name": "RangeFilter",
                   "ofType": null
                 },
                 "defaultValue": null,
@@ -17390,7 +17362,7 @@
                 "description": "Find transactions within a given block height range.",
                 "type": {
                   "kind": "INPUT_OBJECT",
-                  "name": "BlockFilter",
+                  "name": "RangeFilter",
                   "ofType": null
                 },
                 "defaultValue": null,
@@ -17444,6 +17416,18 @@
                       "ofType": null
                     }
                   }
+                },
+                "defaultValue": null,
+                "isDeprecated": false,
+                "deprecationReason": null
+              },
+              {
+                "name": "ingested_at",
+                "description": "Find transactions within a given Search Indexing Service ingestion time range.",
+                "type": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "RangeFilter",
+                  "ofType": null
                 },
                 "defaultValue": null,
                 "isDeprecated": false,
@@ -17562,6 +17546,42 @@
             "deprecationReason": null
           }
         ],
+        "possibleTypes": null
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "RangeFilter",
+        "description": "Filter with a min and max",
+        "isOneOf": false,
+        "fields": null,
+        "inputFields": [
+          {
+            "name": "max",
+            "description": "Maximum integer to filter to",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int",
+              "ofType": null
+            },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "min",
+            "description": "Minimum integer to filter from",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int",
+              "ofType": null
+            },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          }
+        ],
+        "interfaces": null,
+        "enumValues": null,
         "possibleTypes": null
       },
       {
@@ -25076,6 +25096,18 @@
             "deprecationReason": null
           },
           {
+            "name": "INGESTED_AT_ASC",
+            "description": "Results are sorted by the transaction ingestion time in ascending order, with the oldest ingested transactions appearing first.",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "INGESTED_AT_DESC",
+            "description": "Results are sorted by the transaction ingestion time in descending order, with the most recently ingested transactions appearing first.",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "asc",
             "description": null,
             "isDeprecated": false,
@@ -25508,7 +25540,7 @@
       {
         "kind": "OBJECT",
         "name": "Tag",
-        "description": null,
+        "description": "Tag Schema",
         "isOneOf": null,
         "fields": [
           {
@@ -25552,21 +25584,33 @@
       {
         "kind": "INPUT_OBJECT",
         "name": "TagFilter",
-        "description": "Find transactions with the folowing tag name and value",
+        "description": "Find transactions with the following tag name and value",
         "isOneOf": false,
         "fields": null,
         "inputFields": [
           {
-            "name": "name",
-            "description": "The tag name",
+            "name": "match",
+            "description": "How tag names and values are matched. Defaults to EXACT.",
             "type": {
               "kind": "NON_NULL",
               "name": null,
               "ofType": {
-                "kind": "SCALAR",
-                "name": "String",
+                "kind": "ENUM",
+                "name": "TagMatch",
                 "ofType": null
               }
+            },
+            "defaultValue": "EXACT",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "name",
+            "description": "The tag name",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
             },
             "defaultValue": null,
             "isDeprecated": false,
@@ -25576,9 +25620,13 @@
             "name": "op",
             "description": "The operator to apply to to the tag filter. Defaults to EQ (equal).",
             "type": {
-              "kind": "ENUM",
-              "name": "TagOperator",
-              "ofType": null
+              "kind": "NON_NULL",
+              "name": null,
+              "ofType": {
+                "kind": "ENUM",
+                "name": "TagOperator",
+                "ofType": null
+              }
             },
             "defaultValue": "EQ",
             "isDeprecated": false,
@@ -25586,21 +25634,17 @@
           },
           {
             "name": "values",
-            "description": "An array of values to match against. If multiple values are passed then transactions with _any_ matching tag value from the set will be returned.\n\ne.g.\n\n\\`{name: \"app-name\", values: [\"app-1\"]}\\`\n\nReturns all transactions where the \\`app-name\\` tag has a value of \\`app-1\\`.\n\n\\`{name: \"app-name\", values: [\"app-1\", \"app-2\", \"app-3\"]}\\`\n\nReturns all transactions where the \\`app-name\\` tag has a value of either \\`app-1\\` _or_ \\`app-2\\` _or_ \\`app-3\\`.",
+            "description": "An array of values to match against. If multiple values are passed then transactions with _any_ matching tag value from the set will be returned.\n\ne.g.\n\n`{name: \"app-name\", values: [\"app-1\"]}`\n\nReturns all transactions where the `app-name` tag has a value of `app-1`.\n\n`{name: \"app-name\", values: [\"app-1\", \"app-2\", \"app-3\"]}`\n\nReturns all transactions where the `app-name` tag has a value of either `app-1` _or_ `app-2` _or_ `app-3`.",
             "type": {
-              "kind": "NON_NULL",
+              "kind": "LIST",
               "name": null,
               "ofType": {
-                "kind": "LIST",
+                "kind": "NON_NULL",
                 "name": null,
                 "ofType": {
-                  "kind": "NON_NULL",
-                  "name": null,
-                  "ofType": {
-                    "kind": "SCALAR",
-                    "name": "String",
-                    "ofType": null
-                  }
+                  "kind": "SCALAR",
+                  "name": "String",
+                  "ofType": null
                 }
               }
             },
@@ -25615,6 +25659,42 @@
       },
       {
         "kind": "ENUM",
+        "name": "TagMatch",
+        "description": "The method used to determine if tags match.",
+        "isOneOf": null,
+        "fields": null,
+        "inputFields": null,
+        "interfaces": null,
+        "enumValues": [
+          {
+            "name": "EXACT",
+            "description": "An exact match",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "FUZZY_AND",
+            "description": "Fuzzy match containing all search terms",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "FUZZY_OR",
+            "description": "Fuzzy match containing at least one search term",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "WILDCARD",
+            "description": "A wildcard match",
+            "isDeprecated": false,
+            "deprecationReason": null
+          }
+        ],
+        "possibleTypes": null
+      },
+      {
+        "kind": "ENUM",
         "name": "TagOperator",
         "description": "The operator to apply to a tag value.",
         "isOneOf": null,
@@ -25625,6 +25705,12 @@
           {
             "name": "EQ",
             "description": "Equal",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "NEQ",
+            "description": "Not equal",
             "isDeprecated": false,
             "deprecationReason": null
           }
@@ -27296,7 +27382,7 @@
       {
         "kind": "OBJECT",
         "name": "Transaction",
-        "description": null,
+        "description": "Transaction Structure",
         "isOneOf": null,
         "fields": [
           {
@@ -27383,6 +27469,18 @@
                 "name": "ID",
                 "ofType": null
               }
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "ingested_at",
+            "description": "When this transaction was made available for querying",
+            "args": [],
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int",
+              "ofType": null
             },
             "isDeprecated": false,
             "deprecationReason": null
@@ -27500,6 +27598,18 @@
         "isOneOf": null,
         "fields": [
           {
+            "name": "count",
+            "description": "The number of transactions that match this query.",
+            "args": [],
+            "type": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            },
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "edges",
             "description": null,
             "args": [],
@@ -27553,7 +27663,7 @@
         "fields": [
           {
             "name": "cursor",
-            "description": "The cursor value for fetching the next page.\n\nPass this to the \\`after\\` parameter in \\`transactions(after: $cursor)\\`, the next page will start from the next item after this.",
+            "description": "The cursor value for fetching the next page.\n\nPass this to the `after` parameter in ` transactions(after: $cursor)`, the next page will start from the next item after this.",
             "args": [],
             "type": {
               "kind": "NON_NULL",
@@ -28518,6 +28628,55 @@
       }
     ],
     "directives": [
+      {
+        "name": "cacheControl",
+        "description": null,
+        "isRepeatable": false,
+        "locations": [
+          "FIELD_DEFINITION",
+          "INTERFACE",
+          "OBJECT",
+          "UNION"
+        ],
+        "args": [
+          {
+            "name": "inheritMaxAge",
+            "description": null,
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "maxAge",
+            "description": null,
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int",
+              "ofType": null
+            },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
+            "name": "scope",
+            "description": null,
+            "type": {
+              "kind": "ENUM",
+              "name": "CacheControlScope",
+              "ofType": null
+            },
+            "defaultValue": null,
+            "isDeprecated": false,
+            "deprecationReason": null
+          }
+        ]
+      },
       {
         "name": "deprecated",
         "description": "Marks an element of a GraphQL schema as no longer supported.",

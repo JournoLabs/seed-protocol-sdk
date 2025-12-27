@@ -23,6 +23,8 @@ type ModelDefObj = {
 export const clientManager = createActor(clientManagerMachine, {
   input: {
     isInitialized: false,
+    addressesSet: false,
+    isSaving: false,
   }
 })
 
@@ -39,19 +41,17 @@ const ensureInitialized = () => {
   }
 }
 
-export const ClientManager = {
+// Singleton instance - created once at module load time
+// ES modules cache exports, ensuring all imports get the same instance
+const clientInstance = {
   isInitialized: () => {
     return clientManager.getSnapshot().context.isInitialized
   },
   getService: () => {
-    ensureInitialized();
+    // ensureInitialized();
     return clientManager;
   },
   init: async (options: any) => {
-    // clientManager.subscribe((snapshot) => {
-    //   console.log('ClientManager snapshot.value:', snapshot.value);
-    //   console.log('ClientManager snapshot.context.isInitialized:', snapshot.context.isInitialized);
-    // });
     clientManager.send({ type: 'init', options });
     await waitFor(clientManager, (snapshot) => snapshot.context.isInitialized);
   },
@@ -97,4 +97,12 @@ export const ClientManager = {
     clientManager.stop();
     subscription.unsubscribe();
   },
+}
+
+// Export the singleton instance
+// This ensures all imports across different files get the same instance
+export const ClientManager = clientInstance
+
+export const getClient = () => {
+  return clientInstance
 }
