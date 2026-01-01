@@ -5,112 +5,251 @@ import debug from "debug"
 import { useIsClientReady } from "./client"
 import { getClient } from "@/client/ClientManager"
 import { useSelector } from "@xstate/react"
-import { Schema } from "@/schema/Schema"
+import { Schema } from "@/Schema/Schema"
 import { SnapshotFrom } from "xstate"
-import { schemaMachine, SchemaMachineContext } from "@/schema/service/schemaMachine"
-import { ClientManagerEvents } from "@/services/internal/constants"
+import { schemaMachine } from "@/Schema/service/schemaMachine"
+import { ClientManagerEvents } from "@/client/constants"
+import { SEED_PROTOCOL_SCHEMA_NAME } from "@/helpers/constants"
 import { generateId } from "@/helpers"
 import { useImmer } from "use-immer"
-import { produce } from "immer"
-import { Subscription } from "xstate"
 
 const logger = debug('seedSdk:react:schema')
 
 /**
- * Hook to get a Schema class instance (with setters) and reactive schema data
+ * Hook to get a Schema class instance (with setters) that is reactive
  * This allows you to edit schema properties directly like: schema.name = 'New name'
- * The schemaData object will automatically update when version or metadata change
- * @param schemaName - The name of the schema to get
- * @returns Object with schema instance and schemaData (version, metadata, etc.)
+ * The schema instance uses a Proxy to ensure React re-renders when properties change
+ * @param schemaIdentifier - The name of the schema or the schema file ID
+ *   - If a name is provided, retrieves the latest version with that name
+ *   - If an ID is provided, retrieves the specific schema by ID
+ * @returns Object with schema instance
  */
-export const useSchema = (schemaName: string | null | undefined) => {
-  const [schemaInstance, setSchemaInstance] = useState<Schema | null>(null)
-  const [schemaData, setSchemaData] = useImmer<Pick<SchemaMachineContext, 'version' | 'metadata' | '$schema'> | undefined>(undefined)
-  const schemaInstanceRef = useRef<Schema | null>(null)
-  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+// Global cache for schema instances by identifier to prevent loss during React render cycles
+// This cache persists across React render cycles but gets validated before use
+const schemaInstanceCache = new Map<string | null | undefined, Schema>()
+
+export const useSchema = (schemaIdentifier: string | null | undefined) => {
+  const [schema, setSchema] = useState<Schema | null>(null)
+
   const isClientReady = useIsClientReady()
 
-  // Set up subscription for schema data updates
   useEffect(() => {
-    if (!schemaInstance) {
-      setSchemaData(undefined)
+    if (!isClientReady) {
       return
     }
-
-    // Clean up previous subscription
-    if (subscriptionRef.current) {
-      subscriptionRef.current.unsubscribe()
-      subscriptionRef.current = undefined
+    if (schemaIdentifier) {
+      const schema = Schema.create(schemaIdentifier)
+      setSchema(schema)
+    } else {
+      setSchema(null)
     }
-
-    // Initial data update
-    const updateSchemaData = () => {
-      const context = schemaInstance.getService().getSnapshot().context
-      setSchemaData({
-        version: context.version,
-        metadata: context.metadata,
-        $schema: context.$schema,
-      })
-    }
-
-    // Subscribe to service changes to update schemaData
-    const subscription = schemaInstance.getService().subscribe((snapshot) => {
-      updateSchemaData()
-    })
-
-    subscriptionRef.current = subscription
-    updateSchemaData()
-
-    // Cleanup subscription on unmount or when schema changes
-    return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe()
-        subscriptionRef.current = undefined
-      }
-    }
-  }, [schemaInstance, setSchemaData])
-
-  // Create/cleanup schema instance
-  useEffect(() => {
-    if (!isClientReady || !schemaName) {
-      if (schemaInstanceRef.current) {
-        schemaInstanceRef.current.unload()
-        schemaInstanceRef.current = null
-      }
-      setSchemaInstance(null)
-      return
-    }
-
-    // If we already have an instance and the name matches, keep using it
-    // This prevents recreating the instance when the name changes internally
-    if (schemaInstanceRef.current && schemaInstanceRef.current.schemaName === schemaName) {
-      return
-    }
-
-    // Cleanup old instance if it exists
-    if (schemaInstanceRef.current) {
-      schemaInstanceRef.current.unload()
-      schemaInstanceRef.current = null
-    }
-
-    // Create Schema instance - this will automatically load from database
-    const schema = Schema.create(schemaName)
-    schemaInstanceRef.current = schema
-    setSchemaInstance(schema)
-
-    // Cleanup on unmount
-    return () => {
-      if (schemaInstanceRef.current) {
-        schemaInstanceRef.current.unload()
-        schemaInstanceRef.current = null
-      }
-    }
-  }, [schemaName, isClientReady])
-
+  }, [schemaIdentifier, isClientReady])
+  
   return {
-    schema: schemaInstance,
-    schemaData,
+    schema,
   }
+  // const [schemaInstance, setSchemaInstance] = useState<Schema | null>(() => {
+  //   // Initialize from cache if available
+  //   return schemaInstanceCache.get(schemaIdentifier) || null
+  // })
+  // const schemaInstanceRef = useRef<Schema | null>(null)
+  // const previousIdentifierRef = useRef<string | null | undefined>(undefined)
+  // const isClientReady = useIsClientReady()
+
+  // logger('[useSchema] Called with schemaIdentifier:', schemaIdentifier, 'isClientReady:', isClientReady, 'previous:', previousIdentifierRef.current, 'cached:', !!schemaInstanceCache.get(schemaIdentifier))
+
+  // // Subscribe to service changes to trigger re-renders when metadata/context changes
+  // // Use a state variable that updates on every service snapshot change
+  // // This ensures React components re-render when the schema loads or properties change
+  // const [, setRenderTrigger] = useState(0)
+  // const subscriptionRef = useRef<{ unsubscribe: () => void } | undefined>(undefined)
+
+  // useEffect(() => {
+  //   if (!schemaInstance) {
+  //     if (subscriptionRef.current) {
+  //       subscriptionRef.current.unsubscribe()
+  //       subscriptionRef.current = undefined
+  //     }
+  //     return
+  //   }
+
+  //   // Clean up previous subscription
+  //   if (subscriptionRef.current) {
+  //     subscriptionRef.current.unsubscribe()
+  //     subscriptionRef.current = undefined
+  //   }
+
+  //   // Subscribe to ALL service snapshot changes to trigger re-renders
+  //   // This ensures we catch any context updates, including metadata changes
+  //   const subscription = schemaInstance.getService().subscribe((snapshot) => {
+  //     // Trigger a re-render on every snapshot change
+  //     // The actual data is accessed through the Proxy when the component re-renders
+  //     setRenderTrigger((prev) => prev + 1)
+  //   })
+
+  //   subscriptionRef.current = subscription
+
+  //   // Cleanup subscription on unmount or when schema changes
+  //   return () => {
+  //     if (subscriptionRef.current) {
+  //       subscriptionRef.current.unsubscribe()
+  //       subscriptionRef.current = undefined
+  //     }
+  //   }
+  // }, [schemaInstance])
+
+  // // Create/cleanup schema instance
+  // useEffect(() => {
+  //   const identifierChanged = previousIdentifierRef.current !== schemaIdentifier
+  //   previousIdentifierRef.current = schemaIdentifier
+
+  //   // If no identifier, clear the instance only if it changed
+  //   if (!schemaIdentifier) {
+  //     if (identifierChanged && schemaInstanceRef.current) {
+  //       logger('[useSchema] Identifier changed to null, clearing instance')
+  //       schemaInstanceRef.current = null
+  //       schemaInstanceCache.delete(previousIdentifierRef.current || undefined)
+  //       setSchemaInstance(null)
+  //     }
+  //     return
+  //   }
+
+  //   // If client not ready, wait but don't clear existing instance
+  //   if (!isClientReady) {
+  //     // If we have an instance for this identifier, keep it
+  //     if (schemaInstanceRef.current) {
+  //       const currentId = schemaInstanceRef.current.id
+  //       const currentName = schemaInstanceRef.current.schemaName
+  //       if (currentId === schemaIdentifier || currentName === schemaIdentifier) {
+  //         // Ensure state is set even if client not ready yet
+  //         if (schemaInstance !== schemaInstanceRef.current) {
+  //           setSchemaInstance(schemaInstanceRef.current)
+  //         }
+  //       }
+  //     }
+  //     return
+  //   }
+
+  //   let cancelled = false
+
+  //   // Helper to get or create schema instance
+  //   const getOrCreateSchemaInstance = async () => {
+  //     // First check if we already have the correct instance
+  //     if (schemaInstanceRef.current && !identifierChanged) {
+  //       const currentId = schemaInstanceRef.current.id
+  //       const currentName = schemaInstanceRef.current.schemaName
+  //       // If identifier matches current ID or name, keep using the same instance
+  //       if (currentId === schemaIdentifier || currentName === schemaIdentifier) {
+  //         logger('[useSchema] Reusing existing instance from ref:', currentId, currentName)
+  //         // Always ensure state is set - React will deduplicate
+  //         setSchemaInstance(schemaInstanceRef.current)
+  //         return
+  //       }
+  //     }
+
+  //     // If identifier changed, we need a new instance
+  //     // First, try to get by ID (fast cache check)
+  //     const cachedById = Schema.getById(schemaIdentifier)
+  //     if (cachedById) {
+  //       if (cancelled) return
+  //       logger('[useSchema] Found cached instance by ID:', cachedById.id)
+  //       schemaInstanceRef.current = cachedById
+  //       schemaInstanceCache.set(schemaIdentifier, cachedById)
+  //       setSchemaInstance(cachedById)
+  //       return
+  //     }
+
+  //     // Try to create by ID (will query database if not cached)
+  //     try {
+  //       const schemaById = await Schema.createById(schemaIdentifier)
+  //       if (cancelled) {
+  //         schemaById.unload()
+  //         return
+  //       }
+  //       logger('[useSchema] Created schema by ID:', schemaById.id)
+  //       schemaInstanceRef.current = schemaById
+  //       schemaInstanceCache.set(schemaIdentifier, schemaById)
+  //       setSchemaInstance(schemaById)
+  //       return
+  //     } catch (error) {
+  //       // If createById fails, treat it as a name instead
+  //       logger('[useSchema] createById failed, treating as name:', error)
+  //     }
+
+  //     // Fall back to creating by name (treats identifier as schema name)
+  //     // Schema.create() uses a cache, so it will return the same instance if called multiple times
+  //     logger('[useSchema] Creating schema by name:', schemaIdentifier)
+  //     try {
+  //       const schemaByName = Schema.create(schemaIdentifier)
+  //       if (!schemaByName) {
+  //         console.error('[useSchema] Schema.create() returned undefined for:', schemaIdentifier)
+  //         return
+  //       }
+  //       logger('[useSchema] Created/retrieved schema instance:', schemaByName?.id, schemaByName?.schemaName)
+  //       if (cancelled) {
+  //         // Don't unload here - Schema manages its own cache
+  //         return
+  //       }
+  //       // Always update the ref, cache, and state - Schema.create() will return the cached instance if it exists
+  //       schemaInstanceRef.current = schemaByName
+  //       schemaInstanceCache.set(schemaIdentifier, schemaByName)
+  //       // Always set state to ensure it's not null - React will handle deduplication
+  //       setSchemaInstance(schemaByName)
+  //       logger('[useSchema] Set schema instance:', schemaByName?.id)
+  //     } catch (error) {
+  //       console.error('[useSchema] Error creating schema by name:', error)
+  //       // Don't set state on error - let it remain as is
+  //     }
+  //   }
+
+  //   getOrCreateSchemaInstance()
+
+  //   // Cleanup only runs when dependencies change or component unmounts
+  //   // We don't clear the ref here because Schema manages its own cache
+  //   // The ref will be updated on the next render if needed
+  //   return () => {
+  //     logger('[useSchema] Cleanup - schemaIdentifier:', schemaIdentifier, 'identifierChanged:', identifierChanged)
+  //     cancelled = true
+  //     // Don't clear the ref - let the next effect run determine what to do
+  //     // This prevents the schema from being lost during React's render cycle
+  //   }
+  // }, [schemaIdentifier, isClientReady])
+
+  // // Always return from cache if available, even if state hasn't updated yet
+  // // This prevents null returns during React's render cycle
+  // // Use our cache as a fallback - don't call Schema.create() here as it might cause side effects
+  // let currentSchema = schemaInstance
+  
+  // // Only use cache if we have a valid identifier (not null/undefined)
+  // if (!currentSchema && schemaIdentifier) {
+  //   // Use our cache as fallback
+  //   const cachedSchema = schemaInstanceCache.get(schemaIdentifier)
+  //   if (cachedSchema) {
+  //     try {
+  //       // Validate the cached instance is still usable
+  //       const snapshot = cachedSchema.getService().getSnapshot()
+  //       if (snapshot.status !== 'stopped') {
+  //         currentSchema = cachedSchema
+  //       } else {
+  //         // Instance was unloaded, remove from cache
+  //         schemaInstanceCache.delete(schemaIdentifier)
+  //       }
+  //     } catch (error) {
+  //       // Instance is invalid, remove from cache
+  //       schemaInstanceCache.delete(schemaIdentifier)
+  //     }
+  //   }
+  // }
+  
+  // // If schemaIdentifier is null/undefined, ensure we return null (don't use cache)
+  // if (!schemaIdentifier) {
+  //   currentSchema = null
+  // }
+
+  // logger('[useSchema] Returning schema instance:', currentSchema?.id, currentSchema?.schemaName, 'from state:', !!schemaInstance, 'from ref:', !!schemaInstanceRef.current)
+  // return {
+  //   schema: currentSchema,
+  // }
 }
 
 export const useSchemas = (options?: { returnLatest?: boolean }) => {
@@ -118,68 +257,58 @@ export const useSchemas = (options?: { returnLatest?: boolean }) => {
   const isClientReady = useIsClientReady()
   const [schemaInstances, setSchemaInstances] = useImmer<Schema[]>([])
   const schemaInstancesRef = useRef<Map<string, Schema>>(new Map())
+  const [schemaNames, setSchemaNames] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const client = getClient()
-  const clientService = client.getService()
+  // Fetch schema names from database instead of client context
+  useEffect(() => {
+    if (!isClientReady) {
+      setIsLoading(false)
+      setSchemaNames([])
+      return
+    }
 
-  // Get schema names from client context
-  // Use a stable selector that only changes when schema names actually change
-  const schemaNamesRaw = useSelector(
-    clientService,
-    (snapshot) => {
-      // Don't process schemas until the client is ready
-      if (!isClientReady) {
-        return []
-      }
-      
-      if (snapshot && snapshot.context && snapshot.context.schemas) {
-        // Convert object to array of SchemaFileFormat objects
-        const schemaFileArray: SchemaFileFormat[] = Object.values(snapshot.context.schemas)
+    let cancelled = false
+
+    const fetchSchemaNames = async () => {
+      try {
+        setIsLoading(true)
+        // Use loadAllSchemasFromDb to get all schemas from database
+        const allSchemasData = await loadAllSchemasFromDb()
         
+        if (cancelled) return
+
         // Filter to latest versions if requested
         const filteredSchemas = returnLatest 
-          ? filterLatestSchemas(schemaFileArray)
-          : schemaFileArray
+          ? filterLatestSchemas(allSchemasData.map(s => s.schema))
+          : allSchemasData.map(s => s.schema)
         
         // Extract schema names and create a stable sorted array
+        // Filter out internal SDK schemas (e.g., Seed Protocol) - these should not appear in useSchemas
         const names = filteredSchemas
           .map((schemaFile) => schemaFile.metadata?.name)
-          .filter((name): name is string => !!name)
+          .filter((name): name is string => !!name && name !== SEED_PROTOCOL_SCHEMA_NAME)
           .sort() // Sort for stable comparison
         
-        return names
+        setSchemaNames(names)
+      } catch (error) {
+        logger('Error fetching schema names from database:', error)
+        if (!cancelled) {
+          setSchemaNames([])
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
       }
-      return []
-    },
-    // Custom equality function to prevent unnecessary re-renders
-    (a, b) => {
-      if (a.length !== b.length) return false
-      return a.every((name, index) => name === b[index])
     }
-  )
 
-  // Use useImmer to store schema names with structural sharing
-  // This prevents infinite loops by only updating when values actually change
-  const [schemaNames, setSchemaNames] = useImmer<string[]>([])
+    fetchSchemaNames()
 
-  // Update schema names only if they actually changed
-  // Use a ref to track previous values and avoid including schemaNames in deps
-  const prevSchemaNamesRef = useRef<string>('')
-  
-  useEffect(() => {
-    // Create a stable key for comparison
-    const currentKey = [...schemaNamesRaw].sort().join(',')
-    
-    // Only update if the key actually changed
-    if (currentKey !== prevSchemaNamesRef.current) {
-      prevSchemaNamesRef.current = currentKey
-      setSchemaNames((draft) => {
-        draft.length = 0
-        draft.push(...schemaNamesRaw)
-      })
+    return () => {
+      cancelled = true
     }
-    // If unchanged, we don't call setSchemaNames, so Immer keeps the same reference
-  }, [schemaNamesRaw, setSchemaNames])
+  }, [isClientReady, returnLatest])
 
   // Create/update Schema instances when schema names change
   useEffect(() => {
@@ -190,6 +319,16 @@ export const useSchemas = (options?: { returnLatest?: boolean }) => {
       })
       schemaInstancesRef.current.clear()
       setSchemaInstances([])
+      return
+    }
+
+    // Check if we already have all the required instances
+    // This prevents unnecessary Schema.create calls that could trigger context updates
+    const hasAllInstances = schemaNames.every(name => schemaInstancesRef.current.has(name))
+    const hasNoExtraInstances = Array.from(schemaInstancesRef.current.keys()).every(name => schemaNames.includes(name))
+    
+    // If we already have all the instances we need and no extras, skip creating new ones
+    if (hasAllInstances && hasNoExtraInstances) {
       return
     }
 
@@ -322,6 +461,16 @@ export const useAllSchemaVersions = () => {
 
 type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 
+
+/**
+ * Hook to get the internal Seed Protocol schema (SDK-only schema)
+ * This schema is managed by the SDK and should not be edited by app developers
+ * @returns Object with schema instance and schemaData (version, metadata, etc.)
+ */
+export const useSeedProtocolSchema = () => {
+  const { SEED_PROTOCOL_SCHEMA_NAME } = require('@/helpers/constants')
+  return useSchema(SEED_PROTOCOL_SCHEMA_NAME)
+}
 
 export const useCreateSchema = () => {
   const [currentSchema, setCurrentSchema] = useState<Schema | null>(null)

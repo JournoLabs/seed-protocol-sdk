@@ -1,6 +1,6 @@
 import { UploadProperty } from '@/db/read/getPublishUploads'
 import { IItem } from '@/interfaces'
-import { ModelPropertyDataTypes } from '@/schema'
+import { ModelPropertyDataTypes } from '@/Schema'
 
 export const getSegmentedItemProperties = (item: IItem<any>) => {
   const itemBasicProperties = []

@@ -8,15 +8,17 @@ export const initialize = fromCallback<
   FromCallbackInput<ItemMachineContext<any>>
 >(
   ({ sendBack, input: { context } }) => {
-    const { seedLocalId, seedUid, ModelClass, modelName: contextModelName } = context
+    const { seedLocalId, seedUid, modelName: contextModelName, ModelClass } = context
 
-    if (!ModelClass) {
-      throw new Error('ModelClass is required')
+    // Prefer modelName from context, fall back to ModelClass if available
+    let modelName = contextModelName
+    if (!modelName && ModelClass) {
+      // If ModelClass is a Model instance, use its modelName property
+      modelName = (ModelClass as any)?.modelName || (ModelClass as any)?.originalConstructor?.name
     }
-
-    const modelName = ModelClass?.originalConstructor?.name || contextModelName
+    
     if (!modelName) {
-      throw new Error('ModelClass.originalConstructor.name or modelName is required')
+      throw new Error('modelName is required in context')
     }
     const modelNamePlural = pluralize(modelName)
     const modelTableName = modelNamePlural.toLowerCase()
@@ -43,9 +45,15 @@ export const initialize = fromCallback<
       })
     }
 
-    _intialize().then(() => {
-      sendBack({ type: 'initializeSuccess' })
-      return
-    })
+    _intialize()
+      .then(() => {
+        sendBack({ type: 'initializeSuccess' })
+      })
+      .catch((error) => {
+        sendBack({
+          type: 'initializeError',
+          error: error instanceof Error ? error : new Error(String(error)),
+        })
+      })
   },
 )

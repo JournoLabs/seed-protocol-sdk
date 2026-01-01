@@ -1,10 +1,10 @@
 import { Value } from '@sinclair/typebox/value'
-import { TProperty } from '@/schema'
-import { ModelPropertyDataTypes, TPropertyDataType } from '@/schema/property'
-import { ValidationResult, ValidationError, ValidationRules } from '@/schema/validation'
+import { TProperty } from '@/Schema'
+import { ModelPropertyDataTypes, TPropertyDataType } from '@/helpers/property'
+import { ValidationResult, ValidationError, ValidationRules } from '@/Schema/validation'
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
-import { ModelMachineContext } from '@/schema/model/service/modelMachine'
+import { ModelMachineContext } from '@/Model/service/modelMachine'
 import { Type, TSchema, TUnion, TLiteral } from '@sinclair/typebox'
 import debug from 'debug'
 
@@ -439,7 +439,36 @@ export class SchemaValidationService {
   }
 
   /**
-   * Validate a model within a schema
+   * Validate a model against a schema WITHOUT requiring it to be in the schema's context
+   * This allows validation before registration, preventing update loops
+   */
+  validateModelAgainstSchema(
+    schema: SchemaMachineContext,
+    modelName: string,
+    modelData: ModelMachineContext
+  ): ValidationResult {
+    const errors: ValidationError[] = []
+
+    // Create a temporary schema context that includes this model for validation purposes
+    // This allows validateProperty to work without actually adding the model to the real schema
+    const tempSchemaContext: SchemaMachineContext = {
+      ...schema,
+      models: {
+        ...schema.models,
+        [modelName]: {
+          description: modelData.description,
+          properties: modelData.properties || {},
+          indexes: modelData.indexes || [],
+        },
+      },
+    }
+
+    // Use validateModel which now works because the model is in the temp context
+    return this.validateModel(tempSchemaContext, modelName, modelData)
+  }
+
+  /**
+   * Validate a model within a schema (requires model to already be in schema context)
    */
   validateModel(
     schema: SchemaMachineContext,
@@ -459,16 +488,6 @@ export class SchemaValidationService {
     }
 
     const model = schema.models[modelName]
-
-    // Validate model has properties
-    if (!model.properties || Object.keys(model.properties).length === 0) {
-      errors.push({
-        field: 'model.properties',
-        message: `Model "${modelName}" must have at least one property`,
-        code: 'no_properties',
-        severity: 'error' as const,
-      })
-    }
 
     // Validate indexes reference existing properties
     if (model.indexes) {
@@ -538,15 +557,8 @@ export class SchemaValidationService {
       }
     }
 
-    // Validate models exist
-    if (!schema.models || Object.keys(schema.models).length === 0) {
-      errors.push({
-        field: 'models',
-        message: 'Schema must have at least one model',
-        code: 'no_models',
-        severity: 'error' as const,
-      })
-    } else {
+    // Validate models if they exist
+    if (schema.models && Object.keys(schema.models).length > 0) {
       // Validate each model
       for (const modelName of Object.keys(schema.models)) {
         const modelResult = this.validateModel(schema, modelName)

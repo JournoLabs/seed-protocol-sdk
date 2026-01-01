@@ -4,8 +4,8 @@ import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // Dynamic imports to break circular dependencies:
 // - schema/index -> ... -> validateProperty -> SchemaValidationService -> schema/index
 // - schema/Schema -> ... -> validateProperty -> Schema -> schema/Schema
-// import { SchemaValidationService } from '@/schema/service/validation/SchemaValidationService'
-// import { Schema } from '@/schema/Schema'
+// import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
+// import { Schema } from '@/Schema/Schema'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:actors:validateProperty')
@@ -16,9 +16,9 @@ export const validateProperty = fromCallback<
 >(({ sendBack, input: { context } }) => {
   const _validateProperty = async (): Promise<void> => {
     // Use dynamic imports to break circular dependencies
-    const { SchemaValidationService } = await import('@/schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
     const validationService = new SchemaValidationService()
-    const { Schema } = await import('@/schema/Schema')
+    const { Schema } = await import('@/Schema/Schema')
     
     // Validate property structure
     const structureResult = validationService.validatePropertyStructure(context)

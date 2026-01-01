@@ -4,10 +4,9 @@ import { platformClassesInit } from "./actors/platformClassesInit"
 import { saveAppState } from "./actors/saveAppState"
 import { fileSystemInit } from "./actors/fileSystemInit"
 import { dbInit } from "./actors/dbInit"
-import { ClientManagerEvents, ClientManagerState } from "@/services/internal/constants"
-import { MachineIds } from "@/services/internal/constants"
-import { globalServiceInit } from "./actors/globalServiceInit"
+import { ClientManagerEvents, ClientManagerState, MachineIds } from "@/client/constants"
 import { addModelsToStore } from "./actors/addModelsToStore"
+import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
 
@@ -18,14 +17,13 @@ const {
   DB_INIT,
   SAVE_CONFIG,
   PROCESS_SCHEMA_FILES,
-  GLOBAL_SERVICE_INIT,
   ADD_MODELS_TO_STORE,
+  ADD_MODELS_TO_DB,
   IDLE,
 } = ClientManagerState
 
 const {
   UPDATE_CONTEXT,
-  GLOBAL_SERVICE_READY,
   PLATFORM_CLASSES_READY,
   FILE_SYSTEM_READY,
   DB_READY,
@@ -33,6 +31,7 @@ const {
   SAVE_APP_STATE_SUCCESS,
   SET_ADDRESSES,
   ADD_MODELS_TO_STORE_SUCCESS,
+  ADD_MODELS_TO_DB_SUCCESS,
   PROCESS_SCHEMA_FILES_SUCCESS,
 } = ClientManagerEvents
 
@@ -51,9 +50,9 @@ export const clientManagerMachine = setup({
     fileSystemInit,
     dbInit,
     saveConfig,
-    globalServiceInit,
     saveAppState,
     addModelsToStore,
+    addModelsToDb,
     processSchemaFiles,
   },
 }).createMachine({
@@ -68,6 +67,13 @@ export const clientManagerMachine = setup({
           ...context,
           ...event.context,
         }
+      }),
+    },
+    init: {
+      target: `.${PLATFORM_CLASSES_INIT}`,
+      actions: assign({
+        isInitialized: false,
+        initError: undefined,
       }),
     },
   },
@@ -140,7 +146,7 @@ export const clientManagerMachine = setup({
     [ADD_MODELS_TO_STORE]: {
       on: {
         [ADD_MODELS_TO_STORE_SUCCESS]: {
-          target: GLOBAL_SERVICE_INIT,
+          target: ADD_MODELS_TO_DB,
         },
       },
       invoke: {
@@ -148,14 +154,14 @@ export const clientManagerMachine = setup({
         input: ({ context }) => ({ context }),
       },
     },
-    [GLOBAL_SERVICE_INIT]: {
+    [ADD_MODELS_TO_DB]: {
       on: {
-        [GLOBAL_SERVICE_READY]: {
+        [ADD_MODELS_TO_DB_SUCCESS]: {
           target: IDLE,
         },
       },
       invoke: {
-        src: 'globalServiceInit',
+        src: 'addModelsToDb',
         input: ({ context }) => ({ context }),
       },
     },
@@ -188,6 +194,12 @@ export const clientManagerMachine = setup({
               }
             })
           ],
+        },
+        init: {
+          target: PLATFORM_CLASSES_INIT,
+          actions: assign({
+            isInitialized: false,
+          }),
         },
       },
     },

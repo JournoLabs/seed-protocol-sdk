@@ -4,7 +4,7 @@ import protoLoader from '@grpc/proto-loader'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { BaseItem } from '@/Item/BaseItem'
-import { getModel } from '@/stores/modelClass'
+// Model access is now via Model static methods, not getModel()
 import { ClientManager } from '@/client/ClientManager'
 import { client as sdkClient }                              from "@/client"
 import { commandExists } from '@/helpers/scripts'

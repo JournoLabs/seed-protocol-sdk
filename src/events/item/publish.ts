@@ -1,4 +1,11 @@
-// Dynamic import to break circular dependency with globalMachine
+import { createActor, waitFor } from 'xstate'
+import { publishMachine } from '@/services/publish/publishMachine'
+import { eventEmitter } from '@/eventBus'
+import { BaseItem } from '@/Item/BaseItem'
+import debug from 'debug'
+
+const logger = debug('seedSdk:events:item:publish')
+
 type PublishItemRequestEvent = {
   seedLocalId: string
 }
@@ -10,20 +17,50 @@ type PublishItemRequestHandler = (
 export const publishItemRequestHandler: PublishItemRequestHandler = async ({
   seedLocalId,
 }) => {
-  // Use dynamic import to break circular dependency
-  const { getGlobalService } = await import('@/services/global/globalMachine')
-  const globalService = getGlobalService()
-  globalService.subscribe((snapshot) => {
-    if (
-      !snapshot ||
-      !snapshot.context ||
-      !snapshot.context.publishItemService
-    ) {
-      return
+  logger('[publish] Starting publish for seedLocalId:', seedLocalId)
+  
+  try {
+    // Find the item
+    const item = await BaseItem.find({ seedLocalId })
+    
+    if (!item) {
+      throw new Error(`Item not found for seedLocalId: ${seedLocalId}`)
     }
-  })
-  globalService.send({
-    type: 'publishItemRequest',
-    seedLocalId,
-  })
+
+    // Spawn publishMachine directly (no longer needs global service)
+    const publishService = createActor(publishMachine, {
+      input: {
+        localId: seedLocalId,
+        status: 'validating',
+      },
+    })
+
+    publishService.start()
+
+    // Wait for publish machine to complete
+    await waitFor(
+      publishService,
+      (snapshot) => {
+        const state = snapshot.value
+        // Publish is complete when it reaches IDLE state
+        return state === 'idle'
+      },
+      { timeout: 300000 } // 5 minute timeout for publish operations
+    )
+
+    logger('[publish] Publish completed for seedLocalId:', seedLocalId)
+    
+    // Emit success event that BaseItem.publish() is waiting for
+    eventEmitter.emit(`item.${seedLocalId}.publish.success`, {
+      seedLocalId,
+    })
+  } catch (error: any) {
+    logger('[publish] Error publishing item:', error)
+    // Emit error event
+    eventEmitter.emit(`item.${seedLocalId}.publish.error`, {
+      seedLocalId,
+      error,
+    })
+    throw error
+  }
 }

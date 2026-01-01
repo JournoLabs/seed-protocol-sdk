@@ -2,7 +2,7 @@ import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { VersionsType } from '@/seedSchema'
-import { getModel } from '@/stores/modelClass'
+import { Model } from '@/Model/Model'
 
 import {
   CreatePropertyInstanceProps,
@@ -52,11 +52,15 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       latestVersionUid,
     } = initialValues
 
-    const ModelClass = getModel(modelName)
+    // Try to get model from cache (synchronous lookup)
+    // If not found, ModelClass will be undefined and we'll handle it in the service
+    const model = Model.getByName(modelName)
+    const ModelClass = model || undefined
 
     if (
       ModelClass &&
-      Object.keys(ModelClass?.schema).includes('storageTransactionId') &&
+      ModelClass.schema &&
+      Object.keys(ModelClass.schema).includes('storageTransactionId') &&
       initialValues.storageTransactionId
     ) {
       this._storageTransactionId = initialValues.storageTransactionId
@@ -68,6 +72,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
         seedUid,
         schemaUid,
         ModelClass,
+        modelName,
         latestVersionLocalId,
         latestVersionUid,
         storageTransactionId: this._storageTransactionId,
@@ -126,7 +131,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       modelName,
     }
 
-    if (ModelClass && ModelClass.schema) {
+    if (ModelClass && 'schema' in ModelClass && ModelClass.schema) {
       const schema = ModelClass.schema
 
       for (const [propertyName, propertyRecordSchema] of Object.entries(
@@ -218,7 +223,10 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
         return instance
       }
       if (!this.instanceCache.has(seedId)) {
-        const newInstance = new this(props)
+        if (!this.PlatformClass) {
+          throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+        }
+        const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(props)
         this.instanceCache.set(seedId, {
           instance: newInstance,
           refCount: 1,
@@ -229,13 +237,25 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     if (!props.modelName) {
       throw new Error('Model name is required to create an item')
     }
-    const { seedLocalId, versionLocalId, } = await createNewItem({
-      modelName: props.modelName,
-      ...props,
-    })
+    // Filter out ItemData metadata properties - only pass model schema properties
+    const model = await Model.getByNameAsync(props.modelName)
+    const schemaKeys = model?.schema ? Object.keys(model.schema) : []
+    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    
+    // Only include properties that are in the model schema
+    for (const [key, value] of Object.entries(props)) {
+      if (key !== 'modelName' && schemaKeys.includes(key)) {
+        modelPropertyData[key] = value
+      }
+    }
+    
+    const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
     props.seedLocalId = seedLocalId
     props.latestVersionLocalId = versionLocalId
-    const newInstance = new this(props)
+    if (!this.PlatformClass) {
+      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
+    }
+    const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(props)
     this.instanceCache.set(newInstance.seedUid || newInstance.seedLocalId, {
       instance: newInstance,
       refCount: 1,
@@ -381,8 +401,8 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     return this.serviceContext.seedUid
   }
 
-  get schemaUid(): string {
-    return this.serviceContext.schemaUid as string
+  get schemaUid(): string | undefined {
+    return this.serviceContext.schemaUid
   }
 
   get latestVersionUid(): VersionsType {
@@ -460,8 +480,8 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
    */
   get properties(): Record<string, IItemProperty<any>> {
     const allProps = this._propertiesSubject.value
-    const ModelClass = getModel(this.modelName)
-    const modelSchemaKeys = ModelClass?.schema ? Object.keys(ModelClass.schema) : []
+    const model = Model.getByName(this.modelName)
+    const modelSchemaKeys = model?.schema ? Object.keys(model.schema) : []
 
     // Filter to only include properties defined in the Model schema or derived from it
     return Object.fromEntries(

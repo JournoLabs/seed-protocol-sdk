@@ -12,7 +12,7 @@ export {
   Boolean,
   Number,
   Date,
-} from '../schema'
+} from '../Schema'
 
 // Core classes
 export { BaseItem as Item } from '../Item/BaseItem'
@@ -27,8 +27,8 @@ export { ItemProperty as NodeItemProperty } from './ItemProperty/ItemProperty'
 // Schema exports
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'
 
-// Store exports
-export { getModels, getModel, getModelNames } from '../stores/modelClass'
+// Model access - use Model static methods instead
+// Models are accessible via Model.getAll(), Model.getById(), Model.getByName(), etc.
 
 // Helper exports
 export { getCorrectId } from '../helpers'

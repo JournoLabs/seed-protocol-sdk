@@ -6,7 +6,7 @@ import { useIsClientReady } from "./client"
 import { Subscription } from "xstate"
 import { useImmer } from "use-immer"
 import { ModelPropertyMachineContext } from "@/ModelProperty/service/modelPropertyMachine"
-import { ValidationError } from "@/schema/validation"
+import { ValidationError } from "@/Schema/validation"
 import debug from "debug"
 
 const logger = debug('seedSdk:browser:react:modelProperty')

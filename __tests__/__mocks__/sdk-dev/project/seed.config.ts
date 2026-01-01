@@ -1,4 +1,4 @@
-import { Image, List, Model, Relation, Text, Date, Number, Boolean } from '@/schema'
+import { Image, List, Model, Relation, Text, Date, Number, Boolean } from '@/Schema'
 
 
 @Model

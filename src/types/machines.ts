@@ -1,41 +1,18 @@
-import { Endpoints, Environment, ModelClassType } from './index'
+import { Endpoints, Environment } from './index'
 import { ActorRefFrom } from 'xstate'
 import { PublishRequestData } from './seedProtocol'
 import { SchemaFileFormat } from './import'
+import type { Model } from '@/Model/Model'
 
-export type DbServiceContext = {
-  dbName: string
-  dbId?: string
-  dirName: string
-  drizzleDb?: any
-  pathToDb?: string
-  pathToDir?: string
-  pathToDbDir?: string
-  hasFiles?: boolean
-  error?: string
-}
-
-export type InternalMachineContext = {
-  error?: string
-  endpoints: Endpoints
-  addresses: string[]
-  filesDir?: string
-  arweaveDomain?: string
-  environment: string
-  hasFiles: boolean
-  seedDbService: any
-  appDbService: any
-  sdkDbService: any
-}
+// InternalMachineContext removed - functionality moved to ClientManager
+// DbServiceContext removed - dbMachine and db service have been removed
 
 export type GlobalMachineContext = {
   isInitialized?: boolean
-  addedModelRecordsToDb?: boolean
   environment?: Environment
   endpoints?: Endpoints
   addresses?: string[]
-  models?: { [key: string]: ModelClassType }
-  internalService?: ActorRefFrom<any>
+  models?: { [key: string]: Model }
   publishItemService?: ActorRefFrom<any>
   arweaveDomain?: string
   filesDir?: string
@@ -66,9 +43,10 @@ export type ClientManagerContext = {
   isSaving: boolean
   endpoints?: Endpoints
   addresses?: string[]
-  models?: { [key: string]: ModelClassType }
+  models?: { [key: string]: Model }
   schemas?: { [schemaName: string]: SchemaFileFormat }
   arweaveDomain?: string
   filesDir?: string
   dbConfig?: import('@/types').DbConfig
+  initError?: Error | string
 }

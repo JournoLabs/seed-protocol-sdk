@@ -9,9 +9,9 @@ interface ProxyConfig<T> {
   /** Array of property names that should be tracked (read from/written to actor context) */
   trackedProperties: readonly string[]
   /** Function to get the current context from the actor */
-  getContext: () => any
+  getContext: (instance: T) => any
   /** Function to send an update to the actor when a property is set */
-  sendUpdate: (prop: string, value: any) => void
+  sendUpdate: (instance: T, prop: string, value: any) => void
 }
 
 /**
@@ -41,7 +41,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T
       
       // If it's a tracked property, read from actor context
       if (typeof prop === 'string' && trackedPropsSet.has(prop)) {
-        const context = getContext()
+        const context = getContext(instance)
         return context[prop]
       }
       
@@ -57,7 +57,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T
       
       // If it's a tracked property, send update to actor
       if (typeof prop === 'string' && trackedPropsSet.has(prop)) {
-        sendUpdate(prop, value)
+        sendUpdate(instance, prop, value)
         return true // Indicate success
       }
       
@@ -68,7 +68,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T
     has(target, prop: string | symbol) {
       // Check if property exists in context or on target
       if (typeof prop === 'string' && trackedPropsSet.has(prop)) {
-        const context = getContext()
+        const context = getContext(instance)
         return prop in context
       }
       return Reflect.has(target, prop)
@@ -84,7 +84,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T
     
     getOwnPropertyDescriptor(target, prop: string | symbol) {
       if (typeof prop === 'string' && trackedPropsSet.has(prop)) {
-        const context = getContext()
+        const context = getContext(instance)
         if (prop in context) {
           return {
             enumerable: true,

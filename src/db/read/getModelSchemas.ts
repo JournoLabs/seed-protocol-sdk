@@ -1,29 +1,35 @@
-import { getModels } from '@/stores/modelClass'
-import { GetSchemasQuery, Schema } from '@/graphql/gql/graphql'
+import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import pluralize from 'pluralize'
 import { toSnakeCase } from '@/helpers'
 
-const schemaStringToModelRecord = new Map<string, Schema>()
+type ModelRecord = {
+  id: number
+  name: string
+  uid: string | null
+  tableName?: string
+}
+
+const schemaStringToModelRecord = new Map<string, ModelRecord>()
 
 type GetModelSchemasReturn = {
-  schemaStringToModelRecord: Map<string, Schema>
-  modelRecords: Record<string, unknown>
+  schemaStringToModelRecord: Map<string, ModelRecord>
+  modelRecords: ModelRecord[]
 }
 
 type GetModelSchemas = () => Promise<GetModelSchemasReturn>
 
 export const getModelSchemas: GetModelSchemas = async () => {
-  const models = getModels()
-  const modelRecords = [] as Record<string, unknown>[]
-
-  
+  const allModels = Model.getAll()
+  const modelRecords: ModelRecord[] = []
 
   const appDb = BaseDb.getAppDb()
 
-  for (const [modelName, _] of Object.entries(models)) {
+  for (const model of allModels) {
+    const modelName = model.modelName
+    if (!modelName) continue
     const foundModelQuery = await appDb
       .select({
         id: modelsTable.id,
@@ -35,20 +41,23 @@ export const getModelSchemas: GetModelSchemas = async () => {
       .where(eq(modelsTable.name, modelName))
       .limit(1)
 
-    const foundModel: Schema = { ...foundModelQuery[0] }
-
-    if (!foundModel) {
+    if (!foundModelQuery[0]) {
       console.error(
         `[item/events] [syncDbWithEas] model ${modelName} not found in SDK DB`,
       )
-      return
+      continue
     }
 
-    foundModel.tableName = pluralize(foundModel.name).toLowerCase()
+    const foundModel: ModelRecord = {
+      id: foundModelQuery[0].id,
+      name: foundModelQuery[0].name,
+      uid: foundModelQuery[0].uid,
+      tableName: pluralize(foundModelQuery[0].name).toLowerCase(),
+    }
 
-    modelRecords!.push(foundModel)
+    modelRecords.push(foundModel)
 
-    if (modelName === 'Seed' || modelName === 'Version') {
+    if (modelName === 'Seed') {
       continue
     }
 

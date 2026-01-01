@@ -1,4 +1,4 @@
-import { ARWEAVE_HOST } from '@/services/internal/constants'
+import { ARWEAVE_HOST } from '@/client/constants'
 import { BaseArweaveClient } from './BaseArweaveClient'
 import Arweave from 'arweave'
 import { isBrowser } from '../environment'

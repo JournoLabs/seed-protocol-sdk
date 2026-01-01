@@ -20,7 +20,9 @@ export abstract class BaseFileManager {
       return Promise.resolve()
     }
     this.initializing = true
+    console.log('PlatformClass.initializeFileSystem initializing', workingDir)
     await this.PlatformClass.initializeFileSystem(workingDir)
+    console.log('PlatformClass.initializeFileSystem success')
     this.fileSystemInitialized = true
     this.initializing = false
     this.workingDir = workingDir

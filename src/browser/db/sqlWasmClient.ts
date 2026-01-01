@@ -6,7 +6,7 @@
 // import { sql } from 'drizzle-orm'
 // import debug from 'debug'
 // import { sqlite3Worker1Promiser } from '@sqlite.org/sqlite-wasm'
-// import { DB_NAME_APP } from '@/services/internal/constants'
+// import { DB_NAME_APP } from '@/client/constants'
 
 // const logger = debug('seedSdk:browser:db:sqlWasmClient')
 

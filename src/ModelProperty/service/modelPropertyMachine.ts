@@ -1,10 +1,11 @@
-import { assign, setup } from 'xstate'
+import { assign, setup, spawn, ActorRefFrom } from 'xstate'
 import { Static } from '@sinclair/typebox'
-import { TProperty } from '@/schema'
+import { TProperty } from '@/Schema'
 import { saveToSchema } from './actors/saveToSchema'
 import { compareAndMarkDraft } from './actors/compareAndMarkDraft'
 import { validateProperty } from './actors/validateProperty'
-import { ValidationError } from '@/schema/validation'
+import { ValidationError } from '@/Schema/validation'
+import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 
 export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   // Store original values from the JSON schema file
@@ -15,6 +16,7 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   _schemaName?: string
   // Validation errors
   _validationErrors?: ValidationError[]
+  writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
 }
 
 export const modelPropertyMachine = setup({
@@ -33,12 +35,14 @@ export const modelPropertyMachine = setup({
       | { type: 'compareAndMarkDraftError' }
       | { type: 'validateProperty' }
       | { type: 'validationSuccess'; errors: ValidationError[] }
-      | { type: 'validationError'; errors: ValidationError[] },
+      | { type: 'validationError'; errors: ValidationError[] }
+      | { type: 'requestWrite'; data: any },
   },
   actors: {
     saveToSchema,
     compareAndMarkDraft,
     validateProperty,
+    writeProcessMachine,
   },
   guards: {
     isPropertyValid: ({ context }) => {
@@ -143,9 +147,33 @@ export const modelPropertyMachine = setup({
   },
   states: {
     idle: {
+      entry: assign({
+        writeProcess: ({ spawn, context }) => {
+          if (!context.writeProcess && context.id) {
+            return spawn(writeProcessMachine, {
+              input: {
+                entityType: 'modelProperty',
+                entityId: context.id,
+                entityData: context,
+              },
+            })
+          }
+          return context.writeProcess
+        },
+      }),
       on: {
         validateProperty: {
           target: 'validating',
+        },
+        requestWrite: {
+          actions: ({ context, event }) => {
+            if (context.writeProcess) {
+              context.writeProcess.send({
+                type: 'startWrite',
+                data: event.data,
+              })
+            }
+          },
         },
       },
     },

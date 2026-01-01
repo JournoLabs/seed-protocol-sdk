@@ -4,7 +4,7 @@ import path from 'path';
 import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
 import { BaseItem, } from '@/Item/BaseItem';
-import { getModels, getModel, getModelNames, } from '@/stores/modelClass';
+import { Model } from '@/Model/Model';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url)
@@ -32,13 +32,12 @@ const server = {
   // Model operations
   GetModels: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
     try {
-      const modelNames = getModelNames();
-
+      const allModels = Model.getAll();
       const models = [];
 
-      for (const modelName of modelNames) {
-        const model = getModel(modelName);
-        if (!model) {
+      for (const model of allModels) {
+        const modelName = model.modelName;
+        if (!modelName || !model.schema) {
           continue;
         }
         const props = Object.keys(model.schema).map(propName => {
@@ -46,7 +45,7 @@ const server = {
           return {
             name: propName,
             type: prop?.dataType || 'Text',
-            relation_model: prop?.refModelId ? getModel(prop.ref) : '',
+            relation_model: prop?.ref || prop?.refModelName || '',
             is_list: prop?.dataType === 'List'
           };
         });
@@ -106,9 +105,9 @@ const server = {
   CreateItem: async (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
     try {
       const { model_name, properties } = call.request;
-      const ModelClass = getModel(model_name);
+      const model = await Model.getByNameAsync(model_name);
       
-      if (!ModelClass) {
+      if (!model) {
         return callback({
           code: grpc.status.NOT_FOUND,
           message: `Model ${model_name} not found`
@@ -119,10 +118,10 @@ const server = {
       const processedProps = {};
       for (const [key, value] of Object.entries(properties)) {
         // Handle relationship properties and lists based on model definition
-        const prop = ModelClass.prototype[key];
-        if (prop && prop.isList) {
+        const prop = model.schema?.[key];
+        if (prop && prop.dataType === 'List') {
           processedProps[key] = JSON.parse(value);
-        } else if (prop && prop.relationModel) {
+        } else if (prop && (prop.dataType === 'Relation' || prop.ref)) {
           // Assuming relation is stored as stringified ID
           processedProps[key] = value;
         } else {

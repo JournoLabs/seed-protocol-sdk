@@ -4,7 +4,7 @@ import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { immerable } from 'immer'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
-import { getModel } from '@/stores/modelClass'
+import { Model } from '@/Model/Model'
 import { propertyMachine } from './service/propertyMachine'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import debug from 'debug'
@@ -13,7 +13,7 @@ import { getPropertyData } from '@/db/read/getPropertyData'
 import { BaseFileManager, getCorrectId } from '@/helpers'
 // Dynamic import to break circular dependency: schema/index -> ... -> BaseItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
-import type { TProperty } from '@/schema'
+import type { TProperty } from '@/Schema'
 import { eventEmitter } from '@/eventBus'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
@@ -52,9 +52,10 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       throw new Error('Model name is required')
     }
 
-    const ModelClass = getModel(modelName)
+    // Try to get model from cache (synchronous lookup)
+    const model = Model.getByName(modelName)
 
-    if (!ModelClass) {
+    if (!model) {
       throw new Error(`Model ${modelName} not found`)
     }
 
@@ -71,7 +72,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       versionUid,
       modelName,
       storageTransactionId,
-      propertyRecordSchema: ModelClass.schema[propertyName],
+      propertyRecordSchema: model.schema?.[propertyName],
       schemaUid,
       isSaving: false,
       isRelation: false,
@@ -93,7 +94,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       }
 
       const propertyRecordSchema =
-        ModelClass.schema[propertyNameWithoutId || propertyName]
+        model.schema?.[propertyNameWithoutId || propertyName]
       if (propertyRecordSchema) {
         this._dataType = propertyRecordSchema.dataType
 
@@ -147,7 +148,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         }
 
         // Use dynamic import to break circular dependency
-        const { ModelPropertyDataTypes } = await import('@/schema')
+        const { ModelPropertyDataTypes } = await import('@/Schema')
 
         const { context } = snapshot
         const { propertyRecordSchema } = context
@@ -384,8 +385,8 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     return this._getSnapshotContext().seedUid ?? ''
   }
 
-  get schemaUid() {
-    return this._getSnapshotContext().schemaUid ?? ''
+  get schemaUid(): string | undefined {
+    return this._getSnapshotContext().schemaUid
   }
 
   get propertyName() {

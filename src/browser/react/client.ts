@@ -1,19 +1,18 @@
-import { useGlobalServiceStatus } from "./services"
-import { ClientManagerState, GlobalState } from "@/services/internal/constants"
+import { ClientManagerState } from "@/client/constants"
 import { getClient } from "@/client/ClientManager"
 import { useSelector } from "@xstate/react"
 
 
 export const useIsClientReady = () => {
-  const { status, } = useGlobalServiceStatus()
-
   const client = getClient()
 
   const clientService = client.getService()
 
   const isClientReady = useSelector(clientService, (snapshot) => {
+    console.log('useIsClientReady snapshot.value:', snapshot.value)
     return snapshot.value === ClientManagerState.IDLE
   })
 
-  return status === GlobalState.INITIALIZED && isClientReady
+  // GlobalState removed - check ClientManager state directly
+  return isClientReady
 }

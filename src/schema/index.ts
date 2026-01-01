@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 
-export * from './model'
-export * from './property'
+export * from '../Model'
+export * from '../helpers/property/index'
+export * from '../helpers/property'
 export * from './validation'

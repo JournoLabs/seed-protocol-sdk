@@ -1,5 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
-import { ClientManagerEvents } from '@/services/internal/constants'
+import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
@@ -16,8 +16,12 @@ export const saveConfig = fromCallback<
 
   const { endpoints, addresses, arweaveDomain } = context
 
-  if (!endpoints) {
-    throw new Error('saveConfig called with invalid endpoints')
+  // Validate endpoints - required for proper initialization
+  // If endpoints are missing or invalid, initialization should fail
+  if (!endpoints || !endpoints.filePaths || !endpoints.files) {
+    const error = new Error('saveConfig called with invalid endpoints: endpoints must include both filePaths and files')
+    logger('[internal/actors] [saveConfig] Invalid endpoints:', { endpoints })
+    throw error
   }
 
   const _saveConfig = async (): Promise<void> => {

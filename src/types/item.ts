@@ -1,32 +1,14 @@
 import { tags } from 'typia';
-import { ModelClassType, ModelSchema } from '@/types'
+import { ModelSchema } from '@/types'
 import { Attestation } from '@/graphql/gql/graphql'
 import { PropertyType } from '@/seedSchema'
 import { IItem, IItemProperty } from '@/interfaces'
 import { BaseItem } from '@/Item/BaseItem'
+import type { Model } from '@/Model/Model'
 
 export type ItemType = Partial<typeof BaseItem>
 
-export type AllItemsMachineContext = {
-  times?: Record<string, unknown>
-  addresses?: string[]
-  isValidConfig: boolean
-  queryVariables: Record<string, any>
-  modelNameLowercase: string
-  modelNamePlural: string
-  modelName: string
-  ModelClass?: ModelClassType
-  modelSchema?: ModelSchema
-  relatedProperties?: Map<string, PropertyType>
-  relatedVersionsBySeedUid?: Map<string, Attestation[]>
-  relatedVersionsBySchemaUid?: Map<string, Attestation[]>
-  schemaUidsByModelName?: Map<string, string>
-  mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
-  itemSeeds?: Attestation[]
-  itemVersions?: Attestation[]
-  items?: IItem<any>[]
-  modelAddedToDb?: boolean
-}
+// AllItemsMachineContext removed - allItems services have been removed
 
 export type ItemMachineContext<T> = {
   versionLocalId?: string
@@ -34,7 +16,7 @@ export type ItemMachineContext<T> = {
   seedLocalId?: string
   seedUid?: string
   attestationCreatedAt?: string
-  ModelClass?: ModelClassType
+  ModelClass?: Model
   propertiesBySchemaUid?: Map<string, Attestation[]>
   propertiesMetadata?: Map<string, PropertyType>
   propertyInstances?: Map<string | keyof T, IItemProperty<PropertyType>>

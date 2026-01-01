@@ -30,7 +30,7 @@ export const resolveRelatedValue = fromCallback<
 
   const _resolveRelatedValue = async () => {
     // Use dynamic import to break circular dependency
-    const { ModelPropertyDataTypes } = await import('@/schema')
+    const { ModelPropertyDataTypes } = await import('@/Schema')
     
     if (!propertyValue || !isRelation || populatedFromDb) {
       return

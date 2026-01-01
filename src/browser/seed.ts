@@ -1,32 +1,23 @@
-import { ActorRefFrom, createActor, Snapshot, SnapshotFrom } from 'xstate'
+import { Snapshot, SnapshotFrom } from 'xstate'
 
 import { SeedBase } from '@/shared/seed'
 import { SeedConstructorOptions } from '@/types'
-import { CHILD_SNAPSHOT } from '@/services/internal/constants'
-import { internalMachine } from '@/services/internal/internalMachine'
+import { getClient } from '@/client/ClientManager'
+import { ClientManagerState } from '@/client/constants'
 
 class SeedBrowser extends SeedBase {
-  private _internalProcess: ActorRefFrom<typeof internalMachine>
-
   constructor({ config: endpoints }: SeedConstructorOptions) {
     super({ endpoints })
-    this._internalProcess = createActor(internalMachine, {
-      input: {
-        endpoints,
-      },
-    })
+    
+    // Internal machine removed - use ClientManager instead
+    const clientManager = getClient()
+    const clientService = clientManager.getService()
 
-    this._internalProcess.subscribe(
-      (snapshot: SnapshotFrom<typeof internalMachine>) => {
+    clientService.subscribe(
+      (snapshot) => {
         this.notify(snapshot)
       },
     )
-
-    this._internalProcess.on(CHILD_SNAPSHOT, (event) => {
-      this.notify(event.snapshot)
-    })
-
-    this._internalProcess.start()
   }
 
   notify(snapshot: Snapshot<any>) {
@@ -53,7 +44,8 @@ class SeedBrowser extends SeedBase {
   }
 
   unload() {
-    this._internalProcess.stop()
+    // ClientManager is a singleton, don't stop it here
+    // Just complete the subject
     this._subject.complete()
   }
 }

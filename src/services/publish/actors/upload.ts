@@ -3,7 +3,7 @@ import { FromCallbackInput, PublishMachineContext } from '@/types'
 import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import { getCorrectId } from '@/helpers'
-import { ModelPropertyDataTypes } from '@/schema'
+import { ModelPropertyDataTypes } from '@/Schema'
 
 const logger = debug('seedSdk:services:publish:actors:upload')
 

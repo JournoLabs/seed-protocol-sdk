@@ -5,13 +5,14 @@ import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
-import { BROWSER_FS_TOP_DIR, DB_NAME_APP } from "@/services/internal/constants";
+import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
 import * as schema from '@/seedSchema'
 import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
+import { Observable } from 'rxjs'
 
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -23,6 +24,7 @@ class Db extends BaseDb implements IDb {
   static pathToDb: string | undefined
   static dbId: string | undefined
   static appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
+  static sqlocalInstance: SQLocalDrizzle | undefined
 
   constructor() {
     super()
@@ -67,7 +69,16 @@ class Db extends BaseDb implements IDb {
       await BaseFileManager.waitForFileWithContent(journalFilePath, 100, 5000)
       logger('[Db.prepareDb] journal file is ready')
 
-      const { driver, batchDriver } = new SQLocalDrizzle(`${this.filesDir}/db/seed.db`)
+      // Initialize SQLocalDrizzle with reactive: true to enable reactive queries
+      const sqlocalDrizzle = new SQLocalDrizzle({
+        databasePath: `${this.filesDir}/db/seed.db`,
+        reactive: true  // Enable reactive queries
+      })
+      
+      const { driver, batchDriver } = sqlocalDrizzle
+      
+      // Store SQLocalDrizzle instance for reactive queries
+      this.sqlocalInstance = sqlocalDrizzle
 
       this.appDb = drizzle(
         driver, 
@@ -246,11 +257,11 @@ class Db extends BaseDb implements IDb {
     try {
 
       logger('[Db.migrate] calling readMigrationFiles')
-  
+      
       const migrations = readMigrationFiles({
         migrationsFolder: pathToDbDir,
       })
-  
+
       logger('[Db.migrate] migrations', migrations)
   
       await drizzleMigrate(
@@ -266,7 +277,7 @@ class Db extends BaseDb implements IDb {
           migrationsFolder: pathToDbDir,
         },
       )
-  
+
       logger('[Db.migrate] migrations completed')
       
     } catch (error) {
@@ -506,6 +517,67 @@ class Db extends BaseDb implements IDb {
   
   //   return rowsToReturn || []
   // }
+
+  /**
+   * Execute a reactive query that emits new results whenever the underlying data changes.
+   * 
+   * Supports two usage patterns:
+   * 1. SQL tag function: liveQuery((sql) => sql`SELECT * FROM models`)
+   * 2. Drizzle query builder: liveQuery(db.select().from(models))
+   * 
+   * @param query - SQL query function or Drizzle query builder
+   * @returns Observable that emits arrays of query results
+   * 
+   * @example
+   * ```typescript
+   * // Using SQL tag function
+   * const models$ = Db.liveQuery<ModelRow>(
+   *   (sql) => sql`SELECT * FROM models WHERE schema_file_id = ${schemaId}`
+   * )
+   * 
+   * // Using Drizzle query builder
+   * const models$ = Db.liveQuery<ModelRow>(
+   *   appDb.select().from(models).where(eq(models.schemaFileId, schemaId))
+   * )
+   * 
+   * models$.subscribe(models => {
+   *   console.log('Models updated:', models)
+   * })
+   * ```
+   */
+  static liveQuery<T>(
+    query: ((sql: any) => any) | any
+  ): Observable<T[]> {
+    if (!this.sqlocalInstance) {
+      throw new Error('Database not initialized. Call prepareDb first.')
+    }
+    
+    if (!this.sqlocalInstance.reactiveQuery) {
+      throw new Error('Reactive queries not enabled. Initialize SQLocalDrizzle with reactive: true.')
+    }
+    
+    return new Observable<T[]>((subscriber) => {
+      // Call SQLocal's reactiveQuery
+      const reactiveQueryResult = this.sqlocalInstance!.reactiveQuery(query)
+      
+      // Subscribe to SQLocal's subscription API
+      const subscription = reactiveQueryResult.subscribe(
+        (data: T[]) => {
+          // Emit data through RxJS Observable
+          subscriber.next(data)
+        },
+        (err: Error) => {
+          // Emit error through RxJS Observable
+          subscriber.error(err)
+        }
+      )
+      
+      // Cleanup: unsubscribe when Observable is unsubscribed
+      return () => {
+        subscription.unsubscribe()
+      }
+    })
+  }
 }
 
 export { Db }

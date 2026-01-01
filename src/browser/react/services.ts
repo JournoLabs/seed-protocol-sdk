@@ -4,13 +4,13 @@ import { orderBy } from 'lodash-es'
 import { produce } from 'immer'
 import { eventEmitter } from '@/eventBus'
 import pluralize from 'pluralize'
-import { getGlobalService } from '@/services/global/globalMachine'
 import { useSelector } from '@xstate/react'
 import debug from 'debug'
 import { appState } from '@/seedSchema'
 import { like } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { MachineIds } from '@/services/internal/constants'
+import { MachineIds, ClientManagerState } from '@/client/constants'
+import { getClient } from '@/client/ClientManager'
 
 const logger = debug('seedSdk:react:services')
 
@@ -257,90 +257,46 @@ export const useServices = () => {
   const [actors, setActors] = useState<ActorRef<any, any>[]>([])
   const [percentComplete, setPercentComplete] = useState(5)
 
-  const actorsMap = new Map<string, ActorRef<any, any>>()
-
+  // Global service removed - now track ClientManager directly
   useEffect(() => {
-    const globalServiceListener = (eventObj: InspectedEventEvent) => {
-      if (eventObj && eventObj.event && eventObj.event.type === 'init') {
-        return
+    const clientManager = getClient()
+    const clientService = clientManager.getService()
+    
+    // Add ClientManager to actors list
+    const clientActor = clientService as any
+    clientActor.uniqueKey = 'clientManager'
+    
+    setActors([clientActor])
+    
+    // Calculate percent complete based on ClientManager state
+    const subscription = clientService.subscribe((snapshot) => {
+      const state = snapshot.value
+      // Calculate completion based on state progression
+      let percent = 0
+      if (state === ClientManagerState.IDLE) {
+        percent = 100
+      } else if (state === ClientManagerState.ADD_MODELS_TO_DB) {
+        percent = 90
+      } else if (state === ClientManagerState.ADD_MODELS_TO_STORE) {
+        percent = 80
+      } else if (state === ClientManagerState.PROCESS_SCHEMA_FILES) {
+        percent = 70
+      } else if (state === ClientManagerState.SAVE_CONFIG) {
+        percent = 60
+      } else if (state === ClientManagerState.DB_INIT) {
+        percent = 50
+      } else if (state === ClientManagerState.FILE_SYSTEM_INIT) {
+        percent = 30
+      } else if (state === ClientManagerState.PLATFORM_CLASSES_INIT) {
+        percent = 10
       }
-      if (
-        !eventObj || 
-        !eventObj.actorRef || 
-        !eventObj.actorRef.logic || 
-        !eventObj.actorRef.logic.config ||
-        !eventObj.actorRef._snapshot
-      ) {
-        return
-      }
-      
-      const service = eventObj.actorRef
-      const services = [service]
-
-      if (service.logic.config.id === MachineIds.GLOBAL) {
-        const context = service.getSnapshot().context
-        const keys = Object.keys(context)
-        for (const key of keys) {
-          if (!key.startsWith('internal') && key.endsWith('Service')) {
-            const allItemsService = context[key]
-            services.push(allItemsService)
-          }
-        }
-      }
-
-      services.forEach((innerService) => {
-        const uniqueKey = getServiceUniqueKey(innerService)
-        if (!uniqueKey) {
-          return
-        }
-        innerService.uniqueKey = uniqueKey
-        actorsMap.set(uniqueKey, innerService)
-      })
-
-      let actorsArray = Array.from(actorsMap.values())
-      actorsArray = orderBy(actorsArray, (a) => a.logic.config.id, ['asc'])
-
-      setActors(
-        produce(actors, (draft) => {
-          return actorsArray
-        }),
-      )
-    }
-
-    eventEmitter.addListener('inspect.globalService', globalServiceListener)
-
+      setPercentComplete(percent)
+    })
+    
     return () => {
-      eventEmitter.removeListener(
-        'inspect.globalService',
-        globalServiceListener,
-      )
+      subscription.unsubscribe()
     }
   }, [])
-
-  useEffect(() => {
-    const globalService = actors.find(
-      (actor) => getServiceName(actor) === 'global',
-    )
-    const internalService = actors.find(
-      (actor) => getServiceName(actor) === 'internal',
-    )
-    if (!globalService || !internalService) {
-      return
-    }
-    if (
-      getServiceValue(globalService) === 'initialized' &&
-      getServiceValue(internalService) === 'ready'
-    ) {
-      const denominator = actors.length
-      const finishedActors = actors.filter((actor) => {
-        const value = getServiceValue(actor)
-        return finalStrings.includes(value)
-      })
-      const numerator = finishedActors.length
-      const percentComplete = (numerator / denominator) * 100
-      setPercentComplete(percentComplete)
-    }
-  }, [actors])
 
   return {
     services: actors,
@@ -349,24 +305,26 @@ export const useServices = () => {
 }
 
 export const useGlobalServiceStatus = () => {
-  const globalService = getGlobalService()
+  const clientManager = getClient()
+  const clientService = clientManager.getService()
 
-  const status = useSelector(globalService, (snapshot) => {
+  const status = useSelector(clientService, (snapshot) => {
     return snapshot.value
   })
 
-  const internalStatus = useSelector(
-    globalService.getSnapshot().context.internalService,
-    (snapshot) => {
-      if (!snapshot) {
-        return
-      }
-      return snapshot.value
-    },
-  )
-
-  const internalService = useSelector(globalService, (snapshot) => {
-    return snapshot.context.internalService
+  // Internal service functionality is now part of ClientManager
+  // DB is ready when ClientManager reaches DB_INIT or later states
+  const internalStatus = useSelector(clientService, (snapshot) => {
+    const state = snapshot.value
+    if (state === ClientManagerState.DB_INIT || 
+        state === ClientManagerState.SAVE_CONFIG ||
+        state === ClientManagerState.PROCESS_SCHEMA_FILES ||
+        state === ClientManagerState.ADD_MODELS_TO_STORE ||
+        state === ClientManagerState.ADD_MODELS_TO_DB ||
+        state === ClientManagerState.IDLE) {
+      return 'ready'
+    }
+    return state
   })
 
   return {

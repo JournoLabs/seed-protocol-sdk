@@ -11,9 +11,8 @@ type CreateSeedProps = {
 export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<string> => {
   const schemaUid = await getSchemaUidForModel(type)
 
-  if (!schemaUid) {
-    throw new Error(`No schema found for model type: ${type}`)
-  }
+  // schemaUid is optional - Items can be created without a schemaUid
+  // if the EAS schema hasn't been published yet
 
   const appDb = BaseDb.getAppDb()
 
@@ -24,7 +23,7 @@ export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<st
     type,
     uid: seedUid,
     createdAt: Date.now(),
-    schemaUid,
+    schemaUid: schemaUid || null,
   })
 
   return newSeedLocalId

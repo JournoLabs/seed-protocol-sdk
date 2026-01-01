@@ -1,10 +1,13 @@
 import { Static } from '@sinclair/typebox'
-import { TProperty } from '@/schema'
-import { getModel } from '@/stores/modelClass'
+import { TProperty } from '@/Schema'
+import { Model } from '@/Model/Model'
 import pluralize from 'pluralize'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties, PropertyType } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
+
+// Re-export everything from property/index.ts to make it available when importing from helpers/property
+export * from './property/index'
 
 /**
  * Gets the propertyRecordSchema object for a given model and property name.
@@ -42,20 +45,20 @@ export const getPropertySchema = async (
   modelName: string,
   propertyName: string,
 ): Promise<Static<typeof TProperty> | undefined> => {
-  const ModelClass = getModel(modelName)
+  const model = await Model.getByNameAsync(modelName)
   
-  if (!ModelClass) {
+  if (!model) {
     return undefined
   }
   
-  if (!ModelClass.schema) {
+  if (!model.schema) {
     return undefined
   }
   
   // Helper to resolve property name (handles Id/Ids suffixes)
   const resolvePropertyName = (propName: string): string | undefined => {
     // First, try direct lookup
-    if (ModelClass.schema![propName]) {
+    if (model.schema![propName]) {
       return propName
     }
     
@@ -69,7 +72,7 @@ export const getPropertySchema = async (
       propertyNameWithoutId = pluralize(propertyNameWithoutId)
     }
     
-    if (propertyNameWithoutId && ModelClass.schema![propertyNameWithoutId]) {
+    if (propertyNameWithoutId && model.schema![propertyNameWithoutId]) {
       return propertyNameWithoutId
     }
     
@@ -116,10 +119,10 @@ export const getPropertySchema = async (
             .where(eq(properties.modelId, modelRecord.id!))
           
           // Get all schema property names to identify orphaned properties
-          const schemaPropertyNames = new Set(Object.keys(ModelClass.schema || {}))
+          const schemaPropertyNames = new Set(Object.keys(model.schema || {}))
           
           // Get the schema property definition to match characteristics
-          const schemaPropertyDef = ModelClass.schema[resolvedPropertyName]
+          const schemaPropertyDef = model.schema[resolvedPropertyName]
           
           if (schemaPropertyDef) {
             // Find orphaned properties (don't match any schema property name) that match characteristics
@@ -165,7 +168,7 @@ export const getPropertySchema = async (
           const propertyRecord = propertyRecords[0]
           
           // Get the base schema from file to merge with database values
-          const schemaFromFile = ModelClass.schema[resolvedPropertyName]
+          const schemaFromFile = model.schema[resolvedPropertyName]
           
           // Build property schema from database, merging with file schema for fields not in DB
           // Use the schema property name (resolvedPropertyName) even if DB has different name (renamed)
@@ -203,7 +206,7 @@ export const getPropertySchema = async (
   }
   
   // Fall back to schema file lookup
-  const schemaFromFile = ModelClass.schema[resolvedPropertyName]
+  const schemaFromFile = model.schema[resolvedPropertyName]
   if (schemaFromFile) {
     return { ...schemaFromFile, name: resolvedPropertyName }
   }

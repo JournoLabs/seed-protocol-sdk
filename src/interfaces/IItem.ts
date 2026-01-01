@@ -15,7 +15,7 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
 
   readonly seedLocalId: string
   readonly seedUid?: string
-  readonly schemaUid: string
+  readonly schemaUid?: string
   readonly latestVersionUid: VersionsType
   readonly latestVersionLocalId: string
   readonly modelName: string

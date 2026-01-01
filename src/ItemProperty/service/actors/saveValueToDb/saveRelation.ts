@@ -35,7 +35,7 @@ export const saveRelation = fromCallback<
 
   const _saveRelation = async (): Promise<boolean> => {
     // Use dynamic import to break circular dependency
-    const { ModelPropertyDataTypes } = await import('@/schema')
+    const { ModelPropertyDataTypes } = await import('@/Schema')
     
     let refResolvedDisplayValue
     let refSeedType

@@ -1,4 +1,4 @@
-// Internal models (Seed, Version, Metadata) are now defined in seed-protocol-v1.json schema
+// Internal models (Seed, Version, Metadata) are now defined in SEEDPROTOCOL_Seed_Protocol_v1.json schema
 // and loaded automatically via processSchemaFiles
 // OLD CODE: import { BetterSQLite3Database, drizzle } from 'drizzle-orm/better-sqlite3'
 import { drizzle } from 'drizzle-orm/libsql'

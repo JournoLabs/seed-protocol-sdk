@@ -3,26 +3,35 @@ import { GET_PROPERTIES } from '@/Item/queries'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { PropertyType } from '@/seedSchema'
 import { Attestation } from '@/graphql/gql/graphql'
-import { ModelClassType } from '@/types'
 import { BaseEasClient, BaseQueryClient } from '@/helpers'
+import { Model } from '@/Model/Model'
 
 
 export const fetchDataFromEas = fromCallback<
   EventObject,
   typeof itemMachineSingle
 >(({ sendBack, input: { context } }) => {
-  const { ModelClass, modelTableName, versionUid } = context
+  const { ModelClass, modelTableName, versionUid, modelName } = context
 
   const propertiesMetadata = new Map<string, PropertyType>()
+
+  // Get model schema - prefer ModelClass if available, otherwise look up by modelName
+  let modelSchema: Record<string, PropertyType> | undefined
+  if (ModelClass && 'schema' in ModelClass) {
+    modelSchema = ModelClass.schema
+  } else if (modelName) {
+    const model = Model.getByName(modelName)
+    modelSchema = model?.schema
+  }
 
   // EAS is the final source of truth, so we need to see if our Item is
   // already represented there. Then we need to intelligently sync/merge
   // with whatever new data has been created on the device before the sync.
-  for (const [propertyName, propertyMetadata] of Object.entries(
-    (ModelClass as ModelClassType).schema,
-  )) {
-    if (propertyMetadata) {
-      propertiesMetadata.set(propertyName, propertyMetadata)
+  if (modelSchema) {
+    for (const [propertyName, propertyMetadata] of Object.entries(modelSchema)) {
+      if (propertyMetadata) {
+        propertiesMetadata.set(propertyName, propertyMetadata)
+      }
     }
   }
 

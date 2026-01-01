@@ -1,13 +1,12 @@
-import { syncDbFiles } from '@/services/internal/helpers'
 import { eventEmitter } from '@/eventBus'
-import { ARWEAVE_HOST } from '@/services/internal/constants'
+import { ARWEAVE_HOST } from '@/client/constants'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getAddressesFromDb } from '@/helpers/db'
 import {
   BaseFileManager,
 } from '@/helpers'
-import { GET_FILES_METADATA } from '@/schema/file/queries'
+import { GET_FILES_METADATA } from '@/helpers/file/queries'
 import debug from 'debug'
 // Dynamic import to break circular dependency with globalMachine
 // import { getGlobalService } from '@/services/global/globalMachine'
@@ -23,6 +22,14 @@ import { isBrowser } from '@/helpers/environment'
 
 
 const logger = debug('seedSdk:files:download')
+
+// syncDbFiles helper - internal service removed, functionality moved here
+const syncDbFiles = async (endpoints: any) => {
+  // TODO: Implement syncDbFiles functionality if needed
+  // This was previously in @/services/internal/helpers
+  logger('[download] syncDbFiles called but not yet implemented')
+  return Promise.resolve()
+}
 
 
 export const downloadAllFilesRequestHandler = async ({
@@ -48,16 +55,21 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
   }
 
   if (!BaseDb.isAppDbReady()) {
-    // Use dynamic import to break circular dependency
-    const { getGlobalService } = await import('@/services/global/globalMachine')
-    const globalService = getGlobalService()
-    const internalService = globalService.getSnapshot().context.internalService
-    if (internalService) {
-      await waitFor(internalService, (snapshot) => {
-        return snapshot.value === 'ready'
-      })
-      addresses = await getAddressesFromDb()
-    }
+    // Wait for ClientManager to be ready (DB_INIT state or later)
+    const { getClient } = await import('@/client/ClientManager')
+    const clientManager = getClient()
+    const clientService = clientManager.getService()
+    
+    await waitFor(clientService, (snapshot) => {
+      const state = snapshot.value
+      return state === 'dbInit' || 
+             state === 'saveConfig' ||
+             state === 'processSchemaFiles' ||
+             state === 'addModelsToStore' ||
+             state === 'addModelsToDb' ||
+             state === 'idle'
+    }, { timeout: 30000 })
+    addresses = await getAddressesFromDb()
   }
 
   if (!addresses || addresses.length === 0) {
@@ -117,7 +129,35 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
   const transactionIds = []
 
   for (const fileMetadata of filesMetadata) {
-    const json = JSON.parse(fileMetadata.decodedDataJson)
+    // Validate and parse decodedDataJson
+    if (!fileMetadata.decodedDataJson || fileMetadata.decodedDataJson.trim() === '') {
+      console.warn(
+        '[events/files] [download] empty decodedDataJson for fileMetadata: ',
+        fileMetadata.id,
+      )
+      continue
+    }
+
+    let json
+    try {
+      json = JSON.parse(fileMetadata.decodedDataJson)
+    } catch (error) {
+      console.warn(
+        '[events/files] [download] failed to parse decodedDataJson for fileMetadata: ',
+        fileMetadata.id,
+        error,
+      )
+      continue
+    }
+
+    if (!Array.isArray(json) || json.length === 0 || !json[0]?.value?.value) {
+      console.warn(
+        '[events/files] [download] invalid decodedDataJson structure for fileMetadata: ',
+        fileMetadata.id,
+      )
+      continue
+    }
+
     const transactionId = json[0].value.value
     if (excludedTransactions.has(transactionId)) {
       continue

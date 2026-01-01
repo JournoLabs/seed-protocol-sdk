@@ -1,0 +1,20 @@
+---
+description: Package manager rules - always use bun, never npm/npx
+globs: **/*
+---
+Package Manager Rules:
+
+- ALWAYS use 'bun' instead of 'npm' or 'npx' for all package management operations
+- NEVER use 'npm', 'npx', 'yarn', or 'pnpm' commands
+- ALWAYS use 'bun run <script>' for running package.json scripts (e.g., 'bun run test', NOT 'bun test')
+- Bun executable resolution order (try each in sequence):
+  1. Check PATH: `which bun` or `command -v bun`
+  2. Fallback to: `~/.bun/bin/bun`
+  3. Fallback to: `/Users/admin/.bun/bin/bun`
+  4. If all fail, search system-wide: `find /usr /opt /home /Users -name bun -type f -executable 2>/dev/null | head -1`
+- When running commands, use: `$(which bun || echo ~/.bun/bin/bun || echo /Users/admin/.bun/bin/bun || find /usr /opt /home /Users -name bun -type f -executable 2>/dev/null | head -1)`
+- Examples:
+  - Use: `bun install` (not `npm install`)
+  - Use: `bun run build` (not `npm run build`)
+  - Use: `bun run test` (not `bun test` or `npm test`)
+  - Use: `bunx <package>` (not `npx <package>`)

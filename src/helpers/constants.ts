@@ -104,3 +104,15 @@ export enum SeedModels {
   Metadata = 'Metadata',
   Version = 'Version',
 }
+
+// Internal SDK schema that should not be created in app's files directory
+export const SEED_PROTOCOL_SCHEMA_NAME = 'Seed Protocol'
+export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
+
+/**
+ * Check if a schema is an internal SDK schema that should not be created in app files
+ */
+export function isInternalSchema(schemaName: string, schemaId?: string): boolean {
+  return schemaName === SEED_PROTOCOL_SCHEMA_NAME || 
+         (schemaId !== undefined && INTERNAL_SCHEMA_IDS.includes(schemaId as any))
+}

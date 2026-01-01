@@ -1,8 +1,8 @@
 import path                     from 'path'
 import pluralize                from 'pluralize'
 import { camelCase, snakeCase } from 'lodash-es'
-import { ModelClassType }       from '@/types'
-import { ModelPropertyDataTypes } from '@/schema'
+import { Model } from '@/Model/Model'
+import { ModelPropertyDataTypes } from '@/Schema'
 
 // Define ILoader type locally to avoid importing from nunjucks (prevents bundling issues)
 type ILoader = {
@@ -62,9 +62,12 @@ const refNamesToExcludeFromRelations = [
 
 export const generateDrizzleSchemaCode = async (
   modelName: string,
-  modelClass: ModelClassType,
+  model: Model,
 ): Promise<string> => {
-  const listProperties = Object.entries(modelClass.schema).filter(
+  if (!model.schema) {
+    throw new Error(`Model ${modelName} has no schema`)
+  }
+  const listProperties = Object.entries(model.schema).filter(
     ([key, propertyDef]) => propertyDef?.dataType === ModelPropertyDataTypes.List && !refNamesToExcludeFromRelations.includes(propertyDef?.ref!),
   )
 
@@ -75,7 +78,7 @@ export const generateDrizzleSchemaCode = async (
   const env = await getNunjucksEnv()
   const schemaCode = env.render(filePath, {
     modelName,
-    modelClass,
+    modelClass: model, // Keep modelClass name for template compatibility
     listProperties,
   })
 
@@ -93,7 +96,7 @@ export const createDrizzleSchemaFilesFromConfig = async (
   const schemaFilePath = configFilePath || pathResolver.findConfigFile() || path.join(dotSeedDir, 'seed.config.ts')
 
   const { models, } = await getTsImport<{
-    models: Record<string, ModelClassType>
+    models: Record<string, Model>
   }>(schemaFilePath)
 
   const writeToDir = outputDirPath || appSchemaDir

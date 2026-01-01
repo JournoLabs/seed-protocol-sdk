@@ -53,6 +53,7 @@ class FileManager extends BaseFileManager {
       backend: WebAccess,
       handle,
     })
+    console.log('FileManager.initializeFileSystem success')
     // Cache is already set in getFs(), so no need to set it again
   }
 
@@ -94,7 +95,7 @@ class FileManager extends BaseFileManager {
     if (!(await this.pathExists(filePath))) {
       try {
         const zenfs = await this.getFs()
-        await zenfs.promises.mkdir(filePath)
+        await zenfs.promises.mkdir(filePath, { recursive: true })
       } catch (error) {
         // This is a no-op. We tried to create a directory that already exists.
         logger('Attempted to create a directory that already exists')
@@ -281,6 +282,7 @@ class FileManager extends BaseFileManager {
     }
     
     await zenfs.writeFile(filePath, writeContent)
+    await this.waitForFileWithContent(filePath, 100, 5000)
     // try {
     //   // Get a handle to the OPFS root directory
     //   const root = await navigator.storage.getDirectory();

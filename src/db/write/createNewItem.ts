@@ -1,5 +1,5 @@
 import { ModelValues } from '@/types'
-import { getModel } from '@/stores/modelClass'
+import { Model } from '@/Model/Model'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
@@ -30,7 +30,8 @@ export const createNewItem = async ({
 
   const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
-  const propertySchemas = getModel(modelName)?.schema
+  const model = await Model.getByNameAsync(modelName)
+  const propertySchemas = model?.schema
 
   for (const [propertyName, propertyValue] of Object.entries(propertyData)) {
     let propertyRecordSchema
@@ -46,7 +47,7 @@ export const createNewItem = async ({
         propertyName,
         propertyValue,
         modelName,
-      },
+      } as Parameters<typeof createMetadata>[0],
       propertyRecordSchema,
     )
   }

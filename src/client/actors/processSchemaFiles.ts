@@ -1,21 +1,59 @@
 import { EventObject, fromCallback } from "xstate"
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
-import { ClientManagerEvents } from "@/services/internal/constants"
+import { ClientManagerEvents } from "@/client/constants"
 import { listSchemaFiles, loadAllSchemasFromDb } from "@/helpers/schema"
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { createModelsFromJsonFile, importJsonSchema, loadSchemaFromFile } from "@/imports/json"
 import { SchemaFileFormat } from "@/types/import"
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager"
 import debug from "debug"
-import internalSchema from "@/seedSchema/seed-protocol-v1.json"
+import internalSchema from "@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json"
 
 const logger = debug('seedSdk:client:actors:processSchemaFiles')
+
+// Timeout for the entire schema processing operation (30 seconds)
+const PROCESS_SCHEMA_FILES_TIMEOUT_MS = 30000
 
 export const processSchemaFiles = fromCallback<
   EventObject,
   FromCallbackInput<ClientManagerContext>
 >(({ sendBack, input: { context } }) => {
   logger('processSchemaFiles started')
+
+  let hasResponded = false
+  let timeoutId: NodeJS.Timeout | null = null
+
+  const reportError = (error: Error) => {
+    if (!hasResponded) {
+      hasResponded = true
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      logger('processSchemaFiles error:', error)
+      sendBack({ 
+        type: 'error', 
+        error: error instanceof Error ? error : new Error(String(error))
+      })
+    }
+  }
+
+  const reportSuccess = () => {
+    if (!hasResponded) {
+      hasResponded = true
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      logger('processSchemaFiles completed')
+      sendBack({ type: ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS })
+    }
+  }
+
+  // Set up a single timeout for the entire operation
+  timeoutId = setTimeout(() => {
+    reportError(new Error(`processSchemaFiles timed out after ${PROCESS_SCHEMA_FILES_TIMEOUT_MS}ms`))
+  }, PROCESS_SCHEMA_FILES_TIMEOUT_MS)
 
   const _processSchemaFiles = async () => {
     // Use dynamic import to break circular dependency
@@ -40,9 +78,24 @@ export const processSchemaFiles = fromCallback<
     }
 
     // Then, process minimal import files (files without $schema)
-    const schemaFiles = await listSchemaFiles()
+    logger('Listing schema files')
+    let schemaFiles: Array<{ name: string; version: number; filePath: string }> = []
+    try {
+      schemaFiles = await listSchemaFiles()
+      logger(`Found ${schemaFiles.length} schema files to process`)
+    } catch (error) {
+      logger('Error listing schema files (continuing anyway):', error)
+      // Continue with empty array - this is not critical
+      schemaFiles = []
+    }
+    
     for (const schemaFile of schemaFiles) {
-      await importJsonSchema(schemaFile.filePath)
+      try {
+        await importJsonSchema(schemaFile.filePath)
+      } catch (error) {
+        logger(`Error importing schema file ${schemaFile.filePath}:`, error)
+        // Continue with next file
+      }
     }
 
     // Then, load all schemas using the unified database-first approach
@@ -50,9 +103,8 @@ export const processSchemaFiles = fromCallback<
     const allSchemasData = await loadAllSchemasFromDb()
     logger(`Loaded ${allSchemasData.length} schemas (${allSchemasData.filter(s => s.isDraft).length} drafts, ${allSchemasData.filter(s => !s.isDraft).length} published)`)
     
-    // Collect all schemas to add to context
-    const schemas: { [schemaName: string]: SchemaFileFormat } = { ...context.schemas }
-    const allModels: { [key: string]: any } = { ...context.models }
+    // Collect models to add to context (schemas are now loaded on-demand via database queries)
+    const allModels: { [key: string]: any } = { ...(context.models || {}) }
     
     for (const schemaData of allSchemasData) {
       const schema = schemaData.schema
@@ -90,25 +142,32 @@ export const processSchemaFiles = fromCallback<
         logger(`Draft schema ${schemaName} - models will be loaded when schema is accessed`)
       }
       
-      // Add schema to context
-      schemas[schemaName] = schema
+      // Schemas are now loaded on-demand via database queries (useSchemas hook uses loadAllSchemasFromDb)
+      // No need to populate context.schemas
     }
     
-    // Update context with all schemas and models at once
+    // Update context with models only (schemas are loaded on-demand via database queries)
     sendBack({ 
       type: ClientManagerEvents.UPDATE_CONTEXT, 
       context: { 
         models: allModels,
-        schemas: schemas,
       } 
     })
   }
 
-  _processSchemaFiles().then(() => {
-    logger('processSchemaFiles completed')
-    sendBack({ type: ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS })
-  }).catch((error) => {
-    logger('processSchemaFiles error:', error)
-    sendBack({ type: ClientManagerEvents.PROCESS_SCHEMA_FILES_SUCCESS })
-  })
+  _processSchemaFiles()
+    .then(() => {
+      reportSuccess()
+    })
+    .catch((error) => {
+      reportError(error instanceof Error ? error : new Error(String(error)))
+    })
+
+  // Cleanup function to clear timeout if actor is stopped
+  return () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      timeoutId = null
+    }
+  }
 })

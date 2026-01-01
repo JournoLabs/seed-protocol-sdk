@@ -1,20 +1,99 @@
 import { BaseFileManager } from '../helpers/FileManager/BaseFileManager'
 import { JsonImportSchema, SchemaFileFormat } from '../types/import'
-import { ModelPropertyDataTypes } from '@/schema'
+import { ModelPropertyDataTypes } from '@/Schema'
 import { Static } from '@sinclair/typebox'
-import { TProperty } from '@/schema/property'
+import { TProperty } from '@/helpers/property'
 import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import debug from 'debug'
-import { setModel } from '@/stores/modelClass'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { getClient } from '@/client/ClientManager'
-import { ClientManagerEvents } from '@/services/internal/constants'
+import { ClientManagerEvents } from '@/client/constants'
 
 const logger = debug('seedSdk:imports:json')
 
+/**
+ * Compare two schema files structurally, ignoring metadata timestamps
+ * This is used to determine if an existing schema file matches the schema being imported
+ * @param schema1 - First schema to compare
+ * @param schema2 - Second schema to compare
+ * @returns true if schemas are structurally equivalent, false otherwise
+ */
+function compareSchemasStructurally(
+  schema1: SchemaFileFormat,
+  schema2: SchemaFileFormat,
+): boolean {
+  // Compare basic fields
+  if (schema1.$schema !== schema2.$schema) return false
+  if (schema1.version !== schema2.version) return false
+  if (schema1.id !== schema2.id) return false
+  
+  // Compare metadata (ignoring timestamps)
+  if (schema1.metadata?.name !== schema2.metadata?.name) return false
+  
+  // Compare models structure
+  const models1 = schema1.models || {}
+  const models2 = schema2.models || {}
+  
+  const modelNames1 = Object.keys(models1).sort()
+  const modelNames2 = Object.keys(models2).sort()
+  
+  if (modelNames1.length !== modelNames2.length) return false
+  if (!modelNames1.every((name, i) => name === modelNames2[i])) return false
+  
+  // Compare each model's structure
+  for (const modelName of modelNames1) {
+    const model1 = models1[modelName]
+    const model2 = models2[modelName]
+    
+    // Compare model IDs if both have them
+    if (model1.id !== model2.id) return false
+    
+    // Compare properties
+    const props1 = model1.properties || {}
+    const props2 = model2.properties || {}
+    
+    const propNames1 = Object.keys(props1).sort()
+    const propNames2 = Object.keys(props2).sort()
+    
+    if (propNames1.length !== propNames2.length) return false
+    if (!propNames1.every((name, i) => name === propNames2[i])) return false
+    
+    // Compare each property's structure
+    for (const propName of propNames1) {
+      const prop1 = props1[propName]
+      const prop2 = props2[propName]
+      
+      // Compare property IDs if both have them
+      if (prop1.id !== prop2.id) return false
+      
+      // Compare property types
+      if (prop1.type !== prop2.type) return false
+      
+      // Compare other relevant fields (ref, items, etc.)
+      if (prop1.ref !== prop2.ref) return false
+      if (prop1.items?.type !== prop2.items?.type) return false
+      if (prop1.items?.model !== prop2.items?.model) return false
+    }
+  }
+  
+  // Compare enums
+  const enums1 = schema1.enums || {}
+  const enums2 = schema2.enums || {}
+  
+  const enumNames1 = Object.keys(enums1).sort()
+  const enumNames2 = Object.keys(enums2).sort()
+  
+  if (enumNames1.length !== enumNames2.length) return false
+  if (!enumNames1.every((name, i) => name === enumNames2[i])) return false
+  
+  // Note: We don't compare migrations as they're historical records
+  // and may differ even for the same schema structure
+  
+  return true
+}
 
 /**
  * Transform import JSON format to full schema file format
@@ -103,10 +182,6 @@ export const parseJsonImportContent = (
       throw new Error('Schema name is required (either at top level or in metadata.name)')
     }
 
-    if (!data.models || Object.keys(data.models).length === 0) {
-      throw new Error('At least one model is required')
-    }
-
     // Return normalized JsonImportSchema format
     return {
       name: schemaName,
@@ -153,13 +228,37 @@ export const readJsonImportFile = async (
 }
 
 /**
- * Get the full file path for a schema file
+ * Sanitize a schema name to be filesystem-safe
+ * Replaces all special characters (except alphanumeric, hyphens, underscores) with underscores
+ * Converts spaces to underscores
+ * Removes leading/trailing underscores
+ * 
+ * @param name - Schema name to sanitize
+ * @returns Sanitized name safe for use in filenames
  */
-const getSchemaFilePath = (workingDir: string, name: string, version: number): string => {
+const sanitizeSchemaName = (name: string): string => {
+  return name
+    .replace(/[^a-zA-Z0-9\s_-]/g, '_') // Replace special chars (except spaces, hyphens, underscores) with underscore
+    .replace(/\s+/g, '_') // Convert spaces to underscores
+    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+    .replace(/_+/g, '_') // Collapse multiple underscores to single
+}
+
+/**
+ * Get the full file path for a schema file
+ * Format: {schemaFileId}_{schemaName}_v{version}.json
+ * 
+ * The ID-first format ensures all files for a schema group together when sorted alphabetically.
+ * 
+ * @param workingDir - Working directory path
+ * @param name - Schema name
+ * @param version - Schema version
+ * @param schemaFileId - Schema file ID (required)
+ */
+const getSchemaFilePath = (workingDir: string, name: string, version: number, schemaFileId: string): string => {
   const path = BaseFileManager.getPathModule()
-  // Sanitize name to be filesystem-safe
-  const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_')
-  const filename = `${sanitizedName}-v${version}.json`
+  const sanitizedName = sanitizeSchemaName(name)
+  const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
   return path.join(workingDir, filename)
 }
 
@@ -194,24 +293,161 @@ export async function importJsonSchema(
   // Determine if we have a file path or file contents
   let importData: JsonImportSchema
   let importFilePath: string | undefined
+  let originalSchemaFile: SchemaFileFormat | undefined
 
   if (typeof importFilePathOrContents === 'string') {
     // It's a file path
     importFilePath = importFilePathOrContents
     importData = await readJsonImportFile(importFilePath)
   } else {
-    // It's file contents
-    importData = parseJsonImportContent(importFilePathOrContents.contents)
+    // It's file contents - check if it's already a complete schema format
+    try {
+      const parsed = JSON.parse(importFilePathOrContents.contents) as any
+      if (parsed.$schema && parsed.id && parsed.metadata) {
+        // It's already a complete schema format - preserve it
+        originalSchemaFile = parsed as SchemaFileFormat
+        logger(`Input is already a complete schema format, preserving original ID: ${originalSchemaFile.id}`)
+      }
+    } catch {
+      // Not valid JSON or not a complete schema, parse as import format
+    }
+    
+    if (!originalSchemaFile) {
+      importData = parseJsonImportContent(importFilePathOrContents.contents)
+    }
   }
 
-  // Transform to full schema file format
-  const schemaFile = transformImportToSchemaFile(importData, version)
+  // Use original schema file if available, otherwise transform from import format
+  let schemaFile: SchemaFileFormat
+  if (originalSchemaFile) {
+    schemaFile = originalSchemaFile
+    // Use provided version if different, otherwise use version from schema
+    if (version !== undefined && version !== schemaFile.version) {
+      schemaFile = { ...schemaFile, version }
+    }
+  } else {
+    schemaFile = transformImportToSchemaFile(importData, version)
+  }
+
+  // Check if this is an internal SDK schema (should not create files in app directory)
+  const { isInternalSchema } = await import('@/helpers/constants')
+  const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
+  
+  if (isInternal) {
+    logger(`Skipping file creation for internal schema: ${schemaFile.metadata.name}`)
+    // For internal schemas, just load to database and store, don't create file
+    // Extract schema name and version
+    const schemaName = schemaFile.metadata?.name
+    const version = schemaFile.version
+
+    if (!schemaName) {
+      throw new Error('Schema name is required in metadata.name')
+    }
+
+    // Convert to JsonImportSchema format for processing
+    const importDataForInternal: JsonImportSchema = {
+      name: schemaName,
+      models: Object.fromEntries(
+        Object.entries(schemaFile.models || {}).map(([modelName, model]) => [
+          modelName,
+          {
+            ...model,
+            // Remove id field for import format
+            id: undefined,
+            properties: Object.fromEntries(
+              Object.entries(model.properties || {}).map(([propName, prop]) => [
+                propName,
+                {
+                  ...prop,
+                  // Remove id field for import format
+                  id: undefined,
+                },
+              ]),
+            ),
+          },
+        ]),
+      ) as JsonImportSchema['models'],
+    }
+
+    // Convert JSON models to Model classes
+    const modelDefinitions = await createModelsFromJson(importDataForInternal)
+
+    logger('loadSchemaFromFile (internal) - modelDefinitions length:', Object.keys(modelDefinitions).length)
+
+    // Convert schema file metadata to schema input for database
+    const schemaInput = {
+      name: schemaName,
+      version,
+      schemaFileId: schemaFile.id || null,
+      createdAt: new Date(schemaFile.metadata.createdAt).getTime(),
+      updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
+    } as Parameters<typeof addSchemaToDb>[0]
+
+    // Extract schemaFileIds from JSON file
+    const modelFileIds = new Map<string, string>()
+    const propertyFileIds = new Map<string, Map<string, string>>()
+    
+    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+      if (model.id) {
+        modelFileIds.set(modelName, model.id)
+      }
+      
+      const propIds = new Map<string, string>()
+      for (const [propName, prop] of Object.entries(model.properties || {})) {
+        if (prop.id) {
+          propIds.set(propName, prop.id)
+        }
+      }
+      if (propIds.size > 0) {
+        propertyFileIds.set(modelName, propIds)
+      }
+    }
+
+    // Use dynamic import to break circular dependency
+    const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    
+    // Try to add schema and models to database if database is available
+    try {
+      const db = BaseDb.getAppDb()
+      if (db) {
+        // Store full schema data in database as fallback when file is not available
+        const schemaData = JSON.stringify(schemaFile, null, 2)
+        
+        // Add schema to database (creates or returns existing) with schemaFileId and schemaData
+        const schemaRecord = await addSchemaToDb(schemaInput, schemaFile.id, schemaData, false)
+
+        // Add models to database and link them to the schema with schemaFileIds (only if there are models)
+        if (Object.keys(modelDefinitions).length > 0) {
+          await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
+            schemaFileId: schemaFile.id,
+            modelFileIds,
+            propertyFileIds,
+          })
+        }
+      }
+    } catch (dbError) {
+      // Database not available - log warning but continue
+      logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    }
+
+    // Models are now Model instances, no registration needed
+    // They should be created via Model.create() and are accessible via Model static methods
+    for (const [modelName] of Object.entries(modelDefinitions)) {
+      logger('loadSchemaFromFile (internal) - model available:', modelName)
+    }
+
+    // Schema is now saved to database
+    // useSchemas hook will pick it up via database queries
+
+    return '' // Return empty string to indicate no file was created
+  }
 
   const workingDir = BaseFileManager.getWorkingDir()
   const path = BaseFileManager.getPathModule()
 
-  // Get the target file path
-  const filePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, version)
+  // Get the target file path using ID-based naming (preferred)
+  const filePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, version, schemaFile.id)
   
   // Check if schema already exists
   const exists = await BaseFileManager.pathExists(filePath)
@@ -238,10 +474,42 @@ export async function importJsonSchema(
       }
     }
     
-    // Target file exists and is different from import file, or import file is not complete
-    throw new Error(
-      `Schema ${schemaFile.metadata.name} v${version} already exists`,
-    )
+    // File exists - check if it matches the schema we're trying to import
+    try {
+      const existingContent = await BaseFileManager.readFileAsString(filePath)
+      const existingSchema = JSON.parse(existingContent) as SchemaFileFormat
+      
+      // Verify it's a complete schema file
+      if (existingSchema.$schema) {
+        // Compare schemas structurally
+        if (compareSchemasStructurally(schemaFile, existingSchema)) {
+          // Schemas match - just load the existing file
+          logger(`Schema ${schemaFile.metadata.name} v${version} already exists with matching content, loading it`)
+          return await loadSchemaFromFile(filePath)
+        } else {
+          // Schemas don't match - throw error to prevent data loss
+          throw new Error(
+            `Schema ${schemaFile.metadata.name} v${version} already exists with different content. ` +
+            `To update the schema, delete the existing file first or use a different version.`,
+          )
+        }
+      } else {
+        // File exists but is not a complete schema - this shouldn't happen with ID-based naming
+        // but we'll treat it as a conflict
+        throw new Error(
+          `Schema ${schemaFile.metadata.name} v${version} already exists but file is not a complete schema`,
+        )
+      }
+    } catch (error) {
+      // If error is already our custom error, re-throw it
+      if (error instanceof Error && error.message.includes('already exists')) {
+        throw error
+      }
+      // If we can't read/parse the existing file, throw a generic error
+      throw new Error(
+        `Schema ${schemaFile.metadata.name} v${version} already exists but could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 
   // Ensure working directory exists
@@ -259,40 +527,8 @@ export async function importJsonSchema(
   // This handles all model creation, database operations, and store updates
   await loadSchemaFromFile(filePath)
 
-  // Update client context so useSchemas hook reflects the new schema
-  try {
-    // Use dynamic import to break circular dependency
-    const { getClient } = await import('@/client/ClientManager')
-    const client = getClient()
-    const clientService = client.getService()
-    const currentContext = clientService.getSnapshot().context
-    
-    // Read the schema file content to add to context
-    const schemaFileContent = await BaseFileManager.readFileAsString(filePath)
-    const schemaData = JSON.parse(schemaFileContent) as SchemaFileFormat
-    const schemaName = schemaData.metadata?.name || schemaFile.metadata.name
-    
-    // Get model definitions for the context
-    const modelDefinitions = await createModelsFromJson(importData)
-    
-    // Update context with the new schema and models
-    const updatedSchemas = { ...(currentContext.schemas || {}), [schemaName]: schemaData }
-    const updatedModels = { ...(currentContext.models || {}), ...modelDefinitions }
-    
-    // Send UPDATE_CONTEXT event to update the client context
-    clientService.send({
-      type: ClientManagerEvents.UPDATE_CONTEXT,
-      context: {
-        schemas: updatedSchemas,
-        models: updatedModels,
-      },
-    })
-    
-    logger(`Updated client context with schema: ${schemaName}`)
-  } catch (error) {
-    // Log error but don't fail the import if context update fails
-    logger(`Failed to update client context: ${error instanceof Error ? error.message : String(error)}`)
-  }
+  // Schema is now saved to database
+  // useSchemas hook will pick it up via database queries
 
   return filePath
 }
@@ -327,16 +563,12 @@ export const loadSchemaFromFile = async (
       throw new Error('Schema name is required in metadata.name')
     }
 
-    if (!schemaFile.models || Object.keys(schemaFile.models).length === 0) {
-      throw new Error('At least one model is required')
-    }
-
     // Convert to JsonImportSchema format for processing
     // Remove id fields for JsonImportSchema format (they're not part of the import format)
     const importData: JsonImportSchema = {
       name: schemaName,
       models: Object.fromEntries(
-        Object.entries(schemaFile.models).map(([modelName, model]) => [
+        Object.entries(schemaFile.models || {}).map(([modelName, model]) => [
           modelName,
           {
             ...model,
@@ -375,7 +607,7 @@ export const loadSchemaFromFile = async (
     const modelFileIds = new Map<string, string>()
     const propertyFileIds = new Map<string, Map<string, string>>()
     
-    for (const [modelName, model] of Object.entries(schemaFile.models)) {
+    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
       if (model.id) {
         modelFileIds.set(modelName, model.id)
       }
@@ -393,24 +625,36 @@ export const loadSchemaFromFile = async (
 
     // Use dynamic import to break circular dependency
     const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
+    const { BaseDb } = await import('@/db/Db/BaseDb')
     
-    // Store full schema data in database as fallback when file is not available
-    const schemaData = JSON.stringify(schemaFile, null, 2)
-    
-    // Add schema to database (creates or returns existing) with schemaFileId and schemaData
-    const schemaRecord = await addSchemaToDb(schemaInput, schemaFile.id, schemaData, false)
+    // Try to add schema and models to database if database is available
+    try {
+      const db = BaseDb.getAppDb()
+      if (db) {
+        // Store full schema data in database as fallback when file is not available
+        const schemaData = JSON.stringify(schemaFile, null, 2)
+        
+        // Add schema to database (creates or returns existing) with schemaFileId and schemaData
+        const schemaRecord = await addSchemaToDb(schemaInput, schemaFile.id, schemaData, false)
 
-    // Add models to database and link them to the schema with schemaFileIds
-    await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
-      schemaFileId: schemaFile.id,
-      modelFileIds,
-      propertyFileIds,
-    })
+        // Add models to database and link them to the schema with schemaFileIds (only if there are models)
+        if (Object.keys(modelDefinitions).length > 0) {
+          await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
+            schemaFileId: schemaFile.id,
+            modelFileIds,
+            propertyFileIds,
+          })
+        }
+      }
+    } catch (dbError) {
+      // Database not available - log warning but continue
+      logger('Database not available, skipping database operations:', dbError instanceof Error ? dbError.message : String(dbError))
+    }
 
-    // Add models to the store
-    for (const [modelName, modelClass] of Object.entries(modelDefinitions)) {
-      logger('loadSchemaFromFile - setting model:', modelName)
-      setModel(modelName, modelClass)
+    // Models are now Model instances, no registration needed
+    // They should be created via Model.create() and are accessible via Model static methods
+    for (const [modelName] of Object.entries(modelDefinitions)) {
+      logger('loadSchemaFromFile - model available:', modelName)
     }
 
     return schemaFilePath
@@ -491,8 +735,7 @@ export const createModelFromJson = async (
   modelDef: JsonImportSchema['models'][string],
   schemaName: string,
 ): Promise<any> => {
-  const { Model } = await import('@/schema/model')
-  const { ModelClass } = await import('@/schema/model/ModelClass')
+  const { Model } = await import('@/Model')
   
   // Convert JSON properties to schema format
   const convertedProperties: { [propName: string]: any } = {}
@@ -529,36 +772,14 @@ export const createModelFromJson = async (
     }
   }
 
-  // Create Model instance
-  const modelInstance = Model.create(modelName, schemaName)
-  
-  // Update the model instance with the definition
-  modelInstance.properties = convertedProperties
-  modelInstance.description = modelDef.description
-  modelInstance.indexes = modelDef.indexes
+  // Create Model instance with the definition
+  const modelInstance = Model.create(modelName, schemaName, {
+    properties: convertedProperties,
+    description: modelDef.description,
+    indexes: modelDef.indexes,
+  })
 
-  // Create a ModelClass wrapper
-  class WrappedModelClass {
-    private static _modelInstance = modelInstance
-
-    static get schema() {
-      return this._modelInstance.schema
-    }
-
-    static async create(values: any) {
-      return this._modelInstance.create(values)
-    }
-
-    static get modelName() {
-      return modelName
-    }
-
-    static get schemaName() {
-      return schemaName
-    }
-  }
-
-  return WrappedModelClass
+  return modelInstance
 }
 
 /**

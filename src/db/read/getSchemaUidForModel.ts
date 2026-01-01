@@ -5,7 +5,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 
 export const getSchemaUidForModel = async (
   modelName: string,
-): Promise<string> => {
+): Promise<string | null | undefined> => {
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
@@ -28,5 +28,5 @@ export const getSchemaUidForModel = async (
   })
 
   const foundSchema = modelSchemaQuery.schemas[0]
-  return foundSchema.id
+  return foundSchema ? foundSchema.id : undefined
 }

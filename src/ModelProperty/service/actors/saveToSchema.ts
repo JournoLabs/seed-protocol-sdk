@@ -3,7 +3,7 @@ import { FromCallbackInput } from '@/types'
 import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 import { convertPropertyToSchemaUpdate, updateModelProperties, getModelNameFromId } from '@/helpers/updateSchema'
 // Dynamic import to break circular dependency: schema/index -> ... -> saveToSchema -> SchemaValidationService -> schema/index
-// import { SchemaValidationService } from '@/schema/service/validation/SchemaValidationService'
+// import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:actors:saveToSchema')
@@ -42,7 +42,7 @@ export const saveToSchema = fromCallback<
 >(({ sendBack, input: { context } }) => {
   const _saveToSchema = async (): Promise<void> => {
     // Use dynamic import to break circular dependency
-    const { SchemaValidationService } = await import('@/schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
     const validationService = new SchemaValidationService()
     
     // Validate property structure before saving

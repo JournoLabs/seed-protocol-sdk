@@ -1,7 +1,7 @@
 import { eventEmitter } from '@/eventBus'
 import { getItemsData } from '@/db/read/getItems'
 import debug from 'debug'
-import { getModel } from '@/stores/modelClass'
+import { Model } from '@/Model/Model'
 import { BaseItem } from '@/Item/BaseItem'
 
 const logger = debug('seedSdk:events:requestAll')
@@ -40,7 +40,7 @@ const handleRequestAll = async (event) => {
 
   const returnItems = []
 
-  const ModelClass = getModel(modelName)
+  const model = await Model.getByNameAsync(modelName)
 
   for (const itemData of itemsData) {
     returnItems.push(
@@ -53,7 +53,7 @@ const handleRequestAll = async (event) => {
 
   if (modelName === 'Identity' && modelCount <= 1) {
     logger(
-      `[XXXXXX] [handleRequestAll] ${ModelClass?.originalConstructor?.name || modelName}:`,
+      `[XXXXXX] [handleRequestAll] ${model?.modelName || modelName}:`,
       returnItems.length,
     )
     eventEmitter.emit(`item.${modelName}.requestAll.response`, {

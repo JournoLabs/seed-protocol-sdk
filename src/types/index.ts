@@ -1,4 +1,5 @@
 
+import type { Model } from '@/Model/Model'
 import { ModelClassType } from './model'
 
 export * from './db'
@@ -39,7 +40,7 @@ export interface DbConfig {
 
 export interface SeedConfig {
   readonly endpoints: Endpoints
-  models: Record<string, ModelClassType>
+  models?: Record<string, Model>
   arweaveDomain?: string
   filesDir?: string
   dbConfig?: DbConfig
@@ -47,7 +48,7 @@ export interface SeedConfig {
 
 export interface SeedConstructorOptions {
   config: SeedConfig
-  readonly addresses: string[]
+  readonly addresses?: string[]
 }
 
 export type ClientCallback = (event: any) => void

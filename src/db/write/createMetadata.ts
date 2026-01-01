@@ -9,7 +9,7 @@ import { Schema } from '@/graphql/gql/graphql'
 
 
 type CreateMetadata = (
-  metadataValues: Partial<MetadataType>,
+  metadataValues: Partial<MetadataType> & { modelName?: string },
   propertyRecordSchema?: PropertyType | undefined,
 ) => Promise<MetadataType>
 

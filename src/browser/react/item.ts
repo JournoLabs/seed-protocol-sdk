@@ -11,7 +11,7 @@ import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
 import { BaseItem } from '@/Item/BaseItem'
-import { GlobalState } from '@/services/internal/constants'
+import { ClientManagerState } from '@/client/constants'
 import { IItem } from '@/interfaces'
 
 const logger = debug('seedSdk:react:item')
@@ -43,6 +43,14 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 
   const isReadingDb = useRef(false)
 
+  // Check if ClientManager is initialized (IDLE state or later)
+  const isInitialized = status === ClientManagerState.IDLE || 
+                        status === ClientManagerState.ADD_MODELS_TO_DB ||
+                        status === ClientManagerState.ADD_MODELS_TO_STORE ||
+                        status === ClientManagerState.PROCESS_SCHEMA_FILES ||
+                        status === ClientManagerState.SAVE_CONFIG ||
+                        status === ClientManagerState.DB_INIT
+
   const itemStatus = useSelector(
     item?.getService(),
     (snapshot) => snapshot?.value,
@@ -63,7 +71,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const readFromDb = useCallback(async () => {
     if (
       isReadingDb.current ||
-      status !== GlobalState.INITIALIZED ||
+      !isInitialized ||
       (!seedUid && !seedLocalId)
     ) {
       return
@@ -83,7 +91,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     setItem(foundItem)
     updateItem(foundItem)
     isReadingDb.current = false
-  }, [status,])
+  }, [isInitialized,])
 
   const listenerRef = useRef(readFromDb)
 
@@ -92,10 +100,10 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   }, [readFromDb])
 
   useEffect(() => {
-    if (status === GlobalState.INITIALIZED) {
+    if (isInitialized) {
       listenerRef.current()
     }
-  }, [status,])
+  }, [isInitialized,])
 
   useEffect(() => {
     if (item && !itemSubscription) {
@@ -165,8 +173,16 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
 
   const isReadingDb = useRef(false)
 
+  // Check if ClientManager is initialized (IDLE state or later)
+  const isInitialized = status === ClientManagerState.IDLE || 
+                        status === ClientManagerState.ADD_MODELS_TO_DB ||
+                        status === ClientManagerState.ADD_MODELS_TO_STORE ||
+                        status === ClientManagerState.PROCESS_SCHEMA_FILES ||
+                        status === ClientManagerState.SAVE_CONFIG ||
+                        status === ClientManagerState.DB_INIT
+
   const readFromDb = useCallback(async () => {
-    if (isReadingDb.current || status !== GlobalState.INITIALIZED || !modelNameRef.current || modelNameRef.current === '') {
+    if (isReadingDb.current || !isInitialized || !modelNameRef.current || modelNameRef.current === '') {
       return
     }
     isReadingDb.current = true
@@ -174,7 +190,7 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
     setItems(() => [])
     setItems(() => allItems)
     isReadingDb.current = false
-  }, [status, modelName,])
+  }, [isInitialized, modelName,])
 
   const listenerRef = useRef(readFromDb)
 
@@ -187,10 +203,10 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
   }, [readFromDb])
 
   useEffect(() => {
-    if (status === GlobalState.INITIALIZED) {
+    if (isInitialized) {
       listenerRef.current()
     }
-  }, [status, modelName])
+  }, [isInitialized, modelName])
 
   useEffect(() => {
     eventEmitter.addListener('item.requestAll', (event) => {

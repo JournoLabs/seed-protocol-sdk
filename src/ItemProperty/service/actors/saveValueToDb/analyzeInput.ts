@@ -47,7 +47,7 @@ export const analyzeInput = fromCallback<
 
   const _analyzeInput = async (): Promise<boolean> => {
     // Use dynamic import to break circular dependency
-    const { ModelPropertyDataTypes } = await import('@/schema')
+    const { ModelPropertyDataTypes } = await import('@/Schema')
     
     let propertyName = propertyNameRaw
 

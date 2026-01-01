@@ -1,5 +1,5 @@
 import { assign, setup } from 'xstate'
-import { MachineIds } from '@/services/internal/constants'
+import { MachineIds } from '@/client/constants'
 import { ItemMachineContext, HydrateExistingItemEvent } from '@/types'
 import { waitForDb } from './actors/waitForDb'
 import { initialize } from './actors/initialize'

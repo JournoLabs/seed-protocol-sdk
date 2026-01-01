@@ -1,13 +1,12 @@
-import { ClientManagerContext, FromCallbackInput, ModelClassType, SeedConstructorOptions } from '@/types'
+import { ClientManagerContext, FromCallbackInput, SeedConstructorOptions } from '@/types'
 import { fromCallback, EventObject, waitFor }                      from "xstate";
 import debug                                       from 'debug'
-import { setModel } from "@/stores/modelClass";
 import { setArweaveDomain } from "@/helpers/ArweaveClient";
 import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";
 import { setupServiceHandlers } from "@/events/services";
 // import { getGlobalService, } from "@/services/global/globalMachine";
-// import { GlobalState } from "@/services/internal/constants";
+// import { GlobalState } from "@/client/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
@@ -95,11 +94,16 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     
     const { models, endpoints, arweaveDomain, dbConfig, filesDir } = config
 
+    // Validate required endpoints - this should happen early in the initialization process
+    if (!endpoints || !endpoints.filePaths || !endpoints.files) {
+      throw new Error('Config must include endpoints with filePaths and files')
+    }
+
     sendBack({ type: 'updateContext', context: { 
-      models, 
+      models: models || {}, 
       endpoints, 
       arweaveDomain, 
-      addresses, 
+      addresses: addresses || [], 
       filesDir: filesDir || endpoints?.files,
       dbConfig,
     } })
@@ -108,9 +112,8 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       setArweaveDomain(arweaveDomain)
     }
 
-    for (const [key, value] of Object.entries(models)) {
-      setModel(key, value as ModelClassType)
-    }
+    // Models are now Model instances, no registration needed
+    // They should be created via Model.create() and are accessible via Model static methods
     setupAllItemsEventHandlers()
     setupServicesEventHandlers()
     setupServiceHandlers()

@@ -1,11 +1,12 @@
 import { PropertyStates, PropertyValue } from './property'
 import { Actor, AnyActorLogic } from 'xstate'
 import { Static }                               from '@sinclair/typebox'
-import { TModelSchema, TProperty } from '@/schema'
+import { TModelSchema, TProperty } from '@/Schema'
 import { BaseItem }                             from '@/Item/BaseItem'
+import type { Model } from '@/Model/Model'
 
 export type ModelDefinitions = {
-  [modelName: string]: ModelClassType
+  [modelName: string]: Model
 }
 
 export type ModelStatus = (propName: string) => keyof PropertyStates
@@ -16,16 +17,14 @@ type ExcludeKeys<T, K> = {
   [P in keyof T as Exclude<P, K>]: T[P]
 }
 
-export type ModelClassType = {
-  originalConstructor: () => void
-  schema: ModelSchema
-  schemaUid?: string
-  create: (values: ModelValues<any>) => Promise<BaseItem<any>>
-}
+/**
+ * @deprecated Use Model directly instead. This type is kept for backward compatibility during migration.
+ */
+export type ModelClassType = Model
 
 export type ModelValues<T extends Record<string, any>> = BaseItem<any> & {
   schema: ModelSchema
-  ModelClass?: ModelClassType
+  ModelClass?: Model
 } & {
   [K in keyof T]: PropertyValue
 }

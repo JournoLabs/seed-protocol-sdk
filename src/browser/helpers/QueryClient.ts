@@ -1,5 +1,5 @@
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient";
-import { ARWEAVE_ENDPOINT } from "@/services/internal/constants";
+import { ARWEAVE_ENDPOINT } from "@/client/constants";
 import { NetworkMode, QueryClient as ReactQueryClient, } from "@tanstack/react-query";
 import { IQueryClient } from "@/interfaces/IQueryClient";
 

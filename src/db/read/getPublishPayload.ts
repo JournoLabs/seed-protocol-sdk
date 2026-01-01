@@ -22,7 +22,7 @@ import { IItem } from '@/interfaces'
 import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import {ethers} from 'ethers'
-import { ModelPropertyDataTypes } from '@/schema'
+import { ModelPropertyDataTypes } from '@/Schema'
 const logger = debug('seedSdk:db:getPublishPayload')
 
 const getVersionUid = (item: IItem<any>) => {

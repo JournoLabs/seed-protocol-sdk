@@ -20,7 +20,7 @@ import {
 } from '@/Item/queries'
 import { escapeSqliteString, getAddressesFromDb } from '@/helpers/db'
 import { eventEmitter } from '@/eventBus'
-import { getModelNames, getModels } from '@/stores/modelClass'
+import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema, PropertyType } from '@/types'
@@ -195,9 +195,36 @@ const createMetadataRecordsForStorageTransactionId = async (
   storageTransactionIdProperty: Attestation,
   modelSchema: ModelSchema,
 ) => {
-  const attestationData = JSON.parse(
-    storageTransactionIdProperty.decodedDataJson,
-  )[0].value
+  // Validate and parse decodedDataJson
+  if (!storageTransactionIdProperty.decodedDataJson || storageTransactionIdProperty.decodedDataJson.trim() === '') {
+    console.warn(
+      '[item/events] [syncDbWithEas] empty decodedDataJson for storageTransactionIdProperty: ',
+      storageTransactionIdProperty.id,
+    )
+    return
+  }
+
+  let parsedData
+  try {
+    parsedData = JSON.parse(storageTransactionIdProperty.decodedDataJson)
+  } catch (error) {
+    console.warn(
+      '[item/events] [syncDbWithEas] failed to parse decodedDataJson for storageTransactionIdProperty: ',
+      storageTransactionIdProperty.id,
+      error,
+    )
+    return
+  }
+
+  if (!Array.isArray(parsedData) || parsedData.length === 0 || !parsedData[0]?.value) {
+    console.warn(
+      '[item/events] [syncDbWithEas] invalid decodedDataJson structure for storageTransactionIdProperty: ',
+      storageTransactionIdProperty.id,
+    )
+    return
+  }
+
+  const attestationData = parsedData[0].value
   const propertyName = camelCase(attestationData.name)
   const propertyValue = attestationData.value
 
@@ -284,7 +311,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
   const propertyUids = itemProperties.map((property) => property.id)
 
-  const models = getModels()
+  const allModels = Model.getAll()
+  const models = Object.fromEntries(allModels.map(m => [m.modelName!, m]))
 
   const appDb = BaseDb.getAppDb()
 
@@ -321,7 +349,37 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   for (let i = 0; i < newProperties.length; i++) {
     const property = newProperties[i]
     const propertyLocalId = generateId()
-    const metadata = JSON.parse(property.decodedDataJson)[0].value
+    
+    // Validate and parse decodedDataJson
+    if (!property.decodedDataJson || property.decodedDataJson.trim() === '') {
+      console.warn(
+        '[item/events] [syncDbWithEas] empty decodedDataJson for property: ',
+        property.id,
+      )
+      continue
+    }
+
+    let parsedData
+    try {
+      parsedData = JSON.parse(property.decodedDataJson)
+    } catch (error) {
+      console.warn(
+        '[item/events] [syncDbWithEas] failed to parse decodedDataJson for property: ',
+        property.id,
+        error,
+      )
+      continue
+    }
+
+    if (!Array.isArray(parsedData) || parsedData.length === 0 || !parsedData[0]?.value) {
+      console.warn(
+        '[item/events] [syncDbWithEas] invalid decodedDataJson structure for property: ',
+        property.id,
+      )
+      continue
+    }
+
+    const metadata = parsedData[0].value
 
     let propertyNameSnake = metadata.name
 
@@ -417,8 +475,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
     let localStorageDir
     const modelName = startCase(modelType)
-    const ModelClass = models[modelName]
-    const modelSchema = ModelClass.schema
+    const model = models[modelName]
+    const modelSchema = model?.schema
 
     if (propertyNameSnake === 'storage_transaction_id') {
       await createMetadataRecordsForStorageTransactionId(property, modelSchema)
@@ -573,7 +631,10 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
 
     await getRelatedSeedsAndVersions()
 
-    for (const modelName of getModelNames()) {
+    const allModels = Model.getAll()
+    for (const model of allModels) {
+      const modelName = model.modelName
+      if (!modelName) continue
       eventEmitter.emit('item.requestAll', { modelName })
     }
   },

@@ -6,13 +6,12 @@ import { getLatestSchemaVersion } from './schema'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
 import { SchemaType } from '@/seedSchema/SchemaSchema'
-import { setModel } from '@/stores/modelClass'
 import { Static } from '@sinclair/typebox'
-import { TProperty } from '@/schema'
-import { ModelPropertyDataTypes } from '@/schema/property'
+import { TProperty } from '@/Schema'
+import { ModelPropertyDataTypes } from '@/helpers/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { generateId } from './index'
 import debug from 'debug'
 
@@ -76,12 +75,65 @@ export type DeleteOptions = {
 /**
  * Get the file path for a schema file
  */
-const getSchemaFilePath = (name: string, version: number): string => {
+/**
+ * Sanitize a schema name to be filesystem-safe
+ * Replaces all special characters (except alphanumeric, hyphens, underscores) with underscores
+ * Converts spaces to underscores
+ * Removes leading/trailing underscores
+ * 
+ * @param name - Schema name to sanitize
+ * @returns Sanitized name safe for use in filenames
+ */
+const sanitizeSchemaName = (name: string): string => {
+  return name
+    .replace(/[^a-zA-Z0-9\s_-]/g, '_') // Replace special chars (except spaces, hyphens, underscores) with underscore
+    .replace(/\s+/g, '_') // Convert spaces to underscores
+    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+    .replace(/_+/g, '_') // Collapse multiple underscores to single
+}
+
+/**
+ * Get the full file path for a schema
+ * Format: {schemaFileId}_{schemaName}_v{version}.json
+ * 
+ * The ID-first format ensures all files for a schema group together when sorted alphabetically.
+ * 
+ * @param name - Schema name
+ * @param version - Schema version
+ * @param schemaFileId - Schema file ID (required)
+ */
+const getSchemaFilePath = (name: string, version: number, schemaFileId: string): string => {
   const path = BaseFileManager.getPathModule()
   const workingDir = BaseFileManager.getWorkingDir()
-  const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_')
-  const filename = `${sanitizedName}-v${version}.json`
+  const sanitizedName = sanitizeSchemaName(name)
+  const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
   return path.join(workingDir, filename)
+}
+
+/**
+ * Get schemaFileId from database for a schema
+ * @param schemaName - Schema name
+ * @returns Schema file ID
+ * @throws Error if schema not found or missing schemaFileId
+ */
+async function getSchemaFileId(schemaName: string): Promise<string> {
+  const { BaseDb } = await import('@/db/Db/BaseDb')
+  const db = BaseDb.getDb()
+  const { schemas } = await import('@/seedSchema/SchemaSchema')
+  const { eq, desc } = await import('drizzle-orm')
+  
+  const dbSchema = await db
+    .select()
+    .from(schemas)
+    .where(eq(schemas.name, schemaName))
+    .orderBy(desc(schemas.version))
+    .limit(1)
+  
+  if (dbSchema.length === 0 || !dbSchema[0].schemaFileId) {
+    throw new Error(`Schema ${schemaName} not found in database or missing schemaFileId`)
+  }
+  
+  return dbSchema[0].schemaFileId
 }
 
 /**
@@ -206,8 +258,11 @@ export async function updateModelProperties(
     throw new Error(`Schema ${schemaName} not found`)
   }
 
+  // Get schemaFileId from database
+  const schemaFileId = await getSchemaFileId(schemaName)
+  
   // Load the latest schema file
-  const latestFilePath = getSchemaFilePath(schemaName, latestVersion)
+  const latestFilePath = getSchemaFilePath(schemaName, latestVersion, schemaFileId)
   const content = await BaseFileManager.readFileAsString(latestFilePath)
   const schemaFile = JSON.parse(content) as SchemaFileFormat
 
@@ -315,8 +370,8 @@ export async function updateModelProperties(
     Object.assign(property, update.updates)
   }
 
-  // Write the new schema version to file
-  const newFilePath = getSchemaFilePath(schemaName, newVersion)
+  // Write the new schema version to file using ID-based naming (preferred)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   await BaseFileManager.saveFile(newFilePath, newContent)
@@ -364,10 +419,6 @@ async function loadSchemaWithRenames(
 
   if (!schemaName) {
     throw new Error('Schema name is required in metadata.name')
-  }
-
-  if (!schemaFile.models || Object.keys(schemaFile.models).length === 0) {
-    throw new Error('At least one model is required')
   }
 
   // Convert to JsonImportSchema format for processing
@@ -444,10 +495,10 @@ async function loadSchemaWithRenames(
     propertyFileIds,
   })
 
-  // Add models to the store
-  for (const [modelName, modelClass] of Object.entries(modelDefinitions)) {
-    logger('loadSchemaWithRenames - setting model:', modelName)
-    setModel(modelName, modelClass)
+  // Models are now Model instances, no registration needed
+  // They should be created via Model.create() and are accessible via Model static methods
+  for (const [modelName] of Object.entries(modelDefinitions)) {
+    logger('loadSchemaWithRenames - model available:', modelName)
   }
 
   return schemaFilePath
@@ -475,8 +526,11 @@ export async function renameModelProperty(
     throw new Error(`Schema ${schemaName} not found`)
   }
 
+  // Get schemaFileId from database
+  const schemaFileId = await getSchemaFileId(schemaName)
+
   // Load the latest schema file
-  const latestFilePath = getSchemaFilePath(schemaName, latestVersion)
+  const latestFilePath = getSchemaFilePath(schemaName, latestVersion, schemaFileId)
   const content = await BaseFileManager.readFileAsString(latestFilePath)
   const schemaFile = JSON.parse(content) as SchemaFileFormat
 
@@ -552,8 +606,8 @@ export async function renameModelProperty(
   // Remove the old property name
   delete updatedSchema.models[modelName].properties[oldPropertyName]
 
-  // Write the new schema version
-  const newFilePath = getSchemaFilePath(schemaName, newVersion)
+  // Write the new schema version using ID-based naming (preferred)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving
@@ -598,8 +652,11 @@ export async function deleteModelFromSchema(
     throw new Error(`Schema ${schemaName} not found`)
   }
 
+  // Get schemaFileId from database
+  const schemaFileId = await getSchemaFileId(schemaName)
+
   // Load the latest schema file
-  const latestFilePath = getSchemaFilePath(schemaName, latestVersion)
+  const latestFilePath = getSchemaFilePath(schemaName, latestVersion, schemaFileId)
   const content = await BaseFileManager.readFileAsString(latestFilePath)
   const schemaFile = JSON.parse(content) as SchemaFileFormat
 
@@ -609,11 +666,6 @@ export async function deleteModelFromSchema(
 
   if (!schemaFile.models[modelName]) {
     throw new Error(`Model ${modelName} not found in schema ${schemaName}`)
-  }
-
-  // Check if this is the only model
-  if (Object.keys(schemaFile.models).length === 1) {
-    throw new Error(`Cannot delete the only model in schema ${schemaName}. A schema must have at least one model.`)
   }
 
   // Create new version without the model
@@ -720,8 +772,8 @@ export async function deleteModelFromSchema(
     }
   }
 
-  // Write the new schema version
-  const newFilePath = getSchemaFilePath(schemaName, newVersion)
+  // Write the new schema version using ID-based naming (preferred)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving
@@ -766,8 +818,11 @@ export async function deletePropertyFromModel(
     throw new Error(`Schema ${schemaName} not found`)
   }
 
+  // Get schemaFileId from database
+  const schemaFileId = await getSchemaFileId(schemaName)
+
   // Load the latest schema file
-  const latestFilePath = getSchemaFilePath(schemaName, latestVersion)
+  const latestFilePath = getSchemaFilePath(schemaName, latestVersion, schemaFileId)
   const content = await BaseFileManager.readFileAsString(latestFilePath)
   const schemaFile = JSON.parse(content) as SchemaFileFormat
 
@@ -831,8 +886,8 @@ export async function deletePropertyFromModel(
     ],
   }
 
-  // Write the new schema version
-  const newFilePath = getSchemaFilePath(schemaName, newVersion)
+  // Write the new schema version using ID-based naming (preferred)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving

@@ -3,7 +3,12 @@ import { createItemCacheKey, getItemCache, updateItemCache } from './requestAll'
 import { BaseItem } from '@/Item/BaseItem'
 
 export const createItemRequestHandler = async (event) => {
-  const { ModelClass, itemData } = event
+  const { modelName, itemData } = event
+
+  if (!modelName) {
+    console.error('[createItemRequestHandler] modelName is required', { event })
+    throw new Error('modelName is required')
+  }
 
   const itemCache = getItemCache()
 
@@ -16,12 +21,6 @@ export const createItemRequestHandler = async (event) => {
 
   if (itemCache.has(itemCacheKey)) {
     return
-  }
-
-  const modelName = ModelClass?.originalConstructor?.name
-  if (!modelName) {
-    console.error('[createItemRequestHandler] ModelClass.originalConstructor.name is undefined', { ModelClass })
-    throw new Error('ModelClass.originalConstructor.name is required')
   }
 
   const newItem = await BaseItem.create({

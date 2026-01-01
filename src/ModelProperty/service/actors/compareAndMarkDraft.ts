@@ -36,7 +36,7 @@ export const compareAndMarkDraft = fromCallback<
       // Mark schema as draft if schema name is available
       if (context._schemaName) {
         // Get the Schema instance and mark it as draft
-        const { Schema } = await import('@/schema/Schema')
+        const { Schema } = await import('@/Schema/Schema')
         const schema = Schema.create(context._schemaName)
 
         // Send event to Schema machine to mark as draft

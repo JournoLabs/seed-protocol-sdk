@@ -14,6 +14,7 @@ class MockFileManager extends BaseFileManager {
         access: vi.fn().mockResolvedValue(undefined),
         rm: vi.fn().mockResolvedValue(undefined),
         unlink: vi.fn().mockResolvedValue(undefined),
+        readdir: vi.fn().mockResolvedValue([]), // Add async readdir mock
       },
       existsSync: vi.fn().mockReturnValue(true),
       readFileSync: vi.fn().mockReturnValue('mock content'),

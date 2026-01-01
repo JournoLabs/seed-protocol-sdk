@@ -1,5 +1,5 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
-import { ModelClassType } from '@/types'
+import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import debug from 'debug'
 
@@ -10,6 +10,7 @@ const logger = debug('seedSdk:helpers:schema')
  * A Schema is a collection of Models with a name and version
  */
 export type Schema = {
+  id?: string
   name?: string
   metadata?: {
     name: string
@@ -17,26 +18,55 @@ export type Schema = {
     updatedAt: string
   }
   version: number
-  models: ModelClassType[]
+  models: Model[]
 }
 
 
 /**
- * Generate filename for a schema based on name and version
- * Format: {name}-v{version}.json
+ * Sanitize a schema name to be filesystem-safe
+ * Replaces all special characters (except alphanumeric, hyphens, underscores) with underscores
+ * Converts spaces to underscores
+ * Removes leading/trailing underscores
+ * 
+ * @param name - Schema name to sanitize
+ * @returns Sanitized name safe for use in filenames
  */
-const getSchemaFilename = (name: string, version: number): string => {
-  // Sanitize name to be filesystem-safe
-  const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return `${sanitizedName}-v${version}.json`
+const sanitizeSchemaName = (name: string): string => {
+  return name
+    .replace(/[^a-zA-Z0-9\s_-]/g, '_') // Replace special chars (except spaces, hyphens, underscores) with underscore
+    .replace(/\s+/g, '_') // Convert spaces to underscores
+    .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+    .replace(/_+/g, '_') // Collapse multiple underscores to single
+}
+
+/**
+ * Generate filename for a schema
+ * Format: {schemaFileId}_{schemaName}_v{version}.json
+ * 
+ * The ID-first format ensures all files for a schema group together when sorted alphabetically.
+ * 
+ * @param name - Schema name
+ * @param version - Schema version
+ * @param schemaFileId - Schema file ID (required)
+ */
+const getSchemaFilename = (name: string, version: number, schemaFileId: string): string => {
+  const sanitizedName = sanitizeSchemaName(name)
+  return `${schemaFileId}_${sanitizedName}_v${version}.json`
 }
 
 /**
  * Get the full file path for a schema
+ * Format: {schemaFileId}_{schemaName}_v{version}.json
+ * 
+ * The ID-first format ensures all files for a schema group together when sorted alphabetically.
+ * 
+ * @param name - Schema name
+ * @param version - Schema version
+ * @param schemaFileId - Schema file ID (required)
  */
-const getSchemaFilePath = (name: string, version: number): string => {
+const getSchemaFilePath = (name: string, version: number, schemaFileId: string): string => {
   const path = BaseFileManager.getPathModule()
-  const filename = getSchemaFilename(name, version)
+  const filename = getSchemaFilename(name, version, schemaFileId)
   const workingDir = BaseFileManager.getWorkingDir()
   return path.join(workingDir, filename)
 }
@@ -44,14 +74,15 @@ const getSchemaFilePath = (name: string, version: number): string => {
 /**
  * Create a new schema file
  * @param schema - The schema object to save
+ * @param schemaFileId - Schema file ID (required)
  * @throws Error if schema already exists or if workingDir is invalid
  */
-export const createSchema = async (schema: Schema): Promise<void> => {
+export const createSchema = async (schema: Schema, schemaFileId: string): Promise<void> => {
   if (!schema.name || !schema.version) {
     throw new Error('Schema must have a name and version')
   }
 
-  const filePath = getSchemaFilePath(schema.name, schema.version)
+  const filePath = getSchemaFilePath(schema.name, schema.version, schemaFileId)
 
   // Check if schema already exists
   const exists = await BaseFileManager.pathExists(filePath)
@@ -72,13 +103,15 @@ export const createSchema = async (schema: Schema): Promise<void> => {
  * Read a schema file by name and version
  * @param name - The name of the schema
  * @param version - The version of the schema
+ * @param schemaFileId - Schema file ID (required)
  * @returns The schema object, or null if not found
  */
 export const readSchema = async (
   name: string,
   version: number,
+  schemaFileId: string,
 ): Promise<Schema | null> => {
-  const filePath = getSchemaFilePath(name, version)
+  const filePath = getSchemaFilePath(name, version, schemaFileId)
 
   const exists = await BaseFileManager.pathExists(filePath)
   if (!exists) {
@@ -96,14 +129,15 @@ export const readSchema = async (
 /**
  * Update an existing schema file
  * @param schema - The updated schema object (must have same name and version as existing)
+ * @param schemaFileId - Schema file ID (required)
  * @throws Error if schema doesn't exist
  */
-export async function updateSchema(schema: Schema): Promise<void> {
+export async function updateSchema(schema: Schema, schemaFileId: string): Promise<void> {
   if (!schema.name || !schema.version) {
     throw new Error('Schema must have a name and version')
   }
 
-  const filePath = getSchemaFilePath(schema.name, schema.version)
+  const filePath = getSchemaFilePath(schema.name, schema.version, schemaFileId)
 
   // Check if schema exists
   const exists = await BaseFileManager.pathExists(filePath)
@@ -120,13 +154,15 @@ export async function updateSchema(schema: Schema): Promise<void> {
  * Delete a schema file
  * @param name - The name of the schema
  * @param version - The version of the schema
+ * @param schemaFileId - Schema file ID (required)
  * @throws Error if schema doesn't exist
  */
 export async function deleteSchema(
   name: string,
   version: number,
+  schemaFileId: string,
 ): Promise<void> {
-  const filePath = getSchemaFilePath(name, version)
+  const filePath = getSchemaFilePath(name, version, schemaFileId)
 
   // Check if schema exists
   const exists = await BaseFileManager.pathExists(filePath)
@@ -209,7 +245,7 @@ export async function listSchemaFiles(): Promise<Array<{ name: string; version: 
  * These are already-processed schema files that need to be loaded into the model store
  * @returns Array of objects containing name, version, and file path for each complete schema
  */
-export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; version: number; filePath: string }>> {
+export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; version: number; filePath: string; schemaFileId?: string }>> {
   const fs = await BaseFileManager.getFs()
   const path = BaseFileManager.getPathModule()
 
@@ -218,13 +254,14 @@ export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; v
 
   try {
     const files = await fs.promises.readdir(workingDir)
-    const schemas: Array<{ name: string; version: number; filePath: string }> = []
+    const schemas: Array<{ name: string; version: number; filePath: string; schemaFileId?: string }> = []
 
     for (const file of files) {
-      // Match filename pattern: {name}-v{version}.json
-      const match = file.match(/^(.+)-v(\d+)\.json$/)
+      // Match filename pattern: {schemaFileId}_{schemaName}_v{version}.json
+      const match = file.match(/^(.+)_(.+)_v(\d+)\.json$/)
+      
       if (match) {
-        const [, name, versionStr] = match
+        const [, schemaFileId, schemaName, versionStr] = match
         const version = parseInt(versionStr, 10)
         
         if (!isNaN(version)) {
@@ -237,10 +274,14 @@ export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; v
             
             // Only include files that have $schema (complete schema format)
             if (data.$schema && data.metadata?.name) {
+              // CRITICAL: Use schemaFileId from filename (source of truth), not from JSON content
+              // The filename pattern is {schemaFileId}_{schemaName}_v{version}.json
+              // The JSON content's id might be out of sync, but the filename tells us what file actually exists
               schemas.push({
                 name: data.metadata.name,
                 version: data.version || version,
                 filePath,
+                schemaFileId: schemaFileId, // Use from filename, not data.id
               })
             }
           } catch (error) {
@@ -277,7 +318,11 @@ export async function findSchemaByName(
     current.version > prev.version ? current : prev,
   )
 
-  return readSchema(latest.name, latest.version)
+  if (!latest.schemaFileId) {
+    throw new Error(`Schema ${latest.name} v${latest.version} is missing schemaFileId`)
+  }
+
+  return readSchema(latest.name, latest.version, latest.schemaFileId)
 }
 
 /**
@@ -397,6 +442,34 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
     if (dbSchema.isDraft === true && dbSchema.schemaData) {
       try {
         const schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
+        
+        // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
+        // This ensures models added to the database are included even if they're not in schemaData
+        if (dbSchema.id) {
+          const { loadModelsFromDbForSchema } = await import('@/helpers/db')
+          const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
+          if (Object.keys(dbModels).length > 0) {
+            // Merge: database models take precedence for properties, but preserve schemaData models for full structure
+            schemaFile.models = {
+              ...schemaFile.models,
+              ...dbModels,
+            }
+            // For models that exist in both, merge properties (database properties override)
+            for (const [modelName, dbModel] of Object.entries(dbModels)) {
+              if (schemaFile.models[modelName]) {
+                // Merge properties, with database properties taking precedence
+                schemaFile.models[modelName] = {
+                  ...schemaFile.models[modelName],
+                  properties: {
+                    ...schemaFile.models[modelName].properties,
+                    ...dbModel.properties,
+                  },
+                }
+              }
+            }
+          }
+        }
+        
         result.push({
           schema: schemaFile,
           isDraft: true,
@@ -465,6 +538,34 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
       if (dbSchema.schemaData) {
         try {
           const schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
+          
+          // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
+          // This ensures models added to the database are included even if they're not in schemaData
+          if (dbSchema.id) {
+            const { loadModelsFromDbForSchema } = await import('@/helpers/db')
+            const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
+            if (Object.keys(dbModels).length > 0) {
+              // Merge: database models take precedence for properties, but preserve schemaData models for full structure
+              schemaFile.models = {
+                ...schemaFile.models,
+                ...dbModels,
+              }
+              // For models that exist in both, merge properties (database properties override)
+              for (const [modelName, dbModel] of Object.entries(dbModels)) {
+                if (schemaFile.models[modelName]) {
+                  // Merge properties, with database properties taking precedence
+                  schemaFile.models[modelName] = {
+                    ...schemaFile.models[modelName],
+                    properties: {
+                      ...schemaFile.models[modelName].properties,
+                      ...dbModel.properties,
+                    },
+                  }
+                }
+              }
+            }
+          }
+          
           result.push({
             schema: schemaFile,
             isDraft: false,

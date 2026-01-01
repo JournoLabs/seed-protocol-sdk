@@ -1,7 +1,7 @@
 import { ActorRefFrom, Subscription } from 'xstate';
 import { BehaviorSubject } from 'rxjs';
 import { Static } from '@sinclair/typebox';
-import { TProperty } from '@/schema';
+import { TProperty } from '@/Schema';
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty';
 
 export interface IItemProperty {
@@ -10,7 +10,7 @@ export interface IItemProperty {
   readonly uid: string;
   readonly seedLocalId: string;
   readonly seedUid: string;
-  readonly schemaUid: string;
+  readonly schemaUid?: string;
   readonly propertyName: string;
   readonly modelName: string;
   readonly propertyDef: Static<typeof TProperty> | undefined;

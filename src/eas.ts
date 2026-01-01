@@ -1,4 +1,4 @@
-import { getModels } from "@/stores/modelClass"
+import { Model } from "@/Model/Model"
 import { toSnakeCase } from "@/helpers"
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient"
@@ -12,8 +12,8 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const models = getModels()
-  const modelNames = Object.keys(models)
+  const allModels = Model.getAll()
+  const modelNames = allModels.map(m => m.modelName).filter((name): name is string => !!name)
 
   // If there are no models, return empty array instead of querying
   if (modelNames.length === 0) {
@@ -33,7 +33,7 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   }
 
   // Add bytes32 image schema query only once, and only if Image model exists
-  // Image model should now be loaded from seed-protocol-v1.json schema
+  // Image model should now be loaded from SEEDPROTOCOL_Seed_Protocol_v1.json schema
   if (hasImageModel) {
     OR.push({
       schema: {

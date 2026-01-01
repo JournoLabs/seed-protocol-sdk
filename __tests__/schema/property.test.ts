@@ -1,5 +1,5 @@
-import { Model, Text, Number, Json, Relation, List, TModelClass, IModelClass } from '../../src/schema'
-import { ModelClassType } from '../../src/types'
+import { Text, Number, Json, Relation, List, TModelClass, IModelClass } from '../../src/schema'
+import { Model } from '../../src/Model/Model'
 import { Value }                            from '@sinclair/typebox/value'
 import { describe, it, beforeAll } from 'vitest'
 import path                                                                    from 'path'
@@ -9,9 +9,11 @@ import process                                                                 f
 
 describe('Model decorator with properties', () => {
   const projectRoot = path.resolve(process.cwd(),)
-  let Post: ModelClassType | undefined
-  let Identity: ModelClassType | undefined
-  let Link: ModelClassType | undefined
+  // Note: These are now Model instances, not ModelClassType
+  // ModelClassType is now just an alias for Model
+  let Post: Model | undefined
+  let Identity: Model | undefined
+  let Link: Model | undefined
 
   beforeAll(async () => {
     const schemaFilePath = path.resolve(projectRoot, '__tests__', '__mocks__', 'node', 'project', 'seed.config.ts')
@@ -21,19 +23,18 @@ describe('Model decorator with properties', () => {
     Link = models.Link
   })
 
-  it('should create a valid ModelClassType from decorated class', ({expect}) => {
-    // Check if TestModel is a ModelClassType
+  it('should create a valid Model instance from decorated class', ({expect}) => {
+    // Check if Post is a Model instance
     expect(Post).toBeDefined()
     expect((Post as any).schema).toBeDefined()
     
-    // Check that original constructor is preserved
-    expect((Post as any).originalConstructor).toBeDefined()
+    // Note: originalConstructor is no longer part of Model - models are accessed via Model static methods
+    // The decorator pattern may still create classes with originalConstructor for backward compatibility
     
-    // Validate that it conforms to ModelClassType interface
-    const modelClassType = Post as unknown as ModelClassType
-    expect(typeof modelClassType.create).toBe('function')
-    expect(typeof modelClassType.originalConstructor).toBe('function')
-    expect(modelClassType.schema).toBeDefined()
+    // Validate that it has the Model interface
+    const model = Post as Model
+    expect(typeof model.create).toBe('function')
+    expect(model.schema).toBeDefined()
   })
 
   it('should have correct property metadata in schema', ({expect}) => {

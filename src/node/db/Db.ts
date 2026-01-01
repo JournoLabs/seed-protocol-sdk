@@ -9,6 +9,7 @@ import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
 import { pushSQLiteSchema } from 'drizzle-kit/api'
 import * as schema from '@/seedSchema'
+import { Observable, interval, switchMap, distinctUntilChanged, startWith } from 'rxjs'
 
 const logger = debug('seedSdk:node:db:Db')
 
@@ -298,6 +299,73 @@ class Db extends BaseDb implements IDb {
     }
 
     return this.db
+  }
+
+  /**
+   * Execute a reactive query that emits new results whenever the underlying data changes.
+   * 
+   * NOTE: This is a stub implementation using polling. For production use, consider enhancing
+   * with database triggers, change streams, or other real-time mechanisms.
+   * 
+   * Currently supports Drizzle query builders. SQL tag functions are not supported in node
+   * environment (use browser implementation for SQL tag functions).
+   * 
+   * @param query - Drizzle query builder (SQL tag functions not supported in node)
+   * @returns Observable that emits arrays of query results
+   * 
+   * @example
+   * ```typescript
+   * import { models } from '@/seedSchema'
+   * import { eq } from 'drizzle-orm'
+   * 
+   * const appDb = Db.getAppDb()
+   * const models$ = Db.liveQuery<ModelRow>(
+   *   appDb.select().from(models).where(eq(models.schemaFileId, schemaId))
+   * )
+   * 
+   * models$.subscribe(models => {
+   *   console.log('Models updated:', models)
+   * })
+   * ```
+   */
+  static liveQuery<T>(
+    query: ((sql: any) => any) | any
+  ): Observable<T[]> {
+    if (!this.db) {
+      throw new Error('Database not initialized. Call prepareDb first.')
+    }
+    
+    // Polling interval (configurable, default: 1000ms)
+    const pollInterval = 1000
+    
+    // Check if query is a function (SQL tag function) - not supported in node stub
+    if (typeof query === 'function') {
+      throw new Error('SQL tag functions are not supported in node liveQuery stub implementation. Use Drizzle query builders instead.')
+    }
+    
+    // For Drizzle query builders, we need to execute them
+    // Store the query builder for polling
+    const queryBuilder = query
+    
+    return interval(pollInterval).pipe(
+      startWith(0), // Execute immediately on subscription
+      switchMap(async () => {
+        try {
+          // Execute the Drizzle query builder
+          // Drizzle query builders return promises when executed
+          const result = await Promise.resolve(queryBuilder)
+          return result as T[]
+        } catch (error) {
+          logger('[Db.liveQuery] Error executing query:', error)
+          throw error
+        }
+      }),
+      distinctUntilChanged((prev, curr) => {
+        // Only emit if results actually changed
+        // Use JSON.stringify for deep comparison
+        return JSON.stringify(prev) === JSON.stringify(curr)
+      })
+    )
   }
 }
 

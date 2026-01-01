@@ -1,0 +1,70 @@
+{
+  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "version": 1,
+  "id": "SEEDPROTOCOL",
+  "metadata": {
+    "name": "Seed Protocol",
+    "description": "Internal Seed Protocol schema defining core models (Seed, Version, Metadata, Image)",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z"
+  },
+  "models": {
+    "Seed": {
+      "description": "Core seed model representing the base entity in Seed Protocol",
+      "properties": {
+        "uid": {
+          "type": "Text"
+        },
+        "type": {
+          "type": "Text"
+        }
+      }
+    },
+    "Version": {
+      "description": "Version model representing versions of seeds",
+      "properties": {
+        "seedUid": {
+          "type": "Text"
+        },
+        "note": {
+          "type": "Text"
+        }
+      }
+    },
+    "Metadata": {
+      "description": "Metadata model for storing key-value pairs",
+      "properties": {
+        "key": {
+          "type": "Text"
+        },
+        "value": {
+          "type": "Text"
+        }
+      }
+    },
+    "Image": {
+      "description": "Image model for storing image data and metadata",
+      "properties": {
+        "storageTransactionId": {
+          "type": "Text"
+        },
+        "uri": {
+          "type": "Text"
+        },
+        "alt": {
+          "type": "Text"
+        }
+      }
+    }
+  },
+  "enums": {},
+  "migrations": [
+    {
+      "version": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "description": "Initial seed-protocol schema with Seed, Version, Metadata, and Image models",
+      "changes": []
+    }
+  ]
+}
+

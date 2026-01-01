@@ -1,6 +1,6 @@
 import { setup } from 'xstate'
 import { validateItemData } from './actors/validateItemData'
-import { PublishMachineStates } from '@/services/internal/constants'
+import { PublishMachineStates } from '@/client/constants'
 import { PublishMachineContext } from '@/types'
 import { createPublishAttempt } from './actors/createPublishAttempt'
 import { updateMachineContext } from '@/helpers/updateMachineContext'

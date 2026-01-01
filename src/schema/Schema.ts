@@ -1,40 +1,33 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
-import { immerable } from 'immer'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles } from '@/helpers/schema'
 import { updateModelProperties, convertPropertyToSchemaUpdate } from '@/helpers/updateSchema'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
-import { Model } from '@/schema/model/Model'
+import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import { eq } from 'drizzle-orm'
-import { addSchemaToDb, renameModelInDb } from '@/helpers/db'
+import { eq, desc } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import { ConflictError, ConflictResult } from '@/Schema/errors'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
-const contextLogger = debug('seedSdk:schema:updateClientContext')
+const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
 
 type SchemaService = ActorRefFrom<typeof schemaMachine>
 type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 
-// WeakMap to store mutable state per Schema instance
-// This avoids issues with read-only properties when instances are frozen by Immer
+// WeakMap to store non-serializable resources per Schema instance
+// Only stores resources that cannot be serialized (subscriptions, timers, etc.)
 const schemaInstanceState = new WeakMap<Schema, {
-  lastContextUpdate: number
-  contextUpdateTimeout: ReturnType<typeof setTimeout> | null
-  lastContextHash: string | null
-  cacheKeyUpdated: boolean // Track if cache key has been updated to avoid repeated calls
-  lastModelsHash: string | null // Track models hash to avoid unnecessary Model instance updates
-  modelInstances: Map<string, Model> // Store Model instances here to avoid Immer freezing
-  isClientInitialized: boolean | null // Cache client initialization state to avoid repeated checks
+  liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance model updates
 }>()
 
 // Cache client initialization state globally to avoid repeated checks
 let cachedClientInitialized: boolean | null = null
 let clientCheckTime: number = 0
-const CLIENT_CHECK_CACHE_MS = 100 // Cache for 100ms to avoid excessive checks
+const CLIENT_CHECK_CACHE_MS = 50 // Cache for 50ms to avoid excessive checks (reduced from 100ms for faster updates)
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
@@ -64,7 +57,6 @@ export class Schema {
   // Track which schemas are currently being saved to prevent concurrent saves
   protected static savingSchemas: Set<string> = new Set()
   protected readonly _service: SchemaService
-  declare [immerable]: boolean
 
   $schema?: string
   version?: number
@@ -92,9 +84,6 @@ export class Schema {
   }>
 
   constructor(schemaName: string) {
-    // Set immerable in constructor to ensure 'this' is properly bound
-    this[immerable] = true
-    
     const serviceInput: Pick<SchemaMachineContext, 'schemaName'> = {
       schemaName,
     }
@@ -105,104 +94,29 @@ export class Schema {
 
     this._service.start()
 
-    // Initialize instance state in WeakMap (avoids read-only property issues with Immer)
-    schemaInstanceState.set(this, {
-      lastContextUpdate: 0,
-      contextUpdateTimeout: null,
-      lastContextHash: null,
-      cacheKeyUpdated: false,
-      lastModelsHash: null,
-      modelInstances: new Map<string, Model>(),
-      isClientInitialized: null,
-    })
+    console.log('started Schema service for schema:', schemaName)
 
-    // Subscribe to schema context changes to keep client context in sync
-    // This ensures useSchema and useSchemas hooks reflect schema changes
+    // Initialize instance state in WeakMap (only non-serializable resources)
+    schemaInstanceState.set(this, {
+      liveQuerySubscription: null,
+    })
+    
+    // Set up liveQuery subscription for cross-instance model updates
+    // This will be initialized once we have the schemaId
+    this._setupLiveQuerySubscription()
+
+    // Subscribe to schema context changes to update cache keys when schemaFileId becomes available
     this._service.subscribe((snapshot) => {
-      // Update client context when schema is loaded or when in idle state with metadata
-      if (snapshot.value === 'idle' && snapshot.context.metadata?.name) {
-        // Only update if client is fully initialized (prevents loops during initialization)
-        // Use cached check to avoid expensive synchronous require() calls on every snapshot
-        if (typeof window !== 'undefined') {
-          const now = Date.now()
-          // Check cache first (refresh every 100ms)
-          if (cachedClientInitialized === null || (now - clientCheckTime) > CLIENT_CHECK_CACHE_MS) {
-            try {
-              const { getClient } = require('@/client/ClientManager')
-              const { ClientManagerState } = require('@/services/internal/constants')
-              const client = getClient()
-              const clientSnapshot = client.getService().getSnapshot()
-              cachedClientInitialized = clientSnapshot.value === ClientManagerState.IDLE && clientSnapshot.context.isInitialized
-              clientCheckTime = now
-            } catch (error) {
-              // If we can't check client state, assume not initialized to be safe
-              cachedClientInitialized = false
-              clientCheckTime = now
-            }
-          }
-          
-          if (!cachedClientInitialized) {
-            return // Skip updates during initialization
-          }
+      // Update cache to use schemaFileId as key once we have it (only once)
+      if (snapshot.value === 'idle' && snapshot.context.metadata?.name && snapshot.context._schemaFileId) {
+        // Use a static Set to track which schemas have had their cache key updated
+        const cacheKeyUpdatedSet = (Schema as any)._cacheKeyUpdatedSet || new Set<string>()
+        if (!(Schema as any)._cacheKeyUpdatedSet) {
+          (Schema as any)._cacheKeyUpdatedSet = cacheKeyUpdatedSet
         }
-        
-        // Get instance state from WeakMap (avoids read-only property issues)
-        const instanceState = schemaInstanceState.get(this)
-        if (!instanceState) return
-        
-        // Create a hash of the relevant context fields to detect actual changes
-        // Only track fields that affect the schema content (not internal state)
-        const contextHash = JSON.stringify({
-          $schema: snapshot.context.$schema,
-          version: snapshot.context.version,
-          metadata: snapshot.context.metadata,
-          models: snapshot.context.models,
-          enums: snapshot.context.enums,
-          migrations: snapshot.context.migrations,
-        })
-        
-        // Update cache to use schemaFileId as key once we have it (only once)
-        if (snapshot.context._schemaFileId && !instanceState.cacheKeyUpdated) {
+        if (!cacheKeyUpdatedSet.has(snapshot.context._schemaFileId)) {
           Schema._updateCacheKey(snapshot.context.schemaName, snapshot.context._schemaFileId)
-          instanceState.cacheKeyUpdated = true
-        }
-        
-        // Only process updates if context content has actually changed
-        if (instanceState.lastContextHash === contextHash) {
-          return
-        }
-        
-        // Update hash immediately to prevent reprocessing the same change
-        instanceState.lastContextHash = contextHash
-        
-        // Create/update Model instances when schema context changes
-        // Only update if models actually changed to avoid unnecessary work
-        // BUT: Skip during initialization to prevent cascading Schema instance creation
-        // (Models will be created on-demand when accessed via Model.create())
-        const modelsHash = JSON.stringify(snapshot.context.models || {})
-        if (instanceState.lastModelsHash !== modelsHash) {
-          instanceState.lastModelsHash = modelsHash
-          // Only create model instances after client is fully initialized
-          // During initialization, skip to prevent infinite loops from cascading Schema creation
-          // The guard above already checked that client is initialized, so it's safe to create models here
-          this._updateModelInstances(snapshot.context)
-        }
-        
-        // Debounce updates to avoid too many context updates (max once per 100ms)
-        const now = Date.now()
-        if (now - instanceState.lastContextUpdate > 100) {
-          instanceState.lastContextUpdate = now
-          // Clear any pending timeout
-          if (instanceState.contextUpdateTimeout) {
-            clearTimeout(instanceState.contextUpdateTimeout)
-          }
-          // Schedule update
-          instanceState.contextUpdateTimeout = setTimeout(() => {
-            this._updateClientContext().catch(() => {
-              // Silently fail if not in browser environment
-            })
-            instanceState.contextUpdateTimeout = null
-          }, 50) // Small delay to batch rapid updates
+          cacheKeyUpdatedSet.add(snapshot.context._schemaFileId)
         }
       }
     })
@@ -233,24 +147,77 @@ export class Schema {
       instance: newInstance,
       service: newInstance._service as any,
       trackedProperties: TRACKED_PROPERTIES,
-      getContext: () => {
+      getContext: (instance) => {
         // Handle special cases like metadata.name, models array conversion
-        const context = newInstance._getSnapshotContext()
+        const context = instance._getSnapshotContext()
+        
+        // Get model IDs from service context (reactive state)
+        const liveQueryIds = context._liveQueryModelIds || []
+        
+        // Get pending model IDs (not yet in DB)
+        // Note: schemaId lookup is async, so we skip pending IDs here
+        // They will be included when schemaId is available asynchronously
+        const pendingIds: string[] = []
+        
+        // Combine and deduplicate
+        const allModelIds = [...new Set([...liveQueryIds, ...pendingIds])]
+        
+        // Get Model instances from static cache
+        const modelInstances: Model[] = []
+        for (const modelFileId of allModelIds) {
+          const model = Model.getById(modelFileId)
+          if (model) {
+            modelInstances.push(model)
+          }
+          // Note: Cannot create models asynchronously in this synchronous getter
+          // Models will be created elsewhere when needed
+        }
+        
+        // Get the schema name, ensuring it's never the ID
+        // Prefer metadata.name, then schemaName (but only if it's not the ID)
+        const schemaFileId = context._schemaFileId
+        let name = context.metadata?.name
+        
+        // If metadata.name is not available, use schemaName but only if it's not the ID
+        // This prevents returning the ID when the schema is still loading
+        if (!name) {
+          name = (context.schemaName && context.schemaName !== schemaFileId) 
+            ? context.schemaName 
+            : undefined
+        }
+        
+        // Final fallback - if we still don't have a name, use schemaName (even if it might be the ID)
+        // This handles edge cases during loading
+        if (!name) {
+          name = context.schemaName
+        }
+        
+        // CRITICAL: Always create a new metadata object to ensure React detects changes
+        // Even if the metadata content is the same, we need a new reference so React re-renders
+        const metadata = context.metadata ? {
+          ...context.metadata,
+        } : undefined
+        
         return {
           ...context,
+          // Always return a new metadata object reference so React detects changes
+          metadata,
           // Flatten metadata properties to top level for convenience
-          name: context.metadata?.name,
+          // Fall back to schemaName if metadata.name is not available (handles loading states)
+          name,
           createdAt: context.metadata?.createdAt,
           updatedAt: context.metadata?.updatedAt,
           // Return Model instances instead of plain objects
-          models: Array.from((schemaInstanceState.get(newInstance)?.modelInstances || new Map()).values()),
+          // CRITICAL: Always create a new array reference so React detects changes
+          // This ensures that even if the models are the same, React will re-render when the array reference changes
+          models: [...modelInstances], // New array reference for React
         }
       },
-      sendUpdate: (prop: string, value: any) => {
+      sendUpdate: (instance, prop: string, value: any) => {
         // Handle special property updates
         if (prop === 'name') {
           // Update both metadata.name and schemaName
-          const context = newInstance._getSnapshotContext()
+          const context = instance._getSnapshotContext()
           const currentMetadata = context.metadata || {
             name: schemaName,
             createdAt: new Date().toISOString(),
@@ -264,40 +231,147 @@ export class Schema {
             logger(`Updating schema name from "${oldName}" to "${newName}"`)
             
             // Check if service is still running before sending events
-            const snapshot = newInstance._service.getSnapshot()
-            const isServiceStopped = snapshot.status === 'stopped'
+            let snapshot = instance._service.getSnapshot()
+            const wasServiceStopped = snapshot.status === 'stopped'
             
-            if (!isServiceStopped) {
-              newInstance._service.send({
+            if (wasServiceStopped) {
+              // CRITICAL: Update the schemaName in the service context BEFORE restarting
+              // This ensures that when loadOrCreateSchema runs, it looks for the schema with the NEW name
+              // We need to do this by sending updateContext to a running service, but if it's stopped,
+              // we need to restart it first, update, then it will reload with the new name
+              logger(`Service is stopped, will update schemaName to "${newName}" then restart`)
+              
+              // Start the service first
+              instance._service.start()
+              
+              // Immediately update the schemaName so loadOrCreateSchema uses the new name
+              // This must happen before loadOrCreateSchema runs
+              instance._service.send({
                 type: 'updateContext',
-                schemaName: newName, // Update the schemaName identifier
-                metadata: {
-                  ...currentMetadata,
-                  name: newName,
-                  updatedAt: new Date().toISOString(),
-                },
+                schemaName: newName,
               })
               
-              // Mark schema as draft when name changes
-              newInstance._service.send({
-                type: 'markAsDraft',
-                propertyKey: 'schema:name', // Special key for schema name changes
-              })
-            } else {
-              logger(`Service is stopped, skipping context update but will still save to database`)
+              logger(`Updated schemaName to "${newName}" before loadOrCreateSchema runs`)
+              
+              // Re-check snapshot after restart - service might be loading or already idle
+              snapshot = instance._service.getSnapshot()
             }
             
-            // Save draft to database immediately so changes persist
-            newInstance._saveDraftToDb(oldName, newName).catch((error) => {
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
+            // Build the update event with the new name
+            const updateEvent = {
+              type: 'updateContext' as const,
+              schemaName: newName,
+              metadata: {
+                ...(currentMetadata || {
+                  name: newName,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                }),
+                name: newName, // Always use the new name
+                updatedAt: new Date().toISOString(), // Always update timestamp
+              },
+            }
+            
+            // Check current state after potential restart
+            const currentState = snapshot.value
+            const isServiceLoading = currentState === 'loading'
+            
+            // If service is loading (or was just restarted and might be loading), wait for it to finish
+            // Otherwise loadOrCreateSchemaSuccess might overwrite our update with old data
+            if (isServiceLoading || wasServiceStopped) {
+              logger(`Service is ${isServiceLoading ? 'loading' : 'was stopped'}, will send updateContext after loading completes (current state: ${currentState})`)
+              
+              // Helper function to send the update
+              const sendUpdate = () => {
+                logger(`Sending updateContext with newName="${newName}"`)
+                instance._service.send(updateEvent)
+                
+                // Verify the update
+                setTimeout(() => {
+                  const verifySnapshot = instance._service.getSnapshot()
+                  logger(`After updateContext: context schemaName="${verifySnapshot.context.schemaName}", metadata.name="${verifySnapshot.context.metadata?.name}"`)
+                }, 0)
+              }
+              
+              // Check if already idle (might have loaded synchronously)
+              if (currentState === 'idle') {
+                // Service is already idle, but loadOrCreateSchemaSuccess might have just fired
+                // Use a small delay to ensure loadOrCreateSchemaSuccess has been processed
+                logger(`Service is already idle after restart, will send updateContext after brief delay to ensure loadOrCreateSchemaSuccess processed`)
+                setTimeout(() => {
+                  sendUpdate()
+                }, 10)
+              } else {
+                // Subscribe to wait for loading to complete, then send the update
+                // Use a small delay after idle to ensure loadOrCreateSchemaSuccess has been processed
+                const loadingSubscription = instance._service.subscribe((snapshot) => {
+                  if (snapshot.value === 'idle') {
+                    loadingSubscription.unsubscribe()
+                    logger(`Service finished loading, will send updateContext with newName="${newName}" after brief delay`)
+                    setTimeout(() => {
+                      sendUpdate()
+                    }, 10)
+                  } else if (snapshot.value === 'error') {
+                    loadingSubscription.unsubscribe()
+                    logger(`Service failed to load, cannot update context`)
+                  }
+                })
+              }
+            } else {
+              // Service is already idle, send update immediately
+              logger(`Service is already idle, sending updateContext immediately: newName="${newName}", current context schemaName="${snapshot.context.schemaName}"`)
+              instance._service.send(updateEvent)
+              
+              // Verify the update
+              setTimeout(() => {
+                const verifySnapshot = instance._service.getSnapshot()
+                logger(`After updateContext: context schemaName="${verifySnapshot.context.schemaName}", metadata.name="${verifySnapshot.context.metadata?.name}"`)
+              }, 0)
+            }
+            
+            // Mark schema as draft when name changes
+            instance._service.send({
+              type: 'markAsDraft',
+              propertyKey: 'schema:name', // Special key for schema name changes
             })
             
-            // Update client context so useSchema and useSchemas hooks reflect the change
-            newInstance._updateClientContext(newName, oldName)
+            // Save draft to database immediately so changes persist
+            saveDraftLogger(`Name change detected, calling _saveDraftToDb (oldName: "${oldName}", newName: "${newName}")`)
+            instance._saveDraftToDb(oldName, newName).catch((error) => {
+              saveDraftLogger(`ERROR: Failed to save draft after name change: ${error instanceof Error ? error.message : String(error)}`)
+              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
+            })
           } else {
             logger(`Schema name unchanged: "${oldName}"`)
           }
         } else if (prop === 'models') {
+          // DISABLED: Array assignment to schema.models is temporarily disabled
+          // 
+          // REASON: This approach had race condition issues where _saveDraftToDb() would run
+          // before Model instances were fully created, causing models to not be saved to the database.
+          // 
+          // NEW APPROACH: Use Model.create() instead:
+          //   const model = Model.create('ModelName', schemaInstance, {
+          //     properties: {...},
+          //     indexes: [...],
+          //     description: '...'
+          //   })
+          // 
+          // This ensures:
+          //   1. Model instance is created first with its _modelFileId
+          //   2. Model automatically registers with the schema
+          //   3. Schema saves to database with complete model data
+          //   4. No race conditions between model creation and schema persistence
+          //
+          // TODO: Re-enable this if we can fix the race condition, or if we need backward compatibility
+          
+          throw new Error(
+            'Direct assignment to schema.models is disabled. ' +
+            'Please use Model.create() instead: ' +
+            'const model = Model.create("ModelName", schemaInstance, { properties: {...}, indexes: [...], description: "..." })'
+          )
+          
+          /* DISABLED CODE - See comment above
           // Convert array of Model instances or plain objects back to object format
           let modelsObject: { [key: string]: any }
           if (Array.isArray(value)) {
@@ -350,16 +424,46 @@ export class Schema {
           
           const context = newInstance._getSnapshotContext()
           
-          newInstance._service.send({
-            type: 'updateContext',
-            models: modelsObject,
-          })
+          // Check if service is still running before sending events
+          let snapshot = newInstance._service.getSnapshot()
+          const wasServiceStopped = snapshot.status === 'stopped'
           
-          // Update Model instances cache
-          newInstance._updateModelInstances({
-            ...context,
-            models: modelsObject,
-          })
+          if (wasServiceStopped) {
+            logger(`Service is stopped, will restart before adding models`)
+            newInstance._service.start()
+            snapshot = newInstance._service.getSnapshot()
+          }
+          
+          // Check current state after potential restart
+          const currentState = snapshot.value
+          const isServiceLoading = currentState === 'loading'
+          
+          // If service is loading, wait for it to finish before adding models
+          if (isServiceLoading || wasServiceStopped) {
+            logger(`Service is ${isServiceLoading ? 'loading' : 'was stopped'}, will add models after loading completes`)
+            
+            const loadingSubscription = newInstance._service.subscribe((snapshot) => {
+              if (snapshot.value === 'idle') {
+                loadingSubscription.unsubscribe()
+                logger(`Service finished loading, sending addModels event`)
+                newInstance._service.send({
+                  type: 'addModels',
+                  models: modelsObject,
+                })
+              } else if (snapshot.value === 'error') {
+                loadingSubscription.unsubscribe()
+                logger(`Service failed to load, cannot add models`)
+              }
+            })
+          } else {
+            // Service is ready, send addModels event immediately
+            // The state machine will handle all the complexity (validation, instance creation, ID collection, persistence)
+            logger(`Service is ready, sending addModels event`)
+            newInstance._service.send({
+              type: 'addModels',
+              models: modelsObject,
+            })
+          }
           
           // Mark schema as draft when models change
           newInstance._service.send({
@@ -372,22 +476,15 @@ export class Schema {
             logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
           })
           
-          // Create Model classes and add to store for new models
-          newInstance._addModelsToStore(modelsObject, context.models || {}).catch((error) => {
-            logger(`Failed to add models to store: ${error instanceof Error ? error.message : String(error)}`)
-          })
-          
-          // Trigger validation automatically
-          newInstance._service.send({ type: 'validateSchema' })
-          
           // Update client context so useSchema and useSchemas hooks reflect the change
           newInstance._updateClientContext().catch(() => {
             // Silently fail if not in browser environment
           })
+          */
         } else if (prop === 'createdAt' || prop === 'updatedAt') {
           // Update metadata object
-          const context = newInstance._getSnapshotContext()
-          const currentMetadata = context.metadata || {
+          const metadataContext = newInstance._getSnapshotContext()
+          const currentMetadata = metadataContext.metadata || {
             name: schemaName,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -400,15 +497,27 @@ export class Schema {
               updatedAt: new Date().toISOString(),
             },
           })
-          newInstance._updateClientContext().catch(() => {
-            // Silently fail if not in browser environment
-          })
         } else {
           // Standard property update
           newInstance._service.send({
             type: 'updateContext',
             [prop]: value,
           })
+          
+          // Mark schema as draft for other property changes
+          newInstance._service.send({
+            type: 'markAsDraft',
+            propertyKey: prop,
+          })
+          
+          // Save draft to database for tracked properties
+          if (TRACKED_PROPERTIES.includes(prop as any)) {
+            const trackedPropContext = newInstance._getSnapshotContext()
+            const schemaName = trackedPropContext.metadata?.name || trackedPropContext.schemaName
+            newInstance._saveDraftToDb(schemaName, schemaName).catch((error) => {
+              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
+            })
+          }
         }
       },
     })
@@ -447,6 +556,7 @@ export class Schema {
 
   /**
    * Get schema instance by schemaFileId (preferred method)
+   * Returns null if not found in cache
    */
   static getById(schemaFileId: string): Schema | null {
     if (this.instanceCacheById.has(schemaFileId)) {
@@ -458,6 +568,88 @@ export class Schema {
       return instance
     }
     return null
+  }
+
+  /**
+   * Clear all cached Schema instances.
+   * This is primarily useful for test cleanup.
+   * All cached instances will be unloaded and removed from both caches.
+   */
+  static clearCache(): void {
+    // Collect all unique instances from both caches
+    const instances = new Set<Schema>()
+    
+    // Collect from ID-based cache
+    for (const { instance } of this.instanceCacheById.values()) {
+      instances.add(instance)
+    }
+    
+    // Collect from name-based cache
+    for (const { instance } of this.instanceCacheByName.values()) {
+      instances.add(instance)
+    }
+    
+    // Unload all instances (this will properly clean up services and state)
+    for (const instance of instances) {
+      try {
+        instance.unload()
+      } catch (error) {
+        // Ignore errors during cleanup (instance might already be unloaded)
+      }
+    }
+    
+    // Clear both caches explicitly
+    this.instanceCacheById.clear()
+    this.instanceCacheByName.clear()
+  }
+
+  /**
+   * Create or get schema instance by schemaFileId
+   * Queries the database to find the schema name if not cached
+   * @param schemaFileId - The schema file ID
+   * @returns Schema instance
+   */
+  static async createById(schemaFileId: string): Promise<Schema> {
+    if (!schemaFileId) {
+      throw new Error('Schema file ID is required')
+    }
+
+    // First, check if we have an instance cached by ID
+    const cachedInstance = this.getById(schemaFileId)
+    if (cachedInstance) {
+      return cachedInstance
+    }
+
+    // Query database to get schema name from ID
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+    const { eq, desc } = await import('drizzle-orm')
+
+    const db = BaseDb.getAppDb()
+    if (!db) {
+      throw new Error('Database not available')
+    }
+
+    const dbSchemas = await db
+      .select()
+      .from(schemasTable)
+      .where(eq(schemasTable.schemaFileId, schemaFileId))
+      .orderBy(desc(schemasTable.version))
+      .limit(1)
+
+    if (dbSchemas.length === 0) {
+      throw new Error(`Schema with ID "${schemaFileId}" not found in database`)
+    }
+
+    const dbSchema = dbSchemas[0]
+    const schemaName = dbSchema.name
+
+    if (!schemaName) {
+      throw new Error(`Schema with ID "${schemaFileId}" has no name in database`)
+    }
+
+    // Create schema using the name (this will load from database/file)
+    return this.create(schemaName)
   }
 
   /**
@@ -512,7 +704,31 @@ export class Schema {
   }
 
   get schemaName(): string {
-    return this._getSnapshotContext().schemaName
+    const context = this._getSnapshotContext()
+    const schemaFileId = context._schemaFileId
+    
+    // Prefer metadata.name if available (most reliable)
+    if (context.metadata?.name) {
+      return context.metadata.name
+    }
+    
+    // If metadata.name is not available, use schemaName but only if it's not the ID
+    // This prevents returning the ID when the schema is still loading or if an ID was mistakenly passed
+    if (context.schemaName && context.schemaName !== schemaFileId) {
+      return context.schemaName
+    }
+    
+    // Final fallback - return schemaName even if it might be the ID
+    // This handles edge cases during loading, but should be rare
+    return context.schemaName || ''
+  }
+
+  get schemaFileId(): string | undefined {
+    return this._getSnapshotContext()._schemaFileId
+  }
+
+  get id(): string | undefined {
+    return this._getSnapshotContext()._schemaFileId
   }
 
   get status() {
@@ -534,19 +750,80 @@ export class Schema {
    */
   async validate(): Promise<{ isValid: boolean; errors: any[] }> {
     return new Promise((resolve) => {
+      let resolved = false
       const subscription = this._service.subscribe((snapshot) => {
         if (snapshot.value === 'idle' || snapshot.value === 'error') {
+          if (!resolved) {
+            resolved = true
+            subscription.unsubscribe()
+            const errors = snapshot.context._validationErrors || []
+            resolve({
+              isValid: errors.length === 0,
+              errors,
+            })
+          }
+        }
+      })
+
+      this._service.send({ type: 'validateSchema' })
+      
+      // Timeout fallback to ensure we always resolve (15 seconds - longer than actor timeout)
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true
           subscription.unsubscribe()
-          const errors = snapshot.context._validationErrors || []
+          const errors = this._getSnapshotContext()._validationErrors || []
           resolve({
             isValid: errors.length === 0,
             errors,
           })
         }
-      })
-
-      this._service.send({ type: 'validateSchema' })
+      }, 15000)
     })
+  }
+
+  /**
+   * Build models object from Model instances (for persistence)
+   * Model instances are the source of truth for model data
+   */
+  private _buildModelsFromInstances(): { [modelName: string]: any } {
+    const context = this._getSnapshotContext()
+    const models: { [modelName: string]: any } = {}
+    
+    // Get model IDs from service context (reactive state)
+    const modelIds = context._liveQueryModelIds || []
+    
+    // Iterate through Model instances from static cache
+    for (const modelFileId of modelIds) {
+      const modelInstance = Model.getById(modelFileId)
+      if (!modelInstance) continue
+      try {
+        const modelName = modelInstance.modelName
+        
+        if (!modelName) {
+          logger(`Model instance with ID ${modelFileId} has no modelName, skipping`)
+          continue
+        }
+        
+        // Build model definition from Model instance context
+        // CRITICAL: Read properties from ModelProperty instances, not from Model's properties context
+        // ModelProperty instances are the source of truth for property data
+        const propertiesFromInstances = (modelInstance as any)._buildPropertiesFromInstances?.() || modelInstance.properties || {}
+        
+        models[modelName] = {
+          description: modelInstance.description,
+          properties: propertiesFromInstances,
+          indexes: modelInstance.indexes || [],
+        }
+        
+        logger(`Built model "${modelName}" from Model instance (ID: ${modelFileId})`)
+      } catch (error) {
+        logger(`Error building model from instance (ID: ${modelFileId}): ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    
+    logger(`Built ${Object.keys(models).length} models from Model instances`)
+    return models
   }
 
   /**
@@ -557,6 +834,14 @@ export class Schema {
    * @returns The file path of the new schema version
    */
   async saveNewVersion(): Promise<string> {
+    // Check for conflicts before saving
+    const conflictCheck = await this._checkForConflicts()
+    if (conflictCheck.hasConflict) {
+      const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the schema and try again.'
+      logger(`CONFLICT DETECTED: ${errorMessage}`)
+      throw new ConflictError(errorMessage, conflictCheck)
+    }
+    
     const context = this._getSnapshotContext()
     const { BaseDb } = await import('@/db/Db/BaseDb')
     const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
@@ -584,6 +869,10 @@ export class Schema {
     }
 
     // Build current schema state from context
+    // CRITICAL: Read models from Model instances, not from Schema context
+    // Model instances are the source of truth for model data
+    const modelsFromInstances = this._buildModelsFromInstances()
+    
     const currentSchema: SchemaFileFormat = {
       $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
       version: context.version || 1,
@@ -592,7 +881,7 @@ export class Schema {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      models: context.models || {},
+      models: modelsFromInstances, // Read from Model instances, not context.models
       enums: context.enums || {},
       migrations: context.migrations || [],
     }
@@ -700,8 +989,12 @@ export class Schema {
       )
     }
 
-    // Clear draft flags on Schema
-    this._service.send({ type: 'clearDraft' })
+    // Clear draft flags on Schema and update conflict detection metadata
+    this._service.send({ 
+      type: 'clearDraft',
+      _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
+      _dbVersion: publishedSchema.version,
+    } as any)
 
     // Clear edited flags on all ModelProperty instances
     for (const propertyKey of context._editedProperties) {
@@ -730,36 +1023,151 @@ export class Schema {
   }
 
   /**
+   * Check for conflicts between actor context and database
+   * @returns ConflictResult indicating if a conflict exists
+   */
+  private async _checkForConflicts(): Promise<ConflictResult> {
+    const context = this._getSnapshotContext()
+    
+    // If we don't have load metadata, can't check for conflicts
+    if (!context._dbUpdatedAt || !context._schemaFileId) {
+      return { hasConflict: false }
+    }
+    
+    try {
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        return { hasConflict: false } // Can't check without DB
+      }
+      
+      // Get current DB record
+      const dbSchemas = await db
+        .select()
+        .from(schemasTable)
+        .where(eq(schemasTable.schemaFileId, context._schemaFileId))
+        .orderBy(desc(schemasTable.version))
+        .limit(1)
+      
+      if (dbSchemas.length === 0) {
+        return { hasConflict: false } // No DB record, no conflict
+      }
+      
+      const dbRecord = dbSchemas[0]
+      
+      // Check if DB was updated after we loaded
+      const dbUpdatedAt = dbRecord.updatedAt || 0
+      const localUpdatedAt = context._dbUpdatedAt
+      
+      if (dbUpdatedAt > localUpdatedAt) {
+        return {
+          hasConflict: true,
+          localVersion: context.version,
+          dbVersion: dbRecord.version,
+          localUpdatedAt: context.metadata?.updatedAt,
+          dbUpdatedAt: new Date(dbUpdatedAt).toISOString(),
+          message: `Database was updated externally. Local version: ${context.version}, DB version: ${dbRecord.version}`,
+        }
+      }
+      
+      return { hasConflict: false }
+    } catch (error) {
+      logger(`Error checking for conflicts: ${error instanceof Error ? error.message : String(error)}`)
+      return { hasConflict: false } // On error, assume no conflict to allow save
+    }
+  }
+
+  /**
+   * Reload schema from database
+   * This refreshes the actor context with the latest data from the database
+   */
+  async reload(): Promise<void> {
+    logger(`Reloading schema ${this.schemaName} from database`)
+    
+    // Send reload event to machine
+    this._service.send({ type: 'reloadFromDb' })
+    
+    // Wait for reload to complete
+    return new Promise((resolve, reject) => {
+      const subscription = this._service.subscribe((snapshot) => {
+        if (snapshot.value === 'idle') {
+          subscription.unsubscribe()
+          resolve()
+        } else if (snapshot.value === 'error') {
+          subscription.unsubscribe()
+          reject(new Error('Failed to reload schema from database'))
+        }
+      })
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        subscription.unsubscribe()
+        reject(new Error('Timeout waiting for schema reload'))
+      }, 10000)
+    })
+  }
+
+  /**
    * Save the current schema state to the database as a draft
    * This persists changes immediately without creating a new file version
    * @param oldName - Optional old name to look up existing record before name change
    * @param newName - Optional new name to use (if not provided, uses this.schemaName)
    */
   private async _saveDraftToDb(oldName?: string, newName?: string): Promise<void> {
+    saveDraftLogger(`_saveDraftToDb called for schema (oldName: "${oldName}", newName: "${newName}")`)
+    
     // Don't save during initialization - schemas are being loaded from files, not created as drafts
     // Check this FIRST before doing any expensive work like _getSnapshotContext()
     if (typeof window !== 'undefined') {
       const now = Date.now()
       // Use cached check to avoid expensive operations
-      if (cachedClientInitialized === null || (now - clientCheckTime) > CLIENT_CHECK_CACHE_MS) {
+      // Always check if cache is stale or if we previously got false (to allow recovery)
+      const cacheIsStale = cachedClientInitialized === null || (now - clientCheckTime) > CLIENT_CHECK_CACHE_MS
+      const shouldRecheck = cacheIsStale || cachedClientInitialized === false
+      
+      saveDraftLogger(`Client check: cacheIsStale=${cacheIsStale}, shouldRecheck=${shouldRecheck}, cachedValue=${cachedClientInitialized}, timeSinceCheck=${now - clientCheckTime}ms`)
+      
+      if (shouldRecheck) {
         try {
-          const { getClient } = require('@/client/ClientManager')
-          const { ClientManagerState } = require('@/services/internal/constants')
+          // Use dynamic import for browser compatibility (require() doesn't work in browsers)
+          const { getClient } = await import('@/client/ClientManager')
+          const { ClientManagerState } = await import('@/client/constants')
           const client = getClient()
           const clientSnapshot = client.getService().getSnapshot()
-          cachedClientInitialized = clientSnapshot.value === ClientManagerState.IDLE && clientSnapshot.context.isInitialized
+          // Check if state is IDLE (primary check) - isInitialized is set in entry action so should be true
+          // But we check it as a secondary safeguard
+          const isIdle = clientSnapshot.value === ClientManagerState.IDLE
+          const isInitialized = clientSnapshot.context.isInitialized
+          // If state is IDLE, trust it even if isInitialized isn't set yet (entry action should set it)
+          // This aligns with useIsClientReady which only checks the state value
+          cachedClientInitialized = isIdle && (isInitialized !== false)
           clientCheckTime = now
+          saveDraftLogger(`Client state checked: state=${clientSnapshot.value}, isIdle=${isIdle}, isInitialized=${isInitialized}, result=${cachedClientInitialized}`)
         } catch (error) {
           // If we can't check client state, assume not initialized to be safe
+          // But only cache for a short time to allow recovery
           cachedClientInitialized = false
           clientCheckTime = now
+          saveDraftLogger(`Error checking client state: ${error instanceof Error ? error.message : String(error)}, setting cachedClientInitialized=false`)
         }
+      } else {
+        saveDraftLogger(`Using cached client state: cachedClientInitialized=${cachedClientInitialized}`)
       }
       
       if (!cachedClientInitialized) {
+        saveDraftLogger(`Client not initialized, skipping save (oldName: "${oldName}", newName: "${newName}")`)
         // Skip silently during initialization to avoid log spam and reduce overhead
         return
       }
+    }
+    
+    saveDraftLogger(`Client is initialized, proceeding with save (oldName: "${oldName}", newName: "${newName}")`)
+    
+    // Check for conflicts before saving
+    const conflictCheck = await this._checkForConflicts()
+    if (conflictCheck.hasConflict) {
+      const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the schema and try again.'
+      saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
+      throw new ConflictError(errorMessage, conflictCheck)
     }
     
     const context = this._getSnapshotContext()
@@ -771,11 +1179,12 @@ export class Schema {
     
     // Prevent concurrent saves for the same schema
     if (Schema.savingSchemas.has(saveKey)) {
-      logger(`Schema ${schemaName} is already being saved, skipping concurrent save`)
+      saveDraftLogger(`Schema ${schemaName} (key: ${saveKey}) is already being saved, skipping concurrent save`)
       return
     }
     
     Schema.savingSchemas.add(saveKey)
+    saveDraftLogger(`Starting save for schema ${schemaName} (key: ${saveKey}, schemaFileId: ${schemaFileId})`)
     
     try {
       // Get context - if service is stopped, use the last known context or build from metadata
@@ -810,8 +1219,9 @@ export class Schema {
 
       // Use provided newName or fall back to context schemaName (avoid getter which might be stale)
       const finalNewName = newName || context.schemaName || this.schemaName
-      // If name changed, we need to look up by old name first, then update with new name
-      const lookupName = oldName || finalNewName
+      // CRITICAL: If name changed, we MUST look up by old name to find the existing record
+      // Don't use finalNewName if oldName is provided - that would look up by the new name and not find the old record
+      const lookupName = oldName && oldName !== finalNewName ? oldName : finalNewName
 
       // Try to get existing schema ID from database to preserve it
       // PRIMARY: Look up by schemaFileId (most reliable, independent of name changes)
@@ -882,19 +1292,43 @@ export class Schema {
       // Build current schema state from context
       // Use existing schemaFileId if we found one, otherwise use the one from context, or generate new
       const schemaFileId = existingSchemaId || context._schemaFileId || generateId()
+      
+      // Build metadata - if name changed, use newName, otherwise use context metadata
+      // Always ensure metadata.name matches finalNewName to prevent inconsistencies
+      const currentMetadata = context.metadata ? {
+        ...context.metadata,
+        name: finalNewName, // Always use the final name (from newName parameter or context)
+        updatedAt: new Date().toISOString(), // Always update timestamp when saving
+      } : {
+        name: finalNewName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      
+      // CRITICAL: Ensure schema.id always matches schemaFileId (database is source of truth)
+      // Use existingSchemaRecord.schemaFileId if available, otherwise use the calculated schemaFileId
+      const finalSchemaFileId = existingSchemaRecord?.schemaFileId || schemaFileId
+      
+      // CRITICAL: Read models from Model instances, not from Schema context
+      // Model instances are the source of truth for model data
+      const modelsFromInstances = this._buildModelsFromInstances()
+      
       const currentSchema: SchemaFileFormat = {
         $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
         version: context.version || 1,
-        id: schemaFileId, // Preserve existing ID or use context ID, or generate new one
-        metadata: context.metadata || {
-          name: finalNewName,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        models: context.models || {},
+        id: finalSchemaFileId, // Always use schemaFileId from database as source of truth
+        metadata: currentMetadata,
+        models: modelsFromInstances, // Read from Model instances, not context.models
         enums: context.enums || {},
         migrations: context.migrations || [],
       }
+      
+      // Log if there was a mismatch that we're fixing
+      if (existingSchemaRecord?.schemaFileId && context._schemaFileId && context._schemaFileId !== finalSchemaFileId) {
+        saveDraftLogger(`Fixed schema ID mismatch: context._schemaFileId="${context._schemaFileId}" does not match DB schemaFileId="${finalSchemaFileId}". Using DB value.`)
+      }
+      
+      saveDraftLogger(`Building schema with metadata.name="${currentMetadata.name}", finalNewName="${finalNewName}"`)
 
       // If name changed, we MUST update the existing record (don't create a new one)
       if (oldName && oldName !== finalNewName) {
@@ -902,23 +1336,81 @@ export class Schema {
           logger(`Updating existing schema record (id: ${existingSchemaRecord.id}) from "${oldName}" to "${finalNewName}"`)
           
           // Update the existing record with the new name
+          const schemaDataString = JSON.stringify(currentSchema, null, 2)
+          saveDraftLogger(`Saving schemaData with metadata.name="${currentSchema.metadata.name}", schemaData length=${schemaDataString.length}`)
+          
+          // CRITICAL: Ensure schemaFileId column matches schema.id (schema.id is now guaranteed to match finalSchemaFileId)
+          // Always update schemaFileId to match the id in the schema JSON to maintain consistency
+          const updateData: any = {
+            name: finalNewName,
+            schemaData: schemaDataString,
+            schemaFileId: finalSchemaFileId, // Always set to match schema.id
+            version: currentSchema.version,
+            updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
+            isDraft: true, // Ensure it's marked as a draft when saving via _saveDraftToDb
+          }
+          
+          // Log if we're fixing a mismatch
+          if (existingSchemaRecord.schemaFileId && existingSchemaRecord.schemaFileId !== finalSchemaFileId) {
+            saveDraftLogger(`Fixing schemaFileId mismatch: DB had "${existingSchemaRecord.schemaFileId}", schema.id is "${finalSchemaFileId}". Updating DB to match schema.id.`)
+          } else if (!existingSchemaRecord.schemaFileId && finalSchemaFileId) {
+            saveDraftLogger(`Setting schemaFileId to ${finalSchemaFileId} (was null)`)
+          }
+          
           await db
             .update(schemasTable)
-            .set({
-              name: finalNewName,
-              schemaData: JSON.stringify(currentSchema, null, 2),
-              version: currentSchema.version,
-              updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
-            })
+            .set(updateData)
             .where(eq(schemasTable.id, existingSchemaRecord.id))
           
-          // Update the context's _schemaFileId to ensure it's preserved for future lookups
+          // Verify what was saved by reading it back
+          const verifyRecord = await db
+            .select()
+            .from(schemasTable)
+            .where(eq(schemasTable.id, existingSchemaRecord.id))
+            .limit(1)
+          
+          if (verifyRecord.length > 0 && verifyRecord[0].schemaData) {
+            try {
+              const savedSchema = JSON.parse(verifyRecord[0].schemaData) as SchemaFileFormat
+              saveDraftLogger(`Verified saved schemaData: metadata.name="${savedSchema.metadata?.name}", name column="${verifyRecord[0].name}", isDraft=${verifyRecord[0].isDraft}, schemaFileId="${verifyRecord[0].schemaFileId}"`)
+              
+              if (verifyRecord[0].isDraft !== true) {
+                saveDraftLogger(`ERROR: isDraft is not true after save! Expected true, got ${verifyRecord[0].isDraft}. This will cause the schema to load from file instead of database!`)
+                // Try to fix it immediately
+                await db
+                  .update(schemasTable)
+                  .set({ isDraft: true })
+                  .where(eq(schemasTable.id, existingSchemaRecord.id))
+                saveDraftLogger(`Attempted to fix isDraft by setting it to true again`)
+                
+                // Verify the fix
+                const fixedRecord = await db
+                  .select()
+                  .from(schemasTable)
+                  .where(eq(schemasTable.id, existingSchemaRecord.id))
+                  .limit(1)
+                if (fixedRecord.length > 0) {
+                  saveDraftLogger(`After fix attempt: isDraft=${fixedRecord[0].isDraft}`)
+                }
+              }
+            } catch (error) {
+              saveDraftLogger(`Error parsing saved schemaData for verification: ${error}`)
+            }
+          } else {
+            saveDraftLogger(`WARNING: Could not verify saved record - record not found or has no schemaData`)
+          }
+          
+          // Update the context's _schemaFileId and conflict detection metadata
           try {
             const snapshot = this._service.getSnapshot()
-            if (snapshot.status !== 'stopped' && existingSchemaRecord.schemaFileId) {
+            if (snapshot.status !== 'stopped') {
+              // Use finalSchemaFileId which matches the schema.id
+              // Also update conflict detection metadata after successful save
               this._service.send({
                 type: 'updateContext',
-                _schemaFileId: existingSchemaRecord.schemaFileId,
+                _schemaFileId: finalSchemaFileId,
+                _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
+                _dbVersion: currentSchema.version,
               })
             }
           } catch (error) {
@@ -927,6 +1419,7 @@ export class Schema {
           }
           
           logger(`Successfully updated schema name from "${oldName}" to "${finalNewName}" in database`)
+          Schema.savingSchemas.delete(saveKey)
           return
         } else {
           // Name changed but we didn't find the existing record - try harder to find it
@@ -944,23 +1437,28 @@ export class Schema {
             logger(`Found existing record by old name "${oldName}" (id: ${foundRecord.id}), updating to new name "${finalNewName}"`)
             
             // Update the existing record with the new name
-            await db
+              // CRITICAL: Ensure schemaFileId matches schema.id
+              await db
               .update(schemasTable)
               .set({
                 name: finalNewName,
                 schemaData: JSON.stringify(currentSchema, null, 2),
+                schemaFileId: finalSchemaFileId, // Always set to match schema.id
                 version: currentSchema.version,
                 updatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
+                isDraft: true, // Ensure it's marked as a draft when saving via _saveDraftToDb
               })
               .where(eq(schemasTable.id, foundRecord.id))
             
-            // Update context with schemaFileId if available
+            // Update context with schemaFileId and conflict detection metadata
             try {
               const snapshot = this._service.getSnapshot()
-              if (snapshot.status !== 'stopped' && foundRecord.schemaFileId) {
+              if (snapshot.status !== 'stopped' && finalSchemaFileId) {
                 this._service.send({
                   type: 'updateContext',
-                  _schemaFileId: foundRecord.schemaFileId,
+                  _schemaFileId: finalSchemaFileId,
+                  _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
+                  _dbVersion: currentSchema.version,
                 })
               }
             } catch (error) {
@@ -968,21 +1466,25 @@ export class Schema {
             }
             
             logger(`Successfully updated schema name from "${oldName}" to "${finalNewName}" in database (found by old name)`)
+            Schema.savingSchemas.delete(saveKey)
             return
           }
           
           // If we still can't find it, this is an error - don't create a duplicate
           logger(`ERROR: Could not find existing schema record with name "${oldName}". Cannot update name to "${finalNewName}" without creating a duplicate.`)
+          Schema.savingSchemas.delete(saveKey)
           throw new Error(`Cannot update schema name: existing schema with name "${oldName}" not found in database`)
         }
       }
 
-      // If name changed, we should have already updated the record above
+      // If name changed, we should have already updated the record above and returned
       // Only call addSchemaToDb if name didn't change (normal save scenario)
       if (oldName && oldName !== finalNewName) {
-        // This should never happen - we should have updated above
-        logger(`ERROR: Name changed but update didn't happen. This should not occur.`)
-        throw new Error(`Failed to update schema name: existing record not found`)
+        // This should never happen - we should have updated above and returned
+        // But if we get here, it means the update path didn't work, so we need to handle it
+        logger(`ERROR: Name changed from "${oldName}" to "${finalNewName}" but update path didn't complete. This should not occur.`)
+        Schema.savingSchemas.delete(saveKey)
+        throw new Error(`Failed to update schema name: existing record not found or update failed`)
       }
 
       // Otherwise, use addSchemaToDb which will handle create/update logic (for normal saves, not name changes)
@@ -998,402 +1500,42 @@ export class Schema {
         true, // isDraft = true
       )
 
+      // Update conflict detection metadata after successful save
+      try {
+        const snapshot = this._service.getSnapshot()
+        if (snapshot.status !== 'stopped') {
+          this._service.send({
+            type: 'updateContext',
+            _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
+            _dbVersion: currentSchema.version,
+          })
+        }
+      } catch (error) {
+        // Service might be stopped, ignore
+      }
+      
+      saveDraftLogger(`Successfully saved draft schema "${finalNewName}" to database (key: ${saveKey})`)
       logger(`Saved draft schema ${finalNewName} to database`)
     } catch (error) {
+      saveDraftLogger(`ERROR: Failed to save draft to database for schema "${schemaName}" (key: ${saveKey}): ${error instanceof Error ? error.message : String(error)}`)
       logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
       throw error
     } finally {
       // Always remove from saving set, even if there was an error
       Schema.savingSchemas.delete(saveKey)
+      saveDraftLogger(`Removed schema from saving set (key: ${saveKey})`)
     }
   }
 
-  /**
-   * Add new models to the store and database
-   * This ensures that new models are immediately available for use
-   * @param newModels - The new models object
-   * @param existingModels - The existing models object (to detect which are new)
-   */
-  private async _addModelsToStore(
-    newModels: { [modelName: string]: any },
-    existingModels: { [modelName: string]: any }
-  ): Promise<void> {
-    try {
-      // Only process in browser environment where store is available
-      if (typeof window === 'undefined') {
-        return
-      }
-
-      const { setModel } = await import('@/stores/modelClass')
-      const { createModelFromJson } = await import('@/imports/json')
-      const { addModelsToDb } = await import('@/helpers/db')
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-      const { eq } = await import('drizzle-orm')
-
-      // Find new models (ones that don't exist in existingModels)
-      const newModelNames = Object.keys(newModels).filter(
-        name => !existingModels[name]
-      )
-
-      if (newModelNames.length === 0) {
-        return // No new models to add
-      }
-
-      // Get schema record from database
-      const db = BaseDb.getAppDb()
-      if (!db) {
-        logger('Database not found, skipping model store update')
-        return
-      }
-
-      const context = this._getSnapshotContext()
-      const schemaName = context.metadata?.name || context.schemaName
-
-      // Find schema record
-      const schemaRecords = await db
-        .select()
-        .from(schemasTable)
-        .where(eq(schemasTable.name, schemaName))
-        .limit(1)
-
-      if (schemaRecords.length === 0) {
-        logger(`Schema "${schemaName}" not found in database, skipping model store update`)
-        return
-      }
-
-      const schemaRecord = schemaRecords[0]
-
-      // Convert schema model format to JSON import format for createModelFromJson
-      const modelDefinitions: { [modelName: string]: any } = {}
-      
-      for (const modelName of newModelNames) {
-        const modelDef = newModels[modelName]
-        
-        // Convert properties from schema format to JSON import format
-        const convertedProperties: { [propName: string]: any } = {}
-        if (modelDef.properties) {
-          for (const [propName, propDef] of Object.entries(modelDef.properties)) {
-            // Schema format: { dataType, ref, refValueType, storageType, localStorageDir, filenameSuffix }
-            // JSON import format: { type, model, items, storage: { type, path, extension } }
-            const schemaProp = propDef as any
-            const jsonProp: any = {
-              type: schemaProp.dataType || schemaProp.type,
-            }
-
-            // Handle Relation type
-            if (schemaProp.ref || schemaProp.refModelName) {
-              jsonProp.model = schemaProp.refModelName || schemaProp.ref
-            }
-
-            // Handle List type
-            if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
-              jsonProp.items = {
-                type: schemaProp.refValueType,
-                model: schemaProp.refModelName || schemaProp.ref,
-              }
-            }
-
-            // Handle storage configuration
-            if (schemaProp.storageType || schemaProp.localStorageDir || schemaProp.filenameSuffix) {
-              jsonProp.storage = {
-                type: schemaProp.storageType === 'ItemStorage' ? 'ItemStorage' : 'PropertyStorage',
-                path: schemaProp.localStorageDir,
-                extension: schemaProp.filenameSuffix,
-              }
-            }
-
-            convertedProperties[propName] = jsonProp
-          }
-        }
-
-        // Create model definition in JSON import format
-        const jsonModelDef = {
-          properties: convertedProperties,
-          indexes: modelDef.indexes || [],
-          description: modelDef.description,
-        }
-
-        // Create Model class
-        const ModelClass = await createModelFromJson(modelName, jsonModelDef, schemaName)
-        modelDefinitions[modelName] = ModelClass
-
-        // Add to store
-        setModel(modelName, ModelClass as any)
-        logger(`Added model "${modelName}" to store`)
-      }
-
-      // Add models to database
-      if (Object.keys(modelDefinitions).length > 0) {
-        await addModelsToDb(modelDefinitions, schemaRecord)
-        logger(`Added ${Object.keys(modelDefinitions).length} new models to database`)
-      }
-    } catch (error) {
-      logger(`Error adding models to store: ${error instanceof Error ? error.message : String(error)}`)
-      // Don't throw - this is a best-effort operation
-    }
-  }
-
-  /**
-   * Update the client context with the current schema state
-   * This ensures that useSchema and useSchemas hooks reflect schema changes
-   * @param newName - The new schema name (if changed)
-   * @param oldName - The old schema name (if changed, for cleanup)
-   */
-  private async _updateClientContext(newName?: string, oldName?: string): Promise<void> {
-    try {
-      // Only update in browser environment
-      if (typeof window === 'undefined') {
-        return
-      }
-
-      const { getClient } = await import('@/client/ClientManager')
-      const { ClientManagerEvents } = await import('@/services/internal/constants')
-      const { ClientManagerState } = await import('@/services/internal/constants')
-      const { generateId } = await import('@/helpers')
-
-      const client = getClient()
-      const clientService = client.getService()
-      const snapshot = clientService.getSnapshot()
-      
-      // Don't update context during initialization - wait until client is fully ready
-      // This prevents infinite loops during initialization when processSchemaFiles is running
-      if (snapshot.value !== ClientManagerState.IDLE || !snapshot.context.isInitialized) {
-        contextLogger('Client not fully initialized, skipping context update')
-        return
-      }
-      
-      const currentContext = snapshot.context
-
-      const context = this._getSnapshotContext()
-      const schemaName = newName || context.metadata?.name || context.schemaName
-
-      if (!schemaName) {
-        contextLogger('Cannot update client context: schema name is missing')
-        return
-      }
-
-      // Get existing schema from client context to preserve ID and compare
-      const existingSchema = currentContext.schemas?.[schemaName]
-      
-      // Use existing schema ID if available, otherwise use _schemaFileId from context, or generate new
-      const schemaId = existingSchema?.id || context._schemaFileId || generateId()
-
-      // Build SchemaFileFormat from current context
-      const schemaFile: SchemaFileFormat = {
-        $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',
-        version: context.version || 1,
-        id: schemaId,
-        metadata: context.metadata || {
-          name: schemaName,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        models: context.models || {},
-        enums: context.enums || {},
-        migrations: context.migrations || [],
-      }
-
-      // Compare with existing schema to avoid unnecessary updates
-      // Only compare content, not the id (which we preserve)
-      if (existingSchema) {
-        const existingContent = {
-          $schema: existingSchema.$schema,
-          version: existingSchema.version,
-          metadata: existingSchema.metadata,
-          models: existingSchema.models,
-          enums: existingSchema.enums,
-          migrations: existingSchema.migrations,
-        }
-        const newContent = {
-          $schema: schemaFile.$schema,
-          version: schemaFile.version,
-          metadata: schemaFile.metadata,
-          models: schemaFile.models,
-          enums: schemaFile.enums,
-          migrations: schemaFile.migrations,
-        }
-        
-        // Deep comparison using JSON.stringify (for simple objects this is sufficient)
-        if (JSON.stringify(existingContent) === JSON.stringify(newContent)) {
-          // Schema content hasn't changed, skip update to prevent infinite loop
-          contextLogger(`Schema ${schemaName} content unchanged, skipping context update`)
-          return
-        }
-      }
-
-      // Update client context with the new schema
-      const updatedSchemas = { ...(currentContext.schemas || {}) }
-
-      // If name changed, remove old entry and add new one
-      if (oldName && oldName !== schemaName && updatedSchemas[oldName]) {
-        delete updatedSchemas[oldName]
-        contextLogger(`Removed old schema entry: ${oldName}`)
-      }
-
-      // Add/update the schema with the new name
-      updatedSchemas[schemaName] = schemaFile
-
-      clientService.send({
-        type: ClientManagerEvents.UPDATE_CONTEXT,
-        context: {
-          schemas: updatedSchemas,
-        },
-      })
-
-      contextLogger(`Updated client context with schema: ${schemaName}`)
-    } catch (error) {
-      // Log error but don't fail if context update fails (might not be in browser)
-      contextLogger(`Failed to update client context: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  /**
-   * Update Model instances cache when schema context changes
-   * Creates Model instances for each model in the schema
-   */
-  private _updateModelInstances(context: SchemaMachineContext): void {
-    const instanceState = schemaInstanceState.get(this)
-    if (!instanceState) return
-    
-    const modelInstances = instanceState.modelInstances
-    
-    if (!context.models) {
-      modelInstances.clear()
-      return
-    }
-
-    const schemaName = context.metadata?.name || context.schemaName
-    const currentModelNames = new Set(Object.keys(context.models))
-    const cachedModelNames = new Set(modelInstances.keys())
-
-    // Remove models that no longer exist
-    for (const modelName of cachedModelNames) {
-      if (!currentModelNames.has(modelName)) {
-        const modelInstance = modelInstances.get(modelName)
-        if (modelInstance) {
-          modelInstance.unload()
-        }
-        modelInstances.delete(modelName)
-      }
-    }
-
-    // Create or update Model instances for existing models
-    for (const [modelName, modelData] of Object.entries(context.models)) {
-      if (!modelInstances.has(modelName)) {
-        // Create new Model instance
-        const modelInstance = Model.create(modelName, schemaName)
-        
-        // Update the model instance with current data
-        const modelContext = modelInstance.getService().getSnapshot().context
-        modelInstance.getService().send({
-          type: 'updateContext',
-          description: modelData.description,
-          properties: modelData.properties || {},
-          indexes: modelData.indexes,
-        })
-        
-        // Initialize original values
-        modelInstance.getService().send({
-          type: 'initializeOriginalValues',
-          originalValues: {
-            description: modelData.description,
-            properties: modelData.properties ? JSON.parse(JSON.stringify(modelData.properties)) : {},
-            indexes: modelData.indexes ? [...(modelData.indexes || [])] : undefined,
-          },
-          isEdited: false,
-        })
-        
-        modelInstances.set(modelName, modelInstance)
-      } else {
-        // Update existing Model instance if data changed
-        const modelInstance = modelInstances.get(modelName)!
-        const instanceContext = modelInstance.getService().getSnapshot().context
-        
-        // Check if data has changed
-        const descriptionChanged = instanceContext.description !== modelData.description
-        const propertiesChanged = JSON.stringify(instanceContext.properties) !== JSON.stringify(modelData.properties || {})
-        const indexesChanged = JSON.stringify(instanceContext.indexes) !== JSON.stringify(modelData.indexes)
-        
-        if (descriptionChanged || propertiesChanged || indexesChanged) {
-          modelInstance.getService().send({
-            type: 'updateContext',
-            description: modelData.description,
-            properties: modelData.properties || {},
-            indexes: modelData.indexes,
-          })
-        }
-      }
-    }
-  }
-
-  /**
-   * Handle model name change
-   * Updates the Schema's models object and database
-   */
-  async _handleModelNameChange(oldName: string, newName: string): Promise<void> {
-    const context = this._getSnapshotContext()
-    const schemaName = context.metadata?.name || context.schemaName
-    
-    if (!context.models || !context.models[oldName]) {
-      logger(`Model "${oldName}" not found in schema "${schemaName}"`)
-      return
-    }
-
-    // Update the models object in Schema context
-    const updatedModels = { ...context.models }
-    updatedModels[newName] = updatedModels[oldName]
-    delete updatedModels[oldName]
-
-    // Update Model instance cache
-    const instanceState = schemaInstanceState.get(this)
-    if (instanceState) {
-      const modelInstance = instanceState.modelInstances.get(oldName)
-      if (modelInstance) {
-        instanceState.modelInstances.delete(oldName)
-        instanceState.modelInstances.set(newName, modelInstance)
-      }
-    }
-
-    // Update Schema context
-    this._service.send({
-      type: 'updateContext',
-      models: updatedModels,
-    })
-
-    // Mark schema as draft
-    this._service.send({
-      type: 'markAsDraft',
-      propertyKey: `model:${oldName}:name`,
-    })
-
-    // Update database
-    try {
-      await renameModelInDb(oldName, newName)
-      logger(`Renamed model "${oldName}" to "${newName}" in database`)
-    } catch (error) {
-      logger(`Failed to rename model in database: ${error instanceof Error ? error.message : String(error)}`)
-    }
-
-    // Save draft to database
-    await this._saveDraftToDb().catch((error) => {
-      logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }
 
   unload(): void {
-    // Unload all Model instances
-    const instanceState = schemaInstanceState.get(this)
-    if (instanceState) {
-      for (const modelInstance of instanceState.modelInstances.values()) {
-        modelInstance.unload()
-      }
-      instanceState.modelInstances.clear()
-      
-      // Clear any pending context update
-      if (instanceState.contextUpdateTimeout) {
-        clearTimeout(instanceState.contextUpdateTimeout)
-        instanceState.contextUpdateTimeout = null
+    // Clean up instance state
+    const unloadInstanceState = schemaInstanceState.get(this)
+    if (unloadInstanceState) {
+      // Clean up liveQuery subscription
+      if (unloadInstanceState.liveQuerySubscription) {
+        unloadInstanceState.liveQuerySubscription.unsubscribe()
+        unloadInstanceState.liveQuerySubscription = null
       }
     }
     
@@ -1430,5 +1572,223 @@ export class Schema {
     }
     
     this._service.stop()
+    
+    // Clean up liveQuery subscription
+    const instanceState = schemaInstanceState.get(this)
+    if (instanceState?.liveQuerySubscription) {
+      instanceState.liveQuerySubscription.unsubscribe()
+      instanceState.liveQuerySubscription = null
+    }
   }
+
+  /**
+   * Set up liveQuery subscription to watch for model changes in the database
+   * This enables cross-instance synchronization (e.g., changes in other tabs/windows)
+   */
+  private _setupLiveQuerySubscription(): void {
+    // Only set up in browser environment where liveQuery is available
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    // Wait for schema to be loaded and have a schemaId
+    // Subscribe to service to detect when schema is ready
+    const setupSubscription = this._service.subscribe(async (snapshot) => {
+      // Only set up once when schema is idle and we have metadata
+      if (snapshot.value === 'idle' && snapshot.context.metadata?.name) {
+        setupSubscription.unsubscribe()
+        
+        try {
+          const { BaseDb } = await import('@/db/Db/BaseDb')
+          const { schemas: schemasTable, modelSchemas, models: modelsTable } = await import('@/seedSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          // Get schema ID from database
+          const db = BaseDb.getAppDb()
+          if (!db) {
+            logger('[Schema._setupLiveQuerySubscription] Database not available')
+            return
+          }
+
+          const schemaName = snapshot.context.metadata.name
+          const schemaRecords = await db
+            .select()
+            .from(schemasTable)
+            .where(eq(schemasTable.name, schemaName))
+            .limit(1)
+
+          if (schemaRecords.length === 0) {
+            logger(`[Schema._setupLiveQuerySubscription] Schema "${schemaName}" not found in database`)
+            return
+          }
+
+          const schemaId = schemaRecords[0].id
+          if (!schemaId) {
+            logger(`[Schema._setupLiveQuerySubscription] Schema "${schemaName}" has no ID`)
+            return
+          }
+
+          // Set up liveQuery to watch model_schemas join table for this schema
+          const models$ = BaseDb.liveQuery<{ 
+            modelId: number
+            modelName: string
+            modelFileId: string
+          }>(
+            (sql: any) => sql`
+              SELECT 
+                ms.model_id as modelId,
+                m.name as modelName,
+                m.schema_file_id as modelFileId
+              FROM model_schemas ms
+              INNER JOIN models m ON ms.model_id = m.id
+              WHERE ms.schema_id = ${schemaId}
+            `
+          )
+
+          const instanceState = schemaInstanceState.get(this)
+          if (!instanceState) {
+            logger('[Schema._setupLiveQuerySubscription] Instance state not found')
+            return
+          }
+
+          // Helper function to update models from database rows
+          const updateModelsFromRows = (modelRows: { modelId: number; modelName: string; modelFileId: string }[]) => {
+            logger(`[Schema._setupLiveQuerySubscription] Models updated in database: ${modelRows.length} models`)
+            // Extract model IDs from rows
+            const modelIds = modelRows.map(row => row.modelFileId).filter(Boolean) as string[]
+            
+            // Helper function to send updateContext event with model IDs
+            const sendUpdateContext = () => {
+              // Double-check instance state still exists (for subscription cleanup check)
+              const verifyInstanceState = schemaInstanceState.get(this)
+              if (!verifyInstanceState) {
+                logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up before sending updateContext`)
+                return
+              }
+              
+              try {
+                const snapshot = this._service.getSnapshot()
+                if (snapshot.status === 'stopped') {
+                  logger(`[Schema._setupLiveQuerySubscription] Service stopped before sending, skipping`)
+                  return
+                }
+                
+                // Send updateContext with liveQueryModelIds in service context for reactive updates
+                this._service.send({
+                  type: 'updateContext',
+                  _liveQueryModelIds: modelIds, // Store in service context for reactivity
+                  _modelsUpdated: Date.now(), // Internal field for tracking
+                })
+                logger(`[Schema._setupLiveQuerySubscription] Sent updateContext event with ${modelIds.length} model IDs`)
+              } catch (error) {
+                logger(`[Schema._setupLiveQuerySubscription] Error sending updateContext: ${error}`)
+              }
+            }
+            
+            // Check if service is stopped before sending events
+            const snapshot = this._service.getSnapshot()
+            const isServiceStopped = snapshot.status === 'stopped'
+            
+            if (isServiceStopped) {
+              logger(`[Schema._setupLiveQuerySubscription] Service is stopped, restarting before sending updateContext`)
+              // Restart the service first
+              this._service.start()
+              
+              // Wait for service to be ready (idle state) before sending event
+              // Use a small delay to ensure the service has transitioned to idle
+              setTimeout(() => {
+                // Check instanceState again after delay
+                const delayedInstanceState = schemaInstanceState.get(this)
+                if (!delayedInstanceState) {
+                  logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up during restart delay`)
+                  return
+                }
+                
+                const newSnapshot = this._service.getSnapshot()
+                if (newSnapshot.status !== 'stopped') {
+                  sendUpdateContext()
+                } else {
+                  logger(`[Schema._setupLiveQuerySubscription] Service still stopped after restart attempt`)
+                }
+              }, 10)
+            } else {
+              // Service is running, send immediately
+              sendUpdateContext()
+            }
+          }
+
+          // Manually query the database once to get initial models immediately
+          // This ensures models are available right away, not just when liveQuery emits
+          // Retry a few times in case models are still being added to the database
+          const queryInitialModels = async (retries = 3): Promise<void> => {
+            try {
+              const initialModels = await db
+                .select({
+                  modelId: modelSchemas.modelId,
+                  modelName: modelsTable.name,
+                  modelFileId: modelsTable.schemaFileId,
+                })
+                .from(modelSchemas)
+                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+                .where(eq(modelSchemas.schemaId, schemaId))
+              
+              logger(`[Schema._setupLiveQuerySubscription] Initial query found ${initialModels.length} models for schema "${schemaName}" (id: ${schemaId})`)
+              
+              if (initialModels.length > 0) {
+                // Update models immediately
+                updateModelsFromRows(initialModels.map((row: { modelId: number; modelName: string; modelFileId: string | null }) => ({
+                  modelId: row.modelId,
+                  modelName: row.modelName,
+                  modelFileId: row.modelFileId || '',
+                })))
+              } else if (retries > 0) {
+                // Retry after a short delay in case models are still being added
+                logger(`[Schema._setupLiveQuerySubscription] No models found, retrying... (${retries} retries left)`)
+                await new Promise(resolve => setTimeout(resolve, 100))
+                return queryInitialModels(retries - 1)
+              } else {
+                logger(`[Schema._setupLiveQuerySubscription] No models found in initial query for schema "${schemaName}" (id: ${schemaId}) after retries`)
+              }
+            } catch (error) {
+              if (retries > 0) {
+                logger(`[Schema._setupLiveQuerySubscription] Error querying initial models, retrying... (${retries} retries left): ${error}`)
+                await new Promise(resolve => setTimeout(resolve, 100))
+                return queryInitialModels(retries - 1)
+              } else {
+                logger(`[Schema._setupLiveQuerySubscription] Error querying initial models after retries: ${error}`)
+              }
+            }
+          }
+          
+          // Query initial models (with retries)
+          await queryInitialModels()
+
+          // Subscribe to liveQuery updates for future changes
+          const subscription = models$.subscribe({
+            next: (modelRows) => {
+              // CRITICAL: Check if instanceState still exists (hasn't been cleaned up by unload())
+              // This prevents race conditions where unload() is called while callback is executing
+              const currentInstanceState = schemaInstanceState.get(this)
+              if (!currentInstanceState) {
+                logger(`[Schema._setupLiveQuerySubscription] Instance state was cleaned up, skipping update`)
+                return
+              }
+              
+              // Use the helper function to update models (instanceState already checked above)
+              updateModelsFromRows(modelRows)
+            },
+            error: (error) => {
+              logger(`[Schema._setupLiveQuerySubscription] LiveQuery error: ${error}`)
+            },
+          })
+
+          instanceState.liveQuerySubscription = subscription
+          logger(`[Schema._setupLiveQuerySubscription] LiveQuery subscription set up for schema "${schemaName}" (id: ${schemaId})`)
+        } catch (error) {
+          logger(`[Schema._setupLiveQuerySubscription] Error setting up subscription: ${error}`)
+        }
+      }
+    })
+  }
+
 }

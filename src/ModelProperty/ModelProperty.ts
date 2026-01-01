@@ -1,6 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { Static } from '@sinclair/typebox'
-import { ModelPropertyDataTypes, TProperty } from '@/schema'
+import { ModelPropertyDataTypes, TProperty } from '@/Schema'
 import { immerable } from 'immer'
 import { modelPropertyMachine, ModelPropertyMachineContext } from './service/modelPropertyMachine'
 import { StorageType } from '@/types'
@@ -31,6 +31,15 @@ export class ModelProperty {
     string,
     { instance: ModelProperty; refCount: number }
   > = new Map()
+  
+  // Pending writes tracking
+  private static pendingWrites = new Map<string, {
+    propertyFileId: string
+    modelId: number
+    status: 'pending' | 'writing' | 'success' | 'error'
+    timestamp: number
+  }>()
+  
   protected readonly _service: ModelPropertyService
   [immerable] = true
 
@@ -162,15 +171,15 @@ export class ModelProperty {
     }
 
     try {
-      const { getModel } = await import('@/stores/modelClass')
-      const ModelClass = getModel(property.modelName)
+      const { Model } = await import('@/Model/Model')
+      const model = await Model.getByNameAsync(property.modelName)
       
-      if (!ModelClass || !ModelClass.schema) {
+      if (!model || !model.schema) {
         return undefined
       }
 
       // Get the schema file value for this property
-      const schemaFileValue = ModelClass.schema[property.name]
+      const schemaFileValue = model.schema[property.name]
       if (!schemaFileValue) {
         return undefined
       }
@@ -320,9 +329,9 @@ export class ModelProperty {
       instance: newInstance,
       service: newInstance._service,
       trackedProperties: TPropertyKeys,
-      getContext: () => newInstance._getSnapshotContext(),
-      sendUpdate: (prop: string, value: any) => {
-        newInstance._service.send({
+      getContext: (instance) => instance._getSnapshotContext(),
+      sendUpdate: (instance, prop: string, value: any) => {
+        instance._service.send({
           type: 'updateContext',
           [prop]: value,
         })
@@ -333,7 +342,158 @@ export class ModelProperty {
       instance: proxiedInstance,
       refCount: 1,
     })
+    
+    // Trigger write process if property has modelId and propertyFileId
+    // Wait for service to be ready (idle state) and have writeProcess spawned
+    if (property.modelId && property.id) {
+      // Track pending write
+      this.trackPendingWrite(property.id, property.modelId)
+      
+      // Trigger write process asynchronously
+      setTimeout(async () => {
+        const service = proxiedInstance.getService()
+        const snapshot = service.getSnapshot()
+        
+        // Wait for idle state and writeProcess to be spawned
+        if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
+          const propertyData = {
+            modelId: property.modelId!,
+            name: property.name!,
+            dataType: property.dataType!,
+            refModelId: property.refModelId,
+            refValueType: property.refValueType,
+            storageType: property.storageType,
+            localStorageDir: property.localStorageDir,
+            filenameSuffix: property.filenameSuffix,
+          }
+          
+          service.send({
+            type: 'requestWrite',
+            data: propertyData,
+          })
+        }
+      }, 0)
+    }
+    
     return proxiedInstance
+  }
+
+  /**
+   * Get ModelProperty instance by propertyFileId from static cache
+   */
+  static getById(propertyFileId: string): ModelProperty | undefined {
+    if (!propertyFileId) return undefined
+    
+    // Search through cache to find by propertyFileId
+    // Cache key might be "modelName:propertyName" or "id:propertyId"
+    for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
+      const context = instance._getSnapshotContext()
+      if (context.id === propertyFileId || (context as any)._propertyFileId === propertyFileId) {
+        return instance
+      }
+    }
+    
+    return undefined
+  }
+
+  /**
+   * Create or get ModelProperty instance by propertyFileId
+   * Queries the database to find the property if not cached
+   */
+  static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
+    if (!propertyFileId) {
+      return undefined
+    }
+
+    // First, check if we have an instance cached
+    const cachedInstance = this.getById(propertyFileId)
+    if (cachedInstance) {
+      return cachedInstance
+    }
+
+    // Query database to get property data from ID
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+    const { eq } = await import('drizzle-orm')
+
+    const db = BaseDb.getAppDb()
+    if (!db) {
+      return undefined
+    }
+
+    const propertyRecords = await db
+      .select()
+      .from(propertiesTable)
+      .where(eq(propertiesTable.schemaFileId, propertyFileId))
+      .limit(1)
+
+    if (propertyRecords.length === 0) {
+      return undefined
+    }
+
+    const propertyRecord = propertyRecords[0]
+
+    // Get model name
+    const modelRecords = await db
+      .select({ name: modelsTable.name })
+      .from(modelsTable)
+      .where(eq(modelsTable.id, propertyRecord.modelId))
+      .limit(1)
+
+    if (modelRecords.length === 0) {
+      return undefined
+    }
+
+    const modelName = modelRecords[0].name
+
+    // Build property data
+    const propertyData: Static<typeof TProperty> = {
+      id: propertyFileId,
+      name: propertyRecord.name,
+      dataType: propertyRecord.dataType as ModelPropertyDataTypes,
+      modelId: propertyRecord.modelId,
+      modelName,
+      refModelId: propertyRecord.refModelId || undefined,
+      refValueType: propertyRecord.refValueType as ModelPropertyDataTypes | undefined,
+    }
+
+    // Get ref model name if applicable
+    if (propertyRecord.refModelId) {
+      const refModelRecords = await db
+        .select({ name: modelsTable.name })
+        .from(modelsTable)
+        .where(eq(modelsTable.id, propertyRecord.refModelId))
+        .limit(1)
+
+      if (refModelRecords.length > 0) {
+        propertyData.refModelName = refModelRecords[0].name
+        propertyData.ref = refModelRecords[0].name
+      }
+    }
+
+    // Create ModelProperty instance
+    return this.create(propertyData)
+  }
+
+  /**
+   * Track a pending write for a property
+   */
+  static trackPendingWrite(propertyFileId: string, modelId: number): void {
+    this.pendingWrites.set(propertyFileId, {
+      propertyFileId,
+      modelId,
+      status: 'pending',
+      timestamp: Date.now(),
+    })
+  }
+
+  /**
+   * Get all pending property IDs for a model
+   */
+  static getPendingPropertyIds(modelId: number): string[] {
+    return Array.from(this.pendingWrites.entries())
+      .filter(([_, write]) => write.modelId === modelId && write.status !== 'error')
+      .map(([propertyFileId]) => propertyFileId)
   }
 
   getService(): ModelPropertyService {
@@ -416,6 +576,21 @@ export class ModelProperty {
     this._service.send({
       type: 'saveToSchema',
     })
+  }
+
+  /**
+   * Reload property from database
+   * This refreshes the actor context with the latest data from the database
+   * Note: ModelProperty doesn't have a dedicated load actor, so this will
+   * re-initialize from the current property data
+   */
+  async reload(): Promise<void> {
+    // ModelProperty doesn't have a separate load mechanism
+    // It's loaded as part of the Model/Schema
+    // This method is provided for API consistency
+    // To actually reload, you'd need to reload the parent Model or Schema
+    logger('ModelProperty.reload() called - ModelProperty is loaded as part of Model/Schema. Reload the parent Model or Schema instead.')
+    // No-op for now, but could be enhanced to reload from DB if needed
   }
 
   unload(): void {

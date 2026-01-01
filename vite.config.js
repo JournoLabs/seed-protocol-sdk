@@ -1,18 +1,21 @@
 /** @type {import('vite').UserConfig} */
 
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 // import { viteStaticCopy } from 'vite-plugin-static-copy'
 // import { apiRoutes } from './vite/plugin/api'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
-// import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react'
 import tsConfigPaths from 'vite-tsconfig-paths'
 // import { dts } from 'rollup-plugin-dts'
-
+import { playwright } from '@vitest/browser-playwright'
 // import typescript from '@rollup/plugin-typescript'
 import rollupTsConfigPaths from 'rollup-plugin-tsconfig-paths'
 import copy from 'rollup-plugin-copy'
 import Inspect from 'vite-plugin-inspect'
+import { configDefaults } from 'vitest/config'
+import { seedVitePlugin } from './src/vite'
+
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
 
@@ -23,101 +26,144 @@ export default defineConfig({
       outputDir: './.vite-inspect',
     }),
   ],
+  server: {
+    host: '127.0.0.1', // Explicitly bind to IPv4 to avoid IPv6 connection issues
+  },
   test: {
+    api: true, // Explicitly enable API server
     projects: [
       {
-        name: 'browser',
         plugins: [
+          react(),
           tsConfigPaths(),
+          ...seedVitePlugin({ autoInit: false, debug: false }),
+          nodePolyfills({
+            exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
+            // Include crypto, stream, and util - crypto polyfill needs stream.Transform and util
+            include: ['crypto', 'stream', 'util'],
+            globals: {
+              Buffer: true,
+              global: true,
+              process: true,
+            },
+            protocolImports: true,
+          }),
         ],
+        resolve: {
+          alias: {
+            '@seedprotocol/sdk': resolve(__dirname, 'src'),
+            // Ensure fs modules are aliased to @zenfs/core in browser environment
+            'fs': '@zenfs/core',
+            'fs/promises': '@zenfs/core/promises',
+            'node:fs': '@zenfs/core',
+            'node:fs/promises': '@zenfs/core/promises',
+          },
+        },
         optimizeDeps: {
           exclude: [
             '@sqlite.org/sqlite-wasm',
             '@seedprotocol/cli',
+            'drizzle-kit',
+            'drizzle-orm',
+            'sqlocal'
+          ],
+          include: [
+            '@testing-library/react',
+            'react',
+            'react-dom',
           ],
         },
-        environment: 'jsdom',
-        globalSetup: './vitest.setup.ts',
-        dir: './__tests__/',
-        setupFiles: [ './__tests__/setup.ts' ],
-        exclude: [
-          '**/node_modules/**',
-          'dist/**',
-          'src/node/**',
-          '__tests__/node/**',
-          '__tests__/bin/**',
-          '__tests__/schema/**',
-          '__tests__/scripts/**',
-          '__tests__/db/**',
-        ],
-        pool: 'forks',
-        hookTimeout: 60000,
-        testTimeout: 30000,
-        browser: {
-          enabled: true,
-          provider: 'playwright',
-          instances: ['chromium'],
-        },
-        environmentOptions: {
-          jsdom: {
-            resources: 'usable',
+        test: {
+          name: 'browser',
+          dir: './__tests__',
+          env: {
+            DEBUG: '*',
+          },
+          setupFiles: [ 
+            './__tests__/setup.ts',
+            './__tests__/setup.browser.ts',
+          ],
+          exclude: [
+            ...configDefaults.exclude,
+            'dist/**',
+            'src/node/**',
+            '__tests__/node/**',
+            '__tests__/schema/**',
+            '__tests__/scripts/**',
+            '__tests__/db/**',
+          ],
+          hookTimeout: 60000,
+          testTimeout: 30000,
+          maxWorkers: 1,
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [
+              {browser: 'chromium'}
+            ],
           },
         },
       },
       {
-        name: 'NodeJS',
         plugins: [
           tsConfigPaths(),
-        ],
-        environment: 'node',
-        globalSetup: './vitest.setup.ts',
-        dir: './__tests__/',
-        setupFiles: [
-          './__tests__/setup.ts',
-        ],
-        exclude: [ 
-          '**/node_modules/**', 
-          'dist/**', 
-          'src/browser/**', 
-          '__tests__/browser/**', 
-          '__tests__/bin/**',
-          '__tests__/scripts/**',
         ],
         optimizeDeps: {
           exclude: [
             '@seedprotocol/cli',
           ],
         },
-        testTimeout: 30000,
-        pool: 'forks',
-        poolOptions: {
-          forks: {
-            singleFork: true,
+        test: {
+          name: 'NodeJS',
+          environment: 'node',
+          // globalSetup: './vitest.setup.ts',
+          dir: './__tests__',
+          env: {
+            DEBUG: '*',
           },
+          setupFiles: [
+            './__tests__/setup.ts',
+          ],
+          include: [
+            '__tests__/**/*.test.{ts,tsx}',
+          ],
+          exclude: [ 
+            '**/node_modules/**', 
+            'dist/**', 
+            'src/browser/**', 
+            '__tests__/browser/**',
+          ],
+          testTimeout: 30000,
+          pool: 'forks',
+          maxWorkers: 1,
+          isolate: false,
+          fileParallelism: false,
         },
-        fileParallelism: false,
       },
-      {
-        name: 'CLI',
-        plugins: [
-          tsConfigPaths(),
-        ],
-        environment: 'node',
-        globalSetup: './vitest.setup.ts',
-        dir: './__tests__/',
-        setupFiles: [
-          './__tests__/setup.ts',
-        ],
-        exclude: [ 
-          '**/node_modules/**', 
-          'dist/**', 
-          'src/browser/**', 
-          '__tests__/browser/**', 
-          '__tests__/node/**',
-          '__tests__/db/**',
-        ],
-        testTimeout: 120000,
-      },
+      // {
+      //   plugins: [
+      //     tsConfigPaths(),
+      //   ],
+      //   test: {
+      //     name: 'CLI',
+      //     environment: 'node',
+      //     globalSetup: './vitest.setup.ts',
+      //     dir: './__tests__/cli',
+      //     env: {
+      //       DEBUG: '*',
+      //     },
+      //     setupFiles: [
+      //       './__tests__/setup.ts',
+      //     ],
+      //     exclude: [ 
+      //       '**/node_modules/**', 
+      //       'dist/**', 
+      //       'src/browser/**', 
+      //     ],
+      //     testTimeout: 120000,
+      //   },
+      // },
     ],
   },
   build: {

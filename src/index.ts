@@ -13,12 +13,12 @@ export {
   Number,
   Date,
   ModelPropertyDataTypes,
-} from './schema'
+} from './Schema'
 
 export { BaseItem as Item } from './Item/BaseItem'
 export { BaseItemProperty as ItemProperty } from './ItemProperty/BaseItemProperty'
 export { ModelProperty } from './ModelProperty/ModelProperty'
-export { Schema } from './schema/Schema'
+export { Schema } from './Schema/Schema'
 
 export {
   useItems,
@@ -28,6 +28,7 @@ export {
   useItemProperty,
   useDeleteItem,
   useModels,
+  useModel,
   useSchema,
   useSchemas,
   useCreateSchema,
@@ -53,7 +54,11 @@ export { BaseEasClient as EasClient } from './helpers'
 
 // export {models, versions, seeds, metadata, appState, config, modelUids, } from './seedSchema'
 
-export {getModels, getModel, getModelNames,} from './stores/modelClass'
+// Model access - use Model static methods instead:
+// - Model.getAll() - get all models
+// - Model.getById(modelFileId) - get model by ID
+// - Model.getByName(modelName, schemaName?) - get model by name
+// - Model.getByNameAsync(modelName, schemaName?) - async version that queries DB if needed
 
 export {
   getModelSchemasFromEas, 
@@ -107,6 +112,7 @@ export { seedVitePlugin } from './vite'
 // export type { PublishUpload } from './db/read/getPublishUploads'
 export type { Schema as SchemaType } from './helpers/schema'
 export type { ModelClassType as ModelClass } from './types'
+export type { Model } from './Model/Model'
 
 // PathResolver - Platform-specific implementation
 // Auto-initializes based on environment when imported

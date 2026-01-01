@@ -1,6 +1,6 @@
 import yaml from 'js-yaml'
 import { readFileSync } from 'fs'
-import { Property, ModelPropertyDataTypes } from '@/schema'
+import { Property, ModelPropertyDataTypes } from '@/Schema'
 import { ModelDefinitions } from '@/types'
 import { addModelsToDb } from '../helpers/db'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'

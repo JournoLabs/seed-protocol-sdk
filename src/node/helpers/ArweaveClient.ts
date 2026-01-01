@@ -1,5 +1,5 @@
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient';
-import { ARWEAVE_ENDPOINT } from '@/services/internal/constants';
+import { ARWEAVE_ENDPOINT } from '@/client/constants';
 import { GraphQLClient } from 'graphql-request';
 
 class ArweaveClient extends BaseArweaveClient {

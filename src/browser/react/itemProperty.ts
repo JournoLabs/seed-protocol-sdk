@@ -7,7 +7,7 @@ import { eventEmitter } from '@/eventBus'
 import { ItemProperty } from '@/browser/ItemProperty/ItemProperty'
 import { useGlobalServiceStatus } from '@/browser/react/services'
 import { IItemProperty } from '@/interfaces'
-import { GlobalState } from '@/services/internal/constants'
+import { GlobalState } from '@/client/constants'
 
 const logger = debug('seedSdk:react:property')
 

@@ -67,7 +67,35 @@ export const saveDataToDb = fromCallback<EventObject, typeof itemMachineSingle>(
         propertiesBySchemaUid,
       )) {
         for (const property of properties) {
-          const json = JSON.parse(property.decodedDataJson)
+          // Validate and parse decodedDataJson
+          if (!property.decodedDataJson || property.decodedDataJson.trim() === '') {
+            console.warn(
+              '[Item/service/actors] [saveDataToDb] empty decodedDataJson for property: ',
+              property.id,
+            )
+            continue
+          }
+
+          let json
+          try {
+            json = JSON.parse(property.decodedDataJson)
+          } catch (error) {
+            console.warn(
+              '[Item/service/actors] [saveDataToDb] failed to parse decodedDataJson for property: ',
+              property.id,
+              error,
+            )
+            continue
+          }
+
+          if (!Array.isArray(json) || json.length === 0 || !json[0]?.value) {
+            console.warn(
+              '[Item/service/actors] [saveDataToDb] invalid decodedDataJson structure for property: ',
+              property.id,
+            )
+            continue
+          }
+
           const attestationValue = json[0].value
           let propertyValue = attestationValue.value
 

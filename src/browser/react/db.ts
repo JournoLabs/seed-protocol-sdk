@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Subscription } from 'xstate'
-import { getGlobalService } from '@/services/global/globalMachine'
+import { getClient } from '@/client/ClientManager'
+import { ClientManagerState } from '@/client/constants'
 import debug from 'debug'
 
 const logger = debug('seedSdk:react:db')
@@ -16,41 +17,34 @@ export const useDbsAreReady = () => {
   }, [])
 
   useEffect(() => {
-    let globalSubscription: Subscription | undefined
-    let internalSubscription: Subscription | undefined
+    let subscription: Subscription | undefined
 
     const _waitForDbs = async (): Promise<void> => {
-      const globalService = getGlobalService()
-      const internalService =
-        globalService.getSnapshot().context.internalService
-      if (!internalService) {
-        logger('[useDbsAreReady] [useEffect] no internalService')
-
-        globalSubscription = globalService.subscribe(({ context }) => {
-          if (!internalSubscription && context && context.internalService) {
-            globalSubscription?.unsubscribe()
-            internalSubscription = context.internalService.subscribe(
-              (snapshot) => {
-                if (snapshot.value === 'ready') {
-                  update()
-                  internalSubscription?.unsubscribe()
-                }
-              },
-            )
-          }
-        })
-
-        return
-      }
-      const currentState = internalService.getSnapshot().value
-      if (currentState === 'ready') {
+      const clientManager = getClient()
+      const clientService = clientManager.getService()
+      
+      const currentState = clientService.getSnapshot().value
+      // DB is ready when ClientManager reaches DB_INIT state or later
+      if (currentState === ClientManagerState.DB_INIT || 
+          currentState === ClientManagerState.SAVE_CONFIG ||
+          currentState === ClientManagerState.PROCESS_SCHEMA_FILES ||
+          currentState === ClientManagerState.ADD_MODELS_TO_STORE ||
+          currentState === ClientManagerState.ADD_MODELS_TO_DB ||
+          currentState === ClientManagerState.IDLE) {
         update()
         return
       }
-      internalSubscription = internalService.subscribe((snapshot) => {
-        if (snapshot.value === 'ready') {
+      
+      subscription = clientService.subscribe((snapshot) => {
+        const state = snapshot.value
+        if (state === ClientManagerState.DB_INIT || 
+            state === ClientManagerState.SAVE_CONFIG ||
+            state === ClientManagerState.PROCESS_SCHEMA_FILES ||
+            state === ClientManagerState.ADD_MODELS_TO_STORE ||
+            state === ClientManagerState.ADD_MODELS_TO_DB ||
+            state === ClientManagerState.IDLE) {
           update()
-          internalSubscription?.unsubscribe()
+          subscription?.unsubscribe()
         }
       })
     }
@@ -58,12 +52,8 @@ export const useDbsAreReady = () => {
     _waitForDbs()
 
     return () => {
-      if (globalSubscription) {
-        globalSubscription.unsubscribe()
-      }
-
-      if (internalSubscription) {
-        internalSubscription.unsubscribe()
+      if (subscription) {
+        subscription.unsubscribe()
       }
     }
   }, [])

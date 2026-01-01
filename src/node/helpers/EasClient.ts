@@ -1,5 +1,5 @@
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
-import { EAS_ENDPOINT } from "@/services/internal/constants"
+import { EAS_ENDPOINT } from "@/client/constants"
 import { GraphQLClient } from "graphql-request"
 
 class EasClient extends BaseEasClient {

@@ -4,7 +4,7 @@ import {
   TPropertyDataType,
   TPropertyDefs,
   TStorageType,
-} from '@/schema'
+} from '@/Schema'
 import { MetadataType } from '@/seedSchema'
 
 export type PropertyDataType = Static<typeof TPropertyDataType>
