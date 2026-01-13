@@ -413,7 +413,7 @@ generateDrizzleSchemaCode(modelName, model: Model)
 **Files:**
 - `__tests__/client.test.ts`
 - `__tests__/client/actors/processSchemaFiles.test.ts`
-- `__tests__/schema/property.test.ts`
+- `__tests__/Schema/property.test.ts`
 
 **Migration:**
 - Replace `ModelClassType` mocks with `Model` instances

@@ -15,6 +15,18 @@ interface ProxyConfig<T> {
 }
 
 /**
+ * Type helper that explicitly preserves all methods and properties when wrapping in a Proxy.
+ * 
+ * TypeScript's Proxy type doesn't automatically preserve method signatures, so we need
+ * to use this helper type to ensure all methods are recognized by TypeScript.
+ * 
+ * This type uses a mapped type to explicitly preserve all properties and methods from T.
+ */
+export type Proxied<T> = {
+  [K in keyof T]: T[K]
+} & T
+
+/**
  * Creates a reactive Proxy that intercepts property access and assignment
  * to read from and write to an actor service's context.
  * 
@@ -24,14 +36,21 @@ interface ProxyConfig<T> {
  * 
  * @param config Configuration object
  * @returns A proxied instance that behaves like the original but with reactive properties
+ * 
+ * @note TypeScript's Proxy type doesn't automatically preserve method signatures,
+ * so we use Proxied<T> to ensure all methods and properties are recognized.
+ * The Proxy implementation preserves all methods via Reflect.get, so this is safe.
  */
-export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T {
+export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): Proxied<T> {
   const { instance, trackedProperties, getContext, sendUpdate } = config
   
   // Convert readonly array to regular array for includes() checks
   const trackedPropsSet = new Set(trackedProperties)
   
-  return new Proxy(instance, {
+  // Create the proxy - TypeScript needs explicit type assertion to preserve all methods
+  // The Proxy preserves all methods via Reflect.get, so we assert it maintains type T
+  // Using 'as unknown as T' forces TypeScript to recognize all methods and properties
+  const proxy = new Proxy(instance, {
     get(target, prop: string | symbol) {
       // Handle special properties that should not be proxied
       // These need direct access to the underlying instance
@@ -97,5 +116,9 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T
       return Reflect.getOwnPropertyDescriptor(target, prop)
     }
   })
+  
+  // Force TypeScript to recognize all methods and properties are preserved
+  // The Proxy implementation preserves all methods via Reflect.get, so this is safe
+  return proxy as unknown as Proxied<T>
 }
 

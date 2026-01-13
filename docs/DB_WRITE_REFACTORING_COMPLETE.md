@@ -97,10 +97,10 @@ The database write refactoring has been successfully completed across all 5 phas
 - `__tests__/Model/pendingWrites.test.ts` - Pending write tracking tests
 
 ### Tests Updated
-- `__tests__/schema/schema-models-integration.test.ts` - Updated comments
+- `__tests__/Schema/schema-models-integration.test.ts` - Updated comments
 - `__tests__/browser/react/schema.test.tsx` - Updated comments
-- `__tests__/schema/debug-schema-models.ts` - Updated debug script
-- `__tests__/schema/README.md` - Updated documentation
+- `__tests__/Schema/debug-schema-models.ts` - Updated debug script
+- `__tests__/Schema/README.md` - Updated documentation
 
 ## Migration Notes
 

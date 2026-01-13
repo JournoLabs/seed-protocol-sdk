@@ -28,9 +28,17 @@ export const initialize = fromCallback<
         propertyRecordSchema.storageType !== 'ItemStorage'
       )
     ) {
-      schemaUid = await getSchemaUidForSchemaDefinition({ schemaText: propertyName })
-      if (schemaUid) {
-        sendBack({ type: 'updateContext', schemaUid })
+      try {
+        schemaUid = await getSchemaUidForSchemaDefinition({ schemaText: propertyName })
+        if (schemaUid) {
+          sendBack({ type: 'updateContext', schemaUid })
+        }
+      } catch (error) {
+        // If schema fetch fails, continue without schemaUid - it's not required for local metadata
+        // Log error in development but don't throw
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
+        }
       }
     }
   

@@ -7,18 +7,42 @@ import { ModelValues } from '@/types'
 import { ItemData } from '@/types/item'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { ConflictError, ConflictResult } from '@/Schema/errors'
+import { renameModelInDb } from '@/helpers/db'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { eq } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:model:Model')
+const saveDraftLogger = debug('seedSdk:model:saveDraftToDb')
 
 type ModelService = ActorRefFrom<typeof modelMachine>
 type ModelSnapshot = SnapshotFrom<typeof modelMachine>
+
+// Lazy import cache for ModelProperty to avoid circular dependency
+// Eagerly start loading to minimize delay on first access
+let ModelPropertyClass: any = null
+const modelPropertyImportPromise = import('@/ModelProperty/ModelProperty')
+  .then(module => {
+    ModelPropertyClass = module.ModelProperty
+    return ModelPropertyClass
+  })
+  .catch(() => {
+    // If import fails, ModelPropertyClass remains null
+    return null
+  })
+
+function getModelProperty(): any {
+  // Return cached class if available (synchronous access)
+  // Note: On first access before import completes, this will return null
+  // and the getter will return empty array, which matches the original behavior
+  return ModelPropertyClass
+}
 
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
 const modelInstanceState = new WeakMap<Model, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance property updates
-  liveQueryPropertyIds: string[] // Property file IDs from liveQuery
 }>()
 
 // Define tracked properties for the Proxy
@@ -26,9 +50,7 @@ const modelInstanceState = new WeakMap<Model, {
 const TRACKED_PROPERTIES = [
   'modelName',
   'schemaName',
-  'description',
   'properties',
-  'indexes',
 ] as const
 
 export class Model {
@@ -58,6 +80,14 @@ export class Model {
     timestamp: number
   }>()
   
+  // Track which models are currently being saved to prevent concurrent saves
+  protected static savingModels: Set<string> = new Set()
+  
+  // Cache client initialization state globally to avoid repeated checks
+  private static cachedClientInitialized: boolean | null = null
+  private static clientCheckTime: number = 0
+  private static readonly CLIENT_CHECK_CACHE_MS = 50 // Cache for 50ms to avoid excessive checks
+  
   static trackPendingWrite(modelFileId: string, schemaId: number): void {
     this.pendingWrites.set(modelFileId, {
       modelFileId,
@@ -78,21 +108,23 @@ export class Model {
 
   modelName?: string
   schemaName?: string
-  description?: string
-  properties?: {
-    [propertyName: string]: any
-  }
-  indexes?: string[]
+  properties?: any[] // Array of ModelProperty instances (like Schema.models)
   // 'name' is available as an alias for 'modelName' via the proxy
 
-  constructor(modelName: string, schemaName: string, modelFileId?: string) {
+  constructor(
+    modelName: string, 
+    schemaName: string, 
+    modelFileId?: string,
+    initialContext?: Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
+  ) {
     // Set immerable in constructor to ensure 'this' is properly bound
     this[immerable] = true
     
-    const serviceInput: Pick<ModelMachineContext, 'modelName' | 'schemaName' | '_modelFileId'> = {
+    const serviceInput: Pick<ModelMachineContext, 'modelName' | 'schemaName' | '_modelFileId' | '_pendingPropertyDefinitions'> = {
       modelName,
       schemaName,
       ...(modelFileId ? { _modelFileId: modelFileId } : {}),
+      ...(initialContext?._pendingPropertyDefinitions ? { _pendingPropertyDefinitions: initialContext._pendingPropertyDefinitions } : {}),
     }
 
     this._service = createActor(modelMachine as any, {
@@ -104,13 +136,100 @@ export class Model {
     // Initialize instance state in WeakMap
     modelInstanceState.set(this, {
       liveQuerySubscription: null,
-      liveQueryPropertyIds: [],
     })
     
     // Set up liveQuery subscription for cross-instance property updates
     this._setupLiveQuerySubscription()
+    
+    // Subscribe to refresh properties after they're created (for Node.js where liveQuery isn't available)
+    let previousState: string | undefined
+    this._service.subscribe((snapshot) => {
+      // Check if we just transitioned to idle from creatingProperties state
+      if (snapshot.value === 'idle' && previousState === 'creatingProperties') {
+        console.log('[Model constructor] Transitioned to idle after creating properties, refreshing properties from DB')
+        // Small delay to ensure properties are written to DB
+        setTimeout(() => {
+          this._refreshPropertiesFromDb().catch((error) => {
+            logger(`[Model constructor] Error refreshing properties: ${error}`)
+          })
+        }, 200)
+      }
+      previousState = snapshot.value as string
+    })
 
     // Note: Property getters/setters are now handled by the Proxy in create()
+  }
+
+  /**
+   * Find a unique model name by checking for duplicates (case-insensitive) in the cache
+   * If duplicates are found, appends an incrementing number to make it unique
+   * 
+   * @param modelName - The desired model name
+   * @param schemaName - The schema name
+   * @returns A unique model name
+   */
+  static findUniqueModelName(modelName: string, schemaName: string): string {
+    const lowerModelName = modelName.toLowerCase()
+    
+    // Check all cached models for this schema
+    const existingNames = new Set<string>()
+    const existingNumbers = new Set<number>()
+    
+    // Check name-based cache
+    for (const [nameKey, modelFileId] of this.instanceCacheByName.entries()) {
+      const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
+      if (cachedSchemaName === schemaName && cachedModelName) {
+        const lowerCachedName = cachedModelName.toLowerCase()
+        existingNames.add(lowerCachedName)
+        
+        // If it matches the base name (case-insensitive), check if it has a number suffix
+        if (lowerCachedName === lowerModelName) {
+          existingNumbers.add(0) // Base name exists
+        } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
+          // Check if it's the base name followed by a space and a number
+          const suffix = lowerCachedName.slice(lowerModelName.length + 1)
+          const number = parseInt(suffix, 10)
+          if (!isNaN(number) && suffix === number.toString()) {
+            existingNumbers.add(number)
+          }
+        }
+      }
+    }
+    
+    // Check legacy cache
+    for (const [nameKey] of this.instanceCache.keys()) {
+      const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
+      if (cachedSchemaName === schemaName && cachedModelName) {
+        const lowerCachedName = cachedModelName.toLowerCase()
+        existingNames.add(lowerCachedName)
+        
+        // If it matches the base name (case-insensitive), check if it has a number suffix
+        if (lowerCachedName === lowerModelName) {
+          existingNumbers.add(0) // Base name exists
+        } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
+          // Check if it's the base name followed by a space and a number
+          const suffix = lowerCachedName.slice(lowerModelName.length + 1)
+          const number = parseInt(suffix, 10)
+          if (!isNaN(number) && suffix === number.toString()) {
+            existingNumbers.add(number)
+          }
+        }
+      }
+    }
+    
+    // If no duplicates found, return original name
+    if (!existingNames.has(lowerModelName)) {
+      return modelName
+    }
+    
+    // Find the next available number
+    let nextNumber = 1
+    while (existingNumbers.has(nextNumber)) {
+      nextNumber++
+    }
+    
+    // Return the name with the number appended
+    return `${modelName} ${nextNumber}`
   }
 
   /**
@@ -121,8 +240,6 @@ export class Model {
    * @param options - Optional configuration (can be omitted to create model with empty properties):
    *   - modelFileId: Pre-existing model file ID
    *   - properties: Model properties definition (defaults to empty object if not provided)
-   *   - indexes: Model indexes (defaults to empty array if not provided)
-   *   - description: Model description (defaults to undefined if not provided)
    *   - registerWithSchema: Whether to automatically register this model with its schema (default: true if schema instance provided)
    * 
    * @example
@@ -132,9 +249,7 @@ export class Model {
    * @example
    * // Create model with properties
    * const model = Model.create('MyModel', schema, {
-   *   properties: { title: { dataType: 'String' } },
-   *   indexes: ['title'],
-   *   description: 'My model description'
+   *   properties: { title: { dataType: 'String' } }
    * })
    */
   static create(
@@ -143,8 +258,6 @@ export class Model {
     options?: {
       modelFileId?: string
       properties?: { [propertyName: string]: any }
-      indexes?: string[]
-      description?: string
       registerWithSchema?: boolean
     }
   ): Model {
@@ -166,11 +279,18 @@ export class Model {
       throw new Error('Schema name is required')
     }
 
+    // Check for duplicate names (case-insensitive) and generate unique name if needed
+    // This only checks the cache - database check happens in loadOrCreateModel
+    const uniqueModelName = this.findUniqueModelName(modelName, schemaName)
+    if (uniqueModelName !== modelName) {
+      logger(`Model.create: Found duplicate name "${modelName}" in schema "${schemaName}", using unique name "${uniqueModelName}"`)
+    }
+
     const modelFileId = options?.modelFileId
     const registerWithSchema = options?.registerWithSchema !== false && schemaInstance !== undefined
 
-    // Create name-based cache key
-    const nameKey = `${schemaName}:${modelName}`
+    // Create name-based cache key using the unique name
+    const nameKey = `${schemaName}:${uniqueModelName}`
 
     // Step 1: Check ID-based cache first (if ID provided)
     let id = modelFileId
@@ -226,20 +346,25 @@ export class Model {
     
     // Step 5: Create new instance with modelFileId in initial context
     // This ensures loadOrCreateModel sees the ID immediately
-    const newInstance = new this(modelName, schemaName, id)
+    // Pass _pendingPropertyDefinitions in initial context to avoid race condition with loadOrCreateModel
+    // This is the proper XState way - include it in the initial input so it's available from the start
+    const initialContext = options?.properties 
+      ? { _pendingPropertyDefinitions: JSON.parse(JSON.stringify(options.properties)) } as Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
+      : undefined
+    
+    // Use the unique model name for the instance
+    const newInstance = new this(uniqueModelName, schemaName, id, initialContext)
+    
+    if (options?.properties) {
+      logger(`[Model.create] Created instance with _pendingPropertyDefinitions in initial context (${Object.keys(options.properties).length} properties) for model "${uniqueModelName}"`)
+    }
+
+    console.log('newInstance created for', uniqueModelName, 'with id', id)
     
     // Step 7: Set initial model data if provided
+    // Note: description is not supported - JSON files can have it but we ignore it at runtime
     if (options) {
       const updates: any = {}
-      if (options.properties !== undefined) {
-        updates.properties = JSON.parse(JSON.stringify(options.properties)) // Deep clone
-      }
-      if (options.indexes !== undefined) {
-        updates.indexes = options.indexes ? [...options.indexes] : undefined
-      }
-      if (options.description !== undefined) {
-        updates.description = options.description
-      }
       
       if (Object.keys(updates).length > 0) {
         newInstance._service.send({
@@ -248,13 +373,10 @@ export class Model {
         })
         
         // Initialize original values
+        // Note: properties are not stored in context, they're computed from ModelProperty instances
         newInstance._service.send({
           type: 'initializeOriginalValues',
-          originalValues: {
-            description: updates.description,
-            properties: updates.properties ? JSON.parse(JSON.stringify(updates.properties)) : {},
-            indexes: updates.indexes ? [...(updates.indexes || [])] : undefined,
-          },
+          originalValues: {},
           isEdited: false,
         })
       }
@@ -285,53 +407,47 @@ export class Model {
         if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
           // Special handling for properties - compute from liveQuery + ModelProperty static cache
           if (prop === 'properties') {
-            const instanceState = modelInstanceState.get(target)
-            const context = target._getSnapshotContext()
+            const snapshot = target._service.getSnapshot()
+            const context = snapshot.context
             
-            if (!instanceState) {
-              return context.properties || {}
-            }
-            
-            // Get property IDs from liveQuery (synchronously available)
-            const liveQueryIds = instanceState.liveQueryPropertyIds || []
-            
-            // Get modelId from context if available
-            const modelId: number | undefined = (context as any).modelId
-            
+            // Get property IDs from liveQuery (stored in context, not instanceState)
+            const liveQueryIds = context._liveQueryPropertyIds || []
+            console.log(`[Model.properties getter] Model "${context.modelName}" (state: ${snapshot.value}) - liveQueryIds:`, Array.isArray(liveQueryIds) ? `[${liveQueryIds.length} items: ${liveQueryIds.join(', ')}]` : liveQueryIds)
+            // Get modelId from context for pending writes lookup
+            const modelId: number | undefined = context.modelId
+            console.log('modelId', modelId)
             // Get pending property IDs (synchronous - uses static Map)
             // Lazy import ModelProperty to avoid circular dependency
-            let ModelProperty: any
-            try {
-              ModelProperty = require('@/ModelProperty/ModelProperty').ModelProperty
-            } catch {
-              // If import fails, fall back to context.properties
-              return context.properties || {}
+            const ModelProperty = getModelProperty()
+            if (!ModelProperty) {
+              // If ModelProperty is not yet loaded, return empty array
+              // It will be available on subsequent accesses after the async import completes
+              return []
             }
             const pendingIds = modelId ? ModelProperty.getPendingPropertyIds(modelId) : []
+
+            console.log(`[Model.properties getter] Model "${context.modelName}" (state: ${snapshot.value}) - pendingIds:`, pendingIds)
             
             // Combine and deduplicate
             const allPropertyIds = [...new Set([...liveQueryIds, ...pendingIds])]
+
+            console.log('[Model.properties getter] allPropertyIds', allPropertyIds)
             
             // Get ModelProperty instances from static cache (synchronous)
-            const propertiesObj: { [name: string]: any } = {}
+            const propertyInstances: any[] = []
             for (const propertyFileId of allPropertyIds) {
+              console.log('[Model.properties getter] propertyFileId', propertyFileId)
               const property = ModelProperty.getById(propertyFileId)
+              console.log('[Model.properties getter] property', property)
               if (property) {
-                const propContext = property._getSnapshotContext()
-                if (propContext.name) {
-                  propertiesObj[propContext.name] = {
-                    dataType: propContext.dataType,
-                    ref: propContext.refModelName || propContext.ref,
-                    refValueType: propContext.refValueType,
-                    storageType: propContext.storageType,
-                    localStorageDir: propContext.localStorageDir,
-                    filenameSuffix: propContext.filenameSuffix,
-                  }
-                }
+                propertyInstances.push(property)
               }
+              // Note: Cannot create properties asynchronously in this synchronous getter
+              // Properties will be created elsewhere when needed
             }
             
-            return propertiesObj
+            // CRITICAL: Always create a new array reference so React detects changes
+            return [...propertyInstances]
           }
           
           const context = target._getSnapshotContext()
@@ -396,55 +512,20 @@ export class Model {
               propertyKey: 'modelName',
             })
             
+            // Save draft to database immediately so changes persist
+            target._saveDraftToDb(oldName, newName).catch((error) => {
+              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
+            })
+            
             // NOTE: Schema is not notified of model name changes during edits.
             // Schema will read from Model instances when persisting/saving.
           } else if (prop === 'properties') {
-            // Deep clone to ensure immutability
-            const clonedProperties = value ? JSON.parse(JSON.stringify(value)) : {}
-            target._service.send({
-              type: 'updateContext',
-              properties: clonedProperties,
-            })
-            
-            // Mark model as draft when properties change
-            target._service.send({
-              type: 'markAsDraft',
-              propertyKey: 'properties',
-            })
-            
-            // NOTE: Schema is not notified of model property changes during edits.
-            // Schema will read from Model instances when persisting/saving.
-          } else if (prop === 'indexes') {
-            // Clone array
-            const clonedIndexes = value ? [...value] : undefined
-            target._service.send({
-              type: 'updateContext',
-              indexes: clonedIndexes,
-            })
-            
-            // Mark model as draft when indexes change
-            target._service.send({
-              type: 'markAsDraft',
-              propertyKey: 'indexes',
-            })
-            
-            // NOTE: Schema is not notified of model index changes during edits.
-            // Schema will read from Model instances when persisting/saving.
+            // Properties are read-only computed values from ModelProperty instances
+            // Cannot be set directly - properties are managed via ModelProperty instances
+            throw new Error('Cannot set model.properties directly. Properties are computed from ModelProperty instances.')
           } else if (prop === 'description') {
-            // Standard property update
-            target._service.send({
-              type: 'updateContext',
-              description: value,
-            })
-            
-            // Mark model as draft
-            target._service.send({
-              type: 'markAsDraft',
-              propertyKey: 'description',
-            })
-            
-            // NOTE: Schema is not notified of model description changes during edits.
-            // Schema will read from Model instances when persisting/saving.
+            // Description is not supported - JSON files can have it but we ignore it at runtime
+            throw new Error('Cannot set model.description. Description is not supported in runtime Model instances.')
           } else {
             // Standard property update
             target._service.send({
@@ -545,14 +626,16 @@ export class Model {
       refCount: 1,
     })
     
-    logger(`Model.create: Created new instance for "${modelName}" (ID: ${id})`)
+    logger(`Model.create: Created new instance for "${uniqueModelName}" (ID: ${id})`)
     
     // Step 7.5: Model instance is now cached and accessible via Model.getById() and Model.getByName()
     // No wrapper or store registration needed
     
-    // Step 8: Register with schema if requested
+    // Step 8: Register with schema if requested, OR trigger write if properties are provided
+    // If properties are provided, we need to write the model to get modelId for property creation
     // If schema provided, trigger write process instead of registration
-    if (registerWithSchema && schemaInstance) {
+    const shouldTriggerWrite = (registerWithSchema && schemaInstance) || (options?.properties && Object.keys(options.properties).length > 0)
+    if (shouldTriggerWrite) {
       queueMicrotask(async () => {
         try {
           // Wait for model to reach idle state (validation complete)
@@ -576,12 +659,37 @@ export class Model {
           if (finalSnapshot.value === 'idle' && (!finalSnapshot.context._validationErrors || finalSnapshot.context._validationErrors.length === 0)) {
             logger(`Model validation passed, triggering write process`)
             
-            // Get schema ID from schema instance
-            const schemaContext = (schemaInstance as any)._getSnapshotContext()
-            const schemaFileId = schemaContext._schemaFileId
+            // Get schema ID from schema instance or look it up by schema name
             let schemaId: number | undefined
             
-            if (schemaFileId) {
+            if (schemaInstance) {
+              const schemaContext = (schemaInstance as any)._getSnapshotContext()
+              const schemaFileId = schemaContext._schemaFileId
+              
+              if (schemaFileId) {
+                try {
+                  const { BaseDb } = await import('@/db/Db/BaseDb')
+                  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+                  const { eq } = await import('drizzle-orm')
+                  const db = BaseDb.getAppDb()
+                  
+                  if (db) {
+                    const schemaRecords = await db
+                      .select()
+                      .from(schemasTable)
+                      .where(eq(schemasTable.schemaFileId, schemaFileId))
+                      .limit(1)
+                    
+                    if (schemaRecords.length > 0) {
+                      schemaId = schemaRecords[0].id
+                    }
+                  }
+                } catch (error) {
+                  logger(`Error looking up schemaId: ${error}`)
+                }
+              }
+            } else if (schemaName) {
+              // If no schema instance but we have schema name, look it up by name
               try {
                 const { BaseDb } = await import('@/db/Db/BaseDb')
                 const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
@@ -592,7 +700,7 @@ export class Model {
                   const schemaRecords = await db
                     .select()
                     .from(schemasTable)
-                    .where(eq(schemasTable.schemaFileId, schemaFileId))
+                    .where(eq(schemasTable.name, schemaName))
                     .limit(1)
                   
                   if (schemaRecords.length > 0) {
@@ -600,7 +708,7 @@ export class Model {
                   }
                 }
               } catch (error) {
-                logger(`Error looking up schemaId: ${error}`)
+                logger(`Error looking up schemaId by name: ${error}`)
               }
             }
             
@@ -612,10 +720,64 @@ export class Model {
               // Retry a few times if writeProcess isn't available yet
               let retries = 0
               const maxRetries = 10
-              const checkAndSend = () => {
+              const checkAndSend = async () => {
                 const currentSnapshot = proxiedInstance._service.getSnapshot()
                 if (currentSnapshot.context.writeProcess) {
                   logger(`Triggering write process for model "${finalSnapshot.context.modelName}" (schemaId: ${schemaId})`)
+                  
+                  // Use pending property definitions if available, otherwise convert from ModelProperty instances
+                  let propertiesObject: { [name: string]: any } = {}
+                  if (currentSnapshot.context._pendingPropertyDefinitions) {
+                    // Use the original property definitions for the write
+                    // Convert dataType to type for validation compatibility
+                    propertiesObject = JSON.parse(JSON.stringify(currentSnapshot.context._pendingPropertyDefinitions))
+                    for (const [propName, propData] of Object.entries(propertiesObject)) {
+                      if (propData.dataType && !propData.type) {
+                        propertiesObject[propName] = {
+                          ...propData,
+                          type: propData.dataType,
+                        }
+                      }
+                    }
+                  } else {
+                    // Fallback: convert ModelProperty instances to object format
+                    const { modelPropertiesToObject } = await import('@/helpers/model')
+                    const properties = proxiedInstance.properties || []
+                    propertiesObject = modelPropertiesToObject(properties)
+                  }
+                  
+                  // Set up subscription to writeProcess to detect write success BEFORE sending request
+                  const writeProcess = currentSnapshot.context.writeProcess
+                  
+                  // Check current state - if already in success, handle immediately
+                  const currentWriteState = writeProcess.getSnapshot()
+                  if (currentWriteState.value === 'success') {
+                    proxiedInstance._service.send({
+                      type: 'writeSuccess',
+                      output: currentWriteState.context.entityData,
+                    })
+                  } else {
+                    // Set up subscription to catch future state changes
+                    const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
+                      if (writeSnapshot.value === 'success') {
+                        writeSubscription.unsubscribe()
+                        const currentContext = proxiedInstance._service.getSnapshot().context
+                        logger(`[writeProcess subscription] Write succeeded, sending writeSuccess event. Has _pendingPropertyDefinitions: ${!!(currentContext._pendingPropertyDefinitions && Object.keys(currentContext._pendingPropertyDefinitions).length > 0)}`)
+                        // Send writeSuccess event to model machine
+                        proxiedInstance._service.send({
+                          type: 'writeSuccess',
+                          output: writeSnapshot.context.entityData,
+                        })
+                      } else if (writeSnapshot.value === 'error') {
+                        writeSubscription.unsubscribe()
+                        const errorContext = writeSnapshot.context
+                        logger(`Write process failed for model "${finalSnapshot.context.modelName}": ${errorContext.error?.message || 'Unknown error'}`)
+                        logger(`Write process error details:`, errorContext.error)
+                        logger(`Validation errors:`, errorContext.validationErrors)
+                      }
+                    })
+                  }
+                  
                   proxiedInstance._service.send({
                     type: 'requestWrite',
                     data: {
@@ -623,9 +785,7 @@ export class Model {
                       modelName: finalSnapshot.context.modelName,
                       schemaName: finalSnapshot.context.schemaName,
                       schemaId,
-                      properties: finalSnapshot.context.properties,
-                      indexes: finalSnapshot.context.indexes,
-                      description: finalSnapshot.context.description,
+                      properties: propertiesObject,
                     },
                   })
                 } else if (retries < maxRetries) {
@@ -1003,6 +1163,163 @@ export class Model {
     return this._getSnapshot().context
   }
 
+  /**
+   * Check for conflicts between actor context and database
+   * @returns ConflictResult indicating if a conflict exists
+   */
+  private async _checkForConflicts(): Promise<ConflictResult> {
+    const context = this._getSnapshotContext()
+    
+    // If we don't have load metadata, can't check for conflicts
+    if (!context._dbUpdatedAt || !context._modelFileId) {
+      return { hasConflict: false }
+    }
+    
+    try {
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        return { hasConflict: false } // Can't check without DB
+      }
+      
+      // Get current DB record by modelFileId (most reliable lookup)
+      const dbModels = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.schemaFileId, context._modelFileId))
+        .limit(1)
+      
+      if (dbModels.length === 0) {
+        return { hasConflict: false } // No DB record, no conflict
+      }
+      
+      const dbRecord = dbModels[0]
+      
+      // Check if DB was updated after we loaded
+      // Note: models table doesn't have updatedAt, so we can't do timestamp comparison
+      // For now, we'll just check if the record exists and matches
+      // In the future, if models table gets updatedAt, we can compare timestamps
+      return { hasConflict: false }
+    } catch (error) {
+      logger(`Error checking for conflicts: ${error instanceof Error ? error.message : String(error)}`)
+      return { hasConflict: false } // On error, assume no conflict to allow save
+    }
+  }
+
+  /**
+   * Saves model name changes to the database immediately (draft save)
+   * This is called when modelName is changed to persist the change immediately
+   * @param oldName - The old model name (if name changed)
+   * @param newName - The new model name
+   */
+  private async _saveDraftToDb(oldName?: string, newName?: string): Promise<void> {
+    saveDraftLogger(`_saveDraftToDb called for model (oldName: "${oldName}", newName: "${newName}")`)
+    
+    // Don't save during initialization - models are being loaded from files, not created as drafts
+    // Check this FIRST before doing any expensive work like _getSnapshotContext()
+    if (typeof window !== 'undefined') {
+      const now = Date.now()
+      // Use cached check to avoid expensive operations
+      // Always check if cache is stale or if we previously got false (to allow recovery)
+      const cacheIsStale = Model.cachedClientInitialized === null || (now - Model.clientCheckTime) > Model.CLIENT_CHECK_CACHE_MS
+      const shouldRecheck = cacheIsStale || Model.cachedClientInitialized === false
+      
+      saveDraftLogger(`Client check: cacheIsStale=${cacheIsStale}, shouldRecheck=${shouldRecheck}, cachedValue=${Model.cachedClientInitialized}, timeSinceCheck=${now - Model.clientCheckTime}ms`)
+      
+      if (shouldRecheck) {
+        try {
+          // Use dynamic import for browser compatibility (require() doesn't work in browsers)
+          const { getClient } = await import('@/client/ClientManager')
+          const { ClientManagerState } = await import('@/client/constants')
+          const client = getClient()
+          const clientSnapshot = client.getService().getSnapshot()
+          // Check if state is IDLE (primary check) - isInitialized is set in entry action so should be true
+          // But we check it as a secondary safeguard
+          const isIdle = clientSnapshot.value === ClientManagerState.IDLE
+          const isInitialized = clientSnapshot.context.isInitialized
+          // If state is IDLE, trust it even if isInitialized isn't set yet (entry action should set it)
+          // This aligns with useIsClientReady which only checks the state value
+          Model.cachedClientInitialized = isIdle && (isInitialized !== false)
+          Model.clientCheckTime = now
+          saveDraftLogger(`Client state checked: state=${clientSnapshot.value}, isIdle=${isIdle}, isInitialized=${isInitialized}, result=${Model.cachedClientInitialized}`)
+        } catch (error) {
+          // If we can't check client state, assume not initialized to be safe
+          // But only cache for a short time to allow recovery
+          Model.cachedClientInitialized = false
+          Model.clientCheckTime = now
+          saveDraftLogger(`Error checking client state: ${error instanceof Error ? error.message : String(error)}, setting cachedClientInitialized=false`)
+        }
+      } else {
+        saveDraftLogger(`Using cached client state: cachedClientInitialized=${Model.cachedClientInitialized}`)
+      }
+      
+      if (!Model.cachedClientInitialized) {
+        saveDraftLogger(`Client not initialized, skipping save (oldName: "${oldName}", newName: "${newName}")`)
+        // Skip silently during initialization to avoid log spam and reduce overhead
+        return
+      }
+    }
+    
+    saveDraftLogger(`Client is initialized, proceeding with save (oldName: "${oldName}", newName: "${newName}")`)
+    
+    // Check for conflicts before saving
+    const conflictCheck = await this._checkForConflicts()
+    if (conflictCheck.hasConflict) {
+      const errorMessage = conflictCheck.message || 'Database was updated externally. Please reload the model and try again.'
+      saveDraftLogger(`CONFLICT DETECTED: ${errorMessage}`)
+      throw new ConflictError(errorMessage, conflictCheck)
+    }
+    
+    const context = this._getSnapshotContext()
+    const modelFileId = context._modelFileId || ''
+    const modelName = newName || context.modelName || oldName || ''
+    
+    // Use modelFileId as the key if available, otherwise use schemaName:modelName
+    const saveKey = modelFileId || `${context.schemaName}:${modelName}`
+    
+    // Prevent concurrent saves for the same model
+    if (Model.savingModels.has(saveKey)) {
+      saveDraftLogger(`Model ${modelName} (key: ${saveKey}) is already being saved, skipping concurrent save`)
+      return
+    }
+    
+    Model.savingModels.add(saveKey)
+    saveDraftLogger(`Starting save for model ${modelName} (key: ${saveKey}, modelFileId: ${modelFileId})`)
+    
+    try {
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        throw new Error('Database not found')
+      }
+
+      // If name changed, use renameModelInDb
+      if (oldName && newName && oldName !== newName) {
+        saveDraftLogger(`Renaming model from "${oldName}" to "${newName}"`)
+        await renameModelInDb(oldName, newName)
+        saveDraftLogger(`Successfully renamed model from "${oldName}" to "${newName}"`)
+      } else {
+        // For other tracked properties, we would save here
+        // Currently only modelName is saved immediately, so this is a no-op
+        saveDraftLogger(`No name change detected, skipping save (modelName: "${modelName}")`)
+      }
+      
+      // Update conflict detection metadata after successful save
+      // Note: models table doesn't have updatedAt, so we use current timestamp
+      const now = Date.now()
+      this._service.send({
+        type: 'updateContext',
+        _dbUpdatedAt: now,
+      })
+      
+    } catch (error) {
+      logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
+      // Don't throw - allow operation to continue
+    } finally {
+      // Always remove from saving set
+      Model.savingModels.delete(saveKey)
+      saveDraftLogger(`Finished save for model ${modelName} (key: ${saveKey})`)
+    }
+  }
+
   get status() {
     return this._getSnapshot().value
   }
@@ -1084,18 +1401,13 @@ export class Model {
     
     const item = await BaseItem.create({
       modelName: this.modelName,
+      schemaName: this.schemaName,
+      modelInstance: this,
       ...values,
-    })
+    } as Partial<ItemData> & { modelName: string; schemaName?: string; modelInstance?: Model } & Record<string, any>)
     return item
   }
 
-  /**
-   * Get the schema object (properties) for this model
-   * This maintains backward compatibility with model.schema access
-   */
-  get schema() {
-    return this.properties || {}
-  }
 
   /**
    * Reload model from database
@@ -1197,7 +1509,6 @@ export class Model {
         logger(`Model.destroy: Error unsubscribing from liveQuery: ${error instanceof Error ? error.message : String(error)}`)
       }
       instanceState.liveQuerySubscription = null
-      instanceState.liveQueryPropertyIds = []
     }
     
     // Step 2: Remove from Model caches (force removal regardless of refCount)
@@ -1322,47 +1633,88 @@ export class Model {
    * This enables cross-instance synchronization (e.g., changes in other tabs/windows)
    */
   private _setupLiveQuerySubscription(): void {
-    // Only set up in browser environment where liveQuery is available
-    if (typeof window === 'undefined') {
-      return
-    }
+    const isBrowser = typeof window !== 'undefined'
+    console.log(`[Model._setupLiveQuerySubscription] Starting setup for model (browser: ${isBrowser})`)
 
-    // Wait for model to be loaded and have a modelId
-    // Subscribe to service to detect when model is ready
-    const setupSubscription = this._service.subscribe(async (snapshot) => {
-      // Only set up once when model is idle and we have modelName
-      if (snapshot.value === 'idle' && snapshot.context.modelName) {
-        setupSubscription.unsubscribe()
+    // Track if we've already set up the subscription to avoid duplicate subscriptions
+    let subscriptionSetUp = false
+
+    const setupLiveQuery = async (modelId: number, modelName: string) => {
+      console.log('[Model._setupLiveQuerySubscription] setupLiveQuery called with modelId:', modelId, 'modelName:', modelName, 'subscriptionSetUp:', subscriptionSetUp)
+      if (subscriptionSetUp) {
+        console.log('[Model._setupLiveQuerySubscription] Subscription already set up, skipping')
+        return
+      }
+
+      subscriptionSetUp = true
+      console.log('[Model._setupLiveQuerySubscription] Setting up property query...')
+      
+      try {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { properties: propertiesTable } = await import('@/seedSchema')
+        const { eq } = await import('drizzle-orm')
         
-        try {
-          const { BaseDb } = await import('@/db/Db/BaseDb')
-          const { models: modelsTable, properties: propertiesTable } = await import('@/seedSchema')
-          const { eq } = await import('drizzle-orm')
-          
-          // Get model ID from database
-          const db = BaseDb.getAppDb()
-          if (!db) {
-            logger('[Model._setupLiveQuerySubscription] Database not available')
-            return
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          logger('[Model._setupLiveQuerySubscription] Database not available')
+          return
+        }
+
+        // Query initial properties immediately and update context
+        // This works in both browser and Node.js environments
+        const initialProperties = await db
+          .select({ schemaFileId: propertiesTable.schemaFileId })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelId))
+
+        const initialPropertyIds = initialProperties
+          .map((row: { schemaFileId: string | null }) => row.schemaFileId)
+          .filter((id: string | null): id is string => id !== null && id !== undefined)
+
+        console.log(`[Model._setupLiveQuerySubscription] Initial query for model "${modelName}" (id: ${modelId}) returned ${initialPropertyIds.length} properties:`, initialPropertyIds)
+
+        // Update context with initial property IDs IMMEDIATELY
+        console.log(`[Model._setupLiveQuerySubscription] Sending updateContext with _liveQueryPropertyIds:`, initialPropertyIds)
+        
+        // Subscribe to verify the context update is applied
+        let contextUpdated = false
+        const updateSubscription = this._service.subscribe((snapshot) => {
+          if (snapshot.context._liveQueryPropertyIds && snapshot.context._liveQueryPropertyIds.length > 0) {
+            console.log(`[Model._setupLiveQuerySubscription] Context updated via subscription! _liveQueryPropertyIds:`, snapshot.context._liveQueryPropertyIds)
+            contextUpdated = true
+            updateSubscription.unsubscribe()
           }
-
-          const modelName = snapshot.context.modelName
-          const modelRecords = await db
-            .select()
-            .from(modelsTable)
-            .where(eq(modelsTable.name, modelName))
-            .limit(1)
-
-          if (modelRecords.length === 0 || !modelRecords[0].id) {
-            logger(`[Model._setupLiveQuerySubscription] Model "${modelName}" not found in database`)
-            return
+        })
+        
+        this._service.send({
+          type: 'updateContext',
+          _liveQueryPropertyIds: initialPropertyIds,
+        })
+        
+        // Wait for the context update to be applied (with timeout)
+        let attempts = 0
+        while (!contextUpdated && attempts < 50) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+          attempts++
+          const snapshot = this._service.getSnapshot()
+          if (snapshot.context._liveQueryPropertyIds && snapshot.context._liveQueryPropertyIds.length > 0) {
+            console.log(`[Model._setupLiveQuerySubscription] Context updated after ${attempts * 10}ms - _liveQueryPropertyIds:`, snapshot.context._liveQueryPropertyIds)
+            contextUpdated = true
+            break
           }
+        }
+        
+        updateSubscription.unsubscribe()
+        
+        // Final verification
+        const snapshot = this._service.getSnapshot()
+        console.log(`[Model._setupLiveQuerySubscription] Final context check - _liveQueryPropertyIds:`, snapshot.context._liveQueryPropertyIds, 'length:', snapshot.context._liveQueryPropertyIds?.length || 0)
 
-          const modelId = modelRecords[0].id
-
+        // Only set up liveQuery subscription in browser environment
+        if (isBrowser) {
           // Set up liveQuery to watch properties table for this model
           const properties$ = BaseDb.liveQuery<{ id: number; name: string; dataType: string; modelId: number; refModelId: number | null; refValueType: string | null; schemaFileId: string | null }>(
-            (sql) => sql`
+            (sql: any) => sql`
               SELECT id, name, data_type as dataType, model_id as modelId, ref_model_id as refModelId, ref_value_type as refValueType, schema_file_id as schemaFileId
               FROM properties
               WHERE model_id = ${modelId}
@@ -1379,18 +1731,20 @@ export class Model {
           const subscription = properties$.subscribe({
             next: (propertyRows) => {
               logger(`[Model._setupLiveQuerySubscription] Properties updated in database: ${propertyRows.length} properties`)
+              console.log(`[Model._setupLiveQuerySubscription] Properties updated in database: ${propertyRows.length} properties`, propertyRows.map(r => r.schemaFileId))
               
               // Store property file IDs from liveQuery
               const propertyFileIds = propertyRows
                 .map(row => row.schemaFileId)
                 .filter((id): id is string => id !== null && id !== undefined)
               
-              instanceState.liveQueryPropertyIds = propertyFileIds
+              console.log(`[Model._setupLiveQuerySubscription] Extracted property IDs:`, propertyFileIds)
               
-              // Trigger context update (for React reactivity)
+              // Update context with property IDs (like Schema does with model IDs)
               this._service.send({
                 type: 'updateContext',
-                _propertiesUpdated: Date.now(), // Internal field
+                _liveQueryPropertyIds: propertyFileIds, // Store in service context for reactivity
+                _propertiesUpdated: Date.now(), // Internal field for tracking
               })
             },
             error: (error) => {
@@ -1400,11 +1754,133 @@ export class Model {
 
           instanceState.liveQuerySubscription = subscription
           logger(`[Model._setupLiveQuerySubscription] LiveQuery subscription set up for model "${modelName}" (id: ${modelId})`)
+          console.log(`[Model._setupLiveQuerySubscription] LiveQuery subscription set up for model "${modelName}" (id: ${modelId})`)
+        } else {
+          console.log(`[Model._setupLiveQuerySubscription] Skipping liveQuery subscription in Node.js environment (properties already loaded from database)`)
+        }
+      } catch (error) {
+        logger(`[Model._setupLiveQuerySubscription] Error setting up subscription: ${error}`)
+        subscriptionSetUp = false // Reset on error so we can retry
+      }
+    }
+
+    // Set up liveQuery subscription as soon as we have a modelId
+    // The liveQuery will automatically detect when properties are added to the database
+    const setupSubscription = this._service.subscribe(async (snapshot) => {
+      // Check if we have a modelId (either from context or can be found in DB)
+      let modelId = snapshot.context.modelId
+      const modelName = snapshot.context.modelName
+      
+      if (!modelName) {
+        return // Need modelName to proceed
+      }
+      
+      // If we don't have modelId yet, try to find it in the database
+      if (!modelId) {
+        try {
+          const { BaseDb } = await import('@/db/Db/BaseDb')
+          const { models: modelsTable } = await import('@/seedSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          const db = BaseDb.getAppDb()
+          if (!db) {
+            return
+          }
+
+          const modelRecords = await db
+            .select()
+            .from(modelsTable)
+            .where(eq(modelsTable.name, modelName))
+            .limit(1)
+
+          if (modelRecords.length === 0 || !modelRecords[0].id) {
+            // Model not in database yet, will retry on next snapshot update
+            return
+          }
+
+          modelId = modelRecords[0].id
+
+          // Update context with modelId
+          this._service.send({
+            type: 'updateContext',
+            modelId,
+          })
         } catch (error) {
-          logger(`[Model._setupLiveQuerySubscription] Error setting up subscription: ${error}`)
+          logger(`[Model._setupLiveQuerySubscription] Error finding model: ${error}`)
+          return
+        }
+      }
+
+      // Once we have modelId, set up the liveQuery subscription (only once)
+      if (modelId && !subscriptionSetUp) {
+        console.log('[Model._setupLiveQuerySubscription] Setting up liveQuery with modelId:', modelId, 'modelName:', modelName)
+        await setupLiveQuery(modelId, modelName)
+        if (subscriptionSetUp) {
+          setupSubscription.unsubscribe()
         }
       }
     })
+    
+    // Also check current state immediately in case modelId is already available
+    const currentSnapshot = this._service.getSnapshot()
+    if (currentSnapshot.context.modelId && !subscriptionSetUp) {
+      console.log('[Model._setupLiveQuerySubscription] Setting up liveQuery immediately with existing modelId:', currentSnapshot.context.modelId)
+      setupLiveQuery(currentSnapshot.context.modelId, currentSnapshot.context.modelName).catch((error) => {
+        logger(`[Model._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
+        console.error('[Model._setupLiveQuerySubscription] Error in immediate setup:', error)
+      })
+    }
+  }
+
+  /**
+   * Refresh property IDs from database (useful in Node.js where liveQuery isn't available)
+   */
+  private async _refreshPropertiesFromDb(): Promise<void> {
+    const snapshot = this._service.getSnapshot()
+    const modelId = snapshot.context.modelId
+    const modelName = snapshot.context.modelName
+
+    if (!modelId || !modelName) {
+      return
+    }
+
+    try {
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { properties: propertiesTable } = await import('@/seedSchema')
+      const { eq } = await import('drizzle-orm')
+      
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        return
+      }
+
+      const propertyRows = await db
+        .select({ schemaFileId: propertiesTable.schemaFileId })
+        .from(propertiesTable)
+        .where(eq(propertiesTable.modelId, modelId))
+
+      const propertyIds = propertyRows
+        .map((row: { schemaFileId: string | null }) => row.schemaFileId)
+        .filter((id: string | null): id is string => id !== null && id !== undefined)
+
+      console.log(`[Model._refreshPropertiesFromDb] Refreshed properties for model "${modelName}" (id: ${modelId}): ${propertyIds.length} properties`, propertyIds)
+
+      // Update context with refreshed property IDs
+      this._service.send({
+        type: 'updateContext',
+        _liveQueryPropertyIds: propertyIds,
+        _propertiesUpdated: Date.now(),
+      })
+    } catch (error) {
+      logger(`[Model._refreshPropertiesFromDb] Error refreshing properties: ${error}`)
+    }
+  }
+
+  /**
+   * Public method to refresh properties from database
+   */
+  async refreshProperties(): Promise<void> {
+    await this._refreshPropertiesFromDb()
   }
 
 }

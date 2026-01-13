@@ -1,6 +1,6 @@
 import { graphql } from '@/graphql/gql'
 import { TypedDocumentNode } from '@graphql-typed-document-node/core'
-import { Attestation, Schema } from '@/graphql/gql/graphql'
+import { Attestation, Schema as EASSchema } from '@/graphql/gql/graphql'
 
 export const GET_SCHEMAS = graphql(/* GraphQL */ `
   query GetSchemas($where: SchemaWhereInput!) {
@@ -24,7 +24,7 @@ export const GET_SCHEMA_BY_NAME = graphql(/* GraphQL */ `
       }
     }
   }
-`) as TypedDocumentNode<{ schemas: Schema[] }>
+`) as TypedDocumentNode<{ schemas: EASSchema[] }>
 
 export const GET_SEEDS = graphql(/* GraphQL */ `
   query GetSeeds($where: AttestationWhereInput!, $take: Int) {

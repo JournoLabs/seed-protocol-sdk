@@ -219,18 +219,14 @@ export const addModelsMachine = setup({
             // Update the model instance with current data
             modelInstance.getService().send({
               type: 'updateContext',
-              description: modelData.description,
               properties: modelData.properties || {},
-              indexes: modelData.indexes,
             })
             
             // Initialize original values
             modelInstance.getService().send({
               type: 'initializeOriginalValues',
               originalValues: {
-                description: modelData.description,
                 properties: modelData.properties ? JSON.parse(JSON.stringify(modelData.properties)) : {},
-                indexes: modelData.indexes ? [...(modelData.indexes || [])] : undefined,
               },
               isEdited: false,
             })
@@ -471,10 +467,9 @@ export const addModelsMachine = setup({
           }
           
           // Create model definition in JSON import format
+          // Note: description is not passed - JSON files can have it but we ignore it at runtime
           const jsonModelDef = {
             properties: convertedProperties,
-            indexes: modelDef.indexes || [],
-            description: modelDef.description,
           }
           
           // Create Model instance

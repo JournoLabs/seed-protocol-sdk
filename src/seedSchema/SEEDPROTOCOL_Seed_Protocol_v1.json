@@ -10,49 +10,62 @@
   },
   "models": {
     "Seed": {
+      "id": "SEEDPROTOCOL_SEED",
       "description": "Core seed model representing the base entity in Seed Protocol",
       "properties": {
         "uid": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_SEED_uid"
         },
         "type": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_SEED_type"
         }
       }
     },
     "Version": {
+      "id": "SEEDPROTOCOL_VERSION",
       "description": "Version model representing versions of seeds",
       "properties": {
         "seedUid": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_VERSION_seedUid"
         },
         "note": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_VERSION_note"
         }
       }
     },
     "Metadata": {
+      "id": "SEEDPROTOCOL_METADATA",
       "description": "Metadata model for storing key-value pairs",
       "properties": {
         "key": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_METADATA_key"
         },
         "value": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_METADATA_value"
         }
       }
     },
     "Image": {
+      "id": "SEEDPROTOCOL_IMAGE",
       "description": "Image model for storing image data and metadata",
       "properties": {
         "storageTransactionId": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_IMAGE_storageTransactionId"
         },
         "uri": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_IMAGE_uri"
         },
         "alt": {
-          "type": "Text"
+          "type": "Text",
+          "id": "SEEDPROTOCOL_IMAGE_alt"
         }
       }
     }

@@ -1,6 +1,6 @@
 /**
  * Debug script to test schema models loading
- * Run with: npx tsx __tests__/schema/debug-schema-models.ts
+ * Run with: npx tsx __tests__/Schema/debug-schema-models.ts
  */
 
 import { client } from '@/client'

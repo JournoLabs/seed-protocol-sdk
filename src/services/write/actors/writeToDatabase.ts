@@ -26,6 +26,9 @@ export const writeToDatabase = fromCallback<
 
       if (input.entityType === 'model') {
         const { writeModelToDb } = await import('@/helpers/db')
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+        const { eq } = await import('drizzle-orm')
         const writeMsg = `Writing model to database: ${input.entityData.modelName} (schemaId: ${input.entityData.schemaId})`
         logger(writeMsg)
         console.log(writeMsg) // Always log to console
@@ -35,10 +38,28 @@ export const writeToDatabase = fromCallback<
           schemaId: input.entityData.schemaId,
         })
         await writeModelToDb(input.entityId, input.entityData)
+        
+        // Get modelId from database after write
+        const db = BaseDb.getAppDb()
+        if (db) {
+          const modelRecords = await db
+            .select({ id: modelsTable.id })
+            .from(modelsTable)
+            .where(eq(modelsTable.schemaFileId, input.entityId))
+            .limit(1)
+          
+          if (modelRecords.length > 0 && modelRecords[0].id) {
+            output = { ...input.entityData, id: modelRecords[0].id }
+          } else {
+            output = input.entityData
+          }
+        } else {
+          output = input.entityData
+        }
+        
         const successMsg = `Successfully wrote model "${input.entityData.modelName}" to database`
         logger(successMsg)
         console.log(successMsg) // Always log to console
-        output = input.entityData
       } else if (input.entityType === 'modelProperty') {
         const { writePropertyToDb } = await import('@/helpers/db')
         await writePropertyToDb(input.entityId, input.entityData)

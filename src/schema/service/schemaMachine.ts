@@ -17,11 +17,9 @@ export type SchemaMachineContext = {
   }
   models?: {
     [modelName: string]: {
-      description?: string
       properties: {
         [propertyName: string]: any
       }
-      indexes?: string[]
     }
   }
   enums?: {
@@ -197,7 +195,7 @@ export const schemaMachine = setup({
               _loadedAt: (event as any).loadedAt,
               _dbVersion: (event as any).dbVersion,
               _dbUpdatedAt: (event as any).dbUpdatedAt,
-              _liveQueryModelIds: [], // Initialize empty array for liveQuery model IDs
+              _liveQueryModelIds: (event as any)._liveQueryModelIds || [], // Use model IDs from loadOrCreateSchema, or empty array if not provided
             }
           }),
         },

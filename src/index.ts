@@ -2,23 +2,23 @@
 // import { enableMapSet } from 'immer'
 
 export {
-  Model,
-  Property,
-  Image,
-  List,
-  Text,
-  Json,
-  Relation,
-  Boolean,
-  Number,
-  Date,
+  // Property,
+  // Image,
+  // List,
+  // Text,
+  // Json,
+  // Relation,
+  // Boolean,
+  // Number,
+  // Date,
   ModelPropertyDataTypes,
 } from './Schema'
 
 export { BaseItem as Item } from './Item/BaseItem'
 export { BaseItemProperty as ItemProperty } from './ItemProperty/BaseItemProperty'
 export { ModelProperty } from './ModelProperty/ModelProperty'
-export { Schema } from './Schema/Schema'
+export { Schema, type SchemaAllOptions } from './Schema/Schema'
+export { Model } from './Model/Model'
 
 export {
   useItems,
@@ -112,7 +112,7 @@ export { seedVitePlugin } from './vite'
 // export type { PublishUpload } from './db/read/getPublishUploads'
 export type { Schema as SchemaType } from './helpers/schema'
 export type { ModelClassType as ModelClass } from './types'
-export type { Model } from './Model/Model'
+export type { Model as ModelType } from './Model/Model'
 
 // PathResolver - Platform-specific implementation
 // Auto-initializes based on environment when imported

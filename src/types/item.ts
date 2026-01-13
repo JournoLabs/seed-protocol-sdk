@@ -36,6 +36,7 @@ export type ItemMachineContext<T> = {
 export type NewItemProps<T> = Partial<ItemData> &
   Partial<T> & {
     modelName: string
+    modelInstance?: Model
     schemaUidsByModelName?: Map<string, string>
     mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
     storageTransactionId?: string

@@ -19,6 +19,8 @@ FromCallbackInput<ClientManagerContext>
     
     // Prepare databases - this handles all initialization, migration, and file setup
     await BaseDb.prepareDb(filesDir)
+
+    console.log('dbInit _dbInit completed')
     
     // Verify database is ready
     const appDb = BaseDb.getAppDb()
@@ -35,16 +37,11 @@ FromCallbackInput<ClientManagerContext>
     })
     .catch((error) => {
       logger('Error in dbInit:', error)
-      // In test environments, still send ready to allow initialization to continue
-      if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
-        logger('[client/actors] [dbInit] Sending DB_READY despite error in test environment')
-        sendBack({ type: ClientManagerEvents.DB_READY })
-      } else {
-        sendBack({ 
-          type: 'ERROR', 
-          error: error instanceof Error ? error : new Error(String(error))
-        })
-      }
+      console.log('Error in dbInit:', error)
+      sendBack({ 
+        type: 'ERROR', 
+        error: error instanceof Error ? error : new Error(String(error))
+      })
     })
 
 })

@@ -1,6 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
-import { listCompleteSchemaFiles, listLatestSchemaFiles } from '@/helpers/schema'
+import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { updateModelProperties, convertPropertyToSchemaUpdate } from '@/helpers/updateSchema'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { Model } from '@/Model/Model'
@@ -10,6 +10,7 @@ import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { eq, desc } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
+import { isInternalSchema } from '@/helpers/constants'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
@@ -43,6 +44,22 @@ const TRACKED_PROPERTIES = [
   'updatedAt',   // metadata.updatedAt (flattened)
 ] as const
 
+/**
+ * Options for Schema.all() method
+ */
+export interface SchemaAllOptions {
+  /**
+   * If true, returns all versions of each schema. If false (default), returns only the latest version of each schema.
+   * @default false
+   */
+  includeAllVersions?: boolean
+  /**
+   * If true, includes the internal Seed Protocol schema. If false (default), excludes it.
+   * @default false
+   */
+  includeInternal?: boolean
+}
+
 export class Schema {
   // Cache by schemaFileId (primary key - doesn't change when name changes)
   protected static instanceCacheById: Map<
@@ -65,14 +82,7 @@ export class Schema {
     createdAt: string
     updatedAt: string
   }
-  models?: Array<{
-    name: string
-    description?: string
-    properties: {
-      [propertyName: string]: any
-    }
-    indexes?: string[]
-  }>
+  models?: Model[]
   enums?: {
     [enumName: string]: any
   }
@@ -107,6 +117,7 @@ export class Schema {
 
     // Subscribe to schema context changes to update cache keys when schemaFileId becomes available
     this._service.subscribe((snapshot) => {
+      console.log('Schema service subscribed to snapshot', snapshot.value)
       // Update cache to use schemaFileId as key once we have it (only once)
       if (snapshot.value === 'idle' && snapshot.context.metadata?.name && snapshot.context._schemaFileId) {
         // Use a static Set to track which schemas have had their cache key updated
@@ -353,7 +364,6 @@ export class Schema {
           // NEW APPROACH: Use Model.create() instead:
           //   const model = Model.create('ModelName', schemaInstance, {
           //     properties: {...},
-          //     indexes: [...],
           //     description: '...'
           //   })
           // 
@@ -368,7 +378,7 @@ export class Schema {
           throw new Error(
             'Direct assignment to schema.models is disabled. ' +
             'Please use Model.create() instead: ' +
-            'const model = Model.create("ModelName", schemaInstance, { properties: {...}, indexes: [...], description: "..." })'
+            'const model = Model.create("ModelName", schemaInstance, { properties: {...}, description: "..." })'
           )
           
           /* DISABLED CODE - See comment above
@@ -390,9 +400,7 @@ export class Schema {
                 }
                 seenNames.add(modelName)
                 modelsObject[modelName] = {
-                  description: model.description,
                   properties: model.properties || {},
-                  indexes: model.indexes,
                 }
               } else if (model && typeof model === 'object' && 'name' in model) {
                 // Handle plain objects
@@ -527,7 +535,9 @@ export class Schema {
       instance: proxiedInstance,
       refCount: 1,
     })
-    return proxiedInstance
+    // The proxiedInstance is Proxied<Schema> which preserves all methods
+    // TypeScript recognizes this as Schema with all methods intact
+    return proxiedInstance as Schema
   }
 
   /**
@@ -653,42 +663,119 @@ export class Schema {
   }
 
   /**
-   * Get instantiated Schema objects for all complete schema files
-   * Returns one instance per unique schema name (uses latest version if multiple exist)
+   * Get instantiated Schema objects for all schemas (from database and files)
+   * By default, returns only the latest version of each schema and excludes the internal Seed Protocol schema.
+   * Uses loadAllSchemasFromDb() as the single source of truth, which intelligently merges database and file data.
+   * 
+   * @param options - Configuration options
+   * @param options.includeAllVersions - If true, returns all versions of each schema. Default: false
+   * @param options.includeInternal - If true, includes the internal Seed Protocol schema. Default: false
    * @returns Array of Schema instances
    */
-  static async all(): Promise<Schema[]> {
-    const completeSchemas = await listCompleteSchemaFiles()
+  static async all(options: SchemaAllOptions = {}): Promise<Schema[]> {
+    const { includeAllVersions = false, includeInternal = false } = options
     
-    // Get unique schema names (if multiple versions exist, we'll use the latest)
-    const uniqueSchemaNames = new Set<string>()
-    for (const schema of completeSchemas) {
-      uniqueSchemaNames.add(schema.name)
+    try {
+      // Use loadAllSchemasFromDb as single source of truth
+      // This intelligently merges database and file data, including drafts
+      const allSchemasData = await loadAllSchemasFromDb()
+      
+      // Filter internal schemas unless explicitly included
+      let filteredSchemas = includeInternal
+        ? allSchemasData
+        : allSchemasData.filter(schemaData => {
+            const schema = schemaData.schema
+            // Check if this is an internal schema by name or ID
+            return !isInternalSchema(
+              schema.metadata?.name || '',
+              schema.id
+            )
+          })
+      
+      // Filter to latest versions if needed
+      if (!includeAllVersions) {
+        // Group by schema name and keep only the latest version of each
+        const schemaMap = new Map<string, typeof filteredSchemas[0]>()
+        for (const schemaData of filteredSchemas) {
+          const schemaName = schemaData.schema.metadata?.name || ''
+          if (!schemaName) continue
+          
+          const existing = schemaMap.get(schemaName)
+          if (!existing || schemaData.schema.version > existing.schema.version) {
+            schemaMap.set(schemaName, schemaData)
+          } else if (schemaData.schema.version === existing.schema.version) {
+            // If versions are equal, use updatedAt as tiebreaker
+            const currentUpdatedAt = new Date(schemaData.schema.metadata?.updatedAt || 0).getTime()
+            const existingUpdatedAt = new Date(existing.schema.metadata?.updatedAt || 0).getTime()
+            if (currentUpdatedAt > existingUpdatedAt) {
+              schemaMap.set(schemaName, schemaData)
+            }
+          }
+        }
+        filteredSchemas = Array.from(schemaMap.values())
+      }
+      
+      // Extract unique schema names and create Schema instances
+      const uniqueSchemaNames = new Set<string>()
+      for (const schemaData of filteredSchemas) {
+        const schemaName = schemaData.schema.metadata?.name
+        if (schemaName) {
+          uniqueSchemaNames.add(schemaName)
+        }
+      }
+      
+      // Create Schema instances for each unique schema name
+      const schemaInstances: Schema[] = []
+      for (const schemaName of uniqueSchemaNames) {
+        schemaInstances.push(this.create(schemaName))
+      }
+      
+      return schemaInstances
+    } catch (error) {
+      // Fallback to file-based approach if database is unavailable
+      // This maintains backward compatibility for environments without database
+      logger(`Error loading schemas from database, falling back to files: ${error instanceof Error ? error.message : String(error)}`)
+      
+      // Use existing file-based implementation as fallback
+      const allSchemaFiles = await listCompleteSchemaFiles()
+      
+      // Filter out internal schemas unless explicitly included
+      const filteredSchemas = includeInternal
+        ? allSchemaFiles
+        : allSchemaFiles.filter(schema => {
+            // Check if this is an internal schema by name or ID
+            return !isInternalSchema(schema.name, schema.schemaFileId)
+          })
+      
+      // If includeAllVersions is false, filter to only latest version of each schema
+      const schemasToUse = includeAllVersions
+        ? filteredSchemas
+        : (() => {
+            // Group by schema name and keep only the latest version of each
+            const schemaMap = new Map<string, typeof filteredSchemas[0]>()
+            for (const schema of filteredSchemas) {
+              const existing = schemaMap.get(schema.name)
+              if (!existing || schema.version > existing.version) {
+                schemaMap.set(schema.name, schema)
+              }
+            }
+            return Array.from(schemaMap.values())
+          })()
+      
+      // Get unique schema names (one instance per schema name)
+      const uniqueSchemaNames = new Set<string>()
+      for (const schema of schemasToUse) {
+        uniqueSchemaNames.add(schema.name)
+      }
+      
+      // Create Schema instances for each unique schema name
+      const schemaInstances: Schema[] = []
+      for (const schemaName of uniqueSchemaNames) {
+        schemaInstances.push(this.create(schemaName))
+      }
+      
+      return schemaInstances
     }
-    
-    // Create Schema instances for each unique schema name
-    const schemaInstances: Schema[] = []
-    for (const schemaName of uniqueSchemaNames) {
-      schemaInstances.push(this.create(schemaName))
-    }
-    
-    return schemaInstances
-  }
-
-  /**
-   * Get instantiated Schema objects for only the most recent version of each complete schema file
-   * @returns Array of Schema instances (one per schema name, using latest version)
-   */
-  static async latest(): Promise<Schema[]> {
-    const latestSchemas = await listLatestSchemaFiles()
-    
-    // Create Schema instances for each latest schema
-    const schemaInstances: Schema[] = []
-    for (const schema of latestSchemas) {
-      schemaInstances.push(this.create(schema.name))
-    }
-    
-    return schemaInstances
   }
 
   getService(): SchemaService {
@@ -811,9 +898,7 @@ export class Schema {
         const propertiesFromInstances = (modelInstance as any)._buildPropertiesFromInstances?.() || modelInstance.properties || {}
         
         models[modelName] = {
-          description: modelInstance.description,
           properties: propertiesFromInstances,
-          indexes: modelInstance.indexes || [],
         }
         
         logger(`Built model "${modelName}" from Model instance (ID: ${modelFileId})`)
@@ -1629,20 +1714,21 @@ export class Schema {
           }
 
           // Set up liveQuery to watch model_schemas join table for this schema
+          // Use Drizzle query builder instead of raw SQL to ensure proper column mapping
           const models$ = BaseDb.liveQuery<{ 
             modelId: number
             modelName: string
             modelFileId: string
           }>(
-            (sql: any) => sql`
-              SELECT 
-                ms.model_id as modelId,
-                m.name as modelName,
-                m.schema_file_id as modelFileId
-              FROM model_schemas ms
-              INNER JOIN models m ON ms.model_id = m.id
-              WHERE ms.schema_id = ${schemaId}
-            `
+            db
+              .select({
+                modelId: modelSchemas.modelId,
+                modelName: modelsTable.name,
+                modelFileId: modelsTable.schemaFileId,
+              })
+              .from(modelSchemas)
+              .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+              .where(eq(modelSchemas.schemaId, schemaId))
           )
 
           const instanceState = schemaInstanceState.get(this)

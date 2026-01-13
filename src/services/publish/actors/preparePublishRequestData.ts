@@ -4,7 +4,8 @@ import { models as modelsTable, modelUids } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
-import { BaseItem } from '@/Item/BaseItem'
+// Dynamic import to break circular dependency: BaseItem -> ... -> publishMachine -> preparePublishRequestData -> BaseItem
+// import { BaseItem } from '@/Item/BaseItem'
 
 export const preparePublishRequestData = fromCallback<
   EventObject,
@@ -13,6 +14,8 @@ export const preparePublishRequestData = fromCallback<
   const { localId } = context
 
   const _preparePublishRequestData = async () => {
+    // Dynamic import to break circular dependency
+    const { BaseItem } = await import('@/Item/BaseItem')
     const item = await BaseItem.find({ seedLocalId: localId })
 
     if (!item) {

@@ -15,7 +15,7 @@ After refactoring the Model-Schema relationship to eliminate circular updates, s
 
 ## Test Files Requiring Review
 
-### 1. `__tests__/schema/schema-models-integration.test.ts`
+### 1. `__tests__/Schema/schema-models-integration.test.ts`
 
 **Status**: ⚠️ **NEEDS REVIEW**
 
@@ -50,7 +50,7 @@ After refactoring the Model-Schema relationship to eliminate circular updates, s
 
 ---
 
-### 2. `__tests__/schema/Schema.test.ts`
+### 2. `__tests__/Schema/Schema.test.ts`
 
 **Status**: ⚠️ **NEEDS REVIEW**
 
@@ -221,7 +221,7 @@ After refactoring the Model-Schema relationship to eliminate circular updates, s
 
 ### 2. Schema Read-Only Relationship Tests
 
-**Location**: `__tests__/schema/Schema.test.ts`
+**Location**: `__tests__/Schema/Schema.test.ts`
 
 **New Tests Needed:**
 
@@ -249,7 +249,7 @@ After refactoring the Model-Schema relationship to eliminate circular updates, s
 
 ## Tests That Should Be Removed or Significantly Changed
 
-### 1. `__tests__/schema/Schema.test.ts` - "should update models array" (line 773)
+### 1. `__tests__/Schema/Schema.test.ts` - "should update models array" (line 773)
 
 **Reason**: This test appears to test that `schema.models` can be directly assigned, which is an anti-pattern. `schema.models` should be read-only (computed from Model instances).
 
@@ -263,15 +263,15 @@ After refactoring the Model-Schema relationship to eliminate circular updates, s
 
 ### High Priority (Tests That May Fail)
 
-1. ✅ **Review** `__tests__/schema/Schema.test.ts` - "should update models array" test
+1. ✅ **Review** `__tests__/Schema/Schema.test.ts` - "should update models array" test
 2. ✅ **Update** `__tests__/browser/react/schema.test.tsx` - Comment on line 692
-3. ✅ **Review** `__tests__/schema/schema-models-integration.test.ts` - "should update modelInstances when context.models changes" test
+3. ✅ **Review** `__tests__/Schema/schema-models-integration.test.ts` - "should update modelInstances when context.models changes" test
 
 ### Medium Priority (Tests That Should Still Pass But Need Verification)
 
 1. ✅ **Verify** all tests in `__tests__/Model/Model.test.ts` still pass
 2. ✅ **Verify** all tests in `__tests__/browser/react/model.test.tsx` still pass
-3. ✅ **Verify** all tests in `__tests__/schema/schema-models-integration.test.ts` still pass
+3. ✅ **Verify** all tests in `__tests__/Schema/schema-models-integration.test.ts` still pass
 
 ### Low Priority (New Tests to Add)
 

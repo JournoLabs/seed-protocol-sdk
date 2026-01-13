@@ -291,7 +291,7 @@ export async function importJsonSchema(
   version: number = 1,
 ): Promise<string> {
   // Determine if we have a file path or file contents
-  let importData: JsonImportSchema
+  let importData: JsonImportSchema | undefined
   let importFilePath: string | undefined
   let originalSchemaFile: SchemaFileFormat | undefined
 
@@ -325,7 +325,44 @@ export async function importJsonSchema(
     if (version !== undefined && version !== schemaFile.version) {
       schemaFile = { ...schemaFile, version }
     }
+    
+    // Generate missing IDs for complete schema files
+    if (!schemaFile.id) {
+      schemaFile.id = generateId()
+      logger('Generated schema ID for imported complete schema:', schemaFile.id)
+    }
+    
+    // Before generating IDs, check if a file already exists with this schemaFileId
+    // This handles the case where the schema was already loaded via loadSchemaFromFile
+    const workingDir = BaseFileManager.getWorkingDir()
+    const path = BaseFileManager.getPathModule()
+    const existingFilePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, schemaFile.version, schemaFile.id)
+    const existingFileExists = await BaseFileManager.pathExists(existingFilePath)
+    
+    if (existingFileExists) {
+      // File already exists with this schemaFileId - just load it instead of creating a new one
+      logger(`Schema file already exists with schemaFileId ${schemaFile.id}, loading it instead of creating new file`)
+      return await loadSchemaFromFile(existingFilePath)
+    }
+    
+    // Generate missing model and property IDs
+    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+      if (!model.id) {
+        model.id = generateId()
+        logger(`Generated model ID for ${modelName}:`, model.id)
+      }
+      
+      for (const [propName, prop] of Object.entries(model.properties || {})) {
+        if (!prop.id) {
+          prop.id = generateId()
+          logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+        }
+      }
+    }
   } else {
+    if (!importData) {
+      throw new Error('Failed to parse import data: neither complete schema nor import format could be determined')
+    }
     schemaFile = transformImportToSchemaFile(importData, version)
   }
 
@@ -366,11 +403,48 @@ export async function importJsonSchema(
             ),
           },
         ]),
-      ) as JsonImportSchema['models'],
+      ) as unknown as JsonImportSchema['models'],
     }
 
-    // Convert JSON models to Model classes
-    const modelDefinitions = await createModelsFromJson(importDataForInternal)
+    // Generate schema ID if missing
+    if (!schemaFile.id) {
+      schemaFile.id = generateId()
+      logger('Generated schema ID for internal schema:', schemaFile.id)
+    }
+
+    // Extract schemaFileIds from JSON file and generate missing ones BEFORE creating models
+    // This ensures Model instances are created with correct IDs
+    const modelFileIds = new Map<string, string>()
+    const propertyFileIds = new Map<string, Map<string, string>>()
+    
+    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+      // Generate model ID if missing
+      if (!model.id) {
+        model.id = generateId()
+        logger(`Generated model ID for ${modelName}:`, model.id)
+        // Update the schemaFile object so it's included in schemaData
+        schemaFile.models[modelName].id = model.id
+      }
+      modelFileIds.set(modelName, model.id)
+      
+      const propIds = new Map<string, string>()
+      for (const [propName, prop] of Object.entries(model.properties || {})) {
+        // Generate property ID if missing
+        if (!prop.id) {
+          prop.id = generateId()
+          logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+          // Update the schemaFile object so it's included in schemaData
+          schemaFile.models[modelName].properties[propName].id = prop.id
+        }
+        propIds.set(propName, prop.id)
+      }
+      if (propIds.size > 0) {
+        propertyFileIds.set(modelName, propIds)
+      }
+    }
+
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
+    const modelDefinitions = await createModelsFromJson(importDataForInternal, modelFileIds, propertyFileIds)
 
     logger('loadSchemaFromFile (internal) - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -383,26 +457,6 @@ export async function importJsonSchema(
       updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
     } as Parameters<typeof addSchemaToDb>[0]
 
-    // Extract schemaFileIds from JSON file
-    const modelFileIds = new Map<string, string>()
-    const propertyFileIds = new Map<string, Map<string, string>>()
-    
-    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
-      if (model.id) {
-        modelFileIds.set(modelName, model.id)
-      }
-      
-      const propIds = new Map<string, string>()
-      for (const [propName, prop] of Object.entries(model.properties || {})) {
-        if (prop.id) {
-          propIds.set(propName, prop.id)
-        }
-      }
-      if (propIds.size > 0) {
-        propertyFileIds.set(modelName, propIds)
-      }
-    }
-
     // Use dynamic import to break circular dependency
     const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
     const { BaseDb } = await import('@/db/Db/BaseDb')
@@ -412,6 +466,7 @@ export async function importJsonSchema(
       const db = BaseDb.getAppDb()
       if (db) {
         // Store full schema data in database as fallback when file is not available
+        // schemaFile already has all IDs (from JSON file or generated), so we can use it directly
         const schemaData = JSON.stringify(schemaFile, null, 2)
         
         // Add schema to database (creates or returns existing) with schemaFileId and schemaData
@@ -424,6 +479,62 @@ export async function importJsonSchema(
             modelFileIds,
             propertyFileIds,
           })
+          
+          // After properties are created, ensure schemaFile has the correct IDs from database
+          // Query the database to get the actual schemaFileId values that were used
+          // This ensures schemaData matches what's actually in the database
+          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          let schemaFileUpdated = false
+          for (const [modelName, modelFileId] of modelFileIds.entries()) {
+            // Get model record to find modelId
+            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+            const modelRecords = await db
+              .select()
+              .from(modelsTable)
+              .where(eq(modelsTable.schemaFileId, modelFileId))
+              .limit(1)
+            
+            if (modelRecords.length > 0) {
+              const modelId = modelRecords[0].id
+              
+              // Get all properties for this model from database
+              const propertyRecords = await db
+                .select()
+                .from(propertiesTable)
+                .where(eq(propertiesTable.modelId, modelId))
+              
+              // Update schemaFile with actual database IDs (only if they differ)
+              for (const propRecord of propertyRecords) {
+                if (propRecord.schemaFileId && schemaFile.models[modelName]?.properties[propRecord.name]) {
+                  const currentId = schemaFile.models[modelName].properties[propRecord.name].id
+                  if (currentId !== propRecord.schemaFileId) {
+                    schemaFile.models[modelName].properties[propRecord.name].id = propRecord.schemaFileId
+                    logger(`Updated schemaFile property ID for ${modelName}.${propRecord.name} from ${currentId} to ${propRecord.schemaFileId}`)
+                    schemaFileUpdated = true
+                  }
+                }
+              }
+            }
+          }
+          
+          // Always update schemaData to ensure it matches the current schemaFile state
+          // This is important even if nothing changed, to ensure consistency
+          const updatedSchemaData = JSON.stringify(schemaFile, null, 2)
+          
+          // Update the schema record in the database with current schemaData
+          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+          await db
+            .update(schemasTable)
+            .set({ schemaData: updatedSchemaData })
+            .where(eq(schemasTable.id, schemaRecord.id))
+          
+          if (schemaFileUpdated) {
+            logger(`Updated schemaData in database with actual property IDs for schema "${schemaName}"`)
+          } else {
+            logger(`Verified schemaData in database matches schemaFile for schema "${schemaName}"`)
+          }
         }
       }
     } catch (dbError) {
@@ -445,6 +556,12 @@ export async function importJsonSchema(
 
   const workingDir = BaseFileManager.getWorkingDir()
   const path = BaseFileManager.getPathModule()
+
+  // Ensure schema ID is defined (should always be set by this point, but check for safety)
+  if (!schemaFile.id) {
+    schemaFile.id = generateId()
+    logger('Generated schema ID before file path creation:', schemaFile.id)
+  }
 
   // Get the target file path using ID-based naming (preferred)
   const filePath = getSchemaFilePath(workingDir, schemaFile.metadata.name, version, schemaFile.id)
@@ -586,11 +703,48 @@ export const loadSchemaFromFile = async (
             ),
           },
         ]),
-      ) as JsonImportSchema['models'],
+      ) as unknown as JsonImportSchema['models'],
     }
 
-    // Convert JSON models to Model classes
-    const modelDefinitions = await createModelsFromJson(importData)
+    // Generate schema ID if missing (before creating schemaInput)
+    if (!schemaFile.id) {
+      schemaFile.id = generateId()
+      logger('Generated schema ID for schema file:', schemaFile.id)
+    }
+
+    // Extract schemaFileIds from JSON file and generate missing ones BEFORE creating models
+    // This ensures Model instances are created with correct IDs
+    const modelFileIds = new Map<string, string>()
+    const propertyFileIds = new Map<string, Map<string, string>>()
+    
+    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+      // Generate model ID if missing
+      if (!model.id) {
+        model.id = generateId()
+        logger(`Generated model ID for ${modelName}:`, model.id)
+        // Update the schemaFile object so it's included in schemaData
+        schemaFile.models[modelName].id = model.id
+      }
+      modelFileIds.set(modelName, model.id)
+      
+      const propIds = new Map<string, string>()
+      for (const [propName, prop] of Object.entries(model.properties)) {
+        // Generate property ID if missing
+        if (!prop.id) {
+          prop.id = generateId()
+          logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+          // Update the schemaFile object so it's included in schemaData
+          schemaFile.models[modelName].properties[propName].id = prop.id
+        }
+        propIds.set(propName, prop.id)
+      }
+      if (propIds.size > 0) {
+        propertyFileIds.set(modelName, propIds)
+      }
+    }
+
+    // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
+    const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
 
     logger('loadSchemaFromFile - modelDefinitions length:', Object.keys(modelDefinitions).length)
 
@@ -603,26 +757,6 @@ export const loadSchemaFromFile = async (
       updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
     } as Parameters<typeof addSchemaToDb>[0]
 
-    // Extract schemaFileIds from JSON file
-    const modelFileIds = new Map<string, string>()
-    const propertyFileIds = new Map<string, Map<string, string>>()
-    
-    for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
-      if (model.id) {
-        modelFileIds.set(modelName, model.id)
-      }
-      
-      const propIds = new Map<string, string>()
-      for (const [propName, prop] of Object.entries(model.properties)) {
-        if (prop.id) {
-          propIds.set(propName, prop.id)
-        }
-      }
-      if (propIds.size > 0) {
-        propertyFileIds.set(modelName, propIds)
-      }
-    }
-
     // Use dynamic import to break circular dependency
     const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
     const { BaseDb } = await import('@/db/Db/BaseDb')
@@ -632,6 +766,7 @@ export const loadSchemaFromFile = async (
       const db = BaseDb.getAppDb()
       if (db) {
         // Store full schema data in database as fallback when file is not available
+        // schemaFile already has all IDs (from JSON file or generated), so we can use it directly
         const schemaData = JSON.stringify(schemaFile, null, 2)
         
         // Add schema to database (creates or returns existing) with schemaFileId and schemaData
@@ -644,6 +779,62 @@ export const loadSchemaFromFile = async (
             modelFileIds,
             propertyFileIds,
           })
+          
+          // After properties are created, ensure schemaFile has the correct IDs from database
+          // Query the database to get the actual schemaFileId values that were used
+          // This ensures schemaData matches what's actually in the database
+          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          let schemaFileUpdated = false
+          for (const [modelName, modelFileId] of modelFileIds.entries()) {
+            // Get model record to find modelId
+            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+            const modelRecords = await db
+              .select()
+              .from(modelsTable)
+              .where(eq(modelsTable.schemaFileId, modelFileId))
+              .limit(1)
+            
+            if (modelRecords.length > 0) {
+              const modelId = modelRecords[0].id
+              
+              // Get all properties for this model from database
+              const propertyRecords = await db
+                .select()
+                .from(propertiesTable)
+                .where(eq(propertiesTable.modelId, modelId))
+              
+              // Update schemaFile with actual database IDs (only if they differ)
+              for (const propRecord of propertyRecords) {
+                if (propRecord.schemaFileId && schemaFile.models[modelName]?.properties[propRecord.name]) {
+                  const currentId = schemaFile.models[modelName].properties[propRecord.name].id
+                  if (currentId !== propRecord.schemaFileId) {
+                    schemaFile.models[modelName].properties[propRecord.name].id = propRecord.schemaFileId
+                    logger(`Updated schemaFile property ID for ${modelName}.${propRecord.name} from ${currentId} to ${propRecord.schemaFileId}`)
+                    schemaFileUpdated = true
+                  }
+                }
+              }
+            }
+          }
+          
+          // Always update schemaData to ensure it matches the current schemaFile state
+          // This is important even if nothing changed, to ensure consistency
+          const updatedSchemaData = JSON.stringify(schemaFile, null, 2)
+          
+          // Update the schema record in the database with current schemaData
+          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+          await db
+            .update(schemasTable)
+            .set({ schemaData: updatedSchemaData })
+            .where(eq(schemasTable.id, schemaRecord.id))
+          
+          if (schemaFileUpdated) {
+            logger(`Updated schemaData in database with actual property IDs for schema "${schemaName}"`)
+          } else {
+            logger(`Verified schemaData in database matches schemaFile for schema "${schemaName}"`)
+          }
         }
       }
     } catch (dbError) {
@@ -669,61 +860,6 @@ export const loadSchemaFromFile = async (
 }
 
 /**
- * Convert a JSON property definition to a Property definition
- * @param propertyDef - The JSON property definition
- * @returns A Property definition that can be used with the Model decorator
- */
-const convertJsonPropertyToProperty = (
-  propertyDef: JsonImportSchema['models'][string]['properties'][string],
-): Static<typeof TProperty> => {
-  const { type, model, items, storage } = propertyDef
-
-  switch (type) {
-    case ModelPropertyDataTypes.Text:
-      // Handle storage configuration for Text properties
-      const storageType = storage?.type === 'ItemStorage' ? 'ItemStorage' : 
-                         storage?.type === 'PropertyStorage' ? 'PropertyStorage' : 
-                         undefined
-      return Property.Text(
-        storageType,
-        storage?.path,
-        storage?.extension,
-      )
-    case ModelPropertyDataTypes.Number:
-      return Property.Number()
-    case ModelPropertyDataTypes.Boolean:
-      return Property.Boolean()
-    case ModelPropertyDataTypes.Date:
-      return Property.Date()
-    case ModelPropertyDataTypes.Image:
-      return Property.Image()
-    case ModelPropertyDataTypes.Json:
-      return Property.Json()
-    case ModelPropertyDataTypes.File:
-      return Property.File()
-    case ModelPropertyDataTypes.Relation:
-      if (!model) {
-        throw new Error(
-          `Model is required for Relation property type`,
-        )
-      }
-      return Property.Relation(model)
-    case ModelPropertyDataTypes.List:
-      if (!items) {
-        throw new Error('Items configuration is required for List property type')
-      }
-      if (items.type === ModelPropertyDataTypes.Relation && items.model) {
-        return Property.List(items.model, items.type as any)
-      }
-      throw new Error(
-        `Unsupported List items type: ${items.type}. Only Relation with model is currently supported.`,
-      )
-    default:
-      throw new Error(`Unknown property type: ${type}`)
-  }
-}
-
-/**
  * Create a Model class from a JSON model definition
  * @param modelName - The name of the model
  * @param modelDef - The JSON model definition
@@ -734,6 +870,8 @@ export const createModelFromJson = async (
   modelName: string,
   modelDef: JsonImportSchema['models'][string],
   schemaName: string,
+  modelFileId?: string, // Optional modelFileId from JSON file
+  propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
 ): Promise<any> => {
   const { Model } = await import('@/Model')
   
@@ -746,6 +884,13 @@ export const createModelFromJson = async (
       const jsonProp = propDef as any
       const schemaProp: any = {
         dataType: jsonProp.type,
+      }
+
+      // Include property ID if available from propertyFileIds map
+      // This ensures the property uses the correct ID from the schema file
+      const propertyFileId = propertyFileIds?.get(propName)
+      if (propertyFileId) {
+        schemaProp.id = propertyFileId
       }
 
       // Handle Relation type
@@ -773,10 +918,11 @@ export const createModelFromJson = async (
   }
 
   // Create Model instance with the definition
+  // Pass modelFileId if provided to ensure Model instance uses correct ID
+  // Note: indexes and description are ignored - they remain in JSON for schema file format compliance but are not used by Model instances
   const modelInstance = Model.create(modelName, schemaName, {
+    modelFileId, // Pass modelFileId from JSON file
     properties: convertedProperties,
-    description: modelDef.description,
-    indexes: modelDef.indexes,
   })
 
   return modelInstance
@@ -785,16 +931,24 @@ export const createModelFromJson = async (
 /**
  * Convert JSON import schema to ModelDefinitions
  * @param importData - The JSON import data
+ * @param modelFileIds - Optional map of model names to their file IDs from the JSON file
+ * @param propertyFileIds - Optional map of model names to maps of property names to their file IDs from the JSON file
  * @returns ModelDefinitions object with Model classes
  */
 export const createModelsFromJson = async (
   importData: JsonImportSchema,
+  modelFileIds?: Map<string, string>,
+  propertyFileIds?: Map<string, Map<string, string>>,
 ): Promise<ModelDefinitions> => {
   const modelDefinitions: ModelDefinitions = {}
   const schemaName = importData.name
 
   for (const [modelName, modelDef] of Object.entries(importData.models)) {
-    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName)
+    // Get modelFileId from map if available
+    const modelFileId = modelFileIds?.get(modelName)
+    // Get propertyFileIds for this model if available
+    const modelPropertyFileIds = propertyFileIds?.get(modelName)
+    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName, modelFileId, modelPropertyFileIds)
     
     modelDefinitions[modelName] = ModelClass as unknown as ModelClassType
   }

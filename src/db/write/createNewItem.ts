@@ -1,10 +1,12 @@
 import { ModelValues } from '@/types'
-import { Model } from '@/Model/Model'
+// Dynamic import to break circular dependency: Model -> BaseItem -> createNewItem -> Model
+// import { Model } from '@/Model/Model'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { eventEmitter } from '@/eventBus'
+import { modelPropertiesToObject } from '@/helpers/model'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -30,8 +32,10 @@ export const createNewItem = async ({
 
   const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
+  // Dynamic import to break circular dependency
+  const { Model } = await import('@/Model/Model')
   const model = await Model.getByNameAsync(modelName)
-  const propertySchemas = model?.schema
+  const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
   for (const [propertyName, propertyValue] of Object.entries(propertyData)) {
     let propertyRecordSchema

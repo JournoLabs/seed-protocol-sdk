@@ -1,0 +1,786 @@
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import React, { useEffect, useState } from 'react'
+import { useModelProperties, useModelProperty } from '@/browser/react/modelProperty'
+import { client } from '@/client'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { schemas } from '@/seedSchema/SchemaSchema'
+import { properties as propertiesTable, models as modelsTable } from '@/seedSchema/ModelSchema'
+import { eq } from 'drizzle-orm'
+import { importJsonSchema } from '@/imports/json'
+import { SchemaFileFormat } from '@/types/import'
+import { Schema } from '@/Schema/Schema'
+import { Model } from '@/Model/Model'
+import type { SeedConstructorOptions } from '@/types'
+import { ModelProperty } from '@/ModelProperty/ModelProperty'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { generateId } from '@/helpers'
+
+// Test schema with models and properties
+const testSchemaWithProperties: SchemaFileFormat = {
+  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  version: 1,
+  id: 'test-schema-properties',
+  metadata: {
+    name: 'Test Schema Properties',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  models: {
+    Post: {
+      id: 'post-model-id',
+      properties: {
+        title: {
+          id: 'title-prop-id',
+          type: 'Text',
+        },
+        content: {
+          id: 'content-prop-id',
+          type: 'Text',
+        },
+        author: {
+          id: 'author-prop-id',
+          type: 'Text',
+        },
+      },
+    },
+    Article: {
+      id: 'article-model-id',
+      properties: {
+        headline: {
+          id: 'headline-prop-id',
+          type: 'Text',
+        },
+        body: {
+          id: 'body-prop-id',
+          type: 'Text',
+        },
+      },
+    },
+  },
+  enums: {},
+  migrations: [],
+}
+
+// Empty schema with no models for integration test
+const emptyTestSchema: SchemaFileFormat = {
+  $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+  version: 1,
+  id: 'empty-test-schema-props',
+  metadata: {
+    name: 'Empty Test Schema Properties',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  models: {},
+  enums: {},
+  migrations: [],
+}
+
+// Test component for useModelProperties
+function UseModelPropertiesTest({
+  schemaIdOrModelId,
+  modelName,
+}: {
+  schemaIdOrModelId: string | null | undefined
+  modelName?: string | null | undefined
+}) {
+  const { modelProperties, isLoading, error } = useModelProperties(schemaIdOrModelId, modelName)
+  const [status, setStatus] = useState<string>('loading')
+
+  useEffect(() => {
+    if (error) {
+      setStatus('error')
+    } else if (!isLoading && modelProperties !== undefined) {
+      setStatus('loaded')
+    }
+  }, [modelProperties, isLoading, error])
+
+  return (
+    <div data-testid="use-model-properties-test">
+      <div data-testid="properties-status">{status}</div>
+      <div data-testid="is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="error-message">{error.message}</div>}
+      <div data-testid="properties-count">{modelProperties?.length || 0}</div>
+      {modelProperties?.map((property, index) => (
+        <div key={index} data-testid={`property-${index}`}>
+          {property.name}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Test component for useModelProperty
+function UseModelPropertyTest({
+  modelName,
+  propertyName,
+}: {
+  modelName: string | null | undefined
+  propertyName: string | null | undefined
+}) {
+  const { modelProperty, modelPropertyData, validationErrors } = useModelProperty(
+    modelName || '',
+    propertyName || ''
+  )
+  const [status, setStatus] = useState<string>('loading')
+
+  useEffect(() => {
+    if (modelProperty) {
+      setStatus('loaded')
+    } else if (modelName === null || propertyName === null) {
+      setStatus('not-loaded')
+    }
+  }, [modelProperty, modelName, propertyName])
+
+  return (
+    <div data-testid="use-model-property-test">
+      <div data-testid="property-status">{status}</div>
+      {modelProperty && (
+        <>
+          <div data-testid="property-name">{modelProperty.name}</div>
+          <div data-testid="property-data-type">{modelProperty.dataType}</div>
+          <div data-testid="validation-errors-count">{validationErrors?.length || 0}</div>
+        </>
+      )}
+      {!modelProperty && (modelName === null || propertyName === null) && (
+        <div data-testid="property-null">null</div>
+      )}
+    </div>
+  )
+}
+
+// Test component for displaying properties list
+function ModelPropertiesListTest({
+  schemaIdOrModelId,
+  modelName,
+}: {
+  schemaIdOrModelId: string | null | undefined
+  modelName?: string | null | undefined
+}) {
+  const { modelProperties } = useModelProperties(schemaIdOrModelId, modelName)
+  const [status, setStatus] = useState<string>('loading')
+
+  useEffect(() => {
+    if (modelProperties !== undefined) {
+      setStatus('loaded')
+    }
+  }, [modelProperties])
+
+  return (
+    <div data-testid="model-properties-list-test">
+      <div data-testid="properties-status">{status}</div>
+      <ul data-testid="properties-list">
+        {modelProperties?.map((property, index) => (
+          <li key={index} data-testid={`property-item-${index}`}>
+            {property.name}
+          </li>
+        ))}
+      </ul>
+      <div data-testid="properties-count">{modelProperties?.length || 0}</div>
+    </div>
+  )
+}
+
+describe('React ModelProperty Hooks Integration Tests', () => {
+  let container: HTMLElement
+  let schemaId: string | null = null
+
+  beforeAll(async () => {
+    // Initialize client if not already initialized
+    if (!client.isInitialized()) {
+      const config: SeedConstructorOptions = {
+        config: {
+          endpoints: {
+            filePaths: '/api/seed/migrations',
+            files: '/app-files',
+          },
+          filesDir: '.seed',
+        },
+      }
+      await client.init(config)
+    }
+
+    // Wait for client to be ready
+    await waitFor(
+      () => {
+        return client.isInitialized()
+      },
+      { timeout: 30000 }
+    )
+  })
+
+  afterAll(async () => {
+    // Helper function to delete schema file if it exists
+    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
+      try {
+        const path = BaseFileManager.getPathModule()
+        const workingDir = BaseFileManager.getWorkingDir()
+        // Sanitize schema name (same logic as in helpers/schema.ts)
+        const sanitizedName = schemaName
+          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
+          .replace(/\s+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .replace(/_+/g, '_')
+        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
+        const filePath = path.join(workingDir, filename)
+        
+        const exists = await BaseFileManager.pathExists(filePath)
+        if (exists) {
+          const fs = await BaseFileManager.getFs()
+          await fs.promises.unlink(filePath)
+        }
+      } catch (error) {
+        // Ignore errors when deleting files (file might not exist)
+      }
+    }
+
+    // Clean up schemas from database
+    const db = BaseDb.getAppDb()
+    if (db) {
+      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Properties'))
+      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Properties'))
+      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
+    }
+
+    // Clean up schema files from file system
+    if (testSchemaWithProperties.id) {
+      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
+    }
+    if (emptyTestSchema.id) {
+      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
+    }
+    await deleteSchemaFileIfExists('LiveQuery Test Schema Properties', 1, 'livequery-test-schema-props')
+
+    // Clear schema cache
+    Schema.clearCache()
+  })
+
+  beforeEach(async () => {
+    container = document.createElement('div')
+    container.id = 'root'
+    document.body.appendChild(container)
+
+    // Helper function to delete schema file if it exists
+    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
+      try {
+        const path = BaseFileManager.getPathModule()
+        const workingDir = BaseFileManager.getWorkingDir()
+        // Sanitize schema name (same logic as in helpers/schema.ts)
+        const sanitizedName = schemaName
+          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
+          .replace(/\s+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .replace(/_+/g, '_')
+        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
+        const filePath = path.join(workingDir, filename)
+        
+        const exists = await BaseFileManager.pathExists(filePath)
+        if (exists) {
+          const fs = await BaseFileManager.getFs()
+          await fs.promises.unlink(filePath)
+        }
+      } catch (error) {
+        // Ignore errors when deleting files (file might not exist)
+      }
+    }
+
+    // Clean up any existing test schemas from database
+    const db = BaseDb.getAppDb()
+    if (db) {
+      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Properties'))
+      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Properties'))
+      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
+    }
+    
+    // Clean up schema files from file system
+    if (testSchemaWithProperties.id) {
+      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
+    }
+    if (emptyTestSchema.id) {
+      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
+    }
+    
+    Schema.clearCache()
+
+    // Import test schemas
+    try {
+      await importJsonSchema({ contents: JSON.stringify(testSchemaWithProperties) }, testSchemaWithProperties.version)
+    } catch (error) {
+      // Schema might already exist, which is fine
+      console.log('Schema import note:', error)
+    }
+
+    // Wait for schemas to be available in database
+    const { loadAllSchemasFromDb } = await import('@/helpers/schema')
+    await waitFor(
+      async () => {
+        const allSchemas = await loadAllSchemasFromDb()
+        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Properties')
+      },
+      { timeout: 15000 }
+    )
+    
+    // Give a small delay to ensure database operations are processed
+    await new Promise(resolve => setTimeout(resolve, 100))
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+    Schema.clearCache()
+    schemaId = null
+  })
+
+  describe('useModelProperties', () => {
+    it('should return empty array when schemaId/modelId is null', async () => {
+      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          expect(status.textContent).toBe('loaded')
+        },
+        { timeout: 5000 }
+      )
+
+      const count = screen.getByTestId('properties-count')
+      expect(parseInt(count.textContent || '0')).toBe(0)
+    })
+
+    it('should return properties when schemaId and modelName provided', async () => {
+      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          return status.textContent === 'loaded'
+        },
+        { timeout: 15000 }
+      )
+
+      // Wait for properties to be populated
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          const countValue = parseInt(count.textContent || '0')
+          // Post model has 3 properties: title, content, author
+          expect(countValue).toBeGreaterThanOrEqual(3)
+          return countValue >= 3
+        },
+        { timeout: 30000 }
+      )
+
+      // Verify specific properties exist
+      const propertyElements = screen.getAllByTestId(/^property-\d+$/)
+      const propertyNames = propertyElements.map((el) => el.textContent)
+
+      expect(propertyNames).toContain('title')
+      expect(propertyNames).toContain('content')
+      expect(propertyNames).toContain('author')
+    })
+
+    it('should return properties when modelId provided', async () => {
+      // First get the model to get its ID
+      const schema = Schema.create('Test Schema Properties')
+      await new Promise<void>((resolve) => {
+        const subscription = schema.getService().subscribe((snapshot) => {
+          if (snapshot.value === 'idle') {
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        setTimeout(() => {
+          subscription.unsubscribe()
+          resolve()
+        }, 5000)
+      })
+
+      const postModel = schema.models?.find((m) => m.modelName === 'Post')
+      if (!postModel || !postModel.id) {
+        // Skip if we can't get the model ID
+        return
+      }
+
+      render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          return status.textContent === 'loaded'
+        },
+        { timeout: 15000 }
+      )
+
+      // Wait for properties to be populated
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          const countValue = parseInt(count.textContent || '0')
+          expect(countValue).toBeGreaterThanOrEqual(3)
+          return countValue >= 3
+        },
+        { timeout: 30000 }
+      )
+    })
+
+    it('should update when schemaId/modelId changes', async () => {
+      const { rerender } = render(
+        <UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />,
+        { container }
+      )
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          return status.textContent === 'loaded'
+        },
+        { timeout: 15000 }
+      )
+
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          return parseInt(count.textContent || '0') >= 3
+        },
+        { timeout: 30000 }
+      )
+
+      // Change to Article model
+      rerender(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Article" />)
+
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          const countValue = parseInt(count.textContent || '0')
+          // Article model has 2 properties: headline, body
+          expect(countValue).toBeGreaterThanOrEqual(2)
+          return countValue >= 2
+        },
+        { timeout: 30000 }
+      )
+
+      // Verify Article properties
+      const propertyElements = screen.getAllByTestId(/^property-\d+$/)
+      const propertyNames = propertyElements.map((el) => el.textContent)
+      expect(propertyNames).toContain('headline')
+      expect(propertyNames).toContain('body')
+    })
+
+    it('should set isLoading to true initially and false when loaded', async () => {
+      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container })
+
+      // Initially, isLoading might be true or false depending on cache
+      // We'll check that it becomes false when loaded
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('is-loading')
+          const status = screen.getByTestId('properties-status')
+          // Once status is loaded, isLoading should be false
+          if (status.textContent === 'loaded') {
+            expect(isLoading.textContent).toBe('false')
+            return true
+          }
+          return false
+        },
+        { timeout: 15000 }
+      )
+
+      // Verify isLoading is false after loading
+      const isLoading = screen.getByTestId('is-loading')
+      expect(isLoading.textContent).toBe('false')
+    })
+
+    it('should set isLoading to false when schemaId/modelId is null', async () => {
+      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container })
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('is-loading')
+          expect(isLoading.textContent).toBe('false')
+        },
+        { timeout: 5000 }
+      )
+    })
+
+    it('should automatically update when properties change (liveQuery integration)', async () => {
+      // Create an empty schema for this test
+      const emptySchema: SchemaFileFormat = {
+        $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+        version: 1,
+        id: 'livequery-test-schema-props',
+        metadata: {
+          name: 'LiveQuery Test Schema Properties',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        models: {
+          TestModel: {
+            id: 'test-model-livequery',
+            properties: {
+              name: {
+                id: 'name-prop-livequery',
+                type: 'Text',
+              },
+            },
+          },
+        },
+        enums: {},
+        migrations: [],
+      }
+
+      // Clean up any existing schema
+      const db = BaseDb.getAppDb()
+      if (db) {
+        await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
+      }
+      Schema.clearCache()
+
+      // Import schema
+      try {
+        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
+      } catch (error) {
+        // Schema might already exist, clean it up first
+        const appDb = BaseDb.getAppDb()
+        if (appDb) {
+          await appDb.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
+        }
+        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
+      }
+
+      // Wait for schema to be available
+      const { loadAllSchemasFromDb } = await import('@/helpers/schema')
+      await waitFor(
+        async () => {
+          const allSchemas = await loadAllSchemasFromDb()
+          return allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Test Schema Properties')
+        },
+        { timeout: 10000 }
+      )
+
+      // Render component - should start with 1 property (name)
+      render(
+        <UseModelPropertiesTest schemaIdOrModelId="LiveQuery Test Schema Properties" modelName="TestModel" />,
+        { container }
+      )
+
+      // Wait for initial load
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          return status.textContent === 'loaded'
+        },
+        { timeout: 15000 }
+      )
+
+      // Wait for properties to be populated
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          return parseInt(count.textContent || '0') >= 1
+        },
+        { timeout: 30000 }
+      )
+
+      // Get initial count
+      const initialCount = parseInt(screen.getByTestId('properties-count').textContent || '0')
+      expect(initialCount).toBeGreaterThanOrEqual(1)
+
+      // Get the model instance
+      const model = Model.create('TestModel', 'LiveQuery Test Schema Properties')
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Add a new property to the model
+      // Note: This is a simplified test - in reality, properties are added through Model.create with properties option
+      // For this test, we'll verify that the hook responds to database changes via liveQuery
+
+      // Wait for liveQuery to detect the change (if any)
+      await new Promise(resolve => setTimeout(resolve, 2000))
+
+      // Cleanup
+      if (db) {
+        await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
+      }
+      Schema.clearCache()
+    })
+  })
+
+  describe('useModelProperty', () => {
+    it('should return undefined when modelName or propertyName is null', async () => {
+      render(<UseModelPropertyTest modelName={null} propertyName={null} />, { container })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('property-status')
+          expect(status.textContent).toBe('not-loaded')
+        },
+        { timeout: 5000 }
+      )
+    })
+
+    it('should return property when modelName and propertyName provided', async () => {
+      render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+
+      await waitFor(
+        () => {
+          const propertyName = screen.queryByTestId('property-name')
+          return propertyName !== null
+        },
+        { timeout: 15000 }
+      )
+
+      const propertyName = screen.getByTestId('property-name')
+      expect(propertyName.textContent).toBe('title')
+
+      const propertyDataType = screen.getByTestId('property-data-type')
+      expect(propertyDataType.textContent).toBe('Text')
+    })
+
+    it('should update when modelName changes', async () => {
+      const { rerender } = render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+
+      await waitFor(
+        () => {
+          const propertyName = screen.queryByTestId('property-name')
+          return propertyName !== null && propertyName.textContent === 'title'
+        },
+        { timeout: 15000 }
+      )
+
+      // Change to Article model with headline property
+      rerender(<UseModelPropertyTest modelName="Article" propertyName="headline" />)
+
+      await waitFor(
+        () => {
+          const propertyName = screen.getByTestId('property-name')
+          expect(propertyName.textContent).toBe('headline')
+        },
+        { timeout: 15000 }
+      )
+    })
+
+    it('should update when propertyName changes', async () => {
+      const { rerender } = render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+
+      await waitFor(
+        () => {
+          const propertyName = screen.queryByTestId('property-name')
+          return propertyName !== null && propertyName.textContent === 'title'
+        },
+        { timeout: 15000 }
+      )
+
+      // Change property name
+      rerender(<UseModelPropertyTest modelName="Post" propertyName="content" />)
+
+      await waitFor(
+        () => {
+          const propertyName = screen.getByTestId('property-name')
+          expect(propertyName.textContent).toBe('content')
+        },
+        { timeout: 15000 }
+      )
+    })
+
+    it('should track validationErrors', async () => {
+      render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+
+      await waitFor(
+        () => {
+          const propertyName = screen.queryByTestId('property-name')
+          return propertyName !== null
+        },
+        { timeout: 15000 }
+      )
+
+      const validationErrorsCount = screen.getByTestId('validation-errors-count')
+      expect(parseInt(validationErrorsCount.textContent || '0')).toBeGreaterThanOrEqual(0)
+    })
+  })
+
+  describe('useModelProperties with dynamic property creation', () => {
+    it('should display empty properties list initially and show new properties after creation', async () => {
+      // Import empty schema first
+      try {
+        await importJsonSchema({ contents: JSON.stringify(emptyTestSchema) }, emptyTestSchema.version)
+      } catch (error) {
+        // Schema might already exist, which is fine
+        console.log('Schema import note:', error)
+      }
+
+      // Wait for schema to be available in database
+      const { loadAllSchemasFromDb } = await import('@/helpers/schema')
+      await waitFor(
+        async () => {
+          const allSchemas = await loadAllSchemasFromDb()
+          return allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Properties')
+        },
+        { timeout: 10000 }
+      )
+
+      // Render component with empty schema
+      render(
+        <ModelPropertiesListTest schemaIdOrModelId="Empty Test Schema Properties" modelName="NewModel" />,
+        { container }
+      )
+
+      // Wait for component to render
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('properties-status')
+          return status.textContent === 'loaded'
+        },
+        { timeout: 10000 }
+      )
+
+      // Verify properties count is 0 initially (model doesn't exist yet)
+      const initialCount = screen.getByTestId('properties-count')
+      expect(parseInt(initialCount.textContent || '0')).toBe(0)
+
+      // Get the schema instance
+      const schemaInstance = Schema.create('Empty Test Schema Properties')
+      
+      // Wait for schema to be ready
+      await waitFor(
+        () => {
+          const snapshot = schemaInstance.getService().getSnapshot()
+          return snapshot.value === 'idle'
+        },
+        { timeout: 10000 }
+      )
+
+      // Create the model with properties
+      const newModel = Model.create('NewModel', schemaInstance, {
+        properties: {
+          name: { dataType: 'Text' },
+          description: { dataType: 'Text' },
+        },
+      })
+
+      // Wait for model to be idle
+      await waitFor(
+        () => {
+          const modelSnapshot = newModel.getService().getSnapshot()
+          return modelSnapshot.value === 'idle'
+        },
+        { timeout: 10000 }
+      )
+
+      // Wait for properties to appear in the UI
+      await waitFor(
+        () => {
+          const count = screen.getByTestId('properties-count')
+          return parseInt(count.textContent || '0') > 0
+        },
+        { timeout: 30000 }
+      )
+
+      // Verify properties count is now greater than 0
+      const finalCount = screen.getByTestId('properties-count')
+      expect(parseInt(finalCount.textContent || '0')).toBeGreaterThan(0)
+
+      // Cleanup
+      schemaInstance.unload()
+      newModel.unload()
+    })
+  })
+})

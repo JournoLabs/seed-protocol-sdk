@@ -11,7 +11,16 @@ import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
-import { TypedData } from '@ethereum-attestation-service/eas-sdk/dist/offchain/typed-data-handler'
+import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
+
+// Extract TypedData type from EIP712MessageTypes
+// EIP712MessageTypes is defined as { [key: string]: TypedData[] }
+type ExtractTypedData<T> = T extends { [key: string]: infer U }
+  ? U extends Array<infer V>
+    ? V
+    : never
+  : never
+type TypedData = ExtractTypedData<EIP712MessageTypes>
 
 export const analyzeInput = fromCallback<
   EventObject,
@@ -86,19 +95,27 @@ export const analyzeInput = fromCallback<
     }
 
     if (!schemaUid) {
-      let easDataType
+      try {
+        let easDataType
 
-      if (propertyRecordSchema.dataType) {
-        easDataType = INTERNAL_DATA_TYPES[propertyRecordSchema.dataType]
-          .eas as TypedData['type']
-      }
+        if (propertyRecordSchema.dataType) {
+          easDataType = INTERNAL_DATA_TYPES[propertyRecordSchema.dataType]
+            .eas as TypedData['type']
+        }
 
-      const schemaFromEas = await getSchemaForItemProperty({
-        propertyName,
-        easDataType,
-      })
-      if (schemaFromEas) {
-        schemaUid = schemaFromEas.id
+        const schemaFromEas = await getSchemaForItemProperty({
+          propertyName,
+          easDataType,
+        })
+        if (schemaFromEas) {
+          schemaUid = schemaFromEas.id
+        }
+      } catch (error) {
+        // If schema fetch fails, continue without schemaUid - it's not required for local metadata
+        // Log error in development but don't throw
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
+        }
       }
     }
 

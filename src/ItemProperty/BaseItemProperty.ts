@@ -4,7 +4,8 @@ import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { immerable } from 'immer'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
-import { Model } from '@/Model/Model'
+// Dynamic import to break circular dependency: Model -> BaseItem -> BaseItemProperty -> Model
+// import { Model } from '@/Model/Model'
 import { propertyMachine } from './service/propertyMachine'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import debug from 'debug'
@@ -17,6 +18,28 @@ import type { TProperty } from '@/Schema'
 import { eventEmitter } from '@/eventBus'
 import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
+// Lazy import helper to break circular dependency for synchronous Model access
+// Since Model.getByName() is synchronous and Model imports BaseItemProperty (via BaseItem),
+// Model is already initialized when BaseItemProperty constructor runs
+let ModelClass: typeof import('@/Model/Model').Model | null = null
+let modelImportPromise: Promise<typeof import('@/Model/Model')> | null = null
+
+// Start loading Model at module load time (non-blocking)
+modelImportPromise = import('@/Model/Model').then(module => {
+  ModelClass = module.Model
+  return module
+}).catch(() => {
+  // If import fails, ModelClass remains null
+})
+
+const getModel = (): typeof import('@/Model/Model').Model => {
+  if (!ModelClass) {
+    // Model should already be loaded because Model imports BaseItem, which imports BaseItemProperty
+    // If it's not loaded, this indicates a timing issue
+    throw new Error('Model class not available. This may indicate a circular dependency or timing issue.')
+  }
+  return ModelClass
+}
 
 const logger = debug('seedSdk:property:class')
 
@@ -53,6 +76,7 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     }
 
     // Try to get model from cache (synchronous lookup)
+    const Model = getModel()
     const model = Model.getByName(modelName)
 
     if (!model) {
@@ -72,7 +96,19 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
       versionUid,
       modelName,
       storageTransactionId,
-      propertyRecordSchema: model.schema?.[propertyName],
+      propertyRecordSchema: model?.properties ? (() => {
+        const prop = model.properties.find(p => p.name === propertyName)
+        if (!prop) return undefined
+        const propContext = prop._getSnapshotContext()
+        return {
+          dataType: propContext.dataType,
+          ref: propContext.refModelName || propContext.ref,
+          refValueType: propContext.refValueType,
+          storageType: propContext.storageType,
+          localStorageDir: propContext.localStorageDir,
+          filenameSuffix: propContext.filenameSuffix,
+        }
+      })() : undefined,
       schemaUid,
       isSaving: false,
       isRelation: false,
@@ -93,8 +129,20 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
         propertyNameWithoutId = pluralize(propertyNameWithoutId)
       }
 
-      const propertyRecordSchema =
-        model.schema?.[propertyNameWithoutId || propertyName]
+      const propertyRecordSchema = model?.properties ? (() => {
+        const propName = propertyNameWithoutId || propertyName
+        const prop = model.properties.find(p => p.name === propName)
+        if (!prop) return undefined
+        const propContext = prop._getSnapshotContext()
+        return {
+          dataType: propContext.dataType,
+          ref: propContext.refModelName || propContext.ref,
+          refValueType: propContext.refValueType,
+          storageType: propContext.storageType,
+          localStorageDir: propContext.localStorageDir,
+          filenameSuffix: propContext.filenameSuffix,
+        }
+      })() : undefined
       if (propertyRecordSchema) {
         this._dataType = propertyRecordSchema.dataType
 

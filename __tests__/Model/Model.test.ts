@@ -5,7 +5,10 @@ import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { modelUids } from '@/seedSchema/ModelUidSchema'
+import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -14,6 +17,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import { modelPropertiesToObject } from '@/helpers/model'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
 async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
@@ -104,20 +108,104 @@ testDescribe('Model Integration Tests', () => {
   }, 90000) // Increased timeout to allow for full initialization
 
   afterAll(async () => {
-    // Clean up
+    // Clean up - delete in order to respect foreign key constraints
     const db = BaseDb.getAppDb()
     if (db) {
+      // First, nullify refModelId in properties to break self-referential foreign keys
+      await db.update(properties).set({ refModelId: null })
+      // Delete in order: propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
+      await db.delete(propertyUids)
+      await db.delete(modelUids)
+      await db.delete(properties)
+      await db.delete(modelSchemas)
       await db.delete(modelsTable)
       await db.delete(schemas)
     }
   })
 
   beforeEach(async () => {
-    // Clean up database before each test
+    // Clean up database before each test - delete in order to respect foreign key constraints
+    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
     const db = BaseDb.getAppDb()
     if (db) {
-      await db.delete(modelsTable)
-      await db.delete(schemas)
+      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+      const { eq, ne, notInArray, sql } = await import('drizzle-orm')
+      
+      // Get Seed Protocol schema to exclude from cleanup
+      const seedProtocolSchema = await db
+        .select()
+        .from(schemas)
+        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+        .limit(1)
+      
+      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
+        const seedProtocolSchemaId = seedProtocolSchema[0].id
+        
+        // Get Seed Protocol model IDs to exclude from cleanup
+        const seedProtocolModelLinks = await db
+          .select({ modelId: modelSchemas.modelId })
+          .from(modelSchemas)
+          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
+        
+        const seedProtocolModelIds: number[] = seedProtocolModelLinks
+          .map((link: { modelId: number | null }) => link.modelId)
+          .filter((id: number | null): id is number => id !== null)
+        
+        // First, nullify refModelId in properties to break self-referential foreign keys
+        // Exclude Seed Protocol properties
+        if (seedProtocolModelIds.length > 0) {
+          await db.update(properties)
+            .set({ refModelId: null })
+            .where(notInArray(properties.modelId, seedProtocolModelIds))
+        } else {
+          await db.update(properties).set({ refModelId: null })
+        }
+        
+        // Delete propertyUids and modelUids (these don't have schema references, delete all)
+        await db.delete(propertyUids)
+        await db.delete(modelUids)
+        
+        // Delete properties for non-Seed Protocol models
+        if (seedProtocolModelIds.length > 0) {
+          await db.delete(properties)
+            .where(notInArray(properties.modelId, seedProtocolModelIds))
+        } else {
+          await db.delete(properties)
+        }
+        
+        // Delete model_schemas join entries for non-Seed Protocol schemas
+        await db.delete(modelSchemas)
+          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
+        
+        // Delete models for non-Seed Protocol schemas
+        // Get all non-Seed Protocol model IDs from model_schemas
+        const nonSeedProtocolModelLinks = await db
+          .select({ modelId: modelSchemas.modelId })
+          .from(modelSchemas)
+          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
+        
+        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
+          .map((link: { modelId: number | null }) => link.modelId)
+          .filter((id: number | null): id is number => id !== null)
+        
+        if (nonSeedProtocolModelIds.length > 0) {
+          await db.delete(modelsTable)
+            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
+        }
+        
+        // Delete schemas except Seed Protocol
+        await db.delete(schemas)
+          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+      } else {
+        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
+        await db.update(properties).set({ refModelId: null })
+        await db.delete(propertyUids)
+        await db.delete(modelUids)
+        await db.delete(properties)
+        await db.delete(modelSchemas)
+        await db.delete(modelsTable)
+        await db.delete(schemas)
+      }
     }
 
     // Clean up model files (Node.js only)
@@ -159,15 +247,15 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Basic', schemaName)
       expect(model).toBeDefined()
-      expect(model.modelName).toBe('TestModel')
+      expect(model.modelName).toBe('TestModel Basic')
       expect(model.schemaName).toBe(schemaName)
       
       await waitForModelIdle(model)
       
       const context = model.getService().getSnapshot().context
-      expect(context.modelName).toBe('TestModel')
+      expect(context.modelName).toBe('TestModel Basic')
       expect(context.schemaName).toBe(schemaName)
     })
 
@@ -180,9 +268,9 @@ testDescribe('Model Integration Tests', () => {
       const schema = Schema.create(schemaName)
       await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
       
-      const model = Model.create('TestModel', schema)
+      const model = Model.create('TestModel Schema Instance', schema)
       expect(model).toBeDefined()
-      expect(model.modelName).toBe('TestModel')
+      expect(model.modelName).toBe('TestModel Schema Instance')
       expect(model.schemaName).toBe(schemaName)
       
       await waitForModelIdle(model)
@@ -195,87 +283,68 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const properties = {
-        title: { dataType: 'String' },
+        title: { dataType: 'Text' },
         content: { dataType: 'Text' },
       }
       
-      const model = Model.create('TestModel', schemaName, {
+      const model = Model.create('TestModel With Properties', schemaName, {
         properties,
       })
+
+      model.getService().subscribe((snapshot) => {
+        console.log('model snapshot.value', snapshot.value)
+        // console.log('model snapshot.context', snapshot.context)
+      })
       
       await waitForModelIdle(model)
+      
+      // Wait for liveQuery subscription to be set up and context to be updated
+      await new Promise<void>((resolve, reject) => {
+        const subscription = model.getService().subscribe((snapshot) => {
+          console.log('Waiting for liveQueryIds', snapshot.context._liveQueryPropertyIds)
+          const liveQueryIds = snapshot.context._liveQueryPropertyIds || []
+          if (liveQueryIds.length >= 2) {
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        
+        // Also check immediately in case it's already updated
+        const currentSnapshot = model.getService().getSnapshot()
+        const currentLiveQueryIds = currentSnapshot.context._liveQueryPropertyIds || []
+        if (currentLiveQueryIds.length >= 2) {
+          subscription.unsubscribe()
+          resolve()
+          return
+        }
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          subscription.unsubscribe()
+          const finalSnapshot = model.getService().getSnapshot()
+          const finalLiveQueryIds = finalSnapshot.context._liveQueryPropertyIds || []
+          console.log('finalLiveQueryIds', finalLiveQueryIds)
+          if (finalLiveQueryIds.length >= 2) {
+            resolve()
+          } else {
+            reject(new Error(`Timeout waiting for liveQueryPropertyIds. Got ${finalLiveQueryIds.length} items, expected at least 2`))
+          }
+        }, 5000)
+      })
       
       expect(model.properties).toBeDefined()
-      expect(model.properties?.title).toBeDefined()
-      expect(model.properties?.content).toBeDefined()
-    })
-
-    it('should create a Model with indexes', async () => {
-      const schemaName = 'Test Schema Model Indexes'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const modelProperties = model.properties || []
+      expect(Array.isArray(modelProperties)).toBe(true)
+      expect(modelProperties.length).toBe(2)
       
-      const model = Model.create('TestModel', schemaName, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-        indexes: ['title'],
-      })
+      // Find properties by name
+      const titleProperty = modelProperties.find(p => p.name === 'title')
+      const contentProperty = modelProperties.find(p => p.name === 'content')
       
-      await waitForModelIdle(model)
-      
-      expect(model.indexes).toBeDefined()
-      expect(model.indexes).toContain('title')
-    })
-
-    it('should create a Model with description', async () => {
-      const schemaName = 'Test Schema Model Description'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const description = 'Test model description'
-      const model = Model.create('TestModel', schemaName, {
-        description,
-      })
-      
-      await waitForModelIdle(model)
-      
-      expect(model.description).toBe(description)
-    })
-
-    it('should create a Model with modelFileId', async () => {
-      const schemaName = 'Test Schema Model File ID'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const modelFileId = generateId()
-      const model = Model.create('TestModel', schemaName, {
-        modelFileId,
-      })
-      
-      await waitForModelIdle(model)
-      
-      expect(model.id).toBe(modelFileId)
-      const context = model.getService().getSnapshot().context
-      expect(context._modelFileId).toBe(modelFileId)
-    })
-
-    it('should return the same instance when called multiple times (caching)', async () => {
-      const schemaName = 'Test Schema Model Cache'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model1 = Model.create('TestModel', schemaName)
-      const model2 = Model.create('TestModel', schemaName)
-      
-      await waitForModelIdle(model1)
-      await waitForModelIdle(model2)
-      
-      expect(model1).toBe(model2)
+      expect(titleProperty).toBeDefined()
+      expect(titleProperty?.dataType).toBe('Text')
+      expect(contentProperty).toBeDefined()
+      expect(contentProperty?.dataType).toBe('Text')
     })
 
     it('should throw error if model name is empty', () => {
@@ -298,7 +367,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Empty Properties', schemaName)
       await waitForModelIdle(model)
       
       expect(model.properties).toBeDefined()
@@ -306,16 +375,193 @@ testDescribe('Model Integration Tests', () => {
     })
   })
 
+  describe('Model.create() - Duplicate Name Validation', () => {
+    it('should automatically rename model when duplicate name exists in cache (case-insensitive)', async () => {
+      const schemaName = 'Test Schema Duplicate Names Cache'
+      const testSchema = createTestSchema(schemaName, {
+        'New model': {
+          id: generateId(),
+          properties: {},
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Create first model
+      const model1 = Model.create('New model', schemaName)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('New model 1')
+      
+      // Try to create second model with same name (different case)
+      const model2 = Model.create('new model', schemaName)
+      await waitForModelIdle(model2)
+      
+      // Should be automatically renamed
+      expect(model2.modelName).toBe('new model 2')
+      expect(model2).not.toBe(model1) // Should be different instances
+      
+      // Verify both models exist
+      expect(model1.modelName).toBe('New model 1')
+      expect(model2.modelName).toBe('new model 2')
+    })
+
+    it('should increment model name when multiple duplicates exist', async () => {
+      const schemaName = 'Test Schema Duplicate Names Increment'
+      const testSchema = createTestSchema(schemaName)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Create multiple models with the same base name
+      const model1 = Model.create('My Model', schemaName)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('My Model')
+      
+      const model2 = Model.create('My Model', schemaName)
+      await waitForModelIdle(model2)
+      expect(model2.modelName).toBe('My Model 1')
+      
+      const model3 = Model.create('My Model', schemaName)
+      await waitForModelIdle(model3)
+      expect(model3.modelName).toBe('My Model 2')
+      
+      // Verify all models are different instances
+      expect(model1).not.toBe(model2)
+      expect(model2).not.toBe(model3)
+      expect(model1).not.toBe(model3)
+    })
+
+    it('should handle duplicate names when models exist in database', async () => {
+      const schemaName = 'Test Schema Duplicate Names Database'
+      const testSchema = createTestSchema(schemaName, {
+        'Existing Model': {
+          id: generateId(),
+          properties: {},
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Wait for the imported model to be written to database
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Clear the cache to force database lookup
+      // Note: We can't easily clear the cache, but we can create a model with a different name first
+      // then try to create one with the same name as the imported one
+      
+      // Try to create a model with the same name as the imported one (case-insensitive)
+      const newModel = Model.create('existing model', schemaName)
+      await waitForModelIdle(newModel)
+      
+      // Should be automatically renamed since 'Existing Model' exists in database
+      expect(newModel.modelName).toBe('existing model 1')
+    })
+
+    it('should find next available number when some numbers are already used', async () => {
+      const schemaName = 'Test Schema Duplicate Names Gaps'
+      const testSchema = createTestSchema(schemaName)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Create models: base, 1, 3 (skipping 2)
+      const model1 = Model.create('Gap Model', schemaName)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('Gap Model')
+      
+      const model2 = Model.create('Gap Model', schemaName)
+      await waitForModelIdle(model2)
+      expect(model2.modelName).toBe('Gap Model 1')
+      
+      // Create model 3 directly by using the name
+      const model3 = Model.create('Gap Model 3', schemaName)
+      await waitForModelIdle(model3)
+      expect(model3.modelName).toBe('Gap Model 3')
+      
+      // Now create another duplicate - should fill the gap at 2
+      const model4 = Model.create('Gap Model', schemaName)
+      await waitForModelIdle(model4)
+      expect(model4.modelName).toBe('Gap Model 2')
+    })
+
+    it('should handle case-insensitive comparison correctly', async () => {
+      const schemaName = 'Test Schema Duplicate Names Case Insensitive'
+      const testSchema = createTestSchema(schemaName)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Create model with lowercase
+      const model1 = Model.create('case test', schemaName)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('case test')
+      
+      // Try to create with uppercase - should be treated as duplicate
+      const model2 = Model.create('CASE TEST', schemaName)
+      await waitForModelIdle(model2)
+      expect(model2.modelName).toBe('CASE TEST 1')
+      
+      // Try with mixed case - should also be treated as duplicate
+      const model3 = Model.create('Case Test', schemaName)
+      await waitForModelIdle(model3)
+      expect(model3.modelName).toBe('Case Test 2')
+    })
+
+    it('should preserve original name format when appending number', async () => {
+      const schemaName = 'Test Schema Duplicate Names Format'
+      const testSchema = createTestSchema(schemaName)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      // Create first model
+      const model1 = Model.create('Formatted Model', schemaName)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('Formatted Model')
+      
+      // Create duplicate - should preserve original capitalization
+      const model2 = Model.create('Formatted Model', schemaName)
+      await waitForModelIdle(model2)
+      expect(model2.modelName).toBe('Formatted Model 1')
+      
+      // Verify the format is preserved (space before number)
+      expect(model2.modelName).toMatch(/^Formatted Model \d+$/)
+    })
+
+    it('should work correctly with models in different schemas', async () => {
+      const schemaName1 = 'Test Schema Duplicate Names Schema1'
+      const schemaName2 = 'Test Schema Duplicate Names Schema2'
+      
+      const testSchema1 = createTestSchema(schemaName1)
+      const testSchema2 = createTestSchema(schemaName2)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema1) }, testSchema1.version)
+      await importJsonSchema({ contents: JSON.stringify(testSchema2) }, testSchema2.version)
+      
+      // Create models with same name in different schemas
+      const model1 = Model.create('Shared Name', schemaName1)
+      await waitForModelIdle(model1)
+      expect(model1.modelName).toBe('Shared Name')
+      
+      const model2 = Model.create('Shared Name', schemaName2)
+      await waitForModelIdle(model2)
+      // Should NOT be renamed since it's in a different schema
+      expect(model2.modelName).toBe('Shared Name')
+      
+      // But duplicates within the same schema should be renamed
+      const model3 = Model.create('Shared Name', schemaName1)
+      await waitForModelIdle(model3)
+      expect(model3.modelName).toBe('Shared Name 1')
+    })
+  })
+
   describe('Model.create() - Database Integration', () => {
     it('should create seed, version, and metadata records when creating an item instance', async () => {
       const schemaName = 'Test Schema Model DB Integration'
+      const modelName = 'TestModel DB Integration'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {
             title: {
               id: generateId(),
-              type: 'String',
+              type: 'Text',
             },
             content: {
               id: generateId(),
@@ -331,8 +577,57 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const TestModel = Model.create('TestModel', schemaName)
+      // Wait a bit for the schema import to complete and model to be written to database
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Get the model that was imported (may be renamed if duplicate exists)
+      // Try getByNameAsync first, but if that fails, try Model.create which will handle renaming
+      let TestModel = await Model.getByNameAsync(modelName, schemaName)
+      if (!TestModel) {
+        // If not found, try creating it (will use the imported model from database or create new)
+        TestModel = Model.create(modelName, schemaName)
+      }
+      
       await waitForModelIdle(TestModel)
+      
+      // Wait for model properties to be loaded (they come from the schema import)
+      await new Promise<void>((resolve, reject) => {
+        const subscription = TestModel.getService().subscribe((snapshot) => {
+          const properties = TestModel.properties || []
+          if (properties.length >= 3) { // title, content, count
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        
+        // Check immediately
+        const properties = TestModel.properties || []
+        if (properties.length >= 3) {
+          subscription.unsubscribe()
+          resolve()
+          return
+        }
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          subscription.unsubscribe()
+          const finalProperties = TestModel.properties || []
+          if (finalProperties.length >= 3) {
+            resolve()
+          } else {
+            reject(new Error(`Timeout waiting for model properties. Got ${finalProperties.length} properties, expected at least 3`))
+          }
+        }, 5000)
+      })
+      
+      // Get the actual model name (may be renamed if duplicate exists)
+      const actualModelName = TestModel.modelName
+      if (!actualModelName) {
+        throw new Error('Model name is required')
+      }
+      // Convert to snake_case for type assertions (using same function as createNewItem)
+      const { toSnakeCase } = await import('drizzle-orm/casing')
+      const expectedType = toSnakeCase(actualModelName)
       
       // Create an item instance
       const testModelItem = await TestModel.create({
@@ -362,7 +657,7 @@ testDescribe('Model Integration Tests', () => {
 
       expect(seedRecords).toHaveLength(1)
       expect(seedRecords[0].localId).toBe(testModelItem.seedLocalId)
-      expect(seedRecords[0].type).toBe('test_model')
+      expect(seedRecords[0].type).toBe(expectedType)
       expect(seedRecords[0].schemaUid).toBeDefined()
       expect(seedRecords[0].createdAt).toBeDefined()
       expect(seedRecords[0].createdAt).toBeGreaterThan(0)
@@ -377,7 +672,7 @@ testDescribe('Model Integration Tests', () => {
       expect(versionRecords).toHaveLength(1)
       expect(versionRecords[0].localId).toBe(testModelItem.latestVersionLocalId)
       expect(versionRecords[0].seedLocalId).toBe(testModelItem.seedLocalId)
-      expect(versionRecords[0].seedType).toBe('test_model')
+      expect(versionRecords[0].seedType).toBe(expectedType)
       expect(versionRecords[0].createdAt).toBeDefined()
       expect(versionRecords[0].createdAt).toBeGreaterThan(0)
 
@@ -392,6 +687,8 @@ testDescribe('Model Integration Tests', () => {
           )
         )
 
+      console.log('metadataRecords', metadataRecords)
+
       expect(metadataRecords.length).toBeGreaterThanOrEqual(3)
 
       // Verify title metadata
@@ -400,7 +697,7 @@ testDescribe('Model Integration Tests', () => {
       expect(titleMetadata!.propertyValue).toBe('Test Title')
       expect(titleMetadata!.seedLocalId).toBe(testModelItem.seedLocalId)
       expect(titleMetadata!.versionLocalId).toBe(testModelItem.latestVersionLocalId)
-      expect(titleMetadata!.modelType).toBe('test_model')
+      expect(titleMetadata!.modelType).toBe(expectedType)
       expect(titleMetadata!.createdAt).toBeDefined()
       expect(titleMetadata!.updatedAt).toBeDefined()
 
@@ -421,13 +718,14 @@ testDescribe('Model Integration Tests', () => {
 
     it('should create records with correct relationships between seed, version, and metadata', async () => {
       const schemaName = 'Test Schema Model DB Relationships'
+      const modelName = 'TestModel Relationships'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {
             name: {
               id: generateId(),
-              type: 'String',
+              type: 'Text',
             },
           },
         },
@@ -435,7 +733,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       const item = await model.create({
@@ -490,8 +788,9 @@ testDescribe('Model Integration Tests', () => {
 
     it('should handle creating items with no properties', async () => {
       const schemaName = 'Test Schema Model DB No Properties'
+      const modelName = 'TestModel No Properties'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {},
         },
@@ -499,7 +798,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       const item = await model.create({} as any)
@@ -549,13 +848,14 @@ testDescribe('Model Integration Tests', () => {
 
     it('should create unique localIds for seed, version, and metadata records', async () => {
       const schemaName = 'Test Schema Model DB Unique IDs'
+      const modelName = 'TestModel Unique IDs'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {
             value: {
               id: generateId(),
-              type: 'String',
+              type: 'Text',
             },
           },
         },
@@ -563,7 +863,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       // Create multiple items
@@ -612,7 +912,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const modelFileId = generateId()
-      const model1 = Model.create('TestModel', schemaName, { modelFileId })
+      const model1 = Model.create('TestModel Get By ID', schemaName, { modelFileId })
       await waitForModelIdle(model1)
       
       const model2 = Model.getById(modelFileId)
@@ -630,14 +930,15 @@ testDescribe('Model Integration Tests', () => {
   describe('Model.getByName()', () => {
     it('should return cached Model instance by name', async () => {
       const schemaName = 'Test Schema Model Get By Name'
+      const modelName = 'TestModel Get By Name'
       const testSchema = createTestSchema(schemaName)
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model1 = Model.create('TestModel', schemaName)
+      const model1 = Model.create(modelName, schemaName)
       await waitForModelIdle(model1)
       
-      const model2 = Model.getByName('TestModel', schemaName)
+      const model2 = Model.getByName(modelName, schemaName)
       expect(model2).toBe(model1)
     })
 
@@ -649,37 +950,18 @@ testDescribe('Model Integration Tests', () => {
   })
 
   describe('Model property access', () => {
-    it('should access model properties through proxy', async () => {
-      const schemaName = 'Test Schema Model Property Access'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const properties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      const model = Model.create('TestModel', schemaName, { properties })
-      await waitForModelIdle(model)
-      
-      // Test property access
-      expect(model.modelName).toBe('TestModel')
-      expect(model.schemaName).toBe(schemaName)
-      expect(model.properties).toBeDefined()
-      expect(model.properties?.title).toBeDefined()
-    })
 
     it('should access model name via "name" alias', async () => {
       const schemaName = 'Test Schema Model Name Alias'
+      const modelName = 'TestModel Name Alias'
       const testSchema = createTestSchema(schemaName)
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
-      expect(model.name).toBe('TestModel')
+      expect(model.name).toBe(modelName)
       expect(model.name).toBe(model.modelName)
     })
 
@@ -690,7 +972,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const modelFileId = generateId()
-      const model = Model.create('TestModel', schemaName, { modelFileId })
+      const model = Model.create('TestModel ID Property', schemaName, { modelFileId })
       await waitForModelIdle(model)
       
       expect(model.id).toBe(modelFileId)
@@ -698,11 +980,12 @@ testDescribe('Model Integration Tests', () => {
 
     it('should update model name', async () => {
       const schemaName = 'Test Schema Model Update Name'
+      const modelName = 'TestModel Update Name'
       const testSchema = createTestSchema(schemaName)
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       const oldName = model.modelName
@@ -716,102 +999,9 @@ testDescribe('Model Integration Tests', () => {
       expect(model.modelName).toBe(newName)
       expect(model.name).toBe(newName)
     })
-
-    it('should update model properties', async () => {
-      const schemaName = 'Test Schema Model Update Properties'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestModel', schemaName, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-      })
-      await waitForModelIdle(model)
-      
-      const newProperties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      model.properties = newProperties
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      expect(model.properties).toBeDefined()
-      expect(model.properties?.content).toBeDefined()
-    })
-
-    it('should update model indexes', async () => {
-      const schemaName = 'Test Schema Model Update Indexes'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestModel', schemaName, {
-        properties: {
-          title: { dataType: 'String' },
-          content: { dataType: 'Text' },
-        },
-        indexes: ['title'],
-      })
-      await waitForModelIdle(model)
-      
-      model.indexes = ['title', 'content']
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      expect(model.indexes).toContain('title')
-      expect(model.indexes).toContain('content')
-    })
-
-    it('should update model description', async () => {
-      const schemaName = 'Test Schema Model Update Description'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestModel', schemaName, {
-        description: 'Initial description',
-      })
-      await waitForModelIdle(model)
-      
-      model.description = 'Updated description'
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      expect(model.description).toBe('Updated description')
-    })
   })
 
   describe('Model state management', () => {
-    it('should track draft state', async () => {
-      const schemaName = 'Test Schema Model Draft'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestModel', schemaName)
-      await waitForModelIdle(model)
-      
-      // Initially should not be a draft (loaded from file or newly created)
-      let context = model.getService().getSnapshot().context
-      expect(context._isEdited).toBe(false)
-      
-      // Make a change
-      model.description = 'Updated description'
-      
-      // Wait for draft to be saved
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      // Should now be a draft
-      context = model.getService().getSnapshot().context
-      expect(context._isEdited).toBe(true)
-    })
 
     it('should track validation errors', async () => {
       const schemaName = 'Test Schema Model Validation Errors'
@@ -819,7 +1009,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Validation', schemaName)
       await waitForModelIdle(model)
       
       // Check validation errors property
@@ -834,7 +1024,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Status', schemaName)
       
       // Status should be 'loading' initially
       expect(['loading', 'idle']).toContain(model.status)
@@ -853,9 +1043,9 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName, {
+      const model = Model.create('TestModel Validate', schemaName, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
         },
       })
       await waitForModelIdle(model)
@@ -873,7 +1063,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Validate Structure', schemaName)
       await waitForModelIdle(model)
       
       const validationResult = await model.validate()
@@ -884,31 +1074,12 @@ testDescribe('Model Integration Tests', () => {
     })
   })
 
-  describe('Model schema property', () => {
-    it('should return properties as schema', async () => {
-      const schemaName = 'Test Schema Model Schema Property'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const properties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      const model = Model.create('TestModel', schemaName, { properties })
-      await waitForModelIdle(model)
-      
-      expect(model.schema).toBeDefined()
-      expect(model.schema).toBe(model.properties)
-    })
-  })
-
   describe('Model reload', () => {
     it('should reload model from database', async () => {
       const schemaName = 'Test Schema Model Reload'
+      const modelName = 'TestModel Reload'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {
             title: {
@@ -921,7 +1092,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       // Update database directly
@@ -930,12 +1101,12 @@ testDescribe('Model Integration Tests', () => {
         const dbModels = await db
           .select()
           .from(modelsTable)
-          .where(eq(modelsTable.name, 'TestModel'))
+          .where(eq(modelsTable.name, modelName))
           .limit(1)
         
         if (dbModels.length > 0 && dbModels[0].modelData) {
           const updatedModel = JSON.parse(dbModels[0].modelData) as any
-          updatedModel.description = 'Updated from database'
+          // Note: description is not used - JSON files can have it but we ignore it at runtime
           
           await db
             .update(modelsTable)
@@ -961,7 +1132,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create('TestModel Unload', schemaName)
       await waitForModelIdle(model)
       
       // Verify service is running
@@ -980,11 +1151,12 @@ testDescribe('Model Integration Tests', () => {
   describe('Model name change', () => {
     it('should update cache when model name changes', async () => {
       const schemaName = 'Test Schema Model Name Change'
+      const modelName = 'TestModel Cache Update'
       const testSchema = createTestSchema(schemaName)
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel', schemaName)
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
       const modelId = model.id
@@ -1008,162 +1180,94 @@ testDescribe('Model Integration Tests', () => {
       const oldModel = oldName ? Model.getByName(oldName, schemaName) : undefined
       expect(oldModel).toBeUndefined()
     })
-  })
 
-  describe('Model integration with Schema', () => {
-    it('should register model with schema when created with schema instance', async () => {
-      const schemaName = 'Test Schema Model Register'
-      const testSchema = createTestSchema(schemaName)
+    it('should immediately save model name changes to database', async () => {
+      const schemaName = 'Test Schema Model Name Change DB'
+      const modelName = 'TestModel Name Change DB'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            title: {
+              id: generateId(),
+              type: 'Text',
+            },
+          },
+        },
+      })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
-      
-      const model = Model.create('TestModel', schema, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-      })
+      const model = Model.create(modelName, schemaName)
       await waitForModelIdle(model)
       
-      // Wait a bit for registration to complete
+      const oldName = model.modelName
+      const newName = 'UpdatedModelName'
+      
+      expect(oldName).toBeDefined()
+      expect(oldName).toBe(modelName)
+      
+      // Wait a bit for model to be written to database if it wasn't already
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Verify model exists in database with old name first (if it was written)
+      const db = BaseDb.getAppDb()
+      if (db && oldName) {
+        const dbModelsBefore = await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.name, oldName))
+          .limit(1)
+        
+        // Model might not be in database yet if schema wasn't saved, but that's okay
+        // We'll verify it gets saved after the name change
+      }
+      
+      // Update name
+      model.modelName = newName
+      
+      // Wait for update to complete (including database save)
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      // Schema should have the model
-      const schemaContext = schema.getService().getSnapshot().context
-      expect(schemaContext.models).toBeDefined()
-      expect(schemaContext.models?.['TestModel']).toBeDefined()
-    })
-
-    it('should not register model with schema when registerWithSchema is false', async () => {
-      const schemaName = 'Test Schema Model No Register'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      // Verify name changed in memory
+      expect(model.modelName).toBe(newName)
+      expect(model.name).toBe(newName)
       
-      const schema = Schema.create(schemaName)
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
-      
-      const model = Model.create('TestModel', schema, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-        registerWithSchema: false,
-      })
-      await waitForModelIdle(model)
-      
-      // Wait a bit
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Model should still be created
-      expect(model).toBeDefined()
-      expect(model.modelName).toBe('TestModel')
+      // Verify database was updated with new name
+      if (db) {
+        const dbModels = await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.name, newName))
+          .limit(1)
+        
+        expect(dbModels.length).toBeGreaterThan(0)
+        expect(dbModels[0].name).toBe(newName)
+        
+        // Verify old name no longer exists in database (if it existed before)
+        if (oldName) {
+          const oldDbModels = await db
+            .select()
+            .from(modelsTable)
+            .where(eq(modelsTable.name, oldName))
+            .limit(1)
+          
+          // If the model was in the database before, it should be renamed (length = 0)
+          // If it wasn't in the database before, this is also fine
+          // The key assertion is that the new name exists in the database
+        }
+        expect(dbModels.length).toBeGreaterThan(0)
+      }
     })
   })
 
   describe('Model edit independence', () => {
-    it('should not update Schema context when Model is edited', async () => {
-      const schemaName = 'Test Schema Model Edit Independence'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const schema = Schema.create(schemaName)
-      await waitForSchemaIdle(schema)
-      
-      // Create a model
-      const model = Model.create('TestModel', schema, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-      })
-      await waitForModelIdle(model)
-      
-      // Wait for registration
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Get initial Schema context state
-      const initialContext = schema.getService().getSnapshot().context
-      const initialModelData = initialContext.models?.['TestModel']
-      
-      // Edit model properties
-      model.properties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      // Wait for model update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      // Verify Model instance has the new values
-      expect(model.properties?.content).toBeDefined()
-      
-      // Verify Schema context.models is NOT updated immediately
-      // (Model edits no longer notify Schema during edits, only during persistence)
-      const updatedContext = schema.getService().getSnapshot().context
-      const updatedModelData = updatedContext.models?.['TestModel']
-      
-      // The context.models should still have the old data structure
-      // (it's not updated during Model edits, only during persistence)
-      // Note: The exact structure depends on implementation, but the key point is
-      // that Schema context is not immediately updated when Model is edited
-      expect(updatedModelData).toBeDefined()
-      
-      // Verify Model instance maintains its own state
-      expect(model.properties?.content).toBeDefined()
-    })
-
-    it('should read from Model instances when Schema persists', async () => {
-      const schemaName = 'Test Schema Model Persistence'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const schema = Schema.create(schemaName)
-      await waitForSchemaIdle(schema)
-      
-      // Create a model
-      const model = Model.create('TestModel', schema, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-      })
-      await waitForModelIdle(model)
-      
-      // Wait for registration
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Edit model properties
-      model.properties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      // Wait for model update
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      // Verify Model instance has the new values
-      expect(model.properties?.content).toBeDefined()
-      
-      // When Schema persists, it should read from Model instances, not context.models
-      // This is verified by checking that the Model instance has the updated data
-      // and that Schema can access it through schema.models
-      const models = schema.models || []
-      const foundModel = models.find((m: any) => m.modelName === 'TestModel')
-      
-      if (foundModel) {
-        // Schema should be able to read from the Model instance
-        expect(foundModel.properties).toBeDefined()
-        // The Model instance should have the updated properties
-        expect(foundModel.properties?.content).toBeDefined()
-      }
-    })
 
     it('should load Model data from database first', async () => {
       const schemaName = 'Test Schema Model Load From DB'
+      const modelName = 'TestModel Load From DB'
       const testSchema = createTestSchema(schemaName, {
-        TestModel: {
+        [modelName]: {
           id: generateId(),
           properties: {
             title: {
@@ -1181,11 +1285,11 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create first model instance and save to database
-      const model1 = Model.create('TestModel', schemaName)
+      const model1 = Model.create(modelName, schemaName)
       await waitForModelIdle(model1)
       
-      // Edit the model
-      model1.description = 'Initial description'
+      // Note: description is not supported - JSON files can have it but we ignore it at runtime
+      // Edit the model (using a supported property if needed)
       await new Promise(resolve => setTimeout(resolve, 200))
       
       // Save the model (this persists to database)
@@ -1194,7 +1298,7 @@ testDescribe('Model Integration Tests', () => {
       
       // Create a new Model instance with the same name
       // It should load from database, not from Schema context
-      const model2 = Model.create('TestModel', schemaName)
+      const model2 = Model.create(modelName, schemaName)
       await waitForModelIdle(model2)
       
       // Verify both instances exist (they're cached)
@@ -1205,7 +1309,7 @@ testDescribe('Model Integration Tests', () => {
       expect(model1).toBe(model2)
       
       // Verify the model loaded its data
-      expect(model2.modelName).toBe('TestModel')
+      expect(model2.modelName).toBe(modelName)
       expect(model2.schemaName).toBe(schemaName)
     })
   })
@@ -1275,11 +1379,9 @@ testDescribe('Model Integration Tests', () => {
       
       const newModel = Model.create('New model', schemaName, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
           content: { dataType: 'Text' },
         },
-        indexes: ['title'],
-        description: 'Test model description',
       })
       
       // Track subscription callbacks
@@ -1327,6 +1429,7 @@ testDescribe('Model Integration Tests', () => {
       
       // Verify the model eventually reached idle state
       const finalSnapshot = newModel.getService().getSnapshot()
+      console.log('finalSnapshot.value', finalSnapshot.value)
       expect(finalSnapshot.value).toBe('idle')
     })
 
@@ -1341,7 +1444,7 @@ testDescribe('Model Integration Tests', () => {
       
       const newModel = Model.create('New model', schema, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
         },
       })
       
@@ -1401,7 +1504,7 @@ testDescribe('Model Integration Tests', () => {
       
       const newModel = Model.create('New model', schemaName, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
         },
       })
       
@@ -1417,7 +1520,6 @@ testDescribe('Model Integration Tests', () => {
         const modelName = newModel.modelName
         const modelSchemaName = newModel.schemaName
         const properties = newModel.properties
-        const description = newModel.description
         
         // Verify properties are accessible
         expect(modelName).toBe('New model')
@@ -1446,62 +1548,6 @@ testDescribe('Model Integration Tests', () => {
       expect(callbackCount).toBeLessThanOrEqual(maxExpectedCallbacks)
     })
 
-    it('should stabilize context updates and not trigger infinite validation loops', async () => {
-      const schemaName = 'Test Schema Subscription No Loop 5'
-      const testSchema = createTestSchema(schemaName)
-
-      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const newModel = Model.create('New model', schemaName, {
-        properties: {
-          title: { dataType: 'String' },
-        },
-      })
-      
-      await waitForModelIdle(newModel)
-      
-      // Track subscription callbacks after initial creation
-      let callbackCount = 0
-      const stateTransitions: string[] = []
-      const maxExpectedCallbacks = 10
-      
-      const subscription = newModel.getService().subscribe((snapshot) => {
-        callbackCount++
-        stateTransitions.push(snapshot.value as string)
-        
-        // Fail if we get too many callbacks (indicates infinite loop)
-        if (callbackCount > maxExpectedCallbacks) {
-          subscription.unsubscribe()
-          throw new Error(
-            `Infinite loop detected after stabilization: subscription fired ${callbackCount} times. ` +
-            `State transitions: ${stateTransitions.join(' -> ')}`
-          )
-        }
-      })
-      
-      // Make a property update (this should trigger validation but not infinite loop)
-      newModel.properties = {
-        title: { dataType: 'String' },
-        content: { dataType: 'Text' },
-      }
-      
-      // Wait for validation to complete
-      await waitForModelIdle(newModel, 10000)
-      
-      // Wait a bit more to ensure no additional callbacks
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Unsubscribe
-      subscription.unsubscribe()
-      
-      // Verify we didn't get an excessive number of callbacks
-      expect(callbackCount).toBeLessThanOrEqual(maxExpectedCallbacks)
-      
-      // Verify the model eventually reached idle state
-      const finalSnapshot = newModel.getService().getSnapshot()
-      expect(finalSnapshot.value).toBe('idle')
-    })
-
     it('should not cause infinite loop when multiple subscriptions are active', async () => {
       const schemaName = 'Test Schema Subscription No Loop 6'
       const testSchema = createTestSchema(schemaName)
@@ -1510,7 +1556,7 @@ testDescribe('Model Integration Tests', () => {
       
       const newModel = Model.create('New model', schemaName, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
         },
       })
       

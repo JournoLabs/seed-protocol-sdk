@@ -65,7 +65,8 @@ const testSchemaWithModels: SchemaFileFormat = {
 
 // Test component for useModels
 function UseModelsTest({ schemaId }: { schemaId: string | null | undefined }) {
-  const models = useModels(schemaId)
+  console.log('[UseModelsTest] schemaId:', schemaId)
+  const { models } = useModels(schemaId)
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {

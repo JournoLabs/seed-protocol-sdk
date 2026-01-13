@@ -40,12 +40,16 @@ export const runCommandWithOutput: RunCommandWithOutput = async ({command, args,
   return output
 }
 
+// NOTE: This function is obsolete - it references the old decorator-based seed.config.ts approach
+// Models are now defined in schema JSON files, not in seed.config.ts
+// All tests using this function are commented out
 export const runAddModel = async () => {
   const projectRoot = path.resolve(process.cwd(),)
   const addModelPath = path.resolve(projectRoot, 'scripts', 'addModel.ts');
   const nodeProjectDir = path.resolve(projectRoot, '__tests__', '__mocks__', 'node', 'project',)
   const schemaDirPath = path.resolve(nodeProjectDir);
   const dotSeedDir = path.resolve(nodeProjectDir, '.seed');
+  // OBSOLETE: seed.config.ts is no longer used - models are defined in schema files
   const sourceSchemaFilePath = path.resolve(schemaDirPath, 'seed.config.ts');
   const outputFilePath = path.resolve(dotSeedDir, 'schemaTestOutput.ts');
 
@@ -114,17 +118,8 @@ export const runInit = async ({
       fs.mkdirSync(targetDir, { recursive: true })
     }
 
-    // Create a basic seed.config.ts if it doesn't exist
-    const configPath = path.join(targetDir, 'seed.config.ts')
-    if (!fs.existsSync(configPath)) {
-      const configContent = `export default {
-  models: {},
-  endpoints: {
-    localOutputDir: './seed-files'
-  }
-}`
-      fs.writeFileSync(configPath, configContent)
-    }
+    // Note: seed.config.ts is no longer required
+    // Projects can use empty config - models are defined in schema files
 
     const command = `npx tsx ${binPath} init ${args.join(' ')}`
 

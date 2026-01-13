@@ -3,6 +3,7 @@ import pluralize                from 'pluralize'
 import { camelCase, snakeCase } from 'lodash-es'
 import { Model } from '@/Model/Model'
 import { ModelPropertyDataTypes } from '@/Schema'
+import { modelPropertiesToObject } from '@/helpers/model'
 
 // Define ILoader type locally to avoid importing from nunjucks (prevents bundling issues)
 type ILoader = {
@@ -64,10 +65,12 @@ export const generateDrizzleSchemaCode = async (
   modelName: string,
   model: Model,
 ): Promise<string> => {
-  if (!model.schema) {
-    throw new Error(`Model ${modelName} has no schema`)
+  const properties = model.properties || []
+  if (properties.length === 0) {
+    throw new Error(`Model ${modelName} has no properties`)
   }
-  const listProperties = Object.entries(model.schema).filter(
+  const schema = modelPropertiesToObject(properties)
+  const listProperties = Object.entries(schema).filter(
     ([key, propertyDef]) => propertyDef?.dataType === ModelPropertyDataTypes.List && !refNamesToExcludeFromRelations.includes(propertyDef?.ref!),
   )
 

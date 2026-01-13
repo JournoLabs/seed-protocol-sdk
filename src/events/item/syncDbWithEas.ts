@@ -20,7 +20,8 @@ import {
 } from '@/Item/queries'
 import { escapeSqliteString, getAddressesFromDb } from '@/helpers/db'
 import { eventEmitter } from '@/eventBus'
-import { Model } from '@/Model/Model'
+// Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
+// import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema, PropertyType } from '@/types'
@@ -143,9 +144,15 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
 
   if (existingVersionRecordsRows && existingVersionRecordsRows.length > 0) {
     for (const row of existingVersionRecordsRows) {
-      existingVersionUids.add(row.uid)
-      versionUidToLocalId.set(row.uid, row.localId)
-      versionUidToSeedUid.set(row.uid, row.seedUid)
+      if (row.uid) {
+        existingVersionUids.add(row.uid)
+        if (row.localId) {
+          versionUidToLocalId.set(row.uid, row.localId)
+        }
+        if (row.seedUid) {
+          versionUidToSeedUid.set(row.uid, row.seedUid)
+        }
+      }
     }
   }
 
@@ -193,8 +200,17 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
 
 const createMetadataRecordsForStorageTransactionId = async (
   storageTransactionIdProperty: Attestation,
-  modelSchema: ModelSchema,
+  modelSchema: ModelSchema | undefined,
 ) => {
+  // Early return if modelSchema is not provided
+  if (!modelSchema) {
+    console.warn(
+      '[item/events] [syncDbWithEas] modelSchema is undefined for storageTransactionIdProperty: ',
+      storageTransactionIdProperty.id,
+    )
+    return
+  }
+
   // Validate and parse decodedDataJson
   if (!storageTransactionIdProperty.decodedDataJson || storageTransactionIdProperty.decodedDataJson.trim() === '') {
     console.warn(
@@ -311,6 +327,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
   const propertyUids = itemProperties.map((property) => property.id)
 
+  // Dynamic import to break circular dependency
+  const { Model } = await import('@/Model/Model')
   const allModels = Model.getAll()
   const models = Object.fromEntries(allModels.map(m => [m.modelName!, m]))
 
@@ -325,8 +343,12 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
   if (existingMetadataRecordsRows && existingMetadataRecordsRows.length > 0) {
     for (const row of existingMetadataRecordsRows) {
-      existingPropertyRecordsUids.add(row.uid)
-      propertyUidToLocalId.set(row.uid, row.localId)
+      if (row.uid) {
+        existingPropertyRecordsUids.add(row.uid)
+        if (row.localId) {
+          propertyUidToLocalId.set(row.uid, row.localId)
+        }
+      }
     }
   }
 
@@ -631,6 +653,8 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
 
     await getRelatedSeedsAndVersions()
 
+    // Dynamic import to break circular dependency
+    const { Model } = await import('@/Model/Model')
     const allModels = Model.getAll()
     for (const model of allModels) {
       const modelName = model.modelName

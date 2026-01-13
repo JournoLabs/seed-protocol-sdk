@@ -9,7 +9,6 @@ export const useIsClientReady = () => {
   const clientService = client.getService()
 
   const isClientReady = useSelector(clientService, (snapshot) => {
-    console.log('useIsClientReady snapshot.value:', snapshot.value)
     return snapshot.value === ClientManagerState.IDLE
   })
 

@@ -203,13 +203,25 @@ export class SchemaValidationService {
       
       // Validate that Relation and List properties have a ref defined
       if (property.dataType === ModelPropertyDataTypes.Relation || property.dataType === ModelPropertyDataTypes.List) {
-        if (!property.ref || property.ref.trim() === '') {
+        const hasRef = property.ref && property.ref.trim() !== ''
+        const hasRefModelName = property.refModelName && property.refModelName.trim() !== ''
+        const hasRefModelId = property.refModelId !== undefined && property.refModelId !== null
+        
+        if (!hasRef && !hasRefModelName && !hasRefModelId) {
           errors.push({
             field: 'ref',
-            message: `Property with dataType "${property.dataType}" requires a "ref" field to be defined`,
+            message: `Property with dataType "${property.dataType}" requires either a "ref", "refModelName", or "refModelId" field to be defined`,
             code: 'missing_ref',
             severity: 'error' as const,
           })
+        }
+        
+        // For Relation type, prefer having refModelId when ref/refModelName is provided
+        // This is a warning, not an error, as refModelId can be resolved asynchronously
+        if (property.dataType === ModelPropertyDataTypes.Relation && (hasRef || hasRefModelName) && !hasRefModelId) {
+          // This is acceptable - refModelId will be resolved asynchronously
+          // We don't add an error here, just log for debugging
+          logger(`Property "${property.name}" has ref/refModelName but no refModelId - will be resolved asynchronously`)
         }
       }
       
@@ -422,16 +434,6 @@ export class SchemaValidationService {
       })
     }
 
-    // Validate indexes is an array if provided
-    if (model.indexes !== undefined && !Array.isArray(model.indexes)) {
-      errors.push({
-        field: 'indexes',
-        message: 'Indexes must be an array',
-        code: 'invalid_indexes',
-        severity: 'error' as const,
-      })
-    }
-
     return {
       isValid: errors.length === 0,
       errors,
@@ -456,9 +458,7 @@ export class SchemaValidationService {
       models: {
         ...schema.models,
         [modelName]: {
-          description: modelData.description,
           properties: modelData.properties || {},
-          indexes: modelData.indexes || [],
         },
       },
     }
@@ -488,20 +488,6 @@ export class SchemaValidationService {
     }
 
     const model = schema.models[modelName]
-
-    // Validate indexes reference existing properties
-    if (model.indexes) {
-      for (const indexField of model.indexes) {
-        if (!model.properties || !model.properties[indexField]) {
-          errors.push({
-            field: `model.indexes[${indexField}]`,
-            message: `Index field "${indexField}" does not exist in model "${modelName}"`,
-            code: 'invalid_index',
-            severity: 'error' as const,
-          })
-        }
-      }
-    }
 
     // Validate all properties in the model
     if (model.properties) {

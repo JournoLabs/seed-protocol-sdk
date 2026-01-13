@@ -2,7 +2,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { SchemaMachineContext } from '../schemaMachine'
 import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schema'
-import { SchemaFileFormat } from '@/types/import'
+import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { BaseFileManager, generateId, } from '@/helpers'
 import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -11,6 +11,79 @@ import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:actors:loadOrCreateSchema')
+
+/**
+ * Query model IDs (schemaFileId) from database for a given schema
+ * This is used to populate _liveQueryModelIds immediately when loading a schema
+ * @param schemaId - The database ID of the schema
+ * @returns Array of model file IDs (schemaFileId) for models linked to this schema
+ */
+const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
+  const db = BaseDb.getAppDb()
+  if (!db) {
+    logger('Database not available, cannot query model IDs')
+    return []
+  }
+
+  try {
+    const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
+    
+    const modelRecords = await db
+      .select({
+        modelFileId: modelsTable.schemaFileId,
+      })
+      .from(modelSchemas)
+      .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+      .where(eq(modelSchemas.schemaId, schemaId))
+    
+    const modelIds = modelRecords
+      .map((row: { modelFileId: string | null }) => row.modelFileId)
+      .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
+    
+    logger(`Found ${modelIds.length} model IDs for schema (id: ${schemaId}): ${modelIds.join(', ')}`)
+    return modelIds
+  } catch (error) {
+    logger(`Error querying model IDs for schema ${schemaId}:`, error)
+    return []
+  }
+}
+
+/**
+ * Create Model instances for all model IDs to ensure they're cached before getContext runs
+ * This ensures that Model.getById() in Schema.getContext() will find the instances
+ * @param modelIds - Array of model file IDs to create instances for
+ */
+const createModelInstances = async (modelIds: string[]): Promise<void> => {
+  if (modelIds.length === 0) {
+    return
+  }
+
+  try {
+    const { Model } = await import('@/Model/Model')
+    
+    // Create instances for all model IDs in parallel
+    // Model.createById() will check cache first, then query DB and create if needed
+    const createPromises = modelIds.map(async (modelFileId) => {
+      try {
+        const model = await Model.createById(modelFileId)
+        if (model) {
+          logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
+        } else {
+          logger(`Model.createById returned undefined for modelFileId "${modelFileId}" (may not exist in DB yet)`)
+        }
+      } catch (error) {
+        logger(`Error creating Model instance for modelFileId "${modelFileId}": ${error}`)
+        // Don't throw - continue with other models
+      }
+    })
+    
+    await Promise.all(createPromises)
+    logger(`Finished creating/caching ${modelIds.length} Model instances`)
+  } catch (error) {
+    logger(`Error in createModelInstances: ${error}`)
+    // Don't throw - this is best-effort to pre-populate cache
+  }
+}
 
 /**
  * Sanitize a schema name to be filesystem-safe
@@ -75,23 +148,28 @@ export const loadOrCreateSchema = fromCallback<
     if (isInternal && schemaName === SEED_PROTOCOL_SCHEMA_NAME) {
       // For Seed Protocol, always load from internal file, never create new
       logger(`Loading internal Seed Protocol schema from SDK`)
+      console.log('[loadOrCreateSchema] Loading internal Seed Protocol schema from SDK')
       try {
         const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
         const schemaFile = internalSchema.default as SchemaFileFormat
+        console.log('[loadOrCreateSchema] Loaded schema file, models count:', Object.keys(schemaFile.models || {}).length)
         
         // Check if it exists in database, if not, add it
         const db = BaseDb.getAppDb()
         if (db && schemaFile.id) {
+          console.log('[loadOrCreateSchema] Database available, checking for existing schema')
           const existing = await db
             .select()
             .from(schemas)
             .where(eq(schemas.schemaFileId, schemaFile.id))
             .limit(1)
           
+          let schemaRecord = existing.length > 0 ? existing[0] : null
+          
           if (existing.length === 0) {
             // Add to database if not present
             const schemaData = JSON.stringify(schemaFile, null, 2)
-            await addSchemaToDb(
+            schemaRecord = await addSchemaToDb(
               {
                 name: schemaName,
                 version: schemaFile.version,
@@ -103,14 +181,292 @@ export const loadOrCreateSchema = fromCallback<
               false, // isDraft = false (it's a published internal schema)
             )
             logger(`Added Seed Protocol schema to database`)
+            
+            // Also add models and properties to database
+            // Convert to JsonImportSchema format for processing
+            const { createModelsFromJson } = await import('@/imports/json')
+            const { addModelsToDb } = await import('@/helpers/db')
+            
+            const importData: JsonImportSchema = {
+              name: schemaName,
+              models: Object.fromEntries(
+                Object.entries(schemaFile.models || {}).map(([modelName, model]) => [
+                  modelName,
+                  {
+                    ...model,
+                    // Remove id field for import format
+                    id: undefined,
+                    properties: Object.fromEntries(
+                      Object.entries(model.properties || {}).map(([propName, prop]) => {
+                        const schemaProp = prop as any
+                        const jsonProp: any = {
+                          type: schemaProp.dataType || schemaProp.type,
+                        }
+                        
+                        // Copy other properties
+                        Object.keys(schemaProp).forEach(key => {
+                          if (key !== 'id' && key !== 'dataType') {
+                            jsonProp[key] = schemaProp[key]
+                          }
+                        })
+                        
+                        // Handle Relation type
+                        if (schemaProp.ref || schemaProp.refModelName) {
+                          jsonProp.model = schemaProp.refModelName || schemaProp.ref
+                        }
+                        
+                        // Handle List type
+                        if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
+                          jsonProp.items = {
+                            type: schemaProp.refValueType,
+                            model: schemaProp.refModelName || schemaProp.ref,
+                          }
+                        }
+                        
+                        // Handle storage configuration
+                        if (schemaProp.storageType || schemaProp.localStorageDir || schemaProp.filenameSuffix) {
+                          jsonProp.storage = {
+                            type: schemaProp.storageType === 'ItemStorage' ? 'ItemStorage' : 'PropertyStorage',
+                            path: schemaProp.localStorageDir,
+                            extension: schemaProp.filenameSuffix,
+                          }
+                        }
+                        
+                        return [propName, jsonProp]
+                      }),
+                    ),
+                  },
+                ]),
+              ) as JsonImportSchema['models'],
+            }
+            
+            // Generate schema ID if missing
+            if (!schemaFile.id) {
+              schemaFile.id = generateId()
+              logger('Generated schema ID for schema:', schemaFile.id)
+            }
+
+            // Extract schemaFileIds from JSON file and generate missing ones BEFORE creating models
+            // This ensures Model instances are created with correct IDs
+            const modelFileIds = new Map<string, string>()
+            const propertyFileIds = new Map<string, Map<string, string>>()
+            
+            for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+              // Generate model ID if missing
+              if (!model.id) {
+                model.id = generateId()
+                logger(`Generated model ID for ${modelName}:`, model.id)
+                // Update the schemaFile object so it's included in schemaData
+                schemaFile.models[modelName].id = model.id
+              }
+              modelFileIds.set(modelName, model.id)
+              
+              const propIds = new Map<string, string>()
+              for (const [propName, prop] of Object.entries(model.properties || {})) {
+                // Generate property ID if missing
+                if (!prop.id) {
+                  prop.id = generateId()
+                  logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+                  // Update the schemaFile object so it's included in schemaData
+                  schemaFile.models[modelName].properties[propName].id = prop.id
+                }
+                propIds.set(propName, prop.id)
+              }
+              if (propIds.size > 0) {
+                propertyFileIds.set(modelName, propIds)
+              }
+            }
+            
+            // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
+            const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+            
+            // Add models to database and link them to the schema with schemaFileIds
+            if (Object.keys(modelDefinitions).length > 0 && schemaRecord) {
+              await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
+                schemaFileId: schemaFile.id,
+                modelFileIds,
+                propertyFileIds,
+              })
+              logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for Seed Protocol schema`)
+            }
+          } else {
+            // Schema exists, but always ensure models/properties are in database
+            // This handles the case where schema was added but models weren't (from previous code)
+            // or where models were added but properties weren't
+            const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+            const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+            
+            // Check if models are linked to the schema
+            const modelLinks = await db
+              .select({
+                modelId: modelSchemas.modelId,
+                modelName: modelsTable.name,
+              })
+              .from(modelSchemas)
+              .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+              .where(eq(modelSchemas.schemaId, schemaRecord.id!))
+            
+            // Check if we have all expected models
+            const expectedModelNames = Object.keys(schemaFile.models || {})
+            const linkedModelNames = modelLinks
+              .map((link: { modelId: number | null; modelName: string | null }) => link.modelName)
+              .filter((n: string | null): n is string => n !== null)
+            const missingModels = expectedModelNames.filter(name => !linkedModelNames.includes(name))
+            
+            // Check if properties exist for linked models
+            let missingProperties = false
+            if (modelLinks.length > 0) {
+              for (const link of modelLinks) {
+                if (link.modelId) {
+                  const props = await db
+                    .select()
+                    .from(propertiesTable)
+                    .where(eq(propertiesTable.modelId, link.modelId))
+                    .limit(1)
+                  if (props.length === 0) {
+                    missingProperties = true
+                    break
+                  }
+                }
+              }
+            }
+            
+            // If models are missing or properties are missing, add them
+            console.log(`[loadOrCreateSchema] Schema exists check: missingModels=${missingModels.length}, missingProperties=${missingProperties}, modelLinks=${modelLinks.length}`)
+            if (missingModels.length > 0 || missingProperties || modelLinks.length === 0) {
+              logger(`Seed Protocol schema exists but models/properties incomplete (missing models: ${missingModels.length}, missing properties: ${missingProperties}), adding them now`)
+              console.log(`[loadOrCreateSchema] Adding models/properties: missingModels=${missingModels.length}, missingProperties=${missingProperties}, modelLinks=${modelLinks.length}`)
+              const { createModelsFromJson } = await import('@/imports/json')
+              const { addModelsToDb } = await import('@/helpers/db')
+              
+              // Convert SchemaFileFormat to JsonImportSchema format
+              // Schema format: { dataType, ref, refValueType, storageType, localStorageDir, filenameSuffix }
+              // JSON import format: { type, model, items, storage: { type, path, extension } }
+              const importData: JsonImportSchema = {
+                name: schemaName,
+                models: Object.fromEntries(
+                  Object.entries(schemaFile.models || {}).map(([modelName, model]) => [
+                    modelName,
+                    {
+                      ...model,
+                      id: undefined,
+                      properties: Object.fromEntries(
+                        Object.entries(model.properties || {}).map(([propName, prop]) => {
+                          const schemaProp = prop as any
+                          const jsonProp: any = {
+                            type: schemaProp.dataType || schemaProp.type,
+                          }
+                          
+                          // Handle Relation type
+                          if (schemaProp.ref || schemaProp.refModelName) {
+                            jsonProp.model = schemaProp.refModelName || schemaProp.ref
+                          }
+                          
+                          // Handle List type
+                          if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
+                            jsonProp.items = {
+                              type: schemaProp.refValueType,
+                              model: schemaProp.refModelName || schemaProp.ref,
+                            }
+                          }
+                          
+                          // Handle storage configuration
+                          if (schemaProp.storageType || schemaProp.localStorageDir || schemaProp.filenameSuffix) {
+                            jsonProp.storage = {
+                              type: schemaProp.storageType === 'ItemStorage' ? 'ItemStorage' : 'PropertyStorage',
+                              path: schemaProp.localStorageDir,
+                              extension: schemaProp.filenameSuffix,
+                            }
+                          }
+                          
+                          return [propName, jsonProp]
+                        }),
+                      ),
+                    },
+                  ]),
+                ) as JsonImportSchema['models'],
+              }
+              
+              // Generate schema ID if missing
+              if (!schemaFile.id) {
+                schemaFile.id = generateId()
+                logger('Generated schema ID for schema:', schemaFile.id)
+              }
+
+              // Extract schemaFileIds from JSON file and generate missing ones BEFORE creating models
+              // This ensures Model instances are created with correct IDs
+              const modelFileIds = new Map<string, string>()
+              const propertyFileIds = new Map<string, Map<string, string>>()
+              
+              for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
+                // Generate model ID if missing
+                if (!model.id) {
+                  model.id = generateId()
+                  logger(`Generated model ID for ${modelName}:`, model.id)
+                  // Update the schemaFile object so it's included in schemaData
+                  schemaFile.models[modelName].id = model.id
+                }
+                modelFileIds.set(modelName, model.id)
+                
+                const propIds = new Map<string, string>()
+                for (const [propName, prop] of Object.entries(model.properties || {})) {
+                  // Generate property ID if missing
+                  if (!prop.id) {
+                    prop.id = generateId()
+                    logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+                    // Update the schemaFile object so it's included in schemaData
+                    schemaFile.models[modelName].properties[propName].id = prop.id
+                  }
+                  propIds.set(propName, prop.id)
+                }
+                if (propIds.size > 0) {
+                  propertyFileIds.set(modelName, propIds)
+                }
+              }
+              
+              // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
+              const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+              
+              if (Object.keys(modelDefinitions).length > 0) {
+                console.log(`[loadOrCreateSchema] Calling addModelsToDb with ${Object.keys(modelDefinitions).length} models`)
+                await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
+                  schemaFileId: schemaFile.id,
+                  modelFileIds,
+                  propertyFileIds,
+                })
+                console.log(`[loadOrCreateSchema] Successfully added ${Object.keys(modelDefinitions).length} models and their properties to database`)
+                logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for existing Seed Protocol schema`)
+              }
+            } else {
+              console.log(`[loadOrCreateSchema] Schema exists with all models and properties already in database`)
+              logger(`Seed Protocol schema exists with all models and properties already in database`)
+            }
           }
+          
+          // Query model IDs from database to populate _liveQueryModelIds immediately
+          let modelIds: string[] = []
+          if (schemaRecord && schemaRecord.id) {
+            modelIds = await getModelIdsForSchema(schemaRecord.id)
+            // Create Model instances so they're cached before getContext runs
+            await createModelInstances(modelIds)
+          }
+          
+          sendBack({
+            type: 'loadOrCreateSchemaSuccess',
+            schema: schemaFile,
+            _liveQueryModelIds: modelIds,
+          })
+          return
+        } else {
+          // No database available, send schema without model IDs
+          sendBack({
+            type: 'loadOrCreateSchemaSuccess',
+            schema: schemaFile,
+            _liveQueryModelIds: [],
+          })
+          return
         }
-        
-        sendBack({
-          type: 'loadOrCreateSchemaSuccess',
-          schema: schemaFile,
-        })
-        return
       } catch (error) {
         logger(`Error loading internal Seed Protocol schema: ${error}`)
         // Fall through to normal loading logic
@@ -134,6 +490,23 @@ export const loadOrCreateSchema = fromCallback<
       .where(eq(schemas.name, schemaName))
       .orderBy(desc(schemas.isDraft), desc(schemas.version))
       .limit(1)
+
+    // If not found by name, also try querying by schemaFileId directly
+    // This handles the case where an ID is passed instead of a name (e.g., 'test-schema-1')
+    if (dbSchemas.length === 0) {
+      logger(`No schema found by name "${schemaName}", trying to find by schemaFileId`)
+      const schemasByFileId = await db
+        .select()
+        .from(schemas)
+        .where(eq(schemas.schemaFileId, schemaName))
+        .orderBy(desc(schemas.isDraft), desc(schemas.version))
+        .limit(1)
+      
+      if (schemasByFileId.length > 0) {
+        logger(`Found schema by schemaFileId "${schemaName}" (name in DB: ${schemasByFileId[0].name})`)
+        dbSchemas = schemasByFileId
+      }
+    }
 
     // If not found by name, or if found but it's not a draft, try to find by schemaFileId from file
     // This handles the case where a draft's name was changed but we're loading by the old name
@@ -280,12 +653,15 @@ export const loadOrCreateSchema = fromCallback<
             logger(`WARNING: Metadata name mismatch! DB name="${dbSchema.name}", metadata.name="${schemaFile.metadata?.name}"`)
           }
           
+          // Build merged models without mutating schemaFile (read-only approach)
+          let mergedModels = { ...(schemaFile.models || {}) }
+          
           // Ensure models are populated (fallback for seed-protocol if missing)
-          if ((!schemaFile.models || Object.keys(schemaFile.models).length === 0) && schemaName === 'Seed Protocol') {
+          if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
             try {
               const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
               const internalSchemaFile = internalSchema.default as SchemaFileFormat
-              schemaFile.models = internalSchemaFile.models
+              mergedModels = { ...(internalSchemaFile.models || {}) }
               logger(`Populated models for seed-protocol schema from internal file`)
             } catch (error) {
               logger(`Error loading internal seed-protocol schema for models:`, error)
@@ -299,18 +675,18 @@ export const loadOrCreateSchema = fromCallback<
             if (Object.keys(dbModels).length > 0) {
               logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
               // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-              schemaFile.models = {
-                ...schemaFile.models,
+              mergedModels = {
+                ...mergedModels,
                 ...dbModels,
               }
               // For models that exist in both, merge properties (database properties override)
               for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (schemaFile.models[modelName]) {
+                if (mergedModels[modelName]) {
                   // Merge properties, with database properties taking precedence
-                  schemaFile.models[modelName] = {
-                    ...schemaFile.models[modelName],
+                  mergedModels[modelName] = {
+                    ...mergedModels[modelName],
                     properties: {
-                      ...schemaFile.models[modelName].properties,
+                      ...mergedModels[modelName].properties,
                       ...dbModel.properties,
                     },
                   }
@@ -319,8 +695,22 @@ export const loadOrCreateSchema = fromCallback<
             }
           }
           
+          // Create new schemaFile object with merged models (read-only approach)
+          const finalSchemaFile: SchemaFileFormat = {
+            ...schemaFile,
+            models: mergedModels,
+          }
+          
           // Debug: Log what we're sending
-          logger(`Sending schema with ${Object.keys(schemaFile.models || {}).length} models: ${Object.keys(schemaFile.models || {}).join(', ')}`)
+          logger(`Sending schema with ${Object.keys(finalSchemaFile.models || {}).length} models: ${Object.keys(finalSchemaFile.models || {}).join(', ')}`)
+          
+          // Query model IDs from database to populate _liveQueryModelIds immediately
+          let modelIds: string[] = []
+          if (dbSchema.id) {
+            modelIds = await getModelIdsForSchema(dbSchema.id)
+            // Create Model instances so they're cached before getContext runs
+            await createModelInstances(modelIds)
+          }
           
           // Track conflict detection metadata
           const loadedAt = Date.now()
@@ -329,10 +719,11 @@ export const loadOrCreateSchema = fromCallback<
           
           sendBack({
             type: 'loadOrCreateSchemaSuccess',
-            schema: schemaFile,
+            schema: finalSchemaFile,
             loadedAt,
             dbVersion,
             dbUpdatedAt,
+            _liveQueryModelIds: modelIds,
           } as any)
           return
         } catch (error) {
@@ -379,24 +770,35 @@ export const loadOrCreateSchema = fromCallback<
               if (Object.keys(dbModels).length > 0) {
                 logger(`Found ${Object.keys(dbModels).length} models in database for draft schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
                 // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-                schemaFile.models = {
-                  ...schemaFile.models,
+                let mergedModels = { ...(schemaFile.models || {}) }
+                mergedModels = {
+                  ...mergedModels,
                   ...dbModels,
                 }
                 // For models that exist in both, merge properties (database properties override)
                 for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                  if (schemaFile.models[modelName]) {
+                  if (mergedModels[modelName]) {
                     // Merge properties, with database properties taking precedence
-                    schemaFile.models[modelName] = {
-                      ...schemaFile.models[modelName],
+                    mergedModels[modelName] = {
+                      ...mergedModels[modelName],
                       properties: {
-                        ...schemaFile.models[modelName].properties,
+                        ...mergedModels[modelName].properties,
                         ...dbModel.properties,
                       },
                     }
                   }
                 }
+                // Update schemaFile with merged models
+                schemaFile.models = mergedModels
               }
+            }
+            
+            // Query model IDs from database to populate _liveQueryModelIds immediately
+            let modelIds: string[] = []
+            if (draftsByFileId[0].id) {
+              modelIds = await getModelIdsForSchema(draftsByFileId[0].id)
+              // Create Model instances so they're cached before getContext runs
+              await createModelInstances(modelIds)
             }
             
             // Track conflict detection metadata
@@ -410,6 +812,7 @@ export const loadOrCreateSchema = fromCallback<
               loadedAt,
               dbVersion,
               dbUpdatedAt,
+              _liveQueryModelIds: modelIds,
             } as any)
             return
           } catch (error) {
@@ -466,12 +869,15 @@ export const loadOrCreateSchema = fromCallback<
         
         if (schemaFile) {
 
+          // Build merged models without mutating schemaFile (read-only approach)
+          let mergedModels = { ...(schemaFile.models || {}) }
+          
           // Ensure models are populated (fallback for seed-protocol if missing)
-          if ((!schemaFile.models || Object.keys(schemaFile.models).length === 0) && schemaName === 'Seed Protocol') {
+          if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
             try {
               const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
               const internalSchemaFile = internalSchema.default as SchemaFileFormat
-              schemaFile.models = internalSchemaFile.models
+              mergedModels = { ...(internalSchemaFile.models || {}) }
               logger(`Populated models for seed-protocol schema from internal file`)
             } catch (error) {
               logger(`Error loading internal seed-protocol schema for models:`, error)
@@ -485,18 +891,18 @@ export const loadOrCreateSchema = fromCallback<
             if (Object.keys(dbModels).length > 0) {
               logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
               // Merge: database models take precedence for properties, but preserve file models for full structure
-              schemaFile.models = {
-                ...schemaFile.models,
+              mergedModels = {
+                ...mergedModels,
                 ...dbModels,
               }
               // For models that exist in both, merge properties (database properties override)
               for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (schemaFile.models[modelName]) {
+                if (mergedModels[modelName]) {
                   // Merge properties, with database properties taking precedence
-                  schemaFile.models[modelName] = {
-                    ...schemaFile.models[modelName],
+                  mergedModels[modelName] = {
+                    ...mergedModels[modelName],
                     properties: {
-                      ...schemaFile.models[modelName].properties,
+                      ...mergedModels[modelName].properties,
                       ...dbModel.properties,
                     },
                   }
@@ -504,10 +910,24 @@ export const loadOrCreateSchema = fromCallback<
               }
             }
           }
+          
+          // Create new schemaFile object with merged models (read-only approach)
+          const finalSchemaFile: SchemaFileFormat = {
+            ...schemaFile,
+            models: mergedModels,
+          }
 
           logger(`Found existing schema ${schemaName} v${schemaFile.version} from file`)
           // Debug: Log what we're sending
           logger(`Sending schema with ${Object.keys(schemaFile.models || {}).length} models: ${Object.keys(schemaFile.models || {}).join(', ')}`)
+          
+          // Query model IDs from database to populate _liveQueryModelIds immediately
+          let modelIds: string[] = []
+          if (dbSchema.id) {
+            modelIds = await getModelIdsForSchema(dbSchema.id)
+            // Create Model instances so they're cached before getContext runs
+            await createModelInstances(modelIds)
+          }
           
           // Track conflict detection metadata from DB record
           const loadedAt = Date.now()
@@ -520,6 +940,7 @@ export const loadOrCreateSchema = fromCallback<
             loadedAt,
             dbVersion,
             dbUpdatedAt,
+            _liveQueryModelIds: modelIds,
           } as any)
           return
         }
@@ -530,12 +951,15 @@ export const loadOrCreateSchema = fromCallback<
             const schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
             logger(`Found published schema ${schemaName} v${schemaFile.version} in database (file not found, using schemaData)`)
             
+            // Build merged models without mutating schemaFile (read-only approach)
+            let mergedModels = { ...(schemaFile.models || {}) }
+            
             // Ensure models are populated (fallback for seed-protocol if missing)
-            if ((!schemaFile.models || Object.keys(schemaFile.models).length === 0) && schemaName === 'Seed Protocol') {
+            if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
               try {
                 const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
                 const internalSchemaFile = internalSchema.default as SchemaFileFormat
-                schemaFile.models = internalSchemaFile.models
+                mergedModels = { ...(internalSchemaFile.models || {}) }
                 logger(`Populated models for seed-protocol schema from internal file`)
               } catch (error) {
                 logger(`Error loading internal seed-protocol schema for models:`, error)
@@ -549,24 +973,38 @@ export const loadOrCreateSchema = fromCallback<
               if (Object.keys(dbModels).length > 0) {
                 logger(`Found ${Object.keys(dbModels).length} models in database for schema ${schemaName}: ${Object.keys(dbModels).join(', ')}`)
                 // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-                schemaFile.models = {
-                  ...schemaFile.models,
+                mergedModels = {
+                  ...mergedModels,
                   ...dbModels,
                 }
                 // For models that exist in both, merge properties (database properties override)
                 for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                  if (schemaFile.models[modelName]) {
+                  if (mergedModels[modelName]) {
                     // Merge properties, with database properties taking precedence
-                    schemaFile.models[modelName] = {
-                      ...schemaFile.models[modelName],
+                    mergedModels[modelName] = {
+                      ...mergedModels[modelName],
                       properties: {
-                        ...schemaFile.models[modelName].properties,
+                        ...mergedModels[modelName].properties,
                         ...dbModel.properties,
                       },
                     }
                   }
                 }
               }
+            }
+            
+            // Create new schemaFile object with merged models (read-only approach)
+            const finalSchemaFile: SchemaFileFormat = {
+              ...schemaFile,
+              models: mergedModels,
+            }
+            
+            // Query model IDs from database to populate _liveQueryModelIds immediately
+            let modelIds: string[] = []
+            if (dbSchema.id) {
+              modelIds = await getModelIdsForSchema(dbSchema.id)
+              // Create Model instances so they're cached before getContext runs
+              await createModelInstances(modelIds)
             }
             
             // Track conflict detection metadata
@@ -580,6 +1018,7 @@ export const loadOrCreateSchema = fromCallback<
               loadedAt,
               dbVersion,
               dbUpdatedAt,
+              _liveQueryModelIds: modelIds,
             } as any)
             return
           } catch (error) {
@@ -609,9 +1048,18 @@ export const loadOrCreateSchema = fromCallback<
               false, // isDraft = false
             )
             
+            // Query model IDs from database to populate _liveQueryModelIds immediately
+            let modelIds: string[] = []
+            if (dbSchema.id) {
+              modelIds = await getModelIdsForSchema(dbSchema.id)
+              // Create Model instances so they're cached before getContext runs
+              await createModelInstances(modelIds)
+            }
+            
             sendBack({
               type: 'loadOrCreateSchemaSuccess',
               schema: schemaFile,
+              _liveQueryModelIds: modelIds,
             })
             return
           } catch (error) {
@@ -669,19 +1117,28 @@ export const loadOrCreateSchema = fromCallback<
           const schemaFile = JSON.parse(matchingDraft.schemaData) as SchemaFileFormat
           logger(`Loading draft from database instead of file (draft has name "${matchingDraft.name}", file has "${schemaName}")`)
           
+          // Query model IDs from database to populate _liveQueryModelIds immediately
+          let modelIds: string[] = []
+          if (matchingDraft.id) {
+            modelIds = await getModelIdsForSchema(matchingDraft.id)
+            // Create Model instances so they're cached before getContext runs
+            await createModelInstances(modelIds)
+          }
+          
           // Track conflict detection metadata
           const loadedAt = Date.now()
           const dbVersion = matchingDraft.version || schemaFile.version
           const dbUpdatedAt = matchingDraft.updatedAt || loadedAt
           
-          sendBack({
-            type: 'loadOrCreateSchemaSuccess',
-            schema: schemaFile,
-            loadedAt,
-            dbVersion,
-            dbUpdatedAt,
-          } as any)
-          return
+            sendBack({
+              type: 'loadOrCreateSchemaSuccess',
+              schema: schemaFile,
+              loadedAt,
+              dbVersion,
+              dbUpdatedAt,
+              _liveQueryModelIds: modelIds,
+            } as any)
+            return
         } catch (error) {
           logger(`Error parsing draft schemaData, falling back to file: ${error}`)
         }
@@ -697,12 +1154,15 @@ export const loadOrCreateSchema = fromCallback<
       const content = await BaseFileManager.readFileAsString(latest.filePath)
       const schemaFile = JSON.parse(content) as SchemaFileFormat
 
+      // Build merged models without mutating schemaFile (read-only approach)
+      let mergedModels = { ...(schemaFile.models || {}) }
+      
       // Ensure models are populated (fallback for seed-protocol if missing)
-      if ((!schemaFile.models || Object.keys(schemaFile.models).length === 0) && schemaName === 'Seed Protocol') {
+      if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
         try {
           const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
           const internalSchemaFile = internalSchema.default as SchemaFileFormat
-          schemaFile.models = internalSchemaFile.models
+          mergedModels = { ...(internalSchemaFile.models || {}) }
           logger(`Populated models for seed-protocol schema from internal file`)
         } catch (error) {
           logger(`Error loading internal seed-protocol schema for models:`, error)
@@ -711,19 +1171,41 @@ export const loadOrCreateSchema = fromCallback<
 
       logger(`Found existing schema ${schemaName} v${schemaFile.version} from file`)
       
-      // Track conflict detection metadata (no DB record, use file metadata)
-      const loadedAt = Date.now()
-      const dbVersion = schemaFile.version
-      const dbUpdatedAt = new Date(schemaFile.metadata.updatedAt).getTime() || loadedAt
-      
-      sendBack({
-        type: 'loadOrCreateSchemaSuccess',
-        schema: schemaFile,
-        loadedAt,
-        dbVersion,
-        dbUpdatedAt,
-      } as any)
-      return
+          // Query model IDs from database if schema exists in DB
+          let modelIds: string[] = []
+          try {
+            const db = BaseDb.getAppDb()
+            if (db && schemaFile.id) {
+              const schemaRecords = await db
+                .select()
+                .from(schemas)
+                .where(eq(schemas.schemaFileId, schemaFile.id))
+                .limit(1)
+              
+              if (schemaRecords.length > 0 && schemaRecords[0].id) {
+                modelIds = await getModelIdsForSchema(schemaRecords[0].id)
+                // Create Model instances so they're cached before getContext runs
+                await createModelInstances(modelIds)
+              }
+            }
+          } catch (error) {
+            logger(`Error querying model IDs for schema from file: ${error}`)
+          }
+          
+          // Track conflict detection metadata (no DB record, use file metadata)
+          const loadedAt = Date.now()
+          const dbVersion = schemaFile.version
+          const dbUpdatedAt = new Date(schemaFile.metadata.updatedAt).getTime() || loadedAt
+          
+          sendBack({
+            type: 'loadOrCreateSchemaSuccess',
+            schema: schemaFile,
+            loadedAt,
+            dbVersion,
+            dbUpdatedAt,
+            _liveQueryModelIds: modelIds,
+          } as any)
+          return
     }
 
     // STEP 3: Before creating new schema, check database one more time for any existing record
@@ -759,6 +1241,14 @@ export const loadOrCreateSchema = fromCallback<
               schemaFile.id = foundSchema.schemaFileId
             }
             
+            // Query model IDs from database to populate _liveQueryModelIds immediately
+            let modelIds: string[] = []
+            if (foundSchema.id) {
+              modelIds = await getModelIdsForSchema(foundSchema.id)
+              // Create Model instances so they're cached before getContext runs
+              await createModelInstances(modelIds)
+            }
+            
             // Track conflict detection metadata
             const loadedAt = Date.now()
             const dbVersion = foundSchema.version || schemaFile.version
@@ -770,6 +1260,7 @@ export const loadOrCreateSchema = fromCallback<
               loadedAt,
               dbVersion,
               dbUpdatedAt,
+              _liveQueryModelIds: modelIds,
             } as any)
             return
           }
@@ -788,6 +1279,14 @@ export const loadOrCreateSchema = fromCallback<
             
             logger(`Loading existing draft from database instead of creating new schema`)
             
+            // Query model IDs from database to populate _liveQueryModelIds immediately
+            let modelIds: string[] = []
+            if (foundSchema.id) {
+              modelIds = await getModelIdsForSchema(foundSchema.id)
+              // Create Model instances so they're cached before getContext runs
+              await createModelInstances(modelIds)
+            }
+            
             // Track conflict detection metadata
             const loadedAt = Date.now()
             const dbVersion = foundSchema.version || schemaFile.version
@@ -799,6 +1298,7 @@ export const loadOrCreateSchema = fromCallback<
               loadedAt,
               dbVersion,
               dbUpdatedAt,
+              _liveQueryModelIds: modelIds,
             } as any)
             return
           } catch (error) {
@@ -852,6 +1352,27 @@ export const loadOrCreateSchema = fromCallback<
 
     logger(`Created new draft schema ${schemaName} v${newVersion} in database`)
     
+    // Query model IDs from database for newly created schema
+    let modelIds: string[] = []
+    try {
+      const db = BaseDb.getAppDb()
+      if (db && newSchema.id) {
+        const schemaRecords = await db
+          .select()
+          .from(schemas)
+          .where(eq(schemas.schemaFileId, newSchema.id))
+          .limit(1)
+        
+        if (schemaRecords.length > 0 && schemaRecords[0].id) {
+          modelIds = await getModelIdsForSchema(schemaRecords[0].id)
+          // Create Model instances so they're cached before getContext runs
+          await createModelInstances(modelIds)
+        }
+      }
+    } catch (error) {
+      logger(`Error querying model IDs for new schema: ${error}`)
+    }
+    
     // Track conflict detection metadata for new schema
     const loadedAt = Date.now()
     const dbVersion = newVersion
@@ -863,6 +1384,7 @@ export const loadOrCreateSchema = fromCallback<
       loadedAt,
       dbVersion,
       dbUpdatedAt,
+      _liveQueryModelIds: modelIds,
     } as any)
   }
 

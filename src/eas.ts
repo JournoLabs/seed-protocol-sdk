@@ -1,17 +1,20 @@
-import { Model } from "@/Model/Model"
+// Dynamic import to break circular dependency: syncDbWithEas -> stores/eas -> eas -> Model
+// import { Model } from "@/Model/Model"
 import { toSnakeCase } from "@/helpers"
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient"
 import { GET_PROPERTIES, GET_SCHEMAS, GET_SEEDS, GET_VERSIONS } from "@/Item/queries"
-import { Attestation, Schema } from "@/graphql/gql/graphql"
+import { Attestation, Schema as EASSchema } from "@/graphql/gql/graphql"
 
-type GetModelSchemasFromEas = () => Promise<Schema[]>
+type GetModelSchemasFromEas = () => Promise<EASSchema[]>
 
 
 export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
+  // Dynamic import to break circular dependency
+  const { Model } = await import('@/Model/Model')
   const allModels = Model.getAll()
   const modelNames = allModels.map(m => m.modelName).filter((name): name is string => !!name)
 
@@ -128,29 +131,42 @@ type GetSchemaUidBySchemaNameProps = {
 
 type GetSchemaUidBySchemaName = (
   props: GetSchemaUidBySchemaNameProps,
-) => Promise<string>
+) => Promise<string | undefined>
 
 export const getSchemaUidBySchemaName: GetSchemaUidBySchemaName = async ({ schemaName }) => {
-  const queryClient = BaseQueryClient.getQueryClient()
-  const easClient = BaseEasClient.getEasClient()
-  
-  const { schemas } = await queryClient.fetchQuery({
-    queryKey: [`getSchemaUidBySchemaName`],
-    queryFn: async () =>
-      easClient.request(GET_SCHEMAS, {
-        where: {
-          schema: {
-            endsWith: schemaName,
+  try {
+    const queryClient = BaseQueryClient.getQueryClient()
+    const easClient = BaseEasClient.getEasClient()
+    
+    if (!queryClient || !easClient) {
+      return undefined
+    }
+    
+    const { schemas } = await queryClient.fetchQuery({
+      queryKey: [`getSchemaUidBySchemaName`],
+      queryFn: async () =>
+        easClient.request(GET_SCHEMAS, {
+          where: {
+            schema: {
+              endsWith: schemaName,
+            },
           },
-        },
-      }),
-  })
+        }),
+    })
 
-  if (!schemas || schemas.length === 0) {
-    throw new Error(`No schemas found for schema name ${schemaName}`)
+    if (!schemas || schemas.length === 0) {
+      // Return undefined instead of throwing - schema may not be published yet
+      return undefined
+    }
+
+    return schemas[0].id
+  } catch (error) {
+    // If query fails, return undefined - schema may not exist or be accessible
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`Failed to fetch schema for schema name ${schemaName}:`, error)
+    }
+    return undefined
   }
-
-  return schemas[0].id
 }
 
 

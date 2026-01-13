@@ -1,4 +1,5 @@
-import { Model } from '@/Model/Model'
+// Dynamic import to break circular dependency: Model -> BaseItem -> ... -> getModelSchemas -> Model
+// import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
@@ -22,6 +23,8 @@ type GetModelSchemasReturn = {
 type GetModelSchemas = () => Promise<GetModelSchemasReturn>
 
 export const getModelSchemas: GetModelSchemas = async () => {
+  // Dynamic import to break circular dependency
+  const { Model } = await import('@/Model/Model')
   const allModels = Model.getAll()
   const modelRecords: ModelRecord[] = []
 

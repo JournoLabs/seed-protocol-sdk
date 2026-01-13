@@ -450,8 +450,43 @@ async function loadSchemaWithRenames(
   // Use dynamic import to break circular dependency
   const { createModelsFromJson } = await import('@/imports/json')
   
-  // Convert JSON models to Model classes
-  const modelDefinitions = await createModelsFromJson(importData)
+  // Generate schema ID if missing
+  if (!schemaFile.id) {
+    const { generateId } = await import('@/helpers')
+    schemaFile.id = generateId()
+    logger('Generated schema ID for schema:', schemaFile.id)
+  }
+
+  // Extract schemaFileIds from JSON file and generate missing ones BEFORE creating models
+  // This ensures Model instances are created with correct IDs
+  const modelFileIds = new Map<string, string>()
+  const propertyFileIds = new Map<string, Map<string, string>>()
+  const { generateId } = await import('@/helpers')
+  
+  for (const [modelName, model] of Object.entries(schemaFile.models)) {
+    // Generate model ID if missing
+    if (!model.id) {
+      model.id = generateId()
+      logger(`Generated model ID for ${modelName}:`, model.id)
+    }
+    modelFileIds.set(modelName, model.id)
+    
+    const propIds = new Map<string, string>()
+    for (const [propName, prop] of Object.entries(model.properties)) {
+      // Generate property ID if missing
+      if (!prop.id) {
+        prop.id = generateId()
+        logger(`Generated property ID for ${modelName}.${propName}:`, prop.id)
+      }
+      propIds.set(propName, prop.id)
+    }
+    if (propIds.size > 0) {
+      propertyFileIds.set(modelName, propIds)
+    }
+  }
+
+  // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
+  const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
 
   // Convert schema file metadata to schema input for database
   const schemaInput: Omit<SchemaType, 'id'> = {
@@ -460,26 +495,6 @@ async function loadSchemaWithRenames(
     schemaFileId: schemaFile.id || null,
     createdAt: new Date(schemaFile.metadata.createdAt).getTime(),
     updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
-  }
-
-  // Extract schemaFileIds from JSON file
-  const modelFileIds = new Map<string, string>()
-  const propertyFileIds = new Map<string, Map<string, string>>()
-  
-  for (const [modelName, model] of Object.entries(schemaFile.models)) {
-    if (model.id) {
-      modelFileIds.set(modelName, model.id)
-    }
-    
-    const propIds = new Map<string, string>()
-    for (const [propName, prop] of Object.entries(model.properties)) {
-      if (prop.id) {
-        propIds.set(propName, prop.id)
-      }
-    }
-    if (propIds.size > 0) {
-      propertyFileIds.set(modelName, propIds)
-    }
   }
 
   // Use dynamic import to break circular dependency

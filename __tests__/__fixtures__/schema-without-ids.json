@@ -1,0 +1,47 @@
+{
+  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "version": 1,
+  "metadata": {
+    "name": "Test Schema Without IDs",
+    "description": "A test schema without any IDs - should generate them",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z"
+  },
+  "models": {
+    "Product": {
+      "description": "A product model without IDs",
+      "properties": {
+        "name": {
+          "type": "Text"
+        },
+        "price": {
+          "type": "Number"
+        },
+        "description": {
+          "type": "Text"
+        }
+      }
+    },
+    "Category": {
+      "description": "A category model without IDs",
+      "properties": {
+        "name": {
+          "type": "Text"
+        },
+        "slug": {
+          "type": "Text"
+        }
+      }
+    }
+  },
+  "enums": {},
+  "migrations": [
+    {
+      "version": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "description": "Initial schema without IDs",
+      "changes": []
+    }
+  ]
+}
+

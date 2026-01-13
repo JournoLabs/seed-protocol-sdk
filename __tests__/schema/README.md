@@ -11,12 +11,12 @@ This directory contains comprehensive integration tests to debug why `schema.mod
 
 ### Option 1: Run the integration test suite
 ```bash
-npm test -- __tests__/schema/schema-models-integration.test.ts
+npm test -- __tests__/Schema/schema-models-integration.test.ts
 ```
 
 ### Option 2: Run the debug script
 ```bash
-npx tsx __tests__/schema/debug-schema-models.ts
+npx tsx __tests__/Schema/debug-schema-models.ts
 ```
 
 ## Test Scenarios

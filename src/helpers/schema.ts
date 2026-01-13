@@ -253,6 +253,14 @@ export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; v
   const workingDir = BaseFileManager.getWorkingDir()
 
   try {
+    // Check if directory exists before trying to read it
+    const dirExists = await BaseFileManager.pathExists(workingDir)
+    if (!dirExists) {
+      // Directory doesn't exist yet - return empty array (not an error condition)
+      logger(`Working directory does not exist yet: ${workingDir}, returning empty schema list`)
+      return []
+    }
+    
     const files = await fs.promises.readdir(workingDir)
     const schemas: Array<{ name: string; version: number; filePath: string; schemaFileId?: string }> = []
 
@@ -422,10 +430,18 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   }> = []
 
   // STEP 1: Query all schemas from database
+  // Also do a direct SQL query to verify what's actually in the database
+  const { sql } = await import('drizzle-orm')
+  const directQuery = await db.run(sql.raw(`SELECT name, version, schema_file_id, id FROM schemas ORDER BY name, version DESC`))
+  console.log(`[loadAllSchemasFromDb] Direct SQL query result:`, directQuery.rows?.map((row: any) => ({ name: row[0], version: row[1], schemaFileId: row[2], id: row[3] })) || [])
+  
   const dbSchemas = await db
     .select()
     .from(schemasTable)
     .orderBy(schemasTable.name, desc(schemasTable.version))
+
+  console.log(`[loadAllSchemasFromDb] Drizzle query returned ${dbSchemas.length} schemas:`, dbSchemas.map(s => ({ name: s.name, version: s.version, schemaFileId: s.schemaFileId, isDraft: s.isDraft, id: s.id })))
+  console.log(`[loadAllSchemasFromDb] Schema names in query result:`, dbSchemas.map(s => s.name))
 
   const processedSchemaNames = new Set<string>()
 
@@ -433,42 +449,53 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   for (const dbSchema of dbSchemas) {
     const schemaName = dbSchema.name
 
+    console.log(`[loadAllSchemasFromDb] Processing schema: ${schemaName} (id: ${dbSchema.id}, isDraft: ${dbSchema.isDraft}, hasSchemaData: ${!!dbSchema.schemaData}, schemaFileId: ${dbSchema.schemaFileId})`)
+
     // Skip if we've already processed a newer version of this schema
     if (processedSchemaNames.has(schemaName)) {
+      console.log(`[loadAllSchemasFromDb] Skipping ${schemaName} - already processed`)
       continue
     }
 
     // If it's a draft, load from schemaData
     if (dbSchema.isDraft === true && dbSchema.schemaData) {
       try {
-        const schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
+        let schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
         
-        // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
-        // This ensures models added to the database are included even if they're not in schemaData
-        if (dbSchema.id) {
-          const { loadModelsFromDbForSchema } = await import('@/helpers/db')
-          const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
-          if (Object.keys(dbModels).length > 0) {
-            // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-            schemaFile.models = {
-              ...schemaFile.models,
-              ...dbModels,
-            }
-            // For models that exist in both, merge properties (database properties override)
-            for (const [modelName, dbModel] of Object.entries(dbModels)) {
-              if (schemaFile.models[modelName]) {
-                // Merge properties, with database properties taking precedence
-                schemaFile.models[modelName] = {
-                  ...schemaFile.models[modelName],
-                  properties: {
-                    ...schemaFile.models[modelName].properties,
-                    ...dbModel.properties,
-                  },
+          // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
+          // This ensures models added to the database are included even if they're not in schemaData
+          // Build merged models without mutating schemaFile (read-only approach)
+          let mergedModels = { ...(schemaFile.models || {}) }
+          if (dbSchema.id) {
+            const { loadModelsFromDbForSchema } = await import('@/helpers/db')
+            const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
+            if (Object.keys(dbModels).length > 0) {
+              // Merge: database models take precedence for properties, but preserve schemaData models for full structure
+              mergedModels = {
+                ...mergedModels,
+                ...dbModels,
+              }
+              // For models that exist in both, merge properties (database properties override)
+              for (const [modelName, dbModel] of Object.entries(dbModels)) {
+                if (mergedModels[modelName]) {
+                  // Merge properties, with database properties taking precedence
+                  mergedModels[modelName] = {
+                    ...mergedModels[modelName],
+                    properties: {
+                      ...mergedModels[modelName].properties,
+                      ...dbModel.properties,
+                    },
+                  }
                 }
               }
             }
           }
-        }
+          
+          // Create new schemaFile object with merged models (read-only approach)
+          schemaFile = {
+            ...schemaFile,
+            models: mergedModels,
+          }
         
         result.push({
           schema: schemaFile,
@@ -486,7 +513,13 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
 
     // If it's not a draft and has schemaFileId, try to load from file
     if (dbSchema.isDraft === false && dbSchema.schemaFileId) {
-      const completeSchemas = await listCompleteSchemaFiles()
+      let completeSchemas: Array<{ name: string; version: number; filePath: string; schemaFileId?: string }> = []
+      try {
+        completeSchemas = await listCompleteSchemaFiles()
+      } catch (error) {
+        // If we can't list schema files (e.g., directory doesn't exist yet), continue without file-based loading
+        logger(`Error listing complete schema files (continuing with DB data): ${error instanceof Error ? error.message : String(error)}`)
+      }
       const matchingSchemas = completeSchemas.filter((s) => s.name === schemaName)
       
       if (matchingSchemas.length > 0) {
@@ -535,29 +568,32 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
       }
 
       // If file doesn't exist but we have schemaData, use that
+      console.log(`[loadAllSchemasFromDb] ${schemaName}: file not found, checking schemaData...`)
       if (dbSchema.schemaData) {
         try {
-          const schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
+          let schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
           
           // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
           // This ensures models added to the database are included even if they're not in schemaData
+          // Build merged models without mutating schemaFile (read-only approach)
+          let mergedModels = { ...(schemaFile.models || {}) }
           if (dbSchema.id) {
             const { loadModelsFromDbForSchema } = await import('@/helpers/db')
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
               // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-              schemaFile.models = {
-                ...schemaFile.models,
+              mergedModels = {
+                ...mergedModels,
                 ...dbModels,
               }
               // For models that exist in both, merge properties (database properties override)
               for (const [modelName, dbModel] of Object.entries(dbModels)) {
-                if (schemaFile.models[modelName]) {
+                if (mergedModels[modelName]) {
                   // Merge properties, with database properties taking precedence
-                  schemaFile.models[modelName] = {
-                    ...schemaFile.models[modelName],
+                  mergedModels[modelName] = {
+                    ...mergedModels[modelName],
                     properties: {
-                      ...schemaFile.models[modelName].properties,
+                      ...mergedModels[modelName].properties,
                       ...dbModel.properties,
                     },
                   }
@@ -566,17 +602,26 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
             }
           }
           
-          result.push({
-            schema: schemaFile,
-            isDraft: false,
-            source: 'db',
-            schemaRecordId: dbSchema.id || undefined,
-          })
-          processedSchemaNames.add(schemaName)
-          continue
+          // Create new schemaFile object with merged models (read-only approach)
+          schemaFile = {
+            ...schemaFile,
+            models: mergedModels,
+          }
+          
+        console.log(`[loadAllSchemasFromDb] Adding schema from schemaData: ${schemaName} (id: ${dbSchema.id}, schemaFileId: ${dbSchema.schemaFileId})`)
+        result.push({
+          schema: schemaFile,
+          isDraft: false,
+          source: 'db',
+          schemaRecordId: dbSchema.id || undefined,
+        })
+        processedSchemaNames.add(schemaName)
+        continue
         } catch (error) {
           logger(`Error parsing schemaData for ${schemaName}:`, error)
         }
+      } else {
+        console.log(`[loadAllSchemasFromDb] ${schemaName}: No file and no schemaData - SKIPPING`)
       }
     }
   }

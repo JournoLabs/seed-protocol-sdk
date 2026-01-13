@@ -1,7 +1,8 @@
 import { createActor, waitFor } from 'xstate'
 import { publishMachine } from '@/services/publish/publishMachine'
 import { eventEmitter } from '@/eventBus'
-import { BaseItem } from '@/Item/BaseItem'
+// Dynamic import to break circular dependency: BaseItem -> ... -> publish -> BaseItem
+// import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 
 const logger = debug('seedSdk:events:item:publish')
@@ -20,6 +21,8 @@ export const publishItemRequestHandler: PublishItemRequestHandler = async ({
   logger('[publish] Starting publish for seedLocalId:', seedLocalId)
   
   try {
+    // Dynamic import to break circular dependency
+    const { BaseItem } = await import('@/Item/BaseItem')
     // Find the item
     const item = await BaseItem.find({ seedLocalId })
     

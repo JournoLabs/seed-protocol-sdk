@@ -39,8 +39,8 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
           nodePolyfills({
             exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
-            // Include crypto, stream, and util - crypto polyfill needs stream.Transform and util
-            include: ['crypto', 'stream', 'util'],
+            // Include crypto, stream, util, and path - crypto polyfill needs stream.Transform and util
+            include: ['crypto', 'stream', 'util', 'path'],
             globals: {
               Buffer: true,
               global: true,
@@ -57,6 +57,9 @@ export default defineConfig({
             'fs/promises': '@zenfs/core/promises',
             'node:fs': '@zenfs/core',
             'node:fs/promises': '@zenfs/core/promises',
+            // Ensure path modules are aliased to path-browserify in browser environment
+            'path': 'path-browserify',
+            'node:path': 'path-browserify',
           },
         },
         optimizeDeps: {
@@ -80,17 +83,18 @@ export default defineConfig({
             DEBUG: '*',
           },
           setupFiles: [ 
-            './__tests__/setup.ts',
+            // './__tests__/setup.ts',
             './__tests__/setup.browser.ts',
+          ],
+          include: [
+            '**/*.test.{ts,tsx}',
           ],
           exclude: [
             ...configDefaults.exclude,
             'dist/**',
             'src/node/**',
             '__tests__/node/**',
-            '__tests__/schema/**',
             '__tests__/scripts/**',
-            '__tests__/db/**',
           ],
           hookTimeout: 60000,
           testTimeout: 30000,
@@ -123,10 +127,10 @@ export default defineConfig({
             DEBUG: '*',
           },
           setupFiles: [
-            './__tests__/setup.ts',
+            // './__tests__/setup.ts',
           ],
           include: [
-            '__tests__/**/*.test.{ts,tsx}',
+            '**/*.test.ts',
           ],
           exclude: [ 
             '**/node_modules/**', 

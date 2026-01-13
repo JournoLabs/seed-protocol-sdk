@@ -53,8 +53,8 @@
 
 **Files:**
 - `__tests__/Model/Model.test.ts`
-- `__tests__/schema/Schema.test.ts`
-- `__tests__/schema/schema-models-integration.test.ts`
+- `__tests__/Schema/Schema.test.ts`
+- `__tests__/Schema/schema-models-integration.test.ts`
 - `__tests__/client.test.ts`
 - `__tests__/node/client.test.ts`
 

@@ -9,7 +9,6 @@ import { ClientManager } from '@/client/ClientManager'
 import { client as sdkClient }                              from "@/client"
 import { commandExists } from '@/helpers/scripts'
 import { execSync } from 'child_process'
-import config                                  from '@/test/__mocks__/node/project/seed.config'
 import { CLIENT_NOT_INITIALIZED }        from '@/helpers/constants'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -70,16 +69,19 @@ interface PublishResponse {
 }
 
 describe('RPC Server', () => {
-  let testConfig = Object.assign({}, config)
+  // Projects no longer need to provide models in config - they're defined in schema files
+  let testConfig = {
+    models: {},
+    endpoints: {
+      files: './__tests__/__mocks__/node/project/.seed',
+      filePaths: 'api/seed/migrations',
+    },
+    arweaveDomain: 'arweave.net',
+  }
   let rpcClient: SeedService
   let server: grpc.Server
   let sdkTestClient: typeof ClientManager | undefined
   const PROTO_PATH = path.resolve(__dirname, '../../scripts/protos/seed.proto')
-
-  testConfig.endpoints = {
-    files: './__tests__/__mocks__/node/project/.seed',
-    filePaths: 'api/seed/migrations',
-  }
 
   // Helper function to create a gRPC client
   const createClient = () => {

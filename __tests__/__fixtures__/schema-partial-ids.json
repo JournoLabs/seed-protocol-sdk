@@ -1,0 +1,54 @@
+{
+  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "version": 1,
+  "id": "TEST_SCHEMA_PARTIAL",
+  "metadata": {
+    "name": "Test Schema With Partial IDs",
+    "description": "A test schema with some IDs missing - should generate missing ones",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z"
+  },
+  "models": {
+    "Order": {
+      "id": "TEST_ORDER_MODEL",
+      "description": "Order model with ID",
+      "properties": {
+        "orderNumber": {
+          "id": "TEST_ORDER_NUMBER_PROP",
+          "type": "Text"
+        },
+        "total": {
+          "type": "Number"
+        },
+        "status": {
+          "type": "Text"
+        }
+      }
+    },
+    "Item": {
+      "description": "Item model without ID",
+      "properties": {
+        "name": {
+          "id": "TEST_ITEM_NAME_PROP",
+          "type": "Text"
+        },
+        "quantity": {
+          "type": "Number"
+        },
+        "price": {
+          "type": "Number"
+        }
+      }
+    }
+  },
+  "enums": {},
+  "migrations": [
+    {
+      "version": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "description": "Initial schema with partial IDs",
+      "changes": []
+    }
+  ]
+}
+

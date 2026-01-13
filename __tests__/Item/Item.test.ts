@@ -9,7 +9,8 @@ vi.mock('@/client', () => ({
   },
 }))
 
-// Mock the config
+// Mock the config - projects no longer need to provide models in config
+// Models are now defined in schema files, so config can be empty
 vi.mock('@/test/__mocks__/node/project/seed.config', () => ({
   default: {
     models: {},
@@ -17,7 +18,7 @@ vi.mock('@/test/__mocks__/node/project/seed.config', () => ({
       localOutputDir: './seed-files'
     }
   }
-}))
+}), { virtual: true })
 
 describe('Item', () => {
   beforeEach(async () => {

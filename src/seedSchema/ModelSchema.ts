@@ -3,11 +3,19 @@ import { relations } from 'drizzle-orm'
 import { InferInsertModel, InferSelectModel } from 'drizzle-orm'
 
 
-export const models = sqliteTable('models', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
-})
+export const models = sqliteTable(
+  'models',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking - must be unique
+  },
+  (table) => {
+    return {
+      uniqueSchemaFileId: unique('unique_schema_file_id').on(table.schemaFileId),
+    }
+  }
+)
 
 export const modelsRelations = relations(models, ({ many }) => ({
   properties: many(properties),
@@ -35,6 +43,7 @@ export const properties = sqliteTable(
         table.name,
         table.modelId,
       ),
+      uniqueSchemaFileId: unique('unique_property_schema_file_id').on(table.schemaFileId),
     }
   },
 )

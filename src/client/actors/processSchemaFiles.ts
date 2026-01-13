@@ -19,11 +19,13 @@ export const processSchemaFiles = fromCallback<
   FromCallbackInput<ClientManagerContext>
 >(({ sendBack, input: { context } }) => {
   logger('processSchemaFiles started')
+  console.log('processSchemaFiles started')
 
   let hasResponded = false
   let timeoutId: NodeJS.Timeout | null = null
 
   const reportError = (error: Error) => {
+    console.log('processSchemaFiles error:', error)
     if (!hasResponded) {
       hasResponded = true
       if (timeoutId) {
@@ -39,6 +41,7 @@ export const processSchemaFiles = fromCallback<
   }
 
   const reportSuccess = () => {
+    console.log('processSchemaFiles completed')
     if (!hasResponded) {
       hasResponded = true
       if (timeoutId) {
@@ -58,6 +61,8 @@ export const processSchemaFiles = fromCallback<
   const _processSchemaFiles = async () => {
     // Use dynamic import to break circular dependency
     const { importJsonSchema, loadSchemaFromFile, createModelsFromJsonFile } = await import('@/imports/json')
+
+    console.log('processSchemaFiles _processSchemaFiles started')
     
     // First, load the internal seed-protocol schema
     logger('Loading internal seed-protocol schema')
@@ -100,8 +105,16 @@ export const processSchemaFiles = fromCallback<
 
     // Then, load all schemas using the unified database-first approach
     logger('Loading schemas from database and files')
-    const allSchemasData = await loadAllSchemasFromDb()
-    logger(`Loaded ${allSchemasData.length} schemas (${allSchemasData.filter(s => s.isDraft).length} drafts, ${allSchemasData.filter(s => !s.isDraft).length} published)`)
+    let allSchemasData: Array<{ schema: SchemaFileFormat; isDraft: boolean; source: string }> = []
+    try {
+      allSchemasData = await loadAllSchemasFromDb()
+      logger(`Loaded ${allSchemasData.length} schemas (${allSchemasData.filter(s => s.isDraft).length} drafts, ${allSchemasData.filter(s => !s.isDraft).length} published)`)
+    } catch (error) {
+      logger('Error loading schemas from database (continuing anyway):', error)
+      // Continue with empty array - this is not critical for initialization
+      // Schemas can be loaded on-demand later
+      allSchemasData = []
+    }
     
     // Collect models to add to context (schemas are now loaded on-demand via database queries)
     const allModels: { [key: string]: any } = { ...(context.models || {}) }

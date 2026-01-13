@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest'
 import { client } from '@/client'
-import config from '@/test/__mocks__/node/project/seed.config'
 import { execSync } from 'child_process'
 import os from 'os'
 
@@ -541,10 +540,8 @@ testDescribe('Client in node', () => {
       expect(fs.existsSync(path.join(seedDirPath, expectedFile))).toBe(true)
     })
     
-    // Optionally check for seed.config.ts if it exists
-    if (seedContents.includes('seed.config.ts')) {
-      expect(fs.existsSync(path.join(seedDirPath, 'seed.config.ts'))).toBe(true)
-    }
+    // Note: seed.config.ts is no longer required - projects can use empty config
+    // Schema files are now the source of truth for models
     
     // Additional checks for specific subdirectories
     const schemaPath = path.join(seedDirPath, 'schema')
@@ -579,12 +576,14 @@ testDescribe('Client in node', () => {
     expect(testClient.isInitialized()).toBe(false)
 
     // Set up test config with proper endpoint paths - matches how external projects would configure it
+    // Projects no longer need to provide models in config - they're defined in schema files
     const testConfig = {
-      ...config,
+      models: {},
       endpoints: {
-        ...config.endpoints,
+        filePaths: '/api/seed/migrations',
         files: path.join(mockProjectPath, '.seed'),
       },
+      arweaveDomain: 'arweave.net',
     }
 
     // Initialize the client - this matches how external projects would use it:
@@ -606,12 +605,14 @@ testDescribe('Client in node', () => {
     const needsInit = !testClient.isInitialized()
     
     if (needsInit) {
+      // Projects no longer need to provide models in config - they're defined in schema files
       const testConfig = {
-        ...config,
+        models: {},
         endpoints: {
-          ...config.endpoints,
+          filePaths: '/api/seed/migrations',
           files: path.join(mockProjectPath, '.seed'),
         },
+        arweaveDomain: 'arweave.net',
       }
 
       await testClient.init({

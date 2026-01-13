@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
+import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 
 // This test should only run in Node.js environment
 const testDescribe = typeof window === 'undefined' 
@@ -15,7 +16,7 @@ const testDescribe = typeof window === 'undefined'
   : describe.skip
 
 testDescribe('Schema Models Integration Tests', () => {
-  let testProjectPath: string
+  let testProjectPath: string | undefined
   let fsModule: any
   let pathModule: any
 
@@ -26,28 +27,25 @@ testDescribe('Schema Models Integration Tests', () => {
 
     fsModule = await import('fs')
     pathModule = await import('path')
-    const { fileURLToPath } = await import('url')
-    const __filename = fileURLToPath(import.meta.url)
-    const __dirname = pathModule.dirname(__filename)
-    testProjectPath = pathModule.join(__dirname, '../__mocks__/node/project')
 
-    // Create minimal config for testing
-    // The seed-protocol schema models will be loaded automatically via processSchemaFiles
-    const config = {
-      models: {}, // Empty models - seed-protocol models are loaded from schema files
-      endpoints: {
-        filePaths: '/api/seed/migrations',
-        files: '/app-files',
+    // Use setupTestEnvironment to create a temporary directory and initialize client
+    testProjectPath = await setupTestEnvironment({
+      testFileUrl: import.meta.url,
+      configOverrides: {
+        config: {
+          models: {}, // Empty models - seed-protocol models are loaded from schema files
+          endpoints: {
+            filePaths: '/api/seed/migrations',
+            files: '/app-files',
+          },
+          arweaveDomain: 'arweave.net',
+        },
       },
-      arweaveDomain: 'arweave.net',
-    }
-
-    // Initialize client with config
-    await client.init({
-      config,
-      projectPath: testProjectPath,
     })
   })
+
+  afterAll(async () => {
+    await teardownTestEnvironment()
 
   afterAll(async () => {
     // Clean up

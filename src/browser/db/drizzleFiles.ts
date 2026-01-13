@@ -127,6 +127,10 @@ CREATE UNIQUE INDEX \`versions_local_id_unique\` ON \`versions\` (\`local_id\`);
 export const migrationSql_0001_sweet_bruce_banner = `ALTER TABLE \`schemas\` ADD \`schema_data\` text;--> statement-breakpoint
 ALTER TABLE \`schemas\` ADD \`is_draft\` integer;`
 
+export const migrationSql_0002_bitter_proudstar = `CREATE UNIQUE INDEX \`unique_schema_file_id\` ON \`models\` (\`schema_file_id\`);--> statement-breakpoint
+CREATE UNIQUE INDEX \`unique_property_schema_file_id\` ON \`properties\` (\`schema_file_id\`);--> statement-breakpoint
+CREATE UNIQUE INDEX \`unique_schema_schema_file_id\` ON \`schemas\` (\`schema_file_id\`);`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -145,6 +149,13 @@ export const journalJson = `{
       "when": 1766010851770,
       "tag": "0001_sweet_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767621120087,
+      "tag": "0002_bitter_proudstar",
+      "breakpoints": true
     }
   ]
 }`
@@ -154,8 +165,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "839d194f-9d7c-4700-86f0-a430a221d45f",
-  "prevId": "3dcf744c-6908-4423-9a8d-ce3ef5585136",
+  "id": "49b9a020-1b1c-4107-85ee-a5f8a958f1a2",
+  "prevId": "839d194f-9d7c-4700-86f0-a430a221d45f",
   "tables": {
     "appState": {
       "name": "appState",
@@ -445,7 +456,15 @@ export const snapshotJson = `{
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "unique_schema_file_id": {
+          "name": "unique_schema_file_id",
+          "columns": [
+            "schema_file_id"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -510,6 +529,13 @@ export const snapshotJson = `{
           "columns": [
             "name",
             "model_id"
+          ],
+          "isUnique": true
+        },
+        "unique_property_schema_file_id": {
+          "name": "unique_property_schema_file_id",
+          "columns": [
+            "schema_file_id"
           ],
           "isUnique": true
         }
@@ -770,7 +796,15 @@ export const snapshotJson = `{
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "unique_schema_schema_file_id": {
+          "name": "unique_schema_schema_file_id",
+          "columns": [
+            "schema_file_id"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -6,6 +6,9 @@ import { modelPropertyMachine, ModelPropertyMachineContext } from './service/mod
 import { StorageType } from '@/types'
 import { BaseFileManager } from '@/helpers'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import debug from 'debug'
+
+const logger = debug('seedSdk:modelProperty:ModelProperty')
 
 type ModelPropertyService = ActorRefFrom<typeof modelPropertyMachine>
 type ModelPropertySnapshot = SnapshotFrom<typeof modelPropertyMachine>
@@ -47,7 +50,9 @@ export class ModelProperty {
   dataType?: ModelPropertyDataTypes
   ref?: string
   modelId?: number
+  modelName?: string
   refModelId?: number
+  refModelName?: string
   refValueType?: ModelPropertyDataTypes
   storageType?: StorageType
   localStorageDir?: string
@@ -75,6 +80,23 @@ export class ModelProperty {
    * it will be marked as edited.
    */
   private _initializeOriginalValues(property: Static<typeof TProperty>): void {
+    // Resolve refModelId if ref/refModelName is provided but refModelId is missing
+    const refModelName = property.refModelName || property.ref
+    if (refModelName && !property.refModelId) {
+      // Resolve refModelId asynchronously and update context
+      this._resolveRefModelId(refModelName).then((refModelId) => {
+        if (refModelId) {
+          // Update the context with the resolved refModelId
+          this._service.send({
+            type: 'updateContext',
+            refModelId,
+          })
+        }
+      }).catch(() => {
+        // Ignore errors - model might not exist yet
+      })
+    }
+
     // Get schema file values to use as "original" values
     // This allows us to detect if the property was edited (DB value differs from schema file)
     this._getSchemaFileValues(property).then((schemaFileValues) => {
@@ -160,6 +182,44 @@ export class ModelProperty {
   }
 
   /**
+   * Resolve refModelId from refModelName by querying the database
+   * @param refModelName - The name of the referenced model
+   * @returns The database ID of the referenced model, or undefined if not found
+   */
+  private async _resolveRefModelId(refModelName: string): Promise<number | undefined> {
+    if (!refModelName) {
+      return undefined
+    }
+
+    try {
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const seedSchema = await import('@/seedSchema')
+      const modelsTable = seedSchema.models
+      const { eq } = await import('drizzle-orm')
+      
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        return undefined
+      }
+
+      const refModelRecords = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.name, refModelName))
+        .limit(1)
+      
+      if (refModelRecords.length > 0 && refModelRecords[0].id) {
+        return refModelRecords[0].id
+      }
+    } catch (error) {
+      // Ignore errors - model might not exist yet or database not available
+      logger(`Error resolving refModelId for model "${refModelName}":`, error)
+    }
+
+    return undefined
+  }
+
+  /**
    * Get schema file values for this property to use as "original" values
    * This allows comparison with database values to detect edits
    */
@@ -172,14 +232,16 @@ export class ModelProperty {
 
     try {
       const { Model } = await import('@/Model/Model')
+      const { modelPropertiesToObject } = await import('@/helpers/model')
       const model = await Model.getByNameAsync(property.modelName)
       
-      if (!model || !model.schema) {
+      if (!model || !model.properties || model.properties.length === 0) {
         return undefined
       }
 
+      const schema = modelPropertiesToObject(model.properties)
       // Get the schema file value for this property
-      const schemaFileValue = model.schema[property.name]
+      const schemaFileValue = schema[property.name]
       if (!schemaFileValue) {
         return undefined
       }
@@ -199,26 +261,9 @@ export class ModelProperty {
         originalValues.ref = schemaFileValue.ref
         originalValues.refModelName = schemaFileValue.ref
         // Try to get refModelId from database
-        try {
-          const { BaseDb } = await import('@/db/Db/BaseDb')
-          const seedSchema = await import('@/seedSchema')
-          const modelsTable = seedSchema.models
-          const { eq } = await import('drizzle-orm')
-          
-          const db = BaseDb.getAppDb()
-          if (db) {
-            const refModelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, schemaFileValue.ref))
-              .limit(1)
-            
-            if (refModelRecords.length > 0) {
-              originalValues.refModelId = refModelRecords[0].id
-            }
-          }
-        } catch (error) {
-          // Ignore errors getting refModelId
+        const refModelId = await this._resolveRefModelId(schemaFileValue.ref)
+        if (refModelId) {
+          originalValues.refModelId = refModelId
         }
       }
 
@@ -300,21 +345,68 @@ export class ModelProperty {
     })
   }
 
-  static create(property: Static<typeof TProperty>): ModelProperty {
+  static create(property: Static<typeof TProperty> & { _propertyFileId?: string }): ModelProperty {
     if (!property) {
       throw new Error('Property is required')
     }
 
+    // Debug: Log what's being passed to create()
+    console.log(`[ModelProperty.create] Input property data:`, JSON.stringify({
+      name: property.name,
+      modelName: property.modelName,
+      ref: property.ref,
+      refModelName: property.refModelName,
+      refModelId: property.refModelId,
+      dataType: property.dataType,
+      type: (property as any).type, // Check if it's using 'type' instead of 'dataType'
+    }, null, 2))
+
+    // Ensure _propertyFileId is set if id is a string (schemaFileId)
+    // This handles cases where create() is called directly with a string id
+    const propertyWithFileId = { ...property }
+    
+    // Handle 'type' field from JSON schema format - convert to 'dataType'
+    if ((propertyWithFileId as any).type && !propertyWithFileId.dataType) {
+      propertyWithFileId.dataType = (propertyWithFileId as any).type
+    }
+    if (!propertyWithFileId._propertyFileId && typeof property.id === 'string') {
+      propertyWithFileId._propertyFileId = property.id
+    }
+
     // Create cache key from modelName and name
-    const cacheKey = property.modelName && property.name
-      ? `${property.modelName}:${property.name}`
-      : property.id
-      ? `id:${property.id}`
-      : property.name || 'unnamed'
+    const cacheKey = propertyWithFileId.modelName && propertyWithFileId.name
+      ? `${propertyWithFileId.modelName}:${propertyWithFileId.name}`
+      : propertyWithFileId.id
+      ? `id:${propertyWithFileId.id}`
+      : propertyWithFileId.name || 'unnamed'
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
       const { instance, refCount } = this.instanceCache.get(cacheKey)!
+      const cachedContext = instance._getSnapshotContext()
+      console.log(`[ModelProperty.create] Returning cached instance for ${cacheKey}, context has ref:`, cachedContext.ref)
+      
+      // Update cached instance if new property data has fields that the cached instance doesn't have
+      // This handles cases where the property was created without ref initially, but now we have ref from schema
+      const needsUpdate: any = {}
+      if (propertyWithFileId.ref && !cachedContext.ref) {
+        needsUpdate.ref = propertyWithFileId.ref
+      }
+      if (propertyWithFileId.refModelName && !cachedContext.refModelName) {
+        needsUpdate.refModelName = propertyWithFileId.refModelName
+      }
+      if (propertyWithFileId.refModelId && !cachedContext.refModelId) {
+        needsUpdate.refModelId = propertyWithFileId.refModelId
+      }
+      
+      if (Object.keys(needsUpdate).length > 0) {
+        console.log(`[ModelProperty.create] Updating cached instance with missing fields:`, needsUpdate)
+        instance._service.send({
+          type: 'updateContext',
+          ...needsUpdate,
+        })
+      }
+      
       this.instanceCache.set(cacheKey, {
         instance,
         refCount: refCount + 1,
@@ -322,14 +414,40 @@ export class ModelProperty {
       return instance
     }
 
-    const newInstance = new this(property)
+    // Debug: Log what's being passed to the constructor
+    console.log(`[ModelProperty.create] propertyWithFileId before constructor:`, JSON.stringify({
+      name: propertyWithFileId.name,
+      modelName: propertyWithFileId.modelName,
+      ref: propertyWithFileId.ref,
+      refModelName: propertyWithFileId.refModelName,
+      refModelId: propertyWithFileId.refModelId,
+      dataType: propertyWithFileId.dataType,
+    }, null, 2))
+    
+    const newInstance = new this(propertyWithFileId)
+    
+    // Debug: Log what's being passed to the constructor
+    console.log(`[ModelProperty.create] Creating instance for ${propertyWithFileId.modelName}:${propertyWithFileId.name}`, {
+      ref: propertyWithFileId.ref,
+      refModelName: propertyWithFileId.refModelName,
+      refModelId: propertyWithFileId.refModelId,
+      dataType: propertyWithFileId.dataType
+    })
     
     // Wrap instance in Proxy for reactive property access
     const proxiedInstance = createReactiveProxy<ModelProperty>({
       instance: newInstance,
       service: newInstance._service,
       trackedProperties: TPropertyKeys,
-      getContext: (instance) => instance._getSnapshotContext(),
+      getContext: (instance) => {
+        const context = instance._getSnapshotContext()
+        console.log(`[ModelProperty.create] getContext for ${propertyWithFileId.modelName}:${propertyWithFileId.name}`, {
+          ref: context.ref,
+          refModelName: context.refModelName,
+          refModelId: context.refModelId
+        })
+        return context
+      },
       sendUpdate: (instance, prop: string, value: any) => {
         instance._service.send({
           type: 'updateContext',
@@ -345,17 +463,50 @@ export class ModelProperty {
     
     // Trigger write process if property has modelId and propertyFileId
     // Wait for service to be ready (idle state) and have writeProcess spawned
-    if (property.modelId && property.id) {
-      // Track pending write
-      this.trackPendingWrite(property.id, property.modelId)
+    if (propertyWithFileId.modelId && (propertyWithFileId.id || propertyWithFileId._propertyFileId)) {
+      // Use _propertyFileId if available, otherwise convert id to string
+      const propertyFileId = propertyWithFileId._propertyFileId || String(propertyWithFileId.id)
       
-      // Trigger write process asynchronously
-      setTimeout(async () => {
+      // Track pending write
+      this.trackPendingWrite(propertyFileId, propertyWithFileId.modelId)
+      
+      // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
+      // Retry a few times if writeProcess isn't available yet
+      let retries = 0
+      const maxRetries = 10
+      const checkAndSend = async () => {
         const service = proxiedInstance.getService()
         const snapshot = service.getSnapshot()
         
-        // Wait for idle state and writeProcess to be spawned
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
+          const writeProcess = snapshot.context.writeProcess
+          logger(`Triggering write process for property "${property.name}" (modelId: ${property.modelId}, propertyFileId: ${propertyFileId})`)
+          
+          // Check current write state
+          const currentWriteState = writeProcess.getSnapshot()
+          
+          if (currentWriteState.value === 'success') {
+            // Write already succeeded, clear pending write immediately
+            this.clearPendingWrite(propertyFileId, 'success')
+          } else {
+            // Set up subscription to catch future state changes
+            const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
+              if (writeSnapshot.value === 'success') {
+                writeSubscription.unsubscribe()
+                logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
+                // Clear pending write on success
+                this.clearPendingWrite(propertyFileId, 'success')
+              } else if (writeSnapshot.value === 'error') {
+                writeSubscription.unsubscribe()
+                const errorContext = writeSnapshot.context
+                logger(`Write process failed for property "${property.name}" (propertyFileId: ${propertyFileId}): ${errorContext.error?.message || 'Unknown error'}`)
+                logger(`Write process error details:`, errorContext.error)
+                // Mark pending write as error
+                this.clearPendingWrite(propertyFileId, 'error')
+              }
+            })
+          }
+          
           const propertyData = {
             modelId: property.modelId!,
             name: property.name!,
@@ -371,8 +522,19 @@ export class ModelProperty {
             type: 'requestWrite',
             data: propertyData,
           })
+        } else if (retries < maxRetries) {
+          retries++
+          setTimeout(checkAndSend, 50) // Retry after 50ms
+        } else {
+          logger(`ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
+          console.error(`[ModelProperty.create] ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
+          // Mark as error if we couldn't even start the write process
+          this.clearPendingWrite(propertyFileId, 'error')
         }
-      }, 0)
+      }
+      
+      // Start checking after a short delay to allow state machine to initialize
+      setTimeout(checkAndSend, 0)
     }
     
     return proxiedInstance
@@ -388,7 +550,9 @@ export class ModelProperty {
     // Cache key might be "modelName:propertyName" or "id:propertyId"
     for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
       const context = instance._getSnapshotContext()
-      if (context.id === propertyFileId || (context as any)._propertyFileId === propertyFileId) {
+      // Convert context.id to string for comparison (it might be number or string)
+      const contextId = context.id ? String(context.id) : undefined
+      if (contextId === propertyFileId || (context as any)._propertyFileId === propertyFileId) {
         return instance
       }
     }
@@ -401,13 +565,16 @@ export class ModelProperty {
    * Queries the database to find the property if not cached
    */
   static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
+    console.log('createById', propertyFileId)
     if (!propertyFileId) {
       return undefined
     }
 
     // First, check if we have an instance cached
     const cachedInstance = this.getById(propertyFileId)
+    console.log('cachedInstance', cachedInstance)
     if (cachedInstance) {
+      console.log('cachedInstance found', cachedInstance)
       return cachedInstance
     }
 
@@ -417,15 +584,26 @@ export class ModelProperty {
     const { eq } = await import('drizzle-orm')
 
     const db = BaseDb.getAppDb()
+    console.log('db', !!db)
     if (!db) {
+      console.log('db not found')
       return undefined
     }
+
+    const testRecords = await db
+      .select()
+      .from(propertiesTable)
+      .limit(100)
+
+    console.log('testRecords', testRecords)
 
     const propertyRecords = await db
       .select()
       .from(propertiesTable)
       .where(eq(propertiesTable.schemaFileId, propertyFileId))
       .limit(1)
+
+    console.log('propertyRecords', propertyRecords)
 
     if (propertyRecords.length === 0) {
       return undefined
@@ -447,14 +625,17 @@ export class ModelProperty {
     const modelName = modelRecords[0].name
 
     // Build property data
-    const propertyData: Static<typeof TProperty> = {
-      id: propertyFileId,
+    // Note: TProperty.id expects a number (database ID), but we use schemaFileId (string) for lookups
+    // For now, we'll use the database ID if available, otherwise we'll need to handle the type mismatch
+    const propertyData: Static<typeof TProperty> & { _propertyFileId?: string } = {
+      id: propertyRecord.id ?? undefined, // Use database ID (number) for TProperty.id
       name: propertyRecord.name,
       dataType: propertyRecord.dataType as ModelPropertyDataTypes,
       modelId: propertyRecord.modelId,
       modelName,
       refModelId: propertyRecord.refModelId || undefined,
       refValueType: propertyRecord.refValueType as ModelPropertyDataTypes | undefined,
+      _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
     }
 
     // Get ref model name if applicable
@@ -488,9 +669,30 @@ export class ModelProperty {
   }
 
   /**
+   * Clear or update pending write status
+   */
+  static clearPendingWrite(propertyFileId: string, status: 'success' | 'error' = 'success'): void {
+    const write = this.pendingWrites.get(propertyFileId)
+    if (write) {
+      if (status === 'success') {
+        // Remove successful writes from pendingWrites
+        this.pendingWrites.delete(propertyFileId)
+        logger(`Cleared pending write for property "${propertyFileId}" (status: success)`)
+      } else {
+        // Update status to error but keep in map (for debugging/retry purposes)
+        write.status = 'error'
+        this.pendingWrites.set(propertyFileId, write)
+        logger(`Marked pending write as error for property "${propertyFileId}"`)
+      }
+    }
+  }
+
+  /**
    * Get all pending property IDs for a model
    */
   static getPendingPropertyIds(modelId: number): string[] {
+    console.log(`[ModelProperty.getPendingPropertyIds] Getting pending property IDs for modelId: ${modelId}`)
+    console.log(`[ModelProperty.getPendingPropertyIds] Pending writes:`, Array.from(this.pendingWrites.entries()))
     return Array.from(this.pendingWrites.entries())
       .filter(([_, write]) => write.modelId === modelId && write.status !== 'error')
       .map(([propertyFileId]) => propertyFileId)

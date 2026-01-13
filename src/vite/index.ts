@@ -118,6 +118,19 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           replacement: zenfsModule,
         })
       }
+      
+      // Also alias the node-stdlib-browser empty mock to @zenfs/core
+      // This ensures Vite can resolve it properly without needing manual resolution
+      aliases.push(
+        {
+          find: /^node-stdlib-browser\/esm\/mock\/empty(\.js)?$/,
+          replacement: '@zenfs/core',
+        },
+        {
+          find: /node-stdlib-browser\/esm\/mock\/empty(\.js)?$/,
+          replacement: '@zenfs/core',
+        }
+      )
 
       return {
         resolve: {
@@ -170,15 +183,29 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         const isPromiseVariant = source.includes('promises')
         const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
         
-        const resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+        // Try resolving from plugin context first (SDK's node_modules)
+        let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
           ...options,
           skipSelf: true,
         })
+        
+        // If that fails and we have an importer, try resolving from the importer
+        if (!resolved && importer) {
+          resolved = await this.resolve(zenfsModule, importer, {
+            ...options,
+            skipSelf: true,
+          })
+        }
         
         if (resolved) {
           log(`[observer] Resolved empty mock to: ${resolved.id}`)
           return resolved
         }
+        
+        // If resolution fails, return null and let Vite handle it naturally
+        // Vite should be able to resolve @zenfs/core from node_modules
+        log(`[observer] Resolution failed, letting Vite handle: ${zenfsModule}`)
+        return null
       }
       
       return null
@@ -268,16 +295,30 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         const isPromiseVariant = source.includes('promises')
         const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
         
+        // Try resolving from plugin context first (SDK's node_modules)
         let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
           ...options,
           skipSelf: true,
         })
+        
+        // If that fails and we have an importer, try resolving from the importer
+        if (!resolved && importer) {
+          resolved = await this.resolve(zenfsModule, importer, {
+            ...options,
+            skipSelf: true,
+          })
+        }
         
         if (resolved) {
           log(`Resolved empty mock to: ${resolved.id}`)
           interceptedResolutions.set(source, resolved.id)
           return resolved
         }
+        
+        // If resolution fails, return null and let Vite handle it naturally
+        // The alias configuration should handle the resolution
+        log(`Resolution failed, letting Vite handle: ${zenfsModule}`)
+        return null
       }
 
       if (!shouldIntercept) {
@@ -285,14 +326,21 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         const sourceWithoutQuery = source.split('?')[0]
         if (
           source.includes('node_fs') || 
-          (source.includes('.vite/deps') && source.includes('fs')) ||
+          (source.includes('.vite/deps') && source.includes('fs') && !source.includes('@zenfs')) ||
           (source.includes('node-stdlib-browser') && (source.includes('mock/empty') || source.includes('empty.js')))
         ) {
           log(`Intercepting Vite pre-bundled fs polyfill/mock: "${source}"`)
           const isPromiseVariant = source.includes('promises')
           const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
           
-          let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+          // For .vite/deps paths, let the load hook handle them to avoid chunk reference issues
+          if (source.includes('.vite/deps')) {
+            // Return null to let Vite continue, then the load hook will intercept
+            return null
+          }
+          
+          // For other cases, resolve the module
+          let resolved = await this.resolve(zenfsModule, importer || PLUGIN_FILE_URL, {
             ...options,
             skipSelf: true,
           })
@@ -302,6 +350,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
             interceptedResolutions.set(source, resolved.id)
             return resolved
           }
+          
+          // Fallback: return the module specifier
+          log(`Fallback: returning module specifier: ${zenfsModule}`)
+          interceptedResolutions.set(source, zenfsModule)
+          return { id: zenfsModule, external: false }
         }
         return null
       }

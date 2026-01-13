@@ -54,8 +54,16 @@ class Db extends BaseDb implements IDb {
   }
 
   static async prepareDb(filesDir: string, config?: DbConfig) {
-    const nodeDbConfig = await getConfig(filesDir, config)
-    const dbPath = nodeDbConfig.dbCredentials?.url || path.join(filesDir, 'db', 'seed.db')
+    // Resolve and normalize the filesDir path
+    const resolvedFilesDir = path.resolve(filesDir)
+    
+    // Ensure the filesDir exists first (parent directory)
+    if (!fs.existsSync(resolvedFilesDir)) {
+      fs.mkdirSync(resolvedFilesDir, { recursive: true })
+    }
+    
+    const nodeDbConfig = await getConfig(resolvedFilesDir, config)
+    const dbPath = nodeDbConfig.dbCredentials?.url || path.join(resolvedFilesDir, 'db', 'seed.db')
 
     // Ensure the database directory exists
     const dbDir = path.dirname(dbPath)

@@ -10,6 +10,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { getClient } from '@/client/ClientManager'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
+import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
 
 // Dynamically import client from src/client
 type ClientType = typeof import('../../../src/client')['client']
@@ -95,7 +96,7 @@ function createMinimalSchemaFile(
 }
 
 describe('processSchemaFiles Integration Tests', () => {
-  let testProjectPath: string
+  let testProjectPath: string | undefined
   let fsModule: any
   let pathModule: any
   const isNodeEnv = typeof window === 'undefined'
@@ -104,12 +105,18 @@ describe('processSchemaFiles Integration Tests', () => {
     if (isNodeEnv) {
       fsModule = await import('fs')
       pathModule = await import('path')
-      const { fileURLToPath } = await import('url')
-      const __filename = fileURLToPath(import.meta.url)
-      const __dirname = pathModule.dirname(__filename)
-      testProjectPath = pathModule.join(__dirname, '../../../__mocks__/node/project')
+      // Use setupTestEnvironment to create a temporary directory and initialize client
+      testProjectPath = await setupTestEnvironment({
+        testFileUrl: import.meta.url,
+      })
     } else {
       testProjectPath = '/test-project'
+    }
+  })
+
+  afterAll(async () => {
+    if (isNodeEnv) {
+      await teardownTestEnvironment()
     }
   })
 

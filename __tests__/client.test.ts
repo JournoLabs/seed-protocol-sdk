@@ -359,6 +359,112 @@ describe('Client Initialization', () => {
       expect(states).toContain(ClientManagerState.ADD_MODELS_TO_STORE)
       expect(states).toContain(ClientManagerState.ADD_MODELS_TO_DB)
       expect(states).toContain(ClientManagerState.IDLE)
+      
+      // Verify that the internal Seed Protocol schema is loaded into the database
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { schemas } = await import('@/seedSchema/SchemaSchema')
+      const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+      const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+      const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+      const { eq, and } = await import('drizzle-orm')
+      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+      const db = BaseDb.getAppDb()
+      if (db) {
+        // Check that schema exists
+        const seedProtocolSchemas = await db
+          .select()
+          .from(schemas)
+          .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+          .limit(1)
+        expect(seedProtocolSchemas.length).toBeGreaterThan(0)
+        expect(seedProtocolSchemas[0].name).toBe(SEED_PROTOCOL_SCHEMA_NAME)
+        expect(seedProtocolSchemas[0].schemaData).toBeDefined()
+        
+        const schemaId = seedProtocolSchemas[0].id
+        expect(schemaId).toBeDefined()
+        
+        // Wait a bit for models to be fully added to the database and linked
+        // The schema import happens asynchronously, so we need to wait for it to complete
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        const modelRecords = await db
+            .select()
+            .from(modelsTable)
+            .limit(10)
+
+        console.log('modelRecords', modelRecords)
+        
+        // Check that models are linked to the schema via model_schemas join table
+        // Retry a few times in case the join table entries are still being created
+        let modelSchemaLinks: Array<{ modelId: number | null; schemaId: number | null; modelName: string | null }> = []
+        for (let attempt = 0; attempt < 10; attempt++) {
+          modelSchemaLinks = await db
+            .select({
+              modelId: modelSchemas.modelId,
+              schemaId: modelSchemas.schemaId,
+              modelName: modelsTable.name,
+            })
+            .from(modelSchemas)
+            .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+            .where(eq(modelSchemas.schemaId, schemaId!))
+
+          
+          
+          if (modelSchemaLinks.length > 0) {
+            break
+          }
+          
+          // Wait a bit before retrying (longer wait for later attempts)
+          await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)))
+        }
+        
+        // Check if models exist at all (for better error messages)
+        const allModels = await db
+          .select()
+          .from(modelsTable)
+          .limit(10)
+        
+        // Provide informative error if join table entries don't exist
+        if (modelSchemaLinks.length === 0) {
+          if (allModels.length > 0) {
+            // Models exist but aren't linked - this suggests addModelsToDb wasn't called with schema record
+            const modelNames = allModels.map((m: { name: string }) => m.name).join(', ')
+            throw new Error(
+              `Models exist in database (${modelNames}) but are not linked to Seed Protocol schema via model_schemas join table. ` +
+              `This suggests addModelsToDb was not called with the schema record, or join table creation failed. ` +
+              `Schema ID: ${schemaId}`
+            )
+          } else {
+            // No models at all - schema import may have failed
+            throw new Error(
+              `No models found in database for Seed Protocol schema. ` +
+              `This suggests the schema import (importJsonSchema) did not successfully add models to the database. ` +
+              `Schema ID: ${schemaId}`
+            )
+          }
+        }
+        
+        // Verify expected models exist (Seed, Version, Metadata at minimum)
+        const modelNames = modelSchemaLinks
+          .map((link: { modelName: string | null }) => link.modelName)
+          .filter((name: string | null): name is string => name !== null)
+        expect(modelNames).toContain('Seed')
+        expect(modelNames).toContain('Version')
+        expect(modelNames).toContain('Metadata')
+        
+        // Check that properties exist for at least one model
+        const modelIds = modelSchemaLinks
+          .map((link: { modelId: number | null }) => link.modelId)
+          .filter((id: number | null): id is number => id !== null)
+        expect(modelIds.length).toBeGreaterThan(0)
+        
+        const propertiesForModels = await db
+          .select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelIds[0]))
+        
+        expect(propertiesForModels.length).toBeGreaterThan(0)
+      }
     }, 60000)
 
     it('should initialize with full config including dbConfig', async () => {

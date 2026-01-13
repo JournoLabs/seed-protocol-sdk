@@ -1,6 +1,5 @@
 ---
-description: Package manager rules - always use bun, never npm/npx
-globs: **/*
+alwaysApply: true
 ---
 Package Manager Rules:
 

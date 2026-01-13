@@ -15,6 +15,13 @@
       "when": 1766010851770,
       "tag": "0001_sweet_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767621120087,
+      "tag": "0002_bitter_proudstar",
+      "breakpoints": true
     }
   ]
 }

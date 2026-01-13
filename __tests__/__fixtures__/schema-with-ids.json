@@ -1,0 +1,60 @@
+{
+  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
+  "version": 1,
+  "id": "TEST_SCHEMA_WITH_IDS",
+  "metadata": {
+    "name": "Test Schema With IDs",
+    "description": "A test schema with all IDs provided",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z"
+  },
+  "models": {
+    "User": {
+      "id": "TEST_USER_MODEL",
+      "description": "A user model with all IDs",
+      "properties": {
+        "name": {
+          "id": "TEST_USER_NAME_PROP",
+          "type": "Text"
+        },
+        "email": {
+          "id": "TEST_USER_EMAIL_PROP",
+          "type": "Text"
+        },
+        "age": {
+          "id": "TEST_USER_AGE_PROP",
+          "type": "Number"
+        }
+      }
+    },
+    "Post": {
+      "id": "TEST_POST_MODEL",
+      "description": "A post model with all IDs",
+      "properties": {
+        "title": {
+          "id": "TEST_POST_TITLE_PROP",
+          "type": "Text"
+        },
+        "content": {
+          "id": "TEST_POST_CONTENT_PROP",
+          "type": "Text"
+        },
+        "author": {
+          "id": "TEST_POST_AUTHOR_PROP",
+          "type": "Relation",
+          "model": "User"
+        }
+      }
+    }
+  },
+  "enums": {},
+  "migrations": [
+    {
+      "version": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "description": "Initial schema with all IDs",
+      "changes": []
+    }
+  ]
+}
+

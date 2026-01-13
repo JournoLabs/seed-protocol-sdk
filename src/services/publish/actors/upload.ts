@@ -1,9 +1,11 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput, PublishMachineContext } from '@/types'
-import { BaseItem } from '@/Item/BaseItem'
+// Dynamic import to break circular dependency: BaseItem -> ... -> publishMachine -> upload -> BaseItem
+// import { BaseItem } from '@/Item/BaseItem'
 import debug from 'debug'
 import { getCorrectId } from '@/helpers'
-import { ModelPropertyDataTypes } from '@/Schema'
+// Dynamic import to break circular dependency: Schema -> Model -> BaseItem -> ... -> upload -> Schema
+// import { ModelPropertyDataTypes } from '@/Schema'
 
 const logger = debug('seedSdk:services:publish:actors:upload')
 
@@ -22,6 +24,10 @@ export const upload = fromCallback<
   const { localId } = context
 
   const _upload = async () => {
+    // Dynamic imports to break circular dependencies
+    const { BaseItem } = await import('@/Item/BaseItem')
+    const { ModelPropertyDataTypes } = await import('@/Schema')
+    
     const item = await BaseItem.find({ seedLocalId: localId })
 
     if (!item) {

@@ -1,6 +1,7 @@
-import { assign, setup, spawn, ActorRefFrom } from 'xstate'
+import { assign, setup, ActorRefFrom } from 'xstate'
 import { loadOrCreateModel } from './actors/loadOrCreateModel'
 import { validateModel } from './actors/validateModel'
+import { createModelProperties } from './actors/createModelProperties'
 import { ValidationError } from '@/Schema/validation'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import debug from 'debug'
@@ -10,33 +11,32 @@ const logger = debug('seedSdk:model:modelMachine')
 export type ModelMachineContext = {
   modelName: string
   schemaName: string
-  description?: string
-  properties?: {
-    [propertyName: string]: any
-  } // Optional - properties are now computed from liveQuery + ModelProperty static cache
-  indexes?: string[]
   _modelFileId?: string // ID from JSON file
   _isEdited?: boolean
   _editedProperties?: Set<string>
   _validationErrors?: ValidationError[]
   // Store original values from the JSON schema file
   _originalValues?: {
-    description?: string
-    properties?: { [propertyName: string]: any }
-    indexes?: string[]
+    properties?: { [propertyName: string]: any } // Serialized snapshot for comparison only
   }
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   modelId?: number // Store modelId for pending writes lookup
+  _liveQueryPropertyIds?: string[] // Property file IDs from liveQuery (like Schema._liveQueryModelIds)
+  _pendingPropertyDefinitions?: { [propertyName: string]: any } // Temporary storage for properties to create
+  // Conflict detection metadata - track when data was loaded from DB
+  _loadedAt?: number // Timestamp when data was loaded from DB
+  _dbVersion?: number // DB version at load time
+  _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
 }
 
 export const modelMachine = setup({
   types: {
     context: {} as ModelMachineContext,
-    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | '_modelFileId'>,
+    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | '_modelFileId' | '_pendingPropertyDefinitions'>,
     events: {} as
       | { type: 'updateContext'; [key: string]: any }
       | { type: 'loadOrCreateModel' }
-      | { type: 'loadOrCreateModelSuccess'; model: Omit<ModelMachineContext, 'modelName' | 'schemaName' | '_isEdited' | '_editedProperties' | '_validationErrors'> }
+      | { type: 'loadOrCreateModelSuccess'; model: Omit<ModelMachineContext, 'modelName' | 'schemaName' | '_isEdited' | '_editedProperties' | '_validationErrors' | '_loadedAt' | '_dbVersion' | '_dbUpdatedAt'> & Partial<Pick<ModelMachineContext, '_loadedAt' | '_dbVersion' | '_dbUpdatedAt'>> }
       | { type: 'loadOrCreateModelError'; error: Error }
       | { type: 'initializeOriginalValues'; originalValues: Partial<ModelMachineContext>; isEdited?: boolean }
       | { type: 'markAsDraft'; propertyKey: string }
@@ -45,11 +45,16 @@ export const modelMachine = setup({
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      | { type: 'requestWrite'; data: any },
+      | { type: 'requestWrite'; data: any }
+      | { type: 'writeSuccess'; output: any }
+      | { type: 'createModelPropertiesSuccess' }
+      | { type: 'createModelPropertiesError'; error: Error }
+      | { type: 'refreshProperties' },
   },
   actors: {
     loadOrCreateModel,
     validateModel,
+    createModelProperties,
     writeProcessMachine,
   },
   guards: {
@@ -77,62 +82,115 @@ export const modelMachine = setup({
   context: ({ input }) => ({
     modelName: input.modelName,
     schemaName: input.schemaName,
-    properties: undefined, // Properties are now computed from liveQuery + ModelProperty static cache
     _modelFileId: input._modelFileId,
+    _pendingPropertyDefinitions: input._pendingPropertyDefinitions,
     _isDraft: false,
     _editedProperties: new Set<string>(),
     _validationErrors: undefined,
     writeProcess: undefined,
     modelId: undefined,
+    _liveQueryPropertyIds: [], // Initialize empty array
   }),
   on: {
-    updateContext: {
-      actions: assign(({ context, event }) => {
-        const newContext = Object.assign({}, context) as any
+    updateContext: [
+      {
+        // Always update context first (no guard, always runs)
+        actions: [
+          assign(({ context, event }) => {
+          const newContext = { ...context } as any
 
-        // Check if this is only updating internal fields
-        const onlyInternalFields = Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
-
-        // Update the context with new values
-        for (let i = 0; i < Object.keys(event).length; i++) {
-          const key = Object.keys(event)[i] as string
-          if (key === 'type') {
-            continue
-          }
-          newContext[key] = (event as any)[key]
-        }
-
-        // Compare with original values and set _isEdited flag (only for non-internal updates)
-        if (!onlyInternalFields && context._originalValues) {
-          const hasChanges = Object.keys(event).some((key: string) => {
-            if (key === 'type' || key.startsWith('_')) return false
-            const newValue = newContext[key]
-            const oldValue = (context._originalValues as any)?.[key]
-            
-            // Deep comparison for objects/arrays
-            if (typeof newValue === 'object' && typeof oldValue === 'object') {
-              return JSON.stringify(newValue) !== JSON.stringify(oldValue)
-            }
-            return newValue !== oldValue
+          // Check if this is only updating internal fields
+          const onlyInternalFields = Object.keys(event).every((key: string) => {
+            return key === 'type' || key.startsWith('_')
           })
-          newContext._isEdited = hasChanges
-        }
 
-        // Clear validation errors on context update (will be re-validated if needed)
-        newContext._validationErrors = undefined
+          // Update the context with new values
+          for (let i = 0; i < Object.keys(event).length; i++) {
+            const key = Object.keys(event)[i] as string
+            if (key === 'type') {
+              continue
+            }
+            const eventValue = (event as any)[key]
+            // Ensure arrays are properly copied (create new reference)
+            newContext[key] = Array.isArray(eventValue) ? [...eventValue] : eventValue
+          }
+          
+          // Log _liveQueryPropertyIds updates for debugging
+          if ((event as any)._liveQueryPropertyIds !== undefined) {
+            const ids = newContext._liveQueryPropertyIds
+            console.log(`[modelMachine] updateContext: Set _liveQueryPropertyIds for "${context.modelName}" to:`, Array.isArray(ids) ? `[${ids.length} items: ${ids.join(', ')}]` : ids)
+            console.log(`[modelMachine] updateContext: Returning newContext with _liveQueryPropertyIds:`, Array.isArray(newContext._liveQueryPropertyIds) ? `[${newContext._liveQueryPropertyIds.length} items: ${newContext._liveQueryPropertyIds.join(', ')}]` : newContext._liveQueryPropertyIds)
+          }
 
-        return newContext
-      }),
-      // Only trigger validation if we're updating non-internal fields
-      guard: ({ event }: { event: any }) => {
-        return !Object.keys(event).every((key: string) => {
-          return key === 'type' || key.startsWith('_')
-        })
+          // Compare with original values and set _isEdited flag (only for non-internal updates)
+          // Note: properties are not in context - they're computed from ModelProperty instances
+          // Property changes are tracked via ModelProperty._isEdited flags
+          if (!onlyInternalFields && context._originalValues) {
+            const hasChanges = Object.keys(event).some((key: string) => {
+              if (key === 'type' || key.startsWith('_') || key === 'properties') return false
+              const newValue = newContext[key]
+              const oldValue = (context._originalValues as any)?.[key]
+              
+              // Deep comparison for objects/arrays
+              if (typeof newValue === 'object' && typeof oldValue === 'object') {
+                return JSON.stringify(newValue) !== JSON.stringify(oldValue)
+              }
+              return newValue !== oldValue
+            })
+            newContext._isEdited = hasChanges
+          }
+
+          // Clear validation errors on context update (will be re-validated if needed)
+          newContext._validationErrors = undefined
+
+          return newContext
+        }),
+        // Verify the context was updated and create property instances if needed
+        ({ context, event, self }) => {
+          if ((event as any)._liveQueryPropertyIds !== undefined) {
+            const newPropertyIds = (event as any)._liveQueryPropertyIds as string[]
+            // Use setTimeout to check after assign has been applied
+            setTimeout(() => {
+              const snapshot = self.getSnapshot()
+              console.log(`[modelMachine] updateContext: After assign, snapshot.context._liveQueryPropertyIds for "${context.modelName}":`, Array.isArray(snapshot.context._liveQueryPropertyIds) ? `[${snapshot.context._liveQueryPropertyIds.length} items: ${snapshot.context._liveQueryPropertyIds.join(', ')}]` : snapshot.context._liveQueryPropertyIds)
+              
+              // Create ModelProperty instances for any new property IDs
+              if (Array.isArray(newPropertyIds) && newPropertyIds.length > 0) {
+                // Import and create instances asynchronously (fire-and-forget)
+                import('@/ModelProperty/ModelProperty').then(({ ModelProperty }) => {
+                  const createPromises = newPropertyIds.map(async (propertyFileId) => {
+                    try {
+                      const property = await ModelProperty.createById(propertyFileId)
+                      if (property) {
+                        logger(`[modelMachine] Created/cached ModelProperty instance for propertyFileId "${propertyFileId}" after _liveQueryPropertyIds update`)
+                      }
+                    } catch (error) {
+                      logger(`[modelMachine] Error creating ModelProperty instance for propertyFileId "${propertyFileId}": ${error}`)
+                    }
+                  })
+                  Promise.all(createPromises).catch((error) => {
+                    logger(`[modelMachine] Error creating property instances: ${error}`)
+                  })
+                }).catch((error) => {
+                  logger(`[modelMachine] Error importing ModelProperty: ${error}`)
+                })
+              }
+            }, 0)
+          }
+        },
+        ],
+        // Don't transition - stay in current state, context will be updated
       },
-      target: '.validating',
-    },
+      {
+        // Conditionally trigger validation for non-internal updates
+        guard: ({ event }: { event: any }) => {
+          return !Object.keys(event).every((key: string) => {
+            return key === 'type' || key.startsWith('_')
+          })
+        },
+        target: '.validating',
+      },
+    ],
     validateModel: {
       target: '.validating',
     },
@@ -148,7 +206,7 @@ export const modelMachine = setup({
     initializeOriginalValues: {
       actions: assign(({ context, event }) => ({
         ...context,
-        _originalValues: event.originalValues,
+        _originalValues: event.originalValues as { properties?: { [propertyName: string]: any } },
         _isEdited: event.isEdited ?? false,
         _validationErrors: undefined,
       })),
@@ -169,9 +227,8 @@ export const modelMachine = setup({
         _isEdited: false,
         _editedProperties: new Set<string>(),
         _originalValues: {
-          description: context.description,
-          properties: context.properties ? JSON.parse(JSON.stringify(context.properties)) : {},
-          indexes: context.indexes ? [...context.indexes] : undefined,
+          // Properties are not stored in context - they're computed from ModelProperty instances
+          // Properties serialization happens separately when initializing original values
         },
       })),
     },
@@ -182,19 +239,24 @@ export const modelMachine = setup({
         loadOrCreateModelSuccess: {
           target: 'idle',
           actions: assign(({ context, event }) => {
+            const hasPendingProps = !!(context._pendingPropertyDefinitions && Object.keys(context._pendingPropertyDefinitions).length > 0)
+            logger(`[loadOrCreateModelSuccess] Preserving _pendingPropertyDefinitions: ${hasPendingProps} (${Object.keys(context._pendingPropertyDefinitions || {}).length} properties)`)
             return {
               ...context,
-              description: event.model.description,
-              properties: event.model.properties || {},
-              indexes: event.model.indexes,
               _modelFileId: event.model._modelFileId,
+              modelId: event.model.modelId, // Set modelId if provided (from database lookup)
               _isEdited: false,
               _editedProperties: new Set<string>(),
               _validationErrors: undefined,
+              // Preserve _pendingPropertyDefinitions if it exists
+              _pendingPropertyDefinitions: context._pendingPropertyDefinitions,
+              // Preserve conflict detection metadata if provided
+              _loadedAt: event.model._loadedAt,
+              _dbVersion: event.model._dbVersion,
+              _dbUpdatedAt: event.model._dbUpdatedAt,
               _originalValues: {
-                description: event.model.description,
-                properties: event.model.properties ? JSON.parse(JSON.stringify(event.model.properties)) : {},
-                indexes: event.model.indexes ? [...(event.model.indexes || [])] : undefined,
+                // Properties are not stored in context - they're computed from ModelProperty instances
+                // Properties will be loaded via liveQuery after model creation
               },
             }
           }),
@@ -210,7 +272,7 @@ export const modelMachine = setup({
     },
     idle: {
       entry: assign({
-        writeProcess: ({ spawn, context }) => {
+        writeProcess: ({ context, spawn }) => {
           if (!context.writeProcess && context._modelFileId) {
             logger(`[idle entry] Spawning writeProcess for model "${context.modelName}" (${context._modelFileId})`)
             return spawn(writeProcessMachine, {
@@ -220,9 +282,7 @@ export const modelMachine = setup({
                 entityData: {
                   modelName: context.modelName,
                   schemaName: context.schemaName,
-                  properties: context.properties,
-                  indexes: context.indexes,
-                  description: context.description,
+                  // Properties are not stored in context - they'll be provided via requestWrite event
                 },
               },
             })
@@ -231,6 +291,13 @@ export const modelMachine = setup({
         },
       }),
       on: {
+        refreshProperties: {
+          actions: ({ self }) => {
+            // This event will be handled by the Model instance's subscription
+            // The Model will call _refreshPropertiesFromDb when it receives this event
+            logger(`[idle] refreshProperties event received, will be handled by Model instance`)
+          },
+        },
         validateModel: {
           target: 'validating',
         },
@@ -250,6 +317,38 @@ export const modelMachine = setup({
             }
           },
         },
+        writeSuccess: [
+          {
+            guard: ({ context }) => {
+              // If we have pending property definitions, transition to creatingProperties
+              const hasPending = !!(context._pendingPropertyDefinitions && Object.keys(context._pendingPropertyDefinitions).length > 0)
+              logger(`[writeSuccess guard] hasPending: ${hasPending}, _pendingPropertyDefinitions keys: ${context._pendingPropertyDefinitions ? Object.keys(context._pendingPropertyDefinitions).length : 0}`)
+              return hasPending
+            },
+            target: 'creatingProperties',
+            actions: assign(({ context, event }) => {
+              logger(`[writeSuccess] Transitioning to creatingProperties for model "${context.modelName}"`)
+              // Update modelId from write output if available
+              const newContext = { ...context }
+              if (event.output?.id) {
+                newContext.modelId = event.output.id
+                logger(`[writeSuccess] Updated modelId to ${event.output.id}`)
+              }
+              return newContext
+            }),
+          },
+          {
+            target: 'idle',
+            actions: assign(({ context, event }) => {
+              // Update modelId from write output if available
+              const newContext = { ...context }
+              if (event.output?.id) {
+                newContext.modelId = event.output.id
+              }
+              return newContext
+            }),
+          },
+        ],
       },
       always: {
         guard: 'hasValidationErrors',
@@ -273,6 +372,51 @@ export const modelMachine = setup({
       invoke: {
         src: 'validateModel',
         input: ({ context }) => ({ context }),
+      },
+    },
+    creatingProperties: {
+      entry: ({ context }) => {
+        logger(`[creatingProperties entry] Starting property creation for model "${context.modelName}" with ${Object.keys(context._pendingPropertyDefinitions || {}).length} properties`)
+      },
+      invoke: {
+        src: 'createModelProperties',
+        input: ({ context }) => {
+          logger(`[creatingProperties invoke] Invoking createModelProperties with ${Object.keys(context._pendingPropertyDefinitions || {}).length} property definitions`)
+          return {
+            context,
+            propertyDefinitions: context._pendingPropertyDefinitions || {},
+          }
+        },
+      },
+      on: {
+        createModelPropertiesSuccess: {
+          target: 'idle',
+          actions: [
+            assign(({ context }) => {
+              // Only clear _pendingPropertyDefinitions, preserve everything else including _liveQueryPropertyIds
+              console.log(`[modelMachine] creatingProperties createModelPropertiesSuccess: Context before assign - _liveQueryPropertyIds:`, context._liveQueryPropertyIds)
+              const newContext = {
+                ...context,
+                _pendingPropertyDefinitions: undefined,
+              }
+              console.log(`[modelMachine] creatingProperties createModelPropertiesSuccess: Preserving _liveQueryPropertyIds:`, newContext._liveQueryPropertyIds)
+              return newContext
+            }),
+            ({ context, self }) => {
+              // Trigger property refresh after properties are created
+              // This ensures _liveQueryPropertyIds is updated in Node.js where liveQuery isn't available
+              setTimeout(() => {
+                self.send({ type: 'refreshProperties' })
+              }, 100) // Small delay to ensure properties are written to DB
+            },
+          ],
+        },
+        createModelPropertiesError: {
+          target: 'error',
+          actions: ({ event }) => {
+            logger('Error creating model properties:', event.error)
+          },
+        },
       },
     },
     error: {},

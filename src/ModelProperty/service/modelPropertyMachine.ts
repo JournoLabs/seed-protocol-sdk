@@ -17,6 +17,8 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   // Validation errors
   _validationErrors?: ValidationError[]
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
+  // Store propertyFileId (schemaFileId) for lookups by ID
+  _propertyFileId?: string
 }
 
 export const modelPropertyMachine = setup({
@@ -66,7 +68,18 @@ export const modelPropertyMachine = setup({
 }).createMachine({
   id: 'modelProperty',
   initial: 'idle',
-  context: ({ input }) => input as ModelPropertyMachineContext,
+  context: ({ input }) => {
+    const context = input as ModelPropertyMachineContext
+    console.log('[modelPropertyMachine] Initializing context with input:', JSON.stringify({
+      name: context.name,
+      modelName: context.modelName,
+      ref: context.ref,
+      refModelName: context.refModelName,
+      refModelId: context.refModelId,
+      dataType: context.dataType,
+    }, null, 2))
+    return context
+  },
   on: {
     updateContext: {
       actions: assign(({ context, event }) => {

@@ -12,7 +12,7 @@ import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
-import { Observable } from 'rxjs'
+import { Observable, distinctUntilChanged } from 'rxjs'
 
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -50,11 +50,14 @@ class Db extends BaseDb implements IDb {
 
       // Ensure meta directory exists
       const metaDirPath = `${filesDir}/db/meta`
+      console.log('making meta directory', metaDirPath)
       await BaseFileManager.createDirIfNotExists(metaDirPath)
+      console.log('meta directory made', metaDirPath)
 
       // Ensure _journal.json file exists in meta directory
       const journalFilePath = `${metaDirPath}/_journal.json`
       const journalExists = await BaseFileManager.pathExists(journalFilePath)
+      console.log('journalExists', journalExists)
       if (!journalExists) {
         await BaseFileManager.saveFile(journalFilePath, JSON.stringify({
           version: 1,
@@ -555,18 +558,31 @@ class Db extends BaseDb implements IDb {
     if (!this.sqlocalInstance.reactiveQuery) {
       throw new Error('Reactive queries not enabled. Initialize SQLocalDrizzle with reactive: true.')
     }
-    
-    return new Observable<T[]>((subscriber) => {
+
+    const baseObservable = new Observable<T[]>((subscriber) => {
       // Call SQLocal's reactiveQuery
+      console.log('[BaseDb.liveQuery] Creating reactive query, query type:', typeof query, 'is function:', typeof query === 'function')
       const reactiveQueryResult = this.sqlocalInstance!.reactiveQuery(query)
       
       // Subscribe to SQLocal's subscription API
       const subscription = reactiveQueryResult.subscribe(
-        (data: T[]) => {
-          // Emit data through RxJS Observable
-          subscriber.next(data)
+        (data: Record<string, any>[]) => {
+          // Log the actual data structure for debugging
+          console.log('[BaseDb.liveQuery] SQLocal reactiveQuery emitted data:', data?.length || 0, 'items')
+          if (data && data.length > 0) {
+            console.log('[BaseDb.liveQuery] First item keys:', Object.keys(data[0]))
+            console.log('[BaseDb.liveQuery] First item:', data[0])
+            // Try to extract IDs/names for logging (check common field names)
+            const sampleIds = data.map((d: any) => {
+              return d.id || d.modelId || d.schemaId || d.modelFileId || d.schemaFileId || d.name || d.modelName || JSON.stringify(d).substring(0, 50)
+            })
+            console.log('[BaseDb.liveQuery] Sample IDs/values:', sampleIds)
+          }
+          // Emit data through RxJS Observable (cast to T[] since SQLocal returns Record<string, any>[])
+          subscriber.next(data as T[])
         },
         (err: Error) => {
+          console.error('[BaseDb.liveQuery] SQLocal reactiveQuery error:', err)
           // Emit error through RxJS Observable
           subscriber.error(err)
         }
@@ -577,6 +593,29 @@ class Db extends BaseDb implements IDb {
         subscription.unsubscribe()
       }
     })
+    
+    // Use distinctUntilChanged with JSON.stringify comparison
+    // The comparator returns true if values are the same (skip emission)
+    return baseObservable.pipe(
+      distinctUntilChanged((prev, curr) => {
+        // On first emission, prev will be undefined, so we always emit
+        if (prev === undefined) {
+          return false // false = different, so emit
+        }
+        
+        // Compare using JSON.stringify
+        try {
+          const prevJson = JSON.stringify(prev)
+          const currJson = JSON.stringify(curr)
+          // Return true if same (skip), false if different (emit)
+          return prevJson === currJson
+        } catch (error) {
+          // If JSON.stringify fails, fall back to reference equality
+          console.warn('[BaseDb.liveQuery] distinctUntilChanged: JSON.stringify failed, using reference equality', error)
+          return prev === curr
+        }
+      })
+    )
   }
 }
 

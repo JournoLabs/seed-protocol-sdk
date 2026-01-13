@@ -2,7 +2,8 @@ import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import { VersionsType } from '@/seedSchema'
-import { Model } from '@/Model/Model'
+// Dynamic import to break circular dependency: Model -> BaseItem -> Model
+// import { Model } from '@/Model/Model'
 
 import {
   CreatePropertyInstanceProps,
@@ -24,13 +25,52 @@ import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
-// Dynamic import to break circular dependency: schema/index -> ... -> BaseItem -> schema/index
-// import { ModelPropertyDataTypes } from '@/schema'
-// Dynamic imports to break circular dependencies
-// import { getPublishUploads } from '@/db/read/getPublishUploads'
-// import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { createNewItem } from '@/db/write/createNewItem'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
+import { eq, and } from 'drizzle-orm'
 
+// Fallback helper for synchronous Model access when modelInstance is not provided
+// This is only used as a fallback - the preferred approach is to pass modelInstance
+// directly to BaseItem constructor (which Model.create() instance method does).
+// Since Model.getByName() is synchronous and just accesses a cache, Model must be loaded
+// when BaseItem constructor runs (because Model imports BaseItem).
+let ModelClass: typeof import('@/Model/Model').Model | null = null
+let modelImportPromise: Promise<typeof import('@/Model/Model')> | null = null
+
+const getModel = (): typeof import('@/Model/Model').Model => {
+  if (!ModelClass) {
+    // Start loading Model if not already started
+    if (!modelImportPromise) {
+      modelImportPromise = import('@/Model/Model')
+      // Try to get Model synchronously if already loaded
+      // This works because Model imports BaseItem, so Model is initialized when BaseItem runs
+      modelImportPromise.then(module => {
+        ModelClass = module.Model
+      }).catch(() => {
+        // If import fails, ModelClass remains null
+      })
+    }
+    // For synchronous access, we need Model to already be loaded
+    // If it's not loaded yet, this will throw, but in practice Model is always loaded
+    // because Model imports BaseItem, creating the initialization order
+    if (!ModelClass) {
+      // Fallback: try to access Model directly (works if already in module cache)
+      try {
+        // @ts-ignore - accessing module cache directly
+        const modelModule = (globalThis as any).__seedModelModule || 
+          (typeof window !== 'undefined' && (window as any).__seedModelModule)
+        if (modelModule) {
+          ModelClass = modelModule.Model
+        }
+      } catch {
+        // If Model isn't available, throw a more helpful error
+        throw new Error('Model class not available. This may indicate a circular dependency issue.')
+      }
+    }
+  }
+  return ModelClass!
+}
 
 export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
@@ -50,19 +90,28 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       seedLocalId,
       latestVersionLocalId,
       latestVersionUid,
+      modelInstance,
     } = initialValues
 
-    // Try to get model from cache (synchronous lookup)
-    // If not found, ModelClass will be undefined and we'll handle it in the service
-    const model = Model.getByName(modelName)
-    const ModelClass = model || undefined
+    // Use passed modelInstance if available (preferred - avoids circular dependency lookup)
+    // Otherwise fall back to cache lookup via getModel()
+    let ModelClass: import('@/Model/Model').Model | undefined
+    if (modelInstance) {
+      ModelClass = modelInstance
+    } else {
+      // Fallback: Try to get model from cache (synchronous lookup)
+      // If not found, ModelClass will be undefined and we'll handle it in the service
+      const Model = getModel()
+      const model = Model.getByName(modelName)
+      ModelClass = model || undefined
+    }
 
     if (
       ModelClass &&
-      ModelClass.schema &&
-      Object.keys(ModelClass.schema).includes('storageTransactionId') &&
       initialValues.storageTransactionId
     ) {
+      // Check if any property has storageTransactionId (if needed)
+      // Or remove this check if storageTransactionId is handled elsewhere
       this._storageTransactionId = initialValues.storageTransactionId
     }
 
@@ -131,33 +180,48 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       modelName,
     }
 
-    if (ModelClass && 'schema' in ModelClass && ModelClass.schema) {
-      const schema = ModelClass.schema
-
-      for (const [propertyName, propertyRecordSchema] of Object.entries(
-        schema,
-      )) {
-        if (!propertyRecordSchema) {
-          throw new Error(`Property ${propertyName} has no definition`)
+    if (ModelClass && ModelClass.properties) {
+      // Model.properties now returns ModelProperty[] instead of object
+      const properties = ModelClass.properties || []
+      
+      for (const propertyInstance of properties) {
+        // propertyInstance is a ModelProperty instance
+        const propertyName = propertyInstance.name
+        if (!propertyName) {
+          continue
         }
-
+        
+        // Get property schema from ModelProperty instance context
+        const propContext = propertyInstance._getSnapshotContext()
+        const propertyRecordSchema = {
+          dataType: propContext.dataType,
+          ref: propContext.refModelName || propContext.ref,
+          refValueType: propContext.refValueType,
+          storageType: propContext.storageType,
+          localStorageDir: propContext.localStorageDir,
+          filenameSuffix: propContext.filenameSuffix,
+        }
+        
+        if (!propertyRecordSchema.dataType) {
+          throw new Error(`Property ${propertyName} has no dataType`)
+        }
+        
         this._createPropertyInstance({
           ...itemPropertyBase,
           propertyName,
           propertyValue: initialValues[propertyName as keyof T],
         })
-
+        
         definedKeys.push(propertyName)
-
-        // Use string literals to avoid circular dependency in constructor
-        // ModelPropertyDataTypes values are stable string constants
+        
+        // Handle Relation and List types (same as before)
         if (
           propertyRecordSchema.dataType === 'Relation' &&
           !propertyName.endsWith('Id')
         ) {
           definedKeys.push(`${propertyName}Id`)
         }
-
+        
         if (
           propertyRecordSchema.dataType === 'List' &&
           !propertyName.endsWith('Ids')
@@ -192,7 +256,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
   }
 
   static async create<T extends ModelValues<ModelSchema>>(
-    props: Partial<ItemData>,
+    props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
   ): Promise<BaseItem<any>> {
     if (!props.modelName && props.type) {
       props.modelName = startCase(props.type)
@@ -238,17 +302,105 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
       throw new Error('Model name is required to create an item')
     }
     // Filter out ItemData metadata properties - only pass model schema properties
-    const model = await Model.getByNameAsync(props.modelName)
-    const schemaKeys = model?.schema ? Object.keys(model.schema) : []
-    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    // Use schemaName from props if available (passed from Model.create() instance method)
+    const schemaName = (props as any).schemaName
+    // Use passed modelInstance if available (preferred - avoids async lookup and circular dependency)
+    // Otherwise fall back to async lookup
+    let model = props.modelInstance
+    if (!model) {
+      // Dynamic import to break circular dependency
+      const { Model } = await import('@/Model/Model')
+      model = await Model.getByNameAsync(props.modelName, schemaName)
+    }
     
-    // Only include properties that are in the model schema
-    for (const [key, value] of Object.entries(props)) {
-      if (key !== 'modelName' && schemaKeys.includes(key)) {
-        modelPropertyData[key] = value
+    // Get property names directly from database to avoid race conditions with Model.properties getter
+    // which depends on ModelProperty instances being in cache
+    let propertyNames: string[] = []
+    const db = BaseDb.getAppDb()
+    if (db && model) {
+      const snapshot = model.getService().getSnapshot()
+      const modelId = snapshot.context.modelId
+      const modelFileId = snapshot.context._modelFileId
+      
+      // Try querying by modelId first (if available)
+      if (modelId) {
+        const propertyRecords = await db
+          .select({ name: propertiesTable.name })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelId))
+        
+        propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
+      }
+      
+      // If modelId query didn't work, try querying by model name and schema
+      if (propertyNames.length === 0) {
+        // First get the model record by name, optionally filtered by schema
+        let modelRecords
+        
+        // If we have a schema name, join with modelSchemas to filter by schema
+        if (schemaName) {
+          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+          
+          modelRecords = await db
+            .select({ id: modelsTable.id })
+            .from(modelsTable)
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(
+              and(
+                eq(modelsTable.name, props.modelName),
+                eq(schemasTable.name, schemaName)
+              )
+            )
+            .limit(1)
+        } else {
+          modelRecords = await db
+            .select({ id: modelsTable.id })
+            .from(modelsTable)
+            .where(eq(modelsTable.name, props.modelName))
+            .limit(1)
+        }
+        
+        if (modelRecords.length > 0 && modelRecords[0].id) {
+          const propertyRecords = await db
+            .select({ name: propertiesTable.name })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.modelId, modelRecords[0].id))
+          
+          propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
+        }
       }
     }
     
+    // Fallback: Try to get property names from model's pending property definitions
+    if (propertyNames.length === 0 && model) {
+      const snapshot = model.getService().getSnapshot()
+      const pendingPropertyDefinitions = snapshot.context._pendingPropertyDefinitions
+      if (pendingPropertyDefinitions && typeof pendingPropertyDefinitions === 'object') {
+        propertyNames = Object.keys(pendingPropertyDefinitions).filter((name): name is string => Boolean(name))
+      }
+    }
+    
+    // Final fallback: Use Model.properties if available
+    if (propertyNames.length === 0 && model?.properties) {
+      propertyNames = model.properties.map(p => p.name).filter((name): name is string => Boolean(name))
+    }
+    
+    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    
+    // Only include properties that are in the model schema
+    // Exclude modelInstance, modelName, and schemaName as they're metadata, not item properties
+    for (const [key, value] of Object.entries(props)) {
+      // Skip metadata properties that aren't part of the item's data
+      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance') {
+        continue
+      }
+      if (propertyNames.includes(key)) {
+        // Type assertion: we've filtered out modelInstance above, so value should be a valid property value
+        modelPropertyData[key] = value as any
+      }
+    }
     const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
     props.seedLocalId = seedLocalId
     props.latestVersionLocalId = versionLocalId
@@ -435,7 +587,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     // Check property instances to see if this key corresponds to a model property
     // This handles cases where the transformation might not perfectly match
     const serviceContext = this.serviceContext
-    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty<any>> | undefined
+    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
     
     if (propertyInstances) {
       for (const [originalKey, propertyInstance] of propertyInstances) {
@@ -478,10 +630,12 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
    * Returns only properties that are defined in the Model's schema
    * (excludes internal/common properties)
    */
-  get properties(): Record<string, IItemProperty<any>> {
+  get properties(): Record<string, IItemProperty> {
     const allProps = this._propertiesSubject.value
+    const Model = getModel()
     const model = Model.getByName(this.modelName)
-    const modelSchemaKeys = model?.schema ? Object.keys(model.schema) : []
+    const properties = model?.properties || []
+    const modelSchemaKeys = properties.map(p => p.name).filter((name): name is string => Boolean(name))
 
     // Filter to only include properties defined in the Model schema or derived from it
     return Object.fromEntries(
@@ -500,7 +654,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
    * Returns only internal/common properties that are shared across all Items
    * (e.g., seedLocalId, seedUid, createdAt, etc.)
    */
-  get internalProperties(): Record<string, IItemProperty<any>> {
+  get internalProperties(): Record<string, IItemProperty> {
     const allProps = this._propertiesSubject.value
     return Object.fromEntries(
       Object.entries(allProps).filter(([key]) =>
@@ -513,7 +667,7 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
    * Returns all properties (both model-specific and internal)
    * Useful for backward compatibility or debugging
    */
-  get allProperties(): Record<string, IItemProperty<any>> {
+  get allProperties(): Record<string, IItemProperty> {
     return this._propertiesSubject.value
   }
 
