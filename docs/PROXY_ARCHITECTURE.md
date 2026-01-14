@@ -42,7 +42,7 @@ function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T {
   return new Proxy(instance, {
     get(target, prop: string | symbol) {
       // Handle special properties that should not be proxied
-      if (prop === '_service' || prop === Symbol.for('immerable')) {
+      if (prop === '_service') {
         return Reflect.get(target, prop)
       }
       
@@ -58,7 +58,7 @@ function createReactiveProxy<T extends object>(config: ProxyConfig<T>): T {
     
     set(target, prop: string | symbol, value: any) {
       // Handle special properties
-      if (prop === '_service' || prop === Symbol.for('immerable')) {
+      if (prop === '_service') {
         return Reflect.set(target, prop, value)
       }
       
@@ -315,11 +315,7 @@ Some properties need special handling:
 
 Methods on the class (like `save()`, `validate()`, `unload()`) should work normally via `Reflect.get()`.
 
-### 3. Immer Compatibility
-
-The `[immerable]` symbol must be preserved to work with Immer. The Proxy should allow this through.
-
-### 4. Cache Consistency
+### 3. Cache Consistency
 
 The static `create()` methods cache instances. The Proxy should wrap the instance before caching, so all consumers get the same proxied instance.
 

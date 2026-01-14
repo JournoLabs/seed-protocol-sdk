@@ -2,7 +2,6 @@ import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from '
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
-import { immerable } from 'immer'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
 // Dynamic import to break circular dependency: Model -> BaseItem -> BaseItemProperty -> Model
 // import { Model } from '@/Model/Model'
@@ -66,7 +65,6 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
   protected _subscription: Subscription
   protected _dataType: string | undefined
   protected _schemaUid: string | undefined
-  [immerable] = true
 
   constructor(initialValues: Partial<CreatePropertyInstanceProps>) {
     const { modelName, propertyName, propertyValue, seedLocalId, seedUid, versionLocalId, versionUid, storageTransactionId, schemaUid } = initialValues
@@ -76,11 +74,16 @@ export abstract class BaseItemProperty<PropertyType> implements IItemProperty<Pr
     }
 
     // Try to get model from cache (synchronous lookup)
-    const Model = getModel()
-    const model = Model.getByName(modelName)
-
-    if (!model) {
-      throw new Error(`Model ${modelName} not found`)
+    let model: import('@/Model/Model').Model | undefined
+    try {
+      const Model = getModel()
+      if (Model) {
+        model = Model.getByName(modelName)
+      }
+    } catch (error) {
+      // Model class not available - this will be handled by the service
+      console.warn(`[BaseItemProperty] Model class not available for ${modelName}. The service will handle model loading.`, error)
+      model = undefined
     }
 
     if (!propertyName) {

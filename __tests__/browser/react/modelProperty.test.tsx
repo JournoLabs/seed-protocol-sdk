@@ -113,34 +113,41 @@ function UseModelPropertiesTest({
 
 // Test component for useModelProperty
 function UseModelPropertyTest({
+  schemaId,
   modelName,
   propertyName,
 }: {
+  schemaId?: string | null | undefined
   modelName: string | null | undefined
   propertyName: string | null | undefined
 }) {
-  const { modelProperty, modelPropertyData, validationErrors } = useModelProperty(
+  const { modelProperty, isLoading, error } = useModelProperty(
+    schemaId || 'Test Schema Properties',
     modelName || '',
     propertyName || ''
   )
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
-    if (modelProperty) {
+    if (error) {
+      setStatus('error')
+    } else if (!isLoading && modelProperty) {
       setStatus('loaded')
-    } else if (modelName === null || propertyName === null) {
+    } else if (!isLoading && (modelName === null || propertyName === null)) {
       setStatus('not-loaded')
     }
-  }, [modelProperty, modelName, propertyName])
+  }, [modelProperty, isLoading, error, modelName, propertyName])
 
   return (
     <div data-testid="use-model-property-test">
       <div data-testid="property-status">{status}</div>
+      <div data-testid="is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="error-message">{error.message}</div>}
       {modelProperty && (
         <>
           <div data-testid="property-name">{modelProperty.name}</div>
           <div data-testid="property-data-type">{modelProperty.dataType}</div>
-          <div data-testid="validation-errors-count">{validationErrors?.length || 0}</div>
+          <div data-testid="validation-errors-count">{modelProperty.validationErrors?.length || 0}</div>
         </>
       )}
       {!modelProperty && (modelName === null || propertyName === null) && (
@@ -606,7 +613,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
   describe('useModelProperty', () => {
     it('should return undefined when modelName or propertyName is null', async () => {
-      render(<UseModelPropertyTest modelName={null} propertyName={null} />, { container })
+      render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName={null} propertyName={null} />, { container })
 
       await waitFor(
         () => {
@@ -618,7 +625,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should return property when modelName and propertyName provided', async () => {
-      render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+      render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
       await waitFor(
         () => {
@@ -636,7 +643,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should update when modelName changes', async () => {
-      const { rerender } = render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+      const { rerender } = render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
       await waitFor(
         () => {
@@ -647,7 +654,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       )
 
       // Change to Article model with headline property
-      rerender(<UseModelPropertyTest modelName="Article" propertyName="headline" />)
+      rerender(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Article" propertyName="headline" />)
 
       await waitFor(
         () => {
@@ -659,7 +666,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should update when propertyName changes', async () => {
-      const { rerender } = render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+      const { rerender } = render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
       await waitFor(
         () => {
@@ -670,7 +677,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       )
 
       // Change property name
-      rerender(<UseModelPropertyTest modelName="Post" propertyName="content" />)
+      rerender(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="content" />)
 
       await waitFor(
         () => {
@@ -682,7 +689,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should track validationErrors', async () => {
-      render(<UseModelPropertyTest modelName="Post" propertyName="title" />, { container })
+      render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
       await waitFor(
         () => {

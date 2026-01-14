@@ -50,14 +50,11 @@ class Db extends BaseDb implements IDb {
 
       // Ensure meta directory exists
       const metaDirPath = `${filesDir}/db/meta`
-      console.log('making meta directory', metaDirPath)
       await BaseFileManager.createDirIfNotExists(metaDirPath)
-      console.log('meta directory made', metaDirPath)
 
       // Ensure _journal.json file exists in meta directory
       const journalFilePath = `${metaDirPath}/_journal.json`
       const journalExists = await BaseFileManager.pathExists(journalFilePath)
-      console.log('journalExists', journalExists)
       if (!journalExists) {
         await BaseFileManager.saveFile(journalFilePath, JSON.stringify({
           version: 1,
@@ -561,22 +558,17 @@ class Db extends BaseDb implements IDb {
 
     const baseObservable = new Observable<T[]>((subscriber) => {
       // Call SQLocal's reactiveQuery
-      console.log('[BaseDb.liveQuery] Creating reactive query, query type:', typeof query, 'is function:', typeof query === 'function')
       const reactiveQueryResult = this.sqlocalInstance!.reactiveQuery(query)
       
       // Subscribe to SQLocal's subscription API
       const subscription = reactiveQueryResult.subscribe(
         (data: Record<string, any>[]) => {
           // Log the actual data structure for debugging
-          console.log('[BaseDb.liveQuery] SQLocal reactiveQuery emitted data:', data?.length || 0, 'items')
           if (data && data.length > 0) {
-            console.log('[BaseDb.liveQuery] First item keys:', Object.keys(data[0]))
-            console.log('[BaseDb.liveQuery] First item:', data[0])
             // Try to extract IDs/names for logging (check common field names)
             const sampleIds = data.map((d: any) => {
               return d.id || d.modelId || d.schemaId || d.modelFileId || d.schemaFileId || d.name || d.modelName || JSON.stringify(d).substring(0, 50)
             })
-            console.log('[BaseDb.liveQuery] Sample IDs/values:', sampleIds)
           }
           // Emit data through RxJS Observable (cast to T[] since SQLocal returns Record<string, any>[])
           subscriber.next(data as T[])

@@ -161,13 +161,15 @@ export const createOrUpdate = async <T>(
  * @param schemaFileId - Optional schemaFileId from JSON file for change tracking
  * @param schemaData - Optional full schema content as JSON string (SchemaFileFormat)
  * @param isDraft - Optional flag indicating if schema is in draft state (default: false)
+ * @param isEdited - Optional flag indicating if schema has been edited locally (default: false)
  * @returns The schema record (either existing or newly created)
  */
 export const addSchemaToDb = async (
-  schema: Omit<SchemaType, 'id' | 'schemaFileId' | 'schemaData' | 'isDraft'>,
+  schema: Omit<SchemaType, 'id' | 'schemaFileId' | 'schemaData' | 'isDraft' | 'isEdited'>,
   schemaFileId?: string,
   schemaData?: string,
   isDraft?: boolean,
+  isEdited?: boolean,
 ): Promise<typeof schemas.$inferSelect> => {
   const db = BaseDb.getAppDb()
 
@@ -201,6 +203,9 @@ export const addSchemaToDb = async (
       }
       if (isDraft !== undefined && existingByFileId[0].isDraft !== isDraft) {
         updates.isDraft = isDraft
+      }
+      if (isEdited !== undefined && existingByFileId[0].isEdited !== isEdited) {
+        updates.isEdited = isEdited
       }
       if (schema.updatedAt && existingByFileId[0].updatedAt !== schema.updatedAt) {
         updates.updatedAt = schema.updatedAt
@@ -276,6 +281,9 @@ export const addSchemaToDb = async (
       }
       if (isDraft !== undefined && doubleCheckByFileId[0].isDraft !== isDraft) {
         updates.isDraft = isDraft
+      }
+      if (isEdited !== undefined && doubleCheckByFileId[0].isEdited !== isEdited) {
+        updates.isEdited = isEdited
       }
       if (schema.updatedAt && doubleCheckByFileId[0].updatedAt !== schema.updatedAt) {
         updates.updatedAt = schema.updatedAt
@@ -359,6 +367,9 @@ export const addSchemaToDb = async (
     } else if (isDraft !== undefined && existingSchemas[0].isDraft !== isDraft) {
       updates.isDraft = isDraft
     }
+    if (isEdited !== undefined && existingSchemas[0].isEdited !== isEdited) {
+      updates.isEdited = isEdited
+    }
     if (schema.updatedAt && existingSchemas[0].updatedAt !== schema.updatedAt) {
       updates.updatedAt = schema.updatedAt
     }
@@ -384,6 +395,7 @@ export const addSchemaToDb = async (
     schemaFileId: schemaFileId || null,
     schemaData: schemaData || null,
     isDraft: isDraft ?? false,
+    isEdited: isEdited ?? false,
     createdAt: schema.createdAt,
     updatedAt: schema.updatedAt,
   } as NewSchemaRecord).returning()
@@ -651,6 +663,7 @@ export const addModelsToDb = async (
             const newModel = await db.insert(modelsTable).values({
               name: modelName,
               schemaFileId: modelFileId,
+              isEdited: false, // Set isEdited = false when loading from schema file
             }).returning()
             modelRecord = newModel[0] as NewModelRecord
             logger(`Created new model "${modelName}" with schemaFileId "${modelFileId}"`)
@@ -743,7 +756,7 @@ export const addModelsToDb = async (
     console.log(`[addModelsToDb] Processing ${schemaEntries.length} properties for model ${modelName}`)
     for (let index = 0; index < schemaEntries.length; index++) {
       const [propertyName, propertyValues] = schemaEntries[index]
-      console.log(`[addModelsToDb] Processing property ${modelName}:${propertyName}`)
+      console.log(`[addModelsToDb] Processing property ${modelName}:${propertyName}`, JSON.stringify(propertyValues, null, 2))
       
       if (!propertyValues) {
         throw new Error(`Property values not found for ${propertyName}`)
@@ -784,20 +797,25 @@ export const addModelsToDb = async (
       }
 
       // Handle ref property - create ref model if needed
+      // Check both ref and refModelName (refModelName is set by createModelFromJson)
       let expectedRefModelId: number | null = null
-      if (propertyValues.ref) {
+      const refModelName = propertyValues.ref || propertyValues.refModelName
+      if (refModelName) {
+        console.log(`[addModelsToDb] Property ${modelName}:${propertyName} has ref: ${refModelName}`)
         const refModel = await createOrUpdate<NewModelRecord>(
           db,
           modelsTable,
           {
-            name: propertyValues.ref,
+            name: refModelName,
           },
         )
         propertyData.refModelId = refModel.id ?? null
         expectedRefModelId = refModel.id ?? null
+        console.log(`[addModelsToDb] Resolved refModelId ${propertyData.refModelId} for refModelName ${refModelName}`)
       } else {
         // If it's not a Relation type, ensure refModelId is null
         propertyData.refModelId = null
+        console.log(`[addModelsToDb] Property ${modelName}:${propertyName} has no ref (dataType: ${propertyValues.dataType})`)
       }
 
       if (propertyValues.refValueType) {
@@ -861,15 +879,30 @@ export const addModelsToDb = async (
         // Property exists (possibly with different name) - update it with new values from schema file
         // This handles both regular updates and renames
         // Ensure schemaFileId is updated if we have it
+        // Preserve existing isEdited value if it was true (local edits take precedence)
+        const updateData = { ...propertyData }
+        if (existingProperty.isEdited === true) {
+          // Preserve isEdited = true if property was locally edited
+          // Don't overwrite it with false from schema file
+          delete updateData.isEdited
+        } else {
+          // Set isEdited = false when loading from schema file
+          updateData.isEdited = false
+        }
         await db
           .update(properties)
-          .set(propertyData)
+          .set(updateData)
           .where(eq(properties.id, existingProperty.id!))
       } else {
         // Property doesn't exist, create it with schemaFileId
+        // Set isEdited = false when loading from schema file
+        const propertyDataWithIsEdited = {
+          ...propertyData,
+          isEdited: false,
+        }
         logger(`Creating new property ${modelName}:${propertyName} with schemaFileId: ${propertyData.schemaFileId}`)
         console.log(`[addModelsToDb] Creating new property ${modelName}:${propertyName} with schemaFileId: ${propertyData.schemaFileId}`)
-        const result = await db.insert(properties).values(propertyData)
+        const result = await db.insert(properties).values(propertyDataWithIsEdited)
         console.log(`[addModelsToDb] Inserted property ${modelName}:${propertyName}, result:`, result)
       }
     }
@@ -1034,23 +1067,70 @@ export const savePropertyToDb = async (
 
   const modelRecord = modelRecords[0]
 
-  // Find existing property
-  const existingProperties = await db
-    .select()
-    .from(properties)
-    .where(
-      and(
-        eq(properties.name, property.name),
-        eq(properties.modelId, modelRecord.id!),
-      ),
-    )
-    .limit(1)
+  // Find existing property - try multiple strategies to handle name changes
+  // 1. First try by schemaFileId (most reliable - doesn't change when name changes)
+  // Use _propertyFileId first (from getPropertySchema), then id if it's a string (schemaFileId)
+  const schemaFileId = property._propertyFileId || (typeof property.id === 'string' ? property.id : undefined)
+  let existingProperties: any[] = []
+  
+  logger(`[savePropertyToDb] Looking for property ${property.modelName}:${property.name} (schemaFileId: ${schemaFileId}, originalName: ${property._originalValues?.name})`)
+  
+  if (schemaFileId) {
+    existingProperties = await db
+      .select()
+      .from(properties)
+      .where(
+        and(
+          eq(properties.schemaFileId, schemaFileId),
+          eq(properties.modelId, modelRecord.id!),
+        ),
+      )
+      .limit(1)
+    logger(`[savePropertyToDb] Found ${existingProperties.length} properties by schemaFileId`)
+  }
+  
+  // 2. If not found by schemaFileId, try by original name (if name was changed)
+  if (existingProperties.length === 0 && property._originalValues?.name && property._originalValues.name !== property.name) {
+    logger(`[savePropertyToDb] Trying to find by original name: ${property._originalValues.name}`)
+    existingProperties = await db
+      .select()
+      .from(properties)
+      .where(
+        and(
+          eq(properties.name, property._originalValues.name),
+          eq(properties.modelId, modelRecord.id!),
+        ),
+      )
+      .limit(1)
+    logger(`[savePropertyToDb] Found ${existingProperties.length} properties by original name`)
+  }
+  
+  // 3. Fallback: try by current name
+  if (existingProperties.length === 0) {
+    logger(`[savePropertyToDb] Trying to find by current name: ${property.name}`)
+    existingProperties = await db
+      .select()
+      .from(properties)
+      .where(
+        and(
+          eq(properties.name, property.name),
+          eq(properties.modelId, modelRecord.id!),
+        ),
+      )
+      .limit(1)
+    logger(`[savePropertyToDb] Found ${existingProperties.length} properties by current name`)
+  }
 
   // Prepare property data
   const propertyData: Partial<NewPropertyRecord> = {
     name: property.name,
     modelId: modelRecord.id!,
     dataType: property.dataType || '',
+  }
+  
+  // Preserve schemaFileId if we have it
+  if (schemaFileId) {
+    propertyData.schemaFileId = schemaFileId
   }
 
   // Handle ref property - create ref model if needed
@@ -1078,20 +1158,24 @@ export const savePropertyToDb = async (
   }
 
   if (existingProperties.length > 0) {
-    // Property exists, update it with new values
+    // Property exists, update it with new values (including new name)
+    // Set isEdited = true when property is edited
+    const existingProperty = existingProperties[0]
     await db
       .update(properties)
-      .set(propertyData)
-      .where(
-        and(
-          eq(properties.name, property.name),
-          eq(properties.modelId, modelRecord.id!),
-        ),
-      )
-    logger(`Updated property ${property.modelName}:${property.name} in database`)
+      .set({
+        ...propertyData,
+        isEdited: true, // Mark as edited when saving changes
+      })
+      .where(eq(properties.id, existingProperty.id!))
+    logger(`Updated property ${property.modelName}:${property._originalValues?.name || 'unknown'} -> ${property.name} in database`)
   } else {
     // Property doesn't exist, create it
-    await db.insert(properties).values(propertyData)
+    // Set isEdited = true for runtime-created properties
+    await db.insert(properties).values({
+      ...propertyData,
+      isEdited: true, // Runtime-created properties are edited
+    })
     logger(`Created property ${property.modelName}:${property.name} in database`)
   }
 }
@@ -1172,6 +1256,7 @@ export async function writeModelToDb(
         const newModel = await db.insert(modelsTable).values({
           name: data.modelName,
           schemaFileId: modelFileId,
+          isEdited: true, // Runtime-created models are edited
         }).returning()
         modelId = newModel[0].id!
       } catch (error: any) {
@@ -1289,6 +1374,7 @@ export async function writeModelToDb(
  * Write property to database
  * @param propertyFileId - The property file ID (schema_file_id)
  * @param data - Property data including modelId, name, dataType, and other property fields
+ * @param isEdited - Optional flag indicating if property has been edited locally (default: false)
  */
 export async function writePropertyToDb(
   propertyFileId: string,
@@ -1303,7 +1389,8 @@ export async function writePropertyToDb(
     localStorageDir?: string
     filenameSuffix?: string
     [key: string]: any
-  }
+  },
+  isEdited: boolean = false
 ): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
@@ -1335,6 +1422,7 @@ export async function writePropertyToDb(
     modelId: data.modelId,
     dataType: data.dataType || '',
     schemaFileId: propertyFileId,
+    isEdited: isEdited, // Persist isEdited flag
   }
   
   // Handle ref property - create ref model if needed

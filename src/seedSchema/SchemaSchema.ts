@@ -11,6 +11,7 @@ export const schemas = sqliteTable(
     schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking - must be unique
     schemaData: text('schema_data'), // Full JSON schema content (SchemaFileFormat as JSON string)
     isDraft: integer('is_draft', { mode: 'boolean' }), // true if schema is in draft/editing state, false if published to file
+    isEdited: integer('is_edited', { mode: 'boolean' }), // true if schema has been edited locally, false if matches schema file
     createdAt: int('created_at'),
     updatedAt: int('updated_at'),
   },

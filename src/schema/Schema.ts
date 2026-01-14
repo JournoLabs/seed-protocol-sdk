@@ -7,7 +7,7 @@ import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { isInternalSchema } from '@/helpers/constants'
@@ -33,6 +33,7 @@ const CLIENT_CHECK_CACHE_MS = 50 // Cache for 50ms to avoid excessive checks (re
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
 const TRACKED_PROPERTIES = [
+  'id', // schemaFileId (string) - public ID
   '$schema',
   'version',
   'metadata',
@@ -118,16 +119,16 @@ export class Schema {
     // Subscribe to schema context changes to update cache keys when schemaFileId becomes available
     this._service.subscribe((snapshot) => {
       console.log('Schema service subscribed to snapshot', snapshot.value)
-      // Update cache to use schemaFileId as key once we have it (only once)
-      if (snapshot.value === 'idle' && snapshot.context.metadata?.name && snapshot.context._schemaFileId) {
+      // Update cache to use id (schemaFileId) as key once we have it (only once)
+      if (snapshot.value === 'idle' && snapshot.context.metadata?.name && snapshot.context.id) {
         // Use a static Set to track which schemas have had their cache key updated
         const cacheKeyUpdatedSet = (Schema as any)._cacheKeyUpdatedSet || new Set<string>()
         if (!(Schema as any)._cacheKeyUpdatedSet) {
           (Schema as any)._cacheKeyUpdatedSet = cacheKeyUpdatedSet
         }
-        if (!cacheKeyUpdatedSet.has(snapshot.context._schemaFileId)) {
-          Schema._updateCacheKey(snapshot.context.schemaName, snapshot.context._schemaFileId)
-          cacheKeyUpdatedSet.add(snapshot.context._schemaFileId)
+        if (!cacheKeyUpdatedSet.has(snapshot.context.id)) {
+          Schema._updateCacheKey(snapshot.context.schemaName, snapshot.context.id)
+          cacheKeyUpdatedSet.add(snapshot.context.id)
         }
       }
     })
@@ -186,7 +187,7 @@ export class Schema {
         
         // Get the schema name, ensuring it's never the ID
         // Prefer metadata.name, then schemaName (but only if it's not the ID)
-        const schemaFileId = context._schemaFileId
+        const schemaFileId = context.id // id is now the schemaFileId (string)
         let name = context.metadata?.name
         
         // If metadata.name is not available, use schemaName but only if it's not the ID
@@ -633,7 +634,6 @@ export class Schema {
     // Query database to get schema name from ID
     const { BaseDb } = await import('@/db/Db/BaseDb')
     const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-    const { eq, desc } = await import('drizzle-orm')
 
     const db = BaseDb.getAppDb()
     if (!db) {
@@ -792,7 +792,7 @@ export class Schema {
 
   get schemaName(): string {
     const context = this._getSnapshotContext()
-    const schemaFileId = context._schemaFileId
+    const schemaFileId = context.id // id is now the schemaFileId (string)
     
     // Prefer metadata.name if available (most reliable)
     if (context.metadata?.name) {
@@ -811,15 +811,31 @@ export class Schema {
   }
 
   get schemaFileId(): string | undefined {
-    return this._getSnapshotContext()._schemaFileId
+    return this._getSnapshotContext().id // id is now the schemaFileId (string)
   }
 
   get id(): string | undefined {
-    return this._getSnapshotContext()._schemaFileId
+    return this._getSnapshotContext().id // id is now the schemaFileId (string)
   }
 
   get status() {
     return this._getSnapshot().value
+  }
+
+  get isEdited() {
+    const context = this._getSnapshotContext()
+    // First check in-memory state
+    if (context._isEdited !== undefined) {
+      return context._isEdited
+    }
+    // Fall back to reading from database if we have _dbId
+    if (context._dbId) {
+      // Load from database asynchronously (fire-and-forget for now)
+      // For synchronous getter, we'll need to cache it or make it async
+      // For now, return false if not in context
+      return false
+    }
+    return false
   }
 
   get validationErrors() {
@@ -930,7 +946,6 @@ export class Schema {
     const context = this._getSnapshotContext()
     const { BaseDb } = await import('@/db/Db/BaseDb')
     const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-    const { eq } = await import('drizzle-orm')
     const { addSchemaToDb } = await import('@/helpers/db')
     
     if (!context._isDraft || !context._editedProperties || context._editedProperties.size === 0) {
@@ -1053,6 +1068,7 @@ export class Schema {
         .update(schemasTable)
         .set({
           isDraft: false,
+          isEdited: false, // Clear isEdited flag after saving to file
           schemaFileId: publishedSchema.id,
           schemaData: JSON.stringify(publishedSchema, null, 2),
           version: publishedSchema.version,
@@ -1071,6 +1087,7 @@ export class Schema {
         publishedSchema.id,
         JSON.stringify(publishedSchema, null, 2),
         false, // isDraft = false (published)
+        false, // isEdited = false (published)
       )
     }
 
@@ -1081,7 +1098,9 @@ export class Schema {
       _dbVersion: publishedSchema.version,
     } as any)
 
-    // Clear edited flags on all ModelProperty instances
+    // Clear edited flags on all ModelProperty instances and in database
+    const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+    
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
       const cacheKey = `${modelName}:${propertyName}`
@@ -1100,7 +1119,68 @@ export class Schema {
         modelProperty.getService().send({
           type: 'clearEdited',
         })
+        
+        // Clear isEdited flag in database
+        try {
+          if (db && modelName && propertyName) {
+            // Find model by name
+            const modelRecords = await db
+              .select({ id: modelsTable.id })
+              .from(modelsTable)
+              .where(eq(modelsTable.name, modelName))
+              .limit(1)
+            
+            if (modelRecords.length > 0) {
+              // Find property by name and modelId
+              const propertyRecords = await db
+                .select({ id: propertiesTable.id })
+                .from(propertiesTable)
+                .where(
+                  and(
+                    eq(propertiesTable.name, propertyName),
+                    eq(propertiesTable.modelId, modelRecords[0].id)
+                  )
+                )
+                .limit(1)
+              
+              if (propertyRecords.length > 0) {
+                // Clear isEdited flag in database
+                await db
+                  .update(propertiesTable)
+                  .set({ isEdited: false })
+                  .where(eq(propertiesTable.id, propertyRecords[0].id!))
+              }
+            }
+          }
+        } catch (error) {
+          logger(`Error clearing isEdited flag in database for property ${propertyKey}: ${error}`)
+        }
       }
+    }
+    
+    // Clear isEdited flags for all models in this schema
+    try {
+      if (db && context._dbId) {
+        // Get all models for this schema
+        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
+        const modelRecords = await db
+          .select({ id: modelsTable.id })
+          .from(modelSchemas)
+          .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+          .where(eq(modelSchemas.schemaId, context._dbId))
+        
+        // Clear isEdited flag for all models
+        for (const modelRecord of modelRecords) {
+          if (modelRecord.id) {
+            await db
+              .update(modelsTable)
+              .set({ isEdited: false })
+              .where(eq(modelsTable.id, modelRecord.id))
+          }
+        }
+      }
+    } catch (error) {
+      logger(`Error clearing isEdited flags for models: ${error}`)
     }
 
     logger(`Successfully saved new version for schema ${this.schemaName} and published to file`)
@@ -1115,7 +1195,7 @@ export class Schema {
     const context = this._getSnapshotContext()
     
     // If we don't have load metadata, can't check for conflicts
-    if (!context._dbUpdatedAt || !context._schemaFileId) {
+    if (!context._dbUpdatedAt || !context.id) {
       return { hasConflict: false }
     }
     
@@ -1129,7 +1209,7 @@ export class Schema {
       const dbSchemas = await db
         .select()
         .from(schemasTable)
-        .where(eq(schemasTable.schemaFileId, context._schemaFileId))
+        .where(eq(schemasTable.schemaFileId, context.id)) // id is now the schemaFileId (string)
         .orderBy(desc(schemasTable.version))
         .limit(1)
       
@@ -1257,7 +1337,7 @@ export class Schema {
     
     const context = this._getSnapshotContext()
     const schemaName = newName || context.schemaName || oldName || ''
-    const schemaFileId = context._schemaFileId || ''
+    const schemaFileId = context.id || '' // id is now the schemaFileId (string)
     
     // Use schemaFileId as the key if available, otherwise use schemaName
     const saveKey = schemaFileId || schemaName
@@ -1295,7 +1375,6 @@ export class Schema {
       const { generateId } = await import('@/helpers')
       const { BaseDb } = await import('@/db/Db/BaseDb')
       const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-      const { eq } = await import('drizzle-orm')
 
       const db = BaseDb.getAppDb()
       if (!db) {
@@ -1315,24 +1394,24 @@ export class Schema {
       let existingSchemaRecord: typeof schemasTable.$inferSelect | undefined
       
       // PRIMARY: Look up by schemaFileId if we have it (this is the most reliable way)
-      if (context._schemaFileId) {
-        logger(`Looking up schema by schemaFileId: ${context._schemaFileId}`)
+      if (context.id) {
+        logger(`Looking up schema by schemaFileId: ${context.id}`)
         const schemasById = await db
           .select()
           .from(schemasTable)
-          .where(eq(schemasTable.schemaFileId, context._schemaFileId))
+          .where(eq(schemasTable.schemaFileId, context.id)) // id is now the schemaFileId (string)
           .limit(1)
         
         if (schemasById.length > 0) {
           const foundRecord = schemasById[0]
           existingSchemaRecord = foundRecord
-          existingSchemaId = foundRecord.schemaFileId || context._schemaFileId
-          logger(`Found schema by schemaFileId: ${context._schemaFileId} (id: ${foundRecord.id}, name: ${foundRecord.name})`)
+          existingSchemaId = foundRecord.schemaFileId || context.id
+          logger(`Found schema by schemaFileId: ${context.id} (id: ${foundRecord.id}, name: ${foundRecord.name})`)
         } else {
-          logger(`No schema found by schemaFileId: ${context._schemaFileId}`)
+          logger(`No schema found by schemaFileId: ${context.id}`)
         }
       } else {
-        logger(`No _schemaFileId in context, will look up by name`)
+        logger(`No id (schemaFileId) in context, will look up by name`)
       }
       
       // FALLBACK: If not found by schemaFileId, try by name (for newly created schemas that don't have schemaFileId yet)
@@ -1376,7 +1455,7 @@ export class Schema {
 
       // Build current schema state from context
       // Use existing schemaFileId if we found one, otherwise use the one from context, or generate new
-      const schemaFileId = existingSchemaId || context._schemaFileId || generateId()
+      const schemaFileId = existingSchemaId || context.id || generateId() // id is now the schemaFileId (string)
       
       // Build metadata - if name changed, use newName, otherwise use context metadata
       // Always ensure metadata.name matches finalNewName to prevent inconsistencies
@@ -1409,8 +1488,8 @@ export class Schema {
       }
       
       // Log if there was a mismatch that we're fixing
-      if (existingSchemaRecord?.schemaFileId && context._schemaFileId && context._schemaFileId !== finalSchemaFileId) {
-        saveDraftLogger(`Fixed schema ID mismatch: context._schemaFileId="${context._schemaFileId}" does not match DB schemaFileId="${finalSchemaFileId}". Using DB value.`)
+      if (existingSchemaRecord?.schemaFileId && context.id && context.id !== finalSchemaFileId) {
+        saveDraftLogger(`Fixed schema ID mismatch: context.id="${context.id}" does not match DB schemaFileId="${finalSchemaFileId}". Using DB value.`)
       }
       
       saveDraftLogger(`Building schema with metadata.name="${currentMetadata.name}", finalNewName="${finalNewName}"`)
@@ -1485,7 +1564,7 @@ export class Schema {
             saveDraftLogger(`WARNING: Could not verify saved record - record not found or has no schemaData`)
           }
           
-          // Update the context's _schemaFileId and conflict detection metadata
+          // Update the context's id (schemaFileId) and conflict detection metadata
           try {
             const snapshot = this._service.getSnapshot()
             if (snapshot.status !== 'stopped') {
@@ -1493,14 +1572,14 @@ export class Schema {
               // Also update conflict detection metadata after successful save
               this._service.send({
                 type: 'updateContext',
-                _schemaFileId: finalSchemaFileId,
+                id: finalSchemaFileId, // id is now the schemaFileId (string)
                 _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
                 _dbVersion: currentSchema.version,
               })
             }
           } catch (error) {
             // Service might be stopped, ignore
-            logger(`Could not update _schemaFileId in context: ${error instanceof Error ? error.message : String(error)}`)
+            logger(`Could not update id (schemaFileId) in context: ${error instanceof Error ? error.message : String(error)}`)
           }
           
           logger(`Successfully updated schema name from "${oldName}" to "${finalNewName}" in database`)
@@ -1535,13 +1614,13 @@ export class Schema {
               })
               .where(eq(schemasTable.id, foundRecord.id))
             
-            // Update context with schemaFileId and conflict detection metadata
+            // Update context with id (schemaFileId) and conflict detection metadata
             try {
               const snapshot = this._service.getSnapshot()
               if (snapshot.status !== 'stopped' && finalSchemaFileId) {
                 this._service.send({
                   type: 'updateContext',
-                  _schemaFileId: finalSchemaFileId,
+                  id: finalSchemaFileId, // id is now the schemaFileId (string)
                   _dbUpdatedAt: new Date(currentSchema.metadata.updatedAt).getTime(),
                   _dbVersion: currentSchema.version,
                 })
@@ -1630,14 +1709,14 @@ export class Schema {
     // Remove from both caches
     try {
       const context = this._getSnapshotContext()
-      if (context._schemaFileId) {
-        if (Schema.instanceCacheById.has(context._schemaFileId)) {
-          const entry = Schema.instanceCacheById.get(context._schemaFileId)!
+      if (context.id) { // id is now the schemaFileId (string)
+        if (Schema.instanceCacheById.has(context.id)) {
+          const entry = Schema.instanceCacheById.get(context.id)!
           entry.refCount -= 1
           if (entry.refCount <= 0) {
-            Schema.instanceCacheById.delete(context._schemaFileId)
+            Schema.instanceCacheById.delete(context.id)
           } else {
-            Schema.instanceCacheById.set(context._schemaFileId, entry)
+            Schema.instanceCacheById.set(context.id, entry)
           }
         }
       }
@@ -1686,7 +1765,6 @@ export class Schema {
         try {
           const { BaseDb } = await import('@/db/Db/BaseDb')
           const { schemas: schemasTable, modelSchemas, models: modelsTable } = await import('@/seedSchema')
-          const { eq } = await import('drizzle-orm')
           
           // Get schema ID from database
           const db = BaseDb.getAppDb()

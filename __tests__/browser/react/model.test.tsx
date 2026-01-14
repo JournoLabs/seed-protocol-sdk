@@ -104,8 +104,8 @@ function UseModelWithNameTest({
   schemaId: string | null | undefined
   modelName: string | null | undefined
 }) {
-  const model = useModel(schemaId, modelName)
-  const models = useModels(schemaId)
+  const { model } = useModel(schemaId, modelName)
+  const { models } = useModels(schemaId)
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
@@ -143,7 +143,7 @@ function UseModelWithNameTest({
 
 // Test component for useModel with modelId
 function UseModelWithIdTest({ modelId }: { modelId: string | null | undefined }) {
-  const model = useModel(modelId)
+  const { model } = useModel(modelId)
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {

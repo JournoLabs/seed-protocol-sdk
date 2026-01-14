@@ -17,8 +17,10 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   // Validation errors
   _validationErrors?: ValidationError[]
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
-  // Store propertyFileId (schemaFileId) for lookups by ID
+  // Property file ID (schemaFileId from JSON schema file) - used for lookups
   _propertyFileId?: string
+  // Note: id field (from TProperty) is now the schemaFileId (string)
+  // _dbId (from TProperty) stores the database integer ID
 }
 
 export const modelPropertyMachine = setup({
@@ -96,7 +98,13 @@ export const modelPropertyMachine = setup({
           if (key === 'type') {
             continue
           }
-          newContext[key] = (event as any)[key]
+          let value = (event as any)[key]
+          // Convert null to undefined for optional fields (TypeBox validation expects undefined, not null)
+          // This is especially important for refValueType, refModelId, etc.
+          if (value === null && (key === 'refValueType' || key === 'refModelId' || key === 'ref' || key === 'refModelName')) {
+            value = undefined
+          }
+          newContext[key] = value
         }
 
         // Compare with original values and set _isEdited flag (only for non-internal updates)
@@ -110,6 +118,15 @@ export const modelPropertyMachine = setup({
 
         // Clear validation errors on context update (will be re-validated if needed)
         newContext._validationErrors = undefined
+
+        // Convert null to undefined for optional fields (TypeBox validation expects undefined, not null)
+        // This is especially important for refValueType, refModelId, etc.
+        const optionalFields = ['refValueType', 'refModelId', 'ref', 'refModelName']
+        for (const field of optionalFields) {
+          if (newContext[field] === null) {
+            newContext[field] = undefined
+          }
+        }
 
         return newContext
       }),
@@ -162,11 +179,14 @@ export const modelPropertyMachine = setup({
     idle: {
       entry: assign({
         writeProcess: ({ spawn, context }) => {
-          if (!context.writeProcess && context.id) {
+          // Spawn writeProcess if we have id (schemaFileId)
+          // New properties will have id generated
+          const entityId = context.id
+          if (!context.writeProcess && entityId) {
             return spawn(writeProcessMachine, {
               input: {
                 entityType: 'modelProperty',
-                entityId: context.id,
+                entityId: String(entityId),
                 entityData: context,
               },
             })

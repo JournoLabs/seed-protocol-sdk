@@ -392,14 +392,36 @@ export async function importJsonSchema(
             // Remove id field for import format
             id: undefined,
             properties: Object.fromEntries(
-              Object.entries(model.properties || {}).map(([propName, prop]) => [
-                propName,
-                {
-                  ...prop,
+              Object.entries(model.properties || {}).map(([propName, prop]) => {
+                const schemaProp = prop as any
+                const jsonProp: any = {
+                  type: schemaProp.dataType || schemaProp.type,
                   // Remove id field for import format
                   id: undefined,
-                },
-              ]),
+                }
+                
+                // Handle Relation type - convert ref to model
+                if (schemaProp.ref || schemaProp.refModelName) {
+                  jsonProp.model = schemaProp.refModelName || schemaProp.ref
+                }
+                
+                // Handle List type
+                if ((schemaProp.dataType === 'List' || schemaProp.type === 'List') && schemaProp.refValueType) {
+                  jsonProp.items = {
+                    type: schemaProp.refValueType,
+                    model: schemaProp.refModelName || schemaProp.ref,
+                  }
+                }
+                
+                // Copy other properties (storage, etc.)
+                Object.keys(schemaProp).forEach(key => {
+                  if (key !== 'id' && key !== 'dataType' && key !== 'type' && key !== 'ref' && key !== 'refModelName' && key !== 'refValueType') {
+                    jsonProp[key] = schemaProp[key]
+                  }
+                })
+                
+                return [propName, jsonProp]
+              }),
             ),
           },
         ]),
@@ -692,14 +714,36 @@ export const loadSchemaFromFile = async (
             // Remove id field for import format
             id: undefined,
             properties: Object.fromEntries(
-              Object.entries(model.properties).map(([propName, prop]) => [
-                propName,
-                {
-                  ...prop,
+              Object.entries(model.properties).map(([propName, prop]) => {
+                const schemaProp = prop as any
+                const jsonProp: any = {
+                  type: schemaProp.dataType || schemaProp.type,
                   // Remove id field for import format
                   id: undefined,
-                },
-              ]),
+                }
+                
+                // Handle Relation type - convert ref to model
+                if (schemaProp.ref || schemaProp.refModelName) {
+                  jsonProp.model = schemaProp.refModelName || schemaProp.ref
+                }
+                
+                // Handle List type
+                if ((schemaProp.dataType === 'List' || schemaProp.type === 'List') && schemaProp.refValueType) {
+                  jsonProp.items = {
+                    type: schemaProp.refValueType,
+                    model: schemaProp.refModelName || schemaProp.ref,
+                  }
+                }
+                
+                // Copy other properties (storage, etc.)
+                Object.keys(schemaProp).forEach(key => {
+                  if (key !== 'id' && key !== 'dataType' && key !== 'type' && key !== 'ref' && key !== 'refModelName' && key !== 'refValueType') {
+                    jsonProp[key] = schemaProp[key]
+                  }
+                })
+                
+                return [propName, jsonProp]
+              }),
             ),
           },
         ]),

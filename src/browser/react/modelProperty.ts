@@ -4,14 +4,12 @@ import { getPropertySchema } from "@/helpers/property"
 import { ModelProperty } from "@/ModelProperty/ModelProperty"
 import { useIsClientReady } from "./client"
 import { Subscription } from "xstate"
-import { useImmer } from "use-immer"
-import { ModelPropertyMachineContext } from "@/ModelProperty/service/modelPropertyMachine"
-import { ValidationError } from "@/Schema/validation"
 import debug from "debug"
 import { useLiveQuery } from "./liveQuery"
 import { BaseDb } from "@/db/Db/BaseDb"
 import { properties as propertiesTable, models as modelsTable } from "@/seedSchema/ModelSchema"
-import { eq } from "drizzle-orm"
+import { eq, and } from "drizzle-orm"
+import { Model } from "@/Model/Model"
 
 const logger = debug('seedSdk:browser:react:modelProperty')
 
@@ -39,7 +37,7 @@ export const useModelProperties = (
   modelName?: string | null | undefined
 ): UseModelPropertiesResult => {
   // Use useModel to handle both lookup patterns (by ID or by schemaId + modelName)
-  const model = useModel(schemaIdOrModelId, modelName)
+  const { model } = useModel(schemaIdOrModelId, modelName)
   
   // Determine the modelName for use in getPropertySchema
   const modelNameForProperty = useMemo(() => {
@@ -55,12 +53,12 @@ export const useModelProperties = (
   const [error, setError] = useState<Error | null>(null)
   const isClientReady = useIsClientReady()
 
-  // Get modelId (database ID) from model context
+  // Get _dbId (database ID) from model context
   const dbModelId = useMemo(() => {
     if (!model) return null
     try {
       const context = (model as any)._getSnapshotContext()
-      return context.modelId as number | undefined
+      return context._dbId as number | undefined // _dbId is the database integer ID
     } catch {
       return null
     }
@@ -96,8 +94,9 @@ export const useModelProperties = (
       const timestamp = Date.now()
       console.log(`[useModelProperties.fetchModelProperties] [${timestamp}] Starting fetch, propertiesTableData count:`, propertiesTableData?.length, 'properties:', propertiesTableData?.map(p => p.name))
       
-      // Get model properties from the model instance
-      if (!model.properties || model.properties.length === 0) {
+      // Use propertiesTableData (database state) as the source of truth instead of model.properties (schema file)
+      // This ensures we get the current names even after property renames
+      if (!propertiesTableData || propertiesTableData.length === 0) {
         setModelProperties([])
         setError(null)
         setIsLoading(false)
@@ -106,16 +105,24 @@ export const useModelProperties = (
 
       const _modelProperties: ModelProperty[] = []
 
-      for (const propertyDefinition of model.properties) {
-        const propertyName = propertyDefinition.name
-        if (!propertyName) continue
-
-        const modelPropertyData = await getPropertySchema(modelNameForProperty, propertyName)
-        if (modelPropertyData) {
-          const modelProperty = ModelProperty.create({
-            ...modelPropertyData,
-          })
-          _modelProperties.push(modelProperty)
+      // Iterate over propertiesTableData and create ModelProperty instances by schemaFileId
+      // This works even when property names have changed, since schemaFileId is stable
+      for (const dbProperty of propertiesTableData) {
+        if (!dbProperty.schemaFileId) {
+          // If no schemaFileId, fall back to name-based lookup (for backwards compatibility)
+          const modelPropertyData = await getPropertySchema(modelNameForProperty, dbProperty.name)
+          if (modelPropertyData) {
+            const modelProperty = ModelProperty.create({
+              ...modelPropertyData,
+            })
+            _modelProperties.push(modelProperty)
+          }
+        } else {
+          // Use createById to get/create the instance by schemaFileId (stable across renames)
+          const modelProperty = await ModelProperty.createById(dbProperty.schemaFileId)
+          if (modelProperty) {
+            _modelProperties.push(modelProperty)
+          }
         }
       }
 
@@ -155,18 +162,29 @@ export const useModelProperties = (
     }
   }, [modelNameForProperty, model, propertiesTableData, schemaIdOrModelId])
 
-  // Fetch model properties on initial mount when client is ready
+  // Fetch model properties when dbModelId becomes available (model has finished loading)
+  // This ensures we wait for the model to be fully loaded before trying to fetch properties
   useEffect(() => {
-    if (!isClientReady) {
+    if (!isClientReady || !dbModelId || !modelNameForProperty || !model || !schemaIdOrModelId) {
       return
     }
-    // Initial fetch when client becomes ready
+    // Wait for propertiesTableData to be available before initial fetch
+    // (it may be undefined initially while the query is starting)
+    if (propertiesTableData === undefined) {
+      return
+    }
+    // Initial fetch when model is ready and dbModelId is available
     fetchModelProperties()
-  }, [isClientReady, fetchModelProperties])
+  }, [isClientReady, dbModelId, fetchModelProperties, modelNameForProperty, model, schemaIdOrModelId, propertiesTableData])
 
   // Refetch model properties when table data actually changes (not just reference)
   useEffect(() => {
-    if (!isClientReady || !propertiesTableData || !modelNameForProperty || !model || !schemaIdOrModelId) {
+    if (!isClientReady || !modelNameForProperty || !model || !schemaIdOrModelId || !dbModelId) {
+      return
+    }
+
+    // If propertiesTableData is undefined, the query hasn't started yet - wait for it
+    if (propertiesTableData === undefined) {
       return
     }
 
@@ -200,8 +218,10 @@ export const useModelProperties = (
     }
 
     // Compare sets to detect changes
+    // If currentPropertiesSet is empty but tableDataPropertiesSet has data, that's a change
     const setsAreEqual = 
       currentPropertiesSet.size === tableDataPropertiesSet.size &&
+      currentPropertiesSet.size > 0 &&
       [...currentPropertiesSet].every(id => tableDataPropertiesSet.has(id))
 
     if (setsAreEqual) {
@@ -230,44 +250,222 @@ export const useModelProperties = (
   }
 }
 
-export const useModelProperty = (modelName: string, propertyName: string) => {
-  const [modelPropertyData, setModelPropertyData] = useImmer<ModelPropertyMachineContext | undefined>(undefined)
+/**
+ * Helper function to get property schema by modelFileId and propertyName
+ */
+const getPropertySchemaByModelFileId = async (
+  modelFileId: string,
+  propertyName: string
+): Promise<ReturnType<typeof getPropertySchema>> => {
+  // Get model by modelFileId
+  const model = await Model.createById(modelFileId)
+  if (!model) {
+    return undefined
+  }
+
+  // Get modelName from model
+  const modelName = model.modelName ?? (model as any).name
+  if (!modelName) {
+    return undefined
+  }
+
+  // Use existing getPropertySchema function
+  return getPropertySchema(modelName, propertyName)
+}
+
+/**
+ * Hook to get a specific ModelProperty instance
+ * Can be called in three ways:
+ * 1. With propertyFileId: useModelProperty(propertyFileId)
+ * 2. With modelFileId and propertyName: useModelProperty(modelFileId, propertyName)
+ * 3. With schemaId, modelName, and propertyName: useModelProperty(schemaId, modelName, propertyName)
+ * 
+ * @overload
+ * @param propertyFileId - The property file ID (schemaFileId)
+ * @returns Object with modelProperty, isLoading, and error
+ * 
+ * @overload
+ * @param modelFileId - The model file ID (modelFileId)
+ * @param propertyName - The name of the property
+ * @returns Object with modelProperty, isLoading, and error
+ * 
+ * @overload
+ * @param schemaId - The schema ID (schema file ID)
+ * @param modelName - The name of the model
+ * @param propertyName - The name of the property
+ * @returns Object with modelProperty, isLoading, and error
+ */
+export function useModelProperty(propertyFileId: string): {
+  modelProperty: ModelProperty | undefined
+  isLoading: boolean
+  error: Error | null
+}
+export function useModelProperty(
+  modelFileId: string,
+  propertyName: string
+): {
+  modelProperty: ModelProperty | undefined
+  isLoading: boolean
+  error: Error | null
+}
+export function useModelProperty(
+  schemaId: string,
+  modelName: string,
+  propertyName: string
+): {
+  modelProperty: ModelProperty | undefined
+  isLoading: boolean
+  error: Error | null
+}
+export function useModelProperty(
+  arg1: string | null | undefined,
+  arg2?: string | null | undefined,
+  arg3?: string | null | undefined
+) {
+  // Determine initial loading state - start loading if we have valid parameters
+  const initialLoadingState = useMemo(() => {
+    if (arg3 !== undefined && arg3 !== null) {
+      // Three arguments: schemaId, modelName, propertyName
+      return !!(arg1 && arg2 && arg3)
+    } else if (arg2 !== undefined && arg2 !== null) {
+      // Two arguments: modelFileId, propertyName
+      return !!(arg1 && arg2)
+    } else {
+      // One argument: propertyFileId
+      return !!arg1
+    }
+  }, [arg1, arg2, arg3])
+
   const [modelProperty, setModelProperty] = useState<ModelProperty | undefined>(undefined)
-  const [validationErrors, setValidationErrors] = useState<ValidationError[] | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(initialLoadingState)
+  const [error, setError] = useState<Error | null>(null)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
 
   const isClientReady = useIsClientReady()
 
-  const updateModelProperty = useCallback(async (modelName: string, propertyName: string) => {
-    const modelPropertyData = await getPropertySchema(modelName, propertyName)
-    if (modelPropertyData) {
-      const modelProperty = ModelProperty.create({
-        ...modelPropertyData,
-        modelName,
-      })
-      setModelProperty(modelProperty)
-      setValidationErrors(modelProperty.validationErrors)
-      setModelPropertyData((draft) => {
-        if (draft) {
-          const context = modelProperty.getService().getSnapshot().context
-          Object.assign(draft, context)
-        } else {
-          setModelPropertyData(modelProperty.getService().getSnapshot().context)
-        }
-      })
+  // Determine which lookup mode we're in based on arguments
+  const lookupMode = useMemo(() => {
+    if (arg3 !== undefined && arg3 !== null) {
+      // Three arguments: schemaId, modelName, propertyName
+      return { type: 'schemaId' as const, schemaId: arg1, modelName: arg2, propertyName: arg3 }
+    } else if (arg2 !== undefined && arg2 !== null) {
+      // Two arguments: modelFileId, propertyName
+      return { type: 'modelFileId' as const, modelFileId: arg1, propertyName: arg2 }
+    } else {
+      // One argument: propertyFileId
+      return { type: 'propertyFileId' as const, propertyFileId: arg1 }
     }
-  }, [])
+  }, [arg1, arg2, arg3])
 
-  useEffect(() => {
+  // Determine if we should be loading based on parameters
+  const shouldLoad = useMemo(() => {
+    if (!isClientReady) return false
+    if (lookupMode.type === 'propertyFileId') {
+      return !!lookupMode.propertyFileId
+    } else if (lookupMode.type === 'modelFileId') {
+      return !!(lookupMode.modelFileId && lookupMode.propertyName)
+    } else {
+      return !!(lookupMode.schemaId && lookupMode.modelName && lookupMode.propertyName)
+    }
+  }, [isClientReady, lookupMode])
+
+  const updateModelProperty = useCallback(async () => {
     if (!isClientReady) {
+      setModelProperty(undefined)
+      setIsLoading(false)
+      setError(null)
       return
     }
 
-    if (!modelProperty) {
-      updateModelProperty(modelName, propertyName)
-    }
-  }, [modelName, propertyName, isClientReady, modelProperty, updateModelProperty])
+    let propertyData: Awaited<ReturnType<typeof getPropertySchema>> | undefined
+    let resolvedModelName: string | undefined
 
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      if (lookupMode.type === 'propertyFileId') {
+        if (!lookupMode.propertyFileId) {
+          setModelProperty(undefined)
+          setIsLoading(false)
+          setError(null)
+          return
+        }
+
+        // Use ModelProperty.createById for propertyFileId lookup
+        const foundProperty = await ModelProperty.createById(lookupMode.propertyFileId)
+        if (foundProperty) {
+          setModelProperty(foundProperty)
+          setIsLoading(false)
+          setError(null)
+        } else {
+          setModelProperty(undefined)
+          setIsLoading(false)
+          setError(null)
+        }
+        return
+      } else if (lookupMode.type === 'modelFileId') {
+        if (!lookupMode.modelFileId || !lookupMode.propertyName) {
+          setModelProperty(undefined)
+          setIsLoading(false)
+          setError(null)
+          return
+        }
+
+        // Get property schema by modelFileId and propertyName
+        // This function already gets the model and resolves modelName
+        propertyData = await getPropertySchemaByModelFileId(lookupMode.modelFileId, lookupMode.propertyName)
+        
+        // Get modelName from model (needed for ModelProperty.create)
+        const model = await Model.createById(lookupMode.modelFileId)
+        resolvedModelName = model?.modelName ?? (model as any)?.name
+      } else {
+        // lookupMode.type === 'schemaId'
+        if (!lookupMode.schemaId || !lookupMode.modelName || !lookupMode.propertyName) {
+          setModelProperty(undefined)
+          setIsLoading(false)
+          setError(null)
+          return
+        }
+
+        // Use existing getPropertySchema for schemaId + modelName + propertyName
+        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName)
+        resolvedModelName = lookupMode.modelName
+      }
+
+      if (propertyData && resolvedModelName) {
+        const createdProperty = ModelProperty.create({
+          ...propertyData,
+          modelName: resolvedModelName,
+        })
+        setModelProperty(createdProperty)
+        setIsLoading(false)
+        setError(null)
+      } else {
+        setModelProperty(undefined)
+        setIsLoading(false)
+        setError(null)
+      }
+    } catch (error) {
+      console.error('[useModelProperty] Error updating model property:', error)
+      setModelProperty(undefined)
+      setIsLoading(false)
+      setError(error as Error)
+    }
+  }, [isClientReady, lookupMode.type, lookupMode.propertyFileId, lookupMode.modelFileId, lookupMode.propertyName, lookupMode.schemaId, lookupMode.modelName])
+
+  // Fetch/refetch when lookup parameters change or client becomes ready
+  useEffect(() => {
+    if (!shouldLoad) {
+      setModelProperty(undefined)
+      setIsLoading(false)
+      setError(null)
+      return
+    }
+    updateModelProperty()
+  }, [shouldLoad, updateModelProperty])
+
+  // Subscribe to service changes when modelProperty is available
   useEffect(() => {
     if (!modelProperty) {
       return
@@ -278,7 +476,7 @@ export const useModelProperty = (modelName: string, propertyName: string) => {
 
     // Subscribe to service changes
     const subscription = modelProperty.getService().subscribe((snapshot) => {
-      updateModelProperty(modelName, propertyName)
+      updateModelProperty()
     })
     
     subscriptionRef.current = subscription
@@ -287,11 +485,11 @@ export const useModelProperty = (modelName: string, propertyName: string) => {
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
     }
-  }, [modelName, propertyName, modelProperty, updateModelProperty])
+  }, [modelProperty, updateModelProperty])
 
   return {
-    modelPropertyData,
     modelProperty,
-    validationErrors,
+    isLoading,
+    error,
   }
 }

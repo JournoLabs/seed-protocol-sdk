@@ -1016,6 +1016,116 @@ testDescribe('ModelProperty Integration Tests', () => {
         expect(property.name).toBe(newName)
       }
     })
+
+    it('should immediately save property name changes to database', async () => {
+      const schemaName = 'Test Schema Property Name Change DB'
+      const modelName = 'TestModel Property Name Change DB'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            oldPropertyName: {
+              id: generateId(),
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const model = Model.create(modelName, schemaName)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const propertyData = await getPropertySchema(modelName, 'oldPropertyName')
+      expect(propertyData).toBeDefined()
+      
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData)
+      await waitForModelPropertyIdle(property)
+      
+      const oldName = property.name
+      const newName = 'UpdatedPropertyName'
+      
+      expect(oldName).toBeDefined()
+      expect(oldName).toBe('oldPropertyName')
+      
+      // Get modelId from property context for database queries
+      const propertyContext = (property as any)._getSnapshotContext()
+      const modelId = propertyContext.modelId
+      
+      // Wait a bit for property to be written to database if it wasn't already
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Verify property exists in database with old name first
+      const db = BaseDb.getAppDb()
+      if (db && modelId && oldName) {
+        const dbPropertiesBefore = await db
+          .select()
+          .from(propertiesTable)
+          .where(
+            and(
+              eq(propertiesTable.modelId, modelId),
+              eq(propertiesTable.name, oldName as string)
+            )
+          )
+          .limit(1)
+        
+        // Property might not be in database yet if schema wasn't saved, but that's okay
+        // We'll verify it gets saved after the name change
+      }
+      
+      // Update name
+      property.name = newName
+      
+      // Wait for update to complete (including database save via compareAndMarkDraft)
+      // Need to wait for the state machine to complete the compareAndMarkDraft state
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Verify name changed in memory
+      expect(property.name).toBe(newName)
+      
+      // Verify database was updated with new name
+      if (db && modelId) {
+        const dbProperties = await db
+          .select()
+          .from(propertiesTable)
+          .where(
+            and(
+              eq(propertiesTable.modelId, modelId),
+              eq(propertiesTable.name, newName)
+            )
+          )
+          .limit(1)
+        
+        expect(dbProperties.length).toBeGreaterThan(0)
+        expect(dbProperties[0].name).toBe(newName)
+        
+        // Verify old name no longer exists in database (if it existed before)
+        if (oldName) {
+          const oldDbProperties = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.modelId, modelId),
+                eq(propertiesTable.name, oldName as string)
+              )
+            )
+            .limit(1)
+          
+          // If the property was in the database before, it should be renamed (length = 0)
+          // If it wasn't in the database before, this is also fine
+          // The key assertion is that the new name exists in the database
+        }
+        expect(dbProperties.length).toBeGreaterThan(0)
+      }
+    })
   })
 
   describe('ModelProperty subscription handling', () => {

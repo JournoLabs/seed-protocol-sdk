@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { Model } from '@/Model/Model'
 import { useIsClientReady } from './client'
 import { useLiveQuery } from './liveQuery'
@@ -7,6 +7,7 @@ import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { eq, or } from 'drizzle-orm'
+import { Subscription } from 'xstate'
 
 type UseModelsResult = {
   models: Model[]
@@ -175,6 +176,12 @@ export const useModels: UseModels = (schemaId) => {
 
 }
 
+type UseModelResult = {
+  model: Model | undefined
+  isLoading: boolean
+  error: Error | null
+}
+
 /**
  * Hook to get a specific Model instance
  * Can be called in two ways:
@@ -183,48 +190,100 @@ export const useModels: UseModels = (schemaId) => {
  * 
  * @param schemaIdOrModelId - The schema ID (schema file ID) OR the model ID (modelFileId)
  * @param modelName - The name of the model to retrieve (required if first param is schemaId)
- * @returns The Model instance if found, undefined otherwise
+ * @returns Object with model, isLoading, and error
  */
 export const useModel = (
   schemaIdOrModelId: string | null | undefined,
   modelName?: string | null | undefined
-): Model | undefined => {
+): UseModelResult => {
   const isClientReady = useIsClientReady()
   const [model, setModel] = useState<Model | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const [, setVersion] = useState(0) // Version counter to force re-renders
 
   // If modelName is provided, treat first param as schemaId
   // Otherwise, treat first param as modelId
   const isModelIdLookup = modelName === undefined || modelName === null
 
+  // Determine initial loading state
+  const shouldLoad = useMemo(() => {
+    if (!isClientReady) return false
+    if (isModelIdLookup) {
+      return !!schemaIdOrModelId
+    } else {
+      return !!(schemaIdOrModelId && modelName)
+    }
+  }, [isClientReady, isModelIdLookup, schemaIdOrModelId, modelName])
+
   // Lookup model by ID if needed
   useEffect(() => {
     if (!isClientReady || !isModelIdLookup || !schemaIdOrModelId) {
       setModel(undefined)
+      setIsLoading(false)
+      setError(null)
       return
     }
 
     const lookupModelById = async () => {
       try {
+        setIsLoading(true)
+        setError(null)
         // Use Model.createById which handles cache + DB lookup
         const foundModel = await Model.createById(schemaIdOrModelId)
         setModel(foundModel || undefined)
+        setIsLoading(false)
+        setError(null)
       } catch (error) {
         console.error('[useModel] Error looking up model by ID:', error)
         setModel(undefined)
+        setIsLoading(false)
+        setError(error as Error)
       }
     }
 
     lookupModelById()
   }, [isClientReady, isModelIdLookup, schemaIdOrModelId])
 
+  // Subscribe to service changes when model is available (for modelId lookup)
+  useEffect(() => {
+    if (!isModelIdLookup || !model) {
+      // Clean up subscription if model is not available
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+      return
+    }
+
+    // Clean up previous subscription
+    subscriptionRef.current?.unsubscribe()
+
+    // Subscribe to service changes
+    const subscription = model.getService().subscribe((snapshot) => {
+      // Force re-render by incrementing version counter
+      setVersion(prev => prev + 1)
+    })
+    
+    subscriptionRef.current = subscription
+
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+    }
+  }, [isModelIdLookup, model])
+
   // If doing modelId lookup, return the model directly
   if (isModelIdLookup) {
-    return model
+    return {
+      model,
+      isLoading,
+      error,
+    }
   }
 
   // Otherwise, use schemaId + modelName lookup via useModels
-  const { models: modelsList } = useModels(schemaIdOrModelId)
-  return useMemo(() => {
+  const { models: modelsList, isLoading: modelsLoading, error: modelsError } = useModels(schemaIdOrModelId)
+  const foundModel = useMemo(() => {
     if (!modelName) {
       return undefined
     }
@@ -234,4 +293,37 @@ export const useModel = (
       return mName === modelName
     })
   }, [modelsList, modelName])
+
+  // Subscribe to service changes when model is available (for schemaId + modelName lookup)
+  useEffect(() => {
+    if (isModelIdLookup || !foundModel) {
+      // Clean up subscription if model is not available
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+      return
+    }
+
+    // Clean up previous subscription
+    subscriptionRef.current?.unsubscribe()
+
+    // Subscribe to service changes
+    const subscription = foundModel.getService().subscribe((snapshot) => {
+      // Force re-render by incrementing version counter
+      setVersion(prev => prev + 1)
+    })
+    
+    subscriptionRef.current = subscription
+
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+    }
+  }, [isModelIdLookup, foundModel])
+
+  // For schemaId + modelName lookup, derive loading/error from useModels
+  return {
+    model: foundModel,
+    isLoading: modelsLoading,
+    error: modelsError,
+  }
 }

@@ -1,10 +1,9 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { Static } from '@sinclair/typebox'
 import { ModelPropertyDataTypes, TProperty } from '@/Schema'
-import { immerable } from 'immer'
 import { modelPropertyMachine, ModelPropertyMachineContext } from './service/modelPropertyMachine'
 import { StorageType } from '@/types'
-import { BaseFileManager } from '@/helpers'
+import { BaseFileManager, generateId } from '@/helpers'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import debug from 'debug'
 
@@ -44,7 +43,6 @@ export class ModelProperty {
   }>()
   
   protected readonly _service: ModelPropertyService
-  [immerable] = true
 
   name?: string
   dataType?: ModelPropertyDataTypes
@@ -59,7 +57,12 @@ export class ModelProperty {
   filenameSuffix?: string
 
   constructor(property: Static<typeof TProperty>) {
-    const serviceInput: ModelPropertyMachineContext = property
+    // id is now the schemaFileId (string), _dbId is the database integer ID
+    // Preserve _propertyFileId if it exists in the property object (from getPropertySchema)
+    const serviceInput: ModelPropertyMachineContext = {
+      ...property,
+      _propertyFileId: (property as any)._propertyFileId || property.id,
+    }
 
     this._service = createActor(modelPropertyMachine, {
       input: serviceInput,
@@ -142,20 +145,34 @@ export class ModelProperty {
           return currentValue !== originalValue
         })
       } else {
-        // No schema file values found, use current property as original
+        // No schema file values found - this is a runtime-created property
+        // Use current property as original, but mark as edited since it hasn't been exported to file
         TPropertyKeys.forEach((key) => {
           if (property[key] !== undefined) {
             (originalValues as any)[key] = property[key]
           }
         })
+        // For runtime-created properties, set isEdited = true initially
+        isEdited = true
       }
 
-      // Initialize with original values, including isEdited flag if property differs from schema file
-      this._service.send({
-        type: 'initializeOriginalValues',
-        originalValues,
-        schemaName: undefined, // Will be set later if needed
-        isEdited,
+      // Initialize with original values, including isEdited flag
+      // Load isEdited from database if property exists in DB (async, fire-and-forget)
+      this._loadIsEditedFromDb(property, isEdited).then((isEditedFromDb: boolean) => {
+        this._service.send({
+          type: 'initializeOriginalValues',
+          originalValues,
+          schemaName: undefined, // Will be set later if needed
+          isEdited: isEditedFromDb,
+        })
+      }).catch(() => {
+        // If we can't load from DB, use computed isEdited value
+        this._service.send({
+          type: 'initializeOriginalValues',
+          originalValues,
+          schemaName: undefined, // Will be set later if needed
+          isEdited,
+        })
       })
     }).catch(() => {
       // If we can't get schema file values, use current property as original
@@ -179,6 +196,63 @@ export class ModelProperty {
         // If we can't get schema name, that's okay - it will be set later if needed
       })
     }
+  }
+
+  /**
+   * Load isEdited flag from database if property exists in DB
+   * @param property - The property data
+   * @param fallbackIsEdited - Fallback value if property doesn't exist in DB
+   * @returns The isEdited flag from database or fallback value
+   */
+  private async _loadIsEditedFromDb(
+    property: Static<typeof TProperty>,
+    fallbackIsEdited: boolean,
+  ): Promise<boolean> {
+    if (!property.modelName || !property.name) {
+      return fallbackIsEdited
+    }
+
+    try {
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+      const { eq, and } = await import('drizzle-orm')
+      
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        return fallbackIsEdited
+      }
+
+      // Find model by name
+      const modelRecords = await db
+        .select({ id: modelsTable.id })
+        .from(modelsTable)
+        .where(eq(modelsTable.name, property.modelName))
+        .limit(1)
+      
+      if (modelRecords.length === 0) {
+        return fallbackIsEdited
+      }
+
+      // Find property by name and modelId
+      const propertyRecords = await db
+        .select({ isEdited: propertiesTable.isEdited })
+        .from(propertiesTable)
+        .where(
+          and(
+            eq(propertiesTable.name, property.name),
+            eq(propertiesTable.modelId, modelRecords[0].id)
+          )
+        )
+        .limit(1)
+      
+      if (propertyRecords.length > 0) {
+        return propertyRecords[0].isEdited ?? false
+      }
+    } catch (error) {
+      // Ignore errors - use fallback value
+    }
+
+    return fallbackIsEdited
   }
 
   /**
@@ -345,7 +419,7 @@ export class ModelProperty {
     })
   }
 
-  static create(property: Static<typeof TProperty> & { _propertyFileId?: string }): ModelProperty {
+  static create(property: Static<typeof TProperty>): ModelProperty {
     if (!property) {
       throw new Error('Property is required')
     }
@@ -361,24 +435,25 @@ export class ModelProperty {
       type: (property as any).type, // Check if it's using 'type' instead of 'dataType'
     }, null, 2))
 
-    // Ensure _propertyFileId is set if id is a string (schemaFileId)
-    // This handles cases where create() is called directly with a string id
-    const propertyWithFileId = { ...property }
-    
     // Handle 'type' field from JSON schema format - convert to 'dataType'
-    if ((propertyWithFileId as any).type && !propertyWithFileId.dataType) {
-      propertyWithFileId.dataType = (propertyWithFileId as any).type
+    const propertyWithId = { ...property }
+    if ((propertyWithId as any).type && !propertyWithId.dataType) {
+      propertyWithId.dataType = (propertyWithId as any).type
     }
-    if (!propertyWithFileId._propertyFileId && typeof property.id === 'string') {
-      propertyWithFileId._propertyFileId = property.id
+    
+    // Generate id (schemaFileId) if not provided (for new properties)
+    // This ensures new properties can trigger write process
+    if (!propertyWithId.id) {
+      propertyWithId.id = generateId()
+      logger(`ModelProperty.create: Generated new id (schemaFileId) "${propertyWithId.id}" for property "${property.name}"`)
     }
 
-    // Create cache key from modelName and name
-    const cacheKey = propertyWithFileId.modelName && propertyWithFileId.name
-      ? `${propertyWithFileId.modelName}:${propertyWithFileId.name}`
-      : propertyWithFileId.id
-      ? `id:${propertyWithFileId.id}`
-      : propertyWithFileId.name || 'unnamed'
+    // Create cache key from modelName and name, or use id
+    const cacheKey = propertyWithId.modelName && propertyWithId.name
+      ? `${propertyWithId.modelName}:${propertyWithId.name}`
+      : propertyWithId.id
+      ? `id:${propertyWithId.id}`
+      : propertyWithId.name || 'unnamed'
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
@@ -389,14 +464,14 @@ export class ModelProperty {
       // Update cached instance if new property data has fields that the cached instance doesn't have
       // This handles cases where the property was created without ref initially, but now we have ref from schema
       const needsUpdate: any = {}
-      if (propertyWithFileId.ref && !cachedContext.ref) {
-        needsUpdate.ref = propertyWithFileId.ref
+      if (propertyWithId.ref && !cachedContext.ref) {
+        needsUpdate.ref = propertyWithId.ref
       }
-      if (propertyWithFileId.refModelName && !cachedContext.refModelName) {
-        needsUpdate.refModelName = propertyWithFileId.refModelName
+      if (propertyWithId.refModelName && !cachedContext.refModelName) {
+        needsUpdate.refModelName = propertyWithId.refModelName
       }
-      if (propertyWithFileId.refModelId && !cachedContext.refModelId) {
-        needsUpdate.refModelId = propertyWithFileId.refModelId
+      if (propertyWithId.refModelId && !cachedContext.refModelId) {
+        needsUpdate.refModelId = propertyWithId.refModelId
       }
       
       if (Object.keys(needsUpdate).length > 0) {
@@ -415,23 +490,23 @@ export class ModelProperty {
     }
 
     // Debug: Log what's being passed to the constructor
-    console.log(`[ModelProperty.create] propertyWithFileId before constructor:`, JSON.stringify({
-      name: propertyWithFileId.name,
-      modelName: propertyWithFileId.modelName,
-      ref: propertyWithFileId.ref,
-      refModelName: propertyWithFileId.refModelName,
-      refModelId: propertyWithFileId.refModelId,
-      dataType: propertyWithFileId.dataType,
+    console.log(`[ModelProperty.create] propertyWithId before constructor:`, JSON.stringify({
+      name: propertyWithId.name,
+      modelName: propertyWithId.modelName,
+      ref: propertyWithId.ref,
+      refModelName: propertyWithId.refModelName,
+      refModelId: propertyWithId.refModelId,
+      dataType: propertyWithId.dataType,
     }, null, 2))
     
-    const newInstance = new this(propertyWithFileId)
+    const newInstance = new this(propertyWithId)
     
     // Debug: Log what's being passed to the constructor
-    console.log(`[ModelProperty.create] Creating instance for ${propertyWithFileId.modelName}:${propertyWithFileId.name}`, {
-      ref: propertyWithFileId.ref,
-      refModelName: propertyWithFileId.refModelName,
-      refModelId: propertyWithFileId.refModelId,
-      dataType: propertyWithFileId.dataType
+    console.log(`[ModelProperty.create] Creating instance for ${propertyWithId.modelName}:${propertyWithId.name}`, {
+      ref: propertyWithId.ref,
+      refModelName: propertyWithId.refModelName,
+      refModelId: propertyWithId.refModelId,
+      dataType: propertyWithId.dataType
     })
     
     // Wrap instance in Proxy for reactive property access
@@ -441,7 +516,7 @@ export class ModelProperty {
       trackedProperties: TPropertyKeys,
       getContext: (instance) => {
         const context = instance._getSnapshotContext()
-        console.log(`[ModelProperty.create] getContext for ${propertyWithFileId.modelName}:${propertyWithFileId.name}`, {
+        console.log(`[ModelProperty.create] getContext for ${propertyWithId.modelName}:${propertyWithId.name}`, {
           ref: context.ref,
           refModelName: context.refModelName,
           refModelId: context.refModelId
@@ -461,15 +536,12 @@ export class ModelProperty {
       refCount: 1,
     })
     
-    // Trigger write process if property has modelId and propertyFileId
+    // Trigger write process if property has modelId (or modelName) and id (schemaFileId)
     // Wait for service to be ready (idle state) and have writeProcess spawned
-    if (propertyWithFileId.modelId && (propertyWithFileId.id || propertyWithFileId._propertyFileId)) {
-      // Use _propertyFileId if available, otherwise convert id to string
-      const propertyFileId = propertyWithFileId._propertyFileId || String(propertyWithFileId.id)
-      
-      // Track pending write
-      this.trackPendingWrite(propertyFileId, propertyWithFileId.modelId)
-      
+    const propertyFileId = propertyWithId.id // id is now the schemaFileId (string)
+    const hasModelId = propertyWithId.modelId || propertyWithId.modelName
+    
+    if (hasModelId && propertyFileId) {
       // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
       // Retry a few times if writeProcess isn't available yet
       let retries = 0
@@ -480,7 +552,51 @@ export class ModelProperty {
         
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
           const writeProcess = snapshot.context.writeProcess
-          logger(`Triggering write process for property "${property.name}" (modelId: ${property.modelId}, propertyFileId: ${propertyFileId})`)
+          
+          // Resolve dbModelId - convert from string (modelFileId) to number (database ID) if needed
+          let resolvedModelId: number | undefined = undefined
+          
+          if (propertyWithId.modelId) {
+            if (typeof propertyWithId.modelId === 'number') {
+              resolvedModelId = propertyWithId.modelId
+            } else if (typeof propertyWithId.modelId === 'string') {
+              // modelId is a string (modelFileId), need to convert to database ID
+              try {
+                const { getModelIdByFileId } = await import('@/helpers/db')
+                resolvedModelId = await getModelIdByFileId(propertyWithId.modelId)
+                logger(`Converted modelFileId "${propertyWithId.modelId}" to database modelId: ${resolvedModelId}`)
+              } catch (error) {
+                logger(`Failed to convert modelFileId "${propertyWithId.modelId}" to database ID: ${error}`)
+                console.error(`[ModelProperty.create] Failed to convert modelFileId: ${error}`)
+              }
+            }
+          }
+          
+          // If we still don't have a modelId, try to resolve it from modelName
+          if (!resolvedModelId && propertyWithId.modelName) {
+            try {
+              const { getModelId } = await import('@/helpers/db')
+              // Get schemaName from context if available
+              const schemaName = snapshot.context._schemaName
+              resolvedModelId = await getModelId(propertyWithId.modelName, schemaName)
+              logger(`Resolved modelId for model "${propertyWithId.modelName}": ${resolvedModelId}`)
+            } catch (error) {
+              logger(`Failed to resolve modelId for model "${propertyWithId.modelName}": ${error}`)
+              console.error(`[ModelProperty.create] Failed to resolve modelId: ${error}`)
+            }
+          }
+          
+          if (!resolvedModelId) {
+            logger(`ERROR: Cannot write property "${property.name}" - no modelId available`)
+            console.error(`[ModelProperty.create] ERROR: Cannot write property "${property.name}" - no modelId available. modelId: ${propertyWithId.modelId}, modelName: ${propertyWithId.modelName}`)
+            // Don't clear pending write here - it might resolve later
+            return
+          }
+          
+          // Track pending write now that we have the resolved modelId
+          this.trackPendingWrite(propertyFileId, resolvedModelId)
+          
+          logger(`Triggering write process for property "${property.name}" (modelId: ${resolvedModelId}, propertyFileId: ${propertyFileId})`)
           
           // Check current write state
           const currentWriteState = writeProcess.getSnapshot()
@@ -508,7 +624,7 @@ export class ModelProperty {
           }
           
           const propertyData = {
-            modelId: property.modelId!,
+            modelId: resolvedModelId,
             name: property.name!,
             dataType: property.dataType!,
             refModelId: property.refModelId,
@@ -550,9 +666,8 @@ export class ModelProperty {
     // Cache key might be "modelName:propertyName" or "id:propertyId"
     for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
       const context = instance._getSnapshotContext()
-      // Convert context.id to string for comparison (it might be number or string)
-      const contextId = context.id ? String(context.id) : undefined
-      if (contextId === propertyFileId || (context as any)._propertyFileId === propertyFileId) {
+      // id is now the schemaFileId (string)
+      if (context.id === propertyFileId) {
         return instance
       }
     }
@@ -625,18 +740,20 @@ export class ModelProperty {
     const modelName = modelRecords[0].name
 
     // Build property data
-    // Note: TProperty.id expects a number (database ID), but we use schemaFileId (string) for lookups
-    // For now, we'll use the database ID if available, otherwise we'll need to handle the type mismatch
-    const propertyData: Static<typeof TProperty> & { _propertyFileId?: string } = {
-      id: propertyRecord.id ?? undefined, // Use database ID (number) for TProperty.id
+    // id is now the schemaFileId (string), _dbId is the database integer ID
+    const propertyData: Static<typeof TProperty> = {
+      id: propertyFileId, // schemaFileId (string) - public ID
+      _dbId: propertyRecord.id ?? undefined, // Database integer ID - internal only
       name: propertyRecord.name,
       dataType: propertyRecord.dataType as ModelPropertyDataTypes,
       modelId: propertyRecord.modelId,
       modelName,
       refModelId: propertyRecord.refModelId || undefined,
       refValueType: propertyRecord.refValueType as ModelPropertyDataTypes | undefined,
-      _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
     }
+    
+    // Load isEdited from database
+    const isEditedFromDb = propertyRecord.isEdited ?? false
 
     // Get ref model name if applicable
     if (propertyRecord.refModelId) {
@@ -653,7 +770,17 @@ export class ModelProperty {
     }
 
     // Create ModelProperty instance
-    return this.create(propertyData)
+    const instance = this.create(propertyData)
+    
+    // Set isEdited from database after creation
+    if (isEditedFromDb) {
+      instance._service.send({
+        type: 'updateContext',
+        _isEdited: true,
+      })
+    }
+    
+    return instance
   }
 
   /**
@@ -723,7 +850,19 @@ export class ModelProperty {
   }
 
   get isEdited() {
-    return this._getSnapshot().context._isEdited
+    const context = this._getSnapshotContext()
+    // First check in-memory state
+    if (context._isEdited !== undefined) {
+      return context._isEdited
+    }
+    // Fall back to reading from database if we have _dbId
+    if (context._dbId) {
+      // Load from database asynchronously (fire-and-forget for now)
+      // For synchronous getter, we'll need to cache it or make it async
+      // For now, return false if not in context
+      return false
+    }
+    return false
   }
 
   get validationErrors() {

@@ -80,6 +80,48 @@ export const saveToSchema = fromCallback<
     // Update the schema with the property changes
     await updateModelProperties(schemaName, [propertyUpdate])
 
+    // Clear isEdited flag in database after saving to schema file
+    try {
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+      const { eq, and } = await import('drizzle-orm')
+      
+      const db = BaseDb.getAppDb()
+      if (db && context.modelName && context.name) {
+        // Find model by name
+        const modelRecords = await db
+          .select({ id: modelsTable.id })
+          .from(modelsTable)
+          .where(eq(modelsTable.name, context.modelName))
+          .limit(1)
+        
+        if (modelRecords.length > 0) {
+          // Find property by name and modelId
+          const propertyRecords = await db
+            .select({ id: propertiesTable.id })
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.name, context.name),
+                eq(propertiesTable.modelId, modelRecords[0].id)
+              )
+            )
+            .limit(1)
+          
+          if (propertyRecords.length > 0) {
+            // Clear isEdited flag in database
+            await db
+              .update(propertiesTable)
+              .set({ isEdited: false })
+              .where(eq(propertiesTable.id, propertyRecords[0].id!))
+            logger(`Cleared isEdited flag in database for property ${context.modelName}:${context.name}`)
+          }
+        }
+      }
+    } catch (error) {
+      logger(`Error clearing isEdited flag in database: ${error}`)
+    }
+
     logger(`Successfully saved property ${context.name} to schema ${schemaName}`)
   }
 

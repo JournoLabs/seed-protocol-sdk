@@ -22,6 +22,13 @@
       "when": 1767621120087,
       "tag": "0002_bitter_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1768415440282,
+      "tag": "0003_cultured_senator_kelly",
+      "breakpoints": true
     }
   ]
 }

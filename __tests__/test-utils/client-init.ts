@@ -45,9 +45,7 @@ let cachedClient: ClientType | null = null
  */
 async function getClient(): Promise<ClientType> {
   if (!cachedClient) {
-    console.log('Importing client...')
     const clientModule = await import('@/client')
-    console.log('Client imported')
     cachedClient = clientModule.client
   }
   return cachedClient
@@ -134,13 +132,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
 
   // Dynamically import client (same pattern as client.test.ts)
   const client = await getClient()
-
-  console.log('Client obtained', config)
-
-  client.getService().subscribe((snapshot) => {
-    console.log('client snapshot.value', snapshot.value)
-    console.log('client snapshot.context', snapshot.context)
-  })
 
   // Initialize client with config and wait for it to be ready
   if (!client.isInitialized()) {
@@ -247,33 +238,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
     //   }
     // But checking the database directly is more reliable.
     
-    const allProperties = await db
-      .select()
-      .from(propertiesTable)
-      .limit(100)
-
-    console.log('allProperties', allProperties)
-
-    const allModels = await db
-      .select()
-      .from(modelsTable)
-      .limit(100)
-
-    console.log('allModels', allModels)
-
-    const allSchemas = await db
-      .select()
-      .from(schemas)
-      .limit(100)
-
-    console.log('allSchemas', allSchemas)
-
-    const allModelSchemas = await db
-      .select()
-      .from(modelSchemas)
-      .limit(100)
-
-    console.log('allModelSchemas', allModelSchemas)
     
     // Check properties for the first model (Seed should have properties)
     const seedModelLink = modelSchemaLinks.find((link: ModelSchemaLink) => link.modelName === 'Seed')

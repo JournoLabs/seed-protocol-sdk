@@ -39,17 +39,17 @@ export const writeToDatabase = fromCallback<
         })
         await writeModelToDb(input.entityId, input.entityData)
         
-        // Get modelId from database after write
+        // Get _dbId from database after write
         const db = BaseDb.getAppDb()
         if (db) {
           const modelRecords = await db
             .select({ id: modelsTable.id })
             .from(modelsTable)
-            .where(eq(modelsTable.schemaFileId, input.entityId))
+            .where(eq(modelsTable.schemaFileId, input.entityId)) // entityId is now the schemaFileId (string)
             .limit(1)
           
           if (modelRecords.length > 0 && modelRecords[0].id) {
-            output = { ...input.entityData, id: modelRecords[0].id }
+            output = { ...input.entityData, _dbId: modelRecords[0].id } // Store as _dbId (database integer ID)
           } else {
             output = input.entityData
           }
@@ -68,11 +68,11 @@ export const writeToDatabase = fromCallback<
         const { addSchemaToDb } = await import('@/helpers/db')
         const schemaRecord = await addSchemaToDb(
           input.entityData,
-          input.entityId, // schemaFileId
+          input.entityId, // schemaFileId (string)
           input.entityData.schemaData,
           input.entityData.isDraft
         )
-        output = { ...input.entityData, id: schemaRecord.id }
+        output = { ...input.entityData, _dbId: schemaRecord.id } // Store as _dbId (database integer ID)
       } else {
         throw new Error(`Unknown entity type: ${input.entityType}`)
       }

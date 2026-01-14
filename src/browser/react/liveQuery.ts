@@ -72,18 +72,10 @@ export function useLiveQuery<T>(
         const currJson = results ? JSON.stringify(results) : 'undefined'
         const isSameValue = prevJson === currJson
         
-        console.log('[useLiveQuery] Received new data:', {
-          prevCount: prev?.length ?? 0,
-          currCount: results?.length ?? 0,
-          isSameValue,
-          currData: results?.map((r: any) => ({ name: r.name, schemaFileId: r.schemaFileId, version: r.version })) ?? [],
-        })
-        
         // Defensive check: don't update state if values are the same
         // This should be handled by distinctUntilChanged, but adding as safety
         // (especially important for Drizzle query builders which may not work with distinctUntilChanged)
         if (isSameValue && prev !== undefined) {
-          console.log('[useLiveQuery] Skipping update - data is the same')
           return
         }
         

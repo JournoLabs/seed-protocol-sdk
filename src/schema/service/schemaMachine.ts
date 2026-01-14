@@ -5,6 +5,17 @@ import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
 import { addModelsMachine } from './addModelsMachine'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
+import { checkExistingSchema } from './actors/checkExistingSchema'
+import { writeSchemaToDb } from './actors/writeSchemaToDb'
+import { verifySchemaInDb } from './actors/verifySchemaInDb'
+import { writeModelsToDb } from './actors/writeModelsToDb'
+import { verifyModelsInDb } from './actors/verifyModelsInDb'
+import { createModelInstances } from './actors/createModelInstances'
+import { verifyModelInstancesInCache } from './actors/verifyModelInstancesInCache'
+import { writePropertiesToDb } from './actors/writePropertiesToDb'
+import { verifyPropertiesInDb } from './actors/verifyPropertiesInDb'
+import { createPropertyInstances } from './actors/createPropertyInstances'
+import { verifyPropertyInstancesInCache } from './actors/verifyPropertyInstancesInCache'
 
 export type SchemaMachineContext = {
   schemaName: string
@@ -33,12 +44,14 @@ export type SchemaMachineContext = {
   }>
   // Track if schema has unsaved changes
   _isDraft?: boolean
+  // Track if schema has been edited locally (persisted in database)
+  _isEdited?: boolean
   // Track which properties are edited (e.g., "ModelName:propertyName")
   _editedProperties?: Set<string>
   // Validation errors
   _validationErrors?: ValidationError[]
-  // Store schemaFileId for database lookups (independent of name changes)
-  _schemaFileId?: string
+  id?: string // schemaFileId (string) - public ID
+  _dbId?: number // Database integer ID - internal only
   // Conflict detection metadata - track when data was loaded from DB
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time
@@ -49,6 +62,12 @@ export type SchemaMachineContext = {
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   // Store model IDs from liveQuery for reactive updates
   _liveQueryModelIds?: string[]
+  // Staged loading state tracking
+  _modelIds?: string[]  // After models written
+  _propertyIds?: string[]  // After properties written
+  _loadingStage?: string  // Current stage for debugging
+  _loadingError?: { stage: string; error: Error }  // Stage-specific errors
+  _schemaRecord?: any  // Schema database record
 }
 
 export const schemaMachine = setup({
@@ -67,13 +86,38 @@ export const schemaMachine = setup({
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
       | { type: 'addModels'; models: { [modelName: string]: any } }
-      | { type: 'requestWrite'; data: any },
+      | { type: 'requestWrite'; data: any }
+      // Staged loading events
+      | { type: 'schemaFound'; schema: SchemaFileFormat; schemaRecord: any; modelIds?: string[]; loadedAt?: number; dbVersion?: number; dbUpdatedAt?: number }
+      | { type: 'schemaNotFound' }
+      | { type: 'schemaWritten'; schemaRecord: any; schema: SchemaFileFormat }
+      | { type: 'schemaVerified'; schemaId: number }
+      | { type: 'modelsWritten'; modelIds: string[] }
+      | { type: 'modelsVerified'; modelIds: string[] }
+      | { type: 'instancesCreated'; count: number }
+      | { type: 'instancesVerified'; count: number }
+      | { type: 'propertiesWritten'; propertyIds: string[] }
+      | { type: 'propertiesVerified'; propertyIds: string[] }
+      | { type: 'verificationFailed'; stage: string; error: Error }
+      | { type: 'writeError'; error: Error },
   },
   actors: {
     loadOrCreateSchema,
     validateSchema,
     addModelsMachine,
     writeProcessMachine,
+    // Staged loading actors
+    checkExistingSchema,
+    writeSchemaToDb,
+    verifySchemaInDb,
+    writeModelsToDb,
+    verifyModelsInDb,
+    createModelInstances,
+    verifyModelInstancesInCache,
+    writePropertiesToDb,
+    verifyPropertiesInDb,
+    createPropertyInstances,
+    verifyPropertyInstancesInCache,
   },
   guards: {
     isSchemaValid: ({ context }) => {
@@ -149,6 +193,7 @@ export const schemaMachine = setup({
       actions: assign(({ context, event }) => ({
         ...context,
         _isDraft: true,
+        _isEdited: true,
         _editedProperties: new Set([
           ...(context._editedProperties || []),
           event.propertyKey,
@@ -159,6 +204,7 @@ export const schemaMachine = setup({
       actions: assign(({ context, event }) => {
         const newContext = { ...context }
         newContext._isDraft = false
+        newContext._isEdited = false
         newContext._editedProperties = new Set<string>()
         
         // Update conflict detection metadata if provided
@@ -175,7 +221,339 @@ export const schemaMachine = setup({
   },
   states: {
     loading: {
+      initial: 'checkingExisting',
+      states: {
+        // Stage 0: Check for existing schema
+        checkingExisting: {
+          invoke: {
+            src: 'checkExistingSchema',
+            input: ({ context }) => ({ context }),
+          },
+          on: {
+            schemaFound: {
+              target: '#schema.idle',
+              actions: assign(({ event }) => {
+                return {
+                  schemaName: event.schema.metadata.name,
+                  $schema: event.schema.$schema,
+                  version: event.schema.version,
+                  metadata: event.schema.metadata,
+                  models: event.schema.models,
+                  enums: event.schema.enums,
+                  migrations: event.schema.migrations,
+                  _isDraft: false,
+                  _isEdited: event.schemaRecord?.isEdited ?? false,
+                  _editedProperties: new Set<string>(),
+                  _validationErrors: undefined,
+                  id: event.schema.id, // schemaFileId (string)
+                  _dbId: event.schemaRecord?.id, // Database integer ID
+                  _loadedAt: event.loadedAt,
+                  _dbVersion: event.dbVersion,
+                  _dbUpdatedAt: event.dbUpdatedAt,
+                  _liveQueryModelIds: event.modelIds || [],
+                  _schemaRecord: event.schemaRecord,
+                }
+              }),
+            },
+            schemaNotFound: {
+              target: 'writingSchema',
+            },
+          },
+        },
+        // Stage 1: Write and verify schema
+        writingSchema: {
+          entry: assign({
+            _loadingStage: 'writingSchema',
+          }),
+          invoke: {
+            src: 'writeSchemaToDb',
+            input: ({ context }) => ({
+              schemaName: context.schemaName,
+            }),
+          },
+          on: {
+            schemaWritten: {
+              target: 'verifyingSchema',
+              actions: assign({
+                _schemaRecord: ({ event }) => event.schemaRecord,
+                id: ({ event }) => event.schema.id, // schemaFileId (string)
+                _dbId: ({ event }) => event.schemaRecord?.id, // Database integer ID
+              }),
+            },
+            writeError: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: 'writingSchema',
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        verifyingSchema: {
+          entry: assign({
+            _loadingStage: 'verifyingSchema',
+          }),
+          invoke: {
+            src: 'verifySchemaInDb',
+            input: ({ context }) => ({
+              schemaFileId: context.id!,
+              expectedSchemaId: context._dbId,
+            }),
+          },
+          on: {
+            schemaVerified: {
+              target: 'writingModels',
+              actions: assign({
+                _dbId: ({ event }) => event.schemaId, // Store database integer ID
+              }),
+            },
+            verificationFailed: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: event.stage,
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        // Stage 2: Write and verify models
+        writingModels: {
+          entry: assign({
+            _loadingStage: 'writingModels',
+          }),
+          invoke: {
+            src: 'writeModelsToDb',
+            input: ({ context }) => ({
+              schema: {
+                id: context.id,
+                models: context.models || {},
+                version: context.version || 1,
+                metadata: context.metadata || { name: context.schemaName, createdAt: '', updatedAt: '' },
+              } as SchemaFileFormat,
+              schemaRecord: context._schemaRecord!,
+              schemaName: context.schemaName,
+            }),
+          },
+          on: {
+            modelsWritten: {
+              target: 'verifyingModels',
+              actions: assign({
+                _modelIds: ({ event }) => event.modelIds,
+              }),
+            },
+            writeError: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: 'writingModels',
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        verifyingModels: {
+          entry: assign({
+            _loadingStage: 'verifyingModels',
+          }),
+          invoke: {
+            src: 'verifyModelsInDb',
+            input: ({ context }) => ({
+              schemaId: context._dbId!,
+              expectedModelIds: context._modelIds,
+            }),
+          },
+          on: {
+            modelsVerified: {
+              target: 'creatingModelInstances',
+              actions: assign({
+                _modelIds: ({ event }) => event.modelIds,
+              }),
+            },
+            verificationFailed: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: event.stage,
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        // Stage 3: Create and verify model instances
+        creatingModelInstances: {
+          entry: assign({
+            _loadingStage: 'creatingModelInstances',
+          }),
+          invoke: {
+            src: 'createModelInstances',
+            input: ({ context }) => ({
+              modelIds: context._modelIds || [],
+              schemaName: context.schemaName,
+            }),
+          },
+          on: {
+            instancesCreated: {
+              target: 'verifyingModelInstances',
+            },
+            writeError: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: 'creatingModelInstances',
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        verifyingModelInstances: {
+          entry: assign({
+            _loadingStage: 'verifyingModelInstances',
+          }),
+          invoke: {
+            src: 'verifyModelInstancesInCache',
+            input: ({ context }) => ({
+              modelIds: context._modelIds || [],
+            }),
+          },
+          on: {
+            instancesVerified: {
+              target: 'writingProperties',
+            },
+            verificationFailed: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: event.stage,
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        // Stage 4: Write and verify properties
+        writingProperties: {
+          entry: assign({
+            _loadingStage: 'writingProperties',
+          }),
+          invoke: {
+            src: 'writePropertiesToDb',
+            input: ({ context }) => ({
+              modelIds: context._modelIds || [],
+            }),
+          },
+          on: {
+            propertiesWritten: {
+              target: 'verifyingProperties',
+              actions: assign({
+                _propertyIds: ({ event }) => event.propertyIds,
+              }),
+            },
+            writeError: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: 'writingProperties',
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        verifyingProperties: {
+          entry: assign({
+            _loadingStage: 'verifyingProperties',
+          }),
+          invoke: {
+            src: 'verifyPropertiesInDb',
+            input: ({ context }) => ({
+              modelFileIds: context._modelIds,
+              expectedPropertyIds: context._propertyIds,
+            }),
+          },
+          on: {
+            propertiesVerified: {
+              target: 'creatingPropertyInstances',
+              actions: assign({
+                _propertyIds: ({ event }) => event.propertyIds,
+              }),
+            },
+            verificationFailed: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: event.stage,
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        // Stage 5: Create and verify property instances
+        creatingPropertyInstances: {
+          entry: assign({
+            _loadingStage: 'creatingPropertyInstances',
+          }),
+          invoke: {
+            src: 'createPropertyInstances',
+            input: ({ context }) => ({
+              propertyIds: context._propertyIds || [],
+              modelIds: context._modelIds || [],
+            }),
+          },
+          on: {
+            instancesCreated: {
+              target: 'verifyingPropertyInstances',
+            },
+            writeError: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: 'creatingPropertyInstances',
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+        verifyingPropertyInstances: {
+          entry: assign({
+            _loadingStage: 'verifyingPropertyInstances',
+          }),
+          invoke: {
+            src: 'verifyPropertyInstancesInCache',
+            input: ({ context }) => ({
+              propertyIds: context._propertyIds || [],
+            }),
+          },
+          on: {
+            instancesVerified: {
+              target: '#schema.idle',
+              actions: assign({
+                _liveQueryModelIds: ({ context }) => context._modelIds || [],
+                _loadingStage: undefined,
+              }),
+            },
+            verificationFailed: {
+              target: '#schema.error',
+              actions: assign({
+                _loadingError: ({ event }) => ({
+                  stage: event.stage,
+                  error: event.error,
+                }),
+              }),
+            },
+          },
+        },
+      },
       on: {
+        // Keep backward compatibility with old loadOrCreateSchema (for external callers)
         loadOrCreateSchemaSuccess: {
           target: 'idle',
           actions: assign(({ event }) => {
@@ -190,12 +568,12 @@ export const schemaMachine = setup({
               _isDraft: false,
               _editedProperties: new Set<string>(),
               _validationErrors: undefined,
-              _schemaFileId: event.schema.id, // Store schemaFileId for database lookups
-              // Conflict detection metadata - will be set by loadOrCreateSchema actor
+              id: event.schema.id, // schemaFileId (string)
+              _dbId: (event as any)._dbId, // Database integer ID
               _loadedAt: (event as any).loadedAt,
               _dbVersion: (event as any).dbVersion,
               _dbUpdatedAt: (event as any).dbUpdatedAt,
-              _liveQueryModelIds: (event as any)._liveQueryModelIds || [], // Use model IDs from loadOrCreateSchema, or empty array if not provided
+              _liveQueryModelIds: (event as any)._liveQueryModelIds || [],
             }
           }),
         },
@@ -203,19 +581,15 @@ export const schemaMachine = setup({
           target: 'error',
         },
       },
-      invoke: {
-        src: 'loadOrCreateSchema',
-        input: ({ context }) => ({ context }),
-      },
     },
     idle: {
       entry: assign({
         writeProcess: ({ spawn, context }) => {
-          if (!context.writeProcess && context._schemaFileId) {
+          if (!context.writeProcess && context.id) {
             return spawn(writeProcessMachine, {
               input: {
                 entityType: 'schema',
-                entityId: context._schemaFileId,
+                entityId: context.id,
                 entityData: {
                   name: context.schemaName,
                   $schema: context.$schema,

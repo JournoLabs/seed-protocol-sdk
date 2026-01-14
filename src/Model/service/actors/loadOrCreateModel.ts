@@ -53,9 +53,9 @@ export const loadOrCreateModel = fromCallback<
   FromCallbackInput<ModelMachineContext>
 >(({ sendBack, input: { context } }) => {
   const _loadOrCreateModel = async (): Promise<void> => {
-    const { modelName, schemaName, _modelFileId } = context
+    const { modelName, schemaName, id } = context // id is now the schemaFileId (string)
 
-    console.log('loadOrCreateModel called for', modelName, 'with schemaName', schemaName, 'and _modelFileId', _modelFileId)
+    console.log('loadOrCreateModel called for', modelName, 'with schemaName', schemaName, 'and id', id)
 
     if (!modelName || !schemaName) {
       throw new Error('Model name and schema name are required')
@@ -65,7 +65,7 @@ export const loadOrCreateModel = fromCallback<
     // Schema is read-only with respect to Model instances.
 
     const db = BaseDb.getAppDb()
-    let modelFileId = _modelFileId
+    let schemaFileId = id // id is now the schemaFileId (string)
     let modelRecord: any = null
 
     console.log('has db', !!db)
@@ -73,17 +73,17 @@ export const loadOrCreateModel = fromCallback<
     // Step 1: Load from database FIRST (primary source of truth)
     if (db) {
       try {
-        // Try to find model by modelFileId if provided
-        if (modelFileId) {
+        // Try to find model by schemaFileId if provided
+        if (schemaFileId) {
           const dbModels = await db
             .select()
             .from(modelsTable)
-            .where(eq(modelsTable.schemaFileId, modelFileId))
+            .where(eq(modelsTable.schemaFileId, schemaFileId))
             .limit(1)
           
           if (dbModels.length > 0) {
             modelRecord = dbModels[0]
-            logger(`Found model "${modelName}" in database by modelFileId "${modelFileId}"`)
+            logger(`Found model "${modelName}" in database by schemaFileId "${schemaFileId}"`)
           }
         }
         
@@ -102,15 +102,15 @@ export const loadOrCreateModel = fromCallback<
           if (dbModels.length > 0) {
             modelRecord = dbModels[0]
             const dbSchemaFileId = modelRecord.schemaFileId
-            // Only use database schemaFileId if no modelFileId was explicitly provided
-            // If a modelFileId was provided, we should use it (it might be creating a new model with a specific ID)
-            if (!_modelFileId && dbSchemaFileId) {
-              modelFileId = dbSchemaFileId
-              logger(`Using database schemaFileId "${modelFileId}" for model "${modelName}" (no ID was provided)`)
-            } else if (_modelFileId) {
-              logger(`Preserving provided modelFileId "${modelFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
+            // Only use database schemaFileId if no id was explicitly provided
+            // If an id was provided, we should use it (it might be creating a new model with a specific ID)
+            if (!id && dbSchemaFileId) {
+              schemaFileId = dbSchemaFileId
+              logger(`Using database schemaFileId "${schemaFileId}" for model "${modelName}" (no ID was provided)`)
+            } else if (id) {
+              logger(`Preserving provided id (schemaFileId) "${schemaFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
             }
-            logger(`Found model "${modelName}" in database by name, modelFileId: "${modelFileId}"`)
+            logger(`Found model "${modelName}" in database by name, schemaFileId: "${schemaFileId}"`)
           }
         }
 
@@ -136,13 +136,13 @@ export const loadOrCreateModel = fromCallback<
             await createPropertyInstances(propertyFileIds)
           }
 
-          // Generate modelFileId if not set
-          if (!modelFileId) {
-            modelFileId = generateId()
-            logger(`Generated modelFileId "${modelFileId}" for model "${modelName}"`)
+          // Generate schemaFileId if not set
+          if (!schemaFileId) {
+            schemaFileId = generateId()
+            logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
           }
 
-          // Include modelId from database record so properties can be created if needed
+          // Include _dbId from database record so properties can be created if needed
           // Even if we found an existing model, we may still need to create properties
           // if _pendingPropertyDefinitions are provided
           
@@ -152,11 +152,17 @@ export const loadOrCreateModel = fromCallback<
           // In the future, if models table gets these fields, we should use them
           const dbUpdatedAt = loadedAt
           
+          // CRITICAL: Include _liveQueryPropertyIds in loadOrCreateModelSuccess event
+          // This ensures the properties getter works immediately, even before _setupLiveQuerySubscription runs
+          // We already have the property IDs from the database query, so include them now
           sendBack({
             type: 'loadOrCreateModelSuccess',
             model: {
-              _modelFileId: modelFileId,
-              modelId: modelRecord.id, // Include database ID for property creation
+              id: schemaFileId, // schemaFileId (string) - public ID
+              _dbId: modelRecord.id, // Database integer ID - internal only
+              _liveQueryPropertyIds: propertyFileIds, // Property IDs from database query
+              _propertiesUpdated: Date.now(), // Timestamp for tracking
+              _isEdited: modelRecord.isEdited ?? false, // Load isEdited from database
               _loadedAt: loadedAt,
               _dbUpdatedAt: dbUpdatedAt,
             },
@@ -198,16 +204,16 @@ export const loadOrCreateModel = fromCallback<
         const modelData = schemaContext.models[modelName]
         logger(`Found model "${modelName}" in Schema context (database fallback)`)
         
-        // Generate modelFileId if not set
-        if (!modelFileId) {
-          modelFileId = generateId()
-          logger(`Generated modelFileId "${modelFileId}" for model "${modelName}"`)
+        // Generate schemaFileId if not set
+        if (!schemaFileId) {
+          schemaFileId = generateId()
+          logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
         }
         
         sendBack({
           type: 'loadOrCreateModelSuccess',
           model: {
-            _modelFileId: modelFileId,
+            id: schemaFileId, // schemaFileId (string) - public ID
           },
         })
         return
@@ -270,16 +276,16 @@ export const loadOrCreateModel = fromCallback<
     // Step 4: Create new empty model (not found in database or Schema context)
     logger(`Creating new model "${finalModelName}" in schema "${schemaName}"`)
     
-    // Generate modelFileId for new model
-    if (!modelFileId) {
-      modelFileId = generateId()
-      logger(`Generated modelFileId "${modelFileId}" for new model "${finalModelName}"`)
+    // Generate schemaFileId for new model
+    if (!schemaFileId) {
+      schemaFileId = generateId()
+      logger(`Generated id (schemaFileId) "${schemaFileId}" for new model "${finalModelName}"`)
     }
     
     sendBack({
       type: 'loadOrCreateModelSuccess',
       model: {
-        _modelFileId: modelFileId,
+        id: schemaFileId, // schemaFileId (string) - public ID
       },
     })
     
@@ -287,7 +293,7 @@ export const loadOrCreateModel = fromCallback<
     if (finalModelName !== modelName) {
       // Update the cache index
       const { Model } = await import('@/Model/Model')
-      Model.updateNameIndex(modelName, finalModelName, schemaName, modelFileId)
+      Model.updateNameIndex(modelName, finalModelName, schemaName, schemaFileId)
       
       // Update the context
       sendBack({

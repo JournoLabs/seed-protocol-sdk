@@ -9,9 +9,10 @@ import debug from 'debug'
 const logger = debug('seedSdk:model:modelMachine')
 
 export type ModelMachineContext = {
+  id?: string // schemaFileId (string) - public ID
+  _dbId?: number // Database integer ID - internal only
   modelName: string
   schemaName: string
-  _modelFileId?: string // ID from JSON file
   _isEdited?: boolean
   _editedProperties?: Set<string>
   _validationErrors?: ValidationError[]
@@ -20,7 +21,6 @@ export type ModelMachineContext = {
     properties?: { [propertyName: string]: any } // Serialized snapshot for comparison only
   }
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
-  modelId?: number // Store modelId for pending writes lookup
   _liveQueryPropertyIds?: string[] // Property file IDs from liveQuery (like Schema._liveQueryModelIds)
   _pendingPropertyDefinitions?: { [propertyName: string]: any } // Temporary storage for properties to create
   // Conflict detection metadata - track when data was loaded from DB
@@ -32,7 +32,7 @@ export type ModelMachineContext = {
 export const modelMachine = setup({
   types: {
     context: {} as ModelMachineContext,
-    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | '_modelFileId' | '_pendingPropertyDefinitions'>,
+    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions'>,
     events: {} as
       | { type: 'updateContext'; [key: string]: any }
       | { type: 'loadOrCreateModel' }
@@ -80,15 +80,15 @@ export const modelMachine = setup({
   id: 'model',
   initial: 'loading',
   context: ({ input }) => ({
+    id: input.id,
+    _dbId: undefined,
     modelName: input.modelName,
     schemaName: input.schemaName,
-    _modelFileId: input._modelFileId,
     _pendingPropertyDefinitions: input._pendingPropertyDefinitions,
     _isDraft: false,
     _editedProperties: new Set<string>(),
     _validationErrors: undefined,
     writeProcess: undefined,
-    modelId: undefined,
     _liveQueryPropertyIds: [], // Initialize empty array
   }),
   on: {
@@ -243,13 +243,15 @@ export const modelMachine = setup({
             logger(`[loadOrCreateModelSuccess] Preserving _pendingPropertyDefinitions: ${hasPendingProps} (${Object.keys(context._pendingPropertyDefinitions || {}).length} properties)`)
             return {
               ...context,
-              _modelFileId: event.model._modelFileId,
-              modelId: event.model.modelId, // Set modelId if provided (from database lookup)
-              _isEdited: false,
+              id: event.model.id, // schemaFileId (string)
+              _dbId: event.model._dbId, // Database integer ID
+              _isEdited: (event.model as any)._isEdited ?? false, // Load isEdited from database
               _editedProperties: new Set<string>(),
               _validationErrors: undefined,
               // Preserve _pendingPropertyDefinitions if it exists
               _pendingPropertyDefinitions: context._pendingPropertyDefinitions,
+              // Preserve _liveQueryPropertyIds if provided (set by loadOrCreateModel when loading from DB)
+              _liveQueryPropertyIds: (event.model as any)._liveQueryPropertyIds ?? context._liveQueryPropertyIds ?? [],
               // Preserve conflict detection metadata if provided
               _loadedAt: event.model._loadedAt,
               _dbVersion: event.model._dbVersion,
@@ -273,12 +275,12 @@ export const modelMachine = setup({
     idle: {
       entry: assign({
         writeProcess: ({ context, spawn }) => {
-          if (!context.writeProcess && context._modelFileId) {
-            logger(`[idle entry] Spawning writeProcess for model "${context.modelName}" (${context._modelFileId})`)
+          if (!context.writeProcess && context.id) {
+            logger(`[idle entry] Spawning writeProcess for model "${context.modelName}" (${context.id})`)
             return spawn(writeProcessMachine, {
               input: {
                 entityType: 'model',
-                entityId: context._modelFileId,
+                entityId: context.id,
                 entityData: {
                   modelName: context.modelName,
                   schemaName: context.schemaName,
@@ -313,7 +315,7 @@ export const modelMachine = setup({
                 data: event.data,
               })
             } else {
-              logger(`[requestWrite] ERROR: writeProcess not available for model "${context.modelName}" (${context._modelFileId})`)
+              logger(`[requestWrite] ERROR: writeProcess not available for model "${context.modelName}" (${context.id})`)
             }
           },
         },
@@ -328,11 +330,11 @@ export const modelMachine = setup({
             target: 'creatingProperties',
             actions: assign(({ context, event }) => {
               logger(`[writeSuccess] Transitioning to creatingProperties for model "${context.modelName}"`)
-              // Update modelId from write output if available
+              // Update _dbId from write output if available
               const newContext = { ...context }
               if (event.output?.id) {
-                newContext.modelId = event.output.id
-                logger(`[writeSuccess] Updated modelId to ${event.output.id}`)
+                newContext._dbId = event.output.id
+                logger(`[writeSuccess] Updated _dbId to ${event.output.id}`)
               }
               return newContext
             }),
@@ -340,10 +342,10 @@ export const modelMachine = setup({
           {
             target: 'idle',
             actions: assign(({ context, event }) => {
-              // Update modelId from write output if available
+              // Update _dbId from write output if available
               const newContext = { ...context }
               if (event.output?.id) {
-                newContext.modelId = event.output.id
+                newContext._dbId = event.output.id
               }
               return newContext
             }),

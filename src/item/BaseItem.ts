@@ -15,7 +15,6 @@ import {
   PropertyData
 } from '@/types'
 
-import { immerable } from 'immer'
 import { BehaviorSubject } from 'rxjs'
 import { ActorRefFrom, Subscription, createActor } from 'xstate'
 import pluralize from 'pluralize'
@@ -77,7 +76,6 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
   protected static instanceCache: Map<string, { instance: BaseItem<any>; refCount: number }> = new Map();
   protected _subscription: Subscription | undefined;
   protected readonly _storageTransactionId: string | undefined;
-  [immerable] = true;
   protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty>> = new BehaviorSubject({});
   protected readonly _service: ActorRefFrom<typeof itemMachineSingle>;
 
@@ -101,9 +99,18 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     } else {
       // Fallback: Try to get model from cache (synchronous lookup)
       // If not found, ModelClass will be undefined and we'll handle it in the service
-      const Model = getModel()
-      const model = Model.getByName(modelName)
-      ModelClass = model || undefined
+      try {
+        const Model = getModel()
+        if (Model) {
+          const model = Model.getByName(modelName)
+          ModelClass = model || undefined
+        }
+      } catch (error) {
+        // Model class not available yet - will be handled by the service
+        // This can happen in external React apps where Model hasn't loaded yet
+        console.warn(`[BaseItem] Model class not available for ${modelName}. The service will handle model loading.`, error)
+        ModelClass = undefined
+      }
     }
 
     if (
@@ -290,7 +297,17 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
         if (!this.PlatformClass) {
           throw new Error('PlatformClass not set. Call setPlatformClass() first.')
         }
-        const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(props)
+        // Get model if not already provided
+        let model = props.modelInstance
+        if (!model && props.modelName) {
+          const schemaName = (props as any).schemaName
+          // Dynamic import to break circular dependency
+          const { Model } = await import('@/Model/Model')
+          model = await Model.getByNameAsync(props.modelName, schemaName)
+        }
+        // Pass modelInstance to constructor to avoid fallback lookup
+        const propsWithModel = { ...props, modelInstance: model }
+        const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(propsWithModel)
         this.instanceCache.set(seedId, {
           instance: newInstance,
           refCount: 1,
@@ -407,7 +424,9 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
     if (!this.PlatformClass) {
       throw new Error('PlatformClass not set. Call setPlatformClass() first.')
     }
-    const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(props)
+    // Pass modelInstance to constructor to avoid fallback lookup
+    const propsWithModel = { ...props, modelInstance: model }
+    const newInstance = new (this.PlatformClass as unknown as new (props: any) => BaseItem<any>)(propsWithModel)
     this.instanceCache.set(newInstance.seedUid || newInstance.seedLocalId, {
       instance: newInstance,
       refCount: 1,
@@ -632,22 +651,71 @@ export abstract class BaseItem<T extends ModelValues<ModelSchema>> implements II
    */
   get properties(): Record<string, IItemProperty> {
     const allProps = this._propertiesSubject.value
-    const Model = getModel()
-    const model = Model.getByName(this.modelName)
-    const properties = model?.properties || []
-    const modelSchemaKeys = properties.map(p => p.name).filter((name): name is string => Boolean(name))
-
-    // Filter to only include properties defined in the Model schema or derived from it
-    return Object.fromEntries(
-      Object.entries(allProps).filter(([key]) => {
-        // Exclude internal properties
-        if (INTERNAL_PROPERTY_NAMES.includes(key)) {
-          return false
+    // If allProps is empty, return empty object to avoid Immer issues
+    if (!allProps || Object.keys(allProps).length === 0) {
+      return {}
+    }
+    
+    // Try to get modelName from service snapshot directly to avoid getter issues during Immer freezing
+    let modelName: string | undefined
+    try {
+      const snapshot = this._service.getSnapshot()
+      modelName = snapshot?.context?.modelName as string | undefined
+    } catch {
+      // Service not available - return all non-internal properties
+      const filtered: Record<string, IItemProperty> = {}
+      for (const [key, value] of Object.entries(allProps)) {
+        if (!INTERNAL_PROPERTY_NAMES.includes(key)) {
+          filtered[key] = value
         }
-        // Include if it's a model property or derived from one
-        return this._isModelProperty(key, modelSchemaKeys)
-      })
-    )
+      }
+      return filtered
+    }
+    
+    if (!modelName) {
+      // If no modelName, return filtered properties without model schema filtering
+      const filtered: Record<string, IItemProperty> = {}
+      for (const [key, value] of Object.entries(allProps)) {
+        if (!INTERNAL_PROPERTY_NAMES.includes(key)) {
+          filtered[key] = value
+        }
+      }
+      return filtered
+    }
+    
+    try {
+      const Model = getModel()
+      if (Model) {
+        const model = Model.getByName(modelName)
+        const properties = model?.properties || []
+        const modelSchemaKeys = properties.map(p => p.name).filter((name): name is string => Boolean(name))
+
+        // Filter to only include properties defined in the Model schema or derived from it
+        const filtered: Record<string, IItemProperty> = {}
+        for (const [key, value] of Object.entries(allProps)) {
+          // Exclude internal properties
+          if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+            continue
+          }
+          // Include if it's a model property or derived from one
+          if (this._isModelProperty(key, modelSchemaKeys)) {
+            filtered[key] = value
+          }
+        }
+        return filtered
+      }
+    } catch (error) {
+      // Model class not available - return all properties as fallback
+      console.warn(`[BaseItem.properties] Model class not available for ${modelName}. Returning all properties.`, error)
+    }
+    // Fallback: return all properties if Model is not available
+    const filtered: Record<string, IItemProperty> = {}
+    for (const [key, value] of Object.entries(allProps)) {
+      if (!INTERNAL_PROPERTY_NAMES.includes(key)) {
+        filtered[key] = value
+      }
+    }
+    return filtered
   }
 
   /**

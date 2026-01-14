@@ -37,7 +37,8 @@ export const TStorageType = Type.Union([
 ])
 
 export const TProperty = Type.Object({
-  id: Type.Optional(Type.Number()),
+  id: Type.Optional(Type.String()), // schemaFileId (string) - public ID
+  _dbId: Type.Optional(Type.Number()), // Database integer ID - internal only
   name: Type.Optional(Type.String()),
   dataType: TPropertyDataType,
   ref: Type.Optional(Type.String()),

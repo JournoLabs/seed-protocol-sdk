@@ -46,8 +46,51 @@ export const compareAndMarkDraft = fromCallback<
         })
       }
     } else {
-      // No changes - clear edited flag
+      // No changes - clear edited flag in database and context
       logger(`Property ${context.modelName}:${context.name} has no changes`)
+      
+      // Clear isEdited flag in database
+      try {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+        const { eq, and } = await import('drizzle-orm')
+        
+        const db = BaseDb.getAppDb()
+        if (db && context.modelName && context.name) {
+          // Find model by name
+          const modelRecords = await db
+            .select({ id: modelsTable.id })
+            .from(modelsTable)
+            .where(eq(modelsTable.name, context.modelName))
+            .limit(1)
+          
+          if (modelRecords.length > 0) {
+            // Find property by name and modelId
+            const propertyRecords = await db
+              .select({ id: propertiesTable.id })
+              .from(propertiesTable)
+              .where(
+                and(
+                  eq(propertiesTable.name, context.name),
+                  eq(propertiesTable.modelId, modelRecords[0].id)
+                )
+              )
+              .limit(1)
+            
+            if (propertyRecords.length > 0) {
+              // Clear isEdited flag in database
+              await db
+                .update(propertiesTable)
+                .set({ isEdited: false })
+                .where(eq(propertiesTable.id, propertyRecords[0].id!))
+              logger(`Cleared isEdited flag in database for property ${context.modelName}:${context.name}`)
+            }
+          }
+        }
+      } catch (error) {
+        logger(`Error clearing isEdited flag in database: ${error}`)
+      }
+      
       sendBack({
         type: 'clearEdited',
       })

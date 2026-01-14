@@ -42,16 +42,31 @@ export const validateProperty = fromCallback<
           
           // Check if models are actually loaded
           if (schemaContext.models && Object.keys(schemaContext.models).length > 0) {
+            // If property name has changed, validate against the original name (from schema file)
+            // This handles the case where a property is renamed - the schema file still has the old name
+            const propertyNameToValidate = context._originalValues?.name && context._originalValues.name !== context.name
+              ? context._originalValues.name
+              : context.name || ''
+            
             const schemaResult = validationService.validateProperty(
               schemaContext,
               context.modelName,
-              context.name || '',
+              propertyNameToValidate,
               context
             )
             
             if (!schemaResult.isValid) {
-              sendBack({ type: 'validationError', errors: schemaResult.errors })
-              return
+              // If property was renamed, some validation errors are expected (like property_not_found)
+              // Only fail if it's a critical error that's not related to the rename
+              const criticalErrors = schemaResult.errors.filter(err => 
+                err.code !== 'property_not_found' || propertyNameToValidate === context.name
+              )
+              
+              if (criticalErrors.length > 0) {
+                sendBack({ type: 'validationError', errors: criticalErrors })
+                return
+              }
+              // Continue with validation - rename-related errors are acceptable
             }
           } else {
             logger('Schema models not loaded yet, skipping schema validation')

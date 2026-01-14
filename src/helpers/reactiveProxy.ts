@@ -54,7 +54,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
     get(target, prop: string | symbol) {
       // Handle special properties that should not be proxied
       // These need direct access to the underlying instance
-      if (prop === '_service' || prop === Symbol.for('immerable')) {
+      if (prop === '_service') {
         return Reflect.get(target, prop)
       }
       
@@ -70,7 +70,7 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
     
     set(target, prop: string | symbol, value: any) {
       // Handle special properties
-      if (prop === '_service' || prop === Symbol.for('immerable')) {
+      if (prop === '_service') {
         return Reflect.set(target, prop, value)
       }
       

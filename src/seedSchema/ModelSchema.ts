@@ -9,6 +9,7 @@ export const models = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking - must be unique
+    isEdited: integer('is_edited', { mode: 'boolean' }), // true if model has been edited locally, false if matches schema file
   },
   (table) => {
     return {
@@ -36,6 +37,7 @@ export const properties = sqliteTable(
     refModelId: integer('ref_model_id').references(() => models.id),
     refValueType: text('ref_value_type'),
     schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
+    isEdited: integer('is_edited', { mode: 'boolean' }), // true if property has been edited locally, false if matches schema file
   },
   (table) => {
     return {

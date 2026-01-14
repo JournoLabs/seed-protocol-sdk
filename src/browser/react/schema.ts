@@ -25,18 +25,13 @@ const logger = debug('seedSdk:react:schema')
  */
 export const useSchema = (schemaIdentifier: string | null | undefined) => {
   const [schema, setSchema] = useState<Schema | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(schemaIdentifier ? true : false)
   const [error, setError] = useState<Error | null>(null)
   const subscriptionRef = useRef<Subscription | null>(null)
 
   const isClientReady = useIsClientReady()
 
-  console.log('[useSchema] isLoading:', isLoading)
-
-  
-
   const loadSchema = useCallback((identifier: string) => {
-    console.log(`[useSchema] loadSchema setting isLoading to true for schema: ${identifier}`)
     setIsLoading(true)
     setError(null)
     try {
@@ -46,17 +41,18 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
       const service = schemaInstance.getService()
       const initialSnapshot = service.getSnapshot()
 
-      if (initialSnapshot.value === 'idle') {
-        console.log(`[useSchema] loadSchema setting isLoading to false for schema: ${identifier}`)
-        setIsLoading(false)
+      // Set initial loading state based on whether status is 'idle'
+      const isIdle = initialSnapshot.value === 'idle'
+      setIsLoading(!isIdle)
+      if (isIdle) {
         setError(null)
-        return
       }
 
+      // Subscribe to all status changes and update isLoading based on whether status is 'idle'
       subscriptionRef.current = service.subscribe((snapshot: SchemaSnapshot) => {
-        if (snapshot.value === 'idle') {
-          console.log(`[useSchema] loadSchema setting isLoading to false for schema: ${identifier}`)
-          setIsLoading(false)
+        const isIdle = snapshot.value === 'idle'
+        setIsLoading(!isIdle)
+        if (isIdle) {
           setError(null)
         }
       })
@@ -71,8 +67,6 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
   }, [])
 
   useEffect(() => {
-    console.log('[useSchema] useEffect', schemaIdentifier)
-    
     // Clean up previous subscription before starting a new load
     if (subscriptionRef.current) {
       subscriptionRef.current.unsubscribe()
@@ -116,6 +110,8 @@ export const useSchemas = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const isClientReady = useIsClientReady()
+  const subscriptionsRef = useRef<Map<Schema, Subscription>>(new Map())
+  const loadingSchemasRef = useRef<Set<Schema>>(new Set())
 
   // Watch the schemas table for changes
   // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
@@ -130,46 +126,115 @@ export const useSchemas = () => {
     try {
       setIsLoading(true)
       const timestamp = Date.now()
-      console.log(`[useSchemas.fetchSchemas] [${timestamp}] Starting fetch, schemasTableData count:`, schemasTableData?.length, 'schemas:', schemasTableData?.map(s => s.name))
       
       // Also check what's in the database directly before calling Schema.all()
       const db = BaseDb.getAppDb()
       if (db) {
         const directCheck = await db.select().from(schemasTable).orderBy(schemasTable.name, desc(schemasTable.version))
-        console.log(`[useSchemas.fetchSchemas] [${timestamp}] Direct DB query before Schema.all():`, directCheck.length, 'schemas:', directCheck.map((s: any) => s.name))
       }
       
       const allSchemas = await Schema.all()
-      console.log(`[useSchemas.fetchSchemas] [${timestamp}] Schema.all() returned:`, allSchemas.length, 'schemas:', allSchemas.map((s: any) => s.metadata?.name))
       
-      setSchemas(prev => {
-        // Check if anything actually changed
-        if (prev.length !== allSchemas.length) {
-          console.log('[useSchemas] Length changed:', prev.length, '->', allSchemas.length)
-          return allSchemas
-        }
+      // Filter out schemas without an id and subscribe to state changes
+      const readySchemas: Schema[] = []
+      const loadingSchemasList: Schema[] = []
+      
+      // Clear previous loading set
+      loadingSchemasRef.current.clear()
+      
+      for (const schema of allSchemas) {
+        const snapshot = schema.getService().getSnapshot()
+        const hasId = !!schema.id
+        const isIdle = snapshot.value === 'idle'
         
-        // Compare by some stable identifier
-        const hasChanged = allSchemas.some((schema, i) => 
-          !prev[i] || 
-          schema.id !== prev[i].id || 
-          schema.metadata?.updatedAt !== prev[i].metadata?.updatedAt
-        )
-        
-        if (hasChanged) {
-          console.log('[useSchemas] Schemas changed (by ID or updatedAt)')
+        if (hasId && isIdle) {
+          // Schema is ready
+          readySchemas.push(schema)
         } else {
-          console.log('[useSchemas] No changes detected')
+          // Schema is still loading - subscribe to state changes
+          loadingSchemasList.push(schema)
+          loadingSchemasRef.current.add(schema)
+          
+          // Clean up any existing subscription for this schema
+          const existingSub = subscriptionsRef.current.get(schema)
+          if (existingSub) {
+            existingSub.unsubscribe()
+          }
+          
+          // Subscribe to state changes
+          const subscription = schema.getService().subscribe((snapshot: SchemaSnapshot) => {
+            const hasId = !!schema.id
+            const isIdle = snapshot.value === 'idle'
+            
+            if (hasId && isIdle) {
+              // Schema is now ready - update state
+              setSchemas(prev => {
+                // Check if schema is already in the list (by id)
+                if (schema.id && prev.some(s => s.id === schema.id)) {
+                  return prev
+                }
+                // Add the newly ready schema
+                const updated = [...prev, schema].sort((a, b) => {
+                  // Sort by name for consistency
+                  const nameA = a.metadata?.name || ''
+                  const nameB = b.metadata?.name || ''
+                  return nameA.localeCompare(nameB)
+                })
+                return updated
+              })
+              
+              // Remove from loading set and clean up subscription
+              loadingSchemasRef.current.delete(schema)
+              subscription.unsubscribe()
+              subscriptionsRef.current.delete(schema)
+              
+              // Update loading state based on remaining loading schemas
+              setIsLoading(loadingSchemasRef.current.size > 0)
+            } else if (snapshot.value === 'error') {
+              // Schema failed to load - clean up subscription
+              loadingSchemasRef.current.delete(schema)
+              subscription.unsubscribe()
+              subscriptionsRef.current.delete(schema)
+              
+              // Update loading state based on remaining loading schemas
+              setIsLoading(loadingSchemasRef.current.size > 0)
+            }
+          })
+          
+          subscriptionsRef.current.set(schema, subscription)
         }
-        return hasChanged ? allSchemas : prev
-      })
+      }
+      
+      // Set initial ready schemas
+      setSchemas(readySchemas)
       setError(null)
-      setIsLoading(false)
+      setIsLoading(loadingSchemasList.length > 0) // Still loading if any schemas are loading
+      
     } catch (error) {
       setError(error as Error)
       setIsLoading(false)
     }
-  }, [])
+  }, [schemasTableData])
+
+  // Cleanup subscriptions for schemas that are no longer in the list
+  useEffect(() => {
+    const currentSchemaIds = new Set(schemas.map(s => s.id).filter(Boolean))
+    
+    // Clean up subscriptions for schemas that are no longer in the list
+    for (const [schema, subscription] of subscriptionsRef.current.entries()) {
+      if (schema.id && !currentSchemaIds.has(schema.id)) {
+        // Schema is no longer in the list, clean up subscription
+        subscription.unsubscribe()
+        subscriptionsRef.current.delete(schema)
+        loadingSchemasRef.current.delete(schema)
+      }
+    }
+    
+    // Update loading state based on remaining loading schemas
+    if (loadingSchemasRef.current.size === 0 && isLoading) {
+      setIsLoading(false)
+    }
+  }, [schemas, isLoading])
 
   // Fetch schemas on initial mount when client is ready
   useEffect(() => {
@@ -230,19 +295,18 @@ export const useSchemas = () => {
       return
     }
 
-    // Schemas have changed - log for debugging
-    console.log('[useSchemas] schemasTableData changed:', {
-      currentCount: currentSchemasSet.size,
-      tableDataCount: tableDataSchemasSet.size,
-      currentIds: Array.from(currentSchemasSet),
-      tableDataIds: Array.from(tableDataSchemasSet),
-      tableDataNames: schemasTableData.map(s => s.name),
-      tableDataFull: schemasTableData.map(s => ({ name: s.name, schemaFileId: s.schemaFileId, version: s.version, id: s.id })),
-    })
-
     // Schemas have changed, fetch updated schemas
     fetchSchemas()
   }, [isClientReady, schemasTableData, schemas, fetchSchemas])
+
+  // Cleanup all subscriptions on unmount
+  useEffect(() => {
+    return () => {
+      subscriptionsRef.current.forEach(sub => sub.unsubscribe())
+      subscriptionsRef.current.clear()
+      loadingSchemasRef.current.clear()
+    }
+  }, [])
 
   return {
     schemas,
