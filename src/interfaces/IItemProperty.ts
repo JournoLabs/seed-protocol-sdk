@@ -2,7 +2,7 @@ import { ActorRefFrom, Subscription } from 'xstate';
 import { BehaviorSubject } from 'rxjs';
 import { Static } from '@sinclair/typebox';
 import { TProperty } from '@/Schema';
-import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty';
+import { ItemProperty } from '@/ItemProperty/ItemProperty';
 
 export interface IItemProperty {
 
@@ -30,5 +30,5 @@ export interface IItemProperty {
     propertyName: string;
     seedLocalId?: string;
     seedUid?: string;
-  }): Promise<BaseItemProperty<any> | undefined>;
+  }): Promise<ItemProperty<any> | undefined>;
 } 

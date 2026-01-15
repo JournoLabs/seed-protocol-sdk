@@ -1,6 +1,6 @@
 import { eventEmitter } from '@/eventBus'
 import { createItemCacheKey, getItemCache, updateItemCache } from './requestAll'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 
 export const createItemRequestHandler = async (event) => {
   const { modelName, itemData } = event
@@ -23,7 +23,7 @@ export const createItemRequestHandler = async (event) => {
     return
   }
 
-  const newItem = await BaseItem.create({
+  const newItem = await Item.create({
     modelName,
     ...itemData,
   })

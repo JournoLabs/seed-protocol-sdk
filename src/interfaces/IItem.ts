@@ -19,7 +19,7 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   readonly latestVersionUid: VersionsType
   readonly latestVersionLocalId: string
   readonly modelName: string
-  readonly properties: Record<string, IItemProperty<any>>
+  readonly properties: IItemProperty<any>[]
   readonly internalProperties: Record<string, IItemProperty<any>>
   readonly allProperties: Record<string, IItemProperty<any>>
   readonly attestationCreatedAt: number

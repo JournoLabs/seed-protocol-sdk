@@ -1,10 +1,10 @@
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 
 
-export const getIdentities = async ( numIdentities: number ): Promise<BaseItem<any>[]> => {
-  const identities: BaseItem<any>[] = []
+export const getIdentities = async ( numIdentities: number ): Promise<Item<any>[]> => {
+  const identities: Item<any>[] = []
   for ( let i = 0; i < numIdentities; i++ ) {
-    const identity = await BaseItem.create({
+    const identity = await Item.create({
       modelName: 'Identity',
       name: `Identity ${i}`,
       profile: `Profile for identity ${i}`,

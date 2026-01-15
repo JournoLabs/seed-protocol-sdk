@@ -22,9 +22,9 @@ export const publishItemRequestHandler: PublishItemRequestHandler = async ({
   
   try {
     // Dynamic import to break circular dependency
-    const { BaseItem } = await import('@/Item/BaseItem')
+    const { Item } = await import('@/Item/Item')
     // Find the item
-    const item = await BaseItem.find({ seedLocalId })
+    const item = await Item.find({ seedLocalId })
     
     if (!item) {
       throw new Error(`Item not found for seedLocalId: ${seedLocalId}`)
@@ -53,7 +53,7 @@ export const publishItemRequestHandler: PublishItemRequestHandler = async ({
 
     logger('[publish] Publish completed for seedLocalId:', seedLocalId)
     
-    // Emit success event that BaseItem.publish() is waiting for
+    // Emit success event that Item.publish() is waiting for
     eventEmitter.emit(`item.${seedLocalId}.publish.success`, {
       seedLocalId,
     })

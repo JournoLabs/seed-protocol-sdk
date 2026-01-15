@@ -14,8 +14,8 @@ export {
   ModelPropertyDataTypes,
 } from './Schema'
 
-export { BaseItem as Item } from './Item/BaseItem'
-export { BaseItemProperty as ItemProperty } from './ItemProperty/BaseItemProperty'
+export { Item } from './Item/Item'
+export { ItemProperty } from './ItemProperty/ItemProperty'
 export { ModelProperty } from './ModelProperty/ModelProperty'
 export { Schema, type SchemaAllOptions } from './Schema/Schema'
 export { Model } from './Model/Model'

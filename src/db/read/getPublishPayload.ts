@@ -19,7 +19,7 @@ import { getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItemProperty } from '@/interfaces'
 import { IItem } from '@/interfaces'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import debug from 'debug'
 import {ethers} from 'ethers'
 import { ModelPropertyDataTypes } from '@/Schema'
@@ -357,7 +357,7 @@ type UploadedTransaction = {
 }
 
 export const getPublishPayload = async (
-  item: BaseItem<any>,
+  item: Item<any>,
   uploadedTransactions: UploadedTransaction[],
 ): Promise<MultiPublishPayload> => {
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest'
 import { ClientManagerState, ClientManagerEvents } from '@/client/constants'
 import type { SeedConstructorOptions, ModelClassType } from '@/types'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import { ModelPropertyDataTypes } from '@/helpers/property'
 
 // Dynamically import client from src/client
@@ -43,7 +43,7 @@ const TestModel = {
     title: { dataType: ModelPropertyDataTypes.Text },
   },
   create: async () => {
-    return {} as BaseItem<any>
+    return {} as Item<any>
   },
 } as any // Cast to any since we're just testing config passing
 

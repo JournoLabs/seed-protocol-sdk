@@ -6,7 +6,7 @@ import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { getContentHash } from '@/helpers/crypto'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 const logger = debug('seedSdk:item:getPublishUploads')
 
 
@@ -236,7 +236,7 @@ export const getPublishUploads = async (
 
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(propertyValue)
 
-    const relatedItem = await BaseItem.find({
+    const relatedItem = await Item.find({
       seedLocalId,
       seedUid,
     })

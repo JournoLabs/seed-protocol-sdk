@@ -247,8 +247,8 @@ export const hydrateFromDb = fromCallback<
       propertyRecordSchema.storageType &&
       propertyRecordSchema.storageType === 'ItemStorage'
     ) {
-      const { BaseItem } = await import(`@/Item/BaseItem`)
-      const item = await BaseItem.find({
+      const { Item } = await import(`@/Item/Item`)
+      const item = await Item.find({
         seedLocalId,
         modelName,
       })
@@ -261,8 +261,10 @@ export const hydrateFromDb = fromCallback<
         }
 
         const renderValue = await BaseFileManager.readFileAsString(filePath)
-        const property = item.properties[propertyName]
-        property.getService().send({ type: 'updateContext', renderValue })
+        const property = item.properties.find(p => p.propertyName === propertyName)
+        if (property) {
+          property.getService().send({ type: 'updateContext', renderValue })
+        }
         return
       }
     }

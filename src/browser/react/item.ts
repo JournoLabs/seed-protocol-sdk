@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createNewItem } from '@/db/write/createNewItem'
-import { Item } from '../Item/Item'
+import { Item } from '@/Item/Item'
 import { eventEmitter } from '@/eventBus'
 import { useImmer } from 'use-immer'
 import { orderBy } from 'lodash-es'
@@ -10,7 +10,6 @@ import { useGlobalServiceStatus, useIsDbReady } from '../react/services'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
 import { useSelector } from '@xstate/react'
-import { BaseItem } from '@/Item/BaseItem'
 import { ClientManagerState } from '@/client/constants'
 import { IItem } from '@/interfaces'
 
@@ -59,9 +58,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const updateItem = useCallback(
     (newItem: Item<T>) => {
       setItemData((draft) => {
-        Object.keys(newItem.properties).forEach((propertyName) => {
-          const value = newItem.properties[propertyName].value
-          draft[propertyName] = value
+        newItem.properties.forEach((property) => {
+          draft[property.propertyName] = property.value
         })
       })
     },
@@ -105,25 +103,14 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
   }, [isInitialized,])
 
+  // Subscribe to item service for updates (replaces eventBus)
+  // Item's liveQuery subscription will handle cross-instance updates automatically
   useEffect(() => {
     if (item && !itemSubscription) {
-      const subscription = item.subscribe(async (_) => {
-        const newItem = await Item.find({ 
-          modelName, 
-          seedLocalId, 
-          seedUid 
-        }) as Item<T> | undefined
-        
-        if (!newItem) {
-          logger(
-            '[useItem] [itemSubscription] no item found',
-            modelName,
-            seedLocalId,
-          )
-          return
-        }
-        updateItem(newItem)
-        setItem(newItem)
+      const subscription = item.subscribe((_) => {
+        // Item updates are now handled by liveQuery, but we still subscribe to service changes
+        // to update local state when context changes
+        updateItem(item)
       })
       setItemSubscription(subscription)
     }
@@ -131,19 +118,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     return () => {
       itemSubscription?.unsubscribe()
     }
-  }, [item, itemSubscription])
-
-  useEffect(() => {
-    const seedId = seedUid || seedLocalId
-
-    eventEmitter.addListener(`item.${modelName}.${seedId}.update`, () => {
-      listenerRef.current()
-    })
-
-    return () => {
-      eventEmitter.removeListener(`item.${modelName}.${seedId}.update`)
-    }
-  }, [])
+  }, [item, itemSubscription, updateItem])
 
   return {
     item,

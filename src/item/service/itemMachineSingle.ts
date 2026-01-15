@@ -7,6 +7,7 @@ import { hydrateExistingItem } from './actors/hydrateExistingItem'
 import { hydrateNewItem } from './actors/hydrateNewItem'
 import { fetchDataFromEas } from './actors/fetchDataFromEas'
 import { reload } from './actors/reload'
+import { loadOrCreateItem } from './actors/loadOrCreateItem'
 import { IItemProperty } from '@/interfaces'
 
 export const itemMachineSingle = setup({
@@ -16,6 +17,7 @@ export const itemMachineSingle = setup({
   },
   actors: {
     waitForDb,
+    loadOrCreateItem,
     initialize,
     hydrateExistingItem,
     hydrateNewItem,
@@ -77,18 +79,72 @@ export const itemMachineSingle = setup({
         }
       }),
     },
+    updateContext: {
+      actions: assign(({ context, event }) => {
+        const updates: any = {}
+        for (const key in event) {
+          if (key !== 'type' && key in context) {
+            updates[key] = (event as any)[key]
+          }
+        }
+        return {
+          ...context,
+          ...updates,
+        }
+      }),
+    },
     reload: '.reloading',
   },
   states: {
     idle: {},
     waitingForDb: {
       on: {
-        waitForDbSuccess: 'initializing',
+        waitForDbSuccess: 'loading',
       },
       invoke: {
         src: 'waitForDb',
       },
     },
+    loading: {
+      on: {
+        loadOrCreateItemSuccess: {
+          target: 'idle',
+          actions: assign(({ context, event }) => {
+            const item = (event as any).item
+            const existingPropertyInstances = context.propertyInstances || new Map<string, IItemProperty<any>>()
+            
+            // Merge property instances from loadOrCreateItem
+            if (item.propertyInstances) {
+              for (const [propertyName, propertyInstance] of item.propertyInstances) {
+                existingPropertyInstances.set(propertyName, propertyInstance)
+              }
+            }
+            
+            return {
+              ...context,
+              seedLocalId: item.seedLocalId || context.seedLocalId,
+              seedUid: item.seedUid || context.seedUid,
+              schemaUid: item.schemaUid || context.schemaUid,
+              latestVersionLocalId: item.latestVersionLocalId || context.latestVersionLocalId,
+              latestVersionUid: item.latestVersionUid || context.latestVersionUid,
+              versionsCount: item.versionsCount || context.versionsCount,
+              lastVersionPublishedAt: item.lastVersionPublishedAt || context.lastVersionPublishedAt,
+              attestationCreatedAt: item.attestationCreatedAt || context.attestationCreatedAt,
+              createdAt: item.createdAt || context.createdAt,
+              propertyInstances: existingPropertyInstances,
+            }
+          }),
+        },
+        loadOrCreateItemError: {
+          target: 'error',
+        },
+      },
+      invoke: {
+        src: 'loadOrCreateItem',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    error: {},
     initializing: {
       on: {
         hasExistingItem: {

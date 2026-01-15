@@ -3,7 +3,7 @@ import grpc from '@grpc/grpc-js'
 import protoLoader from '@grpc/proto-loader'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 // Model access is now via Model static methods, not getModel()
 import { ClientManager } from '@/client/ClientManager'
 import { client as sdkClient }                              from "@/client"
@@ -260,12 +260,12 @@ describe('RPC Server', () => {
   describe('Query Operations', () => {
     beforeEach(async () => {
       // Create some test items for querying
-      await BaseItem.create({
+      await Item.create({
         modelName: 'Post',
         title: 'Test Post 1',
         summary: 'Summary 1'
       } as any)
-      await BaseItem.create({
+      await Item.create({
         modelName: 'Post',
         title: 'Test Post 2',
         summary: 'Summary 2'
@@ -316,7 +316,7 @@ describe('RPC Server', () => {
     let publishItemId: string
 
     beforeEach(async () => {
-      const item = await BaseItem.create({
+      const item = await Item.create({
         modelName: 'Post',
         title: 'Test Publish Post',
         summary: 'Test Summary'

@@ -1,0 +1,1188 @@
+import { IItem, IItemProperty } from '@/interfaces'
+import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
+import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
+import { VersionsType } from '@/seedSchema'
+// Dynamic import to break circular dependency: Model -> Item -> Model
+// import { Model } from '@/Model/Model'
+
+import {
+  CreatePropertyInstanceProps,
+  ItemData,
+  ItemFindProps,
+  ModelSchema,
+  ModelValues,
+  NewItemProps,
+  PropertyData
+} from '@/types'
+
+import { BehaviorSubject } from 'rxjs'
+import { ActorRefFrom, Subscription, createActor } from 'xstate'
+import pluralize from 'pluralize'
+import { orderBy, startCase } from 'lodash-es'
+import { waitForEvent } from '@/events'
+import { getItemData } from '@/db/read/getItemData'
+import { getItemsData } from '@/db/read/getItems'
+import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { getItemProperties } from '@/db/read/getItemProperties'
+import { createNewItem } from '@/db/write/createNewItem'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
+import { eq, and } from 'drizzle-orm'
+import debug from 'debug'
+
+// Fallback helper for synchronous Model access when modelInstance is not provided
+// This is only used as a fallback - the preferred approach is to pass modelInstance
+// directly to Item constructor (which Model.create() instance method does).
+// Since Model.getByName() is synchronous and just accesses a cache, Model must be loaded
+// when Item constructor runs (because Model imports Item).
+let ModelClass: typeof import('@/Model/Model').Model | null = null
+let modelImportPromise: Promise<typeof import('@/Model/Model')> | null = null
+
+const getModel = (): typeof import('@/Model/Model').Model => {
+  if (!ModelClass) {
+    // Start loading Model if not already started
+    if (!modelImportPromise) {
+      modelImportPromise = import('@/Model/Model')
+      // Try to get Model synchronously if already loaded
+      // This works because Model imports Item, so Model is initialized when Item runs
+      modelImportPromise.then(module => {
+        ModelClass = module.Model
+      }).catch(() => {
+        // If import fails, ModelClass remains null
+      })
+    }
+    // For synchronous access, we need Model to already be loaded
+    // If it's not loaded yet, this will throw, but in practice Model is always loaded
+    // because Model imports Item, creating the initialization order
+    if (!ModelClass) {
+      // Fallback: try to access Model directly (works if already in module cache)
+      try {
+        // @ts-ignore - accessing module cache directly
+        const modelModule = (globalThis as any).__seedModelModule || 
+          (typeof window !== 'undefined' && (window as any).__seedModelModule)
+        if (modelModule) {
+          ModelClass = modelModule.Model
+        }
+      } catch {
+        // If Model isn't available, throw a more helpful error
+        throw new Error('Model class not available. This may indicate a circular dependency issue.')
+      }
+    }
+  }
+  return ModelClass!
+}
+
+// Define tracked properties for the Proxy
+// These properties will be read from/written to the actor context
+const TRACKED_PROPERTIES = [
+  'seedLocalId',
+  'seedUid',
+  'modelName',
+  'schemaUid',
+  'latestVersionLocalId',
+  'latestVersionUid',
+  'properties', // Computed from propertyInstances
+] as const
+
+// WeakMap to store mutable state per Item instance
+// This avoids issues with read-only properties when instances are frozen by Immer
+const itemInstanceState = new WeakMap<Item<any>, {
+  liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
+}>()
+
+export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
+
+  protected static instanceCache: Map<string, { instance: Item<any>; refCount: number }> = new Map();
+  protected _subscription: Subscription | undefined;
+  protected readonly _storageTransactionId: string | undefined;
+  protected _propertiesSubject: BehaviorSubject<Record<string, IItemProperty>> = new BehaviorSubject({});
+  protected readonly _service: ActorRefFrom<typeof itemMachineSingle>;
+
+  constructor(initialValues: NewItemProps<T>) {
+
+    const {
+      modelName,
+      seedUid,
+      schemaUid,
+      seedLocalId,
+      latestVersionLocalId,
+      latestVersionUid,
+      modelInstance,
+    } = initialValues
+
+    // Store modelInstance if provided (for backward compatibility)
+    // But Item no longer depends on Model being loaded - it loads properties from database directly
+    if (initialValues.storageTransactionId) {
+      this._storageTransactionId = initialValues.storageTransactionId
+    }
+
+    this._service = createActor(itemMachineSingle, {
+      input: {
+        seedLocalId,
+        seedUid,
+        schemaUid,
+        modelName,
+        latestVersionLocalId,
+        latestVersionUid,
+        storageTransactionId: this._storageTransactionId,
+        // ModelClass is no longer needed - Item loads properties from database independently
+      },
+    })
+
+    this._subscription = this._service.subscribe((snapshot) => {
+      const { context } = snapshot
+
+      if (
+        !context ||
+        !context.propertyInstances ||
+        context.propertyInstances.size === 0
+      ) {
+        return
+      }
+
+      const propertiesObj: Record<string, IItemProperty> = {}
+
+      for (const [key, propertyInstance] of context.propertyInstances) {
+        if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) {
+          propertiesObj[key.toString()] = propertyInstance
+          continue
+        }
+
+        let transformedKey: string = key as string
+
+        if (propertyInstance.alias) {
+          transformedKey = propertyInstance.alias
+        }
+
+        if (!propertyInstance.alias && key.endsWith('Ids')) {
+          transformedKey = key.slice(0, -3) // Remove 'Ids'
+          transformedKey = pluralize(transformedKey)
+        }
+
+        if (!propertyInstance.alias && key.endsWith('Id')) {
+          transformedKey = key.slice(0, -2) // Remove 'Id'
+        }
+
+        propertiesObj[transformedKey] = propertyInstance
+      }
+
+      this._propertiesSubject.next(propertiesObj)
+    })
+
+    this._service.start()
+
+    // Initialize instance state in WeakMap
+    itemInstanceState.set(this, {
+      liveQuerySubscription: null,
+    })
+    
+    // Set up liveQuery subscription for cross-instance updates
+    this._setupLiveQuerySubscription()
+
+    // Properties are now loaded from database via loadOrCreateItem actor
+    // Only create property instances for values provided in initialValues
+    // The loadOrCreateItem actor will load all properties from metadata table
+    const itemPropertyBase: Partial<CreatePropertyInstanceProps> = {
+      seedLocalId,
+      seedUid,
+      versionLocalId: latestVersionLocalId,
+      versionUid: latestVersionUid,
+      modelName,
+    }
+
+    // Create property instances for any values provided in initialValues
+    // These will be merged with properties loaded from database
+    ; (Object.keys(initialValues) as Array<string & keyof Partial<T>>).forEach(
+      (key) => {
+        // Skip metadata properties
+        if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance' || 
+            key === 'seedLocalId' || key === 'seedUid' || key === 'schemaUid' ||
+            key === 'latestVersionLocalId' || key === 'latestVersionUid') {
+          return
+        }
+
+        this._createPropertyInstance({
+          ...itemPropertyBase,
+          propertyName: key,
+          propertyValue: initialValues[key],
+        })
+      },
+    )
+  }
+
+  static async create<T extends ModelValues<ModelSchema>>(
+    props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
+  ): Promise<Item<any>> {
+    if (!props.modelName && props.type) {
+      props.modelName = startCase(props.type)
+    }
+    if (props.seedUid || props.seedLocalId) {
+      const seedId = (props.seedUid || props.seedLocalId) as string
+      if (this.instanceCache.has(seedId)) {
+        const { instance, refCount } = this.instanceCache.get(seedId)!
+        this.instanceCache.set(seedId, {
+          instance,
+          refCount: refCount + 1,
+        })
+        for (const [propertyName, propertyValue] of Object.entries(props)) {
+          const propertyInstances = instance.getService().getSnapshot()
+            .context.propertyInstances
+          if (!propertyInstances || !propertyInstances.has(propertyName)) {
+            continue
+          }
+          const propertyInstance = propertyInstances.get(propertyName)
+          if (!propertyInstance) {
+            continue
+          }
+          propertyInstance.getService().send({
+            type: 'updateContext',
+            propertyValue,
+          })
+        }
+        return instance
+      }
+      if (!this.instanceCache.has(seedId)) {
+        // Item no longer needs modelInstance - it loads properties from database independently
+        const propsWithModel = { ...props }
+        const newInstance = new Item(propsWithModel)
+        
+        // Wrap instance in Proxy for reactive property access
+        const proxiedInstance = new Proxy(newInstance, {
+          get(target, prop: string | symbol) {
+            // Handle special properties
+            if (prop === '_service') {
+              return Reflect.get(target, prop)
+            }
+            
+            // Handle tracked properties
+            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+              // Special handling for properties - compute from propertyInstances Map
+              if (prop === 'properties') {
+                const snapshot = target._service.getSnapshot()
+                const context = snapshot.context
+                const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
+                
+                if (!propertyInstances || propertyInstances.size === 0) {
+                  return []
+                }
+                
+                // Get model schema keys for filtering
+                const modelSchemaKeys = target._getModelSchemaKeys()
+                
+                // Convert Map to array, filtering by model schema
+                const properties: IItemProperty[] = []
+                for (const [key, propertyInstance] of propertyInstances) {
+                  // Skip internal properties
+                  if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+                    continue
+                  }
+                  
+                  // Include if it's a model property
+                  if (target._isModelProperty(key, modelSchemaKeys)) {
+                    properties.push(propertyInstance)
+                  }
+                }
+                
+                // CRITICAL: Always create a new array reference so React detects changes
+                return [...properties]
+              }
+              
+              const context = target._getSnapshotContext()
+              return (context as any)[prop]
+            }
+            
+            // For methods and other properties, use Reflect
+            return Reflect.get(target, prop)
+          },
+          
+          set(target, prop: string | symbol, value: any) {
+            // Handle special properties
+            if (prop === '_service') {
+              return Reflect.set(target, prop, value)
+            }
+            
+            // Handle tracked properties
+            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+              if (prop === 'properties') {
+                // Properties are read-only computed values from propertyInstances
+                // Cannot be set directly - properties are managed via ItemProperty instances
+                throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
+              } else {
+                // Standard property update
+                target._service.send({
+                  type: 'updateContext',
+                  [prop]: value,
+                })
+              }
+              return true
+            }
+            
+            // For non-tracked properties, use Reflect
+            return Reflect.set(target, prop, value)
+          },
+          
+          has(target, prop: string | symbol) {
+            // Check tracked properties
+            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+              const context = target._getSnapshotContext()
+              return prop in context
+            }
+            return Reflect.has(target, prop)
+          },
+          
+          ownKeys(target) {
+            // Return keys from target
+            return Reflect.ownKeys(target)
+          },
+          
+          getOwnPropertyDescriptor(target, prop: string | symbol) {
+            // Handle tracked properties
+            if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+              const context = target._getSnapshotContext()
+              if (prop in context) {
+                return {
+                  enumerable: true,
+                  configurable: true,
+                  value: (context as any)[prop],
+                  writable: true,
+                }
+              }
+            }
+            return Reflect.getOwnPropertyDescriptor(target, prop)
+          },
+        }) as Item<any>
+        
+        this.instanceCache.set(seedId, {
+          instance: proxiedInstance,
+          refCount: 1,
+        })
+        return proxiedInstance
+      }
+    }
+    if (!props.modelName) {
+      throw new Error('Model name is required to create an item')
+    }
+    // Filter out ItemData metadata properties - only pass model schema properties
+    // Use schemaName from props if available (passed from Model.create() instance method)
+    const schemaName = (props as any).schemaName
+    
+    // Get property names directly from database to make Item independent from Model
+    let propertyNames: string[] = []
+    const db = BaseDb.getAppDb()
+    if (db && props.modelName) {
+      // Query properties table directly by model name
+      // First get the model record by name, optionally filtered by schema
+      let modelRecords
+      
+      // If we have a schema name, join with modelSchemas to filter by schema
+      if (schemaName) {
+        const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+        const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+        
+        modelRecords = await db
+          .select({ id: modelsTable.id })
+          .from(modelsTable)
+          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+          .where(
+            and(
+              eq(modelsTable.name, props.modelName),
+              eq(schemasTable.name, schemaName)
+            )
+          )
+          .limit(1)
+      } else {
+        modelRecords = await db
+          .select({ id: modelsTable.id })
+          .from(modelsTable)
+          .where(eq(modelsTable.name, props.modelName))
+          .limit(1)
+      }
+      
+      if (modelRecords.length > 0 && modelRecords[0].id) {
+        const propertyRecords = await db
+          .select({ name: propertiesTable.name })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelRecords[0].id))
+        
+        propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
+      }
+    }
+    
+    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    
+    // Only include properties that are in the model schema
+    // Exclude modelInstance, modelName, and schemaName as they're metadata, not item properties
+    for (const [key, value] of Object.entries(props)) {
+      // Skip metadata properties that aren't part of the item's data
+      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance') {
+        continue
+      }
+      if (propertyNames.length === 0 || propertyNames.includes(key)) {
+        // If we couldn't get property names from DB, include all properties
+        // Type assertion: we've filtered out modelInstance above, so value should be a valid property value
+        modelPropertyData[key] = value as any
+      }
+    }
+    const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
+    props.seedLocalId = seedLocalId
+    props.latestVersionLocalId = versionLocalId
+    // Item no longer needs modelInstance - it loads properties from database independently
+    const propsWithModel = { ...props }
+    const newInstance = new Item(propsWithModel)
+    
+    // Wrap instance in Proxy for reactive property access
+    const proxiedInstance = new Proxy(newInstance, {
+      get(target, prop: string | symbol) {
+        // Handle special properties
+        if (prop === '_service') {
+          return Reflect.get(target, prop)
+        }
+        
+        // Handle tracked properties
+        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+          // Special handling for properties - compute from propertyInstances Map
+          if (prop === 'properties') {
+            const snapshot = target._service.getSnapshot()
+            const context = snapshot.context
+            const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
+            
+            if (!propertyInstances || propertyInstances.size === 0) {
+              return []
+            }
+            
+            // Get model schema keys for filtering
+            const modelSchemaKeys = target._getModelSchemaKeys()
+            
+            // Convert Map to array, filtering by model schema
+            const properties: IItemProperty[] = []
+            for (const [key, propertyInstance] of propertyInstances) {
+              // Skip internal properties
+              if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+                continue
+              }
+              
+              // Include if it's a model property
+              if (target._isModelProperty(key, modelSchemaKeys)) {
+                properties.push(propertyInstance)
+              }
+            }
+            
+            // CRITICAL: Always create a new array reference so React detects changes
+            return [...properties]
+          }
+          
+          const context = target._getSnapshotContext()
+          return (context as any)[prop]
+        }
+        
+        // For methods and other properties, use Reflect
+        return Reflect.get(target, prop)
+      },
+      
+      set(target, prop: string | symbol, value: any) {
+        // Handle special properties
+        if (prop === '_service') {
+          return Reflect.set(target, prop, value)
+        }
+        
+        // Handle tracked properties
+        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+          if (prop === 'properties') {
+            // Properties are read-only computed values from propertyInstances
+            // Cannot be set directly - properties are managed via ItemProperty instances
+            throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
+          } else {
+            // Standard property update
+            target._service.send({
+              type: 'updateContext',
+              [prop]: value,
+            })
+          }
+          return true
+        }
+        
+        // For non-tracked properties, use Reflect
+        return Reflect.set(target, prop, value)
+      },
+      
+      has(target, prop: string | symbol) {
+        // Check tracked properties
+        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+          const context = target._getSnapshotContext()
+          return prop in context
+        }
+        return Reflect.has(target, prop)
+      },
+      
+      ownKeys(target) {
+        // Return keys from target
+        return Reflect.ownKeys(target)
+      },
+      
+      getOwnPropertyDescriptor(target, prop: string | symbol) {
+        // Handle tracked properties
+        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+          const context = target._getSnapshotContext()
+          if (prop in context) {
+            return {
+              enumerable: true,
+              configurable: true,
+              value: (context as any)[prop],
+              writable: true,
+            }
+          }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop)
+      },
+    }) as Item<any>
+    
+    this.instanceCache.set((proxiedInstance.seedUid || proxiedInstance.seedLocalId) as string, {
+      instance: proxiedInstance,
+      refCount: 1,
+    })
+    return proxiedInstance
+  }
+
+  static async find({
+    modelName,
+    seedLocalId,
+    seedUid,
+  }: ItemFindProps): Promise<IItem<any> | undefined> {
+    if (!seedLocalId && !seedUid) {
+      return
+    }
+    const itemData = await getItemData({
+      modelName,
+      seedLocalId,
+      seedUid,
+    })
+
+    if (!itemData) {
+      console.error('No item data found', { modelName, seedLocalId, seedUid })
+      return
+    }
+
+    return Item.create({
+      ...itemData,
+      modelName,
+    })
+  }
+
+  static async all(
+    modelName?: string,
+    deleted?: boolean,
+  ): Promise<Item<any>[]> {
+    const itemsData = await getItemsData({ modelName, deleted })
+    const itemInstances: Item<any>[] = []
+    for (const itemData of itemsData) {
+      itemInstances.push(
+        await Item.create({
+          ...itemData,
+          modelName,
+        }),
+      )
+    }
+
+    return orderBy(itemInstances, ['createdAt'], ['desc'])
+  }
+
+  protected _createPropertyInstance(props: Partial<CreatePropertyInstanceProps>) {
+    if (this._storageTransactionId) {
+      props.storageTransactionId = this._storageTransactionId
+    }
+
+    const propertyInstance = ItemProperty.create(props)
+
+    if (!propertyInstance || !props.propertyName) {
+      return
+    }
+
+    this._service.send({
+      type: 'addPropertyInstance',
+      propertyName: props.propertyName,
+      propertyInstance,
+    })
+
+    Object.defineProperty(this, props.propertyName, {
+      get: () => propertyInstance.value,
+      set: (value) => (propertyInstance.value = value),
+      enumerable: true,
+    })
+  }
+
+
+  static async publish(item: IItem<any>): Promise<void> {
+    await waitForEvent({
+      req: {
+        eventLabel: `item.${item.seedLocalId}.publish.request`,
+        data: {
+          seedLocalId: item.seedLocalId,
+        },
+      },
+      res: {
+        eventLabel: `item.${item.seedLocalId}.publish.success`,
+      },
+    })
+  }
+
+  subscribe = (callback: (itemProps: any) => void): Subscription => {
+    return this._service.subscribe((snapshot) => {
+      callback(snapshot.context)
+    })
+  }
+
+  getService = (): ActorRefFrom<typeof itemMachineSingle> => {
+    return this._service
+  }
+
+  getEditedProperties = async (): Promise<PropertyData[]> => {
+    return await getItemProperties({
+      seedLocalId: this.seedLocalId,
+      edited: true,
+    })
+  }
+
+  publish = async (): Promise<void> => {
+    await waitForEvent({
+      req: {
+        eventLabel: `item.publish.request`,
+        data: {
+          seedLocalId: this.seedLocalId,
+        },
+      },
+      res: {
+        eventLabel: `item.${this.seedLocalId}.publish.success`,
+      },
+    })
+  }
+
+  getPublishUploads = async () => {
+    // Use dynamic import to break circular dependency
+    const { getPublishUploads } = await import('@/db/read/getPublishUploads')
+    return await getPublishUploads(this)
+  }
+
+  getPublishPayload = async (uploadedTransactions: any[]) => {
+    // Use dynamic import to break circular dependency
+    const { getPublishPayload } = await import('@/db/read/getPublishPayload')
+    return await getPublishPayload(this, uploadedTransactions)
+  }
+
+  get serviceContext() {
+    const snapshot = this._service.getSnapshot()
+    return (snapshot as any).context || {}
+  }
+
+  /**
+   * Get snapshot context from the service
+   * Used by the reactive proxy to read tracked properties
+   */
+  _getSnapshotContext() {
+    return this._service.getSnapshot().context
+  }
+
+  // These getters are now handled by the reactive proxy
+  // They read from the service context via the proxy
+  // Keeping them for backward compatibility, but they delegate to serviceContext
+  get seedLocalId(): string {
+    return this.serviceContext.seedLocalId as string
+  }
+
+  get seedUid(): string | undefined {
+    return this.serviceContext.seedUid
+  }
+
+  get schemaUid(): string | undefined {
+    return this.serviceContext.schemaUid
+  }
+
+  get latestVersionUid(): VersionsType {
+    return this.serviceContext.latestVersionUid as VersionsType
+  }
+
+  get latestVersionLocalId(): string {
+    return this.serviceContext.latestVersionLocalId as string
+  }
+
+  get modelName(): string {
+    return this.serviceContext.modelName as string
+  }
+
+  /**
+   * Helper method to get model schema keys for filtering properties
+   * Since properties are loaded from metadata (which already corresponds to the model),
+   * we can infer schema keys from the property instances themselves
+   * This makes Item independent from Model
+   */
+  protected _getModelSchemaKeys(): string[] {
+    const serviceContext = this.serviceContext
+    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    
+    if (!propertyInstances || propertyInstances.size === 0) {
+      return []
+    }
+    
+    // Extract property names from property instances
+    // These are already filtered to model properties since they come from metadata
+    const schemaKeys: string[] = []
+    for (const [key, propertyInstance] of propertyInstances) {
+      // Skip internal properties
+      if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+        continue
+      }
+      
+      // Get the transformed key (same logic as in properties getter)
+      let transformedKey = key
+      if (propertyInstance.alias) {
+        transformedKey = propertyInstance.alias
+      } else if (key.endsWith('Ids')) {
+        transformedKey = pluralize(key.slice(0, -3))
+      } else if (key.endsWith('Id')) {
+        transformedKey = key.slice(0, -2)
+      }
+      
+      if (!schemaKeys.includes(transformedKey)) {
+        schemaKeys.push(transformedKey)
+      }
+    }
+    
+    return schemaKeys
+  }
+
+  /**
+   * Helper method to determine if a property key is a model-specific property
+   * (as opposed to an internal/common property)
+   * 
+   * Since properties are transformed in the subscription to match schema keys
+   * (e.g., "authorId" -> "author", "tagIds" -> "tags"), the transformed key
+   * should match a schema key directly. We also check the property instance's
+   * original propertyName to handle edge cases.
+   */
+  protected _isModelProperty(key: string, modelSchemaKeys: string[]): boolean {
+    // Direct match with schema (transformed keys should match schema keys)
+    if (modelSchemaKeys.includes(key)) {
+      return true
+    }
+
+    // Check property instances to see if this key corresponds to a model property
+    // This handles cases where the transformation might not perfectly match
+    const serviceContext = this.serviceContext
+    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    
+    if (propertyInstances) {
+      for (const [originalKey, propertyInstance] of propertyInstances) {
+        // Skip internal properties
+        if (INTERNAL_PROPERTY_NAMES.includes(originalKey as string)) {
+          continue
+        }
+
+        // Reconstruct the transformation to see if it matches our key
+        let transformedKey = originalKey as string
+        
+        if (propertyInstance.alias) {
+          transformedKey = propertyInstance.alias
+        } else if (originalKey.endsWith('Ids')) {
+          transformedKey = pluralize(originalKey.slice(0, -3))
+        } else if (originalKey.endsWith('Id')) {
+          transformedKey = originalKey.slice(0, -2)
+        }
+        
+        // If the transformed key matches, check if it's a model property
+        if (transformedKey === key) {
+          // Check if the base property name (without Id/Ids) is in the schema
+          const baseName = originalKey.endsWith('Id') 
+            ? originalKey.slice(0, -2)
+            : originalKey.endsWith('Ids')
+            ? pluralize(originalKey.slice(0, -3))
+            : originalKey
+          
+          // Also check the alias if it exists
+          const checkName = propertyInstance.alias || baseName
+          return modelSchemaKeys.includes(checkName)
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Returns only properties that are defined in the Model's schema
+   * (excludes internal/common properties)
+   */
+  get properties(): IItemProperty[] {
+    const serviceContext = this.serviceContext
+    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    
+    if (!propertyInstances || propertyInstances.size === 0) {
+      return []
+    }
+    
+    // Get model schema keys for filtering
+    const modelSchemaKeys = this._getModelSchemaKeys()
+    
+    // Convert Map to array, filtering by model schema
+    const properties: IItemProperty[] = []
+    for (const [key, propertyInstance] of propertyInstances) {
+      // Skip internal properties
+      if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+        continue
+      }
+      
+      // Include if it's a model property
+      if (this._isModelProperty(key, modelSchemaKeys)) {
+        properties.push(propertyInstance)
+      }
+    }
+    
+    // Always return new array reference for React reactivity
+    return [...properties]
+  }
+
+  /**
+   * Returns only internal/common properties that are shared across all Items
+   * (e.g., seedLocalId, seedUid, createdAt, etc.)
+   */
+  get internalProperties(): Record<string, IItemProperty> {
+    const allProps = this._propertiesSubject.value
+    return Object.fromEntries(
+      Object.entries(allProps).filter(([key]) =>
+        INTERNAL_PROPERTY_NAMES.includes(key)
+      )
+    )
+  }
+
+  /**
+   * Returns all properties (both model-specific and internal)
+   * Useful for backward compatibility or debugging
+   */
+  get allProperties(): Record<string, IItemProperty> {
+    return this._propertiesSubject.value
+  }
+
+  get attestationCreatedAt(): number {
+    return this.serviceContext.attestationCreatedAt as number
+  }
+
+  get versionsCount(): number {
+    return this.serviceContext.versionsCount as number
+  }
+
+  get lastVersionPublishedAt(): number {
+    return this.serviceContext.lastVersionPublishedAt as number
+  }
+
+  get createdAt(): number | undefined {
+    // Try to get from serviceContext first
+    if (this.serviceContext.createdAt !== undefined) {
+      return this.serviceContext.createdAt as number
+    }
+    // Try to get from allProperties if it exists as a property
+    const createdAtProp = this.allProperties.createdAt
+    if (createdAtProp) {
+      return createdAtProp.value as number | undefined
+    }
+    return undefined
+  }
+
+  /**
+   * Set up liveQuery subscription to watch for item and version changes in the database
+   * This enables cross-instance synchronization (e.g., changes in other tabs/windows)
+   */
+  private _setupLiveQuerySubscription(): void {
+    const isBrowser = typeof window !== 'undefined'
+    const logger = debug('seedSdk:item:liveQuery')
+    
+    // Use a closure variable to track setup state per instance
+    const setupState = { subscriptionSetUp: false }
+
+    const setupLiveQuery = async (seedLocalId: string, seedUid?: string) => {
+      if (setupState.subscriptionSetUp) {
+        return
+      }
+
+      setupState.subscriptionSetUp = true
+      logger(`[Item._setupLiveQuerySubscription] Setting up liveQuery for seedLocalId: ${seedLocalId}`)
+      
+      try {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { seeds, versions, metadata } = await import('@/seedSchema')
+        const { eq, and } = await import('drizzle-orm')
+        const { getVersionData } = await import('@/db/read/subqueries/versionData')
+        
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          logger('[Item._setupLiveQuerySubscription] Database not available')
+          return
+        }
+
+        // Query initial seed and version data
+        const versionData = getVersionData()
+        const seedRecords = await db
+          .with(versionData)
+          .select({
+            seedLocalId: seeds.localId,
+            seedUid: seeds.uid,
+            schemaUid: seeds.schemaUid,
+            latestVersionUid: versionData.latestVersionUid,
+            latestVersionLocalId: versionData.latestVersionLocalId,
+          })
+          .from(seeds)
+          .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
+          .where(
+            seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId)
+          )
+          .limit(1)
+
+        if (seedRecords.length === 0) {
+          logger(`[Item._setupLiveQuerySubscription] Seed not found for seedLocalId: ${seedLocalId}`)
+          return
+        }
+
+        const seedRecord = seedRecords[0]
+        const currentVersionLocalId = seedRecord.latestVersionLocalId
+
+        if (!currentVersionLocalId) {
+          logger(`[Item._setupLiveQuerySubscription] No version found for seedLocalId: ${seedLocalId}`)
+          return
+        }
+
+        // Query initial metadata records for the latest version
+        const initialMetadata = await db
+          .select()
+          .from(metadata)
+          .where(
+            and(
+              eq(metadata.seedLocalId, seedLocalId),
+              eq(metadata.versionLocalId, currentVersionLocalId)
+            )
+          )
+
+        const initialMetadataIds = initialMetadata
+          .map((row: any) => row.localId || row.uid)
+          .filter((id: string | null | undefined): id is string => Boolean(id))
+
+        logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
+
+        // CRITICAL: Create ItemProperty instances BEFORE updating context
+        if (initialMetadataIds.length > 0) {
+          try {
+            const { ItemProperty } = await import('@/ItemProperty/ItemProperty')
+            const createPromises = initialMetadata.map(async (metaRow: any) => {
+              try {
+                const property = await ItemProperty.find({
+                  propertyName: metaRow.propertyName,
+                  seedLocalId,
+                  seedUid,
+                })
+                if (property) {
+                  logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+                }
+              } catch (error) {
+                logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
+              }
+            })
+            await Promise.all(createPromises)
+          } catch (error) {
+            logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
+          }
+        }
+
+        // Update context with latest version info
+        this._service.send({
+          type: 'updateContext',
+          latestVersionLocalId: currentVersionLocalId,
+          latestVersionUid: seedRecord.latestVersionUid,
+        })
+
+        // Only set up liveQuery subscription in browser environment
+        if (isBrowser) {
+          // Set up liveQuery to watch seeds table
+          // Use proper SQL parameter binding - ensure values are strings, not objects
+          const resolvedSeedUid = seedUid || null
+          const resolvedSeedLocalId = seedLocalId || null
+          
+          const seeds$ = BaseDb.liveQuery<{ localId: string; uid: string | null; schemaUid: string | null }>(
+            (sql: any) => {
+              if (resolvedSeedUid) {
+                return sql`
+                  SELECT local_id as localId, uid, schema_uid as schemaUid
+                  FROM seeds
+                  WHERE uid = ${resolvedSeedUid}
+                `
+              } else if (resolvedSeedLocalId) {
+                return sql`
+                  SELECT local_id as localId, uid, schema_uid as schemaUid
+                  FROM seeds
+                  WHERE local_id = ${resolvedSeedLocalId}
+                `
+              } else {
+                // Fallback - should not happen, but handle gracefully
+                return sql`
+                  SELECT local_id as localId, uid, schema_uid as schemaUid
+                  FROM seeds
+                  WHERE 1 = 0
+                `
+              }
+            }
+          )
+
+          // Set up liveQuery to watch versions table for this seed
+          const versions$ = BaseDb.liveQuery<{ localId: string; uid: string | null; seedLocalId: string }>(
+            (sql: any) => sql`
+              SELECT local_id as localId, uid, seed_local_id as seedLocalId
+              FROM versions
+              WHERE seed_local_id = ${seedLocalId}
+              ORDER BY COALESCE(attestation_created_at, created_at) DESC
+            `
+          )
+
+          const instanceState = itemInstanceState.get(this)
+          if (!instanceState) {
+            logger('[Item._setupLiveQuerySubscription] Instance state not found')
+            return
+          }
+
+          // Subscribe to seeds updates
+          const seedsSubscription = seeds$.subscribe({
+            next: async (seedRows) => {
+              if (seedRows.length === 0) return
+              
+              const seedRow = seedRows[0]
+              logger(`[Item._setupLiveQuerySubscription] Seed updated in database`)
+              
+              // Update context with seed data
+              this._service.send({
+                type: 'updateContext',
+                seedLocalId: seedRow.localId,
+                seedUid: seedRow.uid || undefined,
+                schemaUid: seedRow.schemaUid || undefined,
+              })
+            },
+            error: (error) => {
+              logger(`[Item._setupLiveQuerySubscription] Seeds liveQuery error: ${error}`)
+            },
+          })
+
+          // Subscribe to versions updates
+          const versionsSubscription = versions$.subscribe({
+            next: async (versionRows) => {
+              if (versionRows.length === 0) return
+              
+              // Get the most recent version
+              const latestVersion = versionRows[0]
+              const latestVersionLocalId = latestVersion.localId
+              
+              logger(`[Item._setupLiveQuerySubscription] Versions updated, latest version: ${latestVersionLocalId}`)
+              
+              // Query metadata for the latest version
+              const metadataRows = await db
+                .select()
+                .from(metadata)
+                .where(
+                  and(
+                    eq(metadata.seedLocalId, seedLocalId),
+                    eq(metadata.versionLocalId, latestVersionLocalId)
+                  )
+                )
+
+              // CRITICAL: Create ItemProperty instances BEFORE updating context
+              if (metadataRows.length > 0) {
+                try {
+                  const { ItemProperty } = await import('@/ItemProperty/ItemProperty')
+                  const createPromises = metadataRows.map(async (metaRow: any) => {
+                    try {
+                      const property = await ItemProperty.find({
+                        propertyName: metaRow.propertyName,
+                        seedLocalId,
+                        seedUid,
+                      })
+                      if (property) {
+                        // Add property instance to context
+                        this._service.send({
+                          type: 'addPropertyInstance',
+                          propertyName: metaRow.propertyName,
+                          propertyInstance: property,
+                        })
+                        logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}" from liveQuery`)
+                      }
+                    } catch (error) {
+                      logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
+                    }
+                  })
+                  await Promise.all(createPromises)
+                } catch (error) {
+                  logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances from liveQuery: ${error}`)
+                }
+              }
+              
+              // Update context with latest version info
+              this._service.send({
+                type: 'updateContext',
+                latestVersionLocalId,
+                latestVersionUid: latestVersion.uid || undefined,
+              })
+            },
+            error: (error) => {
+              logger(`[Item._setupLiveQuerySubscription] Versions liveQuery error: ${error}`)
+            },
+          })
+
+          // Store combined subscription
+          instanceState.liveQuerySubscription = {
+            unsubscribe: () => {
+              seedsSubscription.unsubscribe()
+              versionsSubscription.unsubscribe()
+            }
+          }
+          
+          logger(`[Item._setupLiveQuerySubscription] LiveQuery subscription set up for seedLocalId: ${seedLocalId}`)
+        } else {
+          logger(`[Item._setupLiveQuerySubscription] Skipping liveQuery subscription in Node.js environment`)
+        }
+      } catch (error) {
+        logger(`[Item._setupLiveQuerySubscription] Error setting up subscription: ${error}`)
+        setupState.subscriptionSetUp = false // Reset on error so we can retry
+      }
+    }
+
+    // Set up liveQuery subscription as soon as we have seedLocalId
+    const setupSubscription = this._service.subscribe(async (snapshot) => {
+      const seedLocalId = snapshot.context.seedLocalId
+      const seedUid = snapshot.context.seedUid
+      
+      if (!seedLocalId && !seedUid) {
+        return // Need seed ID to proceed
+      }
+
+      // Once we have seed ID, set up the liveQuery subscription (only once)
+      if ((seedLocalId || seedUid) && !setupState.subscriptionSetUp) {
+        await setupLiveQuery(seedLocalId || '', seedUid)
+        if (setupState.subscriptionSetUp) {
+          setupSubscription.unsubscribe()
+        }
+      }
+    })
+    
+    // Also check current state immediately in case seedLocalId is already available
+    const currentSnapshot = this._service.getSnapshot()
+    if ((currentSnapshot.context.seedLocalId || currentSnapshot.context.seedUid) && !setupState.subscriptionSetUp) {
+      setupLiveQuery(currentSnapshot.context.seedLocalId || '', currentSnapshot.context.seedUid).catch((error) => {
+        logger(`[Item._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
+      })
+    }
+  }
+
+  unload(): void {
+    // Clean up liveQuery subscription
+    const instanceState = itemInstanceState.get(this)
+    if (instanceState?.liveQuerySubscription) {
+      instanceState.liveQuerySubscription.unsubscribe()
+      instanceState.liveQuerySubscription = null
+    }
+    
+    this._subscription?.unsubscribe()
+    this._service.stop()
+  }
+}

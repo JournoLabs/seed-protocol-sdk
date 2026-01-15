@@ -2,11 +2,11 @@ import { eventEmitter } from '@/eventBus'
 import { getItemsData } from '@/db/read/getItems'
 import debug from 'debug'
 import { Model } from '@/Model/Model'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 
 const logger = debug('seedSdk:events:requestAll')
 
-const cache = new Map<string, Map<string, BaseItem<any>>>()
+const cache = new Map<string, Map<string, Item<any>>>()
 
 let modelCount = 0
 
@@ -44,7 +44,7 @@ const handleRequestAll = async (event) => {
 
   for (const itemData of itemsData) {
     returnItems.push(
-      await BaseItem.create({
+      await Item.create({
         ...itemData,
         modelName,
       }),

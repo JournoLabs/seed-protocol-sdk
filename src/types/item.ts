@@ -3,10 +3,10 @@ import { ModelSchema } from '@/types'
 import { Attestation } from '@/graphql/gql/graphql'
 import { PropertyType } from '@/seedSchema'
 import { IItem, IItemProperty } from '@/interfaces'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import type { Model } from '@/Model/Model'
 
-export type ItemType = Partial<typeof BaseItem>
+export type ItemType = Partial<typeof Item>
 
 // AllItemsMachineContext removed - allItems services have been removed
 

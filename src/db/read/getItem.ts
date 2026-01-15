@@ -1,6 +1,6 @@
 import { getItemData } from './getItemData'
 import { GetItem } from '@/types'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import { startCase } from 'lodash-es'
 
 export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
@@ -28,5 +28,5 @@ export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
     itemInitObj.modelName = startCase(itemInitObj.type)
   }
 
-  return BaseItem.create(itemInitObj)
+  return Item.create(itemInitObj)
 }

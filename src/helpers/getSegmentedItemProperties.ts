@@ -11,7 +11,7 @@ export const getSegmentedItemProperties = (item: IItem<any>) => {
   const itemStorageProperties = []
   let itemStorageTransactionProperty: UploadProperty | undefined
 
-  for (const itemProperty of Object.values(item.properties)) {
+  for (const itemProperty of item.properties) {
     if (!itemProperty.propertyDef) {
       continue
     }

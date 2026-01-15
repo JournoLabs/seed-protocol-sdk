@@ -1,7 +1,7 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { modelMachine, ModelMachineContext } from './service/modelMachine'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import { ModelValues } from '@/types'
 import { ItemData } from '@/types/item'
 import { generateId } from '@/helpers'
@@ -1404,12 +1404,12 @@ export class Model {
    * @param values - Item property values (modelName is automatically injected)
    * @returns The created item instance
    */
-  async create(values: Partial<ItemData> & Record<string, any>): Promise<BaseItem<any>> {
+  async create(values: Partial<ItemData> & Record<string, any>): Promise<Item<any>> {
     if (!this.modelName) {
       throw new Error('Cannot create item: model name is not set on this Model instance')
     }
     
-    const item = await BaseItem.create({
+    const item = await Item.create({
       modelName: this.modelName,
       schemaName: this.schemaName,
       modelInstance: this,

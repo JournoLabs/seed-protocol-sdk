@@ -15,14 +15,12 @@ export {
 } from '../Schema'
 
 // Core classes
-export { BaseItem as Item } from '../Item/BaseItem'
-export { BaseItemProperty as ItemProperty } from '../ItemProperty/BaseItemProperty'
+export { Item } from '../Item/Item'
+export { ItemProperty } from '../ItemProperty/ItemProperty'
 
 // Node.js specific exports
 export { FileManager } from './helpers/FileManager'
 export { Db } from './db/Db'
-export { Item as NodeItem } from './Item/Item'
-export { ItemProperty as NodeItemProperty } from './ItemProperty/ItemProperty'
 
 // Schema exports
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'

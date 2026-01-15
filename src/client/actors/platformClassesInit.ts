@@ -10,8 +10,6 @@ import { setupServiceHandlers } from "@/events/services";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
-import { BaseItem } from '@/Item/BaseItem'
-import { BaseItemProperty } from '@/ItemProperty/BaseItemProperty'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 
@@ -49,8 +47,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     let Db: typeof BaseDb
     let QueryClient: typeof BaseQueryClient
     let ArweaveClient: typeof BaseArweaveClient
-    let Item: typeof BaseItem
-    let ItemProperty: typeof BaseItemProperty
     let PathResolver: typeof BasePathResolver
     let EasClient: typeof BaseEasClient
 
@@ -59,8 +55,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       Db = (await import('../../browser/db/Db')).Db
       QueryClient = (await import('../../browser/helpers/QueryClient')).QueryClient
       ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
-      Item = (await import('../../browser/Item/Item')).Item
-      ItemProperty = (await import('../../browser/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../browser/helpers/PathResolver')).PathResolver
       EasClient = (await import('../../browser/helpers/EasClient')).EasClient
     } else if (isNode()) {
@@ -69,8 +63,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       Db = (await import('../../node/db/Db')).Db
       QueryClient = (await import('../../node/helpers/QueryClient')).QueryClient
       ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
-      Item = (await import('../../node/Item/Item')).Item
-      ItemProperty = (await import('../../node/ItemProperty/ItemProperty')).ItemProperty
       PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
       EasClient = (await import('../../node/helpers/EasClient')).EasClient
     } else {
@@ -86,8 +78,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     BaseQueryClient.setPlatformClass(QueryClient!)
     BaseEasClient.setPlatformClass(EasClient!)
     BaseArweaveClient.setPlatformClass(ArweaveClient!)
-    BaseItem.setPlatformClass(Item!)
-    BaseItemProperty.setPlatformClass(ItemProperty!)
     BasePathResolver.setPlatformClass(PathResolver!)
 
 

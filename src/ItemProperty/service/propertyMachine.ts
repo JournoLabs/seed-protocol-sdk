@@ -6,6 +6,7 @@ import { waitForDb } from '@/ItemProperty/service/actors/waitForDb'
 import { initialize } from '@/ItemProperty/service/actors/initialize'
 import { resolveRelatedValue } from '@/ItemProperty/service/actors/resolveRelatedValue'
 import { hydrateFromDb } from '@/ItemProperty/service/actors/hydrateFromDb'
+import { loadOrCreateProperty } from '@/ItemProperty/service/actors/loadOrCreateProperty'
 import {
   saveImage,
   saveItemStorage,
@@ -24,6 +25,7 @@ export const propertyMachine = setup({
   // },
   actors: {
     waitForDb,
+    loadOrCreateProperty,
     hydrateFromDb,
     initialize,
     resolveRelatedValue,
@@ -65,7 +67,7 @@ export const propertyMachine = setup({
     waitingForDb: {
       on: {
         waitForDbSuccess: {
-          target: 'hydratingFromDb',
+          target: 'loading',
           actions: assign({
             isDbReady: true,
           }),
@@ -76,6 +78,39 @@ export const propertyMachine = setup({
         input: ({ context }) => ({ context }),
       },
     },
+    loading: {
+      on: {
+        loadOrCreatePropertySuccess: {
+          target: 'idle',
+          actions: assign(({ context, event }) => {
+            const property = (event as any).property
+            return {
+              ...context,
+              propertyName: property.propertyName || context.propertyName,
+              propertyValue: property.propertyValue !== undefined ? property.propertyValue : context.propertyValue,
+              renderValue: property.renderValue !== undefined ? property.renderValue : context.renderValue,
+              seedLocalId: property.seedLocalId || context.seedLocalId,
+              seedUid: property.seedUid || context.seedUid,
+              versionLocalId: property.versionLocalId || context.versionLocalId,
+              versionUid: property.versionUid || context.versionUid,
+              schemaUid: property.schemaUid || context.schemaUid,
+              localId: property.localId || context.localId,
+              uid: property.uid || context.uid,
+              modelName: property.modelName || context.modelName,
+              propertyRecordSchema: property.propertyRecordSchema || context.propertyRecordSchema,
+            }
+          }),
+        },
+        loadOrCreatePropertyError: {
+          target: 'error',
+        },
+      },
+      invoke: {
+        src: 'loadOrCreateProperty',
+        input: ({ context }) => ({ context }),
+      },
+    },
+    error: {},
     hydratingFromDb: {
       on: {
         hydrateFromDbSuccess: 'initializing',

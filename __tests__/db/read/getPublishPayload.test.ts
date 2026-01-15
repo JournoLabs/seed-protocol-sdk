@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { BaseItem } from '@/Item/BaseItem'
+import { Item } from '@/Item/Item'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
 import { VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA } from '@/helpers/constants'

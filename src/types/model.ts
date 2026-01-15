@@ -2,7 +2,7 @@ import { PropertyStates, PropertyValue } from './property'
 import { Actor, AnyActorLogic } from 'xstate'
 import { Static }                               from '@sinclair/typebox'
 import { TModelSchema, TProperty } from '@/Schema'
-import { BaseItem }                             from '@/Item/BaseItem'
+import { Item }                             from '@/Item/Item'
 import type { Model } from '@/Model/Model'
 
 export type ModelDefinitions = {
@@ -22,7 +22,7 @@ type ExcludeKeys<T, K> = {
  */
 export type ModelClassType = Model
 
-export type ModelValues<T extends Record<string, any>> = BaseItem<any> & {
+export type ModelValues<T extends Record<string, any>> = Item<any> & {
   schema: ModelSchema
   ModelClass?: Model
 } & {

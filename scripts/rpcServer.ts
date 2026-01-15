@@ -3,7 +3,7 @@
 import path from 'path';
 import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
-import { BaseItem, } from '@/Item/BaseItem';
+import { Item, } from '@/Item/Item';
 import { Model } from '@/Model/Model';
 import { fileURLToPath } from 'url';
 
@@ -129,18 +129,18 @@ const server = {
         }
       }
 
-      const item = await BaseItem.create(processedProps);
+      const item = await Item.create(processedProps);
 
-      // Cache the BaseItem
+      // Cache the Item
       if (!itemsCache[model_name]) {
         BaseItemsCache[model_name] = {};
       }
       
-      BaseItemsCache[model_name][item.id] = BaseItem;
+      BaseItemsCache[model_name][item.id] = Item;
 
-      // Return the created BaseItem
+      // Return the created Item
       callback(null, {
-        id: BaseItem.id,
+        id: Item.id,
         model_name,
         properties: properties
       });
@@ -157,7 +157,7 @@ const server = {
       const { id, model_name } = call.request;
       
       // Try to get from cache
-      const item = await BaseItem.find({
+      const item = await Item.find({
         seedLocalId: id,
         modelName: model_name
       });
@@ -201,7 +201,7 @@ const server = {
       const { id, model_name, properties } = call.request;
       
       // Try to get from cache
-      let item = await BaseItem.find({
+      let item = await Item.find({
         seedLocalId: id,
         modelName: model_name
       });
@@ -215,7 +215,7 @@ const server = {
 
       // Update properties
       for (const [key, value] of Object.entries(properties)) {
-        const prop = BaseItem.constructor.prototype[key];
+        const prop = Item.constructor.prototype[key];
         if (prop && prop.isList) {
           item[key] = JSON.parse(value);
         } else if (prop && prop.relationModel) {
@@ -225,8 +225,8 @@ const server = {
         }
       }
 
-      // Save the updated BaseItem
-      await BaseItem.save();
+      // Save the updated Item
+      await item.save();
 
       // Return the updated BaseItem
       callback(null, {
@@ -256,8 +256,18 @@ const server = {
         });
       }
 
-      // Delete the BaseItem
-      await BaseItem.delete();
+      // Delete the Item
+      const item = await Item.find({
+        seedLocalId: id,
+        modelName: model_name
+      });
+      if (!item) {
+        return callback({
+          code: grpc.status.NOT_FOUND,
+          message: `Item ${id} not found`
+        });
+      }
+      // Note: Item doesn't have a delete method - this may need to be implemented
       
       // Remove from cache
       delete BaseItemsCache[model_name][id];
@@ -279,7 +289,7 @@ const server = {
       const { id, model_name } = call.request;
       
       // Try to get from cache
-      const item = await BaseItem.find({
+      const item = await Item.find({
         seedLocalId: id,
         modelName: model_name
       });

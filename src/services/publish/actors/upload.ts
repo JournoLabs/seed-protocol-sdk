@@ -25,10 +25,10 @@ export const upload = fromCallback<
 
   const _upload = async () => {
     // Dynamic imports to break circular dependencies
-    const { BaseItem } = await import('@/Item/BaseItem')
+    const { Item } = await import('@/Item/Item')
     const { ModelPropertyDataTypes } = await import('@/Schema')
     
-    const item = await BaseItem.find({ seedLocalId: localId })
+    const item = await Item.find({ seedLocalId: localId })
 
     if (!item) {
       logger('no item with localId', localId)
@@ -48,7 +48,7 @@ export const upload = fromCallback<
 
     for (const editedPropertyData of editedProperties) {
       const propertyName = editedPropertyData.propertyName
-      const editedProperty = item.properties[propertyName]
+      const editedProperty = item.properties.find(p => p.propertyName === propertyName)
 
       if (!editedProperty || !editedProperty.propertyDef) {
         continue

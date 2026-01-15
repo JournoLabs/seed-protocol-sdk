@@ -2,7 +2,7 @@ import React, { FC, HTMLAttributes, useState, useEffect, DetailedHTMLProps, ImgH
 import debug                                                                                    from 'debug'
 import { FileManager } from "../helpers/FileManager"
 import { useItemProperty } from "./itemProperty"
-import { BaseItemProperty } from "@/ItemProperty/BaseItemProperty"
+import { ItemProperty } from "@/ItemProperty/ItemProperty"
 
 const logger = debug('seedSdk:react:SeedImage')
 
@@ -45,7 +45,7 @@ function matchFileNameWithoutExtension(fileName: string, targetName: string): bo
 }
 
 type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement> & {
-  imageProperty: BaseItemProperty<any>
+  imageProperty: ItemProperty<any>
   alt?: string
   width?: number
   height?: number
