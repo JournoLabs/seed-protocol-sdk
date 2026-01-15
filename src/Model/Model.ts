@@ -662,7 +662,7 @@ export class Model {
             
             if (schemaInstance) {
               const schemaContext = (schemaInstance as any)._getSnapshotContext()
-              const schemaFileId = schemaContext._schemaFileId
+              const schemaFileId = schemaContext.id // id is the schemaFileId (string) in SchemaMachineContext
               
               if (schemaFileId) {
                 try {

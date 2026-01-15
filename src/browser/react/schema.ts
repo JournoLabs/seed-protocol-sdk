@@ -112,6 +112,8 @@ export const useSchemas = () => {
   const isClientReady = useIsClientReady()
   const subscriptionsRef = useRef<Map<Schema, Subscription>>(new Map())
   const loadingSchemasRef = useRef<Set<Schema>>(new Set())
+  const previousSchemasTableDataRef = useRef<DbSchemaType[] | undefined>(undefined)
+  const schemasRef = useRef<Schema[]>([]) // Track schemas for comparison without triggering effects
 
   // Watch the schemas table for changes
   // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
@@ -180,6 +182,7 @@ export const useSchemas = () => {
                   const nameB = b.metadata?.name || ''
                   return nameA.localeCompare(nameB)
                 })
+                schemasRef.current = updated // Update ref for comparison
                 return updated
               })
               
@@ -207,6 +210,7 @@ export const useSchemas = () => {
       
       // Set initial ready schemas
       setSchemas(readySchemas)
+      schemasRef.current = readySchemas // Update ref for comparison
       setError(null)
       setIsLoading(loadingSchemasList.length > 0) // Still loading if any schemas are loading
       
@@ -214,7 +218,7 @@ export const useSchemas = () => {
       setError(error as Error)
       setIsLoading(false)
     }
-  }, [schemasTableData])
+  }, []) // Remove schemasTableData dependency - we'll call fetchSchemas explicitly when table data changes
 
   // Cleanup subscriptions for schemas that are no longer in the list
   useEffect(() => {
@@ -251,10 +255,23 @@ export const useSchemas = () => {
       return
     }
 
-    // Extract identifying information from current schemas in state
+    // Check if schemasTableData actually changed by comparing with previous value
+    const prevData = previousSchemasTableDataRef.current
+    const prevDataJson = prevData ? JSON.stringify(prevData) : 'undefined'
+    const currDataJson = schemasTableData ? JSON.stringify(schemasTableData) : 'undefined'
+    
+    if (prevDataJson === currDataJson && prevData !== undefined) {
+      // Data hasn't actually changed, skip refetch
+      return
+    }
+    
+    // Update ref with current data
+    previousSchemasTableDataRef.current = schemasTableData
+
+    // Extract identifying information from current schemas in state (using ref to avoid dependency)
     // Use schemaFileId if available, otherwise fall back to name+version
     const currentSchemasSet = new Set<string>()
-    for (const schema of schemas) {
+    for (const schema of schemasRef.current) {
       const schemaFileId = schema.id || schema.schemaFileId
       if (schemaFileId) {
         currentSchemasSet.add(schemaFileId)
@@ -297,7 +314,7 @@ export const useSchemas = () => {
 
     // Schemas have changed, fetch updated schemas
     fetchSchemas()
-  }, [isClientReady, schemasTableData, schemas, fetchSchemas])
+  }, [isClientReady, schemasTableData, fetchSchemas]) // Removed 'schemas' from dependencies to break the loop
 
   // Cleanup all subscriptions on unmount
   useEffect(() => {
