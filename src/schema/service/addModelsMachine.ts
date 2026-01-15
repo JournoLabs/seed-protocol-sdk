@@ -354,7 +354,7 @@ export const addModelsMachine = setup({
         }
         
         const schemaName = input.schemaContext.metadata?.name || input.schemaContext.schemaName
-        const schemaFileId = input.schemaContext._schemaFileId
+        const schemaFileId = input.schemaContext.id // id is the schemaFileId (string) in SchemaMachineContext
         const db = BaseDb.getAppDb()
         if (!db) {
           logger('Database not found, skipping model store update')
@@ -483,7 +483,7 @@ export const addModelsMachine = setup({
         // Add models to database with modelFileIds
         if (Object.keys(modelDefinitions).length > 0) {
           await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
-            schemaFileId: input.schemaContext._schemaFileId,
+            schemaFileId: input.schemaContext.id, // id is the schemaFileId (string) in SchemaMachineContext
             modelFileIds: input.modelFileIds.size > 0 ? input.modelFileIds : undefined,
           })
           logger(`Added ${Object.keys(modelDefinitions).length} new models to database`)
