@@ -1,9 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
 import { createActor } from 'xstate'
 import { schemaMachine } from '@/Schema/service/schemaMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
+// Import Node.js Db to initialize platform class
+import '@/node/db/Db'
+import { setupTestEnvironment } from '../test-utils/client-init'
 
 describe('Staged Schema Loading', () => {
+  beforeAll(async () => {
+    // Initialize test environment and database
+    await setupTestEnvironment({
+      testFileUrl: import.meta.url,
+      timeout: 90000,
+    })
+  }, 90000)
+
   beforeEach(async () => {
     // Ensure database is available
     const db = BaseDb.getAppDb()
@@ -46,7 +57,7 @@ describe('Staged Schema Loading', () => {
     const snapshot = actor.getSnapshot()
     expect(snapshot.value).toBe('idle')
     expect(snapshot.context.schemaName).toBe(schemaName)
-    expect(snapshot.context._schemaFileId).toBeDefined()
+    expect(snapshot.context.id).toBeDefined() // schemaFileId (string)
     
     actor.stop()
   })
@@ -88,7 +99,7 @@ describe('Staged Schema Loading', () => {
     const snapshot = actor2.getSnapshot()
     expect(snapshot.value).toBe('idle')
     expect(snapshot.context.schemaName).toBe(schemaName)
-    expect(snapshot.context._schemaFileId).toBeDefined()
+    expect(snapshot.context.id).toBeDefined() // schemaFileId (string)
     
     actor2.stop()
   })

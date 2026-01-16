@@ -62,7 +62,14 @@ export const verifyModelsInDb = fromCallback<
           .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
           .where(eq(modelSchemas.schemaId, schemaId))
 
+        // If expectedModelIds is provided and empty, it means the schema should have no models
+        // This is valid for empty schemas
         if (modelRecords.length === 0) {
+          if (expectedModelIds !== undefined && expectedModelIds.length === 0) {
+            // Empty schema is expected and valid
+            logger(`Schema ${schemaId} has no models (as expected)`)
+            return []
+          }
           throw new Error(`No models found for schema (id: ${schemaId})`)
         }
 

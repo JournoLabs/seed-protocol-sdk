@@ -12,6 +12,7 @@ import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import { propertyMachine } from '@/ItemProperty/service/propertyMachine'
 
 const logger = debug('seedSdk:react:property')
+const propertiesLogger = debug('seedSdk:react:itemProperties')
 
 type ItemPropertySnapshot = SnapshotFrom<typeof propertyMachine>
 
@@ -261,6 +262,7 @@ export function useItemProperties(itemId: string): UseItemPropertiesReturn
 export function useItemProperties(
   arg1: { seedLocalId?: string; seedUid?: string } | string
 ): UseItemPropertiesReturn {
+
   const [properties, setProperties] = useState<IItemProperty[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -302,66 +304,124 @@ export function useItemProperties(
   }, [lookupMode])
 
   // Watch the metadata table for changes
-  // Use SQL tag function for liveQuery (similar to ItemProperty._setupLiveQuerySubscription)
-  // This works better with CTEs than Drizzle query builders
+  // Query metadata table directly and filter for latest records in JavaScript
+  // This is simpler and works better with useLiveQuery than CTEs
+  // Get db inside useMemo to avoid recreating query on each render
+  // Drizzle query builders are new objects each time, but useMemo will only recreate
+  // when dependencies change, which is what we want for reactive queries
   const propertiesQuery = useMemo(() => {
-    if (!isClientReady || (!seedLocalId && !seedUid)) return null
-    
-    const resolvedSeedUid = seedUid || null
-    const resolvedSeedLocalId = seedLocalId || null
-    
-    // Use SQL tag function for better compatibility with liveQuery
-    return (sql: any) => {
-      if (resolvedSeedUid) {
-        return sql`
-          WITH metadataLatest AS (
-            SELECT *,
-              ROW_NUMBER() OVER (
-                PARTITION BY property_name 
-                ORDER BY COALESCE(created_at, attestation_created_at) DESC
-              ) as rowNum
-            FROM metadata
-            WHERE seed_uid = ${resolvedSeedUid}
-          )
-          SELECT property_name as propertyName, property_value as propertyValue,
-                 seed_local_id as seedLocalId, seed_uid as seedUid,
-                 model_type as modelType, schema_uid as schemaUid
-          FROM metadataLatest
-          WHERE rowNum = 1 AND property_name IS NOT NULL
-        `
-      } else if (resolvedSeedLocalId) {
-        return sql`
-          WITH metadataLatest AS (
-            SELECT *,
-              ROW_NUMBER() OVER (
-                PARTITION BY property_name 
-                ORDER BY COALESCE(created_at, attestation_created_at) DESC
-              ) as rowNum
-            FROM metadata
-            WHERE seed_local_id = ${resolvedSeedLocalId}
-          )
-          SELECT property_name as propertyName, property_value as propertyValue,
-                 seed_local_id as seedLocalId, seed_uid as seedUid,
-                 model_type as modelType, schema_uid as schemaUid
-          FROM metadataLatest
-          WHERE rowNum = 1 AND property_name IS NOT NULL
-        `
-      }
+    if (!isClientReady || (!seedLocalId && !seedUid)) {
+      propertiesLogger('[useItemProperties] Query: returning null (not ready or no identifiers)')
       return null
     }
+    
+    const db = BaseDb.getAppDb()
+    if (!db) {
+      propertiesLogger('[useItemProperties] Query: returning null (no db)')
+      return null
+    }
+    
+    propertiesLogger(`[useItemProperties] Query: creating query for seedLocalId=${seedLocalId}, seedUid=${seedUid}`)
+    
+    // Query metadata table directly - we'll filter for latest records in JavaScript
+    const query = seedUid
+      ? db
+          .select({
+            propertyName: metadata.propertyName,
+            propertyValue: metadata.propertyValue,
+            seedLocalId: metadata.seedLocalId,
+            seedUid: metadata.seedUid,
+            modelType: metadata.modelType,
+            schemaUid: metadata.schemaUid,
+            createdAt: metadata.createdAt,
+            attestationCreatedAt: metadata.attestationCreatedAt,
+          })
+          .from(metadata)
+          .where(
+            and(
+              eq(metadata.seedUid, seedUid),
+              isNotNull(metadata.propertyName)
+            )
+          )
+      : db
+          .select({
+            propertyName: metadata.propertyName,
+            propertyValue: metadata.propertyValue,
+            seedLocalId: metadata.seedLocalId,
+            seedUid: metadata.seedUid,
+            modelType: metadata.modelType,
+            schemaUid: metadata.schemaUid,
+            createdAt: metadata.createdAt,
+            attestationCreatedAt: metadata.attestationCreatedAt,
+          })
+          .from(metadata)
+          .where(
+            and(
+              eq(metadata.seedLocalId, seedLocalId),
+              isNotNull(metadata.propertyName)
+            )
+          )
+    
+    propertiesLogger(`[useItemProperties] Query: created query object`, { queryType: seedUid ? 'seedUid' : 'seedLocalId' })
+    return query
   }, [isClientReady, seedLocalId, seedUid])
   
-  const propertiesTableData = useLiveQuery<{
+  const rawPropertiesTableData = useLiveQuery<{
     propertyName: string | null
     propertyValue: string | null
     seedLocalId: string | null
     seedUid: string | null
     modelType: string | null
     schemaUid: string | null
+    createdAt: number | null
+    attestationCreatedAt: number | null
   }>(propertiesQuery)
+  
+  // Debug logging for rawPropertiesTableData
+  useEffect(() => {
+    if (rawPropertiesTableData !== undefined) {
+      propertiesLogger(`[useItemProperties] rawPropertiesTableData updated:`, {
+        length: rawPropertiesTableData?.length || 0,
+        isUndefined: rawPropertiesTableData === undefined,
+        isArray: Array.isArray(rawPropertiesTableData),
+        firstRecord: rawPropertiesTableData?.[0] || null,
+      })
+    } else {
+      propertiesLogger('[useItemProperties] rawPropertiesTableData is undefined (query not executed yet)')
+    }
+  }, [rawPropertiesTableData])
+
+  // Filter for latest records (one per propertyName) in JavaScript
+  const propertiesTableData = useMemo(() => {
+    if (!rawPropertiesTableData || rawPropertiesTableData.length === 0) {
+      return []
+    }
+
+    // Group by propertyName and keep only the latest record for each
+    const latestByProperty = new Map<string, typeof rawPropertiesTableData[0]>()
+    
+    for (const record of rawPropertiesTableData) {
+      if (!record.propertyName) continue
+      
+      const existing = latestByProperty.get(record.propertyName)
+      if (!existing) {
+        latestByProperty.set(record.propertyName, record)
+      } else {
+        // Compare timestamps to find the latest
+        const existingTime = existing.attestationCreatedAt || existing.createdAt || 0
+        const currentTime = record.attestationCreatedAt || record.createdAt || 0
+        if (currentTime > existingTime) {
+          latestByProperty.set(record.propertyName, record)
+        }
+      }
+    }
+
+    return Array.from(latestByProperty.values())
+  }, [rawPropertiesTableData])
 
   const fetchItemProperties = useCallback(async () => {
     if (!seedLocalId && !seedUid) {
+      propertiesLogger('[useItemProperties] fetchItemProperties: no identifiers, clearing properties')
       setProperties([])
       setIsLoading(false)
       setError(null)
@@ -370,26 +430,27 @@ export function useItemProperties(
 
     // Don't fetch if propertiesTableData is not available yet
     if (propertiesTableData === undefined) {
+      propertiesLogger('[useItemProperties] fetchItemProperties: propertiesTableData is undefined, skipping')
       return
     }
+
+    propertiesLogger(`[useItemProperties] fetchItemProperties: starting with ${propertiesTableData.length} records from table`)
 
     try {
       setIsLoading(true)
       setError(null)
 
       // Use propertiesTableData (database state) as the source of truth
-      // If empty, set properties to empty but keep loading state based on whether we expect data
-      // (This allows liveQuery to update when data arrives)
+      // If empty, set properties to empty (liveQuery will update when data arrives)
       if (!propertiesTableData || propertiesTableData.length === 0) {
-        // Only set to empty if we've already tried loading (to avoid flickering)
-        // Otherwise, keep current state and let liveQuery update when data arrives
-        if (properties.length === 0) {
-          setProperties([])
-          setError(null)
-          setIsLoading(false)
-        }
+        propertiesLogger('[useItemProperties] fetchItemProperties: propertiesTableData is empty, setting properties to []')
+        setProperties([])
+        setError(null)
+        setIsLoading(false)
         return
       }
+      
+      propertiesLogger(`[useItemProperties] fetchItemProperties: processing ${propertiesTableData.length} properties`)
 
       const _itemProperties: IItemProperty[] = []
 
@@ -591,7 +652,12 @@ export function useItemProperties(
     // If table data is empty but we have properties, that's also a change (properties were removed)
     if (currentPropertiesSet.size > 0 && tableDataPropertiesSet.size === 0) {
       fetchItemProperties()
+      return
     }
+
+    // If both are empty, we've already tried to fetch (in the first useEffect)
+    // and got empty results, so skip refetching until data arrives
+    // (the change detection above will handle when data arrives)
   }, [isClientReady, propertiesTableData, properties, fetchItemProperties, seedLocalId, seedUid])
 
   // Cleanup subscriptions for properties that are no longer in the list
