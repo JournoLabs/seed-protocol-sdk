@@ -90,6 +90,16 @@ export const clientManagerMachine = setup({
         [PLATFORM_CLASSES_READY]: {
           target: FILE_SYSTEM_INIT,
         },
+        error: {
+          actions: assign(({ event }) => {
+            const error = (event as any).error instanceof Error 
+              ? (event as any).error 
+              : new Error(String((event as any).error || 'Platform classes initialization failed'))
+            return {
+              initError: error,
+            }
+          }),
+        },
       },
       invoke: {
         src: 'platformClassesInit',

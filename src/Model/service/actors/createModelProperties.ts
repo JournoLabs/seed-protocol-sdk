@@ -11,12 +11,12 @@ export const createModelProperties = fromCallback<
 >(({ sendBack, input }) => {
   const _createProperties = async (): Promise<void> => {
     const { context, propertyDefinitions } = input
-    const { _modelFileId, modelId, modelName } = context
+    const { id, _dbId, modelName } = context
 
-    console.log('createModelProperties called for', modelName, 'with _modelFileId', _modelFileId, 'and modelId', modelId)
+    console.log('createModelProperties called for', modelName, 'with id (schemaFileId)', id, 'and _dbId', _dbId)
     console.log('propertyDefinitions', propertyDefinitions)
     
-    if (!_modelFileId || !modelId || !modelName) {
+    if (!id || !_dbId || !modelName) {
       throw new Error('Model ID, file ID, and name are required to create properties')
     }
     
@@ -26,7 +26,7 @@ export const createModelProperties = fromCallback<
       return
     }
     
-    logger(`Creating ${Object.keys(propertyDefinitions).length} properties for model "${modelName}" (id: ${modelId})`)
+    logger(`Creating ${Object.keys(propertyDefinitions).length} properties for model "${modelName}" (id: ${_dbId})`)
     
     const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
     const { BaseDb } = await import('@/db/Db/BaseDb')
@@ -87,7 +87,7 @@ export const createModelProperties = fromCallback<
       await ModelProperty.create({
         name: propName,
         modelName,
-        modelId,
+        modelId: _dbId,
         dataType: propData.dataType,
         ref: propData.ref,
         refModelName: propData.refModelName,

@@ -206,6 +206,6 @@
     "protobufjs"
   ],
   "_bundleHint": {
-    "note": "If bundling this package, mark the following as external: nunjucks, fsevents, better-sqlite3, and other native Node.js modules"
+    "note": "If bundling this package, mark the following as external: nunjucks, fsevents, better-sqlite3, drizzle-kit, and other native Node.js modules. For Vite projects, also exclude drizzle-kit and database drivers (@electric-sql/pglite, pg, postgres, etc.) from optimizeDeps."
   }
 }

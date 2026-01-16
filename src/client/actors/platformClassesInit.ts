@@ -11,6 +11,8 @@ import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
+import path from 'path'
+import fs from 'fs'
 
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -38,8 +40,29 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     return
   }
 
-  const _platformClassesInit = async () => {
+  // Validate synchronously before starting async operations
+  // This ensures errors are handled immediately, preventing unhandled rejections
+  const { config } = options
+  const { endpoints } = config || {}
+  
+  // Track if the operation is cancelled
+  let cancelled = false
+
+  // Create a promise that will handle validation errors immediately
+  // We use Promise.resolve().then() to ensure the catch handler is attached synchronously
+  // before the async function starts executing, preventing unhandled rejections
+  const initPromise = Promise.resolve().then(async () => {
+    // Check if cancelled before starting
+    if (cancelled) {
+      return
+    }
+
     const { config, addresses } = options
+
+    // Validate required endpoints - this should happen early in the initialization process
+    if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
+      throw new Error('Config must include endpoints with filePaths and files')
+    }
 
     const BaseDb = (await import('../../db/Db/BaseDb')).BaseDb
 
@@ -80,13 +103,53 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     BaseArweaveClient.setPlatformClass(ArweaveClient!)
     BasePathResolver.setPlatformClass(PathResolver!)
 
-
+    // Check if cancelled after async imports
+    if (cancelled) {
+      return
+    }
     
     const { models, endpoints, arweaveDomain, dbConfig, filesDir } = config
 
-    // Validate required endpoints - this should happen early in the initialization process
-    if (!endpoints || !endpoints.filePaths || !endpoints.files) {
-      throw new Error('Config must include endpoints with filePaths and files')
+    // Note: Validation already happened above, but we have endpoints here for path normalization
+
+    // Normalize filesDir for Node.js environment
+    // In Node.js, filesDir should be resolved relative to .seed directory at project root
+    let normalizedFilesDir = filesDir || endpoints?.files
+    if (isNode() && normalizedFilesDir) {
+      const pathResolver = BasePathResolver.getInstance()
+      const dotSeedDir = pathResolver.getDotSeedDir()
+      
+      // Ensure .seed directory exists
+      if (!fs.existsSync(dotSeedDir)) {
+        fs.mkdirSync(dotSeedDir, { recursive: true })
+      }
+      
+      // Check if filesDir is a browser OPFS-style path (absolute path starting with '/'
+      // that is a simple single-level path like '/app-files', not a real filesystem path)
+      // Browser OPFS paths are typically simple like '/app-files', '/files', etc.
+      const pathWithoutLeadingSlash = normalizedFilesDir.slice(1)
+      const isBrowserOpfsPath = path.isAbsolute(normalizedFilesDir) && 
+                                 normalizedFilesDir.startsWith('/') &&
+                                 pathWithoutLeadingSlash.length > 0 &&
+                                 !pathWithoutLeadingSlash.includes('/') && // Single directory name, no subdirectories
+                                 !fs.existsSync(normalizedFilesDir) // Doesn't exist on filesystem
+      
+      if (isBrowserOpfsPath) {
+        // Convert browser OPFS path to .seed subdirectory
+        // e.g., '/app-files' -> '.seed/app-files'
+        const dirName = normalizedFilesDir.slice(1) || 'app-files'
+        normalizedFilesDir = path.join(dotSeedDir, dirName)
+      } else if (!path.isAbsolute(normalizedFilesDir)) {
+        // If it's a relative path, check if it already starts with .seed
+        if (normalizedFilesDir.startsWith('.seed') || normalizedFilesDir.startsWith('.seed/')) {
+          // Already relative to project root, resolve it
+          normalizedFilesDir = path.resolve(normalizedFilesDir)
+        } else {
+          // Resolve relative to .seed directory
+          normalizedFilesDir = path.join(dotSeedDir, normalizedFilesDir)
+        }
+      }
+      // If it's an absolute path that exists or is a valid filesystem path, use it as-is
     }
 
     sendBack({ type: 'updateContext', context: { 
@@ -94,7 +157,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       endpoints, 
       arweaveDomain, 
       addresses: addresses || [], 
-      filesDir: filesDir || endpoints?.files,
+      filesDir: normalizedFilesDir,
       dbConfig,
     } })
     
@@ -107,10 +170,34 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     setupAllItemsEventHandlers()
     setupServicesEventHandlers()
     setupServiceHandlers()
-
-  }
-
-  _platformClassesInit().then(() => {
-    sendBack({type: 'platformClassesReady'})
   })
+
+  // Handle the promise immediately - this ensures rejections are caught synchronously
+  // The catch handler is attached synchronously before the async function executes
+  initPromise
+    .then(() => {
+      if (!cancelled) {
+        sendBack({type: 'platformClassesReady'})
+      }
+    })
+    .catch((error) => {
+      // Only send error if not cancelled (prevents unhandled rejections after cleanup)
+      if (!cancelled) {
+        // Send error event using sendBack - this is the recommended XState pattern
+        // The parent state machine should handle the 'error' event
+        sendBack({ 
+          type: 'error', 
+          error: error instanceof Error ? error : new Error(String(error))
+        })
+      }
+      // Explicitly handle the rejection to prevent unhandled promise rejection warnings
+      // The error has been sent via sendBack, so we've handled it
+    })
+
+  // Return cleanup function to cancel pending operations
+  return () => {
+    cancelled = true
+    // The promise will still resolve/reject, but we won't send events if cancelled
+    // This prevents unhandled rejections after the callback is cleaned up
+  }
 })

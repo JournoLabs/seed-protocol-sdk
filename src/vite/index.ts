@@ -34,6 +34,13 @@ export interface SeedVitePluginOptions {
    * If not provided, the plugin will attempt to auto-detect SDK entry points.
    */
   entryPoints?: string[]
+  
+  /**
+   * Whether to automatically include common SDK dependencies in optimizeDeps.include.
+   * Set to false if these dependencies are not installed in your project.
+   * @default false
+   */
+  autoIncludeDeps?: boolean
 }
 
 const DEFAULT_FS_MODULES = [
@@ -60,6 +67,8 @@ const KNOWN_POLYFILL_TARGETS = [
 
 // Common dependencies that are frequently used by the SDK and should be pre-optimized
 // to prevent incremental discovery and multiple reloads
+// Note: Only include these if autoIncludeDeps is enabled, as they might not be
+// installed in the consuming project (they're in the SDK's node_modules)
 const COMMON_DEPENDENCIES = [
   '@zenfs/core',
   '@zenfs/dom',
@@ -79,7 +88,7 @@ const COMMON_DEPENDENCIES = [
   'eventemitter3',
   '@statelyai/inspect',
   'arweave',
-  'node:crypto',
+  // Note: node:crypto is a Node.js built-in and cannot be optimized
 ]
 
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
@@ -88,6 +97,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     autoInit = true,
     debug = false,
     entryPoints,
+    autoIncludeDeps = false,
   } = options
 
   const log = (...args: unknown[]) => {
@@ -145,6 +155,17 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
             // Also exclude the empty mock to prevent it from being cached
             'node-stdlib-browser/esm/mock/empty',
             'node-stdlib-browser/esm/mock/empty.js',
+            // Exclude drizzle-kit and database drivers that it dynamically imports
+            // These are dev tools and should not be bundled
+            'drizzle-kit',
+            '@electric-sql/pglite',
+            'pg',
+            'postgres',
+            '@vercel/postgres',
+            '@neondatabase/serverless',
+            'mysql2',
+            'mysql2/promise',
+            '@planetscale/database',
           ],
         },
       }
@@ -241,14 +262,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     config(userConfig) {
       // Pre-optimize common dependencies to prevent incremental discovery
       // This reduces the number of reloads by ensuring dependencies are optimized upfront
+      // Note: Only include if autoIncludeDeps is true, as these dependencies might not
+      // be installed in the consuming project (they're in the SDK's node_modules)
       const existingInclude = userConfig.optimizeDeps?.include || []
       const existingEntries = userConfig.optimizeDeps?.entries || []
       
-      // Merge with existing include array (Vite will also merge, but being explicit here)
-      const include = Array.isArray(existingInclude)
-        ? [...new Set([...existingInclude, ...COMMON_DEPENDENCIES])]
-        : [...COMMON_DEPENDENCIES]
-
       const optimizeDepsConfig: {
         include?: string[]
         entries?: string[]
@@ -256,12 +274,26 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           define?: Record<string, string>
         }
       } = {
-        include,
         esbuildOptions: {
           define: {
             global: 'globalThis',
           },
         },
+      }
+
+      // Only auto-include dependencies if explicitly enabled
+      // Vite will discover dependencies automatically if they're imported
+      if (autoIncludeDeps) {
+        const include = Array.isArray(existingInclude)
+          ? [...new Set([...existingInclude, ...COMMON_DEPENDENCIES])]
+          : [...COMMON_DEPENDENCIES]
+        optimizeDepsConfig.include = include
+        if (debug) {
+          log(`[main] Auto-including common dependencies: ${COMMON_DEPENDENCIES.join(', ')}`)
+        }
+      } else if (Array.isArray(existingInclude) && existingInclude.length > 0) {
+        // Preserve existing includes if provided
+        optimizeDepsConfig.include = existingInclude
       }
 
       // If entry points are provided, merge them with existing entries
