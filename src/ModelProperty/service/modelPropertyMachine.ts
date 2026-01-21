@@ -91,6 +91,12 @@ export const modelPropertyMachine = setup({
         const onlyInternalFields = Object.keys(event).every((key: string) => {
           return key === 'type' || key.startsWith('_')
         })
+        
+        // Debug logging
+        if (event.name !== undefined) {
+          console.log(`[modelPropertyMachine] updateContext with name change: "${context.name}" -> "${event.name}"`)
+          console.log(`[modelPropertyMachine] onlyInternalFields: ${onlyInternalFields}, has _originalValues: ${!!context._originalValues}`)
+        }
 
         // Update the context with new values
         for (let i = 0; i < Object.keys(event).length; i++) {
@@ -132,9 +138,13 @@ export const modelPropertyMachine = setup({
       }),
       // Only trigger validation and compareAndMarkDraft if we're updating non-internal fields
       guard: ({ event }: { event: any }) => {
-        return !Object.keys(event).every((key: string) => {
+        const shouldTransition = !Object.keys(event).every((key: string) => {
           return key === 'type' || key.startsWith('_')
         })
+        if (event.name !== undefined) {
+          console.log(`[modelPropertyMachine] updateContext guard result: ${shouldTransition} (will ${shouldTransition ? 'transition' : 'not transition'} to validating)`)
+        }
+        return shouldTransition
       },
       target: '.validating',
     },
@@ -211,13 +221,19 @@ export const modelPropertyMachine = setup({
       },
     },
     validating: {
+      entry: () => {
+        console.log('[modelPropertyMachine] Entered validating state')
+      },
       on: {
         validationSuccess: {
           target: 'compareAndMarkDraft',
-          actions: assign(({ context, event }) => ({
-            ...context,
-            _validationErrors: [],
-          })),
+          actions: assign(({ context, event }) => {
+            console.log('[modelPropertyMachine] validationSuccess, transitioning to compareAndMarkDraft')
+            return {
+              ...context,
+              _validationErrors: [],
+            }
+          }),
         },
         // validationError: Uses root handler for assignment, but needs state-specific transition
         validationError: {
@@ -231,6 +247,9 @@ export const modelPropertyMachine = setup({
       },
     },
     compareAndMarkDraft: {
+      entry: () => {
+        console.log('[modelPropertyMachine] Entered compareAndMarkDraft state')
+      },
       on: {
         compareAndMarkDraftSuccess: {
           target: 'idle',
@@ -241,7 +260,16 @@ export const modelPropertyMachine = setup({
       },
       invoke: {
         src: 'compareAndMarkDraft',
-        input: ({ context }: { context: ModelPropertyMachineContext }) => ({ context }),
+        input: ({ context }: { context: ModelPropertyMachineContext }) => {
+          console.log('[modelPropertyMachine] Invoking compareAndMarkDraft with context:', {
+            name: context.name,
+            _originalValues: context._originalValues,
+            modelName: context.modelName,
+            id: context.id,
+            _propertyFileId: context._propertyFileId
+          })
+          return { context }
+        },
       },
     },
     saveToSchema: {

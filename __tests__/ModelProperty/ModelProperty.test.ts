@@ -1092,6 +1092,13 @@ testDescribe('ModelProperty Integration Tests', () => {
       
       // Verify database was updated with new name
       if (db && modelId) {
+        // Debug: Check all properties for this model
+        const allProperties = await db
+          .select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, modelId))
+        console.log(`[TEST] All properties for modelId ${modelId}:`, allProperties.map(p => ({ id: p.id, name: p.name, schemaFileId: p.schemaFileId })))
+        
         const dbProperties = await db
           .select()
           .from(propertiesTable)
@@ -1103,6 +1110,7 @@ testDescribe('ModelProperty Integration Tests', () => {
           )
           .limit(1)
         
+        console.log(`[TEST] Properties with new name "${newName}":`, dbProperties)
         expect(dbProperties.length).toBeGreaterThan(0)
         expect(dbProperties[0].name).toBe(newName)
         

@@ -617,9 +617,13 @@ export const addModelsToDb = async (
 
   // Search for all models by schemaFileId (preferred) or name and create them if they don't exist
   const modelRecords = new Map<string, NewModelRecord>()
+  const modelProcessingErrors: Array<{ modelName: string; error: string }> = []
+  
+  console.log(`[addModelsToDb] Starting to process ${Object.keys(models).length} models: ${Object.keys(models).join(', ')}`)
   
   for (const [modelName, modelClass] of Object.entries(models)) {
-    const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
+    try {
+      const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
     
     // First try to find by schemaFileId if available
     let modelRecord: NewModelRecord | undefined
@@ -716,13 +720,14 @@ export const addModelsToDb = async (
       }
     }
     
-    modelRecords.set(modelName, modelRecord)
+      modelRecords.set(modelName, modelRecord)
+      console.log(`[addModelsToDb] Successfully processed model "${modelName}" (id: ${modelRecord.id}, schemaFileId: ${modelRecord.schemaFileId || 'none'})`)
 
-    // Get all existing properties for this model upfront to handle renamed properties
-    const allDbProperties = await db
-      .select()
-      .from(properties)
-      .where(eq(properties.modelId, modelRecord.id!))
+      // Get all existing properties for this model upfront to handle renamed properties
+      const allDbProperties = await db
+        .select()
+        .from(properties)
+        .where(eq(properties.modelId, modelRecord.id!))
     
     // Track which DB properties have been matched to schema properties
     const matchedDbPropertyIds = new Set<number>()
@@ -906,11 +911,28 @@ export const addModelsToDb = async (
         console.log(`[addModelsToDb] Inserted property ${modelName}:${propertyName}, result:`, result)
       }
     }
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error)
+      console.error(`[addModelsToDb] Error processing model "${modelName}":`, errorMessage)
+      logger(`Error processing model "${modelName}": ${errorMessage}`)
+      modelProcessingErrors.push({ modelName, error: errorMessage })
+      // Continue processing other models even if one fails
+    }
   }
+  
+  if (modelProcessingErrors.length > 0) {
+    console.warn(`[addModelsToDb] Errors occurred while processing ${modelProcessingErrors.length} model(s):`, modelProcessingErrors.map(e => `${e.modelName}: ${e.error}`).join('; '))
+    logger(`Errors processing models: ${modelProcessingErrors.map(e => e.modelName).join(', ')}`)
+  }
+  
+  console.log(`[addModelsToDb] Finished processing models. Successfully processed: ${modelRecords.size}/${Object.keys(models).length}`)
 
   // If schema was provided, create modelSchema join records to connect models to the schema
   if (schemaRecord && schemaRecord.id) {
     // Check for existing records first since there's no unique constraint
+    const createdJoinEntries: string[] = []
+    const existingJoinEntries: string[] = []
+    
     for (const [modelName, modelRecord] of modelRecords.entries()) {
       if (!modelRecord.id) {
         logger(`Skipping join table entry for ${modelName}: model record has no id`)
@@ -928,11 +950,8 @@ export const addModelsToDb = async (
         )
         .limit(1)
 
-      console.log('existingJoinRecords', existingJoinRecords)
-
       if (existingJoinRecords.length === 0) {
-
-        console.log('creating join table entry for model', modelName, 'with id', modelRecord.id, 'and schema', schemaRecord.id)
+        console.log(`[addModelsToDb] Creating join table entry for model "${modelName}" (id: ${modelRecord.id}) to schema (id: ${schemaRecord.id})`)
         // Only provide modelId and schemaId - id is auto-increment and should not be included
         // Don't use type cast - let Drizzle infer the correct type without id
         await db.insert(modelSchemas).values({
@@ -940,10 +959,27 @@ export const addModelsToDb = async (
           schemaId: schemaRecord.id,
         })
         logger(`Created join table entry for model ${modelName} (id: ${modelRecord.id}) to schema (id: ${schemaRecord.id})`)
+        createdJoinEntries.push(modelName)
       } else {
         logger(`Join table entry already exists for model ${modelName} to schema (id: ${schemaRecord.id})`)
+        existingJoinEntries.push(modelName)
       }
     }
+    
+    console.log(`[addModelsToDb] Join table entries - Created: ${createdJoinEntries.join(', ') || 'none'}, Already existed: ${existingJoinEntries.join(', ') || 'none'}, Total models processed: ${modelRecords.size}`)
+    
+    // Verify all models are linked (important for debugging)
+    const allLinkedModels = await db
+      .select({
+        modelId: modelSchemas.modelId,
+        modelName: modelsTable.name,
+      })
+      .from(modelSchemas)
+      .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+      .where(eq(modelSchemas.schemaId, schemaRecord.id))
+    
+    const linkedModelNames = allLinkedModels.map(m => m.modelName).filter(Boolean)
+    console.log(`[addModelsToDb] After processing, schema (id: ${schemaRecord.id}) has ${allLinkedModels.length} models linked: ${linkedModelNames.join(', ')}`)
   } else if (schemaRecord && !schemaRecord.id) {
     logger(`Warning: schemaRecord provided but has no id, cannot create join table entries`)
   }

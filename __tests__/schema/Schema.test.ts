@@ -262,6 +262,10 @@ testDescribe('Schema Integration Tests', () => {
       const testSchema = createTestSchema(schemaName)
       const schemaFileId = testSchema.id
 
+      if (!schemaFileId) {
+        throw new Error('Schema file ID is required for this test')
+      }
+
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const schema = await Schema.createById(schemaFileId)
@@ -274,7 +278,7 @@ testDescribe('Schema Integration Tests', () => {
       expect(schema.schemaFileId).toBe(schemaFileId)
       
       const context = schema.getService().getSnapshot().context
-      expect(context._schemaFileId).toBe(schemaFileId)
+      expect(context.id).toBe(schemaFileId) // id is the schemaFileId in the context
     })
 
     it('should throw error if schemaFileId is empty', async () => {
@@ -1145,13 +1149,52 @@ testDescribe('Schema Integration Tests', () => {
       
       const schema = Schema.create(schemaName)
       
-      // Status should be 'loading' initially
-      expect(['loading', 'idle']).toContain(schema.status)
+      // Status should be 'loading' or a nested loading state initially
+      // Possible nested states: checkingExisting, writingSchema, verifyingSchema,
+      // writingModels, verifyingModels, creatingModelInstances, verifyingModelInstances,
+      // writingProperties, verifyingProperties, creatingPropertyInstances, verifyingPropertyInstances
+      const initialStatus = schema.status
+      const isInitialLoadingState = 
+        (typeof initialStatus === 'object' && initialStatus !== null && 'loading' in initialStatus) ||
+        initialStatus === 'idle' // Could already be idle if loading was very fast
+      expect(isInitialLoadingState).toBe(true)
       
       await waitForSchemaIdle(schema)
       
-      // Status should be 'idle' after loading
+      // Status should be 'idle' after loading completes
       expect(schema.status).toBe('idle')
+      
+      // Test that status can transition to 'validating' state
+      // Trigger validation to test 'validating' state
+      const validatePromise = schema.validate()
+      
+      // Status might be 'validating' or 'idle' (if validation completes quickly)
+      const statusAfterValidate = schema.status
+      const isValidatingOrIdle = statusAfterValidate === 'validating' || statusAfterValidate === 'idle'
+      expect(isValidatingOrIdle).toBe(true)
+      
+      // Wait for validation to complete
+      await validatePromise
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // After validation, should be back to 'idle'
+      expect(schema.status).toBe('idle')
+      
+      // Verify status reflects the actual machine state
+      const snapshot = schema.getService().getSnapshot()
+      expect(schema.status).toBe(snapshot.value)
+      
+      // Status can be one of: 'idle', 'loading', 'addingModels', 'validating', 'error'
+      // or nested states like { loading: 'checkingExisting' }, etc.
+      const finalStatus = schema.status
+      const validTopLevelStates = ['idle', 'loading', 'addingModels', 'validating', 'error']
+      const isTopLevelState = typeof finalStatus === 'string' && validTopLevelStates.includes(finalStatus)
+      const isNestedState = typeof finalStatus === 'object' && finalStatus !== null && 
+        (('loading' in finalStatus) || ('addingModels' in finalStatus) || ('validating' in finalStatus))
+      
+      // At this point, should be 'idle' (top-level state)
+      expect(finalStatus).toBe('idle')
+      expect(isTopLevelState).toBe(true)
     })
   })
 

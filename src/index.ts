@@ -73,6 +73,8 @@ export { SeedModels } from './helpers/constants'
 
 export { getFeedItemsBySchemaName } from './feed'
 
+export { getArweaveUrlForTransaction } from './helpers'
+
 export { 
   createSchema, 
   readSchema, 

@@ -15,6 +15,54 @@ import { ClientManagerEvents } from '@/client/constants'
 const logger = debug('seedSdk:imports:json')
 
 /**
+ * Verify that properties are persisted to the database for a given model
+ * This is important in browser environments where database writes may not be immediately visible
+ * @param db - Database instance
+ * @param modelId - Database ID of the model
+ * @param modelName - Name of the model (for logging)
+ * @param maxRetries - Maximum number of retry attempts
+ * @param retryDelay - Delay between retries in milliseconds
+ * @returns Promise that resolves when properties are found, or rejects if not found after max retries
+ */
+const verifyPropertiesPersisted = async (
+  db: any,
+  modelId: number,
+  modelName: string,
+  maxRetries: number = 10,
+  retryDelay: number = 100
+): Promise<void> => {
+  const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+  const { eq } = await import('drizzle-orm')
+
+  console.log(`[verifyPropertiesPersisted] Starting verification for model "${modelName}" (modelId: ${modelId})`)
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const props = await db
+      .select()
+      .from(propertiesTable)
+      .where(eq(propertiesTable.modelId, modelId))
+      .limit(1)
+    
+    console.log(`[verifyPropertiesPersisted] Attempt ${attempt + 1}/${maxRetries}: found ${props.length} properties for model "${modelName}" (modelId: ${modelId})`)
+    
+    if (props.length > 0) {
+      console.log(`[verifyPropertiesPersisted] ✓ Verified properties exist for model "${modelName}" (modelId: ${modelId}) after ${attempt + 1} attempt(s)`)
+      logger(`Verified properties exist for model "${modelName}" (modelId: ${modelId}) after ${attempt + 1} attempt(s)`)
+      return
+    }
+
+    if (attempt < maxRetries - 1) {
+      console.log(`[verifyPropertiesPersisted] Properties not yet visible for model "${modelName}" (modelId: ${modelId}), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${maxRetries})`)
+      logger(`Properties not yet visible for model "${modelName}" (modelId: ${modelId}), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${maxRetries})`)
+      await new Promise(resolve => setTimeout(resolve, retryDelay))
+    }
+  }
+
+  console.log(`[verifyPropertiesPersisted] ✗ Properties not found for model "${modelName}" (modelId: ${modelId}) after ${maxRetries} attempts`)
+  throw new Error(`Properties not found for model "${modelName}" (modelId: ${modelId}) after ${maxRetries} attempts. This may indicate a database write issue in the browser environment.`)
+}
+
+/**
  * Compare two schema files structurally, ignoring metadata timestamps
  * This is used to determine if an existing schema file matches the schema being imported
  * @param schema1 - First schema to compare
@@ -496,22 +544,222 @@ export async function importJsonSchema(
 
         // Add models to database and link them to the schema with schemaFileIds (only if there are models)
         if (Object.keys(modelDefinitions).length > 0) {
+          console.log(`[importJsonSchema] Adding ${Object.keys(modelDefinitions).length} models to database for internal schema "${schemaName}": ${Object.keys(modelDefinitions).join(', ')}`)
           await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
             schemaFileId: schemaFile.id,
             modelFileIds,
             propertyFileIds,
           })
           
+          // CRITICAL: Verify all expected models are linked via join table
+          // Retry querying until all models are visible (browser environments may have delays)
+          const expectedModelNames = Object.keys(schemaFile.models || {})
+          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          let allModelsLinked = false
+          for (let attempt = 0; attempt < 10; attempt++) {
+            const modelLinks = await db
+              .select({
+                modelId: modelSchemas.modelId,
+                modelName: modelsTable.name,
+              })
+              .from(modelSchemas)
+              .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+              .where(eq(modelSchemas.schemaId, schemaRecord.id))
+            
+            const linkedModelNames = modelLinks
+              .map((link: { modelId: number | null; modelName: string | null }) => link.modelName)
+              .filter((n: string | null): n is string => n !== null)
+            
+            const missingModels = expectedModelNames.filter(name => !linkedModelNames.includes(name))
+            
+            if (missingModels.length === 0) {
+              console.log(`[importJsonSchema] All ${expectedModelNames.length} expected models are linked: ${linkedModelNames.join(', ')}`)
+              allModelsLinked = true
+              break
+            } else {
+              console.log(`[importJsonSchema] Attempt ${attempt + 1}/10: Missing models: ${missingModels.join(', ')}, Linked: ${linkedModelNames.join(', ')}`)
+              if (attempt < 9) {
+                await new Promise(resolve => setTimeout(resolve, 200))
+              }
+            }
+          }
+          
+          if (!allModelsLinked) {
+            const finalLinks = await db
+              .select({ modelName: modelsTable.name })
+              .from(modelSchemas)
+              .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+              .where(eq(modelSchemas.schemaId, schemaRecord.id))
+            const finalLinkedNames = finalLinks.map((l: any) => l.modelName).filter(Boolean)
+            const stillMissing = expectedModelNames.filter(name => !finalLinkedNames.includes(name))
+            
+            console.warn(`[importJsonSchema] WARNING: Not all expected models are linked after retries. Expected: ${expectedModelNames.join(', ')}, Linked: ${finalLinkedNames.join(', ')}, Still missing: ${stillMissing.join(', ') || 'none'}`)
+            
+            // Try to link missing models directly by finding them in the database
+            if (stillMissing.length > 0) {
+              console.log(`[importJsonSchema] Attempting to link missing models directly: ${stillMissing.join(', ')}`)
+              for (const missingModelName of stillMissing) {
+                try {
+                  const modelFileId = modelFileIds.get(missingModelName)
+                  if (modelFileId) {
+                    // Find model by schemaFileId
+                    const missingModel = await db
+                      .select()
+                      .from(modelsTable)
+                      .where(eq(modelsTable.schemaFileId, modelFileId))
+                      .limit(1)
+                    
+                    if (missingModel.length > 0 && missingModel[0].id) {
+                      // Check if join entry already exists
+                      const existingJoin = await db
+                        .select()
+                        .from(modelSchemas)
+                        .where(
+                          and(
+                            eq(modelSchemas.modelId, missingModel[0].id),
+                            eq(modelSchemas.schemaId, schemaRecord.id)
+                          )
+                        )
+                        .limit(1)
+                      
+                      if (existingJoin.length === 0) {
+                        console.log(`[importJsonSchema] Creating missing join table entry for "${missingModelName}" (modelId: ${missingModel[0].id})`)
+                        await db.insert(modelSchemas).values({
+                          modelId: missingModel[0].id,
+                          schemaId: schemaRecord.id,
+                        })
+                        console.log(`[importJsonSchema] Successfully linked missing model "${missingModelName}"`)
+                      } else {
+                        console.log(`[importJsonSchema] Join entry already exists for "${missingModelName}" (modelId: ${missingModel[0].id})`)
+                      }
+                    } else {
+                      console.warn(`[importJsonSchema] Could not find model "${missingModelName}" with schemaFileId "${modelFileId}" in database`)
+                    }
+                  } else {
+                    // Fallback: find by name
+                    const missingModel = await db
+                      .select()
+                      .from(modelsTable)
+                      .where(eq(modelsTable.name, missingModelName))
+                      .limit(1)
+                    
+                    if (missingModel.length > 0 && missingModel[0].id) {
+                      const existingJoin = await db
+                        .select()
+                        .from(modelSchemas)
+                        .where(
+                          and(
+                            eq(modelSchemas.modelId, missingModel[0].id),
+                            eq(modelSchemas.schemaId, schemaRecord.id)
+                          )
+                        )
+                        .limit(1)
+                      
+                      if (existingJoin.length === 0) {
+                        console.log(`[importJsonSchema] Creating missing join table entry for "${missingModelName}" (modelId: ${missingModel[0].id}) by name`)
+                        await db.insert(modelSchemas).values({
+                          modelId: missingModel[0].id,
+                          schemaId: schemaRecord.id,
+                        })
+                        console.log(`[importJsonSchema] Successfully linked missing model "${missingModelName}" by name`)
+                      }
+                    } else {
+                      console.warn(`[importJsonSchema] Could not find model "${missingModelName}" by name in database`)
+                    }
+                  }
+                } catch (error: any) {
+                  console.error(`[importJsonSchema] Error linking missing model "${missingModelName}":`, error?.message || String(error))
+                }
+              }
+            }
+          }
+          
+          // Verify properties are persisted (important for browser environments)
+          // Wait a bit for database writes to be visible (browser environments may have delays)
+          await new Promise(resolve => setTimeout(resolve, 200))
+          
+          console.log(`[importJsonSchema] Starting property verification for schema "${schemaName}" (schemaRecord.id: ${schemaRecord.id})`)
+          // Note: modelSchemas, modelsTable, and eq are already imported above (lines 557-559), reusing them here
+          
+          // Try to find models directly by schemaFileId first (more reliable than join table)
+          const seedModelId = modelFileIds.get('Seed')
+          if (seedModelId) {
+            // Retry querying for the model until it's visible
+            let seedModel: any[] = []
+            for (let attempt = 0; attempt < 10; attempt++) {
+              seedModel = await db
+                .select()
+                .from(modelsTable)
+                .where(eq(modelsTable.schemaFileId, seedModelId))
+                .limit(1)
+              
+              if (seedModel.length > 0 && seedModel[0].id) {
+                break
+              }
+              
+              if (attempt < 9) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+              }
+            }
+            
+            if (seedModel.length > 0 && seedModel[0].id) {
+              console.log(`[importJsonSchema] Found Seed model (modelId: ${seedModel[0].id}), verifying properties`)
+              await verifyPropertiesPersisted(db, seedModel[0].id, 'Seed', 10, 100)
+            } else {
+              console.log(`[importJsonSchema] WARNING: Could not find Seed model after retries`)
+            }
+          }
+          
+          // Also verify via join table if schemaRecord.id is available (for completeness)
+          if (schemaRecord.id) {
+            // Retry querying join table until entries are visible
+            let modelLinks: any[] = []
+            for (let attempt = 0; attempt < 10; attempt++) {
+              modelLinks = await db
+                .select({
+                  modelId: modelSchemas.modelId,
+                  modelName: modelsTable.name,
+                })
+                .from(modelSchemas)
+                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+                .where(eq(modelSchemas.schemaId, schemaRecord.id))
+              
+              if (modelLinks.length > 0) {
+                break
+              }
+              
+              if (attempt < 9) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+              }
+            }
+            
+            logger(`Verifying properties: found ${modelLinks.length} model links for schema ${schemaName} (id: ${schemaRecord.id})`)
+            
+            // If we didn't verify via direct lookup, verify via join table
+            if (!seedModelId || (seedModel.length === 0 || !seedModel[0].id)) {
+              const seedModelLink = modelLinks.find((link: { modelId: number | null; modelName: string | null }) => link.modelName === 'Seed')
+              if (seedModelLink && seedModelLink.modelId) {
+                logger(`Verifying properties for Seed model via join table (modelId: ${seedModelLink.modelId})`)
+                await verifyPropertiesPersisted(db, seedModelLink.modelId, 'Seed', 10, 100)
+              } else if (modelLinks.length > 0 && modelLinks[0].modelId) {
+                // Fallback to first model if Seed not found
+                logger(`Verifying properties for ${modelLinks[0].modelName} model via join table (modelId: ${modelLinks[0].modelId})`)
+                await verifyPropertiesPersisted(db, modelLinks[0].modelId, modelLinks[0].modelName || 'unknown', 10, 100)
+              }
+            }
+          }
+          
           // After properties are created, ensure schemaFile has the correct IDs from database
           // Query the database to get the actual schemaFileId values that were used
           // This ensures schemaData matches what's actually in the database
           const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-          const { eq } = await import('drizzle-orm')
           
           let schemaFileUpdated = false
           for (const [modelName, modelFileId] of modelFileIds.entries()) {
             // Get model record to find modelId
-            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
             const modelRecords = await db
               .select()
               .from(modelsTable)
@@ -824,16 +1072,92 @@ export const loadSchemaFromFile = async (
             propertyFileIds,
           })
           
+          // Verify properties are persisted (important for browser environments)
+          // Wait a bit for database writes to be visible (browser environments may have delays)
+          await new Promise(resolve => setTimeout(resolve, 200))
+          
+          console.log(`[importJsonSchema] Starting property verification for schema "${schemaName}" (schemaRecord.id: ${schemaRecord.id})`)
+          // Query the database to get model IDs that were just created
+          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+          const { eq } = await import('drizzle-orm')
+          
+          // Try to find models directly by schemaFileId first (more reliable than join table)
+          const seedModelId = modelFileIds.get('Seed')
+          if (seedModelId) {
+            // Retry querying for the model until it's visible
+            let seedModel: any[] = []
+            for (let attempt = 0; attempt < 10; attempt++) {
+              seedModel = await db
+                .select()
+                .from(modelsTable)
+                .where(eq(modelsTable.schemaFileId, seedModelId))
+                .limit(1)
+              
+              if (seedModel.length > 0 && seedModel[0].id) {
+                break
+              }
+              
+              if (attempt < 9) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+              }
+            }
+            
+            if (seedModel.length > 0 && seedModel[0].id) {
+              console.log(`[importJsonSchema] Found Seed model (modelId: ${seedModel[0].id}), verifying properties`)
+              await verifyPropertiesPersisted(db, seedModel[0].id, 'Seed', 10, 100)
+            } else {
+              console.log(`[importJsonSchema] WARNING: Could not find Seed model after retries`)
+            }
+          }
+          
+          // Also verify via join table if schemaRecord.id is available (for completeness)
+          if (schemaRecord.id) {
+            // Retry querying join table until entries are visible
+            let modelLinks: any[] = []
+            for (let attempt = 0; attempt < 10; attempt++) {
+              modelLinks = await db
+                .select({
+                  modelId: modelSchemas.modelId,
+                  modelName: modelsTable.name,
+                })
+                .from(modelSchemas)
+                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+                .where(eq(modelSchemas.schemaId, schemaRecord.id))
+              
+              if (modelLinks.length > 0) {
+                break
+              }
+              
+              if (attempt < 9) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+              }
+            }
+            
+            logger(`Verifying properties: found ${modelLinks.length} model links for schema ${schemaName} (id: ${schemaRecord.id})`)
+            
+            // If we didn't verify via direct lookup, verify via join table
+            if (!seedModelId || (seedModel.length === 0 || !seedModel[0].id)) {
+              const seedModelLink = modelLinks.find((link: { modelId: number | null; modelName: string | null }) => link.modelName === 'Seed')
+              if (seedModelLink && seedModelLink.modelId) {
+                logger(`Verifying properties for Seed model via join table (modelId: ${seedModelLink.modelId})`)
+                await verifyPropertiesPersisted(db, seedModelLink.modelId, 'Seed', 10, 100)
+              } else if (modelLinks.length > 0 && modelLinks[0].modelId) {
+                // Fallback to first model if Seed not found
+                logger(`Verifying properties for ${modelLinks[0].modelName} model via join table (modelId: ${modelLinks[0].modelId})`)
+                await verifyPropertiesPersisted(db, modelLinks[0].modelId, modelLinks[0].modelName || 'unknown', 10, 100)
+              }
+            }
+          }
+          
           // After properties are created, ensure schemaFile has the correct IDs from database
           // Query the database to get the actual schemaFileId values that were used
           // This ensures schemaData matches what's actually in the database
           const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-          const { eq } = await import('drizzle-orm')
           
           let schemaFileUpdated = false
           for (const [modelName, modelFileId] of modelFileIds.entries()) {
             // Get model record to find modelId
-            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
             const modelRecords = await db
               .select()
               .from(modelsTable)
@@ -962,10 +1286,16 @@ export const createModelFromJson = async (
   }
 
   // Create Model instance with the definition
-  // Pass modelFileId if provided to ensure Model instance uses correct ID
+  // Pass id (schemaFileId) if provided to ensure Model instance uses correct ID
   // Note: indexes and description are ignored - they remain in JSON for schema file format compliance but are not used by Model instances
+  if (modelFileId) {
+    logger(`Creating schema model "${modelName}" with modelFileId: ${modelFileId}`)
+  } else {
+    logger(`Warning: Creating schema model "${modelName}" without modelFileId - it will be renamed if duplicates exist`)
+  }
   const modelInstance = Model.create(modelName, schemaName, {
-    modelFileId, // Pass modelFileId from JSON file
+    modelFileId: modelFileId, // Pass modelFileId (preferred) as id (schemaFileId) from JSON file
+    id: modelFileId, // Also pass as id for backward compatibility
     properties: convertedProperties,
   })
 
@@ -990,9 +1320,17 @@ export const createModelsFromJson = async (
   for (const [modelName, modelDef] of Object.entries(importData.models)) {
     // Get modelFileId from map if available
     const modelFileId = modelFileIds?.get(modelName)
+    // Fallback: use id from modelDef if not in map
+    const finalModelFileId = modelFileId || modelDef.id
+    if (!modelFileId && modelDef.id) {
+      logger(`ModelFileId not found in map for "${modelName}", using id from modelDef: ${modelDef.id}`)
+    }
+    if (!finalModelFileId) {
+      logger(`Warning: No modelFileId found for model "${modelName}" - model will be created without ID`)
+    }
     // Get propertyFileIds for this model if available
     const modelPropertyFileIds = propertyFileIds?.get(modelName)
-    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName, modelFileId, modelPropertyFileIds)
+    const ModelClass = await createModelFromJson(modelName, modelDef, schemaName, finalModelFileId, modelPropertyFileIds)
     
     modelDefinitions[modelName] = ModelClass as unknown as ModelClassType
   }

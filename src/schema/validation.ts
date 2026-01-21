@@ -1,5 +1,5 @@
 import { Type, TSchema } from '@sinclair/typebox'
-import { ModelPropertyDataTypes } from './property'
+import { ModelPropertyDataTypes } from '@/helpers/property'
 
 /**
  * Validation rules that can be applied to properties

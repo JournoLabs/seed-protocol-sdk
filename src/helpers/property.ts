@@ -211,9 +211,10 @@ export const getPropertySchema = async (
           
           // Build property schema from database, merging with file schema for fields not in DB
           // Use the schema property name (resolvedPropertyName) even if DB has different name (renamed)
-          const propertySchema: Static<typeof TProperty> & { _propertyFileId?: string } = {
+          const propertySchema: Static<typeof TProperty> & { _propertyFileId?: string; _dbId?: number } = {
             ...schemaFromFile, // Start with file schema (has all fields like storageType, etc.)
-            id: propertyRecord.id,
+            id: propertyRecord.schemaFileId || propertyRecord.id?.toString(), // id should be schemaFileId (string), not database ID
+            _dbId: propertyRecord.id, // Store database integer ID separately
             name: resolvedPropertyName, // Use schema name, not DB name (for renamed properties)
             dataType: propertyRecord.dataType as any,
             modelId: propertyRecord.modelId,

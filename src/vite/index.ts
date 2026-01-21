@@ -1,6 +1,7 @@
 import type { Plugin, ResolvedConfig } from 'vite'
 
 // Get the plugin file's URL to use as importer context for resolving SDK dependencies
+// @ts-expect-error - import.meta.url is valid in ESM but TypeScript config may not recognize it
 const PLUGIN_FILE_URL = import.meta.url
 
 export interface SeedVitePluginOptions {
@@ -265,7 +266,13 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // Note: Only include if autoIncludeDeps is true, as these dependencies might not
       // be installed in the consuming project (they're in the SDK's node_modules)
       const existingInclude = userConfig.optimizeDeps?.include || []
-      const existingEntries = userConfig.optimizeDeps?.entries || []
+      // Normalize entries to always be an array (Vite allows string | string[])
+      const existingEntriesRaw = userConfig.optimizeDeps?.entries
+      const existingEntries = Array.isArray(existingEntriesRaw)
+        ? existingEntriesRaw
+        : existingEntriesRaw
+        ? [existingEntriesRaw]
+        : []
       
       const optimizeDepsConfig: {
         include?: string[]

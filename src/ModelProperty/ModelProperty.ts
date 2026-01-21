@@ -441,9 +441,24 @@ export class ModelProperty {
       propertyWithId.dataType = (propertyWithId as any).type
     }
     
-    // Generate id (schemaFileId) if not provided (for new properties)
-    // This ensures new properties can trigger write process
-    if (!propertyWithId.id) {
+    // Ensure id (schemaFileId) is set correctly
+    // Priority: _propertyFileId > id (if string) > generate new
+    // If id is a number (old format), use _propertyFileId instead
+    if (typeof propertyWithId.id === 'number') {
+      // id is a database integer ID, not schemaFileId - use _propertyFileId if available
+      if ((propertyWithId as any)._propertyFileId) {
+        propertyWithId.id = (propertyWithId as any)._propertyFileId
+      } else {
+        // Fallback: generate new schemaFileId (shouldn't happen, but safety)
+        propertyWithId.id = generateId()
+        logger(`ModelProperty.create: id was a number, generated new schemaFileId "${propertyWithId.id}" for property "${property.name}"`)
+      }
+    } else if (!propertyWithId.id && (propertyWithId as any)._propertyFileId) {
+      // id is not set but _propertyFileId is available - use it
+      propertyWithId.id = (propertyWithId as any)._propertyFileId
+    } else if (!propertyWithId.id) {
+      // Generate id (schemaFileId) if not provided (for new properties)
+      // This ensures new properties can trigger write process
       propertyWithId.id = generateId()
       logger(`ModelProperty.create: Generated new id (schemaFileId) "${propertyWithId.id}" for property "${property.name}"`)
     }
@@ -524,10 +539,23 @@ export class ModelProperty {
         return context
       },
       sendUpdate: (instance, prop: string, value: any) => {
+        if (prop === 'name') {
+          const currentContext = instance._getSnapshotContext()
+          console.log(`[ModelProperty.sendUpdate] Name change: "${currentContext.name}" -> "${value}"`)
+          console.log(`[ModelProperty.sendUpdate] Current state: ${instance._service.getSnapshot().value}`)
+          console.log(`[ModelProperty.sendUpdate] Has _originalValues: ${!!currentContext._originalValues}`)
+        }
         instance._service.send({
           type: 'updateContext',
           [prop]: value,
         })
+        if (prop === 'name') {
+          // Check state after sending
+          setTimeout(() => {
+            const newState = instance._service.getSnapshot().value
+            console.log(`[ModelProperty.sendUpdate] State after name change: ${newState}`)
+          }, 10)
+        }
       },
     })
     

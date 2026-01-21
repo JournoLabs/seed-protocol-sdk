@@ -38,6 +38,18 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
+// Lazy import cache for Schema to avoid circular dependency
+let SchemaClass: any = null
+const schemaImportPromise = import('@/Schema/Schema')
+  .then(module => {
+    SchemaClass = module.Schema
+    return SchemaClass
+  })
+  .catch(() => {
+    // If import fails, SchemaClass remains null
+    return null
+  })
+
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
 const modelInstanceState = new WeakMap<Model, {
@@ -162,9 +174,15 @@ export class Model {
    * 
    * @param modelName - The desired model name
    * @param schemaName - The schema name
+   * @param skipAllChecks - If true, skip all duplicate checks and return original name (used when creating schema models to preserve original names)
    * @returns A unique model name
    */
-  static findUniqueModelName(modelName: string, schemaName: string): string {
+  static findUniqueModelName(modelName: string, schemaName: string, skipAllChecks: boolean = false): string {
+    // If skipAllChecks is true (schema models), preserve original name
+    if (skipAllChecks) {
+      return modelName
+    }
+    
     const lowerModelName = modelName.toLowerCase()
     
     // Check all cached models for this schema
@@ -213,13 +231,45 @@ export class Model {
       }
     }
     
-    // If no duplicates found, return original name
-    if (!existingNames.has(lowerModelName)) {
+    // Also check schema context models (case-insensitive)
+    // This ensures runtime-created models are renamed if they conflict with schema-defined models
+    try {
+      // Use lazy-loaded Schema class to avoid circular dependency
+      if (SchemaClass) {
+        const schema = SchemaClass.create(schemaName)
+        const schemaContext = schema.getService().getSnapshot().context
+        
+        if (schemaContext.models) {
+          for (const schemaModelName of Object.keys(schemaContext.models)) {
+            const lowerSchemaModelName = schemaModelName.toLowerCase()
+            
+            // If it matches the base name (case-insensitive), check if it has a number suffix
+            if (lowerSchemaModelName === lowerModelName) {
+              existingNumbers.add(0) // Base name exists in schema
+            } else if (lowerSchemaModelName.startsWith(lowerModelName + ' ')) {
+              // Check if it's the base name followed by a space and a number
+              const suffix = lowerSchemaModelName.slice(lowerModelName.length + 1)
+              const number = parseInt(suffix, 10)
+              if (!isNaN(number) && suffix === number.toString()) {
+                existingNumbers.add(number)
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // If schema check fails, continue with cache-only check
+      // This is a best-effort check and shouldn't block model creation
+    }
+    
+    // If no duplicates found (no base name match and no numbered variants), return original name
+    if (existingNumbers.size === 0) {
       return modelName
     }
     
     // Find the next available number
-    let nextNumber = 1
+    // Start from 1 if base name exists, otherwise check if we can use 1
+    let nextNumber = existingNumbers.has(0) ? 1 : 1
     while (existingNumbers.has(nextNumber)) {
       nextNumber++
     }
@@ -252,7 +302,8 @@ export class Model {
     modelName: string,
     schemaNameOrSchema: string | any, // Schema type - using any to avoid circular dependency
     options?: {
-      id?: string // schemaFileId (string) - public ID
+      id?: string // schemaFileId (string) - public ID (deprecated, use modelFileId)
+      modelFileId?: string // Pre-existing model file ID (preferred)
       properties?: { [propertyName: string]: any }
       registerWithSchema?: boolean
     }
@@ -275,18 +326,9 @@ export class Model {
       throw new Error('Schema name is required')
     }
 
-    // Check for duplicate names (case-insensitive) and generate unique name if needed
-    // This only checks the cache - database check happens in loadOrCreateModel
-    const uniqueModelName = this.findUniqueModelName(modelName, schemaName)
-    if (uniqueModelName !== modelName) {
-      logger(`Model.create: Found duplicate name "${modelName}" in schema "${schemaName}", using unique name "${uniqueModelName}"`)
-    }
-
-    const id = options?.id // schemaFileId (string) - public ID
+    // Support both modelFileId (documented) and id (backward compatibility)
+    const id = options?.modelFileId || options?.id // schemaFileId (string) - public ID
     const registerWithSchema = options?.registerWithSchema !== false && schemaInstance !== undefined
-
-    // Create name-based cache key using the unique name
-    const nameKey = `${schemaName}:${uniqueModelName}`
 
     // Step 1: Check ID-based cache first (if ID provided)
     if (id && this.instanceCacheById.has(id)) {
@@ -299,10 +341,20 @@ export class Model {
       return instance
     }
 
-    // Step 2: Check name-based index to get ID (if ID not provided)
+    // Step 2: Check for duplicate names and generate unique name if needed (before checking cache)
+    // This allows us to create new models with renamed versions when duplicates exist
+    // Skip all duplicate checks if modelFileId is provided (schema models should preserve original names)
+    const skipAllChecks = !!id // If id (modelFileId) is provided, this is a schema model - skip schema check to preserve name
+    const uniqueModelName = this.findUniqueModelName(modelName, schemaName, skipAllChecks)
+    
+    // Step 3: Check name-based index with ORIGINAL name first (before using unique name)
+    // Only return existing instance if the unique name matches the original (no rename needed)
+    // If a rename is needed, we'll create a new model with the unique name
     let resolvedId = id
-    if (!resolvedId) {
-      resolvedId = this.instanceCacheByName.get(nameKey)
+    if (!resolvedId && uniqueModelName === modelName) {
+      // No rename needed - check if instance exists with original name
+      const originalNameKey = `${schemaName}:${modelName}`
+      resolvedId = this.instanceCacheByName.get(originalNameKey)
       if (resolvedId && this.instanceCacheById.has(resolvedId)) {
         const { instance, refCount } = this.instanceCacheById.get(resolvedId)!
         this.instanceCacheById.set(resolvedId, {
@@ -314,7 +366,69 @@ export class Model {
       }
     }
 
-    // Step 3: Check legacy cache (backward compatibility during migration)
+    // Step 4: Check legacy cache with original name (only if no rename needed)
+    if (uniqueModelName === modelName) {
+      const originalNameKey = `${schemaName}:${modelName}`
+      if (this.instanceCache.has(originalNameKey)) {
+        const { instance, refCount } = this.instanceCache.get(originalNameKey)!
+        this.instanceCache.set(originalNameKey, {
+          instance,
+          refCount: refCount + 1,
+        })
+        logger(`Model.create: Found instance in legacy cache for "${modelName}"`)
+        
+        // Migrate to new cache structure
+        const context = instance._getSnapshotContext()
+        const existingId = context.id // id is now the schemaFileId (string)
+        if (existingId) {
+          this.instanceCacheById.set(existingId, { instance, refCount: refCount + 1 })
+          this.instanceCacheByName.set(originalNameKey, existingId)
+        }
+        
+        return instance
+      }
+    }
+    
+    // Step 5: Log if rename is needed
+    if (uniqueModelName !== modelName) {
+      logger(`Model.create: Found duplicate name "${modelName}" in schema "${schemaName}", using unique name "${uniqueModelName}"`)
+      
+      // CRITICAL: When a rename is detected, check all cached instances to see if any match the original name
+      // This handles the case where a model was created, saved to DB, then renamed in cache
+      // We need to find the existing instance by checking all cached instances for this schema
+      for (const [cachedId, { instance }] of this.instanceCacheById.entries()) {
+        const context = instance._getSnapshotContext()
+        // Check if this instance belongs to the same schema and has the original name
+        // Note: We check the context's modelName which reflects the current name (may be renamed)
+        // But we also need to check if it was originally created with the requested name
+        // Since we can't query DB synchronously, we check if the instance's current name matches
+        // the original name OR if it's in the same schema and might be the model we're looking for
+        if (context.schemaName === schemaName) {
+          // If the instance's current name matches the original name, return it
+          // This handles the case where the model wasn't actually renamed yet
+          if (context.modelName === modelName) {
+            const { refCount } = this.instanceCacheById.get(cachedId)!
+            this.instanceCacheById.set(cachedId, {
+              instance,
+              refCount: refCount + 1,
+            })
+            // Update name index to include original name if not already there
+            const originalNameKey = `${schemaName}:${modelName}`
+            if (!this.instanceCacheByName.has(originalNameKey)) {
+              this.instanceCacheByName.set(originalNameKey, cachedId)
+            }
+            logger(`Model.create: Found existing instance with original name "${modelName}" (ID: ${cachedId}) despite rename detection`)
+            return instance
+          }
+        }
+      }
+    }
+
+    // Create name-based cache key using the unique name (for new instances)
+    const nameKey = `${schemaName}:${uniqueModelName}`
+
+    // Step 6: Check legacy cache with unique name (backward compatibility during migration)
+    // This is a fallback in case an instance was cached with a unique name
     if (this.instanceCache.has(nameKey)) {
       const { instance, refCount } = this.instanceCache.get(nameKey)!
       this.instanceCache.set(nameKey, {
@@ -334,13 +448,13 @@ export class Model {
       return instance
     }
 
-    // Step 4: Generate ID if not provided (before creating instance)
+    // Step 7: Generate ID if not provided (before creating instance)
     if (!resolvedId) {
       resolvedId = generateId()
       logger(`Model.create: Generated new id (schemaFileId) "${resolvedId}" for model "${modelName}"`)
     }
     
-    // Step 5: Create new instance with id in initial context
+    // Step 7: Create new instance with id in initial context
     // This ensures loadOrCreateModel sees the ID immediately
     // Pass _pendingPropertyDefinitions in initial context to avoid race condition with loadOrCreateModel
     // This is the proper XState way - include it in the initial input so it's available from the start
@@ -608,17 +722,17 @@ export class Model {
       },
     }) as Model
     
-    // Step 7: Store in new ID-based cache
+    // Step 8: Store in new ID-based cache
     // resolvedId is guaranteed to be defined at this point (generated if not provided)
     this.instanceCacheById.set(resolvedId!, {
       instance: proxiedInstance,
       refCount: 1,
     })
     
-    // Step 8: Store in name-based index
+    // Step 9: Store in name-based index
     this.instanceCacheByName.set(nameKey, resolvedId!)
     
-    // Step 9: Also store in legacy cache (for backward compatibility during migration)
+    // Step 10: Also store in legacy cache (for backward compatibility during migration)
     this.instanceCache.set(nameKey, {
       instance: proxiedInstance,
       refCount: 1,
@@ -626,10 +740,10 @@ export class Model {
     
     logger(`Model.create: Created new instance for "${uniqueModelName}" (ID: ${id})`)
     
-    // Step 7.5: Model instance is now cached and accessible via Model.getById() and Model.getByName()
+    // Model instance is now cached and accessible via Model.getById() and Model.getByName()
     // No wrapper or store registration needed
     
-    // Step 8: Register with schema if requested, OR trigger write if properties are provided
+    // Step 11: Register with schema if requested, OR trigger write if properties are provided
     // If properties are provided, we need to write the model to get modelId for property creation
     // If schema provided, trigger write process instead of registration
     const shouldTriggerWrite = (registerWithSchema && schemaInstance) || (options?.properties && Object.keys(options.properties).length > 0)

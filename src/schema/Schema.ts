@@ -715,19 +715,62 @@ export class Schema {
         filteredSchemas = Array.from(schemaMap.values())
       }
       
-      // Extract unique schema names and create Schema instances
-      const uniqueSchemaNames = new Set<string>()
+      // Create Schema instances using the schemaFileId from filtered data to ensure correct version
+      const schemaInstances: Schema[] = []
+      const processedSchemaNames = new Set<string>()
+      
       for (const schemaData of filteredSchemas) {
         const schemaName = schemaData.schema.metadata?.name
-        if (schemaName) {
-          uniqueSchemaNames.add(schemaName)
+        const schemaFileId = schemaData.schema.id
+        const expectedVersion = schemaData.schema.version
+        
+        if (!schemaName) continue
+        
+        // Skip if we've already processed this schema name (to avoid duplicates)
+        if (processedSchemaNames.has(schemaName)) {
+          continue
         }
-      }
-      
-      // Create Schema instances for each unique schema name
-      const schemaInstances: Schema[] = []
-      for (const schemaName of uniqueSchemaNames) {
-        schemaInstances.push(this.create(schemaName))
+        processedSchemaNames.add(schemaName)
+        
+        // Try to use schemaFileId to ensure we load the correct version
+        // First check if we have a cached instance by schemaFileId
+        if (schemaFileId) {
+          const cachedById = this.getById(schemaFileId)
+          if (cachedById) {
+            // Verify the cached instance has the correct version
+            const cachedContext = cachedById.getService().getSnapshot().context
+            if (cachedContext.version === expectedVersion) {
+              schemaInstances.push(cachedById)
+              continue
+            }
+          }
+        }
+        
+        // If no cached instance by ID, check by name but verify version
+        const cachedByName = this.instanceCacheByName.get(schemaName)
+        if (cachedByName) {
+          const cachedContext = cachedByName.instance.getService().getSnapshot().context
+          // Only use cached instance if it has the correct version
+          if (cachedContext.version === expectedVersion && (!schemaFileId || cachedContext.id === schemaFileId)) {
+            schemaInstances.push(cachedByName.instance)
+            continue
+          }
+        }
+        
+        // Create new instance - it will load from database
+        // The loadOrCreateSchema actor should query by name and get the latest version
+        // But to ensure we get the correct version, we'll use createById if we have the schemaFileId
+        if (schemaFileId) {
+          try {
+            const instance = await this.createById(schemaFileId)
+            schemaInstances.push(instance)
+          } catch (error) {
+            // Fallback to creating by name if createById fails
+            schemaInstances.push(this.create(schemaName))
+          }
+        } else {
+          schemaInstances.push(this.create(schemaName))
+        }
       }
       
       return schemaInstances

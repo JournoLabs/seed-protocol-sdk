@@ -322,6 +322,17 @@ export const checkExistingSchema = fromCallback<
             }
           }
           
+          // Ensure schema.id matches schemaFileId from database (database is source of truth)
+          if (schemaFile && dbSchema.schemaFileId) {
+            if (schemaFile.id !== dbSchema.schemaFileId) {
+              logger(`Fixing schema ID mismatch: file has id="${schemaFile.id}", DB has schemaFileId="${dbSchema.schemaFileId}". Using DB value.`)
+              schemaFile.id = dbSchema.schemaFileId
+            } else if (!schemaFile.id && dbSchema.schemaFileId) {
+              logger(`Schema missing id, using schemaFileId from database: "${dbSchema.schemaFileId}"`)
+              schemaFile.id = dbSchema.schemaFileId
+            }
+          }
+          
           if (schemaFile && dbSchema.id) {
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {

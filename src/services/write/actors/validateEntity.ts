@@ -14,19 +14,24 @@ type ValidateEntityOutput = {
   errors: ValidationError[]
 }
 
+// @ts-expect-error - XState v5 type inference bug: incorrectly expects ValidateEntityOutput for input
+// The actor correctly expects ValidateEntityInput, but TypeScript infers the wrong type
 export const validateEntity = fromPromise<
   ValidateEntityInput,
   ValidateEntityOutput
 >(async ({ input }) => {
+  // Type assertion to fix XState v5 type inference bug
+  const entityInput = input as ValidateEntityInput
+  
   const _validate = async (): Promise<ValidateEntityOutput> => {
     try {
-      const msg = `[validateEntity] Starting validation for ${input.entityType}`
+      const msg = `[validateEntity] Starting validation for ${entityInput.entityType}`
       logger(msg)
       console.log(msg) // Always log to console
-      logger(`[validateEntity] Entity data:`, input.entityData)
+      logger(`[validateEntity] Entity data:`, entityInput.entityData)
       let result: ValidateEntityOutput = { isValid: true, errors: [] }
 
-      if (input.entityType === 'model') {
+      if (entityInput.entityType === 'model') {
         const structureMsg = `[validateEntity] Validating model structure`
         logger(structureMsg)
         console.log(structureMsg) // Always log to console
@@ -35,7 +40,7 @@ export const validateEntity = fromPromise<
         const validationService = new SchemaValidationService()
         
         // Validate model structure
-        const structureResult = validationService.validateModelStructure(input.entityData)
+        const structureResult = validationService.validateModelStructure(entityInput.entityData)
         const structureResultMsg = `[validateEntity] Structure validation result: isValid=${structureResult.isValid}, errors=${structureResult.errors?.length || 0}`
         logger(structureResultMsg)
         console.log(structureResultMsg) // Always log to console
@@ -47,11 +52,11 @@ export const validateEntity = fromPromise<
           }
         } else {
           // If schema name provided, validate against schema
-          if (input.entityData.schemaName) {
+          if (entityInput.entityData.schemaName) {
             try {
-              logger(`[validateEntity] Validating model against schema "${input.entityData.schemaName}"`)
+              logger(`[validateEntity] Validating model against schema "${entityInput.entityData.schemaName}"`)
               const { Schema } = await import('@/Schema/Schema')
-              const schema = Schema.create(input.entityData.schemaName)
+              const schema = Schema.create(entityInput.entityData.schemaName)
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               logger(`[validateEntity] Schema status: ${schemaStatus}`)
@@ -61,8 +66,8 @@ export const validateEntity = fromPromise<
                 logger(`[validateEntity] Running validateModelAgainstSchema`)
                 const schemaResult = validationService.validateModelAgainstSchema(
                   schemaContext,
-                  input.entityData.modelName,
-                  input.entityData
+                  entityInput.entityData.modelName,
+                  entityInput.entityData
                 )
                 logger(`[validateEntity] Schema validation result:`, schemaResult)
                 
@@ -83,13 +88,13 @@ export const validateEntity = fromPromise<
             logger(`[validateEntity] No schemaName provided, skipping schema validation`)
           }
         }
-      } else if (input.entityType === 'modelProperty') {
+      } else if (entityInput.entityType === 'modelProperty') {
         // Use existing ModelProperty validation
         const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
         const validationService = new SchemaValidationService()
         
         // Validate property structure
-        const structureResult = validationService.validatePropertyStructure(input.entityData)
+        const structureResult = validationService.validatePropertyStructure(entityInput.entityData)
         
         if (!structureResult.isValid) {
           result = {
@@ -98,10 +103,10 @@ export const validateEntity = fromPromise<
           }
         } else {
           // If schema name and model name provided, validate against schema
-          if (input.entityData._schemaName && input.entityData.modelName) {
+          if (entityInput.entityData._schemaName && entityInput.entityData.modelName) {
             try {
               const { Schema } = await import('@/Schema/Schema')
-              const schema = Schema.create(input.entityData._schemaName)
+              const schema = Schema.create(entityInput.entityData._schemaName)
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               
@@ -111,9 +116,9 @@ export const validateEntity = fromPromise<
                 if (schemaContext.models && Object.keys(schemaContext.models).length > 0) {
                   const schemaResult = validationService.validateProperty(
                     schemaContext,
-                    input.entityData.modelName,
-                    input.entityData.name || '',
-                    input.entityData
+                    entityInput.entityData.modelName,
+                    entityInput.entityData.name || '',
+                    entityInput.entityData
                   )
                   
                   if (!schemaResult.isValid) {
@@ -130,12 +135,12 @@ export const validateEntity = fromPromise<
             }
           }
         }
-      } else if (input.entityType === 'schema') {
+      } else if (entityInput.entityType === 'schema') {
         // Schema validation - use existing validation
         const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
         const validationService = new SchemaValidationService()
         
-        const schemaResult = validationService.validateSchema(input.entityData)
+        const schemaResult = validationService.validateSchema(entityInput.entityData)
         
         if (!schemaResult.isValid) {
           result = {

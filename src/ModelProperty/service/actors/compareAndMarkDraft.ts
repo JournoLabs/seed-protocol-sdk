@@ -12,26 +12,55 @@ export const compareAndMarkDraft = fromCallback<
   FromCallbackInput<ModelPropertyMachineContext>
 >(({ sendBack, input: { context } }) => {
   const _compareAndMarkDraft = async (): Promise<void> => {
+    // If _originalValues is not set, we still need to save to database if the property exists
+    // This handles the case where the name is changed before _originalValues is initialized
     if (!context._originalValues) {
-      // No original values to compare against
       logger('No original values to compare against')
+      logger(`[compareAndMarkDraft] Context: modelName=${context.modelName}, name=${context.name}, id=${context.id}`)
+      
+      // If we have a name and modelName, try to save to database anyway
+      // This ensures name changes are persisted even if _originalValues isn't initialized yet
+      if (context.modelName && context.name && (context.id || context._propertyFileId)) {
+        logger(`[compareAndMarkDraft] _originalValues not set, but saving to database anyway for property ${context.modelName}:${context.name}`)
+        try {
+          const { savePropertyToDb } = await import('@/helpers/db')
+          await savePropertyToDb(context)
+          logger(`[compareAndMarkDraft] Successfully saved property ${context.modelName}:${context.name} to database (no _originalValues)`)
+        } catch (error) {
+          logger(`[compareAndMarkDraft] Error saving property to database (no _originalValues): ${error}`)
+          // Don't throw - this is a best-effort save
+        }
+      }
       return
     }
 
+    logger(`[compareAndMarkDraft] Comparing: context.name=${context.name}, _originalValues.name=${context._originalValues?.name}`)
+    
     // Compare current values with original
     const hasChanges = Object.keys(context).some(key => {
       if (key.startsWith('_')) return false // Skip internal fields
-      return context[key] !== context._originalValues?.[key]
+      const changed = context[key] !== context._originalValues?.[key]
+      if (changed && key === 'name') {
+        logger(`[compareAndMarkDraft] Name change detected: "${context._originalValues?.name}" -> "${context[key]}"`)
+      }
+      return changed
     })
 
     if (hasChanges) {
       logger(`Property ${context.modelName}:${context.name} has changes, marking as edited`)
+      logger(`[compareAndMarkDraft] Context when saving: id=${context.id}, _propertyFileId=${context._propertyFileId}, name=${context.name}, _originalValues.name=${context._originalValues?.name}`)
 
       // Use dynamic import to break circular dependency
       const { savePropertyToDb } = await import('@/helpers/db')
       
       // Save to database (but not JSON file) - always save to DB when there are changes
-      await savePropertyToDb(context)
+      try {
+        await savePropertyToDb(context)
+        logger(`[compareAndMarkDraft] Successfully saved property ${context.modelName}:${context.name} to database`)
+      } catch (error) {
+        logger(`[compareAndMarkDraft] Error saving property to database: ${error}`)
+        throw error
+      }
 
       // Mark schema as draft if schema name is available
       if (context._schemaName) {

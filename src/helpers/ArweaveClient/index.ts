@@ -17,6 +17,7 @@ export const initArweaveClient = async () => {
 
 
 let domain = 'arweave.net'
+let domainExplicitlySet = false
 
 export const getArweave = (): Arweave | undefined => {
   if (
@@ -28,16 +29,19 @@ export const getArweave = (): Arweave | undefined => {
     return
   }
 
+  // Use the domain variable if it was explicitly set, otherwise use ARWEAVE_HOST in production
+  const hostToUse = domainExplicitlySet ? domain : ARWEAVE_HOST
+
   if (process.env.NODE_ENV === 'production') {
     if (Object.keys(Arweave).includes('default')) {
       return Arweave.default.init({
-        host: ARWEAVE_HOST,
+        host: hostToUse,
         protocol: 'https',
       })
     }
 
     return Arweave.init({
-      host: ARWEAVE_HOST,
+      host: hostToUse,
       protocol: 'https',
     })
   }
@@ -63,6 +67,22 @@ export const getArweave = (): Arweave | undefined => {
 
 export const setArweaveDomain = (newDomain: string): void => {
   domain = newDomain
+  domainExplicitlySet = true
+}
+
+export const getArweaveDomain = (): string => {
+  // If domain was explicitly set via setArweaveDomain (from user config), use it
+  // Otherwise, in production use ARWEAVE_HOST from env/constants
+  // In non-production, use the domain variable (defaults to 'arweave.net')
+  if (domainExplicitlySet) {
+    return domain
+  }
+  
+  if (process.env.NODE_ENV === 'production') {
+    return ARWEAVE_HOST
+  }
+  
+  return domain
 }
 
 export { ArweaveClient }

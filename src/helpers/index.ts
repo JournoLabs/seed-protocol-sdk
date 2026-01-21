@@ -4,6 +4,7 @@ import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
 import { BaseFileManager } from './FileManager/BaseFileManager'
+import { getArweaveDomain } from './ArweaveClient'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
@@ -123,6 +124,16 @@ export const convertTxIdToImage = async (
   const imageBlob = new Blob([uint])
 
   return URL.createObjectURL(imageBlob)
+}
+
+/**
+ * Constructs an Arweave URL for a storage transaction ID
+ * @param storageTransactionId - The Arweave transaction ID
+ * @returns The full URL to access the transaction data on Arweave (e.g., https://arweave.net/raw/{transactionId})
+ */
+export const getArweaveUrlForTransaction = (storageTransactionId: string): string => {
+  const arweaveDomain = getArweaveDomain()
+  return `https://${arweaveDomain}/raw/${storageTransactionId}`
 }
 
 export const getExecutionTime = async (task, args) => {

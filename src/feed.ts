@@ -1,7 +1,7 @@
 import { getSeedsBySchemaName, getItemVersionsFromEas, getItemPropertiesFromEas } from "./eas"
 import { Attestation } from "./graphql/gql/graphql"
 import { setSchemaUidForSchemaDefinition } from "./stores/eas"
-import { BaseEasClient, parseEasRelationPropertyName } from "./helpers"
+import { BaseEasClient, parseEasRelationPropertyName, getArweaveUrlForTransaction } from "./helpers"
 import { GET_SEEDS } from "./Item/queries"
 import debug from 'debug'
 
@@ -10,6 +10,150 @@ const logger = debug('seedSdk:feed')
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
+
+// Helper to convert snake_case to camelCase
+const toCamelCase = (str: string): string => {
+  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
+}
+
+// Helper to format timestamp as RFC 822 date string for RSS pubDate
+const formatRfc822Date = (timestamp: number): string => {
+  const date = new Date(timestamp * 1000) // Convert from seconds to milliseconds
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  
+  const day = days[date.getUTCDay()]
+  const month = months[date.getUTCMonth()]
+  const year = date.getUTCFullYear()
+  const dayNum = date.getUTCDate().toString().padStart(2, '0')
+  const hours = date.getUTCHours().toString().padStart(2, '0')
+  const minutes = date.getUTCMinutes().toString().padStart(2, '0')
+  const seconds = date.getUTCSeconds().toString().padStart(2, '0')
+  
+  return `${day}, ${dayNum} ${month} ${year} ${hours}:${minutes}:${seconds} GMT`
+}
+
+// Helper to set default values for feed items
+const setFeedItemDefaults = (item: Record<string, any>, seedUid: string, schemaName: string): void => {
+  // Set default title if not present (check both snake_case and camelCase)
+  if (!item.title && !item.Title) {
+    item.title = seedUid
+    item.Title = seedUid // Also set camelCase version
+  } else if (item.title && !item.Title) {
+    item.Title = item.title
+  } else if (item.Title && !item.title) {
+    item.title = item.Title
+  }
+  
+  // Set default link/guid using seedUid or storage_transaction_id
+  // Handle empty strings, null, and undefined - check both formats
+  const storageTransactionIdSnake = item.storage_transaction_id && 
+                                     typeof item.storage_transaction_id === 'string' && 
+                                     item.storage_transaction_id.trim() !== '' && 
+                                     item.storage_transaction_id !== 'undefined' &&
+                                     item.storage_transaction_id !== seedUid // Don't use seedUid as transaction ID
+                                     ? item.storage_transaction_id.trim() 
+                                     : null
+  const storageTransactionIdCamel = item.storageTransactionId && 
+                                     typeof item.storageTransactionId === 'string' && 
+                                     item.storageTransactionId.trim() !== '' && 
+                                     item.storageTransactionId !== 'undefined' &&
+                                     item.storageTransactionId !== seedUid // Don't use seedUid as transaction ID
+                                     ? item.storageTransactionId.trim() 
+                                     : null
+  const storageTransactionId = storageTransactionIdSnake || storageTransactionIdCamel
+  
+  console.log('[feed] [setFeedItemDefaults] Setting defaults for item:', {
+    seedUid,
+    schemaName,
+    hasStorageTransactionIdSnake: !!storageTransactionIdSnake,
+    hasStorageTransactionIdCamel: !!storageTransactionIdCamel,
+    storageTransactionIdSnakeValue: item.storage_transaction_id,
+    storageTransactionIdCamelValue: item.storageTransactionId,
+    storageTransactionId,
+    itemKeys: Object.keys(item),
+  })
+  
+  // If there's a valid storageTransactionId (not seedUid), use Arweave URL for the link
+  // Otherwise, build URL based on schema name (e.g., /images/ for image schema, /posts/ for post schema)
+  let defaultLink: string
+  if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
+    try {
+      defaultLink = getArweaveUrlForTransaction(storageTransactionId)
+      console.log('[feed] [setFeedItemDefaults] Using Arweave URL for storageTransactionId:', defaultLink)
+    } catch (error) {
+      console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)
+      // Fallback to default link format
+      const basePath = schemaName === 'image' ? 'images' : schemaName === 'post' ? 'posts' : schemaName.toLowerCase() + 's'
+      const baseUrl = 'https://seedprotocol.io'
+      defaultLink = `${baseUrl}/${basePath}/${seedUid || 'unknown'}`
+    }
+  } else {
+    const basePath = schemaName === 'image' ? 'images' : schemaName === 'post' ? 'posts' : schemaName.toLowerCase() + 's'
+    const baseUrl = 'https://seedprotocol.io'
+    // Ensure seedUid is valid, use 'unknown' as fallback to prevent 'undefined' in URLs
+    const validSeedUid = seedUid && typeof seedUid === 'string' && seedUid.trim() !== '' ? seedUid : 'unknown'
+    defaultLink = `${baseUrl}/${basePath}/${validSeedUid}`
+    console.log('[feed] [setFeedItemDefaults] Using default link format:', defaultLink, { seedUid, validSeedUid })
+  }
+  
+  // Always ensure link is set (override if undefined, null, empty, or the string "undefined")
+  const currentLink = item.link || item.Link
+  if (!currentLink || currentLink === 'undefined' || (typeof currentLink === 'string' && currentLink.trim() === '')) {
+    item.link = defaultLink
+    item.Link = defaultLink
+    console.log('[feed] [setFeedItemDefaults] Set link to:', defaultLink)
+  } else {
+    // Ensure both formats are set
+    if (!item.link || item.link === 'undefined') {
+      item.link = currentLink
+    }
+    if (!item.Link || item.Link === 'undefined') {
+      item.Link = currentLink
+    }
+  }
+  
+  // Always ensure guid is set (use link if available, otherwise default)
+  const currentGuid = item.guid || item.Guid
+  if (!currentGuid || currentGuid === 'undefined' || (typeof currentGuid === 'string' && currentGuid.trim() === '')) {
+    item.guid = item.link || defaultLink
+    item.Guid = item.guid
+    console.log('[feed] [setFeedItemDefaults] Set guid to:', item.guid)
+  } else {
+    // Ensure both formats are set
+    if (!item.guid || item.guid === 'undefined') {
+      item.guid = currentGuid
+    }
+    if (!item.Guid || item.Guid === 'undefined') {
+      item.Guid = currentGuid
+    }
+  }
+  
+  // Set pubDate from timeCreated if available
+  if (item.timeCreated && !item.pubDate && !item.PubDate) {
+    const pubDate = formatRfc822Date(item.timeCreated)
+    item.pubDate = pubDate
+    item.PubDate = pubDate
+  } else if (item.pubDate && !item.PubDate) {
+    item.PubDate = item.pubDate
+  } else if (item.PubDate && !item.pubDate) {
+    item.pubDate = item.PubDate
+  }
+  
+  // Ensure seedUid is always present
+  if (!item.seedUid && !item.SeedUid) {
+    item.seedUid = seedUid
+    item.SeedUid = seedUid
+  } else if (item.seedUid && !item.SeedUid) {
+    item.SeedUid = item.seedUid
+  } else if (item.SeedUid && !item.seedUid) {
+    item.seedUid = item.SeedUid
+  }
+  
+  // Note: We don't set storageTransactionId to seedUid as a fallback anymore
+  // because seedUid is not a valid Arweave transaction ID. If storageTransactionId
+  // doesn't exist, we'll use the default link format with seedUid instead.
+}
 
 const seedUidToModelType = new Map<string, string>()
 const relatedSeedUids = new Set<string>()
@@ -235,7 +379,13 @@ const processItemProperty = async (property: Attestation, itemSeeds: Attestation
 
   let existingFeedItem = assembledFeedItems.get(seedUidForProperty) || {}
   const existingKeys = Object.keys(existingFeedItem)
+  // Store property in snake_case (original format)
   existingFeedItem[propertyNameSnake] = propertyValue
+  // Also store in camelCase for easier access by external consumers (e.g., RSS generators)
+  const propertyNameCamel = toCamelCase(propertyNameSnake)
+  if (propertyNameCamel !== propertyNameSnake) {
+    existingFeedItem[propertyNameCamel] = propertyValue
+  }
   assembledFeedItems.set(seedUidForProperty, existingFeedItem)
 
   console.log('[feed] [processItemProperty] Updated assembled feed item:', {
@@ -261,6 +411,19 @@ const processSeeds = async (seeds: Attestation[]) => {
     seedUids.push(seed.id)
     const modelType = seed.schema.schemaNames[0].name
     seedUidToModelType.set(seed.id, modelType)
+    
+    // Initialize feed item with seed metadata
+    if (!assembledFeedItems.has(seed.id)) {
+      assembledFeedItems.set(seed.id, {
+        seedUid: seed.id,
+        timeCreated: seed.timeCreated,
+      })
+      console.log('[feed] [processSeeds] Initialized feed item for seed:', {
+        seedId: seed.id,
+        modelType,
+      })
+    }
+    
     console.log('[feed] [processSeeds] Processing seed:', {
       index: i,
       seedId: seed.id,
@@ -424,11 +587,21 @@ export const getFeedItemsBySchemaName = async (schemaName: string) => {
 
   await processSeeds(relatedSeeds)
 
-  const feedItems = Array.from(assembledFeedItems.values())
+  // Filter feed items to only include items matching the requested schema name
+  // and apply default values for required RSS fields
+  const feedItems = Array.from(assembledFeedItems.entries())
+    .filter(([seedUid]) => seedUidToModelType.get(seedUid) === schemaName)
+    .map(([seedUid, item]) => {
+      // Apply defaults for required RSS feed fields
+      setFeedItemDefaults(item, seedUid, schemaName)
+      return item
+    })
+  
   console.log('[feed] [getFeedItemsBySchemaName] Completed feed retrieval:', {
     schemaName,
     feedItemsCount: feedItems.length,
     assembledFeedItemsSize: assembledFeedItems.size,
+    filteredFeedItemsCount: feedItems.length,
     feedItemKeys: feedItems.map((item) => Object.keys(item)),
   })
 

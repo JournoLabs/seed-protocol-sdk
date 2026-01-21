@@ -32,6 +32,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
+import { and } from 'drizzle-orm'
 
 // Dynamically import client from src/client (same pattern as client.test.ts)
 type ClientType = typeof import('@/client')['client']
@@ -186,26 +187,55 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
     }
     
     // Check that models are linked to the schema via model_schemas join table
+    // Retry querying until join table entries are visible (browser environments may have delays)
+    // IMPORTANT: Wait for ALL expected models, not just any models
     type ModelSchemaLink = { modelId: number | null; schemaId: number | null; modelName: string | null }
-    const modelSchemaLinks = await db
-      .select({
-        modelId: modelSchemas.modelId,
-        schemaId: modelSchemas.schemaId,
-        modelName: modelsTable.name,
-      })
-      .from(modelSchemas)
-      .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-      .where(eq(modelSchemas.schemaId, schemaId))
+    let modelSchemaLinks: ModelSchemaLink[] = []
+    const maxRetries = 30 // Increased retries to allow time for all models to be added
+    const retryDelay = 200 // Increased delay to allow database writes to complete
+    const expectedModels = ['Seed', 'Version', 'Metadata']
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      modelSchemaLinks = await db
+        .select({
+          modelId: modelSchemas.modelId,
+          schemaId: modelSchemas.schemaId,
+          modelName: modelsTable.name,
+        })
+        .from(modelSchemas)
+        .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+        .where(eq(modelSchemas.schemaId, schemaId))
+      
+      // Check if all expected models are present
+      const modelNames = modelSchemaLinks
+        .map((link: ModelSchemaLink) => link.modelName)
+        .filter((name: string | null): name is string => name !== null)
+      
+      const allExpectedModelsPresent = expectedModels.every(expectedModel => modelNames.includes(expectedModel))
+      
+      if (allExpectedModelsPresent) {
+        // All expected models are present, we can proceed
+        break
+      }
+      
+      // If we have some models but not all, log and continue retrying
+      if (modelSchemaLinks.length > 0) {
+        console.log(`[initializeTestClient] Attempt ${attempt + 1}/${maxRetries}: Found ${modelSchemaLinks.length} models (${modelNames.join(', ')}), waiting for all expected models (${expectedModels.join(', ')})`)
+      }
+      
+      if (attempt < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
+      }
+    }
     
     if (modelSchemaLinks.length === 0) {
-      throw new Error(`No models found linked to Seed Protocol schema via model_schemas join table`)
+      throw new Error(`No models found linked to Seed Protocol schema via model_schemas join table after ${maxRetries} attempts. This may indicate a database write issue in the browser environment.`)
     }
     
     // Verify expected models exist (Seed, Version, Metadata at minimum)
     const modelNames = modelSchemaLinks
       .map((link: ModelSchemaLink) => link.modelName)
       .filter((name: string | null): name is string => name !== null)
-    const expectedModels = ['Seed', 'Version', 'Metadata']
     for (const expectedModel of expectedModels) {
       if (!modelNames.includes(expectedModel)) {
         throw new Error(`Expected model "${expectedModel}" not found in Seed Protocol schema. Found models: ${modelNames.join(', ')}`)
@@ -240,15 +270,83 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
     
     
     // Check properties for the first model (Seed should have properties)
+    // Retry querying until properties are visible (browser environments may have delays)
     const seedModelLink = modelSchemaLinks.find((link: ModelSchemaLink) => link.modelName === 'Seed')
     if (seedModelLink && seedModelLink.modelId) {
-      const propertiesForSeed = await db
+      // Also check if there are multiple Seed models and find the one with properties
+      const allSeedModels = await db
         .select()
-        .from(propertiesTable)
-        .where(eq(propertiesTable.modelId, seedModelLink.modelId))
+        .from(modelsTable)
+        .where(eq(modelsTable.name, 'Seed'))
+      
+      console.log(`[initializeTestClient] Found ${allSeedModels.length} Seed models in database:`, allSeedModels.map(m => ({ id: m.id, schemaFileId: m.schemaFileId })))
+      console.log(`[initializeTestClient] Join table links to Seed model with modelId: ${seedModelLink.modelId}`)
+      
+      // Check properties for the model linked via join table
+      let propertiesForSeed: any[] = []
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        propertiesForSeed = await db
+          .select()
+          .from(propertiesTable)
+          .where(eq(propertiesTable.modelId, seedModelLink.modelId))
+        
+        console.log(`[initializeTestClient] Attempt ${attempt + 1}/${maxRetries}: found ${propertiesForSeed.length} properties for Seed model (modelId: ${seedModelLink.modelId})`)
+        
+        if (propertiesForSeed.length > 0) {
+          break
+        }
+        
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+        }
+      }
+      
+      // If no properties found for the linked model, try other Seed models
+      if (propertiesForSeed.length === 0 && allSeedModels.length > 1) {
+        console.log(`[initializeTestClient] No properties found for linked Seed model (modelId: ${seedModelLink.modelId}), checking other Seed models`)
+        let foundModelWithProperties: any = null
+        for (const seedModel of allSeedModels) {
+          if (seedModel.id && seedModel.id !== seedModelLink.modelId) {
+            const props = await db
+              .select()
+              .from(propertiesTable)
+              .where(eq(propertiesTable.modelId, seedModel.id))
+            
+            console.log(`[initializeTestClient] Seed model (modelId: ${seedModel.id}, schemaFileId: ${seedModel.schemaFileId}) has ${props.length} properties`)
+            if (props.length > 0) {
+              foundModelWithProperties = seedModel
+              // Found properties for a different Seed model - fix the join table
+              console.log(`[initializeTestClient] Found Seed model with properties (modelId: ${seedModel.id}), updating join table to point to it`)
+              // Update the join table to point to the correct model
+              await db
+                .update(modelSchemas)
+                .set({ modelId: seedModel.id })
+                .where(
+                  and(
+                    eq(modelSchemas.schemaId, schemaId),
+                    eq(modelSchemas.modelId, seedModelLink.modelId)
+                  )
+                )
+              console.log(`[initializeTestClient] Updated join table to link schema ${schemaId} to Seed model ${seedModel.id} instead of ${seedModelLink.modelId}`)
+              // Update seedModelLink for the rest of the check
+              seedModelLink.modelId = seedModel.id
+              propertiesForSeed = props
+              break
+            }
+          }
+        }
+        
+        if (!foundModelWithProperties) {
+          // No Seed model has properties - this is the real error
+          throw new Error(`No properties found for any Seed model in Seed Protocol schema. ` +
+            `Checked ${allSeedModels.length} Seed models: ${allSeedModels.map(m => `modelId ${m.id}`).join(', ')}. ` +
+            `This indicates models/properties were not persisted to the database.`)
+        }
+      }
       
       if (propertiesForSeed.length === 0) {
-        throw new Error(`No properties found for Seed model in Seed Protocol schema. ` +
+        throw new Error(`No properties found for Seed model (modelId: ${seedModelLink.modelId}) in Seed Protocol schema after ${maxRetries} attempts. ` +
           `This indicates Schema reached 'idle' state before models/properties were persisted to the database. ` +
           `Schema 'idle' state means schema data is loaded in memory, but does not guarantee database persistence.`)
       }

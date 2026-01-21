@@ -1198,7 +1198,33 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      // Wait a bit for the model to be loaded into cache from the schema import
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Get the existing model from the schema import (don't create a new one)
+      // Use getByNameAsync to ensure we get the model even if it's not in cache yet
+      let model = await Model.getByNameAsync(modelName, schemaName)
+      
+      // If model isn't found yet, wait a bit more and try again
+      if (!model) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+        model = await Model.getByNameAsync(modelName, schemaName)
+      }
+      
+      // If still not found, the model might not have been loaded yet, so we'll need to get it via the schema
+      if (!model) {
+        const schema = Schema.create(schemaName)
+        await waitForSchemaIdle(schema)
+        // Wait for models to be loaded
+        await new Promise(resolve => setTimeout(resolve, 500))
+        model = await Model.getByNameAsync(modelName, schemaName)
+      }
+      
+      // If model still doesn't exist, something went wrong
+      if (!model) {
+        throw new Error(`Model "${modelName}" not found after schema import`)
+      }
+      
       await waitForModelIdle(model)
       
       const oldName = model.modelName

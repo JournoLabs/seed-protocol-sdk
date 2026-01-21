@@ -400,7 +400,7 @@ export class SchemaValidationService {
    * Validate model structure (basic structure checks)
    */
   validateModelStructure(
-    model: ModelMachineContext
+    model: ModelMachineContext & { properties?: { [key: string]: any } }
   ): ValidationResult {
     const errors: ValidationError[] = []
 
@@ -447,7 +447,7 @@ export class SchemaValidationService {
   validateModelAgainstSchema(
     schema: SchemaMachineContext,
     modelName: string,
-    modelData: ModelMachineContext
+    modelData: ModelMachineContext & { properties?: { [key: string]: any } }
   ): ValidationResult {
     const errors: ValidationError[] = []
 
@@ -601,7 +601,7 @@ export class SchemaValidationService {
     if (rules.pattern && (dataType === ModelPropertyDataTypes.Text || dataType === ModelPropertyDataTypes.Html)) {
       try {
         const regex = new RegExp(rules.pattern)
-        result = Type.RegEx(regex)
+        result = Type.RegExp(regex)
       } catch (error) {
         logger('Invalid regex pattern:', rules.pattern, error)
       }

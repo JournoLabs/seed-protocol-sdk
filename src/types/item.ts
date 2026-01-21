@@ -19,7 +19,7 @@ export type ItemMachineContext<T> = {
   ModelClass?: Model
   propertiesBySchemaUid?: Map<string, Attestation[]>
   propertiesMetadata?: Map<string, PropertyType>
-  propertyInstances?: Map<string | keyof T, IItemProperty<PropertyType>>
+  propertyInstances?: Map<string | keyof T, IItemProperty>
   relatedVersionsBySchemaUid?: Map<string, Attestation[]>
   modelTableName?: string
   modelNamePlural?: string

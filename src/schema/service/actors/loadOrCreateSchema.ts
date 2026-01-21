@@ -86,6 +86,50 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
 }
 
 /**
+ * Verify that properties are persisted to the database for a given model
+ * This is important in browser environments where database writes may not be immediately visible
+ * @param modelId - Database ID of the model
+ * @param modelName - Name of the model (for logging)
+ * @param maxRetries - Maximum number of retry attempts
+ * @param retryDelay - Delay between retries in milliseconds
+ * @returns Promise that resolves when properties are found, or rejects if not found after max retries
+ */
+const verifyPropertiesPersisted = async (
+  modelId: number,
+  modelName: string,
+  maxRetries: number = 10,
+  retryDelay: number = 100
+): Promise<void> => {
+  const db = BaseDb.getAppDb()
+  if (!db) {
+    throw new Error('Database not available for property verification')
+  }
+
+  const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+  const { eq } = await import('drizzle-orm')
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const props = await db
+      .select()
+      .from(propertiesTable)
+      .where(eq(propertiesTable.modelId, modelId))
+      .limit(1)
+    
+    if (props.length > 0) {
+      logger(`Verified properties exist for model "${modelName}" (modelId: ${modelId}) after ${attempt + 1} attempt(s)`)
+      return
+    }
+
+    if (attempt < maxRetries - 1) {
+      logger(`Properties not yet visible for model "${modelName}" (modelId: ${modelId}), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${maxRetries})`)
+      await new Promise(resolve => setTimeout(resolve, retryDelay))
+    }
+  }
+
+  throw new Error(`Properties not found for model "${modelName}" (modelId: ${modelId}) after ${maxRetries} attempts. This may indicate a database write issue in the browser environment.`)
+}
+
+/**
  * Sanitize a schema name to be filesystem-safe
  * Replaces all special characters (except alphanumeric, hyphens, underscores) with underscores
  * Converts spaces to underscores
@@ -288,6 +332,28 @@ export const loadOrCreateSchema = fromCallback<
                 propertyFileIds,
               })
               logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for Seed Protocol schema`)
+              
+              // Verify properties are persisted (important for browser environments)
+              // Query the database to get model IDs that were just created
+              const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+              const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+              const modelLinks = await db
+                .select({
+                  modelId: modelSchemas.modelId,
+                  modelName: modelsTable.name,
+                })
+                .from(modelSchemas)
+                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+                .where(eq(modelSchemas.schemaId, schemaRecord.id!))
+              
+              // Verify properties for at least one model (Seed model if available)
+              const seedModelLink = modelLinks.find((link: { modelId: number | null; modelName: string | null }) => link.modelName === 'Seed')
+              if (seedModelLink && seedModelLink.modelId) {
+                await verifyPropertiesPersisted(seedModelLink.modelId, 'Seed', 10, 100)
+              } else if (modelLinks.length > 0 && modelLinks[0].modelId) {
+                // Fallback to first model if Seed not found
+                await verifyPropertiesPersisted(modelLinks[0].modelId, modelLinks[0].modelName || 'unknown', 10, 100)
+              }
             }
           } else {
             // Schema exists, but always ensure models/properties are in database
@@ -313,6 +379,8 @@ export const loadOrCreateSchema = fromCallback<
               .map((link: { modelId: number | null; modelName: string | null }) => link.modelName)
               .filter((n: string | null): n is string => n !== null)
             const missingModels = expectedModelNames.filter(name => !linkedModelNames.includes(name))
+            
+            console.log(`[loadOrCreateSchema] Schema exists check - Expected models: ${expectedModelNames.join(', ')}, Linked models: ${linkedModelNames.join(', ')}, Missing: ${missingModels.join(', ') || 'none'}`)
             
             // Check if properties exist for linked models
             let missingProperties = false
@@ -428,8 +496,17 @@ export const loadOrCreateSchema = fromCallback<
               // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
               const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
               
+              console.log(`[loadOrCreateSchema] createModelsFromJson returned ${Object.keys(modelDefinitions).length} models: ${Object.keys(modelDefinitions).join(', ')}`)
+              console.log(`[loadOrCreateSchema] Expected ${expectedModelNames.length} models from schema file: ${expectedModelNames.join(', ')}`)
+              
+              // Verify all expected models are in modelDefinitions
+              const missingFromDefinitions = expectedModelNames.filter(name => !Object.keys(modelDefinitions).includes(name))
+              if (missingFromDefinitions.length > 0) {
+                console.warn(`[loadOrCreateSchema] WARNING: Some expected models are missing from modelDefinitions: ${missingFromDefinitions.join(', ')}`)
+              }
+              
               if (Object.keys(modelDefinitions).length > 0) {
-                console.log(`[loadOrCreateSchema] Calling addModelsToDb with ${Object.keys(modelDefinitions).length} models`)
+                console.log(`[loadOrCreateSchema] Calling addModelsToDb with ${Object.keys(modelDefinitions).length} models: ${Object.keys(modelDefinitions).join(', ')}`)
                 await addModelsToDb(modelDefinitions, schemaRecord, undefined, {
                   schemaFileId: schemaFile.id,
                   modelFileIds,
@@ -437,6 +514,53 @@ export const loadOrCreateSchema = fromCallback<
                 })
                 console.log(`[loadOrCreateSchema] Successfully added ${Object.keys(modelDefinitions).length} models and their properties to database`)
                 logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for existing Seed Protocol schema`)
+                
+                // Small delay to ensure database writes are visible (important for browser environments)
+                await new Promise(resolve => setTimeout(resolve, 200))
+                
+                // Verify properties are persisted (important for browser environments)
+                // Re-query model links to get updated model IDs
+                // Retry querying until all expected models are visible
+                const expectedModelNames = Object.keys(schemaFile.models || {})
+                let updatedModelLinks: Array<{ modelId: number | null; modelName: string | null }> = []
+                const maxRetries = 10
+                const retryDelay = 100
+                
+                for (let attempt = 0; attempt < maxRetries; attempt++) {
+                  updatedModelLinks = await db
+                    .select({
+                      modelId: modelSchemas.modelId,
+                      modelName: modelsTable.name,
+                    })
+                    .from(modelSchemas)
+                    .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+                    .where(eq(modelSchemas.schemaId, schemaRecord.id!))
+                  
+                  const linkedModelNames = updatedModelLinks
+                    .map((link: { modelId: number | null; modelName: string | null }) => link.modelName)
+                    .filter((n: string | null): n is string => n !== null)
+                  
+                  const allModelsPresent = expectedModelNames.every(name => linkedModelNames.includes(name))
+                  
+                  if (allModelsPresent) {
+                    break
+                  }
+                  
+                  if (attempt < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay))
+                  }
+                }
+                
+                console.log(`[loadOrCreateSchema] After adding models, found ${updatedModelLinks.length} models linked to schema: ${updatedModelLinks.map(l => l.modelName).filter(Boolean).join(', ')}`)
+                
+                // Verify properties for at least one model (Seed model if available)
+                const seedModelLink = updatedModelLinks.find((link: { modelId: number | null; modelName: string | null }) => link.modelName === 'Seed')
+                if (seedModelLink && seedModelLink.modelId) {
+                  await verifyPropertiesPersisted(seedModelLink.modelId, 'Seed', 10, 100)
+                } else if (updatedModelLinks.length > 0 && updatedModelLinks[0].modelId) {
+                  // Fallback to first model if Seed not found
+                  await verifyPropertiesPersisted(updatedModelLinks[0].modelId, updatedModelLinks[0].modelName || 'unknown', 10, 100)
+                }
               }
             } else {
               console.log(`[loadOrCreateSchema] Schema exists with all models and properties already in database`)

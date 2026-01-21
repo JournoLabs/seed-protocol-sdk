@@ -67,6 +67,7 @@ export const loadOrCreateModel = fromCallback<
     const db = BaseDb.getAppDb()
     let schemaFileId = id // id is now the schemaFileId (string)
     let modelRecord: any = null
+    let foundBySchemaFileId = false // Track if model was found by schemaFileId
 
     console.log('has db', !!db)
 
@@ -83,6 +84,7 @@ export const loadOrCreateModel = fromCallback<
           
           if (dbModels.length > 0) {
             modelRecord = dbModels[0]
+            foundBySchemaFileId = true
             logger(`Found model "${modelName}" in database by schemaFileId "${schemaFileId}"`)
           }
         }
@@ -90,6 +92,8 @@ export const loadOrCreateModel = fromCallback<
         console.log('modelRecord', modelRecord)
 
         // If not found by ID, try by name
+        // But if we have a schemaFileId and the model found by name has a different schemaFileId,
+        // don't use it - we're creating a new model from a schema file with a specific ID
         if (!modelRecord) {
           const dbModels = await db
             .select()
@@ -100,17 +104,49 @@ export const loadOrCreateModel = fromCallback<
           console.log('dbModels.length', dbModels.length)
           
           if (dbModels.length > 0) {
-            modelRecord = dbModels[0]
-            const dbSchemaFileId = modelRecord.schemaFileId
-            // Only use database schemaFileId if no id was explicitly provided
-            // If an id was provided, we should use it (it might be creating a new model with a specific ID)
-            if (!id && dbSchemaFileId) {
-              schemaFileId = dbSchemaFileId
-              logger(`Using database schemaFileId "${schemaFileId}" for model "${modelName}" (no ID was provided)`)
-            } else if (id) {
-              logger(`Preserving provided id (schemaFileId) "${schemaFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
+            const foundModel = dbModels[0]
+            const dbSchemaFileId = foundModel.schemaFileId
+            
+            // CRITICAL: If we found a model in the database by name, check if there's already a cached instance
+            // with that schemaFileId. If so, we should use that instance's schemaFileId for the current instance.
+            // This handles the case where Model.create was called with a generated ID, but the model
+            // already exists in the database with a different ID. By updating the current instance's
+            // schemaFileId to match the database, both will point to the same cached instance.
+            if (dbSchemaFileId) {
+              try {
+                const { Model } = await import('@/Model/Model')
+                if (Model.instanceCacheById.has(dbSchemaFileId)) {
+                  logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
+                  // Update the current instance's schemaFileId to match the database
+                  // This ensures both instances point to the same cached instance
+                  modelRecord = foundModel
+                  schemaFileId = dbSchemaFileId
+                  logger(`Using existing cached instance with schemaFileId "${schemaFileId}" for model "${modelName}"`)
+                }
+              } catch (error) {
+                logger(`Error checking Model cache for schemaFileId "${dbSchemaFileId}": ${error}`)
+                // Fall through to normal processing
+              }
             }
-            logger(`Found model "${modelName}" in database by name, schemaFileId: "${schemaFileId}"`)
+            
+            // If we have a schemaFileId and it doesn't match the found model's schemaFileId,
+            // this is a new model from a schema file - don't use the existing model
+            // UNLESS we found a cached instance above (in which case modelRecord is already set)
+            if (!modelRecord && schemaFileId && dbSchemaFileId && schemaFileId !== dbSchemaFileId) {
+              logger(`Model "${modelName}" found by name but has different schemaFileId (provided: "${schemaFileId}", db: "${dbSchemaFileId}"). Creating new model.`)
+              // Don't set modelRecord - we'll create a new model
+            } else if (!modelRecord) {
+              modelRecord = foundModel
+              // Only use database schemaFileId if no id was explicitly provided
+              // If an id was provided, we should use it (it might be creating a new model with a specific ID)
+              if (!id && dbSchemaFileId) {
+                schemaFileId = dbSchemaFileId
+                logger(`Using database schemaFileId "${schemaFileId}" for model "${modelName}" (no ID was provided)`)
+              } else if (id) {
+                logger(`Preserving provided id (schemaFileId) "${schemaFileId}" for model "${modelName}" (ignoring database schemaFileId "${dbSchemaFileId}")`)
+              }
+              logger(`Found model "${modelName}" in database by name, schemaFileId: "${schemaFileId}"`)
+            }
           }
         }
 
@@ -224,52 +260,132 @@ export const loadOrCreateModel = fromCallback<
     }
 
     // Step 3: Check for duplicate names in database before creating new model
+    // Skip duplicate check only if we found a model record to use (modelRecord is set)
+    // OR if the model was found by schemaFileId (preserving original name from schema file)
+    // OR if schemaFileId is provided (schema models should preserve original names)
+    // Otherwise, check for duplicates when creating a new model
     let finalModelName = modelName
     if (db) {
-      try {
-        const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-        const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-        
-        // Query all models for this schema to check for duplicates (case-insensitive)
-        const allModelsForSchema = await db
-          .select({
-            name: modelsTable.name,
-          })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(schemasTable.name, schemaName))
-        
-        const lowerModelName = modelName.toLowerCase()
-        const existingNumbers = new Set<number>()
-        
-        // Check for exact match (case-insensitive) or matches with number suffix
-        for (const dbModel of allModelsForSchema) {
-          const lowerDbName = dbModel.name.toLowerCase()
-          if (lowerDbName === lowerModelName) {
-            existingNumbers.add(0) // Base name exists
-          } else if (lowerDbName.startsWith(lowerModelName + ' ')) {
-            // Check if it's the base name followed by a space and a number
-            const suffix = lowerDbName.slice(lowerModelName.length + 1)
-            const number = parseInt(suffix, 10)
-            if (!isNaN(number) && suffix === number.toString()) {
-              existingNumbers.add(number)
+      // Only skip duplicate check if:
+      // 1. We found a model record to use (modelRecord is set), OR
+      // 2. The model was found by schemaFileId (preserving original name from schema file), OR
+      // 3. schemaFileId is provided (schema models should preserve original names from schema files)
+      const shouldSkipDuplicateCheck = modelRecord !== null || foundBySchemaFileId || !!schemaFileId
+      
+      logger(`Duplicate check: modelRecord=${modelRecord !== null}, foundBySchemaFileId=${foundBySchemaFileId}, schemaFileId=${schemaFileId}, shouldSkip=${shouldSkipDuplicateCheck}`)
+      
+      if (!shouldSkipDuplicateCheck) {
+        try {
+          const lowerModelName = modelName.toLowerCase()
+          const existingNumbers = new Set<number>()
+          
+          // First, check Model cache for models (includes models from imported schemas that may not be in DB yet)
+          try {
+            const { Model } = await import('@/Model/Model')
+            
+            // Check name-based cache for this schema
+            logger(`Checking Model cache for duplicates in schema "${schemaName}"`)
+            for (const [nameKey, modelFileId] of Model.instanceCacheByName.entries()) {
+              const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
+              if (cachedSchemaName === schemaName && cachedModelName) {
+                const lowerCachedName = cachedModelName.toLowerCase()
+                if (lowerCachedName === lowerModelName) {
+                  existingNumbers.add(0) // Base name exists
+                  logger(`Found duplicate in Model cache: "${cachedModelName}" matches "${modelName}"`)
+                } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
+                  // Check if it's the base name followed by a space and a number
+                  const suffix = lowerCachedName.slice(lowerModelName.length + 1)
+                  const number = parseInt(suffix, 10)
+                  if (!isNaN(number) && suffix === number.toString()) {
+                    existingNumbers.add(number)
+                    logger(`Found numbered variant in Model cache: "${cachedModelName}" (number: ${number})`)
+                  }
+                }
+              }
+            }
+            
+            // Also check legacy cache
+            for (const [nameKey] of (Model as any).instanceCache?.keys() || []) {
+              const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
+              if (cachedSchemaName === schemaName && cachedModelName) {
+                const lowerCachedName = cachedModelName.toLowerCase()
+                if (lowerCachedName === lowerModelName) {
+                  existingNumbers.add(0) // Base name exists
+                  logger(`Found duplicate in Model legacy cache: "${cachedModelName}" matches "${modelName}"`)
+                } else if (lowerCachedName.startsWith(lowerModelName + ' ')) {
+                  // Check if it's the base name followed by a space and a number
+                  const suffix = lowerCachedName.slice(lowerModelName.length + 1)
+                  const number = parseInt(suffix, 10)
+                  if (!isNaN(number) && suffix === number.toString()) {
+                    existingNumbers.add(number)
+                    logger(`Found numbered variant in Model legacy cache: "${cachedModelName}" (number: ${number})`)
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            logger(`Error checking Model cache for duplicates: ${error}`)
+            // Continue with database check
+          }
+          
+          // Also check database for models (in case they're persisted but not in Schema context)
+          if (db) {
+            const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+            const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+            
+            // Query all models for this schema to check for duplicates (case-insensitive)
+            logger(`Checking database for duplicate model names in schema "${schemaName}"`)
+            const allModelsForSchema = await db
+              .select({
+                name: modelsTable.name,
+              })
+              .from(modelsTable)
+              .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+              .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+              .where(eq(schemasTable.name, schemaName))
+            
+            logger(`Found ${allModelsForSchema.length} models in database for schema "${schemaName}": ${allModelsForSchema.map(m => m.name).join(', ')}`)
+            
+            // Check for exact match (case-insensitive) or matches with number suffix
+            for (const dbModel of allModelsForSchema) {
+              const lowerDbName = dbModel.name.toLowerCase()
+              if (lowerDbName === lowerModelName) {
+                existingNumbers.add(0) // Base name exists
+                logger(`Found duplicate in database: "${dbModel.name}" matches "${modelName}"`)
+              } else if (lowerDbName.startsWith(lowerModelName + ' ')) {
+                // Check if it's the base name followed by a space and a number
+                const suffix = lowerDbName.slice(lowerModelName.length + 1)
+                const number = parseInt(suffix, 10)
+                if (!isNaN(number) && suffix === number.toString()) {
+                  existingNumbers.add(number)
+                  logger(`Found numbered variant in database: "${dbModel.name}" (number: ${number})`)
+                }
+              }
             }
           }
-        }
-        
-        // If duplicates found, generate unique name
-        if (existingNumbers.has(0)) {
-          let nextNumber = 1
-          while (existingNumbers.has(nextNumber)) {
-            nextNumber++
+          
+          // If duplicates found, generate unique name
+          logger(`Duplicate check results: existingNumbers=${Array.from(existingNumbers).join(', ')}, hasBaseName=${existingNumbers.has(0)}`)
+          if (existingNumbers.has(0)) {
+            let nextNumber = 1
+            while (existingNumbers.has(nextNumber)) {
+              nextNumber++
+            }
+            finalModelName = `${modelName} ${nextNumber}`
+            logger(`Found duplicate model name "${modelName}" in schema "${schemaName}", using unique name "${finalModelName}"`)
+          } else {
+            logger(`No duplicate found for model name "${modelName}" in schema "${schemaName}"`)
           }
-          finalModelName = `${modelName} ${nextNumber}`
-          logger(`Found duplicate model name "${modelName}" in schema "${schemaName}", using unique name "${finalModelName}"`)
+        } catch (error) {
+          logger(`Error checking for duplicate model names: ${error}`)
+          // Continue with original name if check fails
         }
-      } catch (error) {
-        logger(`Error checking for duplicate model names: ${error}`)
-        // Continue with original name if check fails
+      } else {
+        if (foundBySchemaFileId) {
+          logger(`Preserving original model name "${modelName}" for model found by schemaFileId (schemaFileId: ${schemaFileId})`)
+        } else if (modelRecord) {
+          logger(`Using existing model name "${modelName}" from database (modelRecord found)`)
+        }
       }
     }
     
@@ -291,6 +407,7 @@ export const loadOrCreateModel = fromCallback<
     
     // Update modelName in context and cache if it was changed (send after success event)
     if (finalModelName !== modelName) {
+      logger(`Model name changed from "${modelName}" to "${finalModelName}", updating cache and context`)
       // Update the cache index
       const { Model } = await import('@/Model/Model')
       Model.updateNameIndex(modelName, finalModelName, schemaName, schemaFileId)
@@ -300,6 +417,9 @@ export const loadOrCreateModel = fromCallback<
         type: 'updateContext',
         modelName: finalModelName,
       })
+      logger(`Sent updateContext event with modelName="${finalModelName}"`)
+    } else {
+      logger(`Model name unchanged: "${modelName}"`)
     }
   }
 
