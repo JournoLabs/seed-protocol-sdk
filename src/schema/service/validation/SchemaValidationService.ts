@@ -195,7 +195,7 @@ export class SchemaValidationService {
           return {
             field: fieldPath,
             message: enhancedMessage,
-            code: err.type || 'validation_error',
+            code: String(err.type || 'validation_error'),
             severity: 'error' as const,
           }
         }))
@@ -275,7 +275,7 @@ export class SchemaValidationService {
           return {
             field: fieldPath,
             message: enhancedMessage,
-            code: err.type || 'value_validation_error',
+            code: String(err.type || 'value_validation_error'),
             severity: 'error' as const,
           }
         }))

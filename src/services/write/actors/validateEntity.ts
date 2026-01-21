@@ -21,7 +21,8 @@ export const validateEntity = fromPromise<
   ValidateEntityOutput
 >(async ({ input }) => {
   // Type assertion to fix XState v5 type inference bug
-  const entityInput = input as ValidateEntityInput
+  // Convert through unknown to avoid type overlap error
+  const entityInput = input as unknown as ValidateEntityInput
   
   const _validate = async (): Promise<ValidateEntityOutput> => {
     try {
