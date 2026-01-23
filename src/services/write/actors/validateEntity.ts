@@ -14,8 +14,8 @@ type ValidateEntityOutput = {
   errors: ValidationError[]
 }
 
-// @ts-expect-error - XState v5 type inference bug: incorrectly expects ValidateEntityOutput for input
-// The actor correctly expects ValidateEntityInput, but TypeScript infers the wrong type
+// XState v5 type inference bug: fromPromise types are inverted
+// We use type assertion to work around this
 export const validateEntity = fromPromise<
   ValidateEntityInput,
   ValidateEntityOutput
@@ -169,5 +169,6 @@ export const validateEntity = fromPromise<
   }
 
   return await _validate()
-})
+// @ts-expect-error - XState v5 type inference bug: fromPromise incorrectly expects output type to match input type
+}) as any
 

@@ -1054,9 +1054,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       expect(oldName).toBeDefined()
       expect(oldName).toBe('oldPropertyName')
       
-      // Get modelId from property context for database queries
+      // Get modelId and schemaFileId from property context for database queries
       const propertyContext = (property as any)._getSnapshotContext()
       const modelId = propertyContext.modelId
+      const schemaFileId = propertyContext._propertyFileId || (typeof propertyContext.id === 'string' ? propertyContext.id : undefined)
       
       // Wait a bit for property to be written to database if it wasn't already
       await new Promise(resolve => setTimeout(resolve, 300))
@@ -1085,7 +1086,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       // Wait for update to complete (including database save via compareAndMarkDraft)
       // Need to wait for the state machine to complete the compareAndMarkDraft state
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 300))
+      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Verify name changed in memory
       expect(property.name).toBe(newName)
@@ -1114,6 +1115,25 @@ testDescribe('ModelProperty Integration Tests', () => {
         expect(dbProperties.length).toBeGreaterThan(0)
         expect(dbProperties[0].name).toBe(newName)
         
+        // CRITICAL: Verify property can still be found by schemaFileId after name change
+        // This ensures persistence works correctly
+        if (schemaFileId) {
+          const propertyBySchemaFileId = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.schemaFileId, schemaFileId),
+                eq(propertiesTable.modelId, modelId)
+              )
+            )
+            .limit(1)
+          
+          expect(propertyBySchemaFileId.length).toBe(1)
+          expect(propertyBySchemaFileId[0].name).toBe(newName)
+          expect(propertyBySchemaFileId[0].schemaFileId).toBe(schemaFileId)
+        }
+        
         // Verify old name no longer exists in database (if it existed before)
         if (oldName) {
           const oldDbProperties = await db
@@ -1132,6 +1152,237 @@ testDescribe('ModelProperty Integration Tests', () => {
           // The key assertion is that the new name exists in the database
         }
         expect(dbProperties.length).toBeGreaterThan(0)
+      }
+    })
+
+    it('should save property name changes to database even when _originalValues is not initialized yet', async () => {
+      // This test covers the race condition where name is changed before _originalValues is set
+      const schemaName = 'Test Schema Property Name Change Race'
+      const modelName = 'TestModel Property Name Change Race'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            initialName: {
+              id: propertyFileId,
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const model = Model.create(modelName, schemaName)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const propertyData = await getPropertySchema(modelName, 'initialName')
+      expect(propertyData).toBeDefined()
+      
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData)
+      
+      // DON'T wait for idle - change the name immediately before _originalValues is initialized
+      // This simulates the race condition scenario
+      const newName = 'ChangedBeforeInit'
+      property.name = newName
+      
+      // Now wait for the state machine to process the change
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Verify name changed in memory
+      expect(property.name).toBe(newName)
+      
+      // Verify database was updated with new name
+      const db = BaseDb.getAppDb()
+      if (db) {
+        const propertyContext = (property as any)._getSnapshotContext()
+        const modelId = propertyContext.modelId
+        
+        if (modelId) {
+          // Verify property exists in database with new name
+          const dbProperties = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.modelId, modelId),
+                eq(propertiesTable.name, newName)
+              )
+            )
+            .limit(1)
+          
+          expect(dbProperties.length).toBeGreaterThan(0)
+          expect(dbProperties[0].name).toBe(newName)
+          
+          // Verify property can be found by schemaFileId
+          const propertyBySchemaFileId = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.schemaFileId, propertyFileId),
+                eq(propertiesTable.modelId, modelId)
+              )
+            )
+            .limit(1)
+          
+          expect(propertyBySchemaFileId.length).toBe(1)
+          expect(propertyBySchemaFileId[0].name).toBe(newName)
+        }
+      }
+    })
+
+    it('should persist property name changes across reloads (simulating page reload)', async () => {
+      // This test simulates what happens when a user changes a name and then reloads the page
+      const schemaName = 'Test Schema Property Name Persistence'
+      const modelName = 'TestModel Property Name Persistence'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            originalPropertyName: {
+              id: propertyFileId,
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const model = Model.create(modelName, schemaName)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const propertyData = await getPropertySchema(modelName, 'originalPropertyName')
+      expect(propertyData).toBeDefined()
+      
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      // Create property and change name
+      const property = ModelProperty.create(propertyData)
+      await waitForModelPropertyIdle(property)
+      
+      const newName = 'PersistedPropertyName'
+      property.name = newName
+      
+      // Wait for database save to complete
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Verify name changed in memory
+      expect(property.name).toBe(newName)
+      
+      // "Reload" - unload the property and reload it from database
+      property.unload()
+      
+      // Wait a bit to ensure unload completed
+      await new Promise(resolve => setTimeout(resolve, 200))
+      
+      // Reload property from database using schemaFileId (simulating useModelProperties)
+      const reloadedProperty = await ModelProperty.createById(propertyFileId)
+      expect(reloadedProperty).toBeDefined()
+      
+      if (reloadedProperty) {
+        await waitForModelPropertyIdle(reloadedProperty)
+        
+        // Verify the name change persisted
+        expect(reloadedProperty.name).toBe(newName)
+        
+        // Verify it's the same property (same schemaFileId)
+        const reloadedContext = (reloadedProperty as any)._getSnapshotContext()
+        const originalContext = (property as any)._getSnapshotContext()
+        const reloadedSchemaFileId = reloadedContext._propertyFileId || (typeof reloadedContext.id === 'string' ? reloadedContext.id : undefined)
+        const originalSchemaFileId = originalContext._propertyFileId || (typeof originalContext.id === 'string' ? originalContext.id : undefined)
+        
+        expect(reloadedSchemaFileId).toBe(originalSchemaFileId)
+        expect(reloadedSchemaFileId).toBe(propertyFileId)
+      }
+    })
+
+    it('should correctly detect name changes in comparison logic', async () => {
+      // This test verifies that the comparison logic in compareAndMarkDraft correctly detects name changes
+      const schemaName = 'Test Schema Property Name Comparison'
+      const modelName = 'TestModel Property Name Comparison'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            beforeName: {
+              id: generateId(),
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const model = Model.create(modelName, schemaName)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const propertyData = await getPropertySchema(modelName, 'beforeName')
+      expect(propertyData).toBeDefined()
+      
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData)
+      await waitForModelPropertyIdle(property)
+      
+      // Verify _originalValues is set (needed for comparison)
+      const contextBefore = (property as any)._getSnapshotContext()
+      expect(contextBefore._originalValues).toBeDefined()
+      expect(contextBefore._originalValues?.name).toBe('beforeName')
+      
+      // Change name
+      const newName = 'afterName'
+      property.name = newName
+      
+      // Wait for state machine to process (validating -> compareAndMarkDraft -> idle)
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Verify name changed
+      expect(property.name).toBe(newName)
+      
+      // Verify isEdited flag is set (indicates comparison detected the change)
+      expect(property.isEdited).toBe(true)
+      
+      // Verify database was updated
+      const db = BaseDb.getAppDb()
+      if (db) {
+        const contextAfter = (property as any)._getSnapshotContext()
+        const modelId = contextAfter.modelId
+        
+        if (modelId) {
+          const dbProperties = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.modelId, modelId),
+                eq(propertiesTable.name, newName)
+              )
+            )
+            .limit(1)
+          
+          expect(dbProperties.length).toBeGreaterThan(0)
+          expect(dbProperties[0].name).toBe(newName)
+          expect(dbProperties[0].isEdited).toBe(true)
+        }
       }
     })
   })

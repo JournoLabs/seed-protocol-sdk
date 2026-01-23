@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/cli",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "CLI tool for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",

@@ -16,20 +16,30 @@ export const compareAndMarkDraft = fromCallback<
     // This handles the case where the name is changed before _originalValues is initialized
     if (!context._originalValues) {
       logger('No original values to compare against')
-      logger(`[compareAndMarkDraft] Context: modelName=${context.modelName}, name=${context.name}, id=${context.id}`)
+      logger(`[compareAndMarkDraft] Context: modelName=${context.modelName}, name=${context.name}, id=${context.id}, _propertyFileId=${context._propertyFileId}`)
       
       // If we have a name and modelName, try to save to database anyway
       // This ensures name changes are persisted even if _originalValues isn't initialized yet
-      if (context.modelName && context.name && (context.id || context._propertyFileId)) {
-        logger(`[compareAndMarkDraft] _originalValues not set, but saving to database anyway for property ${context.modelName}:${context.name}`)
+      // We need either schemaFileId (id or _propertyFileId) to find the property in the database
+      const schemaFileId = context._propertyFileId || (typeof context.id === 'string' ? context.id : undefined)
+      if (context.modelName && context.name && schemaFileId) {
+        logger(`[compareAndMarkDraft] _originalValues not set, but saving to database anyway for property ${context.modelName}:${context.name} (schemaFileId: ${schemaFileId})`)
         try {
           const { savePropertyToDb } = await import('@/helpers/db')
-          await savePropertyToDb(context)
+          // Ensure _propertyFileId is set for savePropertyToDb to find the property
+          const contextWithFileId = {
+            ...context,
+            _propertyFileId: schemaFileId,
+          }
+          await savePropertyToDb(contextWithFileId)
           logger(`[compareAndMarkDraft] Successfully saved property ${context.modelName}:${context.name} to database (no _originalValues)`)
         } catch (error) {
           logger(`[compareAndMarkDraft] Error saving property to database (no _originalValues): ${error}`)
-          // Don't throw - this is a best-effort save
+          // Don't throw - this is a best-effort save, but log the error for debugging
+          console.error(`[compareAndMarkDraft] Failed to save property ${context.modelName}:${context.name}:`, error)
         }
+      } else {
+        logger(`[compareAndMarkDraft] Cannot save property ${context.modelName}:${context.name} - missing required fields (schemaFileId: ${schemaFileId})`)
       }
       return
     }
@@ -37,13 +47,37 @@ export const compareAndMarkDraft = fromCallback<
     logger(`[compareAndMarkDraft] Comparing: context.name=${context.name}, _originalValues.name=${context._originalValues?.name}`)
     
     // Compare current values with original
-    const hasChanges = Object.keys(context).some(key => {
-      if (key.startsWith('_')) return false // Skip internal fields
-      const changed = context[key] !== context._originalValues?.[key]
-      if (changed && key === 'name') {
-        logger(`[compareAndMarkDraft] Name change detected: "${context._originalValues?.name}" -> "${context[key]}"`)
+    // Only compare property fields, not internal fields
+    const propertyFields = ['name', 'dataType', 'ref', 'refModelName', 'refModelId', 'refValueType', 'storageType', 'localStorageDir', 'filenameSuffix', 'modelName', 'modelId']
+    const hasChanges = propertyFields.some(key => {
+      const currentValue = (context as any)[key]
+      const originalValue = (context._originalValues as any)?.[key]
+      
+      // Handle name changes specifically
+      if (key === 'name') {
+        const nameChanged = currentValue !== originalValue
+        if (nameChanged) {
+          logger(`[compareAndMarkDraft] Name change detected: "${originalValue}" -> "${currentValue}"`)
+        }
+        return nameChanged
       }
-      return changed
+      
+      // Handle ref fields - compare by name
+      if (key === 'ref' || key === 'refModelName') {
+        const currentRef = context.refModelName || context.ref
+        const originalRef = context._originalValues?.refModelName || context._originalValues?.ref
+        // Both undefined/null means no ref, so they're the same
+        if (!currentRef && !originalRef) return false
+        return currentRef !== originalRef
+      }
+      
+      // For other fields, compare values (handling undefined/null)
+      if (currentValue === undefined && originalValue === undefined) return false
+      if (currentValue === null && originalValue === null) return false
+      if (currentValue === undefined && originalValue === null) return false
+      if (currentValue === null && originalValue === undefined) return false
+      
+      return currentValue !== originalValue
     })
 
     if (hasChanges) {

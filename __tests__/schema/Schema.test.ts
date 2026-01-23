@@ -1248,7 +1248,7 @@ testDescribe('Schema Integration Tests', () => {
       // Create a new Model with the Schema instance
       const model = Model.create('TestModel', schema, {
         properties: {
-          title: { dataType: 'String' },
+          title: { dataType: 'Text' },
           content: { dataType: 'Text' },
         },
       })

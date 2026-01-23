@@ -1358,10 +1358,50 @@ export async function writeModelToDb(
   if (existingJoin.length === 0) {
     // Only provide modelId and schemaId - id is auto-increment and should not be included
     // Don't use type cast - let Drizzle infer the correct type without id
-    await db.insert(modelSchemas).values({
-      modelId,
-      schemaId: data.schemaId,
-    })
+    
+    // Verify both modelId and schemaId exist before inserting join record
+    try {
+      // Verify modelId exists
+      const modelCheck = await db
+        .select({ id: modelsTable.id })
+        .from(modelsTable)
+        .where(eq(modelsTable.id, modelId))
+        .limit(1)
+      
+      if (modelCheck.length === 0) {
+        throw new Error(`Model with id ${modelId} does not exist in database. Cannot create join record.`)
+      }
+      
+      // Verify schemaId exists (double-check)
+      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+      const schemaCheck = await db
+        .select({ id: schemasTable.id })
+        .from(schemasTable)
+        .where(eq(schemasTable.id, data.schemaId))
+        .limit(1)
+      
+      if (schemaCheck.length === 0) {
+        throw new Error(`Schema with id ${data.schemaId} does not exist in database. Cannot create join record.`)
+      }
+      
+      logger(`Creating join record: modelId=${modelId}, schemaId=${data.schemaId} (both verified to exist)`)
+      
+      await db.insert(modelSchemas).values({
+        modelId,
+        schemaId: data.schemaId,
+      })
+      
+      logger(`Successfully created join record for model ${data.modelName} (id: ${modelId}) to schema (id: ${data.schemaId})`)
+    } catch (error: any) {
+      if (error?.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+        logger(`FOREIGN KEY constraint failed when creating join record for model "${data.modelName}"`)
+        logger(`modelId: ${modelId}, schemaId: ${data.schemaId}`)
+        logger(`Error details:`, error)
+        // Re-throw with more context
+        throw new Error(`FOREIGN KEY constraint failed when creating join record for model "${data.modelName}" (modelId: ${modelId}, schemaId: ${data.schemaId}). ${error.message}`)
+      }
+      throw error
+    }
   }
   
   // Write properties if provided

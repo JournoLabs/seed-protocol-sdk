@@ -72,6 +72,9 @@ export const propertyMachine = setup({
             isDbReady: true,
           }),
         },
+        waitForDbError: {
+          target: 'error',
+        },
       },
       invoke: {
         src: 'waitForDb',

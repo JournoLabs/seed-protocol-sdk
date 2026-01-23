@@ -776,9 +776,10 @@ export class Model {
             
             if (schemaInstance) {
               const schemaContext = (schemaInstance as any)._getSnapshotContext()
-              const schemaFileId = schemaContext.id // id is the schemaFileId (string) in SchemaMachineContext
               
-              if (schemaFileId) {
+              // First, try to use _dbId directly from schema context (most reliable)
+              // But verify it exists in database before using it
+              if (schemaContext._dbId && typeof schemaContext._dbId === 'number' && schemaContext._dbId > 0) {
                 try {
                   const { BaseDb } = await import('@/db/Db/BaseDb')
                   const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
@@ -786,18 +787,55 @@ export class Model {
                   const db = BaseDb.getAppDb()
                   
                   if (db) {
-                    const schemaRecords = await db
-                      .select()
+                    const verifySchema = await db
+                      .select({ id: schemasTable.id })
                       .from(schemasTable)
-                      .where(eq(schemasTable.schemaFileId, schemaFileId))
+                      .where(eq(schemasTable.id, schemaContext._dbId))
                       .limit(1)
                     
-                    if (schemaRecords.length > 0) {
-                      schemaId = schemaRecords[0].id
+                    if (verifySchema.length > 0) {
+                      schemaId = schemaContext._dbId
+                      logger(`Using schema _dbId directly from Schema context: ${schemaId} (verified in database)`)
+                    } else {
+                      logger(`WARNING: Schema _dbId ${schemaContext._dbId} from context does not exist in database. Falling back to schemaFileId lookup.`)
                     }
                   }
                 } catch (error) {
-                  logger(`Error looking up schemaId: ${error}`)
+                  logger(`WARNING: Could not verify schema _dbId: ${error}. Falling back to schemaFileId lookup.`)
+                }
+              }
+              
+              // Fall back to database lookup by schemaFileId if _dbId wasn't available or invalid
+              if (!schemaId) {
+                // Fall back to database lookup by schemaFileId
+                const schemaFileId = schemaContext.id // id is the schemaFileId (string) in SchemaMachineContext
+                
+                if (schemaFileId) {
+                  try {
+                    const { BaseDb } = await import('@/db/Db/BaseDb')
+                    const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+                    const { eq } = await import('drizzle-orm')
+                    const db = BaseDb.getAppDb()
+                    
+                    if (db) {
+                      const schemaRecords = await db
+                        .select()
+                        .from(schemasTable)
+                        .where(eq(schemasTable.schemaFileId, schemaFileId))
+                        .limit(1)
+                      
+                      if (schemaRecords.length > 0) {
+                        schemaId = schemaRecords[0].id
+                        logger(`Found schemaId ${schemaId} by schemaFileId lookup: ${schemaFileId}`)
+                      } else {
+                        logger(`WARNING: Schema not found in database by schemaFileId: ${schemaFileId}. Schema may not be fully loaded yet.`)
+                      }
+                    }
+                  } catch (error) {
+                    logger(`Error looking up schemaId: ${error}`)
+                  }
+                } else {
+                  logger(`WARNING: Schema instance has no schemaFileId (id) in context`)
                 }
               }
             } else if (schemaName) {
@@ -817,6 +855,9 @@ export class Model {
                   
                   if (schemaRecords.length > 0) {
                     schemaId = schemaRecords[0].id
+                    logger(`Found schemaId ${schemaId} by schema name lookup: ${schemaName}`)
+                  } else {
+                    logger(`WARNING: Schema not found in database by name: ${schemaName}`)
                   }
                 }
               } catch (error) {
@@ -824,7 +865,46 @@ export class Model {
               }
             }
             
-            if (schemaId && finalSnapshot.context.id) {
+            // Validate schemaId before proceeding
+            if (!schemaId || !Number.isInteger(schemaId) || schemaId <= 0) {
+              logger(`ERROR: Invalid schemaId (${schemaId}) for model "${finalSnapshot.context.modelName}". Cannot trigger write process.`)
+              logger(`Schema context:`, {
+                schemaFileId: schemaInstance ? (schemaInstance as any)._getSnapshotContext().id : 'N/A',
+                _dbId: schemaInstance ? (schemaInstance as any)._getSnapshotContext()._dbId : 'N/A',
+                schemaName: schemaName || 'N/A',
+              })
+            } else if (finalSnapshot.context.id) {
+              // Verify schema exists in database before proceeding (additional safety check)
+              try {
+                const { BaseDb } = await import('@/db/Db/BaseDb')
+                const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+                const { eq } = await import('drizzle-orm')
+                const db = BaseDb.getAppDb()
+                
+                if (db) {
+                  const schemaCheck = await db
+                    .select({ id: schemasTable.id })
+                    .from(schemasTable)
+                    .where(eq(schemasTable.id, schemaId))
+                    .limit(1)
+                  
+                  if (schemaCheck.length === 0) {
+                    const errorMsg = `Schema with id ${schemaId} does not exist in database. Cannot create model "${finalSnapshot.context.modelName}".`
+                    logger(`ERROR: ${errorMsg}`)
+                    throw new Error(errorMsg)
+                  }
+                  logger(`Verified schema ${schemaId} exists in database before creating model "${finalSnapshot.context.modelName}"`)
+                } else {
+                  logger(`WARNING: Database not available for schema verification. Proceeding anyway.`)
+                }
+              } catch (error) {
+                // If it's our validation error, re-throw it
+                if (error instanceof Error && error.message.includes('does not exist in database')) {
+                  throw error
+                }
+                logger(`WARNING: Could not verify schema exists in database: ${error}. Proceeding anyway.`)
+              }
+              
               // Track pending write
               Model.trackPendingWrite(finalSnapshot.context.id, schemaId) // id is now the schemaFileId (string)
               

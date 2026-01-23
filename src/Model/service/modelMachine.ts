@@ -241,6 +241,13 @@ export const modelMachine = setup({
           actions: assign(({ context, event }) => {
             const hasPendingProps = !!(context._pendingPropertyDefinitions && Object.keys(context._pendingPropertyDefinitions).length > 0)
             logger(`[loadOrCreateModelSuccess] Preserving _pendingPropertyDefinitions: ${hasPendingProps} (${Object.keys(context._pendingPropertyDefinitions || {}).length} properties)`)
+            
+            // Check if there's a pending model name update (set before this event to avoid validation trigger)
+            const finalModelName = (context as any)._pendingModelName || context.modelName
+            if ((context as any)._pendingModelName) {
+              logger(`[loadOrCreateModelSuccess] Applying pending model name: "${context.modelName}" -> "${finalModelName}"`)
+            }
+            
             return {
               ...context,
               id: event.model.id, // schemaFileId (string)
@@ -248,6 +255,10 @@ export const modelMachine = setup({
               _isEdited: (event.model as any)._isEdited ?? false, // Load isEdited from database
               _editedProperties: new Set<string>(),
               _validationErrors: undefined,
+              // Use final model name (may have been set via _pendingModelName to avoid validation trigger)
+              modelName: finalModelName,
+              // Clear the temporary field
+              _pendingModelName: undefined,
               // Preserve _pendingPropertyDefinitions if it exists
               _pendingPropertyDefinitions: context._pendingPropertyDefinitions,
               // Preserve _liveQueryPropertyIds if provided (set by loadOrCreateModel when loading from DB)

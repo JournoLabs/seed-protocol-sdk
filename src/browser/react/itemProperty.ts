@@ -7,9 +7,11 @@ import { IItemProperty } from '@/interfaces'
 import { useLiveQuery } from './liveQuery'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
+import { seeds } from '@/seedSchema'
 import { and, eq, isNotNull } from 'drizzle-orm'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import { propertyMachine } from '@/ItemProperty/service/propertyMachine'
+import { startCase } from 'lodash-es'
 
 const logger = debug('seedSdk:react:property')
 const propertiesLogger = debug('seedSdk:react:itemProperties')
@@ -343,24 +345,26 @@ export function useItemProperties(
               isNotNull(metadata.propertyName)
             )
           )
-      : db
-          .select({
-            propertyName: metadata.propertyName,
-            propertyValue: metadata.propertyValue,
-            seedLocalId: metadata.seedLocalId,
-            seedUid: metadata.seedUid,
-            modelType: metadata.modelType,
-            schemaUid: metadata.schemaUid,
-            createdAt: metadata.createdAt,
-            attestationCreatedAt: metadata.attestationCreatedAt,
-          })
-          .from(metadata)
-          .where(
-            and(
-              eq(metadata.seedLocalId, seedLocalId),
-              isNotNull(metadata.propertyName)
-            )
-          )
+      : seedLocalId
+          ? db
+              .select({
+                propertyName: metadata.propertyName,
+                propertyValue: metadata.propertyValue,
+                seedLocalId: metadata.seedLocalId,
+                seedUid: metadata.seedUid,
+                modelType: metadata.modelType,
+                schemaUid: metadata.schemaUid,
+                createdAt: metadata.createdAt,
+                attestationCreatedAt: metadata.attestationCreatedAt,
+              })
+              .from(metadata)
+              .where(
+                and(
+                  eq(metadata.seedLocalId, seedLocalId),
+                  isNotNull(metadata.propertyName)
+                )
+              )
+          : null
     
     propertiesLogger(`[useItemProperties] Query: created query object`, { queryType: seedUid ? 'seedUid' : 'seedLocalId' })
     return query
@@ -434,45 +438,173 @@ export function useItemProperties(
       return
     }
 
-    propertiesLogger(`[useItemProperties] fetchItemProperties: starting with ${propertiesTableData.length} records from table`)
+      propertiesLogger(`[useItemProperties] fetchItemProperties: starting with ${propertiesTableData?.length || 0} records from table`)
 
     try {
       setIsLoading(true)
       setError(null)
 
-      // Use propertiesTableData (database state) as the source of truth
-      // If empty, set properties to empty (liveQuery will update when data arrives)
-      if (!propertiesTableData || propertiesTableData.length === 0) {
-        propertiesLogger('[useItemProperties] fetchItemProperties: propertiesTableData is empty, setting properties to []')
+      const db = BaseDb.getAppDb()
+      if (!db) {
+        propertiesLogger('[useItemProperties] fetchItemProperties: no db available')
         setProperties([])
-        setError(null)
         setIsLoading(false)
         return
       }
+
+      // Get modelName from metadata records or from seeds table
+      let modelName: string | undefined
+      if (propertiesTableData && propertiesTableData.length > 0) {
+        const firstProperty = propertiesTableData[0]
+        if (firstProperty.modelType) {
+          modelName = startCase(firstProperty.modelType)
+        }
+      }
       
-      propertiesLogger(`[useItemProperties] fetchItemProperties: processing ${propertiesTableData.length} properties`)
+      // If we don't have modelName from metadata, try to get it from seeds table
+      if (!modelName) {
+        const seedRecords = await db
+          .select({ type: seeds.type })
+          .from(seeds)
+          .where(
+            seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!)
+          )
+          .limit(1)
+        
+        if (seedRecords.length > 0 && seedRecords[0].type) {
+          modelName = startCase(seedRecords[0].type)
+        }
+      }
+
+      // Get all ModelProperties for this Model
+      const modelProperties: string[] = []
+      if (modelName) {
+        try {
+          const { Model } = await import('@/Model/Model')
+          const model = await Model.getByNameAsync(modelName)
+          if (model && model.properties) {
+            for (const modelProperty of model.properties) {
+              if (modelProperty.name) {
+                modelProperties.push(modelProperty.name)
+              }
+            }
+          }
+        } catch (error) {
+          propertiesLogger(`[useItemProperties] Error getting ModelProperties for ${modelName}:`, error)
+          // Continue without ModelProperties - we'll still return properties from metadata
+        }
+      }
+
+      // Create a Set of property names that have metadata records
+      const propertiesWithMetadata = new Set<string>()
+      if (propertiesTableData) {
+        for (const dbProperty of propertiesTableData) {
+          if (dbProperty.propertyName) {
+            propertiesWithMetadata.add(dbProperty.propertyName)
+          }
+        }
+      }
 
       const _itemProperties: IItemProperty[] = []
 
-      // Iterate over propertiesTableData and create ItemProperty instances
-      for (const dbProperty of propertiesTableData) {
-        if (!dbProperty.propertyName) {
-          continue
-        }
-
-        try {
-          const itemProperty = await ItemProperty.find({
-            propertyName: dbProperty.propertyName,
-            seedLocalId: dbProperty.seedLocalId || undefined,
-            seedUid: dbProperty.seedUid || undefined,
-          })
-
-          if (itemProperty) {
-            _itemProperties.push(itemProperty)
+      // First, create ItemProperty instances for properties that have metadata records
+      if (propertiesTableData && propertiesTableData.length > 0) {
+        for (const dbProperty of propertiesTableData) {
+          if (!dbProperty.propertyName) {
+            continue
           }
-        } catch (error) {
-          logger(`[useItemProperties] Error creating ItemProperty for ${dbProperty.propertyName}:`, error)
-          // Continue with other properties even if one fails
+
+          try {
+            const itemProperty = await ItemProperty.find({
+              propertyName: dbProperty.propertyName,
+              seedLocalId: dbProperty.seedLocalId || undefined,
+              seedUid: dbProperty.seedUid || undefined,
+            })
+
+            if (itemProperty) {
+              _itemProperties.push(itemProperty as any as IItemProperty)
+            }
+          } catch (error) {
+            logger(`[useItemProperties] Error creating ItemProperty for ${dbProperty.propertyName}:`, error)
+            // Continue with other properties even if one fails
+          }
+        }
+      }
+
+      // Then, create ItemProperty instances for ModelProperties that don't have metadata records
+      if (modelName && modelProperties.length > 0) {
+        const resolvedSeedLocalId = propertiesTableData && propertiesTableData.length > 0 
+          ? propertiesTableData[0].seedLocalId || seedLocalId
+          : seedLocalId
+        const resolvedSeedUid = propertiesTableData && propertiesTableData.length > 0
+          ? propertiesTableData[0].seedUid || seedUid
+          : seedUid
+
+        for (const propertyName of modelProperties) {
+          // Skip if we already have a metadata record for this property
+          if (propertiesWithMetadata.has(propertyName)) {
+            continue
+          }
+
+          try {
+            // Create ItemProperty with empty value for properties without metadata records
+            const itemProperty = ItemProperty.create({
+              propertyName,
+              modelName,
+              seedLocalId: resolvedSeedLocalId || undefined,
+              seedUid: resolvedSeedUid || undefined,
+              propertyValue: null,
+            })
+
+            if (itemProperty) {
+              _itemProperties.push(itemProperty as any as IItemProperty)
+            }
+          } catch (error) {
+            logger(`[useItemProperties] Error creating ItemProperty for missing property ${propertyName}:`, error)
+            // Continue with other properties even if one fails
+          }
+        }
+      }
+
+      // Also add system properties like 'createdAt' if they don't exist
+      // Get createdAt from seeds table
+      if (seedLocalId || seedUid) {
+        const seedRecords = await db
+          .select({ createdAt: seeds.createdAt })
+          .from(seeds)
+          .where(
+            seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!)
+          )
+          .limit(1)
+        
+        if (seedRecords.length > 0 && seedRecords[0].createdAt) {
+          const createdAtPropertyName = 'createdAt'
+          const hasCreatedAtProperty = _itemProperties.some(p => p.propertyName === createdAtPropertyName)
+          
+          if (!hasCreatedAtProperty && modelName) {
+            try {
+              const resolvedSeedLocalId = propertiesTableData && propertiesTableData.length > 0 
+                ? propertiesTableData[0].seedLocalId || seedLocalId
+                : seedLocalId
+              const resolvedSeedUid = propertiesTableData && propertiesTableData.length > 0
+                ? propertiesTableData[0].seedUid || seedUid
+                : seedUid
+
+              const createdAtProperty = ItemProperty.create({
+                propertyName: createdAtPropertyName,
+                modelName,
+                seedLocalId: resolvedSeedLocalId || undefined,
+                seedUid: resolvedSeedUid || undefined,
+                propertyValue: seedRecords[0].createdAt.toString(),
+              })
+
+              if (createdAtProperty) {
+                _itemProperties.push(createdAtProperty as any as IItemProperty)
+              }
+            } catch (error) {
+              logger(`[useItemProperties] Error creating createdAt ItemProperty:`, error)
+            }
+          }
         }
       }
 

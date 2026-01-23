@@ -1,5 +1,5 @@
 import { assign, setup, fromCallback } from 'xstate'
-import type { EventObject } from 'xstate'
+import type { EventObject, DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
 
@@ -10,6 +10,7 @@ export type AddModelsMachineContext = {
   modelInstances?: Map<string, Model>
   modelFileIds?: Map<string, string>
   errors?: Array<{ modelName: string; error: Error }>
+  addedModels?: { addedModels: any }
   progress?: {
     stage: 'preparing' | 'creatingInstances' | 'collectingIds' | 'persisting'
     currentModel?: string
@@ -609,19 +610,26 @@ export const addModelsMachine = setup({
           modelFileIds: context.modelFileIds!,
         }),
         onDone: {
-          type: 'final',
-          output: ({ event }) => ({ addedModels: event.output.addedModels }),
+          target: '#addModels.success',
+          actions: assign({
+            addedModels: ({ event }: { event: DoneActorEvent<{ addedModels: any }> }) => ({ addedModels: event.output.addedModels }),
+          }),
         },
         onError: {
           target: 'error',
           actions: assign({
             errors: ({ context, event }) => [
               ...(context.errors || []),
-              { modelName: 'persist', error: event.error },
+              { modelName: 'persist', error: event.error instanceof Error ? event.error : new Error(String(event.error)) },
             ],
           }),
         },
       },
+    },
+    success: {
+      id: 'success',
+      type: 'final',
+      output: ({ context }) => ({ addedModels: context.addedModels?.addedModels || [] }),
     },
     error: {
       type: 'final',

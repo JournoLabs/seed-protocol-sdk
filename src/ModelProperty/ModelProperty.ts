@@ -59,9 +59,14 @@ export class ModelProperty {
   constructor(property: Static<typeof TProperty>) {
     // id is now the schemaFileId (string), _dbId is the database integer ID
     // Preserve _propertyFileId if it exists in the property object (from getPropertySchema)
+    // Convert null to undefined for optional fields (TypeBox validation expects undefined, not null)
     const serviceInput: ModelPropertyMachineContext = {
       ...property,
       _propertyFileId: (property as any)._propertyFileId || property.id,
+      refValueType: property.refValueType ?? undefined,
+      refModelId: property.refModelId ?? undefined,
+      ref: property.ref ?? undefined,
+      refModelName: property.refModelName ?? undefined,
     }
 
     this._service = createActor(modelPropertyMachine, {
@@ -777,7 +782,7 @@ export class ModelProperty {
       modelId: propertyRecord.modelId,
       modelName,
       refModelId: propertyRecord.refModelId || undefined,
-      refValueType: propertyRecord.refValueType as ModelPropertyDataTypes | undefined,
+      refValueType: propertyRecord.refValueType ? (propertyRecord.refValueType as ModelPropertyDataTypes) : undefined,
     }
     
     // Load isEdited from database

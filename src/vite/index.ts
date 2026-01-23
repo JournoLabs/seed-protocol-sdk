@@ -117,7 +117,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     name: 'seed-protocol:observer',
     enforce: 'pre',
 
-    config(userConfig) {
+    config(userConfig, env) {
       // Set up aliases early to override other plugins' fs polyfills
       const aliases: Array<{ find: string | RegExp; replacement: string }> = []
       
@@ -260,7 +260,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     name: 'seed-protocol:main',
     enforce: 'post',
 
-    config(userConfig) {
+    config(userConfig, env) {
       // Pre-optimize common dependencies to prevent incremental discovery
       // This reduces the number of reloads by ensuring dependencies are optimized upfront
       // Note: Only include if autoIncludeDeps is true, as these dependencies might not
@@ -318,8 +318,127 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         optimizeDepsConfig.entries = existingEntries
       }
 
+      // Configure build externals to prevent bundling Node.js-only packages
+      // These packages should not be bundled for browser builds
+      const nodeOnlyPackages = [
+        'drizzle-kit',
+        '@electric-sql/pglite',
+        'pg',
+        'postgres',
+        '@vercel/postgres',
+        '@neondatabase/serverless',
+        'mysql2',
+        'mysql2/promise',
+        '@planetscale/database',
+        'better-sqlite3',
+        'nunjucks',
+        'fsevents',
+      ]
+
+      // Node.js built-in modules that should be externalized
+      const nodeBuiltins = [
+        'url',
+        'path',
+        'http',
+        'http2',
+        'stream',
+        'crypto',
+        'net',
+        'https',
+        'zlib',
+        'child_process',
+        'fs',
+        'fs/promises',
+        'node:fs',
+        'node:fs/promises',
+        'node:url',
+        'node:path',
+        'node:http',
+        'node:http2',
+        'node:stream',
+        'node:crypto',
+        'node:net',
+        'node:https',
+        'node:zlib',
+        'node:child_process',
+      ]
+
+      const existingExternal = userConfig.build?.rollupOptions?.external
+      const existingExternalArray = Array.isArray(existingExternal)
+        ? existingExternal
+        : typeof existingExternal === 'string'
+        ? [existingExternal]
+        : []
+
+      // Merge with existing externals, avoiding duplicates
+      const allExternals = [
+        ...new Set([
+          ...existingExternalArray,
+          ...nodeOnlyPackages,
+          ...nodeBuiltins,
+        ]),
+      ]
+
+      // Create external function that checks both our list and user's function
+      const externalFunction = (id: string, importer?: string, isResolved?: boolean): boolean => {
+        // Check if it's a node-only package (exact match or subpath)
+        if (nodeOnlyPackages.some(pkg => id === pkg || id.startsWith(`${pkg}/`))) {
+          if (debug) {
+            log(`[build] Externalizing node-only package: ${id}`)
+          }
+          return true
+        }
+
+        // Check if it's a Node.js built-in
+        if (nodeBuiltins.includes(id)) {
+          if (debug) {
+            log(`[build] Externalizing Node.js built-in: ${id}`)
+          }
+          return true
+        }
+
+        // If user provided a function, call it first
+        if (typeof existingExternal === 'function') {
+          const userResult = existingExternal(id, importer, isResolved ?? false)
+          if (userResult) return true
+        }
+
+        // Otherwise check if it's in the array
+        return allExternals.includes(id)
+      }
+
+      // Configure worker format to 'es' to support code-splitting
+      // This is required for packages like sqlocal that use workers with dynamic imports
+      // Only set format if user hasn't explicitly configured it
+      const existingWorkerConfig = userConfig.worker
+      const workerConfig = existingWorkerConfig
+        ? {
+            ...existingWorkerConfig,
+            // Only override format if not already set (default is 'iife' which causes issues)
+            format: (existingWorkerConfig.format === 'es' || existingWorkerConfig.format === 'iife' 
+              ? existingWorkerConfig.format 
+              : 'es') as 'es' | 'iife',
+          }
+        : {
+            format: 'es' as const,
+          }
+
       return {
         optimizeDeps: optimizeDepsConfig,
+        worker: workerConfig,
+        build: {
+          rollupOptions: {
+            // Always use the function if we have node-only packages to externalize
+            // or if the user provided an external function
+            // Otherwise, use the array if we have externals
+            external:
+              nodeOnlyPackages.length > 0 || typeof existingExternal === 'function'
+                ? externalFunction
+                : allExternals.length > 0
+                ? allExternals
+                : undefined,
+          },
+        },
       }
     },
 

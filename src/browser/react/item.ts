@@ -1,24 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { createNewItem } from '@/db/write/createNewItem'
 import { Item } from '@/Item/Item'
 import { eventEmitter } from '@/eventBus'
-import { useImmer } from 'use-immer'
 import { orderBy } from 'lodash-es'
 import { getAreItemEventHandlersReady } from '@/events'
 import debug from 'debug'
-import { useGlobalServiceStatus, useIsDbReady } from '../react/services'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
-import { useSelector } from '@xstate/react'
-import { ClientManagerState } from '@/client/constants'
 import { IItem } from '@/interfaces'
+import { useIsClientReady } from './client'
+import { useLiveQuery } from './liveQuery'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { seeds } from '@/seedSchema'
+import { and, eq, isNotNull, isNull, or } from 'drizzle-orm'
+import type { SeedType } from '@/seedSchema/SeedSchema'
 
 const logger = debug('seedSdk:react:item')
 
 type UseItemReturn<T extends ModelValues<T>> = {
   item: IItem<T> | undefined
-  itemData: ItemData<T>
-  itemStatus: string | Record<string, unknown> | undefined
+  isLoading: boolean
+  error: Error | null
 }
 
 type UseItemProps = {
@@ -29,107 +31,130 @@ type UseItemProps = {
 
 type UseItem = <T extends ModelValues<T>>(props: UseItemProps) => UseItemReturn<T>
 
-type ItemData<T> = Record<string, Partial<T>>
-
 export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLocalId, seedUid }: UseItemProps) => {
-  const [itemData, setItemData] = useImmer<ItemData<T>>({})
   const [item, setItem] = useState<Item<T> | undefined>()
-  const [itemSubscription, setItemSubscription] = useState<
-    Subscription | undefined
-  >()
+  const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
+  const [error, setError] = useState<Error | null>(null)
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
 
-  const { status, } = useGlobalServiceStatus()
+  const isClientReady = useIsClientReady()
 
-  const isReadingDb = useRef(false)
+  const modelNameRef = useRef<string>(modelName)
+  const seedLocalIdRef = useRef<string | undefined>(seedLocalId)
+  const seedUidRef = useRef<string | undefined>(seedUid)
 
-  // Check if ClientManager is initialized (IDLE state or later)
-  const isInitialized = status === ClientManagerState.IDLE || 
-                        status === ClientManagerState.ADD_MODELS_TO_DB ||
-                        status === ClientManagerState.ADD_MODELS_TO_STORE ||
-                        status === ClientManagerState.PROCESS_SCHEMA_FILES ||
-                        status === ClientManagerState.SAVE_CONFIG ||
-                        status === ClientManagerState.DB_INIT
+  // Determine if we should be loading based on parameters
+  const shouldLoad = !!(isClientReady && (seedLocalIdRef.current || seedUidRef.current))
 
-  const itemStatus = useSelector(
-    item?.getService(),
-    (snapshot) => snapshot?.value,
-  )
-
-  const updateItem = useCallback(
-    (newItem: Item<T>) => {
-      setItemData((draft) => {
-        newItem.properties.forEach((property) => {
-          draft[property.propertyName] = property.value
-        })
-      })
-    },
-    [setItemData],
-  )
-
-  const readFromDb = useCallback(async () => {
-    if (
-      isReadingDb.current ||
-      !isInitialized ||
-      (!seedUid && !seedLocalId)
-    ) {
+  const loadItem = useCallback(async () => {
+    if (!shouldLoad) {
+      setItem(undefined)
+      setIsLoading(false)
+      setError(null)
       return
     }
-    isReadingDb.current = true
-    const foundItem = await Item.find({
-      modelName,
-      seedLocalId,
-      seedUid,
-    }) as Item<T> | undefined
+
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const foundItem = await Item.find({
+        modelName: modelNameRef.current,
+        seedLocalId: seedLocalIdRef.current,
+        seedUid: seedUidRef.current,
+      }) as Item<T> | undefined
+      
+      if (!foundItem) {
+        logger('[useItem] [loadItem] no item found', modelNameRef.current, seedLocalIdRef.current)
+        setItem(undefined)
+        setIsLoading(false)
+        setError(null)
+        return
+      }
+
+      setItem(foundItem)
+
+      // Check initial service state
+      const service = foundItem.getService()
+      const initialSnapshot = service.getSnapshot()
+      const isIdle = initialSnapshot.value === 'idle'
+      setIsLoading(!isIdle)
+      if (isIdle) {
+        setError(null)
+      }
+    } catch (error) {
+      logger('[useItem] Error loading item:', error)
+      setItem(undefined)
+      setIsLoading(false)
+      setError(error as Error)
+    }
+  }, [shouldLoad])
+
+  useEffect(() => {
+    modelNameRef.current = modelName
+    seedLocalIdRef.current = seedLocalId
+    seedUidRef.current = seedUid
+  }, [modelName, seedLocalId, seedUid])
+
+  // Fetch/refetch when parameters change or client becomes ready
+  useEffect(() => {
+    if (!shouldLoad) {
+      setItem(undefined)
+      setIsLoading(false)
+      setError(null)
+      return
+    }
+    loadItem()
+  }, [shouldLoad, loadItem])
+
+  // Subscribe to service changes when item is available
+  useEffect(() => {
+    if (!item) {
+      // Clean up subscription if item is not available
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+      return
+    }
+
+    // Clean up previous subscription
+    subscriptionRef.current?.unsubscribe()
+
+    // Subscribe to service changes
+    const subscription = item.getService().subscribe((snapshot: any) => {
+      // Update loading state based on service state
+      if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
+        const isIdle = snapshot.value === 'idle'
+        setIsLoading(!isIdle)
+        
+        // Clear error if service is in idle state
+        if (isIdle) {
+          setError(null)
+        } else if (snapshot.value === 'error') {
+          // Set error if service is in error state
+          setError(new Error('Item service error'))
+        }
+      }
+    })
     
-    if (!foundItem) {
-      logger('[useItem] [getItemFromDb] no item found', modelName, seedLocalId)
-      isReadingDb.current = false
-      return
-    }
-    setItem(foundItem)
-    updateItem(foundItem)
-    isReadingDb.current = false
-  }, [isInitialized,])
-
-  const listenerRef = useRef(readFromDb)
-
-  useEffect(() => {
-    listenerRef.current = readFromDb
-  }, [readFromDb])
-
-  useEffect(() => {
-    if (isInitialized) {
-      listenerRef.current()
-    }
-  }, [isInitialized,])
-
-  // Subscribe to item service for updates (replaces eventBus)
-  // Item's liveQuery subscription will handle cross-instance updates automatically
-  useEffect(() => {
-    if (item && !itemSubscription) {
-      const subscription = item.subscribe((_) => {
-        // Item updates are now handled by liveQuery, but we still subscribe to service changes
-        // to update local state when context changes
-        updateItem(item)
-      })
-      setItemSubscription(subscription)
-    }
+    subscriptionRef.current = subscription
 
     return () => {
-      itemSubscription?.unsubscribe()
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
     }
-  }, [item, itemSubscription, updateItem])
+  }, [item])
 
   return {
     item,
-    itemData,
-    itemStatus,
+    isLoading,
+    error,
   }
 }
 
 type UseItemsReturn = {
   items: IItem<any>[]
-  isReadingDb: boolean
+  isLoading: boolean
+  error: Error | null
 }
 
 type UseItemsProps = {
@@ -140,65 +165,232 @@ type UseItemsProps = {
 type UseItems = (props: UseItemsProps) => UseItemsReturn
 
 export const useItems: UseItems = ({ modelName, deleted=false }) => {
-  const [items, setItems] = useImmer<IItem<any>[]>([])
+  const [items, setItems] = useState<IItem<any>[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+  const isClientReady = useIsClientReady()
+  const subscriptionsRef = useRef<Map<IItem<any>, Subscription>>(new Map())
+  const loadingItemsRef = useRef<Set<IItem<any>>>(new Set())
+  const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
+  const itemsRef = useRef<IItem<any>[]>([]) // Track items for comparison without triggering effects
 
-  const { status, } = useGlobalServiceStatus()
+  // Watch the seeds table for changes
+  // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
+  const db = isClientReady ? BaseDb.getAppDb() : null
+  const seedsQuery = useMemo(() => {
+    if (!db) return null
+    
+    const conditions: any[] = []
+    
+    if (modelName) {
+      conditions.push(eq(seeds.type, modelName.toLowerCase()))
+    }
+    
+    if (deleted) {
+      conditions.push(
+        or(
+          isNotNull(seeds._markedForDeletion),
+          eq(seeds._markedForDeletion, 1)
+        ) as any
+      )
+    } else {
+      conditions.push(
+        or(
+          isNull(seeds._markedForDeletion),
+          eq(seeds._markedForDeletion, 0)
+        ) as any
+      )
+    }
+    
+    return db
+      .select()
+      .from(seeds)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+  }, [db, isClientReady, modelName, deleted])
+  const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
-  const modelNameRef = useRef<string | undefined>(modelName)
+  const fetchItems = useCallback(async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      
+      const allItems = await Item.all(modelName, deleted)
+      
+      // Filter items into ready vs loading based on service state
+      const readyItems: IItem<any>[] = []
+      const loadingItemsList: IItem<any>[] = []
+      
+      // Clear previous loading set
+      loadingItemsRef.current.clear()
+      
+      for (const item of allItems) {
+        const snapshot = item.getService().getSnapshot()
+        const isIdle = snapshot.value === 'idle'
+        
+        if (isIdle) {
+          // Item is ready
+          readyItems.push(item)
+        } else {
+          // Item is still loading - subscribe to state changes
+          loadingItemsList.push(item)
+          loadingItemsRef.current.add(item)
+          
+          // Clean up any existing subscription for this item
+          const existingSub = subscriptionsRef.current.get(item)
+          if (existingSub) {
+            existingSub.unsubscribe()
+          }
+          
+          // Subscribe to state changes
+          const subscription = item.getService().subscribe((snapshot: any) => {
+            if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
+              const isIdle = snapshot.value === 'idle'
+              
+              if (isIdle) {
+                // Item is now ready - update state
+                setItems(prev => {
+                  // Check if item is already in the list (by seedLocalId or seedUid)
+                  const exists = prev.some(i => 
+                    (i.seedLocalId && item.seedLocalId && i.seedLocalId === item.seedLocalId) ||
+                    (i.seedUid && item.seedUid && i.seedUid === item.seedUid)
+                  )
+                  if (exists) {
+                    return prev
+                  }
+                  // Add the newly ready item
+                  const updated = [...prev, item]
+                  itemsRef.current = updated // Update ref for comparison
+                  return updated
+                })
+                
+                // Remove from loading set and clean up subscription
+                loadingItemsRef.current.delete(item)
+                subscription.unsubscribe()
+                subscriptionsRef.current.delete(item)
+                
+                // Update loading state based on remaining loading items
+                setIsLoading(loadingItemsRef.current.size > 0)
+              } else if (snapshot.value === 'error') {
+                // Item failed to load - clean up subscription
+                loadingItemsRef.current.delete(item)
+                subscription.unsubscribe()
+                subscriptionsRef.current.delete(item)
+                
+                // Update loading state based on remaining loading items
+                setIsLoading(loadingItemsRef.current.size > 0)
+              }
+            }
+          })
+          
+          subscriptionsRef.current.set(item, subscription)
+        }
+      }
+      
+      // Set initial ready items
+      setItems(readyItems)
+      itemsRef.current = readyItems // Update ref for comparison
+      setError(null)
+      setIsLoading(loadingItemsList.length > 0) // Still loading if any items are loading
+      
+    } catch (error) {
+      setError(error as Error)
+      setIsLoading(false)
+    }
+  }, [modelName, deleted])
 
-  const isReadingDb = useRef(false)
+  // Cleanup subscriptions for items that are no longer in the list
+  useEffect(() => {
+    const currentItemKeys = new Set<string>()
+    for (const item of items) {
+      const key = item.seedLocalId || item.seedUid || ''
+      if (key) {
+        currentItemKeys.add(key)
+      }
+    }
+    
+    // Clean up subscriptions for items that are no longer in the list
+    for (const [item, subscription] of subscriptionsRef.current.entries()) {
+      const key = item.seedLocalId || item.seedUid || ''
+      if (key && !currentItemKeys.has(key)) {
+        // Item is no longer in the list, clean up subscription
+        subscription.unsubscribe()
+        subscriptionsRef.current.delete(item)
+        loadingItemsRef.current.delete(item)
+      }
+    }
+    
+    // Update loading state based on remaining loading items
+    if (loadingItemsRef.current.size === 0 && isLoading) {
+      setIsLoading(false)
+    }
+  }, [items, isLoading])
 
-  // Check if ClientManager is initialized (IDLE state or later)
-  const isInitialized = status === ClientManagerState.IDLE || 
-                        status === ClientManagerState.ADD_MODELS_TO_DB ||
-                        status === ClientManagerState.ADD_MODELS_TO_STORE ||
-                        status === ClientManagerState.PROCESS_SCHEMA_FILES ||
-                        status === ClientManagerState.SAVE_CONFIG ||
-                        status === ClientManagerState.DB_INIT
-
-  const readFromDb = useCallback(async () => {
-    if (isReadingDb.current || !isInitialized || !modelNameRef.current || modelNameRef.current === '') {
+  // Fetch items on initial mount when client is ready
+  useEffect(() => {
+    if (!isClientReady) {
       return
     }
-    isReadingDb.current = true
-    const allItems = await Item.all(modelNameRef.current, deleted)
-    setItems(() => [])
-    setItems(() => allItems)
-    isReadingDb.current = false
-  }, [isInitialized, modelName,])
+    // Initial fetch when client becomes ready
+    fetchItems()
+  }, [isClientReady, fetchItems])
 
-  const listenerRef = useRef(readFromDb)
-
+  // Refetch items when table data actually changes (not just reference)
   useEffect(() => {
-    modelNameRef.current = modelName
-  }, [modelName])
-
-  useEffect(() => {
-    listenerRef.current = readFromDb
-  }, [readFromDb])
-
-  useEffect(() => {
-    if (isInitialized) {
-      listenerRef.current()
+    if (!isClientReady || !seedsTableData) {
+      return
     }
-  }, [isInitialized, modelName])
 
-  useEffect(() => {
-    eventEmitter.addListener('item.requestAll', (event) => {
-      if (
-        !event ||
-        !event.modelName ||
-        event.modelName !== modelNameRef.current
-      ) {
-        return
+    // Check if seedsTableData actually changed by comparing with previous value
+    const prevData = previousSeedsTableDataRef.current
+    const prevDataJson = prevData ? JSON.stringify(prevData.map(s => ({ localId: s.localId, uid: s.uid }))) : 'undefined'
+    const currDataJson = seedsTableData ? JSON.stringify(seedsTableData.map(s => ({ localId: s.localId, uid: s.uid }))) : 'undefined'
+    
+    if (prevDataJson === currDataJson && prevData !== undefined) {
+      // Data hasn't actually changed, skip refetch
+      return
+    }
+    
+    // Update ref with current data
+    previousSeedsTableDataRef.current = seedsTableData
+
+    // Extract identifying information from current items in state (using ref to avoid dependency)
+    const currentItemsSet = new Set<string>()
+    for (const item of itemsRef.current) {
+      const key = item.seedLocalId || item.seedUid
+      if (key) {
+        currentItemsSet.add(key)
       }
-      listenerRef.current()
-    })
+    }
 
-    readFromDb()
+    // Extract identifying information from seedsTableData
+    const tableDataItemsSet = new Set<string>()
+    for (const dbSeed of seedsTableData) {
+      const key = dbSeed.localId || dbSeed.uid
+      if (key) {
+        tableDataItemsSet.add(key)
+      }
+    }
 
+    // Compare sets to detect changes
+    const setsAreEqual = 
+      currentItemsSet.size === tableDataItemsSet.size &&
+      [...currentItemsSet].every(id => tableDataItemsSet.has(id))
+
+    if (setsAreEqual) {
+      // Items in state match table data, skip refetch
+      return
+    }
+
+    // Items have changed, fetch updated items
+    fetchItems()
+  }, [isClientReady, seedsTableData, fetchItems, modelName])
+
+  // Cleanup all subscriptions on unmount
+  useEffect(() => {
     return () => {
-      eventEmitter.removeListener('item.requestAll', readFromDb)
+      subscriptionsRef.current.forEach(sub => sub.unsubscribe())
+      subscriptionsRef.current.clear()
+      loadingItemsRef.current.clear()
     }
   }, [])
 
@@ -213,7 +405,8 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       ],
       ['desc'],
     ),
-    isReadingDb: isReadingDb.current,
+    isLoading,
+    error,
   }
 }
 
@@ -252,7 +445,7 @@ export const useCreateItem = <T>() => {
   const { isReady } = useItemIsReady()
 
   const createItem = useCallback(
-    async (modelName: string, itemData?: Partial<ItemData<T>>) => {
+    async (modelName: string, itemData?: Record<string, any>) => {
       if (!isReady) {
         console.error(
           `[useCreateItem] [createItem] called before listeners are ready`,
@@ -272,7 +465,7 @@ export const useCreateItem = <T>() => {
       setIsCreatingItem(true)
 
       if (!itemData) {
-        itemData = {} as Partial<ItemData<T>>
+        itemData = {}
       }
 
       const { seedLocalId } = await createNewItem({ modelName, ...itemData })

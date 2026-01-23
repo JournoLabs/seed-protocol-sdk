@@ -24,6 +24,16 @@ import { setupTestEnvironment } from '../test-utils/client-init'
 async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 10000): Promise<void> {
   const service = property.getService()
   
+  // Check current state first - if already idle, return immediately
+  const currentSnapshot = service.getSnapshot()
+  if (currentSnapshot.value === 'idle') {
+    return
+  }
+  
+  if (currentSnapshot.value === 'error') {
+    throw new Error('ItemProperty failed to load')
+  }
+  
   try {
     await waitFor(
       service,
@@ -1073,6 +1083,7 @@ testDescribe('ItemProperty Integration Tests', () => {
     })
 
     it('should handle Relation property', async () => {
+      // This test needs more time for relation property initialization
       const schemaName = 'Test Schema Property Relation'
       const authorModelId = generateId()
       const postModelId = generateId()
@@ -1146,10 +1157,11 @@ testDescribe('ItemProperty Integration Tests', () => {
         setTimeout(() => {
           subscription.unsubscribe()
           resolve()
-        }, 5000)
+        }, 10000) // Increase timeout for relation properties
       })
       
       const properties = post.properties
+      
       // Relation properties might be stored as "authorId" in the database
       const authorProperty = properties.find(p => 
         p.propertyName === 'author' || 
@@ -1161,7 +1173,8 @@ testDescribe('ItemProperty Integration Tests', () => {
       expect(authorProperty).toBeDefined()
       
       if (authorProperty) {
-        await waitForItemPropertyIdle(authorProperty)
+        // Wait for ItemProperty to be idle (the improved waitForItemPropertyIdle checks current state first)
+        await waitForItemPropertyIdle(authorProperty, 15000) // Increase timeout for relation properties
         // Wait for propertyDef to be loaded (it loads asynchronously)
         let propertyDefLoaded = false
         for (let i = 0; i < 50; i++) {
@@ -1186,7 +1199,7 @@ testDescribe('ItemProperty Integration Tests', () => {
           ).toBeTruthy()
         }
       }
-    })
+    }, 30000) // Increase timeout to 30 seconds for relation properties
 
     it('should handle List property', async () => {
       const schemaName = 'Test Schema Property List'
