@@ -12,6 +12,9 @@ import pluralize from 'pluralize'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { BaseFileManager, getCorrectId } from '@/helpers'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { findEntity } from '@/helpers/entity/entityFind'
+import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
+import { unloadEntity } from '@/helpers/entity/entityUnload'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -600,11 +603,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     readyTimeout?: number
   }): Promise<IItemProperty<any> | undefined> {
     if ((!seedLocalId && !seedUid) || !propertyName) {
-      return
+      return undefined
     }
+    
     const cacheKeyId = seedUid || seedLocalId
     const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
     let foundProperty: IItemProperty<any> | undefined
+    
+    // Check cache first
     if (this.instanceCache.has(cacheKey)) {
       const { instance, refCount } = this.instanceCache.get(cacheKey)!
       this.instanceCache.set(cacheKey, {
@@ -613,13 +619,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       })
       foundProperty = instance
     } else {
+      // Query database
       const propertyData = await getPropertyData({
         propertyName,
         seedLocalId,
         seedUid,
       })
       if (!propertyData) {
-        return
+        return undefined
       }
       foundProperty = await ItemProperty.create(propertyData)
     }
@@ -785,14 +792,41 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   unload() {
-    // Clean up liveQuery subscription
-    const instanceState = itemPropertyInstanceState.get(this)
-    if (instanceState?.liveQuerySubscription) {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
+    try {
+      const context = this._getSnapshotContext()
+      const cacheKey = ItemProperty.cacheKey(
+        context.seedUid || context.seedLocalId || '',
+        context.propertyName || ''
+      )
+      const cacheKeys: string[] = []
+      
+      if (cacheKey && cacheKey !== 'Item__') {
+        cacheKeys.push(cacheKey)
+      }
+      
+      unloadEntity(this, {
+        getCacheKeys: () => cacheKeys,
+        caches: [ItemProperty.instanceCache],
+        instanceState: itemPropertyInstanceState,
+        getService: (instance) => instance._service,
+        onUnload: (instance) => {
+          // Clean up additional subscription
+          instance._subscription?.unsubscribe()
+        },
+      })
+    } catch (error) {
+      // Still try to clean up what we can
+      const instanceState = itemPropertyInstanceState.get(this)
+      if (instanceState?.liveQuerySubscription) {
+        instanceState.liveQuerySubscription.unsubscribe()
+        instanceState.liveQuerySubscription = null
+      }
+      this._subscription?.unsubscribe()
+      try {
+        this._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
     }
-    
-    this._subscription?.unsubscribe()
-    this._service.stop()
   }
 }

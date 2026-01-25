@@ -28,6 +28,9 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { findEntity } from '@/helpers/entity/entityFind'
+import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
+import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { eq, and } from 'drizzle-orm'
 import debug from 'debug'
 
@@ -84,7 +87,6 @@ const TRACKED_PROPERTIES = [
   'schemaUid',
   'latestVersionLocalId',
   'latestVersionUid',
-  'properties', // Computed from propertyInstances
 ] as const
 
 // WeakMap to store mutable state per Item instance
@@ -264,55 +266,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             
             // Handle tracked properties
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              // Special handling for properties - compute from propertyInstances Map
-              if (prop === 'properties') {
-                console.log(`[Item.Proxy.properties] Proxy handler called for properties`)
-                const snapshot = target._service.getSnapshot()
-                const context = snapshot.context
-                const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
-                const modelName = context.modelName as string
-                
-                console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances size: ${propertyInstances?.size || 0}`)
-                if (!propertyInstances || propertyInstances.size === 0) {
-                  console.log(`[Item.Proxy.properties] ${modelName}: No property instances`)
-                  return []
-                }
-                
-                // Get model schema keys for filtering
-                const modelSchemaKeys = target._getModelSchemaKeys()
-                console.log(`[Item.Proxy.properties] ${modelName}: modelSchemaKeys:`, modelSchemaKeys)
-                console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances keys:`, Array.from(propertyInstances.keys()))
-                
-                // Convert Map to array, filtering by model schema
-                const properties: IItemProperty[] = []
-                for (const [key, propertyInstance] of propertyInstances) {
-                  // Skip internal properties
-                  if (INTERNAL_PROPERTY_NAMES.includes(key)) {
-                    continue
-                  }
-                  
-                  // Include if it's a model property
-                  const isModelProp = target._isModelProperty(key, modelSchemaKeys)
-                  const propValue = propertyInstance.value
-                  console.log(`[Item.Proxy.properties] ${modelName}: key="${key}", propertyName="${propertyInstance.propertyName}", isModelProperty=${isModelProp}, value=${propValue}, valueType=${typeof propValue}`)
-                  if (isModelProp) {
-                    properties.push(propertyInstance)
-                    console.log(`[Item.Proxy.properties] ${modelName}: Added property "${propertyInstance.propertyName}" with value:`, propValue)
-                  }
-                }
-                
-                const propertiesInfo = properties.map(p => ({
-                  propertyName: p.propertyName,
-                  value: p.value,
-                  hasValue: p.value !== undefined && p.value !== null
-                }))
-                console.log(`[Item.Proxy.properties] ${modelName}: Returning ${properties.length} properties:`, JSON.stringify(propertiesInfo, null, 2))
-                // CRITICAL: Always create a new array reference so React detects changes
-                return [...properties]
-              }
-              
               const context = target._getSnapshotContext()
               return (context as any)[prop]
+            }
+            
+            // Handle 'properties' getter - not tracked, but accessible via getter
+            if (typeof prop === 'string' && prop === 'properties') {
+              // Delegate to the getter method on the instance
+              return target.properties
             }
             
             // For methods and other properties, use Reflect
@@ -327,18 +288,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             
             // Handle tracked properties
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-              if (prop === 'properties') {
-                // Properties are read-only computed values from propertyInstances
-                // Cannot be set directly - properties are managed via ItemProperty instances
-                throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
-              } else {
-                // Standard property update
-                target._service.send({
-                  type: 'updateContext',
-                  [prop]: value,
-                })
-              }
+              // Standard property update
+              target._service.send({
+                type: 'updateContext',
+                [prop]: value,
+              })
               return true
+            }
+            
+            // Handle 'properties' - read-only computed property
+            if (typeof prop === 'string' && prop === 'properties') {
+              // Properties are read-only computed values from propertyInstances
+              // Cannot be set directly - properties are managed via ItemProperty instances
+              throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
             }
             
             // For non-tracked properties, use Reflect
@@ -598,17 +560,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     waitForReady?: boolean
     readyTimeout?: number
   }): Promise<IItem<any> | undefined> {
-    console.log(`[Item.find] Called with modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
     if (!seedLocalId && !seedUid) {
-      console.log(`[Item.find] No seedLocalId or seedUid, returning undefined`)
-      return
+      return undefined
     }
 
-    // Check cache first (fast path) - matches pattern used by Schema, Model, ModelProperty, and ItemProperty
     const cacheKey = seedUid || seedLocalId
     let foundItem: IItem<any> | undefined
+    
+    // Check cache first
     if (cacheKey && this.instanceCache.has(cacheKey)) {
-      console.log(`[Item.find] Found in cache: ${cacheKey}`)
       const { instance, refCount } = this.instanceCache.get(cacheKey)!
       this.instanceCache.set(cacheKey, {
         instance,
@@ -616,7 +576,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       })
       foundItem = instance
     } else {
-      console.log(`[Item.find] Not in cache, querying database...`)
       // If not in cache, query database
       const itemData = await getItemData({
         modelName,
@@ -625,11 +584,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       })
 
       if (!itemData) {
-        console.error('[Item.find] No item data found', { modelName, seedLocalId, seedUid })
-        return
+        return undefined
       }
 
-      console.log(`[Item.find] Got itemData, creating Item instance...`)
       // Item.create() will handle caching the new instance
       foundItem = await Item.create({
         ...itemData,
@@ -1312,14 +1269,38 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   unload(): void {
-    // Clean up liveQuery subscription
-    const instanceState = itemInstanceState.get(this)
-    if (instanceState?.liveQuerySubscription) {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
+    try {
+      const context = this._getSnapshotContext()
+      const cacheKey = context.seedUid || context.seedLocalId
+      const cacheKeys: string[] = []
+      
+      if (cacheKey) {
+        cacheKeys.push(cacheKey)
+      }
+      
+      unloadEntity(this, {
+        getCacheKeys: () => cacheKeys,
+        caches: [Item.instanceCache],
+        instanceState: itemInstanceState,
+        getService: (instance) => instance._service,
+        onUnload: (instance) => {
+          // Clean up additional subscription
+          instance._subscription?.unsubscribe()
+        },
+      })
+    } catch (error) {
+      // Still try to clean up what we can
+      const instanceState = itemInstanceState.get(this)
+      if (instanceState?.liveQuerySubscription) {
+        instanceState.liveQuerySubscription.unsubscribe()
+        instanceState.liveQuerySubscription = null
+      }
+      this._subscription?.unsubscribe()
+      try {
+        this._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
     }
-    
-    this._subscription?.unsubscribe()
-    this._service.stop()
   }
 }

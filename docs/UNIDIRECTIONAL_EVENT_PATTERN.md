@@ -428,33 +428,35 @@ type ModelEditEvent = {
 }
 ```
 
-## Reactive Proxy Pattern
+## Property and Model Access Patterns
 
-Both `Model.properties` and `Schema.models` use the same reactive Proxy pattern:
+### Non-Reactive Getters (Convenience Methods)
 
-### Model.properties Pattern
+`item.properties`, `model.properties`, and `schema.models` are **non-reactive convenience getters** that return snapshots at the time of access:
 
-1. **ModelProperty instances are stored** in `modelInstanceState.propertyInstancesById` (WeakMap)
-2. **When ModelProperty changes**, it sends `property:edit` event to Model
-3. **Model receives event** and calls `_buildPropertiesFromInstances()` to read from ModelProperty instances
-4. **Model updates its `properties` property** via `updateContext` (read-only)
-5. **Proxy handler detects change** and triggers React re-renders for components using `model.properties`
+- **`item.properties`**: Returns an array of `ItemProperty` instances from the Item's service context
+- **`model.properties`**: Returns an array of `ModelProperty` instances from the Model's service context  
+- **`schema.models`**: Returns an array of `Model` instances from the Schema's service context
 
-### Schema.models Pattern
+These getters are **NOT reactive** - they won't trigger React re-renders when child instances change. They're useful for one-time reads or non-React code.
 
-1. **Model instances are stored** in `schemaInstanceState.modelInstancesById` (WeakMap)
-2. **When Model changes**, it sends `model:edit` event to Schema
-3. **Schema receives event** and reads from Model instance directly
-4. **Schema updates its `models` property** via `updateContext` (read-only)
-5. **Proxy handler detects change** and triggers React re-renders for components using `schema.models`
+### Reactive Hooks (Recommended for React)
+
+For React components that need reactivity, use the dedicated hooks:
+
+- **`useItemProperties(itemId)`**: Watches the database and returns reactive `ItemProperty[]`
+- **`useModelProperties(schemaId, modelName)`**: Watches the database and returns reactive `ModelProperty[]`
+- **`useModels(schemaId)`**: Watches the database and returns reactive `Model[]`
+- **`useItemProperty(itemId, propertyName)`**: Watches a specific `ItemProperty` for value/context changes
+
+These hooks use `useLiveQuery` to watch database tables directly, providing automatic re-renders when data changes.
 
 ### Benefits
 
-- **Automatic Re-renders**: No manual subscription management needed
-- **Consistent Pattern**: Same approach for both Model.properties and Schema.models
-- **Type Safety**: Proxy handlers maintain type safety
-- **Performance**: Only updates when actual changes occur
-- **Simplicity**: `useModels` can simply return `schema.models`, `useModelProperties` can return `model.properties`
+- **Clear Separation**: Non-reactive getters for convenience, reactive hooks for React components
+- **Performance**: Hooks only subscribe when needed, getters are lightweight snapshots
+- **Type Safety**: All methods maintain type safety
+- **Simplicity**: Use hooks in React, getters elsewhere
 
 ## Benefits of This Pattern
 

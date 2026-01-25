@@ -6,6 +6,8 @@ import { StorageType } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { findEntity } from '@/helpers/entity/entityFind'
+import { unloadEntity } from '@/helpers/entity/entityUnload'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
@@ -828,26 +830,17 @@ export class ModelProperty {
       return undefined
     }
 
-    // Check cache first
-    const cached = this.getById(propertyFileId)
-    if (cached) {
-      if (waitForReady) {
-        await waitForEntityIdle(cached, { timeout: readyTimeout })
+    return await findEntity<ModelProperty>(
+      {
+        getById: (id) => ModelProperty.getById(id),
+        createById: (id) => ModelProperty.createById(id),
+      },
+      { id: propertyFileId },
+      {
+        waitForReady,
+        readyTimeout,
       }
-      return cached
-    }
-
-    // Create/find from database
-    const instance = await this.createById(propertyFileId)
-    if (!instance) {
-      return undefined
-    }
-
-    if (waitForReady) {
-      await waitForEntityIdle(instance, { timeout: readyTimeout })
-    }
-
-    return instance
+    )
   }
 
   /**
@@ -1000,6 +993,12 @@ export class ModelProperty {
   }
 
   unload(): void {
-    this._service.stop()
+    // ModelProperty doesn't have liveQuery subscriptions or complex cache management
+    // Just stop the service
+    try {
+      this._service.stop()
+    } catch (error) {
+      // Service might already be stopped
+    }
   }
 }

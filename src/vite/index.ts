@@ -156,6 +156,10 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
             // Also exclude the empty mock to prevent it from being cached
             'node-stdlib-browser/esm/mock/empty',
             'node-stdlib-browser/esm/mock/empty.js',
+            // Exclude buffer to prevent dynamic require issues
+            // Buffer should be polyfilled via vite-plugin-node-polyfills
+            'buffer',
+            'node:buffer',
             // Exclude drizzle-kit and database drivers that it dynamically imports
             // These are dev tools and should not be bundled
             'drizzle-kit',

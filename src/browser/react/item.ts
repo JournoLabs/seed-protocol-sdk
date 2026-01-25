@@ -36,9 +36,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const [item, setItem] = useState<Item<T> | undefined>()
   const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
   const [error, setError] = useState<Error | null>(null)
-  const [propertyVersion, setPropertyVersion] = useState<number>(0)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
-  const lastPropertyInstancesSizeRef = useRef<number>(0)
 
   const isClientReady = useIsClientReady()
 
@@ -84,27 +82,9 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       }
 
       // Item.find() now waits for idle by default, so the item should be ready
-      // Check if properties are already loaded
-      const service = foundItem.getService()
-      const snapshot = service.getSnapshot()
-      const context = snapshot.context
-      const propertyInstances = context?.propertyInstances as Map<string, any> | undefined
-      const propertyInstancesSize = propertyInstances?.size || 0
-      
       setItem(foundItem)
       setIsLoading(false) // Item is ready since find() waited for idle
       setError(null)
-      
-      // If properties are already present when item is loaded, trigger re-render
-      if (propertyInstancesSize > 0) {
-        console.log(`[useItem] Item loaded with ${propertyInstancesSize} properties, triggering re-render`)
-        lastPropertyInstancesSizeRef.current = propertyInstancesSize
-        setPropertyVersion((v) => {
-          const newVersion = v + 1
-          console.log(`[useItem] propertyVersion after loadItem: ${v} -> ${newVersion}`)
-          return newVersion
-        })
-      }
     } catch (error) {
       logger('[useItem] Error loading item:', error)
       setItem(undefined)
@@ -141,38 +121,16 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       // Clean up subscription if item is not available
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
-      lastPropertyInstancesSizeRef.current = 0
       return
     }
 
     // Clean up previous subscription
     subscriptionRef.current?.unsubscribe()
-    // Reset the ref when item changes
-    lastPropertyInstancesSizeRef.current = 0
 
     // Subscribe to service changes
     // Don't set isLoading here - it's already set correctly in loadItem
     // Just subscribe to future state changes
     const service = item.getService()
-    
-    // Check initial state immediately
-    const initialSnapshot = service.getSnapshot()
-    if (initialSnapshot && typeof initialSnapshot === 'object' && 'value' in initialSnapshot) {
-      const initialContext = initialSnapshot.context
-      const initialPropertyInstances = initialContext?.propertyInstances as Map<string, any> | undefined
-      const initialPropertyInstancesSize = initialPropertyInstances?.size || 0
-      lastPropertyInstancesSizeRef.current = initialPropertyInstancesSize
-      
-      // If properties are already present, trigger initial re-render
-      if (initialPropertyInstancesSize > 0) {
-        console.log(`[useItem] Initial property instances found: ${initialPropertyInstancesSize}, triggering initial re-render`)
-        setPropertyVersion((v) => {
-          const newVersion = v + 1
-          console.log(`[useItem] Initial propertyVersion: ${v} -> ${newVersion}`)
-          return newVersion
-        })
-      }
-    }
     
     const subscription = service.subscribe((snapshot: any) => {
       // Update loading state based on service state changes
@@ -187,24 +145,6 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
           // Set error if service is in error state
           setError(new Error('Item service error'))
         }
-        
-        // CRITICAL: Trigger re-render when propertyInstances change
-        // Check if propertyInstances have changed by comparing size
-        const context = snapshot.context
-        const propertyInstances = context?.propertyInstances as Map<string, any> | undefined
-        const currentPropertyInstancesSize = propertyInstances?.size || 0
-        const lastSize = lastPropertyInstancesSizeRef.current
-        
-        if (currentPropertyInstancesSize !== lastSize) {
-          // Property instances changed - trigger re-render by incrementing version
-          console.log(`[useItem] Property instances changed: ${lastSize} -> ${currentPropertyInstancesSize}, incrementing propertyVersion`)
-          lastPropertyInstancesSizeRef.current = currentPropertyInstancesSize
-          setPropertyVersion((v) => {
-            const newVersion = v + 1
-            console.log(`[useItem] propertyVersion: ${v} -> ${newVersion}`)
-            return newVersion
-          })
-        }
       }
     })
     
@@ -216,16 +156,11 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
   }, [item])
 
-  // Use useMemo to ensure React detects changes when propertyVersion changes
-  // This forces a re-render even if the item reference hasn't changed
-  // The component will re-access item.properties, which will call the Proxy handler
-  const memoizedReturn = useMemo(() => ({
+  return {
     item,
     isLoading,
     error,
-  }), [item, isLoading, error, propertyVersion])
-  
-  return memoizedReturn
+  }
 }
 
 type UseItemsReturn = {

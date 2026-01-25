@@ -12,6 +12,9 @@ import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { isInternalSchema } from '@/helpers/constants'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { findEntity } from '@/helpers/entity/entityFind'
+import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
+import { unloadEntity } from '@/helpers/entity/entityUnload'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
@@ -40,7 +43,6 @@ const TRACKED_PROPERTIES = [
   'metadata',
   'enums',
   'migrations',
-  'models',
   'name',        // metadata.name (flattened)
   'createdAt',   // metadata.createdAt (flattened)
   'updatedAt',   // metadata.updatedAt (flattened)
@@ -164,28 +166,6 @@ export class Schema {
         // Handle special cases like metadata.name, models array conversion
         const context = instance._getSnapshotContext()
         
-        // Get model IDs from service context (reactive state)
-        const liveQueryIds = context._liveQueryModelIds || []
-        
-        // Get pending model IDs (not yet in DB)
-        // Note: schemaId lookup is async, so we skip pending IDs here
-        // They will be included when schemaId is available asynchronously
-        const pendingIds: string[] = []
-        
-        // Combine and deduplicate
-        const allModelIds = [...new Set([...liveQueryIds, ...pendingIds])]
-        
-        // Get Model instances from static cache
-        const modelInstances: Model[] = []
-        for (const modelFileId of allModelIds) {
-          const model = Model.getById(modelFileId)
-          if (model) {
-            modelInstances.push(model)
-          }
-          // Note: Cannot create models asynchronously in this synchronous getter
-          // Models will be created elsewhere when needed
-        }
-        
         // Get the schema name, ensuring it's never the ID
         // Prefer metadata.name, then schemaName (but only if it's not the ID)
         const schemaFileId = context.id // id is now the schemaFileId (string)
@@ -220,10 +200,6 @@ export class Schema {
           name,
           createdAt: context.metadata?.createdAt,
           updatedAt: context.metadata?.updatedAt,
-          // Return Model instances instead of plain objects
-          // CRITICAL: Always create a new array reference so React detects changes
-          // This ensures that even if the models are the same, React will re-render when the array reference changes
-          models: [...modelInstances], // New array reference for React
         }
       },
       sendUpdate: (instance, prop: string, value: any) => {
@@ -358,6 +334,9 @@ export class Schema {
             logger(`Schema name unchanged: "${oldName}"`)
           }
         } else if (prop === 'models') {
+          // Models are read-only computed values from Model instances
+          // Cannot be set directly - models are managed via Model instances
+          throw new Error('Cannot set schema.models directly. Models are computed from Model instances.')
           // DISABLED: Array assignment to schema.models is temporarily disabled
           // 
           // REASON: This approach had race condition issues where _saveDraftToDb() would run
@@ -682,22 +661,18 @@ export class Schema {
       return undefined
     }
 
-    // Check cache first
-    const cached = this.getById(schemaFileId)
-    if (cached) {
-      if (waitForReady) {
-        await waitForEntityIdle(cached, { timeout: readyTimeout })
-      }
-      return cached
-    }
-
-    // Create/find from database
     try {
-      const instance = await this.createById(schemaFileId)
-      if (waitForReady) {
-        await waitForEntityIdle(instance, { timeout: readyTimeout })
-      }
-      return instance
+      return await findEntity<Schema>(
+        {
+          getById: (id) => Schema.getById(id),
+          createById: (id) => Schema.createById(id),
+        },
+        { id: schemaFileId },
+        {
+          waitForReady,
+          readyTimeout,
+        }
+      )
     } catch (error) {
       return undefined
     }
@@ -900,6 +875,40 @@ export class Schema {
 
   get id(): string | undefined {
     return this._getSnapshotContext().id // id is now the schemaFileId (string)
+  }
+
+  /**
+   * Returns Model instances for this schema
+   * This is a computed property that reads from the service context
+   * Note: This is NOT reactive - use useModels() hook for reactivity
+   */
+  get models(): Model[] {
+    const context = this._getSnapshotContext()
+    
+    // Get model IDs from service context (reactive state)
+    const liveQueryIds = context._liveQueryModelIds || []
+    
+    // Get pending model IDs (not yet in DB)
+    // Note: schemaId lookup is async, so we skip pending IDs here
+    // They will be included when schemaId is available asynchronously
+    const pendingIds: string[] = []
+    
+    // Combine and deduplicate
+    const allModelIds = [...new Set([...liveQueryIds, ...pendingIds])]
+    
+    // Get Model instances from static cache
+    const modelInstances: Model[] = []
+    for (const modelFileId of allModelIds) {
+      const model = Model.getById(modelFileId)
+      if (model) {
+        modelInstances.push(model)
+      }
+      // Note: Cannot create models asynchronously in this synchronous getter
+      // Models will be created elsewhere when needed
+    }
+    
+    // Return a new array reference (snapshot at time of access)
+    return [...modelInstances]
   }
 
   get status() {
@@ -1777,55 +1786,42 @@ export class Schema {
 
 
   unload(): void {
-    // Clean up instance state
-    const unloadInstanceState = schemaInstanceState.get(this)
-    if (unloadInstanceState) {
-      // Clean up liveQuery subscription
-      if (unloadInstanceState.liveQuerySubscription) {
-        unloadInstanceState.liveQuerySubscription.unsubscribe()
-        unloadInstanceState.liveQuerySubscription = null
-      }
-    }
-    
-    // Clean up WeakMap entry
-    schemaInstanceState.delete(this)
-    
-    // Remove from both caches
     try {
       const context = this._getSnapshotContext()
-      if (context.id) { // id is now the schemaFileId (string)
-        if (Schema.instanceCacheById.has(context.id)) {
-          const entry = Schema.instanceCacheById.get(context.id)!
-          entry.refCount -= 1
-          if (entry.refCount <= 0) {
-            Schema.instanceCacheById.delete(context.id)
-          } else {
-            Schema.instanceCacheById.set(context.id, entry)
-          }
-        }
+      const cacheKeys: string[] = []
+      
+      if (context.id) {
+        cacheKeys.push(context.id)
       }
-      // Also remove from name-based cache if it exists
-      if (context.schemaName && Schema.instanceCacheByName.has(context.schemaName)) {
-        const entry = Schema.instanceCacheByName.get(context.schemaName)!
-        entry.refCount -= 1
-        if (entry.refCount <= 0) {
-          Schema.instanceCacheByName.delete(context.schemaName)
-        } else {
-          Schema.instanceCacheByName.set(context.schemaName, entry)
-        }
+      if (context.schemaName) {
+        cacheKeys.push(context.schemaName)
       }
+      
+      unloadEntity(this, {
+        getCacheKeys: () => cacheKeys,
+        caches: [Schema.instanceCacheById, Schema.instanceCacheByName],
+        instanceState: schemaInstanceState,
+        getService: (instance) => instance._service,
+        onUnload: () => {
+          // Clean up WeakMap entry
+          schemaInstanceState.delete(this)
+        },
+      })
     } catch (error) {
       // Service might be stopped, can't get context - that's okay
       logger(`Could not get context during unload: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    
-    this._service.stop()
-    
-    // Clean up liveQuery subscription
-    const instanceState = schemaInstanceState.get(this)
-    if (instanceState?.liveQuerySubscription) {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
+      // Still try to clean up what we can
+      const instanceState = schemaInstanceState.get(this)
+      if (instanceState?.liveQuerySubscription) {
+        instanceState.liveQuerySubscription.unsubscribe()
+        instanceState.liveQuerySubscription = null
+      }
+      schemaInstanceState.delete(this)
+      try {
+        this._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
     }
   }
 
@@ -1839,50 +1835,139 @@ export class Schema {
       return
     }
 
-    // Wait for schema to be loaded and have a schemaId
-    // Subscribe to service to detect when schema is ready
-    const setupSubscription = this._service.subscribe(async (snapshot) => {
-      // Only set up once when schema is idle and we have metadata
-      if (snapshot.value === 'idle' && snapshot.context.metadata?.name) {
-        setupSubscription.unsubscribe()
+    setupEntityLiveQuery(this, {
+      getEntityId: async (schema) => {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { schemas: schemasTable } = await import('@/seedSchema')
+        const { eq } = await import('drizzle-orm')
         
-        try {
-          const { BaseDb } = await import('@/db/Db/BaseDb')
-          const { schemas: schemasTable, modelSchemas, models: modelsTable } = await import('@/seedSchema')
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          return undefined
+        }
+
+        const context = schema._getSnapshotContext()
+        const schemaName = context.metadata?.name
+        if (!schemaName) {
+          return undefined
+        }
+
+        const schemaRecords = await db
+          .select()
+          .from(schemasTable)
+          .where(eq(schemasTable.name, schemaName))
+          .limit(1)
+
+        if (schemaRecords.length === 0 || !schemaRecords[0].id) {
+          return undefined
+        }
+
+        return schemaRecords[0].id
+      },
+      buildQuery: async (schemaId) => {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
+        const { eq } = await import('drizzle-orm')
+        
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          throw new Error('Database not available')
+        }
+        return BaseDb.liveQuery<{ 
+          modelId: number
+          modelName: string
+          modelFileId: string
+        }>(
+          db
+            .select({
+              modelId: modelSchemas.modelId,
+              modelName: modelsTable.name,
+              modelFileId: modelsTable.schemaFileId,
+            })
+            .from(modelSchemas)
+            .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
+            .where(eq(modelSchemas.schemaId, schemaId))
+        )
+      },
+      extractEntityIds: (rows) => rows.map(row => row.modelFileId).filter(Boolean) as string[],
+      updateContext: (schema, ids) => {
+        // Helper function to send updateContext event with model IDs
+        const sendUpdateContext = () => {
+          // Double-check instance state still exists
+          const verifyInstanceState = schemaInstanceState.get(schema)
+          if (!verifyInstanceState) {
+            logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up before sending updateContext`)
+            return
+          }
           
-          // Get schema ID from database
-          const db = BaseDb.getAppDb()
-          if (!db) {
-            logger('[Schema._setupLiveQuerySubscription] Database not available')
-            return
+          try {
+            const snapshot = schema._service.getSnapshot()
+            if (snapshot.status === 'stopped') {
+              logger(`[Schema._setupLiveQuerySubscription] Service stopped before sending, skipping`)
+              return
+            }
+            
+            // Send updateContext with liveQueryModelIds in service context for reactive updates
+            schema._service.send({
+              type: 'updateContext',
+              _liveQueryModelIds: ids, // Store in service context for reactivity
+              _modelsUpdated: Date.now(), // Internal field for tracking
+            })
+            logger(`[Schema._setupLiveQuerySubscription] Sent updateContext event with ${ids.length} model IDs`)
+          } catch (error) {
+            logger(`[Schema._setupLiveQuerySubscription] Error sending updateContext: ${error}`)
           }
+        }
+        
+        // Check if service is stopped before sending events
+        const snapshot = schema._service.getSnapshot()
+        const isServiceStopped = snapshot.status === 'stopped'
+        
+        if (isServiceStopped) {
+          logger(`[Schema._setupLiveQuerySubscription] Service is stopped, restarting before sending updateContext`)
+          // Restart the service first
+          schema._service.start()
+          
+          // Wait for service to be ready (idle state) before sending event
+          setTimeout(() => {
+            const delayedInstanceState = schemaInstanceState.get(schema)
+            if (!delayedInstanceState) {
+              logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up during restart delay`)
+              return
+            }
+            
+            const newSnapshot = schema._service.getSnapshot()
+            if (newSnapshot.status !== 'stopped') {
+              sendUpdateContext()
+            } else {
+              logger(`[Schema._setupLiveQuerySubscription] Service still stopped after restart attempt`)
+            }
+          }, 10)
+        } else {
+          // Service is running, send immediately
+          sendUpdateContext()
+        }
+      },
+      createChildInstances: async (ids) => {
+        const { Model } = await import('@/Model/Model')
+        for (const id of ids) {
+          await Model.createById(id)
+        }
+      },
+      queryInitialData: async (schemaId) => {
+        const { BaseDb } = await import('@/db/Db/BaseDb')
+        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
+        const { eq } = await import('drizzle-orm')
+        
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          return []
+        }
 
-          const schemaName = snapshot.context.metadata.name
-          const schemaRecords = await db
-            .select()
-            .from(schemasTable)
-            .where(eq(schemasTable.name, schemaName))
-            .limit(1)
-
-          if (schemaRecords.length === 0) {
-            logger(`[Schema._setupLiveQuerySubscription] Schema "${schemaName}" not found in database`)
-            return
-          }
-
-          const schemaId = schemaRecords[0].id
-          if (!schemaId) {
-            logger(`[Schema._setupLiveQuerySubscription] Schema "${schemaName}" has no ID`)
-            return
-          }
-
-          // Set up liveQuery to watch model_schemas join table for this schema
-          // Use Drizzle query builder instead of raw SQL to ensure proper column mapping
-          const models$ = BaseDb.liveQuery<{ 
-            modelId: number
-            modelName: string
-            modelFileId: string
-          }>(
-            db
+        // Retry logic for initial query
+        const queryInitialModels = async (retries = 3): Promise<any[]> => {
+          try {
+            const initialModels = await db
               .select({
                 modelId: modelSchemas.modelId,
                 modelName: modelsTable.name,
@@ -1891,151 +1976,43 @@ export class Schema {
               .from(modelSchemas)
               .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
               .where(eq(modelSchemas.schemaId, schemaId))
-          )
-
-          const instanceState = schemaInstanceState.get(this)
-          if (!instanceState) {
-            logger('[Schema._setupLiveQuerySubscription] Instance state not found')
-            return
-          }
-
-          // Helper function to update models from database rows
-          const updateModelsFromRows = (modelRows: { modelId: number; modelName: string; modelFileId: string }[]) => {
-            logger(`[Schema._setupLiveQuerySubscription] Models updated in database: ${modelRows.length} models`)
-            // Extract model IDs from rows
-            const modelIds = modelRows.map(row => row.modelFileId).filter(Boolean) as string[]
             
-            // Helper function to send updateContext event with model IDs
-            const sendUpdateContext = () => {
-              // Double-check instance state still exists (for subscription cleanup check)
-              const verifyInstanceState = schemaInstanceState.get(this)
-              if (!verifyInstanceState) {
-                logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up before sending updateContext`)
-                return
-              }
-              
-              try {
-                const snapshot = this._service.getSnapshot()
-                if (snapshot.status === 'stopped') {
-                  logger(`[Schema._setupLiveQuerySubscription] Service stopped before sending, skipping`)
-                  return
-                }
-                
-                // Send updateContext with liveQueryModelIds in service context for reactive updates
-                this._service.send({
-                  type: 'updateContext',
-                  _liveQueryModelIds: modelIds, // Store in service context for reactivity
-                  _modelsUpdated: Date.now(), // Internal field for tracking
-                })
-                logger(`[Schema._setupLiveQuerySubscription] Sent updateContext event with ${modelIds.length} model IDs`)
-              } catch (error) {
-                logger(`[Schema._setupLiveQuerySubscription] Error sending updateContext: ${error}`)
-              }
-            }
+            logger(`[Schema._setupLiveQuerySubscription] Initial query found ${initialModels.length} models`)
             
-            // Check if service is stopped before sending events
-            const snapshot = this._service.getSnapshot()
-            const isServiceStopped = snapshot.status === 'stopped'
-            
-            if (isServiceStopped) {
-              logger(`[Schema._setupLiveQuerySubscription] Service is stopped, restarting before sending updateContext`)
-              // Restart the service first
-              this._service.start()
-              
-              // Wait for service to be ready (idle state) before sending event
-              // Use a small delay to ensure the service has transitioned to idle
-              setTimeout(() => {
-                // Check instanceState again after delay
-                const delayedInstanceState = schemaInstanceState.get(this)
-                if (!delayedInstanceState) {
-                  logger(`[Schema._setupLiveQuerySubscription] Instance state cleaned up during restart delay`)
-                  return
-                }
-                
-                const newSnapshot = this._service.getSnapshot()
-                if (newSnapshot.status !== 'stopped') {
-                  sendUpdateContext()
-                } else {
-                  logger(`[Schema._setupLiveQuerySubscription] Service still stopped after restart attempt`)
-                }
-              }, 10)
+            if (initialModels.length > 0) {
+              return initialModels.map((row: { modelId: number; modelName: string; modelFileId: string | null }) => ({
+                modelId: row.modelId,
+                modelName: row.modelName,
+                modelFileId: row.modelFileId || '',
+              }))
+            } else if (retries > 0) {
+              logger(`[Schema._setupLiveQuerySubscription] No models found, retrying... (${retries} retries left)`)
+              await new Promise(resolve => setTimeout(resolve, 100))
+              return queryInitialModels(retries - 1)
             } else {
-              // Service is running, send immediately
-              sendUpdateContext()
+              logger(`[Schema._setupLiveQuerySubscription] No models found in initial query after retries`)
+              return []
+            }
+          } catch (error) {
+            if (retries > 0) {
+              logger(`[Schema._setupLiveQuerySubscription] Error querying initial models, retrying... (${retries} retries left): ${error}`)
+              await new Promise(resolve => setTimeout(resolve, 100))
+              return queryInitialModels(retries - 1)
+            } else {
+              logger(`[Schema._setupLiveQuerySubscription] Error querying initial models after retries: ${error}`)
+              return []
             }
           }
-
-          // Manually query the database once to get initial models immediately
-          // This ensures models are available right away, not just when liveQuery emits
-          // Retry a few times in case models are still being added to the database
-          const queryInitialModels = async (retries = 3): Promise<void> => {
-            try {
-              const initialModels = await db
-                .select({
-                  modelId: modelSchemas.modelId,
-                  modelName: modelsTable.name,
-                  modelFileId: modelsTable.schemaFileId,
-                })
-                .from(modelSchemas)
-                .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-                .where(eq(modelSchemas.schemaId, schemaId))
-              
-              logger(`[Schema._setupLiveQuerySubscription] Initial query found ${initialModels.length} models for schema "${schemaName}" (id: ${schemaId})`)
-              
-              if (initialModels.length > 0) {
-                // Update models immediately
-                updateModelsFromRows(initialModels.map((row: { modelId: number; modelName: string; modelFileId: string | null }) => ({
-                  modelId: row.modelId,
-                  modelName: row.modelName,
-                  modelFileId: row.modelFileId || '',
-                })))
-              } else if (retries > 0) {
-                // Retry after a short delay in case models are still being added
-                logger(`[Schema._setupLiveQuerySubscription] No models found, retrying... (${retries} retries left)`)
-                await new Promise(resolve => setTimeout(resolve, 100))
-                return queryInitialModels(retries - 1)
-              } else {
-                logger(`[Schema._setupLiveQuerySubscription] No models found in initial query for schema "${schemaName}" (id: ${schemaId}) after retries`)
-              }
-            } catch (error) {
-              if (retries > 0) {
-                logger(`[Schema._setupLiveQuerySubscription] Error querying initial models, retrying... (${retries} retries left): ${error}`)
-                await new Promise(resolve => setTimeout(resolve, 100))
-                return queryInitialModels(retries - 1)
-              } else {
-                logger(`[Schema._setupLiveQuerySubscription] Error querying initial models after retries: ${error}`)
-              }
-            }
-          }
-          
-          // Query initial models (with retries)
-          await queryInitialModels()
-
-          // Subscribe to liveQuery updates for future changes
-          const subscription = models$.subscribe({
-            next: (modelRows) => {
-              // CRITICAL: Check if instanceState still exists (hasn't been cleaned up by unload())
-              // This prevents race conditions where unload() is called while callback is executing
-              const currentInstanceState = schemaInstanceState.get(this)
-              if (!currentInstanceState) {
-                logger(`[Schema._setupLiveQuerySubscription] Instance state was cleaned up, skipping update`)
-                return
-              }
-              
-              // Use the helper function to update models (instanceState already checked above)
-              updateModelsFromRows(modelRows)
-            },
-            error: (error) => {
-              logger(`[Schema._setupLiveQuerySubscription] LiveQuery error: ${error}`)
-            },
-          })
-
-          instanceState.liveQuerySubscription = subscription
-          logger(`[Schema._setupLiveQuerySubscription] LiveQuery subscription set up for schema "${schemaName}" (id: ${schemaId})`)
-        } catch (error) {
-          logger(`[Schema._setupLiveQuerySubscription] Error setting up subscription: ${error}`)
         }
-      }
+        
+        return queryInitialModels()
+      },
+      instanceState: schemaInstanceState,
+      loggerName: 'seedSdk:schema:liveQuery',
+      isReady: (schema) => {
+        const snapshot = schema._service.getSnapshot()
+        return snapshot.value === 'idle' && !!snapshot.context.metadata?.name
+      },
     })
   }
 
