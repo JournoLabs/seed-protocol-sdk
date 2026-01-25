@@ -339,6 +339,91 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
   })
 
+  describe('ModelProperty.find()', () => {
+    it('should find existing ModelProperty by propertyFileId and wait for idle by default', async () => {
+      const schemaName = 'Test Schema Property Find'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: {
+              id: propertyFileId,
+              dataType: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      // Find the property
+      const foundProperty = await ModelProperty.find({
+        propertyFileId: propertyFileId,
+      })
+
+      expect(foundProperty).toBeDefined()
+      expect(foundProperty?.name).toBe('title')
+      
+      // Verify it's in idle state (find() should have waited)
+      const service = foundProperty!.getService()
+      expect(service.getSnapshot().value).toBe('idle')
+    })
+
+    it('should return undefined if ModelProperty not found', async () => {
+      const foundProperty = await ModelProperty.find({
+        propertyFileId: 'non-existent-id',
+      })
+
+      expect(foundProperty).toBeUndefined()
+    })
+
+    it('should support waitForReady: false option', async () => {
+      const schemaName = 'Test Schema Property Find No Wait'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: {
+              id: propertyFileId,
+              dataType: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      // Find with waitForReady: false - should return immediately
+      const foundProperty = await ModelProperty.find({
+        propertyFileId: propertyFileId,
+        waitForReady: false,
+      })
+
+      expect(foundProperty).toBeDefined()
+      // Property might not be idle yet since we didn't wait
+      const service = foundProperty!.getService()
+      const state = service.getSnapshot().value
+      // State could be idle (if already loaded) or loading/waitingForDb
+      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+    })
+  })
+
   describe('ModelProperty.getById()', () => {
     it('should return cached ModelProperty instance by propertyFileId', async () => {
       const schemaName = 'Test Schema Property Get By ID'

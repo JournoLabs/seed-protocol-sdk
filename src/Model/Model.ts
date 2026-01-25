@@ -9,6 +9,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { renameModelInDb } from '@/helpers/db'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { eq } from 'drizzle-orm'
 import debug from 'debug'
 
@@ -522,10 +523,8 @@ export class Model {
             
             // Get property IDs from liveQuery (stored in context, not instanceState)
             const liveQueryIds = context._liveQueryPropertyIds || []
-            console.log(`[Model.properties getter] Model "${context.modelName}" (state: ${snapshot.value}) - liveQueryIds:`, Array.isArray(liveQueryIds) ? `[${liveQueryIds.length} items: ${liveQueryIds.join(', ')}]` : liveQueryIds)
             // Get _dbId from context for pending writes lookup
             const dbId: number | undefined = context._dbId // _dbId is the database integer ID
-            console.log('_dbId', dbId)
             // Get pending property IDs (synchronous - uses static Map)
             // Lazy import ModelProperty to avoid circular dependency
             const ModelProperty = getModelProperty()
@@ -535,20 +534,14 @@ export class Model {
               return []
             }
             const pendingIds = dbId ? ModelProperty.getPendingPropertyIds(dbId) : []
-
-            console.log(`[Model.properties getter] Model "${context.modelName}" (state: ${snapshot.value}) - pendingIds:`, pendingIds)
             
             // Combine and deduplicate
             const allPropertyIds = [...new Set([...liveQueryIds, ...pendingIds])]
-
-            console.log('[Model.properties getter] allPropertyIds', allPropertyIds)
             
             // Get ModelProperty instances from static cache (synchronous)
             const propertyInstances: any[] = []
             for (const propertyFileId of allPropertyIds) {
-              console.log('[Model.properties getter] propertyFileId', propertyFileId)
               const property = ModelProperty.getById(propertyFileId)
-              console.log('[Model.properties getter] property', property)
               if (property) {
                 propertyInstances.push(property)
               }
@@ -557,7 +550,6 @@ export class Model {
             }
             
             // CRITICAL: Always create a new array reference so React detects changes
-            console.log('[Model.properties getter] propertyInstances', propertyInstances.map(p => p.name))
             return [...propertyInstances]
           }
           
@@ -1175,6 +1167,56 @@ export class Model {
       logger(`Model.createById: Error looking up model by ID "${modelFileId}": ${error instanceof Error ? error.message : String(error)}`)
       return undefined
     }
+  }
+
+  /**
+   * Find Model instance by modelFileId, modelName/schemaName, or both
+   * Waits for the model to be fully loaded (idle state) by default
+   * @param options - Find options including lookup parameters and wait configuration
+   * @returns Model instance if found, undefined otherwise
+   */
+  static async find({
+    modelFileId,
+    modelName,
+    schemaName,
+    waitForReady = true,
+    readyTimeout = 5000,
+  }: {
+    modelFileId?: string
+    modelName?: string
+    schemaName?: string
+    waitForReady?: boolean
+    readyTimeout?: number
+  }): Promise<Model | undefined> {
+    let instance: Model | undefined
+
+    // Try modelFileId first (most specific)
+    if (modelFileId) {
+      instance = this.getById(modelFileId)
+      if (!instance) {
+        instance = await this.createById(modelFileId)
+      }
+    }
+    // Fall back to name lookup
+    else if (modelName && schemaName) {
+      instance = this.getByName(modelName, schemaName)
+      if (!instance) {
+        // Try async lookup if not in cache
+        instance = await this.getByNameAsync(modelName, schemaName)
+      }
+    } else {
+      return undefined
+    }
+
+    if (!instance) {
+      return undefined
+    }
+
+    if (waitForReady) {
+      await waitForEntityIdle(instance, { timeout: readyTimeout })
+    }
+
+    return instance
   }
 
   /**

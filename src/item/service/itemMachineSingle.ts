@@ -113,12 +113,16 @@ export const itemMachineSingle = setup({
             const item = (event as any).item
             const existingPropertyInstances = context.propertyInstances || new Map<string, IItemProperty<any>>()
             
+            console.log(`[itemMachine] loadOrCreateItemSuccess for modelName: ${context.modelName}, propertyInstances from event:`, item.propertyInstances ? Array.from(item.propertyInstances.keys()) : 'none')
+            
             // Merge property instances from loadOrCreateItem
             if (item.propertyInstances) {
               for (const [propertyName, propertyInstance] of item.propertyInstances) {
                 existingPropertyInstances.set(propertyName, propertyInstance)
               }
             }
+            
+            console.log(`[itemMachine] After merge, total propertyInstances:`, Array.from(existingPropertyInstances.keys()))
             
             return {
               ...context,

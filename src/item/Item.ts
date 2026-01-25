@@ -27,8 +27,11 @@ import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { eq, and } from 'drizzle-orm'
 import debug from 'debug'
+
+const itemLogger = debug('seedSdk:Item')
 
 // Fallback helper for synchronous Model access when modelInstance is not provided
 // This is only used as a fallback - the preferred approach is to pass modelInstance
@@ -218,8 +221,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
     if (props.seedUid || props.seedLocalId) {
       const seedId = (props.seedUid || props.seedLocalId) as string
-      if (this.instanceCache.has(seedId)) {
+        if (this.instanceCache.has(seedId)) {
         const { instance, refCount } = this.instanceCache.get(seedId)!
+        console.log(`[Item.create] Returning cached instance for ${seedId}`)
         this.instanceCache.set(seedId, {
           instance,
           refCount: refCount + 1,
@@ -249,6 +253,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // Wrap instance in Proxy for reactive property access
         const proxiedInstance = new Proxy(newInstance, {
           get(target, prop: string | symbol) {
+            // Log all property accesses to see what's being called
+            if (typeof prop === 'string' && prop === 'properties') {
+              console.log(`[Item.Proxy.get] properties accessed on Item instance`)
+            }
             // Handle special properties
             if (prop === '_service') {
               return Reflect.get(target, prop)
@@ -258,16 +266,22 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
               // Special handling for properties - compute from propertyInstances Map
               if (prop === 'properties') {
+                console.log(`[Item.Proxy.properties] Proxy handler called for properties`)
                 const snapshot = target._service.getSnapshot()
                 const context = snapshot.context
                 const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
+                const modelName = context.modelName as string
                 
+                console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances size: ${propertyInstances?.size || 0}`)
                 if (!propertyInstances || propertyInstances.size === 0) {
+                  console.log(`[Item.Proxy.properties] ${modelName}: No property instances`)
                   return []
                 }
                 
                 // Get model schema keys for filtering
                 const modelSchemaKeys = target._getModelSchemaKeys()
+                console.log(`[Item.Proxy.properties] ${modelName}: modelSchemaKeys:`, modelSchemaKeys)
+                console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances keys:`, Array.from(propertyInstances.keys()))
                 
                 // Convert Map to array, filtering by model schema
                 const properties: IItemProperty[] = []
@@ -278,11 +292,21 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   }
                   
                   // Include if it's a model property
-                  if (target._isModelProperty(key, modelSchemaKeys)) {
+                  const isModelProp = target._isModelProperty(key, modelSchemaKeys)
+                  const propValue = propertyInstance.value
+                  console.log(`[Item.Proxy.properties] ${modelName}: key="${key}", propertyName="${propertyInstance.propertyName}", isModelProperty=${isModelProp}, value=${propValue}, valueType=${typeof propValue}`)
+                  if (isModelProp) {
                     properties.push(propertyInstance)
+                    console.log(`[Item.Proxy.properties] ${modelName}: Added property "${propertyInstance.propertyName}" with value:`, propValue)
                   }
                 }
                 
+                const propertiesInfo = properties.map(p => ({
+                  propertyName: p.propertyName,
+                  value: p.value,
+                  hasValue: p.value !== undefined && p.value !== null
+                }))
+                console.log(`[Item.Proxy.properties] ${modelName}: Returning ${properties.length} properties:`, JSON.stringify(propertiesInfo, null, 2))
                 // CRITICAL: Always create a new array reference so React detects changes
                 return [...properties]
               }
@@ -434,6 +458,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Wrap instance in Proxy for reactive property access
     const proxiedInstance = new Proxy(newInstance, {
       get(target, prop: string | symbol) {
+        // Log all property accesses to see what's being called
+        if (typeof prop === 'string' && prop === 'properties') {
+          console.log(`[Item.Proxy.get] properties accessed on Item instance (second Proxy setup)`)
+        }
         // Handle special properties
         if (prop === '_service') {
           return Reflect.get(target, prop)
@@ -443,16 +471,22 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
           // Special handling for properties - compute from propertyInstances Map
           if (prop === 'properties') {
+            console.log(`[Item.Proxy.properties] Proxy handler called for properties (second Proxy setup)`)
             const snapshot = target._service.getSnapshot()
             const context = snapshot.context
             const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
+            const modelName = context.modelName as string
             
+            console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances size: ${propertyInstances?.size || 0}`)
             if (!propertyInstances || propertyInstances.size === 0) {
+              console.log(`[Item.Proxy.properties] ${modelName}: No property instances`)
               return []
             }
             
             // Get model schema keys for filtering
             const modelSchemaKeys = target._getModelSchemaKeys()
+            console.log(`[Item.Proxy.properties] ${modelName}: modelSchemaKeys:`, modelSchemaKeys)
+            console.log(`[Item.Proxy.properties] ${modelName}: propertyInstances keys:`, Array.from(propertyInstances.keys()))
             
             // Convert Map to array, filtering by model schema
             const properties: IItemProperty[] = []
@@ -463,11 +497,21 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               }
               
               // Include if it's a model property
-              if (target._isModelProperty(key, modelSchemaKeys)) {
+              const isModelProp = target._isModelProperty(key, modelSchemaKeys)
+              const propValue = propertyInstance.value
+              console.log(`[Item.Proxy.properties] ${modelName}: key="${key}", propertyName="${propertyInstance.propertyName}", isModelProperty=${isModelProp}, value=${propValue}`)
+              if (isModelProp) {
                 properties.push(propertyInstance)
+                console.log(`[Item.Proxy.properties] ${modelName}: Added property "${propertyInstance.propertyName}" with value:`, propValue)
               }
             }
             
+            const propertiesInfo = properties.map(p => ({
+              propertyName: p.propertyName,
+              value: p.value,
+              hasValue: p.value !== undefined && p.value !== null
+            }))
+            console.log(`[Item.Proxy.properties] ${modelName}: Returning ${properties.length} properties:`, JSON.stringify(propertiesInfo, null, 2))
             // CRITICAL: Always create a new array reference so React detects changes
             return [...properties]
           }
@@ -548,25 +592,60 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     modelName,
     seedLocalId,
     seedUid,
-  }: ItemFindProps): Promise<IItem<any> | undefined> {
+    waitForReady = true,
+    readyTimeout = 5000,
+  }: ItemFindProps & {
+    waitForReady?: boolean
+    readyTimeout?: number
+  }): Promise<IItem<any> | undefined> {
+    console.log(`[Item.find] Called with modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
     if (!seedLocalId && !seedUid) {
-      return
-    }
-    const itemData = await getItemData({
-      modelName,
-      seedLocalId,
-      seedUid,
-    })
-
-    if (!itemData) {
-      console.error('No item data found', { modelName, seedLocalId, seedUid })
+      console.log(`[Item.find] No seedLocalId or seedUid, returning undefined`)
       return
     }
 
-    return Item.create({
-      ...itemData,
-      modelName,
-    })
+    // Check cache first (fast path) - matches pattern used by Schema, Model, ModelProperty, and ItemProperty
+    const cacheKey = seedUid || seedLocalId
+    let foundItem: IItem<any> | undefined
+    if (cacheKey && this.instanceCache.has(cacheKey)) {
+      console.log(`[Item.find] Found in cache: ${cacheKey}`)
+      const { instance, refCount } = this.instanceCache.get(cacheKey)!
+      this.instanceCache.set(cacheKey, {
+        instance,
+        refCount: refCount + 1,
+      })
+      foundItem = instance
+    } else {
+      console.log(`[Item.find] Not in cache, querying database...`)
+      // If not in cache, query database
+      const itemData = await getItemData({
+        modelName,
+        seedLocalId,
+        seedUid,
+      })
+
+      if (!itemData) {
+        console.error('[Item.find] No item data found', { modelName, seedLocalId, seedUid })
+        return
+      }
+
+      console.log(`[Item.find] Got itemData, creating Item instance...`)
+      // Item.create() will handle caching the new instance
+      foundItem = await Item.create({
+        ...itemData,
+        modelName,
+      })
+    }
+
+    if (!foundItem) {
+      return undefined
+    }
+
+    if (waitForReady) {
+      await waitForEntityIdle(foundItem, { timeout: readyTimeout })
+    }
+
+    return foundItem
   }
 
   static async all(
@@ -716,15 +795,63 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * This makes Item independent from Model
    */
   protected _getModelSchemaKeys(): string[] {
+    // Get model schema keys - prefer property instances since they come from the database
+    // and are already filtered to the correct model. Fall back to Model if property instances
+    // aren't available yet.
     const serviceContext = this.serviceContext
     const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    const modelName = this.modelName
     
+    // First, try to get schema keys from property instances (most reliable)
+    // Property instances come from the database and are already model-specific
+    if (propertyInstances && propertyInstances.size > 0) {
+      const schemaKeys = this._getSchemaKeysFromPropertyInstances(propertyInstances)
+      if (schemaKeys.length > 0) {
+        return schemaKeys
+      }
+    }
+    
+    // Fall back to Model if property instances aren't available yet
+    try {
+      const Model = getModel()
+      if (!modelName) {
+        return []
+      }
+      
+      const model = Model.getByName(modelName)
+      if (!model) {
+        return []
+      }
+      
+      // Get property names from Model.properties
+      const modelProperties = model.properties || []
+      if (modelProperties.length === 0) {
+        return []
+      }
+      
+      const schemaKeys: string[] = []
+      for (const modelProperty of modelProperties) {
+        const propContext = modelProperty._getSnapshotContext()
+        const propertyName = propContext.name
+        if (propertyName && !INTERNAL_PROPERTY_NAMES.includes(propertyName)) {
+          if (!schemaKeys.includes(propertyName)) {
+            schemaKeys.push(propertyName)
+          }
+        }
+      }
+      
+      return schemaKeys
+    } catch (error) {
+      // If Model access fails, return empty array (property instances should be used instead)
+      return []
+    }
+  }
+  
+  protected _getSchemaKeysFromPropertyInstances(propertyInstances: Map<string, IItemProperty> | undefined): string[] {
     if (!propertyInstances || propertyInstances.size === 0) {
       return []
     }
     
-    // Extract property names from property instances
-    // These are already filtered to model properties since they come from metadata
     const schemaKeys: string[] = []
     for (const [key, propertyInstance] of propertyInstances) {
       // Skip internal properties
@@ -732,21 +859,24 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         continue
       }
       
-      // Get the transformed key (same logic as in properties getter)
-      let transformedKey = key
+      // Prefer propertyInstance.propertyName if available (most reliable)
+      // Otherwise use the Map key
+      let propertyName = propertyInstance.propertyName || key
+      
+      // Apply transformations if needed
+      let transformedKey = propertyName
       if (propertyInstance.alias) {
         transformedKey = propertyInstance.alias
-      } else if (key.endsWith('Ids')) {
-        transformedKey = pluralize(key.slice(0, -3))
-      } else if (key.endsWith('Id')) {
-        transformedKey = key.slice(0, -2)
+      } else if (propertyName.endsWith('Ids')) {
+        transformedKey = pluralize(propertyName.slice(0, -3))
+      } else if (propertyName.endsWith('Id')) {
+        transformedKey = propertyName.slice(0, -2)
       }
       
       if (!schemaKeys.includes(transformedKey)) {
         schemaKeys.push(transformedKey)
       }
     }
-    
     return schemaKeys
   }
 
@@ -814,13 +944,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   get properties(): IItemProperty[] {
     const serviceContext = this.serviceContext
     const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    const modelName = this.modelName
     
     if (!propertyInstances || propertyInstances.size === 0) {
+      console.log(`[Item.properties getter] ${modelName}: No property instances`)
       return []
     }
     
     // Get model schema keys for filtering
     const modelSchemaKeys = this._getModelSchemaKeys()
+    console.log(`[Item.properties getter] ${modelName}: modelSchemaKeys:`, modelSchemaKeys)
+    console.log(`[Item.properties getter] ${modelName}: propertyInstances keys:`, Array.from(propertyInstances.keys()))
     
     // Convert Map to array, filtering by model schema
     const properties: IItemProperty[] = []
@@ -831,11 +965,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
       
       // Include if it's a model property
-      if (this._isModelProperty(key, modelSchemaKeys)) {
+      const isModelProp = this._isModelProperty(key, modelSchemaKeys)
+      console.log(`[Item.properties getter] ${modelName}: key="${key}", propertyName="${propertyInstance.propertyName}", isModelProperty=${isModelProp}`)
+      if (isModelProp) {
         properties.push(propertyInstance)
       }
     }
     
+    console.log(`[Item.properties getter] ${modelName}: Returning ${properties.length} properties:`, properties.map(p => p.propertyName))
     // Always return new array reference for React reactivity
     return [...properties]
   }

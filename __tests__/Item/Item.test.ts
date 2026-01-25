@@ -509,10 +509,13 @@ testDescribe('Item Integration Tests', () => {
       })
       
       // If found, verify it matches
+      // Note: find() now waits for idle by default, so no need to call waitForItemIdle
       if (foundItem) {
         expect(foundItem.seedLocalId).toBe(seedLocalId)
         expect(foundItem.modelName).toBe('TestPost')
-        await waitForItemIdle(foundItem)
+        // Verify it's in idle state (find() should have waited)
+        const service = foundItem.getService()
+        expect(service.getSnapshot().value).toBe('idle')
       }
       // If not found, that's okay - it means the item doesn't have a version yet
       // which is expected for newly created items
@@ -583,7 +586,9 @@ testDescribe('Item Integration Tests', () => {
         expect(foundItem?.seedUid).toBe(seedUid)
         expect(foundItem?.modelName).toBe('TestPost')
         
-        await waitForItemIdle(foundItem!)
+        // Verify it's in idle state (find() should have waited)
+        const service = foundItem!.getService()
+        expect(service.getSnapshot().value).toBe('idle')
       }
     })
 
@@ -594,6 +599,52 @@ testDescribe('Item Integration Tests', () => {
       })
       
       expect(foundItem).toBeUndefined()
+    })
+
+    it('should support waitForReady: false option', async () => {
+      const schemaName = 'Test Schema Item Find No Wait'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+      
+      const createdItem = await Item.create({
+        modelName: 'TestPost',
+        title: 'Find Me No Wait',
+      })
+      
+      await waitForItemIdle(createdItem)
+      const seedLocalId = createdItem.seedLocalId
+      
+      // Wait a bit for database to be updated
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Find with waitForReady: false - should return immediately
+      const foundItem = await Item.find({
+        modelName: 'TestPost',
+        seedLocalId,
+        waitForReady: false,
+      })
+      
+      expect(foundItem).toBeDefined()
+      // Item might not be idle yet since we didn't wait
+      const service = foundItem!.getService()
+      const state = service.getSnapshot().value
+      // State could be idle (if already loaded) or loading/waitingForDb
+      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
     })
   })
 

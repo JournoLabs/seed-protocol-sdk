@@ -11,6 +11,7 @@ import { eq, desc, and } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { isInternalSchema } from '@/helpers/constants'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
@@ -660,6 +661,46 @@ export class Schema {
 
     // Create schema using the name (this will load from database/file)
     return this.create(schemaName)
+  }
+
+  /**
+   * Find schema instance by schemaFileId
+   * Waits for the schema to be fully loaded (idle state) by default
+   * @param options - Find options including schemaFileId and wait configuration
+   * @returns Schema instance if found, undefined otherwise
+   */
+  static async find({
+    schemaFileId,
+    waitForReady = true,
+    readyTimeout = 5000,
+  }: {
+    schemaFileId: string
+    waitForReady?: boolean
+    readyTimeout?: number
+  }): Promise<Schema | undefined> {
+    if (!schemaFileId) {
+      return undefined
+    }
+
+    // Check cache first
+    const cached = this.getById(schemaFileId)
+    if (cached) {
+      if (waitForReady) {
+        await waitForEntityIdle(cached, { timeout: readyTimeout })
+      }
+      return cached
+    }
+
+    // Create/find from database
+    try {
+      const instance = await this.createById(schemaFileId)
+      if (waitForReady) {
+        await waitForEntityIdle(instance, { timeout: readyTimeout })
+      }
+      return instance
+    } catch (error) {
+      return undefined
+    }
   }
 
   /**

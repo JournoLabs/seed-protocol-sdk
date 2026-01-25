@@ -30,5 +30,7 @@ export interface IItemProperty {
     propertyName: string;
     seedLocalId?: string;
     seedUid?: string;
+    waitForReady?: boolean;
+    readyTimeout?: number;
   }): Promise<ItemProperty<any> | undefined>;
 } 

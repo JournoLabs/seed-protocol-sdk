@@ -67,6 +67,7 @@ export const loadOrCreateItem = fromCallback<
   const _loadOrCreateItem = async (): Promise<void> => {
     const { seedLocalId, seedUid, modelName } = context
 
+    console.log(`[loadOrCreateItem] Called for modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
     logger(`loadOrCreateItem called for modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
 
     if (!seedLocalId && !seedUid) {
@@ -196,12 +197,18 @@ export const loadOrCreateItem = fromCallback<
       )
 
     logger(`Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
+    console.log(`[loadOrCreateItem] Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
+    if (metadataRecords.length > 0) {
+      console.log(`[loadOrCreateItem] Metadata property names:`, metadataRecords.map(r => r.propertyName))
+    }
 
     // Step 4: Create ItemProperty instances from metadata records
     // This ensures they're in the cache when Item.properties getter is called
     const propertyInstances = metadataRecords.length > 0
       ? await createItemPropertyInstances(metadataRecords, resolvedSeedLocalId, resolvedSeedUid)
       : new Map<string, any>()
+
+    console.log(`[loadOrCreateItem] Created ${propertyInstances.size} property instances:`, Array.from(propertyInstances.keys()))
 
     // Step 5: Return loaded item data with property instances
     sendBack({

@@ -5,6 +5,7 @@ import { useItem, useItems } from '@/browser/react/item'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
+import { seeds } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { importJsonSchema } from '@/imports/json'
 import { SchemaFileFormat } from '@/types/import'
@@ -357,9 +358,38 @@ describe('React Item Hooks Integration Tests', () => {
         return
       }
 
+      // Verify item exists in database before test
+      const db = BaseDb.getAppDb()
+      if (db) {
+        await waitFor(
+          async () => {
+            const { seeds } = await import('@/seedSchema')
+            const seedRows = await db
+              .select()
+              .from(seeds)
+              .where(eq(seeds.localId, testItem1.seedLocalId))
+              .limit(1)
+            return seedRows.length > 0
+          },
+          { timeout: 5000 }
+        )
+      }
+
       render(
         <UseItemTest modelName="Post" seedLocalId={testItem1.seedLocalId} />,
         { container }
+      )
+
+      // Small delay to allow React to process initial render and state updates
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Wait for loading to complete first (this ensures state updates have propagated)
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('item-is-loading')
+          return isLoading.textContent === 'false'
+        },
+        { timeout: 15000 }
       )
 
       // Wait for item to be found
@@ -528,8 +558,25 @@ describe('React Item Hooks Integration Tests', () => {
       const itemModelName = screen.getByTestId('item-model-name')
       expect(itemModelName.textContent).toBe('Article')
 
+      // Wait for properties to be rendered
+      await waitFor(
+        () => {
+          const itemDataHeadline = screen.queryByTestId('item-data-headline')
+          return itemDataHeadline !== null && itemDataHeadline.textContent === 'Test Article Headline'
+        },
+        { timeout: 10000 }
+      )
+
       const itemDataHeadline = screen.getByTestId('item-data-headline')
       expect(itemDataHeadline.textContent).toBe('Test Article Headline')
+
+      await waitFor(
+        () => {
+          const itemDataBody = screen.queryByTestId('item-data-body')
+          return itemDataBody !== null && itemDataBody.textContent === 'Test Article Body'
+        },
+        { timeout: 10000 }
+      )
 
       const itemDataBody = screen.getByTestId('item-data-body')
       expect(itemDataBody.textContent).toBe('Test Article Body')

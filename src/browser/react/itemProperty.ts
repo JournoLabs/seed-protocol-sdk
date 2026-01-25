@@ -151,24 +151,10 @@ export function useItemProperty(
         return
       }
 
-      // Check if property is in 'waitingForDb' state and trigger load
-      const snapshot = foundProperty.getService().getSnapshot()
-      if (snapshot.value === 'waitingForDb') {
-        foundProperty.getService().send({ type: 'waitForDbSuccess' })
-      }
-
+      // ItemProperty.find() now waits for idle by default, so the property should be ready
       setProperty(foundProperty)
-      
-      // Set loading state based on service state
-      // Use type guard to check if snapshot has 'value' property
-      if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
-        const isIdle = snapshot.value === 'idle'
-        setIsLoading(!isIdle)
-        setError(null)
-      } else {
-        setIsLoading(false)
-        setError(null)
-      }
+      setIsLoading(false) // Property is ready since find() waited for idle
+      setError(null)
     } catch (error) {
       logger('[useItemProperty] Error updating item property:', error)
       setProperty(undefined)

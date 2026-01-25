@@ -574,7 +574,9 @@ testDescribe('ItemProperty Integration Tests', () => {
       expect(property).toBeDefined()
       
       if (property) {
-        await waitForItemPropertyIdle(property)
+        // Verify it's in idle state (find() should have waited)
+        const service = property.getService()
+        expect(service.getSnapshot().value).toBe('idle')
         expect(property.propertyName).toBe('title')
         expect(property.seedLocalId).toBe(seedLocalId)
         expect(property.value).toBe('Find Me')
@@ -626,7 +628,9 @@ testDescribe('ItemProperty Integration Tests', () => {
       expect(property).toBeDefined()
       
       if (property) {
-        await waitForItemPropertyIdle(property)
+        // Verify it's in idle state (find() should have waited)
+        const service = property.getService()
+        expect(service.getSnapshot().value).toBe('idle')
         expect(property.propertyName).toBe('content')
         expect(property.value).toBe('Find By Uid')
       }
@@ -647,6 +651,52 @@ testDescribe('ItemProperty Integration Tests', () => {
       })
       
       expect(property).toBeUndefined()
+    })
+
+    it('should support waitForReady: false option', async () => {
+      const schemaName = 'Test Schema Property Find No Wait'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+      
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'Find Me No Wait',
+      })
+      
+      await waitForItemIdle(item)
+      const seedLocalId = item.seedLocalId
+      
+      // Wait for properties to be saved to database
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      
+      // Find with waitForReady: false - should return immediately
+      const property = await ItemProperty.find({
+        propertyName: 'title',
+        seedLocalId,
+        waitForReady: false,
+      })
+      
+      expect(property).toBeDefined()
+      // Property might not be idle yet since we didn't wait
+      const service = property!.getService()
+      const state = service.getSnapshot().value
+      // State could be idle (if already loaded) or loading/waitingForDb
+      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
     })
   })
 

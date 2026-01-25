@@ -1,10 +1,10 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, eq, getTableColumns, gt, SQL, sql } from "drizzle-orm"
+import { and, eq, getTableColumns, gt, SQL, sql, count, max } from "drizzle-orm"
 import { getItemProperties } from "./getItemProperties"
 import { getVersionData } from "./subqueries/versionData"
-import { seeds } from "@/seedSchema"
+import { seeds, versions } from "@/seedSchema"
 import { getSeedData } from "./getSeedData"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -45,31 +45,60 @@ export const getItemData: GetItemData = async ({
     whereClauses.push(eq(seeds.localId, seedLocalId))
   }
 
-  const versionData = getVersionData()
-
-  const itemDataRows = await appDb
-    .with(versionData)
+  // First, query the seeds table directly to find the item
+  const seedRows = await appDb
     .select({
       ...rest,
       seedLocalId: seeds.localId,
       seedUid: seeds.uid,
-      versionsCount: versionData.versionsCount,
-      lastVersionPublishedAt: versionData.lastVersionPublishedAt,
-      latestVersionUid: versionData.latestVersionUid,
-      latestVersionLocalId: versionData.latestVersionLocalId,
     })
     .from(seeds)
-    .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
-    .where(and(...whereClauses, gt(versionData.versionsCount, 0)))
-    .orderBy(sql.raw('COALESCE(attestation_created_at, created_at) DESC'))
-    .groupBy(seeds.localId) as ItemData[]
+    .where(and(...whereClauses))
+    .limit(1)
 
-  if (!itemDataRows || itemDataRows.length === 0) {
-    logger('[db/queries] [getItemDataFromDb] no itemDataRows')
+  logger('[getItemData] Seed query result', { rowsCount: seedRows?.length || 0, firstRow: seedRows?.[0] })
+
+  if (!seedRows || seedRows.length === 0) {
+    logger('[db/queries] [getItemDataFromDb] no seedRows found', { modelName, seedLocalId, seedUid })
     return
   }
 
-  let itemData = itemDataRows[0] as ItemData & { [key: string]: any }
+  const seedRow = seedRows[0]
+  const resolvedSeedLocalId = seedRow.seedLocalId
+
+  // Now get version data if it exists - query versions table directly
+  let versionRow = {
+    versionsCount: 0,
+    lastVersionPublishedAt: null,
+    latestVersionUid: null,
+    latestVersionLocalId: null,
+  }
+  
+  try {
+    const versionRows = await appDb
+      .select({
+        versionsCount: count(versions.localId).as('versionsCount'),
+        lastVersionPublishedAt: max(versions.attestationCreatedAt).as('lastVersionPublishedAt'),
+        latestVersionUid: max(versions.uid).as('latestVersionUid'),
+        latestVersionLocalId: max(versions.localId).as('latestVersionLocalId'),
+      })
+      .from(versions)
+      .where(eq(versions.seedLocalId, resolvedSeedLocalId))
+      .groupBy(versions.seedLocalId)
+      .limit(1)
+
+    if (versionRows && versionRows.length > 0) {
+      versionRow = versionRows[0]
+    }
+  } catch (error) {
+    console.error('[getItemData] Error querying versions', error)
+    // Continue with default versionRow values
+  }
+
+  let itemData = {
+    ...seedRow,
+    ...versionRow,
+  } as ItemData & { [key: string]: any }
 
   const propertiesData = await getItemProperties({
     seedLocalId,

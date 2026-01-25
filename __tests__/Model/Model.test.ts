@@ -904,6 +904,107 @@ testDescribe('Model Integration Tests', () => {
     })
   })
 
+  describe('Model.find()', () => {
+    it('should find existing Model by modelFileId and wait for idle by default', async () => {
+      const schemaName = 'Test Schema Model Find'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitForModelIdle(model)
+      const modelFileId = model.id
+
+      // Find the model
+      const foundModel = await Model.find({
+        modelFileId: modelFileId!,
+      })
+
+      expect(foundModel).toBeDefined()
+      expect(foundModel?.modelName).toBe('TestPost')
+      
+      // Verify it's in idle state (find() should have waited)
+      const service = foundModel!.getService()
+      expect(service.getSnapshot().value).toBe('idle')
+    })
+
+    it('should find existing Model by modelName and schemaName', async () => {
+      const schemaName = 'Test Schema Model Find By Name'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitForModelIdle(model)
+
+      // Find the model by name
+      const foundModel = await Model.find({
+        modelName: 'TestPost',
+        schemaName: schemaName,
+      })
+
+      expect(foundModel).toBeDefined()
+      expect(foundModel?.modelName).toBe('TestPost')
+      
+      // Verify it's in idle state (find() should have waited)
+      const service = foundModel!.getService()
+      expect(service.getSnapshot().value).toBe('idle')
+    })
+
+    it('should return undefined if Model not found', async () => {
+      const foundModel = await Model.find({
+        modelFileId: 'non-existent-id',
+      })
+
+      expect(foundModel).toBeUndefined()
+    })
+
+    it('should support waitForReady: false option', async () => {
+      const schemaName = 'Test Schema Model Find No Wait'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      
+      const model = Model.create('TestPost', schemaName)
+      await waitForModelIdle(model)
+      const modelFileId = model.id
+
+      // Find with waitForReady: false - should return immediately
+      const foundModel = await Model.find({
+        modelFileId: modelFileId!,
+        waitForReady: false,
+      })
+
+      expect(foundModel).toBeDefined()
+      // Model might not be idle yet since we didn't wait
+      const service = foundModel!.getService()
+      const state = service.getSnapshot().value
+      // State could be idle (if already loaded) or loading/waitingForDb
+      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+    })
+  })
+
   describe('Model.getById()', () => {
     it('should return cached Model instance by modelFileId', async () => {
       const schemaName = 'Test Schema Model Get By ID'

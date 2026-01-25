@@ -293,6 +293,71 @@ testDescribe('Schema Integration Tests', () => {
     })
   })
 
+  describe('Schema.find()', () => {
+    it('should find existing Schema by schemaFileId and wait for idle by default', async () => {
+      const schemaName = 'Test Schema Find'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const schemaFileId = testSchema.id
+
+      // Find the schema
+      const foundSchema = await Schema.find({
+        schemaFileId: schemaFileId!,
+      })
+
+      expect(foundSchema).toBeDefined()
+      expect(foundSchema?.schemaName).toBe(schemaName)
+      
+      // Verify it's in idle state (find() should have waited)
+      const service = foundSchema!.getService()
+      expect(service.getSnapshot().value).toBe('idle')
+    })
+
+    it('should return undefined if Schema not found', async () => {
+      const foundSchema = await Schema.find({
+        schemaFileId: 'non-existent-id',
+      })
+
+      expect(foundSchema).toBeUndefined()
+    })
+
+    it('should support waitForReady: false option', async () => {
+      const schemaName = 'Test Schema Find No Wait'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const schemaFileId = testSchema.id
+
+      // Find with waitForReady: false - should return immediately
+      const foundSchema = await Schema.find({
+        schemaFileId: schemaFileId!,
+        waitForReady: false,
+      })
+
+      expect(foundSchema).toBeDefined()
+      // Schema might not be idle yet since we didn't wait
+      const service = foundSchema!.getService()
+      const state = service.getSnapshot().value
+      // State could be idle (if already loaded) or loading/waitingForDb
+      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+    })
+  })
+
   describe('Schema.schemaName getter - ID prevention', () => {
     it('should return actual schema name even if context.schemaName contains an ID', async () => {
       const schemaName = 'Test Schema Name Not ID'

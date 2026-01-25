@@ -5,6 +5,7 @@ import { modelPropertyMachine, ModelPropertyMachineContext } from './service/mod
 import { StorageType } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
@@ -536,11 +537,6 @@ export class ModelProperty {
       trackedProperties: TPropertyKeys,
       getContext: (instance) => {
         const context = instance._getSnapshotContext()
-        console.log(`[ModelProperty.create] getContext for ${propertyWithId.modelName}:${propertyWithId.name}`, {
-          ref: context.ref,
-          refModelName: context.refModelName,
-          refModelId: context.refModelId
-        })
         return context
       },
       sendUpdate: (instance, prop: string, value: any) => {
@@ -713,16 +709,13 @@ export class ModelProperty {
    * Queries the database to find the property if not cached
    */
   static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
-    console.log('createById', propertyFileId)
     if (!propertyFileId) {
       return undefined
     }
 
     // First, check if we have an instance cached
     const cachedInstance = this.getById(propertyFileId)
-    console.log('cachedInstance', cachedInstance)
     if (cachedInstance) {
-      console.log('cachedInstance found', cachedInstance)
       return cachedInstance
     }
 
@@ -817,6 +810,47 @@ export class ModelProperty {
   }
 
   /**
+   * Find ModelProperty instance by propertyFileId
+   * Waits for the property to be fully loaded (idle state) by default
+   * @param options - Find options including propertyFileId and wait configuration
+   * @returns ModelProperty instance if found, undefined otherwise
+   */
+  static async find({
+    propertyFileId,
+    waitForReady = true,
+    readyTimeout = 5000,
+  }: {
+    propertyFileId: string
+    waitForReady?: boolean
+    readyTimeout?: number
+  }): Promise<ModelProperty | undefined> {
+    if (!propertyFileId) {
+      return undefined
+    }
+
+    // Check cache first
+    const cached = this.getById(propertyFileId)
+    if (cached) {
+      if (waitForReady) {
+        await waitForEntityIdle(cached, { timeout: readyTimeout })
+      }
+      return cached
+    }
+
+    // Create/find from database
+    const instance = await this.createById(propertyFileId)
+    if (!instance) {
+      return undefined
+    }
+
+    if (waitForReady) {
+      await waitForEntityIdle(instance, { timeout: readyTimeout })
+    }
+
+    return instance
+  }
+
+  /**
    * Track a pending write for a property
    */
   static trackPendingWrite(propertyFileId: string, modelId: number): void {
@@ -851,8 +885,6 @@ export class ModelProperty {
    * Get all pending property IDs for a model
    */
   static getPendingPropertyIds(modelId: number): string[] {
-    console.log(`[ModelProperty.getPendingPropertyIds] Getting pending property IDs for modelId: ${modelId}`)
-    console.log(`[ModelProperty.getPendingPropertyIds] Pending writes:`, Array.from(this.pendingWrites.entries()))
     return Array.from(this.pendingWrites.entries())
       .filter(([_, write]) => write.modelId === modelId && write.status !== 'error')
       .map(([propertyFileId]) => propertyFileId)

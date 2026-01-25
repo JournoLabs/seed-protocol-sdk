@@ -11,6 +11,7 @@ import debug from 'debug'
 import pluralize from 'pluralize'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { BaseFileManager, getCorrectId } from '@/helpers'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -592,29 +593,46 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     propertyName,
     seedLocalId,
     seedUid,
-  }: ItemPropertyFindProps): Promise<IItemProperty<any> | undefined> {
+    waitForReady = true,
+    readyTimeout = 5000,
+  }: ItemPropertyFindProps & {
+    waitForReady?: boolean
+    readyTimeout?: number
+  }): Promise<IItemProperty<any> | undefined> {
     if ((!seedLocalId && !seedUid) || !propertyName) {
       return
     }
     const cacheKeyId = seedUid || seedLocalId
     const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
+    let foundProperty: IItemProperty<any> | undefined
     if (this.instanceCache.has(cacheKey)) {
       const { instance, refCount } = this.instanceCache.get(cacheKey)!
       this.instanceCache.set(cacheKey, {
         instance,
         refCount: refCount + 1,
       })
-      return instance
+      foundProperty = instance
+    } else {
+      const propertyData = await getPropertyData({
+        propertyName,
+        seedLocalId,
+        seedUid,
+      })
+      if (!propertyData) {
+        return
+      }
+      foundProperty = await ItemProperty.create(propertyData)
     }
-    const propertyData = await getPropertyData({
-      propertyName,
-      seedLocalId,
-      seedUid,
-    })
-    if (!propertyData) {
-      return
+
+    if (!foundProperty) {
+      return undefined
     }
-    return ItemProperty.create(propertyData)
+
+    if (waitForReady) {
+      await waitForEntityIdle(foundProperty, { timeout: readyTimeout })
+    }
+
+    return foundProperty
   }
 
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {

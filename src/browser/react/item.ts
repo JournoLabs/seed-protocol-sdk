@@ -12,8 +12,9 @@ import { useIsClientReady } from './client'
 import { useLiveQuery } from './liveQuery'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { and, eq, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import type { SeedType } from '@/seedSchema/SeedSchema'
+import { getVersionData } from '@/db/read/subqueries/versionData'
 
 const logger = debug('seedSdk:react:item')
 
@@ -35,7 +36,9 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const [item, setItem] = useState<Item<T> | undefined>()
   const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
   const [error, setError] = useState<Error | null>(null)
+  const [propertyVersion, setPropertyVersion] = useState<number>(0)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const lastPropertyInstancesSizeRef = useRef<number>(0)
 
   const isClientReady = useIsClientReady()
 
@@ -43,11 +46,17 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const seedLocalIdRef = useRef<string | undefined>(seedLocalId)
   const seedUidRef = useRef<string | undefined>(seedUid)
 
-  // Determine if we should be loading based on parameters
-  const shouldLoad = !!(isClientReady && (seedLocalIdRef.current || seedUidRef.current))
+  // Determine if we should be loading based on parameters - use useMemo to stabilize
+  // Use refs to check current values to avoid dependency issues
+  const shouldLoad = useMemo(() => {
+    if (!isClientReady) return false
+    return !!(seedLocalIdRef.current || seedUidRef.current)
+  }, [isClientReady, seedLocalId, seedUid])
 
   const loadItem = useCallback(async () => {
-    if (!shouldLoad) {
+    // Check shouldLoad inside the function to avoid recreating the callback
+    const currentShouldLoad = !!(isClientReady && (seedLocalIdRef.current || seedUidRef.current))
+    if (!currentShouldLoad) {
       setItem(undefined)
       setIsLoading(false)
       setError(null)
@@ -55,7 +64,9 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
 
     try {
-      setIsLoading(true)
+      // Don't set isLoading here - let the subscription effect handle it
+      // This avoids race conditions where isLoading is set to true but then
+      // the subscription effect hasn't run yet to set it to false
       setError(null)
 
       const foundItem = await Item.find({
@@ -72,15 +83,27 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
         return
       }
 
-      setItem(foundItem)
-
-      // Check initial service state
+      // Item.find() now waits for idle by default, so the item should be ready
+      // Check if properties are already loaded
       const service = foundItem.getService()
-      const initialSnapshot = service.getSnapshot()
-      const isIdle = initialSnapshot.value === 'idle'
-      setIsLoading(!isIdle)
-      if (isIdle) {
-        setError(null)
+      const snapshot = service.getSnapshot()
+      const context = snapshot.context
+      const propertyInstances = context?.propertyInstances as Map<string, any> | undefined
+      const propertyInstancesSize = propertyInstances?.size || 0
+      
+      setItem(foundItem)
+      setIsLoading(false) // Item is ready since find() waited for idle
+      setError(null)
+      
+      // If properties are already present when item is loaded, trigger re-render
+      if (propertyInstancesSize > 0) {
+        console.log(`[useItem] Item loaded with ${propertyInstancesSize} properties, triggering re-render`)
+        lastPropertyInstancesSizeRef.current = propertyInstancesSize
+        setPropertyVersion((v) => {
+          const newVersion = v + 1
+          console.log(`[useItem] propertyVersion after loadItem: ${v} -> ${newVersion}`)
+          return newVersion
+        })
       }
     } catch (error) {
       logger('[useItem] Error loading item:', error)
@@ -88,7 +111,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       setIsLoading(false)
       setError(error as Error)
     }
-  }, [shouldLoad])
+  }, [isClientReady])
 
   useEffect(() => {
     modelNameRef.current = modelName
@@ -98,14 +121,19 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
 
   // Fetch/refetch when parameters change or client becomes ready
   useEffect(() => {
+    // Only clear item if we don't have parameters to load
+    // Don't clear if shouldLoad is false but we have an item - it might just be a timing issue
     if (!shouldLoad) {
-      setItem(undefined)
-      setIsLoading(false)
-      setError(null)
+      // Only clear if we actually don't have parameters (not just client not ready)
+      if (!seedLocalId && !seedUid) {
+        setItem(undefined)
+        setIsLoading(false)
+        setError(null)
+      }
       return
     }
     loadItem()
-  }, [shouldLoad, loadItem])
+  }, [shouldLoad, loadItem, seedLocalId, seedUid])
 
   // Subscribe to service changes when item is available
   useEffect(() => {
@@ -113,15 +141,41 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       // Clean up subscription if item is not available
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
+      lastPropertyInstancesSizeRef.current = 0
       return
     }
 
     // Clean up previous subscription
     subscriptionRef.current?.unsubscribe()
+    // Reset the ref when item changes
+    lastPropertyInstancesSizeRef.current = 0
 
     // Subscribe to service changes
-    const subscription = item.getService().subscribe((snapshot: any) => {
-      // Update loading state based on service state
+    // Don't set isLoading here - it's already set correctly in loadItem
+    // Just subscribe to future state changes
+    const service = item.getService()
+    
+    // Check initial state immediately
+    const initialSnapshot = service.getSnapshot()
+    if (initialSnapshot && typeof initialSnapshot === 'object' && 'value' in initialSnapshot) {
+      const initialContext = initialSnapshot.context
+      const initialPropertyInstances = initialContext?.propertyInstances as Map<string, any> | undefined
+      const initialPropertyInstancesSize = initialPropertyInstances?.size || 0
+      lastPropertyInstancesSizeRef.current = initialPropertyInstancesSize
+      
+      // If properties are already present, trigger initial re-render
+      if (initialPropertyInstancesSize > 0) {
+        console.log(`[useItem] Initial property instances found: ${initialPropertyInstancesSize}, triggering initial re-render`)
+        setPropertyVersion((v) => {
+          const newVersion = v + 1
+          console.log(`[useItem] Initial propertyVersion: ${v} -> ${newVersion}`)
+          return newVersion
+        })
+      }
+    }
+    
+    const subscription = service.subscribe((snapshot: any) => {
+      // Update loading state based on service state changes
       if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
         const isIdle = snapshot.value === 'idle'
         setIsLoading(!isIdle)
@@ -132,6 +186,24 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
         } else if (snapshot.value === 'error') {
           // Set error if service is in error state
           setError(new Error('Item service error'))
+        }
+        
+        // CRITICAL: Trigger re-render when propertyInstances change
+        // Check if propertyInstances have changed by comparing size
+        const context = snapshot.context
+        const propertyInstances = context?.propertyInstances as Map<string, any> | undefined
+        const currentPropertyInstancesSize = propertyInstances?.size || 0
+        const lastSize = lastPropertyInstancesSizeRef.current
+        
+        if (currentPropertyInstancesSize !== lastSize) {
+          // Property instances changed - trigger re-render by incrementing version
+          console.log(`[useItem] Property instances changed: ${lastSize} -> ${currentPropertyInstancesSize}, incrementing propertyVersion`)
+          lastPropertyInstancesSizeRef.current = currentPropertyInstancesSize
+          setPropertyVersion((v) => {
+            const newVersion = v + 1
+            console.log(`[useItem] propertyVersion: ${v} -> ${newVersion}`)
+            return newVersion
+          })
         }
       }
     })
@@ -144,11 +216,16 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
   }, [item])
 
-  return {
+  // Use useMemo to ensure React detects changes when propertyVersion changes
+  // This forces a re-render even if the item reference hasn't changed
+  // The component will re-access item.properties, which will call the Proxy handler
+  const memoizedReturn = useMemo(() => ({
     item,
     isLoading,
     error,
-  }
+  }), [item, isLoading, error, propertyVersion])
+  
+  return memoizedReturn
 }
 
 type UseItemsReturn = {
@@ -176,6 +253,8 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
 
   // Watch the seeds table for changes
   // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
+  // IMPORTANT: This query must match the logic in getItemsData() to ensure seedsTableData
+  // only includes seeds that Item.all() will return (i.e., seeds with versionsCount > 0)
   const db = isClientReady ? BaseDb.getAppDb() : null
   const seedsQuery = useMemo(() => {
     if (!db) return null
@@ -202,10 +281,25 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       )
     }
     
+    // Join with versionData and filter by versionsCount > 0 to match getItemsData() logic
+    // This ensures we only watch seeds that have at least one version
+    const versionData = getVersionData()
+    
     return db
-      .select()
+      .with(versionData)
+      .select({
+        localId: seeds.localId,
+        uid: seeds.uid,
+        type: seeds.type,
+        schemaUid: seeds.schemaUid,
+        createdAt: seeds.createdAt,
+        attestationCreatedAt: seeds.attestationCreatedAt,
+        _markedForDeletion: seeds._markedForDeletion,
+      })
       .from(seeds)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
+      .where(and(gt(versionData.versionsCount, 0), ...conditions))
+      .groupBy(seeds.localId)
   }, [db, isClientReady, modelName, deleted])
   const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
