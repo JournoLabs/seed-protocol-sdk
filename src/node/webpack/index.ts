@@ -16,7 +16,7 @@ export const withSeed = (config: any, webpack: any, isServer: boolean) => {
     // new webpack.DefinePlugin({
     //   __dirname: JSON.stringify(__dirname),
     // }),
-    new webpack.NormalModuleReplacementPlugin(/node:/, (resource) => {
+    new webpack.NormalModuleReplacementPlugin(/node:/, (resource: { request: string }) => {
       resource.request = resource.request.replace(/^node:/, '')
     }),
   )

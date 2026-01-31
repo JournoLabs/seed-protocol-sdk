@@ -1,6 +1,6 @@
 import { graphql } from '@/graphql/gql'
 import { TypedDocumentNode } from '@graphql-typed-document-node/core'
-import { Tag } from '@/graphql/gql/graphql'
+import { GetTransactionTagsQuery } from '@/graphql/gql/graphql'
 
 export const GET_TRANSACTION_TAGS = graphql(/* GraphQL */ `
   query GetTransactionTags($transactionId: ID!) {
@@ -12,4 +12,4 @@ export const GET_TRANSACTION_TAGS = graphql(/* GraphQL */ `
       }
     }
   }
-`) as TypedDocumentNode<{ tags: Tag[] }>
+`) as unknown as TypedDocumentNode<{ tags: { id: string; tags: { name: string; value: string }[] } | null }, { transactionId: string }>

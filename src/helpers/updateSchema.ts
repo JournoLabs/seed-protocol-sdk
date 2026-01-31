@@ -102,11 +102,13 @@ const sanitizeSchemaName = (name: string): string => {
  * @param version - Schema version
  * @param schemaFileId - Schema file ID (required)
  */
-const getSchemaFilePath = (name: string, version: number, schemaFileId: string): string => {
+const getSchemaFilePath = (name: string, version: number, schemaFileId?: string): string => {
   const path = BaseFileManager.getPathModule()
   const workingDir = BaseFileManager.getWorkingDir()
   const sanitizedName = sanitizeSchemaName(name)
-  const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
+  const filename = schemaFileId 
+    ? `${schemaFileId}_${sanitizedName}_v${version}.json`
+    : `${sanitizedName}_v${version}.json`
   return path.join(workingDir, filename)
 }
 
@@ -118,7 +120,7 @@ const getSchemaFilePath = (name: string, version: number, schemaFileId: string):
  */
 async function getSchemaFileId(schemaName: string): Promise<string> {
   const { BaseDb } = await import('@/db/Db/BaseDb')
-  const db = BaseDb.getDb()
+  const db = BaseDb.getAppDb()
   const { schemas } = await import('@/seedSchema/SchemaSchema')
   const { eq, desc } = await import('drizzle-orm')
   
@@ -371,7 +373,7 @@ export async function updateModelProperties(
   }
 
   // Write the new schema version to file using ID-based naming (preferred)
-  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id ?? undefined)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   await BaseFileManager.saveFile(newFilePath, newContent)
@@ -429,19 +431,18 @@ async function loadSchemaWithRenames(
       Object.entries(schemaFile.models).map(([modelName, model]) => [
         modelName,
         {
-          ...model,
-          // Remove id field for import format
-          id: undefined,
+          description: model.description,
           properties: Object.fromEntries(
             Object.entries(model.properties).map(([propName, prop]) => [
               propName,
               {
+                type: prop.type || 'string', // Ensure type is present
                 ...prop,
-                // Remove id field for import format
-                id: undefined,
+                // Remove id field for import format (not part of JsonImportSchema)
               },
             ]),
           ),
+          indexes: model.indexes,
         },
       ]),
     ) as JsonImportSchema['models'],
@@ -493,6 +494,9 @@ async function loadSchemaWithRenames(
     name: schemaName,
     version,
     schemaFileId: schemaFile.id || null,
+    schemaData: null,
+    isDraft: false,
+    isEdited: false,
     createdAt: new Date(schemaFile.metadata.createdAt).getTime(),
     updatedAt: new Date(schemaFile.metadata.updatedAt).getTime(),
   }
@@ -622,7 +626,7 @@ export async function renameModelProperty(
   delete updatedSchema.models[modelName].properties[oldPropertyName]
 
   // Write the new schema version using ID-based naming (preferred)
-  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id ?? undefined)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving
@@ -788,7 +792,7 @@ export async function deleteModelFromSchema(
   }
 
   // Write the new schema version using ID-based naming (preferred)
-  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id ?? undefined)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving
@@ -902,7 +906,7 @@ export async function deletePropertyFromModel(
   }
 
   // Write the new schema version using ID-based naming (preferred)
-  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id)
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, updatedSchema.id ?? undefined)
   const newContent = JSON.stringify(updatedSchema, null, 2)
   
   // Ensure the directory exists before saving

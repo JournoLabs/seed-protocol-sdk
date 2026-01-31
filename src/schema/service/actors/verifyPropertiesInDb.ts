@@ -117,7 +117,7 @@ export const verifyPropertiesInDb = fromCallback<
           }
         }
 
-        logger(`Properties verified: found ${propertyIds.length} properties for ${modelIds.length} models`)
+        logger(`Properties verified: found ${propertyIds.length} properties for ${dbModelIds.length} models`)
         return propertyIds
       })
 

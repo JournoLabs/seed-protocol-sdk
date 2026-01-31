@@ -1,31 +1,28 @@
-import Transaction from 'arweave'
-import { CreateTransactionInterface } from 'arweave/web'
-import { getArweave } from '@/helpers/ArweaveClient'
 import { BaseFileManager, getCorrectId } from '@/helpers'
+import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { getContentHash } from '@/helpers/crypto'
 import { Item } from '@/Item/Item'
-const logger = debug('seedSdk:item:getPublishUploads')
+import type { ArweaveTransaction } from '@/types/arweave'
 
+const logger = debug('seedSdk:item:getPublishUploads')
 
 export const prepareArweaveTransaction = async (
   data: string | Uint8Array,
   contentHash: string | undefined,
-): Promise<Transaction> => {
-  const transactionData: Partial<CreateTransactionInterface> = {
-    data,
-    tags: [],
-  }
-
-  const tx = await getArweave()!.createTransaction(transactionData)
+): Promise<ArweaveTransaction> => {
+  const tags = contentHash
+    ? [{ name: 'Content-SHA-256', value: contentHash }]
+    : undefined
 
   if (contentHash) {
     logger('contentHash', contentHash)
-    logger('adding content hash tag to tx.id:', tx.id)
-    tx.addTag('Content-SHA-256', contentHash)
+    logger('adding content hash tag')
   }
+
+  const tx = await BaseArweaveClient.createTransaction(data, { tags })
 
   return tx
 }
@@ -35,8 +32,17 @@ const getImageUploads = async (itemImageProperties: IItemProperty<any>[]) => {
   const uploads: PublishUpload[] = []
 
   for (const itemImageProperty of itemImageProperties) {
+    const snapshot = itemImageProperty.getService().getSnapshot()
+    const context = 'context' in snapshot ? snapshot.context : null
+    if (!context) {
+      continue
+    }
+    const refResolvedValue = (context as any).refResolvedValue
+    if (!refResolvedValue) {
+      continue
+    }
 
-    const filePath = `/files/images/${itemImageProperty.refResolvedValue}`
+    const filePath = `/files/images/${refResolvedValue}`
 
     if (!filePath) {
       continue
@@ -102,7 +108,7 @@ const processUploadProperty = async (
   }
 
   let fileContents
-  let transaction: Transaction
+  let transaction: ArweaveTransaction
 
   if (!childUploads || childUploads.length === 0) {
     if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -196,7 +202,7 @@ export type PublishUpload = {
   itemPropertyLocalId: string
   seedLocalId: string
   versionLocalId: string
-  transactionToSign: Transaction
+  transactionToSign: ArweaveTransaction
 }
 export const getPublishUploads = async (
   item: IItem<any>,
@@ -227,8 +233,12 @@ export const getPublishUploads = async (
   uploads.push(...imageUploads)
 
   for (const relationProperty of itemRelationProperties) {
-    const propertyValue = relationProperty.getService().getSnapshot()
-      .context.propertyValue
+    const snapshot = relationProperty.getService().getSnapshot()
+    const context = 'context' in snapshot ? snapshot.context : null
+    if (!context) {
+      continue
+    }
+    const propertyValue = (context as any).propertyValue
 
     if (!propertyValue || relationProperty.uid) {
       continue

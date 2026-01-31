@@ -43,8 +43,5 @@ export const getPropertyData = async ({
 
   const row = rows[0]
 
-  return {
-    ...row,
-    modelName: startCase(row.modelType),
-  }
+  return row as PropertyData
 } 

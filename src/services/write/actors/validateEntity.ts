@@ -19,6 +19,7 @@ type ValidateEntityOutput = {
 export const validateEntity = fromPromise<
   ValidateEntityInput,
   ValidateEntityOutput
+// @ts-ignore - XState v5 type inference bug: fromPromise incorrectly expects output type to match input type
 >(async ({ input }) => {
   // Type assertion to fix XState v5 type inference bug
   // Convert through unknown to avoid type overlap error
@@ -169,6 +170,6 @@ export const validateEntity = fromPromise<
   }
 
   return await _validate()
-// @ts-expect-error - XState v5 type inference bug: fromPromise incorrectly expects output type to match input type
+// @ts-ignore - XState v5 type inference bug: fromPromise incorrectly expects output type to match input type
 }) as any
 

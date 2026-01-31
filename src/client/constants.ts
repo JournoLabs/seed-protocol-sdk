@@ -114,7 +114,18 @@ export const EAS_ENDPOINT =
                ENV.EAS_ENDPOINT ||
                'https://optimism-sepolia.easscan.org/graphql'
 
+/**
+ * @deprecated Use BaseArweaveClient.getHost() instead.
+ * This constant is kept for backward compatibility but will be removed in a future version.
+ * Migration: import { BaseArweaveClient } from '@/helpers' and use BaseArweaveClient.getHost()
+ */
 export const ARWEAVE_HOST     =
                ENV.NEXT_PUBLIC_ARWEAVE_HOST || 'arweave.net'
+
+/**
+ * @deprecated Use BaseArweaveClient.getEndpoint() instead.
+ * This constant is kept for backward compatibility but will be removed in a future version.
+ * Migration: import { BaseArweaveClient } from '@/helpers' and use BaseArweaveClient.getEndpoint()
+ */
 export const ARWEAVE_ENDPOINT = `https://${ARWEAVE_HOST}/graphql`
 

@@ -1,5 +1,4 @@
 import { IDb } from '@/interfaces/IDb'
-import { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import { Observable } from 'rxjs'
 
 export abstract class BaseDb implements IDb {
@@ -15,11 +14,11 @@ export abstract class BaseDb implements IDb {
     this.PlatformClass = platformClass
   }
 
-  static getAppDb(): BaseSQLiteDatabase {
+  static getAppDb(): any {
     return this.PlatformClass.getAppDb()
   }
 
-  static prepareDb(filesDir: string): Promise<BaseSQLiteDatabase> {
+  static prepareDb(filesDir: string): Promise<any> {
     return this.PlatformClass.prepareDb(filesDir)
   }
 

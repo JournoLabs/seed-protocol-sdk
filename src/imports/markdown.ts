@@ -5,6 +5,7 @@ import { ModelDefinitions } from '@/types'
 import { addModelsToDb } from '../helpers/db'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
+import type { Model } from '@/Model/Model'
 
 /**
  * Configuration structure expected in markdown frontmatter
@@ -139,7 +140,7 @@ export const processSeedConfig = (config: SeedConfig): ModelDefinitions => {
   }
   
   return {
-    [modelName]: modelClass,
+    [modelName]: modelClass as any as Model,
   }
 }
 
@@ -165,7 +166,7 @@ export const saveModelsFromMarkdown = async (
   const modelDefinitions = processSeedConfig(seedConfig)
   
   // Save to database
-  await addModelsToDb(db, modelDefinitions)
+  await addModelsToDb(modelDefinitions, undefined, undefined, undefined)
   
   return modelDefinitions
 }

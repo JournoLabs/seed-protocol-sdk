@@ -8,6 +8,7 @@ import {
 } from '@/helpers/constants'
 import {
   AttestationRequest,
+  AttestationRequestData,
 } from '@ethereum-attestation-service/eas-sdk'
 
 import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
@@ -25,17 +26,15 @@ import {ethers} from 'ethers'
 import { ModelPropertyDataTypes } from '@/Schema'
 const logger = debug('seedSdk:db:getPublishPayload')
 
-const getVersionUid = (item: IItem<any>) => {
-  let versionUid
-
-  if (
-    item.latestVersionUid &&
-    item.latestVersionUid !== 'NULL' &&
-    item.latestVersionUid !== 'undefined'
-  ) {
-    versionUid = item.latestVersionUid
+const getVersionUid = (item: IItem<any>): string => {
+  const latestVersion = item.latestVersionUid
+  if (latestVersion && typeof latestVersion === 'object' && latestVersion.uid) {
+    return latestVersion.uid
   }
-  return versionUid || ZERO_BYTES32
+  if (latestVersion && typeof latestVersion === 'string') {
+    return latestVersion
+  }
+  return ZERO_BYTES32
 }
 
 const getPropertyData = async (itemProperty: IItemProperty<any>) => {
@@ -84,7 +83,12 @@ const processBasicProperties = async (
   itemPublishData: PublishPayload,
 ): Promise<PublishPayload> => {
   for (const basicProperty of itemBasicProperties) {
-    let value = basicProperty.getService().getSnapshot().context.propertyValue
+    const snapshot = basicProperty.getService().getSnapshot()
+    const context = 'context' in snapshot ? snapshot.context : null
+    if (!context) {
+      continue
+    }
+    let value = (context as any).propertyValue
 
     if (!value || basicProperty.uid) {
       continue
@@ -126,12 +130,10 @@ const processBasicProperties = async (
 
     itemPublishData.listOfAttestations.push({
       schema: schemaUid!,
-      data: [
-        {
-          ...defaultAttestationData,
-          data: encodedData,
-        },
-      ],
+      data: {
+        ...defaultAttestationData,
+        data: encodedData,
+      } as AttestationRequestData,
     })
   }
 
@@ -152,8 +154,12 @@ const processRelationOrImageProperty = async (
     )
   }
 
-  const value = relationOrImageProperty.getService().getSnapshot()
-    .context.propertyValue
+  const snapshot = relationOrImageProperty.getService().getSnapshot()
+  const context = 'context' in snapshot ? snapshot.context : null
+  if (!context) {
+    return multiPublishPayload
+  }
+  const value = (context as any).propertyValue
   if (!value || relationOrImageProperty.uid) {
     return multiPublishPayload
   }
@@ -175,7 +181,7 @@ const processRelationOrImageProperty = async (
 
   const versionUid = getVersionUid(relatedItem)
 
-  let modelName: string
+  let modelName: string | undefined
 
   if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
     modelName = 'Image'
@@ -185,9 +191,11 @@ const processRelationOrImageProperty = async (
     modelName = relationOrImageProperty.propertyDef!.ref as string
   }
 
-  const seedSchemaUid = await getSchemaUidForModel(
-    modelName!,
-  )
+  if (!modelName) {
+    throw new Error(`Model name not found for relation or image property: ${relationOrImageProperty.propertyName}`)
+  }
+
+  const seedSchemaUid = await getSchemaUidForModel(modelName)
   
   if (!seedSchemaUid) {
     throw new Error(`Schema UID not found for model: ${modelName}`)
@@ -247,7 +255,12 @@ const processListProperty = async (
     )
   }
 
-  let value = listProperty.getService().getSnapshot().context.propertyValue
+  const snapshot = listProperty.getService().getSnapshot()
+  const context = 'context' in snapshot ? snapshot.context : null
+  if (!context) {
+    return multiPublishPayload
+  }
+  let value = (context as any).propertyValue
   if (!value || listProperty.uid) {
     return multiPublishPayload
   }
@@ -288,7 +301,7 @@ const processListProperty = async (
 
     const versionUid = getVersionUid(relatedItem)
 
-    let modelName: string
+    let modelName: string | undefined
 
     if (listProperty.propertyDef?.ref) {
       modelName = listProperty.propertyDef!.ref as string
@@ -298,9 +311,11 @@ const processListProperty = async (
       modelName = 'Image'
     }
 
-    const seedSchemaUid = await getSchemaUidForModel(
-      modelName!,
-    )
+    if (!modelName) {
+      throw new Error(`Model name not found for list property: ${listProperty.propertyName}`)
+    }
+
+    const seedSchemaUid = await getSchemaUidForModel(modelName)
     
     if (!seedSchemaUid) {
       throw new Error(`Schema UID not found for model: ${modelName}`)
@@ -370,19 +385,20 @@ export const getPublishPayload = async (
   // That means the Seed of the Item, plus any Seeds pointed to by Relations
 
   // Check if the item has a schema UID
-  if (!item.schemaUid) {
+  let itemSchemaUid = item.schemaUid
+  if (!itemSchemaUid) {
     const schemaUid = await getSchemaUidForModel(item.modelName)
     if (!schemaUid) {
       throw new Error(`Schema UID not found for model: ${item.modelName}`)
     }
-    item.schemaUid = schemaUid
+    itemSchemaUid = schemaUid
   }
 
   let itemPublishData: PublishPayload = {
     localId: item.seedLocalId,
     seedUid: item.seedUid || ZERO_BYTES32,
     seedIsRevocable: true,
-    seedSchemaUid: item.schemaUid,
+    seedSchemaUid: itemSchemaUid,
     versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
     versionUid: getVersionUid(item),
     listOfAttestations: [],

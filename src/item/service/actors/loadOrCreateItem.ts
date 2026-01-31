@@ -199,7 +199,7 @@ export const loadOrCreateItem = fromCallback<
     logger(`Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
     console.log(`[loadOrCreateItem] Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
     if (metadataRecords.length > 0) {
-      console.log(`[loadOrCreateItem] Metadata property names:`, metadataRecords.map(r => r.propertyName))
+      console.log(`[loadOrCreateItem] Metadata property names:`, metadataRecords.map((r: { propertyName: string }) => r.propertyName))
     }
 
     // Step 4: Create ItemProperty instances from metadata records

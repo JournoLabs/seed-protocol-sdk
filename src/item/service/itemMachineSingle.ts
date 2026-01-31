@@ -10,6 +10,7 @@ import { reload } from './actors/reload'
 import { loadOrCreateItem } from './actors/loadOrCreateItem'
 import { IItemProperty } from '@/interfaces'
 
+// @ts-ignore - Complex type inference from setup().createMachine()
 export const itemMachineSingle = setup({
   types: {
     context: {} as ItemMachineContext<any>,
@@ -103,6 +104,7 @@ export const itemMachineSingle = setup({
       },
       invoke: {
         src: 'waitForDb',
+        input: ({ context }) => ({ context }),
       },
     },
     loading: {
@@ -171,7 +173,7 @@ export const itemMachineSingle = setup({
       },
       invoke: {
         src: 'initialize',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context }) => ({ context }),
       },
     },
     hydratingExistingItem: {
@@ -202,7 +204,7 @@ export const itemMachineSingle = setup({
       },
       invoke: {
         src: 'fetchDataFromEas',
-        input: ({ context }) => ({ context }),
+        input: ({ context }: { context: ItemMachineContext<any> }) => ({ context }),
       },
     },
     reloading: {

@@ -1,4 +1,4 @@
-import { assign, setup, spawn, ActorRefFrom } from 'xstate'
+import { assign, setup, ActorRefFrom } from 'xstate'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
 import { saveToSchema } from './actors/saveToSchema'

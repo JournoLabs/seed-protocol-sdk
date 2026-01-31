@@ -5,16 +5,22 @@ import {
 } from '@/helpers/file/download/actors'
 
 type DownloadMachineContext = {
-  fileName: string
-  metadata: any
-  binaryData: any
-  metadataServiceUrl: string
-  blobServiceUrl: string
+  addresses: string[]
+  fileName?: string
+  metadata?: any
+  binaryData?: any
+  metadataServiceUrl?: string
+  blobServiceUrl?: string
 }
+
+type DownloadMachineEvents =
+  | { type: 'fetchingMetadataSuccess'; metadataRecords: any }
+  | { type: 'fetchingBinaryDataSuccess'; data?: any }
 
 export const downloadMachine = setup({
   types: {
     context: {} as DownloadMachineContext,
+    events: {} as DownloadMachineEvents,
   },
   actors: {
     fetchMetadata,
@@ -31,13 +37,13 @@ export const downloadMachine = setup({
         fetchingMetadataSuccess: {
           target: 'fetchingBinaryData',
           actions: assign({
-            metadata: (context, event) => event.metadataRecords,
+            metadata: ({ event }) => event.metadataRecords,
           }),
         },
       },
       invoke: {
         src: 'fetchMetadata',
-        input: (context) => ({ context }),
+        input: ({ context }) => ({ context }),
       },
     },
     fetchingBinaryData: {
@@ -45,13 +51,13 @@ export const downloadMachine = setup({
         fetchingBinaryDataSuccess: {
           target: 'idle',
           actions: assign({
-            binaryData: (context, event) => event.data,
+            binaryData: ({ event }) => event.data,
           }),
         },
       },
       invoke: {
         src: 'fetchBinaryData',
-        input: (context) => ({ context }),
+        input: ({ context }) => ({ context }),
       },
     },
   },

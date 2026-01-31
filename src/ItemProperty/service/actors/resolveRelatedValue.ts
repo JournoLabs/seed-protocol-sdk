@@ -112,7 +112,10 @@ export const resolveRelatedValue = fromCallback<
       // This handles a local-only relation value and resolves from the filesystem
       if (
         refResolvedValue &&
+        propertyRecordSchema &&
         propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation &&
+        propertyValueFromDb &&
+        typeof propertyValueFromDb === 'string' &&
         propertyValueFromDb.length === 10 &&
         propertyRecordSchema.ref
       ) {

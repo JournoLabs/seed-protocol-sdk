@@ -4,7 +4,7 @@ import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
 import { BaseFileManager } from './FileManager/BaseFileManager'
-import { getArweaveDomain } from './ArweaveClient'
+import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
@@ -119,7 +119,25 @@ export const convertTxIdToImage = async (
   }
   const buffer = await BaseFileManager.readFileAsBuffer(imageFilePath)
 
-  const uint = new Uint8Array(buffer)
+  // Convert Blob to ArrayBuffer if needed, or use Buffer directly
+  let arrayBuffer: ArrayBuffer
+  if (buffer instanceof Blob) {
+    arrayBuffer = await buffer.arrayBuffer()
+  } else if (buffer instanceof ArrayBuffer) {
+    arrayBuffer = buffer
+  } else {
+    // Node.js Buffer
+    const sliced = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    // Handle SharedArrayBuffer case by creating a new ArrayBuffer
+    if (sliced instanceof SharedArrayBuffer) {
+      const uint8Array = new Uint8Array(sliced)
+      arrayBuffer = uint8Array.buffer.slice(0) as unknown as ArrayBuffer
+    } else {
+      arrayBuffer = sliced as ArrayBuffer
+    }
+  }
+
+  const uint = new Uint8Array(arrayBuffer)
 
   const imageBlob = new Blob([uint])
 
@@ -130,13 +148,13 @@ export const convertTxIdToImage = async (
  * Constructs an Arweave URL for a storage transaction ID
  * @param storageTransactionId - The Arweave transaction ID
  * @returns The full URL to access the transaction data on Arweave (e.g., https://arweave.net/raw/{transactionId})
+ * @deprecated Use BaseArweaveClient.getRawUrl() instead for better consistency and testability
  */
 export const getArweaveUrlForTransaction = (storageTransactionId: string): string => {
-  const arweaveDomain = getArweaveDomain()
-  return `https://${arweaveDomain}/raw/${storageTransactionId}`
+  return BaseArweaveClient.getRawUrl(storageTransactionId)
 }
 
-export const getExecutionTime = async (task, args) => {
+export const getExecutionTime = async (task: (...args: any[]) => Promise<any>, args: any[]) => {
   const start = Date.now()
   await task(...args)
   return Date.now() - start

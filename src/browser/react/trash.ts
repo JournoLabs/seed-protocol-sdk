@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Item } from '@/browser/Item/Item'
-import { eventEmitter } from '@/eventBus'
+import { Item } from '@/Item/Item'
 import { deleteItem } from '@/db/write/deleteItem'
 
 export const useDeleteItem = () => {
@@ -12,9 +11,7 @@ export const useDeleteItem = () => {
         return
       }
       setIsDeletingItem(true)
-      const { modelName } = item.getService().getSnapshot().context
       await deleteItem({ seedLocalId: item.seedLocalId })
-      eventEmitter.emit('item.requestAll', { modelName })
       setIsDeletingItem(false)
     },
     [isDeletingItem],

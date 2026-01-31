@@ -1,4 +1,6 @@
-import { runQueryForStatement } from '../sqlWasmClient'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { versions } from '@/seedSchema'
+import { inArray } from 'drizzle-orm'
 
 type VersionData = {
   localId: string
@@ -12,28 +14,32 @@ type GetVersionsForVersionUids = (
 export const getVersionsForVersionUids: GetVersionsForVersionUids = async (
   versionUids: string[],
 ) => {
-  const queryStatement = `
-      SELECT local_id, uid, seed_uid, seed_local_id
-      FROM versions
-      WHERE uid IN ('${versionUids.join("','")}');
-  `
+  if (!versionUids || versionUids.length === 0) {
+    return []
+  }
 
-  const { rows } = await runQueryForStatement(queryStatement)
+  const appDb = BaseDb.getAppDb()
+
+  const rows = await appDb
+    .select({
+      localId: versions.localId,
+      uid: versions.uid,
+      seedUid: versions.seedUid,
+      seedLocalId: versions.seedLocalId,
+    })
+    .from(versions)
+    .where(inArray(versions.uid, versionUids))
 
   if (!rows || rows.length === 0) {
     return []
   }
 
-  const versionsData: VersionData[] = []
-
-  for (const row of rows) {
-    versionsData.push({
-      localId: row[0],
-      uid: row[1],
-      seedUid: row[2],
-      seedLocalId: row[3],
-    })
-  }
+  const versionsData: VersionData[] = rows.map((row: { localId: string | null; uid: string | null; seedUid: string | null; seedLocalId: string | null }) => ({
+    localId: row.localId || '',
+    uid: row.uid || '',
+    seedUid: row.seedUid || '',
+    seedLocalId: row.seedLocalId || '',
+  }))
 
   return versionsData
 }

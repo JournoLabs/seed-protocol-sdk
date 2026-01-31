@@ -11,8 +11,6 @@ import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
-import path from 'path'
-import fs from 'fs'
 
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -116,6 +114,8 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     // In Node.js, filesDir should be resolved relative to .seed directory at project root
     let normalizedFilesDir = filesDir || endpoints?.files
     if (isNode() && normalizedFilesDir) {
+      const path = (await import('node:path')).default
+      const fs = (await import('node:fs')).default
       const pathResolver = BasePathResolver.getInstance()
       const dotSeedDir = pathResolver.getDotSeedDir()
       

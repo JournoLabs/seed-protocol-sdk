@@ -55,11 +55,14 @@ const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
 
   const [sizedContentUrl, setSizedContentUrl] = useState<string | undefined>()
 
-  const {property, value: srcUrl} = useItemProperty({
+  const {property} = useItemProperty({
     propertyName: imageProperty.propertyName,
     seedLocalId: imageProperty.seedLocalId,
     seedUid: imageProperty.seedUid
   })
+
+  // Get the value from the property
+  const srcUrl = property?.value as string | undefined
 
   useEffect(() => {
     if (!property || !width || !property.localStoragePath) {
@@ -70,9 +73,9 @@ const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
       const fs = await FileManager.getFs()
       const baseDir = `/files${property.localStorageDir}`
       const itemsInDir = fs.readdirSync(baseDir, {withFileTypes: true})
-      const widthDirs = itemsInDir.filter(item => item.isDirectory())
-      const availableWidths = widthDirs.map(dir => parseInt(dir.name))
-      const closestWidth = availableWidths.reduce((prev, curr) => {
+      const widthDirs = itemsInDir.filter((item: { isDirectory: () => boolean }) => item.isDirectory())
+      const availableWidths = widthDirs.map((dir: { name: string }) => parseInt(dir.name))
+      const closestWidth = availableWidths.reduce((prev: number, curr: number) => {
         return (Math.abs(curr - width) < Math.abs(prev - width) ? curr : prev)
       }, availableWidths[0])
       if (!property.refResolvedValue) {
@@ -85,10 +88,12 @@ const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
       if (contentUrlCache.has(cacheKey)) {
         try {
           const contentUrl = contentUrlCache.get(cacheKey)
-          const response = await fetch(contentUrl)
-          if (response.ok) {
-            setSizedContentUrl(contentUrl)
-            return
+          if (contentUrl) {
+            const response = await fetch(contentUrl)
+            if (response.ok) {
+              setSizedContentUrl(contentUrl)
+              return
+            }
           }
         } catch (error) {
           logger('error', error)
@@ -98,7 +103,7 @@ const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
 
       const itemsInSizedDir = fs.readdirSync(`${baseDir}/${closestWidth}`, {withFileTypes: true})
 
-      const matchingFile = itemsInSizedDir.find((item) => {
+      const matchingFile = itemsInSizedDir.find((item: { name?: string }) => {
         if (!item.name) {
           return false
         }

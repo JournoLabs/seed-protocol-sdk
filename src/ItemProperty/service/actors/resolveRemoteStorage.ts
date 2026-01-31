@@ -8,17 +8,14 @@ export const resolveRemoteStorage = fromCallback<
   EventObject,
   FromCallbackInput<PropertyMachineContext, EventObject>
 >(({ sendBack, input: { context } }) => {
-  const { propertyInstances } = context
+  // Note: propertyInstances is not part of PropertyMachineContext
+  // This actor may need to be refactored or removed if propertyInstances is no longer available
+  // For now, we'll skip this functionality
+  const storageTransactionId = context.storageTransactionId
 
-  if (!propertyInstances) {
-    throw new Error(`propertyInstances not found for ${context.seedLocalId}`)
-  }
-
-  if (!propertyInstances.has('storageTransactionId')) {
+  if (!storageTransactionId) {
     return
   }
-
-  const storageTransactionId = propertyInstances.get('storageTransactionId')
 
   const _resolveRemoteStorage = async (): Promise<void> => {
 

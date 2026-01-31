@@ -135,7 +135,7 @@ export const writeModelsToDb = fromCallback<
                 ),
               },
             ]),
-          ) as JsonImportSchema['models'],
+          ) as unknown as JsonImportSchema['models'],
         }
       } else {
         // Standard schema format
@@ -150,7 +150,7 @@ export const writeModelsToDb = fromCallback<
                 properties: model.properties || {},
               },
             ]),
-          ) as JsonImportSchema['models'],
+          ) as unknown as JsonImportSchema['models'],
         }
       }
 

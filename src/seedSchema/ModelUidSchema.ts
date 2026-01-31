@@ -1,6 +1,6 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
-import { models } from './ModelSchema'
+import { models } from './ModelSchema.js'
 
 export const modelUids = sqliteTable('model_uids', {
   id: int('id').primaryKey({ autoIncrement: true }),
@@ -11,6 +11,6 @@ export const modelUids = sqliteTable('model_uids', {
     .references(() => models.id),
 })
 
-export const modelRelations = relations(modelUids, ({ many, one }) => ({
+export const modelRelations = relations(modelUids, ({ one }) => ({
   model: one(models),
 }))

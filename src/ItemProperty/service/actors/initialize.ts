@@ -21,6 +21,7 @@ export const initialize = fromCallback<
   const _initialize = async () => {
     if (
       !schemaUid && 
+      propertyName &&
       !INTERNAL_PROPERTY_NAMES.includes(propertyName) &&
       (
         !propertyRecordSchema ||

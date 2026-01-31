@@ -13,7 +13,7 @@ export const createSeeds: CreateSeeds = async (
     .values(newSeeds)
     .returning({ uid: seeds.uid })
 
-  const newUids = results.reduce((acc, result) => {
+  const newUids = results.reduce((acc: string[], result: { uid: string | null }) => {
     if (result.uid) {
       acc.push(result.uid)
     }

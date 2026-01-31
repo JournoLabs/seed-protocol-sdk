@@ -8,6 +8,8 @@ export * from './item'
 export * from './property'
 export * from './machines'
 export * from './seedProtocol'
+export * from './browser'
+export * from './arweave'
 
 export type Endpoints = {
   filePaths: string

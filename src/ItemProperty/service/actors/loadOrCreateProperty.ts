@@ -32,7 +32,10 @@ export const loadOrCreateProperty = fromCallback<
     }
 
     // Use getMetadataLatest subquery pattern to get the latest metadata record for the property
-    const metadataLatest = getMetadataLatest({ seedLocalId, seedUid })
+    const metadataLatest = getMetadataLatest({ 
+      seedLocalId: seedLocalId ?? undefined, 
+      seedUid: seedUid ?? undefined 
+    })
     
     const metadataRecords = await db
       .with(metadataLatest)

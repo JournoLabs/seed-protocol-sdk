@@ -9,7 +9,10 @@ class QueryClient extends BaseQueryClient {
       fetchQuery: async <T>({
         queryKey,
         queryFn,
-       }): Promise<T> => {
+      }: {
+        queryKey: unknown[]
+        queryFn: () => Promise<T>
+      }): Promise<T> => {
         return await queryFn()
       },
       getQueryData: () => {

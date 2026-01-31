@@ -17,7 +17,10 @@ export {
 export { Item } from './Item/Item'
 export { ItemProperty } from './ItemProperty/ItemProperty'
 export { ModelProperty } from './ModelProperty/ModelProperty'
-export { Schema, type SchemaAllOptions } from './Schema/Schema'
+export { Schema } from './Schema/Schema'
+// Note: SchemaAllOptions type is available from './Schema/Schema'
+// Type-only exports cause issues with Rollup's parser. Import directly if needed:
+// import type { SchemaAllOptions } from '@seedprotocol/sdk/Schema/Schema'
 export { Model } from './Model/Model'
 
 export {
@@ -45,7 +48,9 @@ export {
 
 // export { SeedImage }
 
-export type { IItemProperty } from './interfaces/IItemProperty'
+// Types - Type-only exports cause issues with Rollup's parser
+// IItemProperty type is available from './interfaces/IItemProperty'
+// Import directly if needed: import type { IItemProperty } from '@seedprotocol/sdk/interfaces/IItemProperty'
 
 export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
@@ -89,9 +94,10 @@ export {
   renameModelProperty,
   deletePropertyFromModel,
   deleteModelFromSchema,
-  type SchemaPropertyUpdate,
-  type SchemaModelUpdate,
 } from './helpers/updateSchema'
+// Types - Type-only exports cause issues with Rollup's parser
+// SchemaPropertyUpdate and SchemaModelUpdate types are available from './helpers/updateSchema'
+// Import directly if needed: import type { SchemaPropertyUpdate, SchemaModelUpdate } from '@seedprotocol/sdk/helpers/updateSchema'
 
 export { 
   importJsonSchema, 
@@ -99,7 +105,11 @@ export {
   transformImportToSchemaFile, 
 } from './imports'
 
-export { seedVitePlugin } from './vite'
+// NOTE: seedVitePlugin is NOT exported from the main entry to prevent
+// build-time dependencies (vite-plugin-node-polyfills, @rollup/plugin-inject, etc.)
+// from being bundled into browser code.
+// Import from '@seedprotocol/sdk/vite' instead:
+//   import { seedVitePlugin } from '@seedprotocol/sdk/vite'
 
 // export { getCorrectId, } from './helpers'
 
@@ -112,9 +122,11 @@ export { seedVitePlugin } from './vite'
 // export { withSeed } from './node/webpack'
 
 // export type { PublishUpload } from './db/read/getPublishUploads'
-export type { Schema as SchemaType } from './helpers/schema'
-export type { ModelClassType as ModelClass } from './types'
-export type { Model as ModelType } from './Model/Model'
+// Types - Type-only exports cause issues with Rollup's parser
+// These types are available from their source files:
+// - SchemaType: import type { Schema as SchemaType } from '@seedprotocol/sdk/helpers/schema'
+// - ModelClass: import type { ModelClassType as ModelClass } from '@seedprotocol/sdk/types'
+// - ModelType: import type { Model as ModelType } from '@seedprotocol/sdk/Model/Model'
 
 // PathResolver - Platform-specific implementation
 // Auto-initializes based on environment when imported

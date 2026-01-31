@@ -5,7 +5,9 @@ import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
 import { Item, } from '@/Item/Item';
 import { Model } from '@/Model/Model';
+import { IItem } from '@/interfaces/IItem';
 import { fileURLToPath } from 'url';
+import { modelPropertiesToObject } from '@/helpers/model';
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -20,10 +22,23 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   oneofs: true
 });
 
-const seedProto = grpc.loadPackageDefinition(packageDefinition).seed;
+const seedProto = grpc.loadPackageDefinition(packageDefinition) as any;
 
 // In-memory cache to store BaseItems by model and ID
-const BaseItemsCache = {};
+const BaseItemsCache: Record<string, Record<string, IItem<any>>> = {};
+
+// Helper function to get error message
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+// Helper function to get model by name
+function getModel(modelName: string) {
+  return Model.getByName(modelName);
+}
 
 /**
  * Implements the SeedService gRPC service
@@ -37,11 +52,21 @@ const server = {
 
       for (const model of allModels) {
         const modelName = model.modelName;
-        if (!modelName || !model.schema) {
+        if (!modelName) {
           continue;
         }
-        const props = Object.keys(model.schema).map(propName => {
-          const prop = model.schema[propName];
+        
+        // Get properties from Model instance
+        const modelProperties = model.properties || [];
+        if (modelProperties.length === 0) {
+          continue;
+        }
+        
+        // Convert ModelProperty instances to schema object
+        const schema = modelPropertiesToObject(modelProperties);
+        
+        const props = Object.keys(schema).map(propName => {
+          const prop = schema[propName];
           return {
             name: propName,
             type: prop?.dataType || 'Text',
@@ -60,7 +85,7 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error getting models: ${error.message}`
+        message: `Error getting models: ${getErrorMessage(error)}`
       });
     }
   },
@@ -77,13 +102,17 @@ const server = {
         });
       }
 
-      const props = Object.keys(model.prototype).map(propName => {
-        const prop = model.prototype[propName];
+      // Get properties from Model instance
+      const modelProperties = model.properties || [];
+      const schema = modelPropertiesToObject(modelProperties);
+      
+      const props = Object.keys(schema).map(propName => {
+        const prop = schema[propName];
         return {
           name: propName,
-          type: prop.type || 'text',
-          relation_model: prop.relationModel || '',
-          is_list: prop.isList || false
+          type: prop?.dataType || 'text',
+          relation_model: prop?.ref || prop?.refModelName || '',
+          is_list: prop?.dataType === 'List'
         };
       });
 
@@ -96,7 +125,7 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error getting model: ${error.message}`
+        message: `Error getting model: ${getErrorMessage(error)}`
       });
     }
   },
@@ -115,12 +144,17 @@ const server = {
       }
 
       // Process properties to handle relations and lists
-      const processedProps = {};
-      for (const [key, value] of Object.entries(properties)) {
+      const processedProps: Record<string, any> = {};
+      
+      // Get model schema from properties
+      const modelProperties = model.properties || [];
+      const schema = modelPropertiesToObject(modelProperties);
+      
+      for (const [key, value] of Object.entries(properties || {})) {
         // Handle relationship properties and lists based on model definition
-        const prop = model.schema?.[key];
+        const prop = schema[key];
         if (prop && prop.dataType === 'List') {
-          processedProps[key] = JSON.parse(value);
+          processedProps[key] = typeof value === 'string' ? JSON.parse(value) : value;
         } else if (prop && (prop.dataType === 'Relation' || prop.ref)) {
           // Assuming relation is stored as stringified ID
           processedProps[key] = value;
@@ -132,22 +166,22 @@ const server = {
       const item = await Item.create(processedProps);
 
       // Cache the Item
-      if (!itemsCache[model_name]) {
+      if (!BaseItemsCache[model_name]) {
         BaseItemsCache[model_name] = {};
       }
       
-      BaseItemsCache[model_name][item.id] = Item;
+      BaseItemsCache[model_name][item.seedLocalId] = item;
 
       // Return the created Item
       callback(null, {
-        id: Item.id,
+        id: item.seedLocalId,
         model_name,
         properties: properties
       });
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error creating BaseItem: ${error.message}`
+        message: `Error creating BaseItem: ${getErrorMessage(error)}`
       });
     }
   },
@@ -170,9 +204,10 @@ const server = {
       }
 
       // Convert properties to simple strings for gRPC
-      const properties = {};
-      for (const [key, value] of Object.entries(item)) {
+      const properties: Record<string, string> = {};
+      for (const [key, property] of Object.entries(item.allProperties)) {
         if (key !== 'id' && key !== 'modelName') {
+          const value = property.value;
           if (Array.isArray(value)) {
             properties[key] = JSON.stringify(value);
           } else if (typeof value === 'object' && value !== null) {
@@ -191,7 +226,7 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error getting BaseItem: ${error.message}`
+        message: `Error getting BaseItem: ${getErrorMessage(error)}`
       });
     }
   },
@@ -201,7 +236,7 @@ const server = {
       const { id, model_name, properties } = call.request;
       
       // Try to get from cache
-      let item = await Item.find({
+      const item = await Item.find({
         seedLocalId: id,
         modelName: model_name
       });
@@ -214,19 +249,24 @@ const server = {
       }
 
       // Update properties
-      for (const [key, value] of Object.entries(properties)) {
-        const prop = Item.constructor.prototype[key];
-        if (prop && prop.isList) {
-          item[key] = JSON.parse(value);
-        } else if (prop && prop.relationModel) {
-          item[key] = value;
-        } else {
-          item[key] = value;
+      for (const [key, value] of Object.entries(properties || {})) {
+        const property = item.allProperties[key];
+        if (property) {
+          // Parse JSON if needed
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              property.value = parsed;
+            } catch {
+              property.value = value;
+            }
+          } else {
+            property.value = value;
+          }
+          // Save the property
+          await property.save();
         }
       }
-
-      // Save the updated Item
-      await item.save();
 
       // Return the updated BaseItem
       callback(null, {
@@ -237,40 +277,35 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error updating BaseItem: ${error.message}`
+        message: `Error updating BaseItem: ${getErrorMessage(error)}`
       });
     }
   },
 
-  DeleteItem: async (call, callback) => {
+  DeleteItem: async (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
     try {
       const { id, model_name } = call.request;
       
-      // Try to get from cache
-      const BaseItem = BaseItemsCache[model_name]?.[id];
-      
-      if (!item) {
-        return callback({
-          code: grpc.status.NOT_FOUND,
-          message: `Item ${id} not found`
-        });
-      }
-
-      // Delete the Item
+      // Find the Item
       const item = await Item.find({
         seedLocalId: id,
         modelName: model_name
       });
+      
       if (!item) {
         return callback({
           code: grpc.status.NOT_FOUND,
           message: `Item ${id} not found`
         });
       }
+      
       // Note: Item doesn't have a delete method - this may need to be implemented
+      // For now, just remove from cache
       
       // Remove from cache
-      delete BaseItemsCache[model_name][id];
+      if (BaseItemsCache[model_name]) {
+        delete BaseItemsCache[model_name][id];
+      }
 
       callback(null, {
         success: true,
@@ -279,12 +314,12 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error deleting BaseItem: ${error.message}`
+        message: `Error deleting BaseItem: ${getErrorMessage(error)}`
       });
     }
   },
 
-  PublishItem: async (call, callback) => {
+  PublishItem: async (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
     try {
       const { id, model_name } = call.request;
       
@@ -311,43 +346,49 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error publishing BaseItem: ${error.message}`
+        message: `Error publishing BaseItem: ${getErrorMessage(error)}`
       });
     }
   },
 
-  QueryItems: async (call, callback) => {
+  QueryItems: async (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
     try {
       const { model_name, filters, limit, offset } = call.request;
       
       // Simple in-memory implementation - in production, you'd query the SDK
       // Get all BaseItems for the model
       const modelItems = BaseItemsCache[model_name] || {};
-      let items = Object.values(modelItems);
+      let items: IItem<any>[] = Object.values(modelItems);
       
       // Apply filters
-      if (filters) {
+      if (filters && typeof filters === 'object') {
         items = items.filter(item => {
           return Object.entries(filters).every(([key, value]) => {
-            return item[key] === value;
+            const property = item.allProperties[key];
+            if (!property) return false;
+            return property.value === value;
           });
         });
       }
       
       // Apply pagination
-      if (offset) {
-        items = items.slice(offset);
+      const offsetNum = typeof offset === 'number' ? offset : 0;
+      const limitNum = typeof limit === 'number' ? limit : undefined;
+      
+      if (offsetNum > 0) {
+        items = items.slice(offsetNum);
       }
       
-      if (limit) {
-        items = items.slice(0, limit);
+      if (limitNum !== undefined) {
+        items = items.slice(0, limitNum);
       }
       
       // Format response
       const responseItems = items.map(item => {
-        const properties = {};
-        for (const [key, value] of Object.entries(item)) {
+        const properties: Record<string, string> = {};
+        for (const [key, property] of Object.entries(item.allProperties)) {
           if (key !== 'id' && key !== 'modelName') {
+            const value = property.value;
             if (Array.isArray(value)) {
               properties[key] = JSON.stringify(value);
             } else if (typeof value === 'object' && value !== null) {
@@ -369,7 +410,7 @@ const server = {
     } catch (error) {
       callback({
         code: grpc.status.INTERNAL,
-        message: `Error querying BaseItems: ${error.message}`
+        message: `Error querying BaseItems: ${getErrorMessage(error)}`
       });
     }
   }
@@ -381,7 +422,12 @@ const server = {
 function startServer() {
   const grpcServer = new grpc.Server();
   
-  grpcServer.addService(seedProto.SeedService.service, server);
+  if (seedProto && seedProto.SeedService && seedProto.SeedService.service) {
+    grpcServer.addService(seedProto.SeedService.service, server);
+  } else {
+    console.error('Failed to load SeedService from protobuf definition');
+    return;
+  }
   
   grpcServer.bindAsync('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), (err, port) => {
     if (err) {

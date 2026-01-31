@@ -9,6 +9,9 @@ export {
   loadSchemaFromFile,
   readJsonImportFile,
   transformImportToSchemaFile,
-  type JsonImportSchema,
-  type SchemaFileFormat,
 } from './json'
+
+export type {
+  JsonImportSchema,
+  SchemaFileFormat,
+} from '../types/import'

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { createNewItem } from '@/db/write/createNewItem'
 import { Item } from '@/Item/Item'
-import { eventEmitter } from '@/eventBus'
 import { orderBy } from 'lodash-es'
-import { getAreItemEventHandlersReady } from '@/events'
 import debug from 'debug'
 import { ModelValues } from '@/types'
 import { Subscription } from 'xstate'
@@ -439,49 +437,11 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
   }
 }
 
-export const useItemIsReady = () => {
-  const [itemListenersReady, setItemListenersReady] = useState(false)
-
-  const itemEventListenersHandler = useCallback((_: any) => {
-    setItemListenersReady(true)
-  }, [])
-
-  useEffect(() => {
-    const areReady = getAreItemEventHandlersReady()
-
-    if (areReady) {
-      itemEventListenersHandler(true)
-    }
-
-    eventEmitter.addListener(
-      'item.events.setupAllItemsEventHandlers',
-      itemEventListenersHandler,
-    )
-
-    return () => {
-      eventEmitter.removeListener('item.events.setupAllItemsEventHandlers')
-    }
-  }, [])
-
-  return {
-    isReady: itemListenersReady,
-  }
-}
-
 export const useCreateItem = <T>() => {
   const [isCreatingItem, setIsCreatingItem] = useState(false)
 
-  const { isReady } = useItemIsReady()
-
   const createItem = useCallback(
     async (modelName: string, itemData?: Record<string, any>) => {
-      if (!isReady) {
-        console.error(
-          `[useCreateItem] [createItem] called before listeners are ready`,
-          itemData,
-        )
-        return
-      }
       if (isCreatingItem) {
         // TODO: should we setup a queue for this?
         console.error(
@@ -501,11 +461,9 @@ export const useCreateItem = <T>() => {
 
       const newItem = await Item.find({ modelName, seedLocalId })
 
-      eventEmitter.emit('item.requestAll', { modelName })
-
       setIsCreatingItem(false)
     },
-    [isCreatingItem, isReady],
+    [isCreatingItem],
   )
 
   return {

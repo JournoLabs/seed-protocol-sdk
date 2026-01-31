@@ -8,6 +8,7 @@ import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
 import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
 import * as schema from '@/seedSchema'
+// @ts-ignore - sqlocal/drizzle types may not be available during build
 import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'

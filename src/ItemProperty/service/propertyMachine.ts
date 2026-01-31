@@ -1,5 +1,5 @@
 import { assign, setup } from 'xstate'
-import { PropertyMachineContext } from '@/types'
+import { PropertyMachineContext, SaveValueToDbEvent } from '@/types'
 
 import { resolveRemoteStorage } from '@/ItemProperty/service/actors/resolveRemoteStorage'
 import { waitForDb } from '@/ItemProperty/service/actors/waitForDb'
@@ -49,14 +49,14 @@ export const propertyMachine = setup({
     },
     updateContext: {
       actions: assign(({ context, event }) => {
-        const newContext = Object.assign({}, context)
+        const newContext = Object.assign({}, context) as any
 
         for (let i = 0; i < Object.keys(event).length; i++) {
           const key = Object.keys(event)[i]
           if (key === 'type') {
             continue
           }
-          newContext[key] = event[key]
+          newContext[key] = (event as any)[key]
         }
         return newContext
       }),
@@ -182,7 +182,10 @@ export const propertyMachine = setup({
           },
           invoke: {
             src: 'analyzeInput',
-            input: ({ context, event }) => ({ context, event }),
+            input: ({ context, event }) => {
+              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
+              return { context, event: event as SaveValueToDbEvent }
+            },
           },
         },
         savingImage: {
@@ -191,7 +194,10 @@ export const propertyMachine = setup({
           },
           invoke: {
             src: 'saveImage',
-            input: ({ context, event }) => ({ context, event }),
+            input: ({ context, event }) => {
+              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
+              return { context, event: event as SaveValueToDbEvent }
+            },
           },
         },
         savingRelation: {
@@ -200,7 +206,10 @@ export const propertyMachine = setup({
           },
           invoke: {
             src: 'saveRelation',
-            input: ({ context, event }) => ({ context, event }),
+            input: ({ context, event }) => {
+              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
+              return { context, event: event as SaveValueToDbEvent }
+            },
           },
         },
         savingItemStorage: {
@@ -209,7 +218,10 @@ export const propertyMachine = setup({
           },
           invoke: {
             src: 'saveItemStorage',
-            input: ({ context, event }) => ({ context, event }),
+            input: ({ context, event }) => {
+              // Type assertion needed because event is AnyEventObject but actor expects SaveValueToDbEvent
+              return { context, event: event as SaveValueToDbEvent }
+            },
           },
         },
         doneSaving: {

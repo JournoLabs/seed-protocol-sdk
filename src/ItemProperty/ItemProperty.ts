@@ -32,6 +32,8 @@ modelImportPromise = import('@/Model/Model').then(module => {
   return module
 }).catch(() => {
   // If import fails, ModelClass remains null
+  // Return a default module structure to maintain type consistency
+  return {} as typeof import('@/Model/Model')
 })
 
 const getModel = (): typeof import('@/Model/Model').Model => {
@@ -476,7 +478,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
       // Once we have required context, set up the liveQuery subscription (only once)
       if ((seedLocalId || seedUid) && propertyName && !setupState.subscriptionSetUp) {
-        await setupLiveQuery(seedLocalId || '', seedUid, propertyName, versionLocalId)
+        await setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined)
         if (setupState.subscriptionSetUp) {
           setupSubscription.unsubscribe()
         }
@@ -491,7 +493,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const versionLocalId = currentSnapshot.context.versionLocalId
     
     if ((seedLocalId || seedUid) && propertyName && !setupState.subscriptionSetUp) {
-      setupLiveQuery(seedLocalId || '', seedUid, propertyName, versionLocalId).catch((error) => {
+      setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined).catch((error) => {
         logger(`[ItemProperty._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
       })
     }
@@ -601,14 +603,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
-  }): Promise<IItemProperty<any> | undefined> {
+  }): Promise<ItemProperty<any> | undefined> {
     if ((!seedLocalId && !seedUid) || !propertyName) {
       return undefined
     }
     
     const cacheKeyId = seedUid || seedLocalId
     const cacheKey = ItemProperty.cacheKey(cacheKeyId!, propertyName)
-    let foundProperty: IItemProperty<any> | undefined
+    let foundProperty: ItemProperty<any> | undefined
     
     // Check cache first
     if (this.instanceCache.has(cacheKey)) {
@@ -617,7 +619,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         instance,
         refCount: refCount + 1,
       })
-      foundProperty = instance
+      foundProperty = instance as ItemProperty<any>
     } else {
       // Query database
       const propertyData = await getPropertyData({
@@ -641,6 +643,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     return foundProperty
   }
+
+  find = ItemProperty.find
 
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
@@ -676,14 +680,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   get schemaUid(): string | undefined {
-    return this._getSnapshotContext().schemaUid
+    return this._getSnapshotContext().schemaUid || undefined
   }
 
-  get propertyName() {
+  get propertyName(): string {
     if (this._alias) {
       return this._alias
     }
-    return this._getSnapshotContext().propertyName
+    return this._getSnapshotContext().propertyName || ''
   }
 
   get modelName() {
@@ -699,13 +703,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (propertyDef && propertyDef.localStorageDir) {
       return this.propertyDef.localStorageDir
     }
-    if (this._getSnapshot().context.localStorageDir) {
-      return this._getSnapshot().context.localStorageDir
+    const localStorageDir = this._getSnapshot().context.localStorageDir
+    if (localStorageDir) {
+      return localStorageDir
     }
   }
 
   get refResolvedValue(): string | undefined {
-    return this._getSnapshotContext().refResolvedValue
+    return this._getSnapshotContext().refResolvedValue || undefined
   }
 
   get localStoragePath(): string | void {
@@ -715,7 +720,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   get versionLocalId(): string | undefined {
-    return this._getSnapshotContext().versionLocalId
+    return this._getSnapshotContext().versionLocalId || undefined
   }
 
   get status() {

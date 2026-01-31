@@ -43,7 +43,7 @@ export const getItemProperties: GetItemProperties = async ({
     .from(metadataLatest)
     .where(eq(metadataLatest.rowNum, 1))
 
-  return propertiesData.map(data => ({
+  return propertiesData.map((data: any) => ({
     ...data,
     localId: data.localId || '',
     uid: data.uid || '',

@@ -440,8 +440,8 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
     .from(schemasTable)
     .orderBy(schemasTable.name, desc(schemasTable.version))
 
-  console.log(`[loadAllSchemasFromDb] Drizzle query returned ${dbSchemas.length} schemas:`, dbSchemas.map(s => ({ name: s.name, version: s.version, schemaFileId: s.schemaFileId, isDraft: s.isDraft, id: s.id })))
-  console.log(`[loadAllSchemasFromDb] Schema names in query result:`, dbSchemas.map(s => s.name))
+  console.log(`[loadAllSchemasFromDb] Drizzle query returned ${dbSchemas.length} schemas:`, dbSchemas.map((s: any) => ({ name: s.name, version: s.version, schemaFileId: s.schemaFileId, isDraft: s.isDraft, id: s.id })))
+  console.log(`[loadAllSchemasFromDb] Schema names in query result:`, dbSchemas.map((s: any) => s.name))
 
   const processedSchemaNames = new Set<string>()
 

@@ -4,7 +4,7 @@ import debug from 'debug'
 /**
  * Configuration for entity liveQuery setup
  */
-export interface LiveQueryConfig<T> {
+export interface LiveQueryConfig<T extends object> {
   /**
    * Get entity identifier for query (e.g., schemaId, modelId, seedLocalId)
    * Returns the ID needed to build the query

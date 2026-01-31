@@ -15,6 +15,7 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { Subscription } from 'rxjs'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
@@ -25,8 +26,9 @@ type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 
 // WeakMap to store non-serializable resources per Schema instance
 // Only stores resources that cannot be serialized (subscriptions, timers, etc.)
-const schemaInstanceState = new WeakMap<Schema, {
-  liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance model updates
+export const schemaInstanceState = new WeakMap<Schema, {
+  liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance model updates
+  modelInstances?: Map<string, Model> // Model instances cache
 }>()
 
 // Cache client initialization state globally to avoid repeated checks
@@ -86,7 +88,7 @@ export class Schema {
     createdAt: string
     updatedAt: string
   }
-  models?: Model[]
+  _models?: Model[] // Internal models array (use getter for public access)
   enums?: {
     [enumName: string]: any
   }
@@ -113,6 +115,7 @@ export class Schema {
     // Initialize instance state in WeakMap (only non-serializable resources)
     schemaInstanceState.set(this, {
       liveQuerySubscription: null,
+      modelInstances: new Map<string, Model>(),
     })
     
     // Set up liveQuery subscription for cross-instance model updates
@@ -263,7 +266,8 @@ export class Schema {
             
             // Check current state after potential restart
             const currentState = snapshot.value
-            const isServiceLoading = currentState === 'loading'
+            // Check if state is a loading state object (XState v5 nested states)
+            const isServiceLoading = typeof currentState === 'object' && 'loading' in currentState
             
             // If service is loading (or was just restarted and might be loading), wait for it to finish
             // Otherwise loadOrCreateSchemaSuccess might overwrite our update with old data
@@ -425,7 +429,8 @@ export class Schema {
           
           // Check current state after potential restart
           const currentState = snapshot.value
-          const isServiceLoading = currentState === 'loading'
+          // Check if state is a loading state object (XState v5 nested states)
+          const isServiceLoading = typeof currentState === 'object' && 'loading' in currentState
           
           // If service is loading, wait for it to finish before adding models
           if (isServiceLoading || wasServiceStopped) {
@@ -549,7 +554,7 @@ export class Schema {
    * Get schema instance by schemaFileId (preferred method)
    * Returns null if not found in cache
    */
-  static getById(schemaFileId: string): Schema | null {
+  static getById(schemaFileId: string): Schema | undefined {
     if (this.instanceCacheById.has(schemaFileId)) {
       const { instance, refCount } = this.instanceCacheById.get(schemaFileId)!
       this.instanceCacheById.set(schemaFileId, {
@@ -558,7 +563,7 @@ export class Schema {
       })
       return instance
     }
-    return null
+    return undefined
   }
 
   /**
@@ -664,7 +669,7 @@ export class Schema {
     try {
       return await findEntity<Schema>(
         {
-          getById: (id) => Schema.getById(id),
+          getById: (id) => Schema.getById(id) ?? undefined,
           createById: (id) => Schema.createById(id),
         },
         { id: schemaFileId },
@@ -1886,7 +1891,7 @@ export class Schema {
             })
             .from(modelSchemas)
             .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-            .where(eq(modelSchemas.schemaId, schemaId))
+            .where(eq(modelSchemas.schemaId, typeof schemaId === 'string' ? parseInt(schemaId, 10) : schemaId))
         )
       },
       extractEntityIds: (rows) => rows.map(row => row.modelFileId).filter(Boolean) as string[],
@@ -1975,7 +1980,7 @@ export class Schema {
               })
               .from(modelSchemas)
               .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-              .where(eq(modelSchemas.schemaId, schemaId))
+              .where(eq(modelSchemas.schemaId, typeof schemaId === 'string' ? parseInt(schemaId, 10) : schemaId))
             
             logger(`[Schema._setupLiveQuerySubscription] Initial query found ${initialModels.length} models`)
             
@@ -2007,7 +2012,7 @@ export class Schema {
         
         return queryInitialModels()
       },
-      instanceState: schemaInstanceState,
+      instanceState: schemaInstanceState as WeakMap<Schema, { liveQuerySubscription: Subscription | null }>,
       loggerName: 'seedSdk:schema:liveQuery',
       isReady: (schema) => {
         const snapshot = schema._service.getSnapshot()

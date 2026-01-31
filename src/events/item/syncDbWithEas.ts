@@ -13,13 +13,13 @@ import {
   generateId,
   parseEasRelationPropertyName,
 } from '@/helpers'
+import { modelPropertiesToObject } from '@/helpers/model'
 import {
   GET_PROPERTIES,
   GET_SEEDS,
   GET_VERSIONS,
 } from '@/Item/queries'
 import { escapeSqliteString, getAddressesFromDb } from '@/helpers/db'
-import { eventEmitter } from '@/eventBus'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -445,7 +445,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
           refSeedType = result.modelName
         }
 
-        metadata.value.forEach((value) => {
+        metadata.value.forEach((value: string) => {
           relatedSeedUids.add(value)
         })
       }
@@ -498,7 +498,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
     let localStorageDir
     const modelName = startCase(modelType)
     const model = models[modelName]
-    const modelSchema = model?.schema
+    const modelSchema = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
     if (propertyNameSnake === 'storage_transaction_id') {
       await createMetadataRecordsForStorageTransactionId(property, modelSchema)
@@ -653,14 +653,7 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
 
     await getRelatedSeedsAndVersions()
 
-    // Dynamic import to break circular dependency
-    const { Model } = await import('@/Model/Model')
-    const allModels = Model.getAll()
-    for (const model of allModels) {
-      const modelName = model.modelName
-      if (!modelName) continue
-      eventEmitter.emit('item.requestAll', { modelName })
-    }
+    // Note: Removed item.requestAll emission - no listeners registered
   },
   30000,
   {

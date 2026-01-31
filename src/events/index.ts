@@ -17,7 +17,9 @@ type WaitForEvent = (
   config: WaitForEventConfig,
 ) => Promise<Record<string, unknown>>
 
-export const waitForEvent: WaitForEvent = async ({ req, res }) => {
+// Export waitForEvent - using const export for better Rollup compatibility
+export const waitForEvent: WaitForEvent = async (config) => {
+  const { req, res } = config
   const eventId = generateId()
 
   return new Promise((resolve) => {

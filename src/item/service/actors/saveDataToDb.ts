@@ -1,9 +1,9 @@
 import { EventObject, fromCallback } from 'xstate'
-import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { sql } from 'drizzle-orm'
 import { escapeSqliteString } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { FromCallbackInput, ItemMachineContext } from '@/types'
 
 const relatedSnakeCaseToCamelCase = (snakeCase: string): string => {
   let camelCasePropertyName = snakeCase
@@ -15,8 +15,10 @@ const relatedSnakeCaseToCamelCase = (snakeCase: string): string => {
     .replace(/[-_][a-z]/g, (group) => group.slice(-1).toUpperCase())
 }
 
-export const saveDataToDb = fromCallback<EventObject, typeof itemMachineSingle>(
-  ({ sendBack, input: { context } }) => {
+export const saveDataToDb = fromCallback<
+  EventObject,
+  FromCallbackInput<ItemMachineContext<any>>
+>(({ sendBack, input: { context } }) => {
     const {
       modelName,
       modelTableName,
@@ -64,9 +66,9 @@ export const saveDataToDb = fromCallback<EventObject, typeof itemMachineSingle>(
       }
 
       for (const [schemaUid, properties] of Object.entries(
-        propertiesBySchemaUid,
+        propertiesBySchemaUid || {},
       )) {
-        for (const property of properties) {
+        for (const property of (properties as any[])) {
           // Validate and parse decodedDataJson
           if (!property.decodedDataJson || property.decodedDataJson.trim() === '') {
             console.warn(

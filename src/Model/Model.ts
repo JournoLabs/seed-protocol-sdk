@@ -14,6 +14,7 @@ import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { eq } from 'drizzle-orm'
+import { Subscription } from 'rxjs'
 import debug from 'debug'
 
 const logger = debug('seedSdk:model:Model')
@@ -56,8 +57,9 @@ const schemaImportPromise = import('@/Schema/Schema')
 
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
+
 const modelInstanceState = new WeakMap<Model, {
-  liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance property updates
+  liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance property updates
 }>()
 
 // Define tracked properties for the Proxy
@@ -122,7 +124,7 @@ export class Model {
 
   modelName?: string
   schemaName?: string
-  properties?: any[] // Array of ModelProperty instances (like Schema.models)
+  _properties?: any[] // Internal properties array (use getter for public access)
   // 'name' is available as an alias for 'modelName' via the proxy
 
   constructor(
@@ -1801,7 +1803,7 @@ export class Model {
           // Delete all properties for this model
           await db
             .delete(propertiesTable)
-            .where(eq(propertiesTable.modelId, modelId))
+            .where(eq(propertiesTable.modelId, typeof modelId === 'string' ? parseInt(modelId, 10) : modelId))
           logger(`Model.destroy: Deleted properties from database`)
           
           // Finally, delete the model record itself
@@ -1973,13 +1975,13 @@ export class Model {
         const initialProperties = await db
           .select({ schemaFileId: propertiesTable.schemaFileId })
           .from(propertiesTable)
-          .where(eq(propertiesTable.modelId, modelId))
+          .where(eq(propertiesTable.modelId, typeof modelId === 'string' ? parseInt(modelId, 10) : modelId))
 
         return initialProperties.map((row: { schemaFileId: string | null }) => ({
           schemaFileId: row.schemaFileId,
         }))
       },
-      instanceState: modelInstanceState,
+      instanceState: modelInstanceState as WeakMap<Model, { liveQuerySubscription: Subscription | null }>,
       loggerName: 'seedSdk:model:liveQuery',
     })
   }

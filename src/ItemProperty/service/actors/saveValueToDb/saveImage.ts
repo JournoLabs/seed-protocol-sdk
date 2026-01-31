@@ -20,6 +20,9 @@ const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onload = async (e) => {
+      if (!e.target || !e.target.result) {
+        throw new Error('FileReader result is null')
+      }
       const arrayBuffer = e.target.result as ArrayBuffer
 
       resolve(arrayBuffer)
@@ -81,6 +84,9 @@ export const saveImage = fromCallback<
   }
 
   const _saveImage = async (): Promise<void> => {
+    if (!propertyNameRaw) {
+      throw new Error('propertyName is required')
+    }
     let propertyName = propertyNameRaw
 
     if (!propertyNameRaw.endsWith('Id')) {
@@ -93,7 +99,8 @@ export const saveImage = fromCallback<
     let fileName
 
     if (!imageSchemaUid) {
-      imageSchemaUid = await getSchemaUidForModel('Image')
+      const fetchedSchemaUid = await getSchemaUidForModel('Image')
+      imageSchemaUid = fetchedSchemaUid ?? undefined
     }
 
     if (typeof newValue === 'string') {
@@ -147,7 +154,7 @@ export const saveImage = fromCallback<
 
     if (fileData instanceof ArrayBuffer) {
       try {
-        await BaseFileManager.saveFile(filePath, new Uint8Array(fileData))
+        await BaseFileManager.saveFile(filePath, fileData)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, new Uint8Array(fileData))
@@ -186,10 +193,9 @@ export const saveImage = fromCallback<
           versionLocalId,
           versionUid,
           modelName,
-          schemaUid,
+          schemaUid: imageSchemaUid,
           refSeedType: 'image',
           refModelUid: imageSchemaUid,
-          refSchemaUid: imageSchemaUid,
           refResolvedDisplayValue,
           refResolvedValue: fileName,
           localStorageDir: '/images',
@@ -198,7 +204,9 @@ export const saveImage = fromCallback<
         propertyRecordSchema,
       )
 
-      newLocalId = result[0].localId
+      if (result && result.localId) {
+        newLocalId = result.localId
+      }
     }
 
     if (localId) {
@@ -214,10 +222,9 @@ export const saveImage = fromCallback<
         refResolvedDisplayValue,
         refResolvedValue: fileName,
         refModelUid: imageSchemaUid,
-        refSchemaUid: imageSchemaUid,
         localStorageDir: '/images',
         easDataType: 'bytes32',
-      })
+      } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
     }
 
     sendBack({

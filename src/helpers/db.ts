@@ -33,7 +33,7 @@ export const escapeSqliteString = (value: string): string => {
 export const getObjectForRow = (row: any): ResultObject => {
   const obj: ResultObject = {}
 
-  row.columnNames.forEach((colName, index) => {
+  row.columnNames.forEach((colName: string, index: number) => {
     const value = row.row[index]
     if (typeof value !== 'string') {
       obj[colName] = row.row[index]
@@ -65,7 +65,7 @@ export const getSqlResultObject = (
   }
 
   if (queryResult.rows.length > 1) {
-    obj = queryResult.rows.reduce((acc, row) => {
+    obj = queryResult.rows.reduce((acc: ResultObject[], row: any) => {
       const rowObj = getObjectForRow(row)
 
       acc.push(rowObj)
@@ -476,8 +476,9 @@ async function checkIfPropertyIsEdited(
     // First, check the in-memory cache (for current session edits)
     // Dynamic import to break circular dependency
     const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
+    type ModelPropertyInstance = InstanceType<typeof ModelProperty>
     const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-      instanceCache: Map<string, { instance: ModelProperty; refCount: number }>
+      instanceCache: Map<string, { instance: ModelPropertyInstance; refCount: number }>
     }
     
     const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
@@ -978,7 +979,7 @@ export const addModelsToDb = async (
       .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
       .where(eq(modelSchemas.schemaId, schemaRecord.id))
     
-    const linkedModelNames = allLinkedModels.map(m => m.modelName).filter(Boolean)
+    const linkedModelNames = allLinkedModels.map((m: any) => m.modelName).filter(Boolean)
     console.log(`[addModelsToDb] After processing, schema (id: ${schemaRecord.id}) has ${allLinkedModels.length} models linked: ${linkedModelNames.join(', ')}`)
   } else if (schemaRecord && !schemaRecord.id) {
     logger(`Warning: schemaRecord provided but has no id, cannot create join table entries`)

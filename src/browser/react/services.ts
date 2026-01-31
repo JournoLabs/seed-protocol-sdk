@@ -18,10 +18,11 @@ const finalStrings = ['idle', 'ready', 'done', 'success', 'initialized']
 
 export const getServiceName = (service: ActorRef<any, any>) => {
   let name = 'actor'
-  if (service && service.uniqueKey) {
-    name = service.uniqueKey
+  const serviceAny = service as any
+  if (service && serviceAny.uniqueKey) {
+    name = serviceAny.uniqueKey
   }
-  if (service && !service.uniqueKey && service.logic && service.logic.config) {
+  if (service && !serviceAny.uniqueKey && serviceAny.logic && serviceAny.logic.config) {
     name = getServiceUniqueKey(service)
   }
   return name
@@ -51,10 +52,11 @@ export const getServiceValue = (
 }
 
 export const getServiceUniqueKey = (service: ActorRef<any, any>) => {
-  if (!service || !service.logic || !service.logic.config || !service._snapshot) {
+  const serviceAny = service as any
+  if (!service || !serviceAny.logic || !serviceAny.logic.config || !serviceAny._snapshot) {
     return
   }
-  const config = service.logic.config
+  const config = serviceAny.logic.config
   if (!config.id) {
     return
   }
@@ -89,12 +91,14 @@ export const useService = (service: ActorRef<any, any>) => {
 
   const getPercentComplete = (service: ActorRef<any, any>) => {
     let percentComplete = 0
-    if (service.logic.states) {
-      const stateNames = []
-      const startupStates = []
+    const serviceAny = service as any
+    if (serviceAny.logic?.states) {
+      const stateNames: string[] = []
+      const startupStates: any[] = []
 
-      for (const [stateName, state] of Object.entries(service.logic.states)) {
-        if (state.tags.includes('loading')) {
+      for (const [stateName, state] of Object.entries(serviceAny.logic.states)) {
+        const stateTyped = state as { tags?: string[] }
+        if (stateTyped.tags?.includes('loading')) {
           stateNames.push(stateName)
           startupStates.push(state)
         }
@@ -102,17 +106,19 @@ export const useService = (service: ActorRef<any, any>) => {
 
       const totalStates = startupStates.length
       const value = getServiceValue(service)
-      if (finalStrings.includes(value)) {
+      if (value && finalStrings.includes(value)) {
         return 0
       }
-      const stateIndex = stateNames.indexOf(value)
-      percentComplete = (stateIndex / totalStates) * 100
+      if (value) {
+        const stateIndex = stateNames.indexOf(value)
+        percentComplete = (stateIndex / totalStates) * 100
+      }
     }
     return percentComplete
   }
 
   const updateTime = useCallback(
-    (interval) => {
+    (interval: ReturnType<typeof setInterval>) => {
       const context = service.getSnapshot().context
       const status = service.getSnapshot().value
       if (

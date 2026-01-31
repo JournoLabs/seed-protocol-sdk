@@ -39,8 +39,7 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
           nodePolyfills({
             exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
-            // Include crypto, stream, util, and path - crypto polyfill needs stream.Transform and util
-            include: ['crypto', 'stream', 'util', 'path'],
+            include: ['crypto', 'stream', 'util', 'path',],
             globals: {
               Buffer: true,
               global: true,
@@ -280,7 +279,7 @@ export default defineConfig({
     //   alias: {
     //     'node:fs': '@zenfs/core',
     //   },
-    // },
+    //     },
   },
 })
 

@@ -24,6 +24,9 @@ export const hydrateFromDb = fromCallback<
     modelName,
   } = context
 
+  if (!propertyNameRaw) {
+    throw new Error('propertyName is required')
+  }
   let propertyName = propertyNameRaw
 
   // Note: isRelation, isImage, isFile checks moved inside async function
@@ -249,7 +252,7 @@ export const hydrateFromDb = fromCallback<
     ) {
       const { Item } = await import(`@/Item/Item`)
       const item = await Item.find({
-        seedLocalId,
+        seedLocalId: seedLocalId ?? undefined,
         modelName,
       })
       if (item) {

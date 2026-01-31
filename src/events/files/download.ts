@@ -1,5 +1,4 @@
 import { eventEmitter } from '@/eventBus'
-import { ARWEAVE_HOST } from '@/client/constants'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getAddressesFromDb } from '@/helpers/db'
@@ -13,12 +12,11 @@ import debug from 'debug'
 import { waitFor } from 'xstate'
 import { getMetadata } from '@/db/read/getMetadata'
 import { saveMetadata } from '@/db/write/saveMetadata'
-import { GET_TRANSACTION_TAGS } from '@/helpers/ArweaveClient/queries'
 import { saveAppState } from '@/db/write/saveAppState'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient } from '@/helpers'
-import { getArweave } from '@/helpers/ArweaveClient'
 import { isBrowser } from '@/helpers/environment'
+import { Endpoints } from '@/types'
 
 
 const logger = debug('seedSdk:files:download')
@@ -32,10 +30,15 @@ const syncDbFiles = async (endpoints: any) => {
 }
 
 
+type DownloadAllFilesRequestHandlerProps = {
+  endpoints: Endpoints
+  eventId: string
+}
+
 export const downloadAllFilesRequestHandler = async ({
   endpoints,
   eventId,
-}) => {
+}: DownloadAllFilesRequestHandlerProps) => {
 
   if (!isBrowser()) {
     return
@@ -165,27 +168,15 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
     transactionIds.push(transactionId)
   }
 
-  const arweave = getArweave()
-
-  if (!arweave) {
-    console.warn(
-      '[fetchAll/actors] [fetchAllBinaryData] arweave not available',
-    )
-    return []
-  }
-
-  const arweaveClient = BaseArweaveClient.getArweaveClient()
-
   const transactionIdsToDownload = []
 
   for (const transactionId of transactionIds) {
 
     try {
-      const res = await fetch(
-        `https://${ARWEAVE_HOST}/tx/${transactionId}/status`,
-      )
+      // Use BaseArweaveClient for transaction status check
+      const status = await BaseArweaveClient.getTransactionStatus(transactionId)
 
-      if (res.status !== 200) {
+      if (status.status !== 200) {
         logger(
           `[fetchAll/actors] [fetchAllBinaryData] error fetching transaction data for ${transactionId}`,
         )
@@ -200,17 +191,13 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
         continue
       }
       
-      const { tags: tagsResult } = await queryClient.fetchQuery({
+      // Use BaseArweaveClient for getting transaction tags
+      const tags = await queryClient.fetchQuery({
         queryKey: ['getTransactionTags', transactionId],
-        queryFn: async () =>
-          arweaveClient.request(GET_TRANSACTION_TAGS, {
-            transactionId,
-          }),
+        queryFn: async () => BaseArweaveClient.getTransactionTags(transactionId),
       })
 
-      const tags = tagsResult.tags || []
-
-      if (tagsResult.tags && tagsResult.tags.length > 0) {
+      if (tags && tags.length > 0) {
         for (const { name, value } of tags) {
           if (name === 'Content-SHA-256') {
             const metadataRecord = await getMetadata({
@@ -228,8 +215,6 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
 
       transactionIdsToDownload.push(transactionId)
 
-    
-
     } catch (error) {
       logger(error)
     }
@@ -237,7 +222,7 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
 
   await BaseFileManager.downloadAllFiles({
     transactionIds: transactionIdsToDownload,
-    arweaveHost: ARWEAVE_HOST,
+    arweaveHost: BaseArweaveClient.getHost(),
     excludedTransactions,
   })
 

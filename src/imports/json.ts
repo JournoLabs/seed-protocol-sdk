@@ -556,7 +556,7 @@ export async function importJsonSchema(
           const expectedModelNames = Object.keys(schemaFile.models || {})
           const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
           const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-          const { eq } = await import('drizzle-orm')
+          const { eq, and } = await import('drizzle-orm')
           
           let allModelsLinked = false
           for (let attempt = 0; attempt < 10; attempt++) {
@@ -686,9 +686,9 @@ export async function importJsonSchema(
           
           // Try to find models directly by schemaFileId first (more reliable than join table)
           const seedModelId = modelFileIds.get('Seed')
+          let seedModel: any[] = []
           if (seedModelId) {
             // Retry querying for the model until it's visible
-            let seedModel: any[] = []
             for (let attempt = 0; attempt < 10; attempt++) {
               seedModel = await db
                 .select()
@@ -1084,9 +1084,9 @@ export const loadSchemaFromFile = async (
           
           // Try to find models directly by schemaFileId first (more reliable than join table)
           const seedModelId = modelFileIds.get('Seed')
+          let seedModel: any[] = []
           if (seedModelId) {
             // Retry querying for the model until it's visible
-            let seedModel: any[] = []
             for (let attempt = 0; attempt < 10; attempt++) {
               seedModel = await db
                 .select()
@@ -1320,11 +1320,8 @@ export const createModelsFromJson = async (
   for (const [modelName, modelDef] of Object.entries(importData.models)) {
     // Get modelFileId from map if available
     const modelFileId = modelFileIds?.get(modelName)
-    // Fallback: use id from modelDef if not in map
-    const finalModelFileId = modelFileId || modelDef.id
-    if (!modelFileId && modelDef.id) {
-      logger(`ModelFileId not found in map for "${modelName}", using id from modelDef: ${modelDef.id}`)
-    }
+    // Use modelFileId from map (no fallback to modelDef.id as JsonImportSchema doesn't have id property)
+    const finalModelFileId = modelFileId
     if (!finalModelFileId) {
       logger(`Warning: No modelFileId found for model "${modelName}" - model will be created without ID`)
     }

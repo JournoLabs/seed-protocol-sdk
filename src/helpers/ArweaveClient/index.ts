@@ -1,4 +1,3 @@
-import { ARWEAVE_HOST } from '@/client/constants'
 import { BaseArweaveClient } from './BaseArweaveClient'
 import Arweave from 'arweave'
 import { isBrowser } from '../environment'
@@ -15,74 +14,59 @@ export const initArweaveClient = async () => {
   // }
 }
 
-
-let domain = 'arweave.net'
-let domainExplicitlySet = false
-
+/**
+ * @deprecated Use BaseArweaveClient methods instead (getTransactionStatus, getTransactionData, createTransaction, etc.)
+ * This function is kept for backward compatibility but will be removed in a future version.
+ * The Arweave instance is now internal to the platform-specific ArweaveClient implementations.
+ * 
+ * Migration guide:
+ * - For transaction status: BaseArweaveClient.getTransactionStatus(transactionId)
+ * - For transaction data: BaseArweaveClient.getTransactionData(transactionId, options)
+ * - For creating transactions: BaseArweaveClient.createTransaction(data, options)
+ * - For transaction tags: BaseArweaveClient.getTransactionTags(transactionId)
+ * 
+ * @returns Arweave instance or undefined if not available
+ */
 export const getArweave = (): Arweave | undefined => {
   if (
     typeof window === 'undefined' ||
     !Arweave ||
-    (!Object.keys(Arweave).includes('init') &&
-      !Object.keys(Arweave).includes('default'))
+    (typeof Arweave.init !== 'function' &&
+      !('default' in Arweave && typeof (Arweave as any).default?.init === 'function'))
   ) {
     return
   }
 
-  // Use the domain variable if it was explicitly set, otherwise use ARWEAVE_HOST in production
-  const hostToUse = domainExplicitlySet ? domain : ARWEAVE_HOST
+  const hostToUse = BaseArweaveClient.getHost()
 
-  if (process.env.NODE_ENV === 'production') {
-    if (Object.keys(Arweave).includes('default')) {
-      return Arweave.default.init({
-        host: hostToUse,
-        protocol: 'https',
-      })
-    }
-
-    return Arweave.init({
+  // Check if Arweave has a default export (ES modules) or is the class itself (CommonJS)
+  if ('default' in Arweave && typeof (Arweave as any).default?.init === 'function') {
+    return (Arweave as any).default.init({
       host: hostToUse,
       protocol: 'https',
     })
   }
 
-  // return Arweave.init({
-  //   host     : 'localhost',
-  //   port     : 1984,
-  //   protocol : 'http',
-  // },)
-
-  if (Object.keys(Arweave).includes('default')) {
-    return Arweave.default.init({
-      host: domain,
-      protocol: 'https',
-    })
-  }
-
   return Arweave.init({
-    host: domain,
+    host: hostToUse,
     protocol: 'https',
   })
 }
 
+/**
+ * @deprecated Use BaseArweaveClient.setHost() instead.
+ * This function is kept for backward compatibility but will be removed in a future version.
+ */
 export const setArweaveDomain = (newDomain: string): void => {
-  domain = newDomain
-  domainExplicitlySet = true
+  BaseArweaveClient.setHost(newDomain)
 }
 
+/**
+ * @deprecated Use BaseArweaveClient.getHost() instead.
+ * This function is kept for backward compatibility but will be removed in a future version.
+ */
 export const getArweaveDomain = (): string => {
-  // If domain was explicitly set via setArweaveDomain (from user config), use it
-  // Otherwise, in production use ARWEAVE_HOST from env/constants
-  // In non-production, use the domain variable (defaults to 'arweave.net')
-  if (domainExplicitlySet) {
-    return domain
-  }
-  
-  if (process.env.NODE_ENV === 'production') {
-    return ARWEAVE_HOST
-  }
-  
-  return domain
+  return BaseArweaveClient.getHost()
 }
 
 export { ArweaveClient }

@@ -1,7 +1,8 @@
 import { getSeedsBySchemaName, getItemVersionsFromEas, getItemPropertiesFromEas } from "./eas"
 import { Attestation } from "./graphql/gql/graphql"
 import { setSchemaUidForSchemaDefinition } from "./stores/eas"
-import { BaseEasClient, parseEasRelationPropertyName, getArweaveUrlForTransaction } from "./helpers"
+import { BaseEasClient, parseEasRelationPropertyName } from "./helpers"
+import { BaseArweaveClient } from "./helpers/ArweaveClient/BaseArweaveClient"
 import { GET_SEEDS } from "./Item/queries"
 import debug from 'debug'
 
@@ -79,7 +80,7 @@ const setFeedItemDefaults = (item: Record<string, any>, seedUid: string, schemaN
   let defaultLink: string
   if (storageTransactionId && storageTransactionId !== seedUid && storageTransactionId.length > 0) {
     try {
-      defaultLink = getArweaveUrlForTransaction(storageTransactionId)
+      defaultLink = BaseArweaveClient.getRawUrl(storageTransactionId)
       console.log('[feed] [setFeedItemDefaults] Using Arweave URL for storageTransactionId:', defaultLink)
     } catch (error) {
       console.error('[feed] [setFeedItemDefaults] Error generating Arweave URL:', error)

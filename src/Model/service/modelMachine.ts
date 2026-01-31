@@ -23,6 +23,7 @@ export type ModelMachineContext = {
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   _liveQueryPropertyIds?: string[] // Property file IDs from liveQuery (like Schema._liveQueryModelIds)
   _pendingPropertyDefinitions?: { [propertyName: string]: any } // Temporary storage for properties to create
+  _modelFileId?: string // Model file ID (string) - used for tracking model instances
   // Conflict detection metadata - track when data was loaded from DB
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time

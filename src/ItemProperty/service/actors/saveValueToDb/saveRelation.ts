@@ -39,6 +39,9 @@ export const saveRelation = fromCallback<
     
     let refResolvedDisplayValue
     let refSeedType
+    if (!propertyNameRaw) {
+      throw new Error('propertyName is required')
+    }
     let propertyName = propertyNameRaw
     let versionLocalIdToSave = versionLocalId
 

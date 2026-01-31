@@ -8,6 +8,7 @@ import * as schema from '@/seedSchema'
 import { createClient } from '@libsql/client'
 
 // Get the directory of this file to resolve relative paths
+// @ts-ignore - rollup plugin-typescript doesn't recognize import.meta with module: "preserve"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 

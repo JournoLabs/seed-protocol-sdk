@@ -49,7 +49,7 @@ export const fetchAllFilesMachine = setup({
       },
       invoke: {
         src: 'fetchAllMetadataRecords',
-        input: ({ context, event }) => ({ context, event }),
+        input: ({ context, event }: { context: FetchAllFilesMachineContext; event?: any }) => ({ context, event }),
       },
     },
     fetchingAllBinaryData: {
@@ -63,7 +63,7 @@ export const fetchAllFilesMachine = setup({
       },
       invoke: {
         src: 'fetchAllBinaryData',
-        input: ({ context }) => ({ context }),
+        input: ({ context }: { context: FetchAllFilesMachineContext }) => ({ context }),
       },
     },
     success: {

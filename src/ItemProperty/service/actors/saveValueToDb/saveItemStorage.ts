@@ -58,6 +58,9 @@ export const saveItemStorage = fromCallback<
         seedLocalId,
       })
       if (itemData) {
+        if (!propertyName) {
+          throw new Error('propertyName is required')
+        }
         const whereClauses = [
           eq(metadata.propertyName, propertyName),
           eq(metadata.seedLocalId, seedLocalId),
@@ -84,7 +87,7 @@ export const saveItemStorage = fromCallback<
           const writeToPath = `/files/${propertyRecordSchema.localStorageDir}/${filename}`
           await BaseFileManager.saveFile(writeToPath, newValue as string | Blob | ArrayBuffer)
 
-          const propertyDataRows = await createMetadata(
+          const propertyDataRow = await createMetadata(
             {
               propertyName,
               propertyValue: filename,
@@ -99,7 +102,9 @@ export const saveItemStorage = fromCallback<
             propertyRecordSchema,
           )
 
-          propertyData = propertyDataRows[0]
+          if (propertyDataRow) {
+            propertyData = propertyDataRow
+          }
         }
 
         // propertyData = {

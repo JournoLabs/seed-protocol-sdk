@@ -1,12 +1,19 @@
 import { EventObject, fromCallback } from 'xstate'
-import { downloadMachine } from '@/helpers/file/download'
 import { GET_FILES_METADATA } from '@/helpers/file/queries'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 
+type DownloadMachineContext = {
+  addresses: string[]
+  fileName?: string
+  metadata?: any
+  binaryData?: any
+  metadataServiceUrl?: string
+  blobServiceUrl?: string
+}
 
-export const fetchMetadata = fromCallback<EventObject, typeof downloadMachine>(
-  ({ sendBack, input: { context } }) => {
+export const fetchMetadata = fromCallback<EventObject, { context: DownloadMachineContext }>(
+  ({ sendBack, input: { context } }): (() => void) => {
     const { addresses } = context
 
     const fetchMetadata = async () => {
@@ -41,8 +48,8 @@ export const fetchMetadata = fromCallback<EventObject, typeof downloadMachine>(
 
 export const fetchBinaryData = fromCallback<
   EventObject,
-  typeof downloadMachine
->(({ sendBack, receive, input: { context } }) => {
+  { context: DownloadMachineContext }
+>(({ sendBack, receive, input: { context } }): (() => void) => {
   const { addresses } = context
 
   const fetchBinaryData = async () => {

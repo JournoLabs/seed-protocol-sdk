@@ -3,7 +3,7 @@ import { CacheEntry } from './entityCache'
 /**
  * Configuration for entity unload operations
  */
-export interface UnloadConfig<T> {
+export interface UnloadConfig<T extends object> {
   /**
    * Get cache key(s) for this instance
    * Returns array of cache keys that should be removed/updated
@@ -42,7 +42,7 @@ export interface UnloadConfig<T> {
  * @param instance - Entity instance to unload
  * @param config - Unload configuration
  */
-export function unloadEntity<T>(instance: T, config: UnloadConfig<T>): void {
+export function unloadEntity<T extends object>(instance: T, config: UnloadConfig<T>): void {
   // Clean up liveQuery subscription
   const instanceState = config.instanceState.get(instance)
   if (instanceState?.liveQuerySubscription) {

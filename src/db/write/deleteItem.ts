@@ -10,10 +10,22 @@ type DeleteItem = (props: DeleteItemProps) => Promise<void>
 export const deleteItem: DeleteItem = async ({ seedLocalId, seedUid }) => {
   const appDb = BaseDb.getAppDb()
 
+  const conditions = []
+  if (seedLocalId) {
+    conditions.push(eq(seeds.localId, seedLocalId))
+  }
+  if (seedUid) {
+    conditions.push(eq(seeds.uid, seedUid))
+  }
+
+  if (conditions.length === 0) {
+    return
+  }
+
   await appDb
     .update(seeds)
     .set({
       _markedForDeletion: 1,
     })
-    .where(or(eq(seeds.localId, seedLocalId), eq(seeds.uid, seedUid)))
+    .where(or(...conditions))
 }

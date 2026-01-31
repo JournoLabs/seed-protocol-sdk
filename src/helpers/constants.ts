@@ -42,6 +42,15 @@ export const INTERNAL_DATA_TYPES = {
   Blob: {
     eas: 'bytes32',
   },
+  Boolean: {
+    eas: 'bool',
+  },
+  Date: {
+    eas: 'uint256',
+  },
+  Html: {
+    eas: 'string',
+  },
 }
 
 export const INTERNAL_PROPERTY_NAMES = [

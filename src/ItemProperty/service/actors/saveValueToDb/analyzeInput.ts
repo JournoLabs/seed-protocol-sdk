@@ -59,6 +59,9 @@ export const analyzeInput = fromCallback<
     const { ModelPropertyDataTypes } = await import('@/Schema')
     
     let propertyName = propertyNameRaw
+    if (!propertyName) {
+      throw new Error('propertyName is required')
+    }
 
     if (
       propertyRecordSchema.refValueType &&
@@ -104,7 +107,7 @@ export const analyzeInput = fromCallback<
         }
 
         const schemaFromEas = await getSchemaForItemProperty({
-          propertyName,
+          propertyName: propertyName!,
           easDataType,
         })
         if (schemaFromEas) {
@@ -119,19 +122,24 @@ export const analyzeInput = fromCallback<
       }
     }
 
+    // Convert newValue to string for database storage
+    const stringValue = newValue !== null && newValue !== undefined 
+      ? (typeof newValue === 'string' ? newValue : String(newValue))
+      : null
+
     const result = await updateItemPropertyValue({
       localId,
-      propertyName,
-      newValue,
+      propertyName: propertyName!,
+      newValue: stringValue,
       seedLocalId,
       versionLocalId,
       versionUid,
       modelName,
       schemaUid,
-    })
+    } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
 
     let updatedContext: Partial<PropertyMachineContext> = {
-      propertyValue: newValue,
+      propertyValue: typeof newValue === 'string' ? newValue : (newValue !== null && newValue !== undefined ? String(newValue) : undefined),
     }
 
     if (localId) {

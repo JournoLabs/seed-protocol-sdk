@@ -321,7 +321,7 @@ const findMaxWidth = (config: BrowserImageResizerConfig, canvas: { width: number
   } else {
       //1 cpu version
       const { srcImgData, destImgData } = getImageData(srcCanvas, destCanvas);
-      resampleSingle(srcImgData, destImgData, config);
+      resampleSingle(srcImgData, destImgData);
       destCanvas.getContext('2d')!.putImageData(destImgData, 0, 0);
       return;
   }
@@ -410,9 +410,9 @@ const imageResize = async (filePath: string, width: number, height: number) => {
 
   console.log({filePath, width, height})
 
-  const config = {
+  const config: BrowserImageResizerConfig = {
     ...DEFAULT_CONFIG,
-    algorithm: 'hermite_single',
+    algorithm: 'hermite_single' as const,
     mimeType: 'image/webp',
     maxWidth: width,
     maxHeight: height,
@@ -459,7 +459,7 @@ const imageResize = async (filePath: string, width: number, height: number) => {
 	}
 
 	if (converting.width > maxWidth) {
-		if (config.debug) console.log(`browser-image-resizer: scale: Scaling canvas by ${config.argorithm} from ${converting.width} to ${maxWidth}`);
+		if (config.debug) console.log(`browser-image-resizer: scale: Scaling canvas by ${config.algorithm} from ${converting.width} to ${maxWidth}`);
 		converting = await scaleCanvasWithAlgorithm(
 			converting,
 			Object.assign(config, { outputWidth: maxWidth }),

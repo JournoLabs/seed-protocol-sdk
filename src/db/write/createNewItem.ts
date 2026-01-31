@@ -5,7 +5,6 @@ import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { eventEmitter } from '@/eventBus'
 import { modelPropertiesToObject } from '@/helpers/model'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
@@ -55,8 +54,6 @@ export const createNewItem = async ({
       propertyRecordSchema,
     )
   }
-
-  eventEmitter.emit('item.requestAll', { modelName })
 
   return {
     modelName,

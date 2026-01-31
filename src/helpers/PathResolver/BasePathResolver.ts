@@ -14,7 +14,7 @@ export abstract class BasePathResolver {
       if (BasePathResolver.PlatformClass === BasePathResolver) {
         throw new Error('Circular reference detected: PlatformClass is set to BasePathResolver')
       }
-      BasePathResolver.instance = new BasePathResolver.PlatformClass()
+      BasePathResolver.instance = new (BasePathResolver.PlatformClass as any)()
     }
     return BasePathResolver.instance
   }

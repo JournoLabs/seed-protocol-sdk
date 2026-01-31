@@ -137,7 +137,7 @@ export const addModelsMachine = setup({
             
             // Create new Model instance with modelFileId
             // Model.create() will set _modelFileId in the context automatically
-            const modelInstance = Model.create(modelName, schemaName, modelFileId)
+            const modelInstance = Model.create(modelName, schemaName, { modelFileId })
             const service = modelInstance.getService()
             
             logger(`Created Model instance for "${modelName}" with modelFileId "${modelFileId}"`)
@@ -227,12 +227,17 @@ export const addModelsMachine = setup({
             modelInstance.getService().send({
               type: 'initializeOriginalValues',
               originalValues: {
-                properties: modelData.properties ? JSON.parse(JSON.stringify(modelData.properties)) : {},
+                _originalValues: {
+                  properties: modelData.properties ? JSON.parse(JSON.stringify(modelData.properties)) : {},
+                },
               },
               isEdited: false,
             })
             
             // Store in instance state
+            if (!instanceState.modelInstances) {
+              instanceState.modelInstances = new Map<string, Model>()
+            }
             instanceState.modelInstances.set(modelName, modelInstance)
             modelInstances.set(modelName, modelInstance)
             
@@ -389,7 +394,9 @@ export const addModelsMachine = setup({
             
             if (schemasById.length > 0) {
               schemaRecord = schemasById[0]
-              logger(`Found schema by schemaFileId: ${schemaFileId} (id: ${schemaRecord.id}, name: ${schemaRecord.name}, isDraft: ${schemaRecord.isDraft})`)
+              if (schemaRecord) {
+                logger(`Found schema by schemaFileId: ${schemaFileId} (id: ${schemaRecord.id}, name: ${schemaRecord.name}, isDraft: ${schemaRecord.isDraft})`)
+              }
               break
             } else {
               logger(`No schema found by schemaFileId: ${schemaFileId}, will try by name`)
@@ -409,9 +416,11 @@ export const addModelsMachine = setup({
             
             if (schemasByName.length > 0) {
               // Prefer draft records
-              const draftRecord = schemasByName.find(s => s.isDraft === true)
+              const draftRecord = schemasByName.find((s: typeof schemasTable.$inferSelect) => s.isDraft === true)
               schemaRecord = draftRecord || schemasByName[0]
-              logger(`Found schema by name "${schemaName}": selected ${draftRecord ? 'draft' : 'first'} record (id: ${schemaRecord.id}, isDraft: ${schemaRecord.isDraft})`)
+              if (schemaRecord) {
+                logger(`Found schema by name "${schemaName}": selected ${draftRecord ? 'draft' : 'first'} record (id: ${schemaRecord.id}, isDraft: ${schemaRecord.isDraft})`)
+              }
               break
             }
           }
@@ -540,7 +549,10 @@ export const addModelsMachine = setup({
           actions: assign({
             errors: ({ context, event }) => [
               ...(context.errors || []),
-              { modelName: 'validation', error: event.error },
+              { 
+                modelName: 'validation', 
+                error: event.error instanceof Error ? event.error : new Error(String(event.error))
+              },
             ],
           }),
         },
@@ -556,7 +568,11 @@ export const addModelsMachine = setup({
         onDone: {
           target: 'collectingIds',
           actions: assign({
-            modelInstances: ({ event }) => event.output.modelInstances,
+            modelInstances: ({ event }) => {
+              // Type assertion needed due to XState v5 type inference limitation
+              const doneEvent = event as unknown as { output: { modelInstances: Map<string, Model> } }
+              return doneEvent.output?.modelInstances
+            },
             progress: ({ context }) => ({
               ...context.progress!,
               stage: 'collectingIds',
@@ -568,7 +584,10 @@ export const addModelsMachine = setup({
           actions: assign({
             errors: ({ context, event }) => [
               ...(context.errors || []),
-              { modelName: 'createInstances', error: event.error },
+              { 
+                modelName: 'createInstances', 
+                error: event.error instanceof Error ? event.error : new Error(String(event.error))
+              },
             ],
           }),
         },
@@ -583,7 +602,11 @@ export const addModelsMachine = setup({
         onDone: {
           target: 'persisting',
           actions: assign({
-            modelFileIds: ({ event }) => event.output.modelFileIds,
+            modelFileIds: ({ event }) => {
+              // Type assertion needed due to XState v5 type inference limitation
+              const doneEvent = event as unknown as { output: { modelFileIds: Map<string, string> } }
+              return doneEvent.output?.modelFileIds
+            },
             progress: ({ context }) => ({
               ...context.progress!,
               stage: 'persisting',
@@ -595,7 +618,10 @@ export const addModelsMachine = setup({
           actions: assign({
             errors: ({ context, event }) => [
               ...(context.errors || []),
-              { modelName: 'collectIds', error: event.error },
+              { 
+                modelName: 'collectIds', 
+                error: event.error instanceof Error ? event.error : new Error(String(event.error))
+              },
             ],
           }),
         },
@@ -612,7 +638,12 @@ export const addModelsMachine = setup({
         onDone: {
           target: '#addModels.success',
           actions: assign({
-            addedModels: ({ event }: { event: DoneActorEvent<{ addedModels: any }> }) => ({ addedModels: event.output.addedModels }),
+            addedModels: ({ event }) => {
+              // Type assertion needed due to XState v5 type inference limitation
+              // Convert through unknown first to avoid type overlap error
+              const doneEvent = event as unknown as DoneActorEvent<{ addedModels: any }, string>
+              return { addedModels: doneEvent.output?.addedModels }
+            },
           }),
         },
         onError: {

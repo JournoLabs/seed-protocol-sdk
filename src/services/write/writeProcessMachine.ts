@@ -82,11 +82,9 @@ export const writeProcessMachine = setup({
         console.log(msg) // Always log to console
         logger(`[validating] Entity data:`, context.pendingWrite?.data || context.entityData)
       },
-      // @ts-expect-error - XState v5 type inference bug: incorrectly expects ValidateEntityOutput for input
-      // The actor correctly expects ValidateEntityInput, but TypeScript infers the wrong type
       invoke: {
         src: 'validateEntity',
-        input: ({ context }): ValidateEntityInput => {
+        input: ({ context }: { context: WriteProcessContext }): ValidateEntityInput => {
           const entityData = context.pendingWrite?.data || context.entityData
           logger(`[validating] Invoking validateEntity with:`, { entityType: context.entityType, entityData })
           return {

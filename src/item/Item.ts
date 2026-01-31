@@ -16,7 +16,7 @@ import {
 } from '@/types'
 
 import { BehaviorSubject } from 'rxjs'
-import { ActorRefFrom, Subscription, createActor } from 'xstate'
+import { ActorRefFrom, Subscription, createActor, SnapshotFrom } from 'xstate'
 import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { waitForEvent } from '@/events'
@@ -29,7 +29,6 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
-import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { eq, and } from 'drizzle-orm'
 import debug from 'debug'
@@ -134,7 +133,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       },
     })
 
-    this._subscription = this._service.subscribe((snapshot) => {
+    this._subscription = this._service.subscribe((snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
       const { context } = snapshot
 
       if (
@@ -231,8 +230,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           refCount: refCount + 1,
         })
         for (const [propertyName, propertyValue] of Object.entries(props)) {
-          const propertyInstances = instance.getService().getSnapshot()
-            .context.propertyInstances
+          const snapshot = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
+          const propertyInstances = snapshot.context.propertyInstances
           if (!propertyInstances || !propertyInstances.has(propertyName)) {
             continue
           }
@@ -249,7 +248,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
       if (!this.instanceCache.has(seedId)) {
         // Item no longer needs modelInstance - it loads properties from database independently
-        const propsWithModel = { ...props }
+        // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
+        const { latestVersionUid, ...propsWithoutVersionUid } = props
+        const propsWithModel = { ...propsWithoutVersionUid } as any
         const newInstance = new Item(propsWithModel)
         
         // Wrap instance in Proxy for reactive property access
@@ -414,7 +415,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     props.seedLocalId = seedLocalId
     props.latestVersionLocalId = versionLocalId
     // Item no longer needs modelInstance - it loads properties from database independently
-    const propsWithModel = { ...props }
+    // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
+    const { latestVersionUid, ...propsWithoutVersionUid } = props
+    const propsWithModel = { ...propsWithoutVersionUid } as any
     const newInstance = new Item(propsWithModel)
     
     // Wrap instance in Proxy for reactive property access
@@ -434,7 +437,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           // Special handling for properties - compute from propertyInstances Map
           if (prop === 'properties') {
             console.log(`[Item.Proxy.properties] Proxy handler called for properties (second Proxy setup)`)
-            const snapshot = target._service.getSnapshot()
+            const snapshot = target._service.getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
             const context = snapshot.context
             const propertyInstances = context.propertyInstances as Map<string, IItemProperty> | undefined
             const modelName = context.modelName as string
@@ -550,6 +553,74 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return proxiedInstance
   }
 
+  /**
+   * Get Item instance by ID from cache
+   * The ID can be either seedUid or seedLocalId
+   * @param id - seedUid or seedLocalId
+   * @returns Cached Item instance or null if not found
+   */
+  static getById(id: string): Item<any> | null {
+    if (!id) {
+      return null
+    }
+    
+    // Check cache - the cache key is seedUid || seedLocalId
+    if (this.instanceCache.has(id)) {
+      const { instance, refCount } = this.instanceCache.get(id)!
+      this.instanceCache.set(id, {
+        instance,
+        refCount: refCount + 1,
+      })
+      return instance
+    }
+    
+    return null
+  }
+
+  /**
+   * Create Item instance by ID (queries database if not in cache)
+   * The ID can be either seedUid or seedLocalId
+   * @param id - seedUid or seedLocalId
+   * @param modelName - Optional model name for querying
+   * @returns Item instance or undefined if not found
+   */
+  static async createById(id: string, modelName?: string): Promise<Item<any> | undefined> {
+    if (!id) {
+      return undefined
+    }
+
+    // Check cache first
+    const cached = this.getById(id)
+    if (cached) {
+      return cached
+    }
+
+    // Determine if id is seedUid or seedLocalId by querying database
+    // Try seedUid first, then seedLocalId
+    let itemData = await getItemData({
+      modelName,
+      seedUid: id,
+    })
+
+    if (!itemData) {
+      // Try as seedLocalId
+      itemData = await getItemData({
+        modelName,
+        seedLocalId: id,
+      })
+    }
+
+    if (!itemData) {
+      return undefined
+    }
+
+    // Item.create() will handle caching the new instance
+    return await Item.create({
+      ...itemData,
+      modelName,
+    })
+  }
+
   static async find({
     modelName,
     seedLocalId,
@@ -564,45 +635,30 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    const cacheKey = seedUid || seedLocalId
-    let foundItem: IItem<any> | undefined
-    
-    // Check cache first
-    if (cacheKey && this.instanceCache.has(cacheKey)) {
-      const { instance, refCount } = this.instanceCache.get(cacheKey)!
-      this.instanceCache.set(cacheKey, {
-        instance,
-        refCount: refCount + 1,
-      })
-      foundItem = instance
-    } else {
-      // If not in cache, query database
-      const itemData = await getItemData({
-        modelName,
-        seedLocalId,
-        seedUid,
-      })
-
-      if (!itemData) {
-        return undefined
-      }
-
-      // Item.create() will handle caching the new instance
-      foundItem = await Item.create({
-        ...itemData,
-        modelName,
-      })
-    }
-
-    if (!foundItem) {
+    // Use seedUid as primary ID if available, otherwise use seedLocalId
+    const id = seedUid || seedLocalId
+    if (!id) {
       return undefined
     }
 
-    if (waitForReady) {
-      await waitForEntityIdle(foundItem, { timeout: readyTimeout })
+    try {
+      return await findEntity<Item<any>>(
+        {
+          getById: (id) => Item.getById(id) || undefined,
+          createById: async (id) => {
+            // Pass modelName to createById if available
+            return await Item.createById(id, modelName)
+          },
+        },
+        { id },
+        {
+          waitForReady,
+          readyTimeout,
+        }
+      )
+    } catch (error) {
+      return undefined
     }
-
-    return foundItem
   }
 
   static async all(
@@ -663,7 +719,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   subscribe = (callback: (itemProps: any) => void): Subscription => {
-    return this._service.subscribe((snapshot) => {
+    return this._service.subscribe((snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
       callback(snapshot.context)
     })
   }
@@ -715,7 +771,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * Used by the reactive proxy to read tracked properties
    */
   _getSnapshotContext() {
-    return this._service.getSnapshot().context
+    return (this._service.getSnapshot() as SnapshotFrom<typeof itemMachineSingle>).context
   }
 
   // These getters are now handled by the reactive proxy
@@ -1242,7 +1298,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
 
     // Set up liveQuery subscription as soon as we have seedLocalId
-    const setupSubscription = this._service.subscribe(async (snapshot) => {
+    const setupSubscription = this._service.subscribe(async (snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
       const seedLocalId = snapshot.context.seedLocalId
       const seedUid = snapshot.context.seedUid
       
@@ -1260,9 +1316,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     })
     
     // Also check current state immediately in case seedLocalId is already available
-    const currentSnapshot = this._service.getSnapshot()
+    const currentSnapshot = this._service.getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
     if ((currentSnapshot.context.seedLocalId || currentSnapshot.context.seedUid) && !setupState.subscriptionSetUp) {
-      setupLiveQuery(currentSnapshot.context.seedLocalId || '', currentSnapshot.context.seedUid).catch((error) => {
+      setupLiveQuery(currentSnapshot.context.seedLocalId || '', currentSnapshot.context.seedUid || undefined).catch((error) => {
         logger(`[Item._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
       })
     }

@@ -1,14 +1,15 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "declaration": true,
-    "declarationMap": true,
-    "declarationDir": "./dist",
+    "declaration": false,
+    "declarationMap": false,
+    "declarationDir": null,
     "emitDeclarationOnly": false,
+    "noEmit": false,
     "outDir": "./dist"
   }
 }

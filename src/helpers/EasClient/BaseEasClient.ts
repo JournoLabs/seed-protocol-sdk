@@ -3,7 +3,7 @@ import { Attestation } from '@/graphql/gql/graphql'
 
 export abstract class BaseEasClient {
   static PlatformClass: typeof BaseEasClient
-  private static easClient: GraphQLClient
+  protected static easClient: GraphQLClient
 
   static setPlatformClass(platformClass: typeof BaseEasClient) {
     if (!platformClass) {

@@ -115,7 +115,9 @@ export const loadOrCreateModel = fromCallback<
             if (dbSchemaFileId) {
               try {
                 const { Model } = await import('@/Model/Model')
-                if (Model.instanceCacheById.has(dbSchemaFileId)) {
+                // Access instanceCacheById via type assertion since it's protected
+                const cacheById = (Model as any).instanceCacheById as Map<string, any>
+                if (cacheById.has(dbSchemaFileId)) {
                   logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
                   // Update the current instance's schemaFileId to match the database
                   // This ensures both instances point to the same cached instance
@@ -174,8 +176,8 @@ export const loadOrCreateModel = fromCallback<
           // Pre-create ModelProperty instances for all property IDs to ensure they're cached
           // This ensures that ModelProperty.getById() in Model.properties getter will find the instances
           const propertyFileIds = propertyRecords
-            .map(record => record.schemaFileId)
-            .filter((id): id is string => id !== null)
+            .map((record: { schemaFileId: string | null }) => record.schemaFileId)
+            .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
 
           if (propertyFileIds.length > 0) {
             await createPropertyInstances(propertyFileIds)
@@ -228,7 +230,9 @@ export const loadOrCreateModel = fromCallback<
       const schemaSnapshot = schema.getService().getSnapshot()
       
       // Wait for schema to load if it's still loading
-      if (schemaSnapshot.value === 'loading') {
+      // Check if state is a loading state object (XState v5 nested states)
+      const isLoading = typeof schemaSnapshot.value === 'object' && 'loading' in schemaSnapshot.value
+      if (isLoading) {
         await new Promise<void>((resolve, reject) => {
           const subscription = schema.getService().subscribe((snapshot) => {
             if (snapshot.value === 'idle' || snapshot.value === 'error') {
@@ -302,7 +306,9 @@ export const loadOrCreateModel = fromCallback<
             
             // Check name-based cache for this schema
             logger(`Checking Model cache for duplicates in schema "${schemaName}"`)
-            for (const [nameKey, modelFileId] of Model.instanceCacheByName.entries()) {
+            // Access instanceCacheByName via type assertion since it's protected
+            const cacheByName = (Model as any).instanceCacheByName as Map<string, string>
+            for (const [nameKey, modelFileId] of cacheByName.entries()) {
               const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
               if (cachedSchemaName === schemaName && cachedModelName) {
                 const lowerCachedName = cachedModelName.toLowerCase()
@@ -361,7 +367,7 @@ export const loadOrCreateModel = fromCallback<
               .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
               .where(eq(schemasTable.name, schemaName))
             
-            logger(`Found ${allModelsForSchema.length} models in database for schema "${schemaName}": ${allModelsForSchema.map(m => m.name).join(', ')}`)
+            logger(`Found ${allModelsForSchema.length} models in database for schema "${schemaName}": ${allModelsForSchema.map((m: { name: string | null }) => m.name).join(', ')}`)
             if (allModelsForSchema.length === 0 && modelName.includes('Shared')) {
               logger(`[DEBUG] No models found in database for schema "${schemaName}" when checking for duplicate "${modelName}"`)
             }

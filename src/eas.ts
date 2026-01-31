@@ -241,5 +241,5 @@ export const getSeedsBySchemaName = async (schemaName: string, limit: number = 1
 
 export const getSeedUidsBySchemaName = async (schemaName: string, limit: number = 10) => {
   const { itemSeeds } = await getSeedsBySchemaName(schemaName, limit)
-  return itemSeeds.map((seed) => seed.id)
+  return itemSeeds.map((seed: Attestation) => seed.id)
 }

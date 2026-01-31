@@ -5,23 +5,20 @@ import { getSeedData } from '@/db/read/getSeedData'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
 import debug from 'debug'
-import { eventEmitter } from '@/eventBus'
 import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
-
-const sendItemUpdateEvent = ({ modelName, seedLocalId, seedUid }: { modelName: string | null | undefined, seedLocalId: string | null | undefined, seedUid: string | null | undefined }) => {
-  if (!modelName || (!seedLocalId && !seedUid)) {
-    return
-  }
-  // eventEmitter.emit(`item.${modelName}.${seedUid || seedLocalId}.update`)
-}
 
 type UpdateItemPropertyValueResult = {
   localId: string
   schemaUid: string
 }
 
-type UpdateItemPropertyValue = (props: Partial<MetadataType>) => Promise<UpdateItemPropertyValueResult | undefined>
+type UpdateItemPropertyValueProps = Partial<MetadataType> & {
+  newValue?: string | null
+  modelName?: string | null
+}
+
+type UpdateItemPropertyValue = (props: UpdateItemPropertyValueProps) => Promise<UpdateItemPropertyValueResult | undefined>
 
 export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   localId,
@@ -129,8 +126,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
       await appDb.run(sql.raw(updatePropertyStatement))
 
-      sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
-
       return
     }
 
@@ -173,8 +168,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
     await appDb.run(sql.raw(newPropertyStatement))
 
-    sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
-
     return {
       localId: newLocalId,
       schemaUid,
@@ -186,9 +179,9 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   const newLocalId = generateId()
 
   if (!seedUid) {
-    const seedData = await getSeedData({ seedLocalId })
+    const seedData = await getSeedData({ seedLocalId: seedLocalId || undefined })
     if (seedData) {
-      seedUid = seedData.uid
+      seedUid = seedData.uid || undefined
     }
   }
 
@@ -229,8 +222,6 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
                                         ${Date.now()});`
 
   await appDb.run(sql.raw(newPropertyStatement))
-
-  sendItemUpdateEvent({ modelName, seedLocalId, seedUid })
 
   return {
     localId: newLocalId,

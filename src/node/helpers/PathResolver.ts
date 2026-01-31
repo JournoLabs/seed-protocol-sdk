@@ -10,7 +10,7 @@ class PathResolver extends BasePathResolver {
   /**
    * Detects the current environment based on filesystem structure and package.json
    */
-  private detectEnvironment(): 'sdk-dev' | 'linked-sdk' | 'test' | 'production' {
+  private detectEnvironment(): 'sdk-dev' | 'linked-sdk' | 'production' | 'test' {
     // Check if we're in the SDK repo itself
     if (process.env.NODE_ENV !== 'test' && this.isInSdkRepo()) {
       return 'sdk-dev'
@@ -94,17 +94,15 @@ class PathResolver extends BasePathResolver {
       return path.resolve(processCwd, sdkPath.replace(/^(link:|portal:)/, ''))
     }
 
-    switch (env) {
-      case 'sdk-dev':
-        // This should be {localDir}/seed-protocol-sdk (the SDK root directory)
-        return rootWithNodeModules
-      case 'test':
-        // This should be {localDir}/seed-protocol-sdk (the SDK root directory)
-        return rootWithNodeModules
-      default:
-        // This should be {projectDir}/node_modules/@seedprotocol/sdk/dist
-        return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
+    // After early returns, env can only be 'sdk-dev' or 'production'
+    if (env === 'sdk-dev') {
+      // This should be {localDir}/seed-protocol-sdk (the SDK root directory)
+      return rootWithNodeModules
     }
+    
+    // Default to production environment
+    // This should be {projectDir}/node_modules/@seedprotocol/sdk/dist
+    return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
   }
 
   getNodeModulesDir(): string {

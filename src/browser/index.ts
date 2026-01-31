@@ -3,8 +3,6 @@ import debug from 'debug'
 
 export * from './db/Db'
 export * from './react'
-export * from './Item'
-export * from './ItemProperty'
 
 // Initialize PathResolver for browser
 import './helpers/PathResolver'

@@ -107,14 +107,7 @@ const clientInstance = {
     }
     try {
       await waitFor(clientManager, (snapshot) => {
-        // Check if we're in the error state - if so, throw the error immediately
-        if (snapshot.value === 'initError') {
-          const error = snapshot.context.initError instanceof Error 
-            ? snapshot.context.initError 
-            : new Error(String(snapshot.context.initError || 'Initialization failed'))
-          throw error
-        }
-        // Also check for errors in context (for cases where error is set but state hasn't transitioned yet)
+        // Check for errors in context (for cases where error is set but state hasn't transitioned yet)
         if (snapshot.context.initError) {
           const error = snapshot.context.initError instanceof Error 
             ? snapshot.context.initError 

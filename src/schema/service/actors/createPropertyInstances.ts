@@ -58,7 +58,8 @@ export const createPropertyInstances = fromCallback<
           const property = ModelProperty.getById(propertyFileId)
           if (property) {
             // Check if we already counted this
-            const context = property._getSnapshotContext()
+            // Access _service via type assertion since it's protected
+            const context = (property as any)._service.getSnapshot().context
             const propFileId = (context as any)._propertyFileId || context.id
             if (!propertyIds.slice(0, propertyIds.indexOf(propertyFileId)).includes(String(propFileId))) {
               successCount++

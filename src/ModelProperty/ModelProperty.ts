@@ -891,7 +891,7 @@ export class ModelProperty {
     return this._service.getSnapshot() as ModelPropertySnapshot
   }
 
-  private _getSnapshotContext(): ModelPropertyMachineContext {
+  public _getSnapshotContext(): ModelPropertyMachineContext {
     return this._getSnapshot().context
   }
 

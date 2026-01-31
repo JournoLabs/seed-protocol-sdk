@@ -1,8 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { fetchAllFilesMachine } from '@/helpers/file/fetchAll/index'
-import { ARWEAVE_HOST } from '@/client/constants'
 import { GET_FILES_METADATA } from '@/helpers/file/queries'
-import { getArweave } from '@/helpers/ArweaveClient'
 import {
   BaseFileManager,
   getDataTypeFromString,
@@ -13,6 +11,7 @@ import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
+import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { saveAppState } from '@/db/write/saveAppState'
@@ -33,10 +32,17 @@ const fileTypeMap: Record<string, FileType> = {
   // Add more MIME types and file extensions as needed
 }
 
+type FetchAllFilesMachineContext = {
+  addresses: string[]
+  dbsLoaded: boolean
+  filesMetadata?: any[]
+  filesBlobData?: any[]
+}
+
 export const fetchAllMetadataRecords = fromCallback<
   EventObject,
-  typeof fetchAllFilesMachine
->(({ sendBack, receive, input: { context, event } }) => {
+  { context: FetchAllFilesMachineContext; event?: any }
+>(({ sendBack, receive, input: { context, event } }): (() => void) => {
   const { addresses } = context
 
   const _fetchAllMetadataRecords = async () => {
@@ -75,9 +81,14 @@ export const fetchAllMetadataRecords = fromCallback<
 
 export const fetchAllBinaryData = fromCallback<
   EventObject,
-  typeof fetchAllFilesMachine
->(({ sendBack, input: { context } }) => {
+  { context: FetchAllFilesMachineContext }
+>(({ sendBack, input: { context } }): (() => void) => {
   const { filesMetadata, addresses } = context
+
+  if (!filesMetadata || filesMetadata.length === 0) {
+    sendBack({ type: 'fetchingAllBinaryDataSuccess', binaryData: [] })
+    return () => { }
+  }
 
   const _fetchAllBinaryData = async () => {
     const fs = await BaseFileManager.getFs()
@@ -146,19 +157,11 @@ export const fetchAllBinaryData = fromCallback<
         continue
       }
 
-      const arweave = getArweave()
-
-      if (!arweave) {
-        logger('[fetchAll/actors] [fetchAllBinaryData] arweave not available')
-        return []
-      }
-
       try {
-        const res = await fetch(
-          `https://${ARWEAVE_HOST}/tx/${transactionId}/status`,
-        )
+        // Use BaseArweaveClient for transaction status check
+        const status = await BaseArweaveClient.getTransactionStatus(transactionId)
 
-        if (res.status !== 200) {
+        if (status.status !== 200) {
           logger(
             `[fetchAll/actors] [fetchAllBinaryData] error fetching transaction data for ${transactionId}`,
           )
@@ -178,31 +181,42 @@ export const fetchAllBinaryData = fromCallback<
           continue
         }
 
-        const dataString = await arweave.transactions
-          .getData(transactionId, {
+        // Use BaseArweaveClient for fetching transaction data
+        let dataString: string | undefined
+        try {
+          const data = await BaseArweaveClient.getTransactionData(transactionId, {
             decode: true,
             string: true,
           })
-          .catch((error) => {
-            logger(
-              `[fetchAll/actors] [fetchAllBinaryData] error fetching transaction data for ${transactionId}`,
-              error,
-            )
-          })
+          dataString = typeof data === 'string' ? data : new TextDecoder().decode(data)
+        } catch (error) {
+          logger(
+            `[fetchAll/actors] [fetchAllBinaryData] error fetching transaction data for ${transactionId}`,
+            error,
+          )
+          continue
+        }
 
-        const dataUint8Array = await arweave.transactions.getData(transactionId)
+        if (!dataString || typeof dataString !== 'string') {
+          logger(
+            `[fetchAll/actors] [fetchAllBinaryData] invalid dataString for transaction ${transactionId}`,
+          )
+          continue
+        }
+
+        const dataUint8Array = await BaseArweaveClient.getTransactionData(transactionId)
         // let buffer
         //
         // if (dataUint8Array && dataUint8Array instanceof Uint8Array) {
         // }
 
-        let contentType = identifyString(dataString as string)
+        let contentType = identifyString(dataString)
         if (
           contentType !== 'json' &&
           contentType !== 'base64' &&
           contentType !== 'html'
         ) {
-          const possibleImageType = getDataTypeFromString(dataString as string)
+          const possibleImageType = getDataTypeFromString(dataString)
           if (!possibleImageType) {
             logger(
               `[fetchAll/actors] [fetchAllBinaryData] transaction ${transactionId} data not in expected format: ${possibleImageType}`,
@@ -214,7 +228,7 @@ export const fetchAllBinaryData = fromCallback<
         }
 
         if (contentType === 'url') {
-          const url = dataString as string
+          const url = dataString
           const response = await fetch(url)
           if (!response.ok) {
             throw new Error(`Failed to fetch image: ${response.statusText}`)
@@ -250,7 +264,7 @@ export const fetchAllBinaryData = fromCallback<
           continue
         }
 
-        let mimeType = getMimeType(dataString as string)
+        let mimeType = getMimeType(dataString)
         let fileExtension = mimeType
 
         if (fileExtension && fileExtension?.startsWith('image')) {

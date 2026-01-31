@@ -6,6 +6,10 @@ export const saveMetadata = async (
   metadataRecord: Partial<MetadataType>,
   metadataValues: Partial<MetadataType>,
 ) => {
+  if (!metadataRecord.localId) {
+    return
+  }
+
   const appDb = BaseDb.getAppDb()
 
   await appDb

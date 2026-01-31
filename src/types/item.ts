@@ -31,6 +31,10 @@ export type ItemMachineContext<T> = {
   isPublishing?: boolean
   schemaUid?: string
   latestVersionUid?: string
+  latestVersionLocalId?: string
+  versionsCount?: number
+  lastVersionPublishedAt?: number
+  createdAt?: number
 }
 
 export type NewItemProps<T> = Partial<ItemData> &

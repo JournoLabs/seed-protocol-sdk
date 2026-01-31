@@ -24,7 +24,7 @@ export const getItemData: GetItemData = async ({
       logger('[db/queries] [getItem] no seedData seedUid', seedUid)
       return
     }
-    seedLocalId = seedData.localId
+    seedLocalId = seedData.localId || undefined
   }
 
   const appDb = BaseDb.getAppDb()

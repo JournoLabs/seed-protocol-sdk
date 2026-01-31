@@ -70,21 +70,17 @@ export const deleteFilesWithExtension = async (
   extension: string,
 ) => {
   const pattern = path.join(dir, `**/*${extension}`)
-  glob(pattern, (err, files) => {
-    if (err) {
-      logger('Error finding files:', err)
-      return
-    }
-
+  try {
+    const files = await glob(pattern)
     for (const file of files) {
-      // TODO: Change this whole thing to be async?
-      rimraf(file, (err) => {
-        if (err) {
-          logger('Error deleting file:', err)
-        } else {
-          logger(`Deleted: ${file}`)
-        }
-      })
+      try {
+        await rimraf(file)
+        logger(`Deleted: ${file}`)
+      } catch (err) {
+        logger('Error deleting file:', err)
+      }
     }
-  })
+  } catch (err) {
+    logger('Error finding files:', err)
+  }
 }

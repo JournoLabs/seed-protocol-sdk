@@ -41,7 +41,9 @@ export { eventEmitter } from '../eventBus'
 export { withSeed } from './webpack'
 
 // Types
-export type { PublishUpload } from '../db/read/getPublishUploads'
+// Note: PublishUpload type is available from '../db/read/getPublishUploads'
+// Type-only exports cause issues with Rollup's parser. Import directly if needed:
+// import type { PublishUpload } from '@seedprotocol/sdk/db/read/getPublishUploads'
 
 // Client
 export { client } from '../client'

@@ -17,7 +17,7 @@ export const getItemPropertyData: GetItemPropertyData = async (props) => {
 
   for (const [propertyName, propertyValue] of Object.entries(props)) {
     if (Object.keys(tableColumns).includes(propertyName)) {
-      whereClauses.push(eq(tableColumns[propertyName], propertyValue))
+      whereClauses.push(eq((tableColumns as any)[propertyName], propertyValue))
     }
   }
 

@@ -65,9 +65,9 @@ export class ImageResizer {
       withFileTypes: true
     })
 
-    imageFilesStats = imageFilesStats.filter(file => file.isFile())
+    imageFilesStats = imageFilesStats.filter((file: any) => file.isFile())
 
-    const imageFiles = imageFilesStats.map(file => file.path)
+    const imageFiles = imageFilesStats.map((file: any) => file.path)
 
     const widthDir = `${imageDir}/${width}`
 

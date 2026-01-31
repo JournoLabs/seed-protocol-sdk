@@ -67,7 +67,7 @@ export const TPropertyDefs = Type.Record(
   TPropertyConstructor,
 )
 
-export const Property: PropertyDefs = {
+export const Property = {
   Text: (
     storageType?: StorageType,
     localStorageDir?: string,
@@ -87,7 +87,7 @@ export const Property: PropertyDefs = {
     ref,
     refValueType,
   }),
-  Relation: (ref, refValueType?: PropertyDataType) => ({
+  Relation: (ref?: string, refValueType?: PropertyDataType) => ({
     dataType: ModelPropertyDataTypes.Relation,
     ref,
     refValueType,
@@ -95,7 +95,8 @@ export const Property: PropertyDefs = {
   Image: () => ({ dataType: ModelPropertyDataTypes.Image }),
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
   Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
-}
+  Html: () => ({ dataType: ModelPropertyDataTypes.Html }),
+} as PropertyDefs
 
 export const PropertyMetadataKey = Symbol('property')
 

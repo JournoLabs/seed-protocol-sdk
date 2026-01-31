@@ -1,0 +1,3475 @@
+import type { Plugin, ResolvedConfig } from 'vite'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
+
+// Get the plugin file's URL to use as importer context for resolving SDK dependencies
+// @ts-ignore - rollup plugin-typescript doesn't recognize import.meta with module: "preserve"
+// This is safe because import.meta.url is available at runtime in ESM contexts
+const PLUGIN_FILE_URL: string = import.meta.url
+
+// Create a require function for resolving CJS modules
+// This is used to find the CJS build of packages that have problematic ESM exports
+const require = createRequire(import.meta.url)
+
+export interface SeedVitePluginOptions {
+  /**
+   * Custom ZenFS configuration to apply on initialization
+   */
+  zenfsConfig?: Record<string, unknown>
+  
+  /**
+   * Additional modules to alias to ZenFS equivalents
+   * @default ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']
+   */
+  fsModules?: string[]
+  
+  /**
+   * Whether to inject automatic ZenFS initialization
+   * @default true
+   */
+  autoInit?: boolean
+  
+  /**
+   * Enable debug logging
+   * @default false
+   */
+  debug?: boolean
+  
+  /**
+   * Entry points to scan for dependencies during initial optimization.
+   * This helps prevent incremental dependency discovery and multiple reloads.
+   * Can be file paths or glob patterns relative to the project root.
+   * If not provided, the plugin will attempt to auto-detect SDK entry points.
+   */
+  entryPoints?: string[]
+  
+  /**
+   * Whether to automatically include common SDK dependencies in optimizeDeps.include.
+   * Set to false if these dependencies are not installed in your project.
+   * @default false
+   */
+  autoIncludeDeps?: boolean
+  
+  /**
+   * Whether to automatically configure vite-plugin-node-polyfills if available.
+   * When true, the plugin will automatically set up node polyfills for buffer, events, util, and process.
+   * Set to false if you want to configure vite-plugin-node-polyfills manually.
+   * @default true
+   * @deprecated Use `includeNodePolyfills` instead. This option will be removed in a future version.
+   */
+  autoConfigurePolyfills?: boolean
+  
+  /**
+   * Whether to automatically include vite-plugin-node-polyfills in the plugin array.
+   * When true (default), the SDK will add vite-plugin-node-polyfills with optimal settings.
+   * Set to false if you want to configure vite-plugin-node-polyfills manually with custom settings.
+   * @default true
+   */
+  includeNodePolyfills?: boolean
+  
+  /**
+   * Enable the generic require() transformer for Vite-optimized files.
+   * When true (default), the plugin will automatically transform require() calls to ESM imports
+   * in files from Vite's optimization directories (.vite/deps, .vite-electron-renderer, etc.).
+   * This eliminates "Dynamic require of X is not supported" errors without manual package exclusions.
+   * @default true
+   */
+  transformRequires?: boolean
+  
+  /**
+   * Modules that should NOT be transformed by the require() transformer (already ESM-safe).
+   * These modules will be skipped even if they contain require() calls.
+   * @default ['@zenfs/core', 'path-browserify', 'lodash-es', 'graphql-request']
+   */
+  esmSafeModules?: string[]
+  
+  /**
+   * Module name mappings for require() transformations.
+   * Maps CommonJS module names to their ESM-compatible equivalents.
+   * For example: { 'path': 'path-browserify', 'fs': '@zenfs/core' }
+   * These mappings are merged with the default mappings.
+   * @default { 'path': 'path-browserify', 'fs': '@zenfs/core', ... }
+   */
+  moduleReplacements?: Record<string, string>
+}
+
+/**
+ * The seed-vite-plugin automatically configures your Vite project for browser compatibility.
+ * 
+ * It includes vite-plugin-node-polyfills with optimal settings by default.
+ * 
+ * Basic usage (recommended):
+ * ```ts
+ * import { seedVitePlugin } from '@seedprotocol/sdk/vite'
+ * 
+ * export default defineConfig({
+ *   plugins: [...seedVitePlugin()],
+ * })
+ * ```
+ * 
+ * Advanced usage (custom polyfill config):
+ * ```ts
+ * import { nodePolyfills } from 'vite-plugin-node-polyfills'
+ * import { seedVitePlugin } from '@seedprotocol/sdk/vite'
+ * 
+ * export default defineConfig({
+ *   plugins: [
+ *     ...seedVitePlugin({ includeNodePolyfills: false }),
+ *     nodePolyfills({ ...yourCustomConfig }),
+ *   ],
+ * })
+ * ```
+ * 
+ * The SDK plugin will automatically:
+ * - Include vite-plugin-node-polyfills with optimal settings (unless disabled)
+ * - Exclude the necessary modules from optimization
+ * - Configure proper aliases for fs -> @zenfs/core
+ * - Handle buffer/events polyfill interception
+ */
+
+const DEFAULT_FS_MODULES = [
+  'fs',
+  'fs/promises',
+  'node:fs',
+  'node:fs/promises',
+]
+
+// Modules that other polyfill plugins commonly alias fs to
+const KNOWN_POLYFILL_TARGETS = [
+  'memfs',
+  'browserfs',
+  'rollup-plugin-node-polyfills/polyfills/fs',
+  'vite-plugin-node-polyfills/shims/fs',
+  'node-stdlib-browser/esm/mock/empty',
+  'node-stdlib-browser/esm/mock/empty.js',
+  '\0vite/node-polyfills/fs',
+  '\0node-polyfills:fs',
+  'empty',
+  '\0empty',
+  '__vite-browser-external',
+]
+
+// Common dependencies that are frequently used by the SDK and should be pre-optimized
+// to prevent incremental discovery and multiple reloads
+// Note: Only include these if autoIncludeDeps is enabled, as they might not be
+// installed in the consuming project (they're in the SDK's node_modules)
+const COMMON_DEPENDENCIES = [
+  '@zenfs/core',
+  '@zenfs/dom',
+  'path-browserify',
+  'graphql-request',
+  'tslib',
+  'reflect-metadata',
+  '@sinclair/typebox',
+  '@sinclair/typebox/value',
+  'immer',
+  'rxjs',
+  'xstate',
+  'lodash-es',
+  'use-immer',
+  '@xstate/react',
+  'ethers',
+  'eventemitter3',
+  '@statelyai/inspect',
+  'arweave',
+  // Note: node:crypto is a Node.js built-in and cannot be optimized
+]
+
+// Default module replacements for require() transformations
+// Maps CommonJS module names to their ESM-compatible browser equivalents
+const DEFAULT_MODULE_REPLACEMENTS: Record<string, string> = {
+  'path': 'path-browserify',
+  'node:path': 'path-browserify',
+  'fs': '@zenfs/core',
+  'node:fs': '@zenfs/core',
+  'fs/promises': '@zenfs/core/promises',
+  'node:fs/promises': '@zenfs/core/promises',
+  'buffer': 'buffer',
+  'node:buffer': 'buffer',
+  'events': 'events',
+  'node:events': 'events',
+  'util': 'util',
+  'node:util': 'util',
+  'stream': 'stream-browserify',
+  'node:stream': 'stream-browserify',
+  'crypto': 'crypto-browserify',
+  'node:crypto': 'crypto-browserify',
+  'process': 'process',
+  'process/': 'process',
+  'assert': 'assert',
+  'node:assert': 'assert',
+  'url': 'url',
+  'node:url': 'url',
+  'querystring': 'querystring-es3',
+  'node:querystring': 'querystring-es3',
+  'os': 'os-browserify/browser',
+  'node:os': 'os-browserify/browser',
+  'zlib': 'browserify-zlib',
+  'node:zlib': 'browserify-zlib',
+  'http': 'stream-http',
+  'node:http': 'stream-http',
+  'https': 'https-browserify',
+  'node:https': 'https-browserify',
+  'string_decoder': 'string_decoder',
+  'node:string_decoder': 'string_decoder',
+  'punycode': 'punycode',
+  'node:punycode': 'punycode',
+}
+
+// Modules that are known to be ESM-safe and should NOT be transformed
+// even if they appear in Vite's optimization directories
+const DEFAULT_ESM_SAFE_MODULES = [
+  '@zenfs/core',
+  '@zenfs/dom',
+  'path-browserify',
+  'lodash-es',
+  'graphql-request',
+  'buffer/',  // The buffer polyfill itself
+  'events/',  // The events polyfill itself
+  'process/',  // The process polyfill itself
+  'util/',    // The util polyfill itself
+  'stream-browserify',
+  'crypto-browserify',
+  'assert/',
+  'url/',
+  'querystring-es3',
+  'os-browserify',
+  'browserify-zlib',
+  'stream-http',
+  'https-browserify',
+  'string_decoder/',
+  'punycode/',
+  // Vite's own modules
+  'vite/',
+  '@vite/',
+  // Our SDK
+  'seed-protocol-sdk',
+  '@seedprotocol/sdk',
+]
+
+export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
+  const {
+    fsModules = DEFAULT_FS_MODULES,
+    autoInit = true,
+    debug = false,
+    entryPoints,
+    autoIncludeDeps = false,
+    autoConfigurePolyfills = true,
+    includeNodePolyfills = true,
+    transformRequires = true,
+    esmSafeModules = [],
+    moduleReplacements = {},
+  } = options
+
+  const log = (...args: unknown[]) => {
+    if (debug) console.log('[seed-vite-plugin]', ...args)
+  }
+
+  let config: ResolvedConfig
+
+  // Track what other plugins have done to fs
+  const interceptedResolutions = new Map<string, string>()
+
+  // We'll create a plugin that loads vite-plugin-node-polyfills on demand
+  // This allows us to check if it's available and configure it automatically
+
+  /**
+   * First plugin: runs early to observe what other plugins do and set up aliases
+   */
+  const observerPlugin: Plugin = {
+    name: 'seed-protocol:observer',
+    enforce: 'pre',
+
+    config(userConfig, env) {
+      // Set up aliases early to override other plugins' fs polyfills
+      const aliases: Array<{ find: string | RegExp; replacement: string }> = []
+      
+      for (const fsModule of fsModules) {
+        const isPromiseVariant = fsModule.includes('promises')
+        const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+        aliases.push({
+          find: new RegExp(`^${fsModule.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+          replacement: zenfsModule,
+        })
+      }
+      
+      // Note: We don't alias buffer here because vite-plugin-node-polyfills handles it
+      // when configured with include: ['buffer']. The alias would conflict with the plugin's
+      // own resolution mechanism. Instead, we ensure buffer is excluded from optimization
+      // and let vite-plugin-node-polyfills handle the polyfill injection.
+      
+      // Also alias the node-stdlib-browser empty mock to @zenfs/core
+      // This ensures Vite can resolve it properly without needing manual resolution
+      aliases.push(
+        {
+          find: /^node-stdlib-browser\/esm\/mock\/empty(\.js)?$/,
+          replacement: '@zenfs/core',
+        },
+        {
+          find: /node-stdlib-browser\/esm\/mock\/empty(\.js)?$/,
+          replacement: '@zenfs/core',
+        }
+      )
+      
+      // Alias 'path' and 'node:path' to 'path-browserify' to ensure we always use the ESM-compatible polyfill
+      // This is critical for Electron renderer processes where vite-plugin-node-polyfills
+      // might create a problematic path polyfill that causes "Dynamic require" errors
+      aliases.push(
+        {
+          find: /^path$/,
+          replacement: 'path-browserify',
+        },
+        {
+          find: /^node:path$/,
+          replacement: 'path-browserify',
+        }
+      )
+      
+      // NOTE: We do NOT alias 'process' here because:
+      // 1. Virtual modules (\0-prefixed) don't work with esbuild during dep optimization
+      // 2. The npm 'process' package should be bundled normally by Vite
+      // 3. vite-plugin-node-polyfills handles process polyfilling when configured
+      // If you see "Dynamic require of process/" errors, ensure vite-plugin-node-polyfills
+      // is configured with include: ['process'] and globals: { process: true }
+
+      return {
+        resolve: {
+          alias: aliases,
+        },
+        optimizeDeps: {
+          // NOTE: This exclude list works in conjunction with the generic require() transformer.
+          // - Packages listed here won't be optimized by Vite, so their require() calls are
+          //   handled by our load hook polyfills or aliases.
+          // - Packages NOT listed here may be optimized by Vite. If they end up with require()
+          //   calls in the optimized output, the generic require() transformer in the transform
+          //   hook will convert them to ESM imports automatically.
+          // This provides defense-in-depth: known problematic packages are excluded, and
+          // any new packages that cause issues are handled by the transformer automatically.
+          exclude: [
+            // === Node.js built-in modules (aliased to browser polyfills) ===
+            'fs', 
+            'node:fs', 
+            'fs/promises', 
+            'node:fs/promises',
+            'path',
+            'node:path',
+            'buffer',
+            'node:buffer',
+            'events',
+            'util',
+            'module',
+            'node:module',
+            // NOTE: Do NOT exclude 'process' - it needs to be bundled so that packages
+            // like readable-stream can have their require('process/') calls resolved at bundle time
+            
+            // === Polyfill packages (handled by load hook with custom implementations) ===
+            'path-browserify',
+            'node-stdlib-browser/esm/mock/empty',
+            'node-stdlib-browser/esm/mock/empty.js',
+            
+            // === CommonJS packages with load hook polyfills ===
+            // These have full polyfill implementations in the load hook
+            'picomatch',
+            'create-require',
+            'pkg-dir',
+            
+            // === vite-plugin-node-polyfills and its dependencies ===
+            // These are build-time dependencies that should NOT be optimized.
+            // They should NOT run in the browser at all.
+            'vite-plugin-node-polyfills',
+            'vite-plugin-node-polyfills/shims/buffer',
+            'vite-plugin-node-polyfills/shims/global',
+            'vite-plugin-node-polyfills/shims/process',
+            '@rollup/plugin-inject',
+            '@rollup/pluginutils',
+            // Also exclude node-stdlib-browser since vite-plugin-node-polyfills imports it
+            'node-stdlib-browser',
+            'node-stdlib-browser/helpers/rollup/plugin',
+            'node-stdlib-browser/helpers/esbuild/plugin',
+            
+            // === Drizzle ORM migrators (use node:fs internally) ===
+            'drizzle-orm/migrator',
+            'drizzle-orm/sqlite-proxy/migrator',
+            'drizzle-orm/better-sqlite3/migrator',
+            'drizzle-orm/libsql/migrator',
+            
+            // === Dev tools and database drivers (should not be bundled) ===
+            'drizzle-kit',
+            '@electric-sql/pglite',
+            'pg',
+            'postgres',
+            '@vercel/postgres',
+            '@neondatabase/serverless',
+            'mysql2',
+            'mysql2/promise',
+            '@planetscale/database',
+          ],
+          // Note: We don't auto-include @zenfs/core here because it might not be installed
+          // in the consuming project. The resolveId hook will help resolve it when needed.
+        },
+      }
+    },
+
+    async resolveId(source, importer, options) {
+      // Remove query parameters for matching
+      const sourceWithoutQuery = source.split('?')[0]
+      
+      // #region agent log
+      // Debug: Track node-stdlib-browser/helpers/rollup module resolution
+      if (source.includes('node-stdlib-browser') && source.includes('rollup')) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId',message:'Resolving node-stdlib-browser rollup module',data:{source,importer:importer?.substring(0,200),sourceWithoutQuery},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // Intercept node-stdlib-browser/helpers/rollup/plugin and redirect to virtual module
+      // This ensures our ESM wrapper is ALWAYS served, bypassing any /@fs/ caching issues
+      if (
+        sourceWithoutQuery.includes('node-stdlib-browser') && 
+        sourceWithoutQuery.includes('helpers/rollup/plugin')
+      ) {
+        log(`[observer:resolveId] Redirecting node-stdlib-browser rollup plugin to virtual module`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId-redirect',message:'Redirecting to virtual module',data:{source,importer:importer?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7-FIX'})}).catch(()=>{});
+        // #endregion
+        // Return a virtual module ID that we control
+        return '\0virtual:node-stdlib-browser-rollup-plugin'
+      }
+      
+      // Intercept node-stdlib-browser/helpers/esbuild/plugin and redirect to virtual module
+      // Same treatment as rollup plugin - CommonJS needs ESM wrapper
+      if (
+        sourceWithoutQuery.includes('node-stdlib-browser') && 
+        sourceWithoutQuery.includes('helpers/esbuild/plugin')
+      ) {
+        log(`[observer:resolveId] Redirecting node-stdlib-browser esbuild plugin to virtual module`)
+        // Return a virtual module ID that we control
+        return '\0virtual:node-stdlib-browser-esbuild-plugin'
+      }
+      
+      // NOTE: We do NOT intercept process/process/ here because virtual modules
+      // don't work with esbuild during Vite's dependency optimization phase.
+      // Instead, we let the npm 'process' package be bundled normally, or rely on
+      // vite-plugin-node-polyfills to handle the polyfilling.
+      
+      // Intercept fs imports early, before other plugins can create polyfills
+      // This is critical for packages like drizzle-orm/migrator that import node:fs
+      if (fsModules.includes(source) || fsModules.includes(sourceWithoutQuery)) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId-fs',message:'Intercepting fs module in observer resolveId',data:{source,importer:importer?.substring(0,150)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        log(`[observer] Early interception of: "${source}" from ${importer}`)
+        
+        const isPromiseVariant = source.includes('promises')
+        const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+        
+        // Resolve from plugin's context (SDK's node_modules)
+        const resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        
+        if (resolved) {
+          log(`[observer] Resolved to: ${resolved.id}`)
+          return resolved
+        }
+      }
+      
+      // Also intercept node-stdlib-browser empty mock if it's being used
+      // Match various formats: full path, relative path, with/without query params
+      if (
+        source.includes('node-stdlib-browser') && 
+        (source.includes('mock/empty') || source.includes('empty.js'))
+      ) {
+        log(`[observer] Intercepting node-stdlib-browser empty mock: "${source}"`)
+        const isPromiseVariant = source.includes('promises')
+        const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+        
+        // Try resolving from plugin context first (SDK's node_modules)
+        let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        
+        // If that fails and we have an importer, try resolving from the importer
+        if (!resolved && importer) {
+          resolved = await this.resolve(zenfsModule, importer, {
+            ...options,
+            skipSelf: true,
+          })
+        }
+        
+        if (resolved) {
+          log(`[observer] Resolved empty mock to: ${resolved.id}`)
+          return resolved
+        }
+        
+        // If resolution fails, return null and let Vite handle it naturally
+        // Vite should be able to resolve @zenfs/core from node_modules
+        log(`[observer] Resolution failed, letting Vite handle: ${zenfsModule}`)
+        return null
+      }
+      
+      return null
+    },
+
+    // Load hook in observer (enforce: 'pre') to intercept CommonJS modules BEFORE Vite core
+    // This is critical for node-stdlib-browser/helpers/rollup/plugin.js which is loaded
+    // directly via /@fs/ and needs to be converted to ESM before the browser receives it
+    load(id) {
+      const idWithoutQuery = id.split('?')[0]
+      
+      // Handle the virtual module for node-stdlib-browser rollup plugin
+      // This is the most reliable way to serve our ESM wrapper - using a virtual module
+      // bypasses all Vite filesystem caching mechanisms
+      if (id === '\0virtual:node-stdlib-browser-rollup-plugin') {
+        log(`[observer:load] Serving virtual module for node-stdlib-browser rollup plugin`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-load-virtual-node-stdlib',message:'Serving VIRTUAL module for node-stdlib-browser rollup plugin',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7-FIX'})}).catch(()=>{});
+        // #endregion
+        return `
+// Virtual module: node-stdlib-browser/helpers/rollup/plugin (ESM wrapper)
+// This virtual module ensures the ESM wrapper is ALWAYS served
+
+/**
+ * Rollup warning handler that suppresses circular dependency warnings
+ * from known packages that have safe circular dependencies.
+ */
+export function handleCircularDependancyWarning(warning, warningHandler) {
+  const packagesWithCircularDependencies = [
+    'util/',
+    'assert/',
+    'readable-stream/',
+    'crypto-browserify/'
+  ];
+  if (
+    !(
+      warning.code === 'CIRCULAR_DEPENDENCY' &&
+      packagesWithCircularDependencies.some((modulePath) => {
+        if (typeof warning.importer !== 'string') {
+          return false;
+        }
+        return warning.importer.includes(modulePath);
+      })
+    )
+  ) {
+    warningHandler(warning);
+  }
+}
+
+export default { handleCircularDependancyWarning };
+`
+      }
+      
+      // Fallback: Intercept node-stdlib-browser/helpers/rollup/plugin.js directly
+      // This handles cases where the file is loaded without going through resolveId first
+      const isNodeStdlibBrowserRollupPlugin = 
+        idWithoutQuery.includes('node-stdlib-browser') && 
+        idWithoutQuery.includes('helpers/rollup/plugin')
+      
+      if (isNodeStdlibBrowserRollupPlugin) {
+        log(`[observer:load] Intercepting node-stdlib-browser rollup plugin: ${id} - providing ESM wrapper`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-load-node-stdlib-browser-rollup',message:'EARLY intercept of node-stdlib-browser rollup plugin in observer (pre)',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-FIX'})}).catch(()=>{});
+        // #endregion
+        return `
+// Intercepted by seed-vite-plugin (observer:pre) - ESM wrapper for node-stdlib-browser/helpers/rollup/plugin.js
+// This MUST be intercepted early (enforce: 'pre') to ensure ESM wrapper is served instead of CommonJS
+
+/**
+ * Rollup warning handler that suppresses circular dependency warnings
+ * from known packages that have safe circular dependencies.
+ */
+export function handleCircularDependancyWarning(warning, warningHandler) {
+  const packagesWithCircularDependencies = [
+    'util/',
+    'assert/',
+    'readable-stream/',
+    'crypto-browserify/'
+  ];
+  if (
+    !(
+      warning.code === 'CIRCULAR_DEPENDENCY' &&
+      packagesWithCircularDependencies.some((modulePath) => {
+        if (typeof warning.importer !== 'string') {
+          return false;
+        }
+        return warning.importer.includes(modulePath);
+      })
+    )
+  ) {
+    warningHandler(warning);
+  }
+}
+
+export default { handleCircularDependancyWarning };
+`
+      }
+      
+      // Handle the virtual module for node-stdlib-browser esbuild plugin
+      if (id === '\0virtual:node-stdlib-browser-esbuild-plugin') {
+        log(`[observer:load] Serving virtual module for node-stdlib-browser esbuild plugin`)
+        return `
+// Virtual module: node-stdlib-browser/helpers/esbuild/plugin (ESM wrapper)
+
+function plugin(stdLibBrowser) {
+  return {
+    name: 'node-stdlib-browser-alias',
+    setup(build) {
+      // In browser context, this is a no-op stub
+    }
+  };
+}
+
+export default plugin;
+export { plugin };
+`
+      }
+      
+      // Fallback: Intercept node-stdlib-browser/helpers/esbuild/plugin.js directly
+      const isNodeStdlibBrowserEsbuildPlugin = 
+        idWithoutQuery.includes('node-stdlib-browser') && 
+        idWithoutQuery.includes('helpers/esbuild/plugin')
+      
+      if (isNodeStdlibBrowserEsbuildPlugin) {
+        log(`[observer:load] Intercepting node-stdlib-browser esbuild plugin: ${id} - providing ESM wrapper`)
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for esbuild plugin
+function plugin(stdLibBrowser) {
+  return {
+    name: 'node-stdlib-browser-alias',
+    setup(build) {}
+  };
+}
+export default plugin;
+export { plugin };
+`
+      }
+      
+      return null
+    },
+
+    configResolved(resolvedConfig) {
+      config = resolvedConfig
+
+      // Log any fs-related aliases from other plugins
+      const aliases = resolvedConfig.resolve.alias
+      if (debug && aliases) {
+        const aliasArray = Array.isArray(aliases) ? aliases : Object.entries(aliases)
+        for (const alias of aliasArray) {
+          const [find, replacement] = Array.isArray(alias) 
+            ? [alias[0], alias[1]] 
+            : [alias.find, alias.replacement]
+          
+          if (typeof find === 'string' && fsModules.some(m => find.includes('fs'))) {
+            log(`Detected existing alias: ${find} -> ${replacement}`)
+          }
+        }
+      }
+    },
+  }
+
+  /**
+   * Main plugin: enforced to run last in the chain
+   */
+  const mainPlugin: Plugin = {
+    name: 'seed-protocol:main',
+    enforce: 'post',
+
+    async config(userConfig, env) {
+      // Pre-optimize common dependencies to prevent incremental discovery
+      // This reduces the number of reloads by ensuring dependencies are optimized upfront
+      // Note: Only include if autoIncludeDeps is true, as these dependencies might not
+      // be installed in the consuming project (they're in the SDK's node_modules)
+      const existingInclude = userConfig.optimizeDeps?.include || []
+      // Normalize entries to always be an array (Vite allows string | string[])
+      const existingEntriesRaw = userConfig.optimizeDeps?.entries
+      const existingEntries = Array.isArray(existingEntriesRaw)
+        ? existingEntriesRaw
+        : existingEntriesRaw
+        ? [existingEntriesRaw]
+        : []
+      
+      const optimizeDepsConfig: {
+        include?: string[]
+        entries?: string[]
+        esbuildOptions?: {
+          define?: Record<string, string>
+          inject?: string[]
+        }
+      } = {
+        esbuildOptions: {
+          define: {
+            global: 'globalThis',
+            // Inject process global for packages like readable-stream that check for it
+            'process.env.NODE_DEBUG': 'false',
+            'process.browser': 'true',
+            'process.version': '"v16.0.0"',
+          },
+        },
+      }
+
+      // Only auto-include dependencies if explicitly enabled
+      // Vite will discover dependencies automatically if they're imported
+      if (autoIncludeDeps) {
+        const include = Array.isArray(existingInclude)
+          ? [...new Set([...existingInclude, ...COMMON_DEPENDENCIES])]
+          : [...COMMON_DEPENDENCIES]
+        optimizeDepsConfig.include = include
+        if (debug) {
+          log(`[main] Auto-including common dependencies: ${COMMON_DEPENDENCIES.join(', ')}`)
+        }
+      } else if (Array.isArray(existingInclude) && existingInclude.length > 0) {
+        // Preserve existing includes if provided
+        optimizeDepsConfig.include = existingInclude
+      }
+
+      // If entry points are provided, merge them with existing entries
+      // This helps Vite discover all dependencies during initial optimization
+      if (entryPoints && entryPoints.length > 0) {
+        const mergedEntries = Array.isArray(existingEntries)
+          ? [...new Set([...existingEntries, ...entryPoints])]
+          : entryPoints
+        optimizeDepsConfig.entries = mergedEntries
+        if (debug) {
+          log(`[main] Using entry points for dependency scanning: ${mergedEntries.join(', ')}`)
+        }
+      } else if (existingEntries.length > 0) {
+        // Preserve existing entries even if none provided
+        optimizeDepsConfig.entries = existingEntries
+      }
+
+      // Configure build externals to prevent bundling Node.js-only packages
+      // These packages should not be bundled for browser builds
+      const nodeOnlyPackages = [
+        'drizzle-kit',
+        '@electric-sql/pglite',
+        'pg',
+        'postgres',
+        '@vercel/postgres',
+        '@neondatabase/serverless',
+        'mysql2',
+        'mysql2/promise',
+        '@planetscale/database',
+        'better-sqlite3',
+        'nunjucks',
+        'fsevents',
+      ]
+
+      // Packages with ESM export patterns that Rollup can't properly trace
+      // These need special handling via aliases to use their CJS builds instead
+      // Note: We don't externalize these because browsers can't resolve bare specifiers
+      const esmProblematicPackages: string[] = [
+        // '@sinclair/typebox' is handled via alias to use CJS build instead
+      ]
+
+      // CommonJS dependencies that should be externalized for Node.js builds
+      // NOTE: For browser/Electron renderer builds, these should NOT be externalized
+      // as they need to be bundled with proper polyfills. We check isElectron below
+      // to avoid externalizing these for renderer builds.
+      // Packages like readable-stream, safe-buffer, string_decoder are commonly used
+      // and can be bundled by Vite's esbuild with proper polyfill configuration.
+      const commonjsDependencies: string[] = [
+        // 'safe-buffer',      // Don't externalize - let Vite bundle it
+        // 'readable-stream',  // Don't externalize - let Vite bundle it  
+        // 'string_decoder',   // Don't externalize - let Vite bundle it
+        'inherits',  // This one is safe to externalize as it's just a utility
+      ]
+
+      // Node.js built-in modules that should be externalized
+      // Note: buffer should NOT be externalized for browser builds - it needs to be polyfilled
+      // via vite-plugin-node-polyfills. Only externalize it for Node.js builds.
+      const nodeBuiltins = [
+        'url',
+        'path',
+        'http',
+        'http2',
+        'stream',
+        'crypto',
+        'net',
+        'https',
+        'zlib',
+        'child_process',
+        'fs',
+        'fs/promises',
+        'node:fs',
+        'node:fs/promises',
+        'node:url',
+        'node:path',
+        'node:http',
+        'node:http2',
+        'node:stream',
+        'node:crypto',
+        'node:net',
+        'node:https',
+        'node:zlib',
+        'node:child_process',
+        // Note: buffer and node:buffer are intentionally NOT in this list
+        // They should be polyfilled via vite-plugin-node-polyfills for browser builds
+      ]
+
+      const existingExternal = userConfig.build?.rollupOptions?.external
+      const existingExternalArray = Array.isArray(existingExternal)
+        ? existingExternal
+        : typeof existingExternal === 'string'
+        ? [existingExternal]
+        : []
+
+      // Merge with existing externals, avoiding duplicates
+      const allExternals = [
+        ...new Set([
+          ...existingExternalArray,
+          ...nodeOnlyPackages,
+          ...commonjsDependencies,
+          ...nodeBuiltins,
+          ...esmProblematicPackages,
+        ]),
+      ]
+
+      // Detect if we're in an Electron environment
+      // Electron apps typically have electron in their dependencies or use electron-specific build tools
+      // For renderer processes, we need to bundle fs polyfills instead of externalizing Node.js fs
+      const isElectron = 
+        process.env.ELECTRON_RUN_AS_NODE === '1' ||
+        process.env.ELECTRON_IS_DEV === '1' ||
+        process.env.ELECTRON_BUILDER_CACHE !== undefined ||
+        typeof process !== 'undefined' && process.versions?.electron ||
+        (typeof window !== 'undefined' && (window as any).process?.versions?.electron) ||
+        // Check if the build target suggests Electron
+        userConfig.build?.target === 'electron' ||
+        // Check if there are Electron-specific plugins
+        (Array.isArray(userConfig.plugins) && userConfig.plugins.some((p: any) => {
+          const name = p?.name || (p as Plugin)?.name
+          return name?.includes('electron') || name?.includes('vite-plugin-electron')
+        })) ||
+        // Check package.json for electron dependency (if available in build context)
+        (typeof process !== 'undefined' && process.cwd && (() => {
+          try {
+            const fs = require('fs')
+            const path = require('path')
+            const pkgPath = path.join(process.cwd(), 'package.json')
+            if (fs.existsSync(pkgPath)) {
+              const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+              return !!(pkg.dependencies?.electron || pkg.devDependencies?.electron)
+            }
+          } catch {
+            // Ignore errors - this is just a heuristic
+          }
+          return false
+        })())
+
+      // Create external function that checks both our list and user's function
+      const externalFunction = (id: string, importer?: string, isResolved?: boolean): boolean => {
+        // For Electron builds, don't externalize path, fs, and @zenfs packages - they should be bundled
+        // Electron renderer processes can't use Node.js fs directly, so we need to bundle the polyfills
+        if (isElectron) {
+          if (id === 'path' || id === 'node:path' || 
+              id === 'fs' || id === 'node:fs' || id === 'fs/promises' || id === 'node:fs/promises' ||
+              id === '@zenfs/core' || id === '@zenfs/dom' || 
+              id.startsWith('@zenfs/core/') || id.startsWith('@zenfs/dom/')) {
+            if (debug) {
+              log(`[build] Electron detected - bundling ${id} instead of externalizing`)
+            }
+            return false // Don't externalize - bundle it
+          }
+        }
+
+        // Check if it's a node-only package (exact match or subpath)
+        if (nodeOnlyPackages.some(pkg => id === pkg || id.startsWith(`${pkg}/`))) {
+          if (debug) {
+            log(`[build] Externalizing node-only package: ${id}`)
+          }
+          return true
+        }
+
+        // Check if it's a CommonJS dependency that should be externalized
+        if (commonjsDependencies.some(pkg => id === pkg || id.startsWith(`${pkg}/`))) {
+          if (debug) {
+            log(`[build] Externalizing CommonJS dependency: ${id}`)
+          }
+          return true
+        }
+
+        // Check if it's an ESM package with problematic export patterns
+        // These packages use `export *` re-exports that Rollup can't properly trace
+        if (esmProblematicPackages.some(pkg => id === pkg || id.startsWith(`${pkg}/`))) {
+          if (debug) {
+            log(`[build] Externalizing ESM problematic package: ${id}`)
+          }
+          return true
+        }
+
+        // Check if it's a Node.js built-in
+        // For Electron, we still externalize most built-ins, but not path or fs (they need polyfills)
+        if (nodeBuiltins.includes(id)) {
+          if (debug) {
+            log(`[build] Externalizing Node.js built-in: ${id}`)
+          }
+          return true
+        }
+
+        // If user provided a function, call it first
+        if (typeof existingExternal === 'function') {
+          const userResult = existingExternal(id, importer, isResolved ?? false)
+          if (userResult) return true
+        }
+
+        // Otherwise check if it's in the array
+        return allExternals.includes(id)
+      }
+
+      // Configure worker format to 'es' to support code-splitting
+      // This is required for packages like sqlocal that use workers with dynamic imports
+      // Only set format if user hasn't explicitly configured it
+      const existingWorkerConfig = userConfig.worker
+      const workerConfig = existingWorkerConfig
+        ? {
+            ...existingWorkerConfig,
+            // Only override format if not already set (default is 'iife' which causes issues)
+            format: (existingWorkerConfig.format === 'es' || existingWorkerConfig.format === 'iife' 
+              ? existingWorkerConfig.format 
+              : 'es') as 'es' | 'iife',
+          }
+        : {
+            format: 'es' as const,
+          }
+
+      return {
+        optimizeDeps: optimizeDepsConfig,
+        worker: workerConfig,
+        build: {
+          // Ensure CommonJS dependencies in SDK dist are transformed
+          commonjsOptions: {
+            include: [
+              /node_modules/,
+              /seed-protocol-sdk[\\/]+dist[\\/]/,
+            ],
+            // Transform require() calls to ESM imports
+            transformMixedEsModules: true,
+          },
+          rollupOptions: {
+            // Always use the function if we have packages to externalize
+            // or if the user provided an external function
+            // Otherwise, use the array if we have externals
+            external:
+              (nodeOnlyPackages.length > 0 || commonjsDependencies.length > 0 || typeof existingExternal === 'function')
+                ? externalFunction
+                : allExternals.length > 0
+                ? allExternals
+                : undefined,
+          },
+        },
+      }
+    },
+
+    async resolveId(source, importer, options) {
+      // #region agent log
+      // Debug: Track node-stdlib-browser rollup resolution
+      if (source.includes('node-stdlib-browser') && source.includes('rollup')) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId',message:'Resolving node-stdlib-browser rollup module in mainPlugin',data:{source,importer:importer?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // #region agent log
+      // Debug: Track picomatch resolution
+      if (source.includes('picomatch') || (importer && importer.includes('picomatch'))) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId-picomatch',message:'Resolving picomatch-related module',data:{source,importer:importer?.substring(0,150)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // Note: We don't intercept buffer here because vite-plugin-node-polyfills should handle it
+      // when configured with include: ['buffer']. Intercepting here could interfere with
+      // the plugin's own resolution mechanism. The transform hook will handle any require() calls.
+
+      // Force @sinclair/typebox to use its CommonJS build during production builds
+      // The ESM build uses `export * from './module.mjs'` which Rollup can't trace properly
+      // The CJS build doesn't have this issue
+      if (source === '@sinclair/typebox' || source === '@sinclair/typebox/value') {
+        // #region agent log
+        // Debug: Track typebox resolution to see if this hook runs in the Electron build
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId-typebox',message:'Intercepting @sinclair/typebox resolution',data:{source,importer:importer?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H4'})}).catch(()=>{});
+        // #endregion
+
+        // Skip if already resolving to CJS build
+        if (importer && importer.includes('@sinclair/typebox/build/cjs')) {
+          return null
+        }
+        
+        log(`Intercepting @sinclair/typebox resolution: ${source} from ${importer || 'unknown'}`)
+        
+        // Resolve the package first to get its location
+        const resolved = await this.resolve(source, importer || PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        
+        if (resolved) {
+          // Replace ESM path with CJS path
+          // ESM: .../build/esm/index.mjs or .../build/esm/value/index.mjs
+          // CJS: .../build/cjs/index.js or .../build/cjs/value/index.js
+          const cjsPath = resolved.id
+            .replace('/build/esm/', '/build/cjs/')
+            .replace('.mjs', '.js')
+          
+          log(`Resolved @sinclair/typebox to CJS: ${cjsPath}`)
+          return { id: cjsPath, moduleSideEffects: resolved.moduleSideEffects }
+        }
+      }
+
+      // Intercept ALL 'path' module resolutions to ensure we use path-browserify
+      // This is critical for Electron renderer processes where vite-plugin-node-polyfills
+      // might create a problematic path polyfill that causes "Dynamic require" errors
+      // We intercept ALL path resolutions, not just from vite optimization directories,
+      // to ensure consistent behavior
+      if (source === 'path' || source === 'node:path') {
+        // Skip if the importer is already path-browserify (avoid circular resolution)
+        if (importer && importer.includes('path-browserify')) {
+          return null
+        }
+        
+        log(`Intercepting path resolution in resolveId: ${source} from ${importer || 'unknown'}`)
+        // Resolve to path-browserify instead
+        const resolved = await this.resolve('path-browserify', importer || PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        if (resolved) {
+          log(`Resolved path to path-browserify: ${resolved.id}`)
+          return resolved
+        }
+      }
+      
+      // Also intercept if the source is a path.mjs file from vite optimization
+      if (source.includes('path.mjs') && 
+          !source.includes('path-browserify') &&
+          (source.includes('.vite-electron-renderer') || 
+           source.includes('.vite/deps') ||
+           source.includes('node_modules/.vite'))) {
+        log(`Intercepting path.mjs file resolution: ${source} from ${importer}`)
+        // Resolve to path-browserify instead
+        const resolved = await this.resolve('path-browserify', importer || PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        if (resolved) {
+          log(`Resolved path.mjs to path-browserify: ${resolved.id}`)
+          return resolved
+        }
+      }
+
+      // Help resolve @zenfs/core if it's not being found
+      // This can happen in browser contexts where module resolution might fail
+      if (source === '@zenfs/core' || source.startsWith('@zenfs/core/')) {
+        log(`Helping resolve @zenfs/core: "${source}" from ${importer}`)
+        
+        // Try resolving from plugin context first (SDK's node_modules)
+        let resolved = await this.resolve(source, PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        
+        // If that fails and we have an importer, try resolving from the importer
+        if (!resolved && importer) {
+          resolved = await this.resolve(source, importer, {
+            ...options,
+            skipSelf: true,
+          })
+        }
+        
+        if (resolved) {
+          log(`Resolved @zenfs/core to: ${resolved.id}`)
+          return resolved
+        }
+        
+        // If still not resolved, return null to let Vite handle it
+        // Vite should be able to resolve from node_modules
+        log(`Could not resolve @zenfs/core, letting Vite handle it`)
+        return null
+      }
+
+      // Check if this is an fs-related import we should intercept
+      const shouldIntercept = fsModules.includes(source) || 
+        KNOWN_POLYFILL_TARGETS.some(target => source.includes(target) || source === target)
+
+      // Also intercept node-stdlib-browser empty mock paths
+      if (source.includes('node-stdlib-browser') && source.includes('mock/empty')) {
+        log(`Intercepting node-stdlib-browser empty mock: "${source}"`)
+        const isPromiseVariant = source.includes('promises')
+        const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+        
+        // Try resolving from plugin context first (SDK's node_modules)
+        let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+          ...options,
+          skipSelf: true,
+        })
+        
+        // If that fails and we have an importer, try resolving from the importer
+        if (!resolved && importer) {
+          resolved = await this.resolve(zenfsModule, importer, {
+            ...options,
+            skipSelf: true,
+          })
+        }
+        
+        if (resolved) {
+          log(`Resolved empty mock to: ${resolved.id}`)
+          interceptedResolutions.set(source, resolved.id)
+          return resolved
+        }
+        
+        // If resolution fails, return null and let Vite handle it naturally
+        // The alias configuration should handle the resolution
+        log(`Resolution failed, letting Vite handle: ${zenfsModule}`)
+        return null
+      }
+
+      if (!shouldIntercept) {
+        // Also intercept if source is a Vite pre-bundled fs polyfill path or node-stdlib-browser mock
+        const sourceWithoutQuery = source.split('?')[0]
+        if (
+          source.includes('node_fs') || 
+          (source.includes('.vite/deps') && source.includes('fs') && !source.includes('@zenfs')) ||
+          (source.includes('node-stdlib-browser') && (source.includes('mock/empty') || source.includes('empty.js')))
+        ) {
+          log(`Intercepting Vite pre-bundled fs polyfill/mock: "${source}"`)
+          const isPromiseVariant = source.includes('promises')
+          const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+          
+          // For .vite/deps paths, let the load hook handle them to avoid chunk reference issues
+          if (source.includes('.vite/deps')) {
+            // Return null to let Vite continue, then the load hook will intercept
+            return null
+          }
+          
+          // For other cases, resolve the module
+          let resolved = await this.resolve(zenfsModule, importer || PLUGIN_FILE_URL, {
+            ...options,
+            skipSelf: true,
+          })
+          
+          if (resolved) {
+            log(`Resolved pre-bundled fs to: ${resolved.id}`)
+            interceptedResolutions.set(source, resolved.id)
+            return resolved
+          }
+          
+          // Fallback: return the module specifier
+          log(`Fallback: returning module specifier: ${zenfsModule}`)
+          interceptedResolutions.set(source, zenfsModule)
+          return { id: zenfsModule, external: false }
+        }
+        return null
+      }
+
+      log(`Intercepting resolution: "${source}" from ${importer}`)
+
+      // Determine the correct ZenFS module
+      const isPromiseVariant = source.includes('promises')
+      const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+
+      // First, try resolving from the plugin's context (SDK's node_modules)
+      // This ensures we use the SDK's dependencies even if the consuming project doesn't have them
+      let resolved = await this.resolve(zenfsModule, PLUGIN_FILE_URL, {
+        ...options,
+        skipSelf: true,
+      })
+
+      // If that fails, try resolving from the original importer (project's node_modules)
+      if (!resolved && importer) {
+        resolved = await this.resolve(zenfsModule, importer, {
+          ...options,
+          skipSelf: true,
+        })
+      }
+
+      if (resolved) {
+        log(`Resolved to: ${resolved.id}`)
+        interceptedResolutions.set(source, resolved.id)
+        return resolved
+      }
+
+      // Fallback: return the module specifier and let Vite handle it
+      // Vite should be able to resolve from parent node_modules automatically
+      log(`Fallback resolution for: ${zenfsModule}`)
+      return { id: zenfsModule, external: false }
+    },
+
+    shouldTransformCachedModule({ id, code }) {
+      // Force transformation of cached fs polyfill modules
+      const idWithoutQuery = id.split('?')[0]
+      const isFsPolyfill = 
+        idWithoutQuery.includes('node_fs') || 
+        (idWithoutQuery.includes('.vite/deps') && idWithoutQuery.includes('fs') && !idWithoutQuery.includes('@zenfs')) ||
+        (idWithoutQuery.includes('node-stdlib-browser') && (idWithoutQuery.includes('mock/empty') || idWithoutQuery.includes('empty.js')))
+      
+      if (isFsPolyfill) {
+        log(`Forcing transformation of cached fs polyfill: ${id}`)
+        return true
+      }
+      return false
+    },
+
+    load(id) {
+      // Remove query parameters for matching (e.g., ?v=392cb483)
+      const idWithoutQuery = id.split('?')[0]
+      
+      // #region agent log
+      // Debug: Track node-stdlib-browser/helpers/rollup module loading
+      if (idWithoutQuery.includes('node-stdlib-browser') && idWithoutQuery.includes('rollup')) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-entry',message:'Loading node-stdlib-browser rollup module',data:{id,idWithoutQuery,isViteOptimized:idWithoutQuery.includes('.vite')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // #region agent log
+      // Debug: Track picomatch and glob-related module loading
+      if (idWithoutQuery.includes('picomatch') || idWithoutQuery.includes('micromatch') || idWithoutQuery.includes('glob')) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-entry-glob',message:'Loading glob-related module',data:{id,idWithoutQuery,isViteOptimized:idWithoutQuery.includes('.vite')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H4'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // Early check for path polyfill files - check this first before other logic
+      // This catches vite-plugin-node-polyfills path polyfills that may use require() or have other issues
+      // We intercept ALL path polyfills from Vite's optimization directories to ensure compatibility
+      if (idWithoutQuery.includes('path') && 
+          !idWithoutQuery.includes('path-browserify') && 
+          (idWithoutQuery.includes('.vite-electron-renderer') || 
+           idWithoutQuery.includes('.vite/deps') ||
+           idWithoutQuery.includes('node_modules/.vite'))) {
+        // Always intercept path polyfills from vite-plugin-node-polyfills
+        // The polyfill may have issues even if it doesn't contain require('path')
+        log(`Intercepting load of path polyfill from vite-plugin-node-polyfills: ${id} - using path-browserify`)
+        return `
+// Intercepted by seed-vite-plugin to prevent "Dynamic require of path is not supported" errors
+// Re-export from path-browserify which is ESM-compatible
+// Note: path-browserify is CommonJS, so we use namespace import
+import * as pathBrowserify from 'path-browserify';
+export default pathBrowserify;
+export const { basename, dirname, extname, format, isAbsolute, join, normalize, parse, relative, resolve, sep, delimiter, posix, win32 } = pathBrowserify;
+`
+      }
+      
+      // Fix SDK export patterns in load hook as fallback (for cases where transform doesn't run)
+      // This handles the case where Vite loads the file directly via /@fs/
+      if (id.includes('seed-protocol-sdk') && id.includes('events/index.js')) {
+        try {
+          // Use Node.js fs module with ESM import (already imported at top)
+          let code = readFileSync(idWithoutQuery, 'utf-8')
+          // Check if the file uses the const + separate export pattern
+          if (code.includes('const waitForEvent =') && code.includes('export { waitForEvent }')) {
+            if (debug) {
+              log(`[load] Fixing export pattern in SDK events module: ${id}`)
+            }
+            // Transform: const waitForEvent = ...; export { waitForEvent };
+            // To: export const waitForEvent = ...;
+            code = code
+              .replace(/const waitForEvent =/g, 'export const waitForEvent =')
+              .replace(/export \{ waitForEvent \};?\s*/g, '')
+            return code
+          }
+        } catch (e) {
+          // If we can't read it, let Vite handle it normally
+          if (debug) {
+            log(`[load] Could not read file to fix export pattern: ${id}`, e)
+          }
+        }
+      }
+      
+      // NOTE: Virtual process polyfill has been removed because virtual modules (\0-prefixed)
+      // don't work with esbuild during Vite's dependency optimization phase.
+      // Process polyfilling is now handled by vite-plugin-node-polyfills when configured,
+      // or by the npm 'process' package being bundled normally.
+
+      // Intercept Vite's pre-bundled fs polyfill and replace it with ZenFS
+      // Also intercept node-stdlib-browser's empty mock
+      // Handle both regular paths and /@fs/ prefixed paths
+      const isFsPolyfill = 
+        idWithoutQuery.includes('node_fs') || 
+        (idWithoutQuery.includes('.vite/deps') && idWithoutQuery.includes('fs') && !idWithoutQuery.includes('@zenfs')) ||
+        (idWithoutQuery.includes('node-stdlib-browser') && (idWithoutQuery.includes('mock/empty') || idWithoutQuery.includes('empty.js')))
+      
+      if (isFsPolyfill) {
+        log(`Intercepting load of fs polyfill/mock file: ${id}`)
+        const isPromiseVariant = idWithoutQuery.includes('promises')
+        const zenfsModule = isPromiseVariant ? '@zenfs/core/promises' : '@zenfs/core'
+        
+        // Return a re-export from ZenFS
+        return `export * from '${zenfsModule}'; export { default } from '${zenfsModule}';`
+      }
+
+      // Intercept the actual npm buffer and events packages which use require()
+      // This prevents "require is not defined" errors in ESM contexts
+      // These packages from npm are CommonJS and don't work in ESM
+      // When vite-plugin-node-polyfills is configured, it provides polyfills
+      // Match any buffer.mjs, events.mjs, util.mjs, or process.mjs files
+      // 
+      // NOTE: We DO intercept Vite-optimized files in .vite-electron-renderer/, .vite/deps/, etc.
+      // because Vite's esbuild may not fully convert all require() calls to ESM, especially
+      // for packages like 'buffer' that have complex CommonJS patterns. We provide a self-contained
+      // Buffer polyfill that works in browser/Electron renderer without requiring globals.
+      const isViteOptimized = 
+        idWithoutQuery.includes('.vite-electron-renderer/') ||
+        idWithoutQuery.includes('.vite/deps/') ||
+        idWithoutQuery.includes('node_modules/.vite/')
+      
+      // Match buffer files - including Vite-optimized ones since they may still have require()
+      const isNpmBufferPackage = 
+        idWithoutQuery.includes('/buffer') && 
+        (idWithoutQuery.endsWith('buffer.mjs') || 
+         idWithoutQuery.endsWith('/buffer/index.js') ||
+         idWithoutQuery.endsWith('/buffer/index.mjs') ||
+         (idWithoutQuery.includes('node_modules/buffer') && idWithoutQuery.endsWith('.mjs')) ||
+         (idWithoutQuery.includes('node_modules/buffer') && idWithoutQuery.endsWith('/index.js')) ||
+         // Also match Vite-optimized buffer files
+         (isViteOptimized && idWithoutQuery.endsWith('buffer.mjs')))
+      
+      const isNpmEventsPackage = 
+        idWithoutQuery.includes('/events') && 
+        (idWithoutQuery.endsWith('events.mjs') || 
+         idWithoutQuery.endsWith('/events/index.js') ||
+         idWithoutQuery.endsWith('/events/index.mjs') ||
+         (idWithoutQuery.includes('node_modules/events') && idWithoutQuery.endsWith('.mjs')) ||
+         (idWithoutQuery.includes('node_modules/events') && idWithoutQuery.endsWith('/index.js')) ||
+         // Also match Vite-optimized events files
+         (isViteOptimized && idWithoutQuery.endsWith('events.mjs')))
+      
+      // Only intercept Node.js "path" module polyfills, not path-browserify
+      // The pattern should match files that are clearly the Node.js path polyfill
+      // but not path-browserify itself (which would cause circular references)
+      // Note: We don't intercept path polyfills here because:
+      // 1. vite-plugin-node-polyfills should handle path when configured with include: ['path']
+      // 2. The alias configuration already redirects 'path' to 'path-browserify'
+      // 3. Intercepting here can cause circular reference issues
+      // If you see "Dynamic require of path" errors, ensure vite-plugin-node-polyfills
+      // is configured with include: ['path'] and the alias is set up correctly
+      
+      if (isNpmBufferPackage) {
+        log(`Intercepting npm buffer package load: ${id} - providing self-contained Buffer polyfill`)
+        // #region agent log
+        // Debug instrumentation for hypothesis testing
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-isNpmBufferPackage',message:'Intercepting npm buffer package in load hook - providing polyfill',data:{id,idWithoutQuery,isViteOptimized},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX3'})}).catch(()=>{});
+        // #endregion
+        // Provide a self-contained Buffer polyfill that works without globals or require()
+        // This is based on the feross/buffer implementation but simplified for browser use
+        return `
+// #region agent log
+(function() {
+  fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'buffer-polyfill-loaded',message:'Self-contained Buffer polyfill loaded successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX3'})}).catch(function(){});
+})();
+// #endregion
+
+// Intercepted by seed-vite-plugin - Self-contained Buffer polyfill for browser/Electron renderer
+// First check if a global Buffer already exists (e.g., from vite-plugin-node-polyfills)
+const existingBuffer = typeof globalThis !== 'undefined' && globalThis.Buffer 
+  ? globalThis.Buffer 
+  : typeof global !== 'undefined' && global.Buffer 
+    ? global.Buffer 
+    : typeof window !== 'undefined' && window.Buffer 
+      ? window.Buffer 
+      : null;
+
+// If no global Buffer, create a minimal polyfill
+const Buffer = existingBuffer || (function() {
+  // Minimal Buffer implementation for browser environments
+  // Based on feross/buffer but simplified
+  
+  const K_MAX_LENGTH = 0x7fffffff;
+  
+  function Buffer(arg, encodingOrOffset, length) {
+    if (typeof arg === 'number') {
+      return allocUnsafe(arg);
+    }
+    return from(arg, encodingOrOffset, length);
+  }
+  
+  Buffer.TYPED_ARRAY_SUPPORT = true;
+  Buffer.poolSize = 8192;
+  
+  function from(value, encodingOrOffset, length) {
+    if (typeof value === 'string') {
+      return fromString(value, encodingOrOffset);
+    }
+    if (ArrayBuffer.isView(value)) {
+      return fromArrayView(value);
+    }
+    if (value == null) {
+      throw new TypeError('The first argument must be one of type string, Buffer, ArrayBuffer, Array, or Array-like Object.');
+    }
+    if (Array.isArray(value) || (typeof value === 'object' && value.length !== undefined)) {
+      return fromArrayLike(value);
+    }
+    if (value instanceof ArrayBuffer) {
+      return fromArrayBuffer(value, encodingOrOffset, length);
+    }
+    throw new TypeError('The first argument must be one of type string, Buffer, ArrayBuffer, Array, or Array-like Object.');
+  }
+  
+  Buffer.from = from;
+  
+  function allocUnsafe(size) {
+    if (size < 0 || size > K_MAX_LENGTH) {
+      throw new RangeError('Invalid typed array length');
+    }
+    const buf = new Uint8Array(size);
+    Object.setPrototypeOf(buf, Buffer.prototype);
+    return buf;
+  }
+  
+  Buffer.alloc = function(size, fill, encoding) {
+    const buf = allocUnsafe(size);
+    if (fill !== undefined) {
+      if (typeof fill === 'number') {
+        buf.fill(fill);
+      } else {
+        buf.fill(0);
+      }
+    } else {
+      buf.fill(0);
+    }
+    return buf;
+  };
+  
+  Buffer.allocUnsafe = allocUnsafe;
+  Buffer.allocUnsafeSlow = allocUnsafe;
+  
+  function fromString(string, encoding) {
+    encoding = encoding || 'utf8';
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(string);
+    const buf = allocUnsafe(bytes.length);
+    buf.set(bytes);
+    return buf;
+  }
+  
+  function fromArrayLike(array) {
+    const buf = allocUnsafe(array.length);
+    for (let i = 0; i < array.length; i++) {
+      buf[i] = array[i] & 255;
+    }
+    return buf;
+  }
+  
+  function fromArrayView(view) {
+    const buf = allocUnsafe(view.byteLength);
+    buf.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+    return buf;
+  }
+  
+  function fromArrayBuffer(arrayBuffer, byteOffset, length) {
+    byteOffset = byteOffset || 0;
+    length = length === undefined ? arrayBuffer.byteLength - byteOffset : length;
+    const buf = allocUnsafe(length);
+    buf.set(new Uint8Array(arrayBuffer, byteOffset, length));
+    return buf;
+  }
+  
+  Buffer.isBuffer = function(obj) {
+    return obj != null && obj._isBuffer === true;
+  };
+  
+  Buffer.isEncoding = function(encoding) {
+    switch ((encoding + '').toLowerCase()) {
+      case 'hex': case 'utf8': case 'utf-8': case 'ascii':
+      case 'latin1': case 'binary': case 'base64': case 'ucs2':
+      case 'ucs-2': case 'utf16le': case 'utf-16le':
+        return true;
+      default:
+        return false;
+    }
+  };
+  
+  Buffer.concat = function(list, totalLength) {
+    if (list.length === 0) return Buffer.alloc(0);
+    if (totalLength === undefined) {
+      totalLength = 0;
+      for (let i = 0; i < list.length; i++) {
+        totalLength += list[i].length;
+      }
+    }
+    const buf = Buffer.alloc(totalLength);
+    let pos = 0;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      buf.set(item, pos);
+      pos += item.length;
+    }
+    return buf;
+  };
+  
+  Buffer.byteLength = function(string, encoding) {
+    if (typeof string !== 'string') {
+      return string.length || string.byteLength || 0;
+    }
+    return new TextEncoder().encode(string).length;
+  };
+  
+  // Set up prototype chain
+  Buffer.prototype = Object.create(Uint8Array.prototype);
+  Buffer.prototype.constructor = Buffer;
+  Buffer.prototype._isBuffer = true;
+  
+  Buffer.prototype.toString = function(encoding, start, end) {
+    start = start || 0;
+    end = end === undefined ? this.length : end;
+    if (end === 0) return '';
+    const slice = this.subarray(start, end);
+    return new TextDecoder(encoding || 'utf-8').decode(slice);
+  };
+  
+  Buffer.prototype.toJSON = function() {
+    return { type: 'Buffer', data: Array.from(this) };
+  };
+  
+  Buffer.prototype.slice = function(start, end) {
+    const len = this.length;
+    start = ~~start;
+    end = end === undefined ? len : ~~end;
+    if (start < 0) { start += len; if (start < 0) start = 0; }
+    if (end < 0) { end += len; if (end < 0) end = 0; }
+    if (end > len) end = len;
+    if (end < start) end = start;
+    const newBuf = this.subarray(start, end);
+    Object.setPrototypeOf(newBuf, Buffer.prototype);
+    return newBuf;
+  };
+  
+  Buffer.prototype.copy = function(target, targetStart, start, end) {
+    start = start || 0;
+    end = end || this.length;
+    targetStart = targetStart || 0;
+    if (end === start) return 0;
+    if (target.length === 0 || this.length === 0) return 0;
+    const len = end - start;
+    target.set(this.subarray(start, end), targetStart);
+    return len;
+  };
+  
+  Buffer.prototype.write = function(string, offset, length, encoding) {
+    offset = offset || 0;
+    const remaining = this.length - offset;
+    length = length === undefined ? remaining : Math.min(length, remaining);
+    const bytes = new TextEncoder().encode(string);
+    const bytesToWrite = Math.min(bytes.length, length);
+    this.set(bytes.subarray(0, bytesToWrite), offset);
+    return bytesToWrite;
+  };
+  
+  Buffer.prototype.fill = function(val, start, end) {
+    start = start || 0;
+    end = end || this.length;
+    if (typeof val === 'number') {
+      for (let i = start; i < end; i++) {
+        this[i] = val & 255;
+      }
+    }
+    return this;
+  };
+  
+  Buffer.prototype.equals = function(otherBuffer) {
+    if (!Buffer.isBuffer(otherBuffer)) return false;
+    if (this.length !== otherBuffer.length) return false;
+    for (let i = 0; i < this.length; i++) {
+      if (this[i] !== otherBuffer[i]) return false;
+    }
+    return true;
+  };
+  
+  Buffer.prototype.compare = function(target) {
+    if (!Buffer.isBuffer(target)) {
+      throw new TypeError('Argument must be a Buffer');
+    }
+    const len = Math.min(this.length, target.length);
+    for (let i = 0; i < len; i++) {
+      if (this[i] !== target[i]) {
+        return this[i] < target[i] ? -1 : 1;
+      }
+    }
+    if (this.length !== target.length) {
+      return this.length < target.length ? -1 : 1;
+    }
+    return 0;
+  };
+
+  // Read/write methods
+  Buffer.prototype.readUInt8 = function(offset) { return this[offset]; };
+  Buffer.prototype.readUInt16LE = function(offset) { return this[offset] | (this[offset + 1] << 8); };
+  Buffer.prototype.readUInt16BE = function(offset) { return (this[offset] << 8) | this[offset + 1]; };
+  Buffer.prototype.readUInt32LE = function(offset) { 
+    return (this[offset] | (this[offset + 1] << 8) | (this[offset + 2] << 16)) + (this[offset + 3] * 0x1000000); 
+  };
+  Buffer.prototype.readUInt32BE = function(offset) { 
+    return (this[offset] * 0x1000000) + ((this[offset + 1] << 16) | (this[offset + 2] << 8) | this[offset + 3]); 
+  };
+  Buffer.prototype.readInt8 = function(offset) { return (this[offset] & 0x80) ? this[offset] - 0x100 : this[offset]; };
+  Buffer.prototype.readInt16LE = function(offset) { const val = this.readUInt16LE(offset); return (val & 0x8000) ? val - 0x10000 : val; };
+  Buffer.prototype.readInt16BE = function(offset) { const val = this.readUInt16BE(offset); return (val & 0x8000) ? val - 0x10000 : val; };
+  Buffer.prototype.readInt32LE = function(offset) { return this[offset] | (this[offset + 1] << 8) | (this[offset + 2] << 16) | (this[offset + 3] << 24); };
+  Buffer.prototype.readInt32BE = function(offset) { return (this[offset] << 24) | (this[offset + 1] << 16) | (this[offset + 2] << 8) | this[offset + 3]; };
+  
+  Buffer.prototype.writeUInt8 = function(value, offset) { this[offset] = value & 0xff; return offset + 1; };
+  Buffer.prototype.writeUInt16LE = function(value, offset) { this[offset] = value & 0xff; this[offset + 1] = (value >>> 8) & 0xff; return offset + 2; };
+  Buffer.prototype.writeUInt16BE = function(value, offset) { this[offset] = (value >>> 8) & 0xff; this[offset + 1] = value & 0xff; return offset + 2; };
+  Buffer.prototype.writeUInt32LE = function(value, offset) { 
+    this[offset] = value & 0xff; this[offset + 1] = (value >>> 8) & 0xff; 
+    this[offset + 2] = (value >>> 16) & 0xff; this[offset + 3] = (value >>> 24) & 0xff; return offset + 4; 
+  };
+  Buffer.prototype.writeUInt32BE = function(value, offset) { 
+    this[offset] = (value >>> 24) & 0xff; this[offset + 1] = (value >>> 16) & 0xff;
+    this[offset + 2] = (value >>> 8) & 0xff; this[offset + 3] = value & 0xff; return offset + 4; 
+  };
+  Buffer.prototype.writeInt8 = Buffer.prototype.writeUInt8;
+  Buffer.prototype.writeInt16LE = Buffer.prototype.writeUInt16LE;
+  Buffer.prototype.writeInt16BE = Buffer.prototype.writeUInt16BE;
+  Buffer.prototype.writeInt32LE = Buffer.prototype.writeUInt32LE;
+  Buffer.prototype.writeInt32BE = Buffer.prototype.writeUInt32BE;
+
+  return Buffer;
+})();
+
+// Also set on globalThis for other modules that might check for it
+if (typeof globalThis !== 'undefined' && !globalThis.Buffer) {
+  globalThis.Buffer = Buffer;
+}
+if (typeof window !== 'undefined' && !window.Buffer) {
+  window.Buffer = Buffer;
+}
+
+export default Buffer;
+export { Buffer };
+
+// Additional exports that some packages expect
+export const SlowBuffer = Buffer;
+export const INSPECT_MAX_BYTES = 50;
+export const kMaxLength = 0x7fffffff;
+`
+      }
+
+      if (isNpmEventsPackage) {
+        log(`Intercepting npm events package load: ${id} - using EventEmitter polyfill`)
+        // Use a minimal EventEmitter implementation that works in browser/ESM contexts
+        // This prevents "require is not defined" errors
+        // When vite-plugin-node-polyfills is configured, it will provide a more complete implementation
+        return `
+// Intercepted by seed-vite-plugin to prevent "require is not defined" errors
+// Minimal EventEmitter implementation for ESM compatibility
+class EventEmitter {
+  constructor() {
+    this._events = {};
+  }
+
+  on(event, listener) {
+    if (!this._events[event]) {
+      this._events[event] = [];
+    }
+    this._events[event].push(listener);
+    return this;
+  }
+
+  once(event, listener) {
+    const onceWrapper = (...args) => {
+      listener(...args);
+      this.removeListener(event, onceWrapper);
+    };
+    this.on(event, onceWrapper);
+    return this;
+  }
+
+  emit(event, ...args) {
+    if (this._events[event]) {
+      const listeners = [...this._events[event]];
+      listeners.forEach(listener => {
+        try {
+          listener(...args);
+        } catch (err) {
+          console.error('EventEmitter error:', err);
+        }
+      });
+    }
+    return this;
+  }
+
+  removeListener(event, listener) {
+    if (this._events[event]) {
+      this._events[event] = this._events[event].filter(l => l !== listener);
+      if (this._events[event].length === 0) {
+        delete this._events[event];
+      }
+    }
+    return this;
+  }
+
+  removeAllListeners(event) {
+    if (event) {
+      delete this._events[event];
+    } else {
+      this._events = {};
+    }
+    return this;
+  }
+
+  listenerCount(event) {
+    return this._events[event] ? this._events[event].length : 0;
+  }
+}
+
+export default EventEmitter;
+export { EventEmitter };
+`
+      }
+
+      // Intercept process package - commonly needed by packages like readable-stream
+      // Match process.mjs, process/index.js, or just "process/" or "process"
+      const isProcessPackage = 
+        (idWithoutQuery.includes('/process') && 
+         (idWithoutQuery.endsWith('process.mjs') || 
+          idWithoutQuery.endsWith('/process/index.js') ||
+          idWithoutQuery.endsWith('/process/index.mjs') ||
+          idWithoutQuery.endsWith('/process/browser.js') ||
+          idWithoutQuery.endsWith('/process/browser') ||
+          (idWithoutQuery.includes('node_modules/process') && (idWithoutQuery.endsWith('.mjs') || idWithoutQuery.endsWith('.js'))))) ||
+        // Also match Vite-optimized process files
+        (isViteOptimized && (idWithoutQuery.endsWith('process.mjs') || idWithoutQuery.includes('/process')))
+      
+      if (isProcessPackage) {
+        log(`Intercepting npm process package load: ${id} - providing self-contained process polyfill`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-isProcessPackage',message:'Intercepting process package in load hook - providing polyfill',data:{id,idWithoutQuery,isViteOptimized},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'PROCESS'})}).catch(()=>{});
+        // #endregion
+        // Provide a self-contained process polyfill for browser environments
+        return `
+// Intercepted by seed-vite-plugin - Self-contained process polyfill for browser/Electron renderer
+
+// Check for existing process object
+const existingProcess = typeof globalThis !== 'undefined' && globalThis.process 
+  ? globalThis.process 
+  : typeof global !== 'undefined' && global.process 
+    ? global.process 
+    : typeof window !== 'undefined' && window.process 
+      ? window.process 
+      : null;
+
+// Create process polyfill if not exists
+const process = existingProcess || {
+  // Environment
+  env: {},
+  argv: [],
+  version: 'v16.0.0',
+  versions: {
+    node: '16.0.0',
+  },
+  platform: 'browser',
+  browser: true,
+  
+  // Timing functions
+  nextTick: function(fn, ...args) {
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(() => fn(...args));
+    } else if (typeof Promise !== 'undefined') {
+      Promise.resolve().then(() => fn(...args));
+    } else {
+      setTimeout(() => fn(...args), 0);
+    }
+  },
+  
+  // Streams (stubs)
+  stdout: {
+    write: function(str) { console.log(str); return true; },
+    on: function() { return this; },
+    once: function() { return this; },
+    emit: function() { return false; },
+    end: function() {},
+    isTTY: false,
+  },
+  stderr: {
+    write: function(str) { console.error(str); return true; },
+    on: function() { return this; },
+    once: function() { return this; },
+    emit: function() { return false; },
+    end: function() {},
+    isTTY: false,
+  },
+  stdin: {
+    read: function() { return null; },
+    on: function() { return this; },
+    once: function() { return this; },
+    emit: function() { return false; },
+    end: function() {},
+    isTTY: false,
+  },
+  
+  // Process info
+  pid: 1,
+  ppid: 0,
+  title: 'browser',
+  arch: 'javascript',
+  
+  // Memory (stubs)
+  memoryUsage: function() {
+    return { rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 };
+  },
+  
+  // CPU (stubs)
+  cpuUsage: function() {
+    return { user: 0, system: 0 };
+  },
+  
+  // Working directory (stubs)
+  cwd: function() { return '/'; },
+  chdir: function(dir) {},
+  
+  // Exit (stub)
+  exit: function(code) {
+    console.warn('process.exit called with code:', code);
+  },
+  
+  // Event emitter methods (stubs)
+  on: function(event, listener) { return this; },
+  once: function(event, listener) { return this; },
+  off: function(event, listener) { return this; },
+  emit: function(event, ...args) { return false; },
+  removeListener: function(event, listener) { return this; },
+  removeAllListeners: function(event) { return this; },
+  listeners: function(event) { return []; },
+  listenerCount: function(event) { return 0; },
+  
+  // HR Time
+  hrtime: function(previousTimestamp) {
+    const clocktime = performance.now() * 1e-3;
+    let seconds = Math.floor(clocktime);
+    let nanoseconds = Math.floor((clocktime % 1) * 1e9);
+    if (previousTimestamp) {
+      seconds = seconds - previousTimestamp[0];
+      nanoseconds = nanoseconds - previousTimestamp[1];
+      if (nanoseconds < 0) {
+        seconds--;
+        nanoseconds += 1e9;
+      }
+    }
+    return [seconds, nanoseconds];
+  },
+  
+  // Uptime
+  uptime: function() {
+    return performance.now() / 1000;
+  },
+  
+  // Abort (stub)
+  abort: function() {
+    throw new Error('process.abort() called');
+  },
+  
+  // umask (stub)
+  umask: function(mask) { return 0o22; },
+  
+  // kill (stub)
+  kill: function(pid, signal) {},
+  
+  // binding (stub - throws like Node.js does for missing bindings)
+  binding: function(name) {
+    throw new Error('process.binding is not supported');
+  },
+  
+  // Additional properties some packages expect
+  noDeprecation: false,
+  throwDeprecation: false,
+  traceDeprecation: false,
+};
+
+// Set hrtime.bigint if BigInt is available
+if (typeof BigInt !== 'undefined') {
+  process.hrtime.bigint = function() {
+    const time = performance.now();
+    return BigInt(Math.floor(time * 1e6)) * BigInt(1000);
+  };
+}
+
+// Set on globalThis for other modules
+if (typeof globalThis !== 'undefined' && !globalThis.process) {
+  globalThis.process = process;
+}
+if (typeof window !== 'undefined' && !window.process) {
+  window.process = process;
+}
+if (typeof global !== 'undefined' && !global.process) {
+  global.process = process;
+}
+
+export default process;
+export { process };
+export const nextTick = process.nextTick;
+export const platform = process.platform;
+export const env = process.env;
+export const argv = process.argv;
+export const version = process.version;
+export const versions = process.versions;
+export const stdout = process.stdout;
+export const stderr = process.stderr;
+export const stdin = process.stdin;
+export const pid = process.pid;
+export const browser = process.browser;
+`
+      }
+
+      // Intercept module package - Node.js built-in that can't be polyfilled in browsers
+      // Match module.mjs files from vite optimization directories
+      // IMPORTANT: Avoid matching third-party packages that happen to use "module" in their path,
+      // such as @sinclair/typebox's internal "type/module/index.mjs". Those are real library files,
+      // not the Node.js built-in, and stubbing them breaks their exports.
+      const isModulePackage = 
+        // Never treat TypeBox's internal module helpers as the Node.js built-in
+        !idWithoutQuery.includes('@sinclair/typebox/') &&
+        (
+          // Match explicit module paths
+          (idWithoutQuery.includes('/module') && 
+           (idWithoutQuery.endsWith('module.mjs') || 
+            idWithoutQuery.endsWith('/module/index.js') ||
+            idWithoutQuery.endsWith('/module/index.mjs'))) ||
+          // Match Vite-optimized module files (e.g., .vite-electron-renderer/module.mjs)
+          (isViteOptimized && idWithoutQuery.endsWith('module.mjs')) ||
+          // Explicit patterns for electron renderer
+          idWithoutQuery.includes('.vite-electron-renderer/module') ||
+          idWithoutQuery.includes('.vite/deps/module') ||
+          // Also catch node_modules/.vite patterns
+          (idWithoutQuery.includes('node_modules/.vite') && idWithoutQuery.includes('module.mjs'))
+        )
+      
+      if (isModulePackage) {
+        log(`Intercepting module package load: ${id} - providing stub`)
+        // Provide a minimal stub for the module built-in
+        // This can't be properly polyfilled in browsers, so we provide empty stubs
+        return `
+// Intercepted by seed-vite-plugin - Stub for Node.js 'module' built-in
+// The 'module' built-in cannot be properly polyfilled in browsers
+
+// Stub functions that return empty/noop values
+export function createRequire() {
+  return function require() {
+    throw new Error('require() is not supported in browser environments');
+  };
+}
+
+export function builtinModules() {
+  return [];
+}
+
+export function isBuiltin() {
+  return false;
+}
+
+export function syncBuiltinESMExports() {
+  // No-op in browser
+}
+
+export function findSourceMap() {
+  return undefined;
+}
+
+export function SourceMap() {
+  // No-op constructor
+}
+
+// Module._extensions is used by some packages
+export const _extensions = {};
+export const _cache = {};
+export const _pathCache = {};
+export const globalPaths = [];
+
+// Default export with all stubs
+const moduleStub = {
+  createRequire,
+  builtinModules,
+  isBuiltin,
+  syncBuiltinESMExports,
+  findSourceMap,
+  SourceMap,
+  _extensions,
+  _cache,
+  _pathCache,
+  globalPaths,
+};
+
+export default moduleStub;
+`
+      }
+
+      // Intercept buffer polyfill loading to ensure it resolves correctly
+      // This helps prevent "Dynamic require of buffer is not supported" errors
+      const isBufferPolyfill = 
+        (idWithoutQuery.includes('.vite/deps') && idWithoutQuery.includes('buffer') && !idWithoutQuery.includes('node_modules/buffer')) ||
+        (idWithoutQuery.includes('vite/node-polyfills') && idWithoutQuery.includes('buffer'))
+      
+      if (isBufferPolyfill) {
+        log(`Intercepting load of buffer polyfill: ${id}`)
+        // Let vite-plugin-node-polyfills handle it, but ensure it's available
+        // Return null to let Vite handle it normally
+        return null
+      }
+
+      // Intercept pkg-dir package to provide proper ESM exports
+      // pkg-dir is CommonJS and doesn't have a default export
+      const isPkgDir = 
+        idWithoutQuery.includes('pkg-dir') && 
+        idWithoutQuery.endsWith('index.js')
+      
+      if (isPkgDir) {
+        log(`Intercepting pkg-dir load: ${id} - providing ESM wrapper`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-pkg-dir-intercept',message:'Intercepting and wrapping pkg-dir',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
+        // #endregion
+        // Provide an ESM wrapper for pkg-dir
+        // pkg-dir finds the root directory of a Node.js project - stub for browser
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for pkg-dir (CommonJS)
+// In browser environments, we provide a stub since fs access doesn't work
+
+async function packageDirectory(options) {
+  // In browser environment, return undefined (no package directory found)
+  return undefined;
+}
+
+function packageDirectorySync(options) {
+  // In browser environment, return undefined (no package directory found)
+  return undefined;
+}
+
+export default packageDirectory;
+export { packageDirectory, packageDirectorySync };
+`
+      }
+
+      // Intercept create-require package to provide proper ESM exports
+      // create-require is CommonJS and doesn't have a default export
+      const isCreateRequire = 
+        idWithoutQuery.includes('create-require') && 
+        idWithoutQuery.endsWith('create-require.js')
+      
+      if (isCreateRequire) {
+        log(`Intercepting create-require load: ${id} - providing ESM wrapper`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-create-require-intercept',message:'Intercepting and wrapping create-require',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
+        // #endregion
+        // Provide an ESM wrapper for create-require
+        // create-require exports a function that creates a require function for ESM
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for create-require (CommonJS)
+// In browser environments, we provide a no-op stub since require() doesn't work
+// This stub returns dummy values instead of throwing to allow build-time code to run
+
+function createRequire(filename) {
+  // In browser/Electron renderer, we can't create a real require function
+  // Return a stub that returns undefined/null for everything
+  const req = function require(id) {
+    // Return an empty object as a dummy module
+    // Build-time code that uses require() in a try/catch will handle this
+    console.warn('[seed-vite-plugin] createRequire stub: require("' + id + '") called in browser - returning empty object');
+    return {};
+  };
+  
+  req.resolve = function resolve(id) {
+    // Return the module ID as a "resolved" path
+    // This allows code that just needs the path string to continue
+    return id;
+  };
+  
+  req.resolve.paths = function paths(id) {
+    return [];
+  };
+  
+  req.cache = {};
+  req.extensions = { '.js': null, '.json': null, '.node': null };
+  req.main = undefined;
+  
+  return req;
+}
+
+export default createRequire;
+export { createRequire };
+`
+      }
+
+      // Intercept picomatch package to provide proper ESM exports
+      // picomatch is CommonJS and doesn't have a default export
+      const isPicomatch = 
+        idWithoutQuery.includes('picomatch') && 
+        (idWithoutQuery.endsWith('index.js') || idWithoutQuery.endsWith('picomatch.js'))
+      
+      if (isPicomatch) {
+        log(`Intercepting picomatch load: ${id} - providing ESM wrapper`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-picomatch-intercept',message:'Intercepting and wrapping picomatch',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
+        // #endregion
+        // Provide a minimal ESM wrapper for picomatch
+        // picomatch exports a function with additional methods attached
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for picomatch (CommonJS)
+// Picomatch is a glob pattern matching library
+
+const POSIX_CHARS = {
+  DOT: '.',
+  SLASH: '/',
+  STAR: '*',
+  QMARK: '?',
+};
+
+function isObject(val) {
+  return val !== null && typeof val === 'object' && !Array.isArray(val);
+}
+
+function picomatch(glob, options, returnState = false) {
+  if (Array.isArray(glob)) {
+    const fns = glob.map(g => picomatch(g, options, returnState));
+    return str => {
+      for (const fn of fns) {
+        const result = fn(str);
+        if (result) return result;
+      }
+      return false;
+    };
+  }
+
+  if (typeof glob !== 'string' || glob === '') {
+    throw new TypeError('Expected pattern to be a non-empty string');
+  }
+
+  const opts = options || {};
+  const regex = picomatch.makeRe(glob, opts);
+  
+  const matcher = input => {
+    if (typeof input !== 'string') {
+      throw new TypeError('Expected input to be a string');
+    }
+    return regex.test(input);
+  };
+
+  if (returnState) {
+    matcher.state = { glob, regex };
+  }
+
+  return matcher;
+}
+
+// Static methods
+picomatch.test = (input, regex, options, { glob, posix } = {}) => {
+  if (typeof input !== 'string') {
+    throw new TypeError('Expected input to be a string');
+  }
+  if (input === '') return false;
+  
+  if (regex instanceof RegExp) {
+    return regex.test(input);
+  }
+  
+  return picomatch(regex, options)(input);
+};
+
+picomatch.isMatch = (str, patterns, options) => {
+  return picomatch(patterns, options)(str);
+};
+
+picomatch.match = (list, patterns, options) => {
+  const isMatch = picomatch(patterns, options);
+  return list.filter(item => isMatch(item));
+};
+
+picomatch.makeRe = (pattern, options = {}) => {
+  if (!pattern || typeof pattern !== 'string') {
+    throw new TypeError('Expected a non-empty string');
+  }
+
+  const opts = { ...options };
+  const negated = pattern[0] === '!';
+  if (negated) pattern = pattern.slice(1);
+
+  let source = '';
+  const flags = opts.flags || (opts.nocase ? 'i' : '');
+
+  // Simple pattern to regex conversion
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i];
+    switch (char) {
+      case '*':
+        if (pattern[i + 1] === '*') {
+          source += '.*';
+          i++;
+        } else {
+          source += '[^/]*';
+        }
+        break;
+      case '?':
+        source += '[^/]';
+        break;
+      case '.':
+      case '(':
+      case ')':
+      case '+':
+      case '^':
+      case '$':
+      case '|':
+        source += '\\\\' + char;
+        break;
+      case '[':
+        let j = i + 1;
+        while (j < pattern.length && pattern[j] !== ']') j++;
+        source += pattern.slice(i, j + 1);
+        i = j;
+        break;
+      case '{':
+        let k = i + 1;
+        let depth = 1;
+        while (k < pattern.length && depth > 0) {
+          if (pattern[k] === '{') depth++;
+          if (pattern[k] === '}') depth--;
+          k++;
+        }
+        const group = pattern.slice(i + 1, k - 1).split(',').map(s => s.trim()).join('|');
+        source += '(' + group + ')';
+        i = k - 1;
+        break;
+      default:
+        source += char;
+    }
+  }
+
+  try {
+    const regex = new RegExp('^' + source + '$', flags);
+    regex.negated = negated;
+    return regex;
+  } catch (e) {
+    return /(?:)/;
+  }
+};
+
+picomatch.parse = (pattern, options) => {
+  return { input: pattern, output: picomatch.makeRe(pattern, options).source };
+};
+
+picomatch.scan = (pattern, options) => {
+  const parts = pattern.split('/');
+  let isGlob = false;
+  let base = '';
+  let glob = '';
+  
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (/[*?{}\\[\\]]/.test(part)) {
+      isGlob = true;
+      glob = parts.slice(i).join('/');
+      break;
+    }
+    base += (i > 0 ? '/' : '') + part;
+  }
+  
+  return {
+    prefix: '',
+    input: pattern,
+    start: 0,
+    base: base || '.',
+    glob: glob || pattern,
+    isBrace: pattern.includes('{'),
+    isBracket: pattern.includes('['),
+    isGlob,
+    isExtglob: false,
+    isGlobstar: pattern.includes('**'),
+    negated: pattern[0] === '!',
+  };
+};
+
+picomatch.compileRe = picomatch.makeRe;
+picomatch.toRegex = picomatch.makeRe;
+
+// Constants
+picomatch.constants = {
+  POSIX_CHARS,
+  MAX_LENGTH: 65536,
+  REGEX_SPECIAL_CHARS: /[-[\\]{}()*+?.,\\\\^$|#\\s]/g,
+};
+
+export default picomatch;
+export { picomatch };
+export const isMatch = picomatch.isMatch;
+export const match = picomatch.match;
+export const makeRe = picomatch.makeRe;
+export const parse = picomatch.parse;
+export const scan = picomatch.scan;
+export const test = picomatch.test;
+export const compileRe = picomatch.compileRe;
+export const toRegex = picomatch.toRegex;
+export const constants = picomatch.constants;
+`
+      }
+
+      // Intercept node-stdlib-browser/helpers/rollup/plugin.js to provide ESM wrapper
+      // This is a CommonJS module that exports handleCircularDependancyWarning via module.exports
+      // vite-plugin-node-polyfills imports it with named import syntax, causing the error:
+      // "does not provide an export named 'handleCircularDependancyWarning'"
+      const isNodeStdlibBrowserRollupPlugin = 
+        idWithoutQuery.includes('node-stdlib-browser') && 
+        idWithoutQuery.includes('helpers/rollup/plugin')
+      
+      if (isNodeStdlibBrowserRollupPlugin) {
+        log(`Intercepting node-stdlib-browser rollup plugin load: ${id} - providing ESM wrapper`)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-node-stdlib-browser-rollup-intercept',message:'Intercepting and wrapping node-stdlib-browser rollup plugin',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
+        // #endregion
+        // Provide an ESM wrapper with the handleCircularDependancyWarning export
+        // This function is used by vite-plugin-node-polyfills to suppress circular dependency warnings
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for node-stdlib-browser/helpers/rollup/plugin.js (CommonJS)
+// Original exports: module.exports.handleCircularDependancyWarning
+
+/**
+ * Rollup warning handler that suppresses circular dependency warnings
+ * from known packages that have safe circular dependencies.
+ */
+export function handleCircularDependancyWarning(warning, warningHandler) {
+  const packagesWithCircularDependencies = [
+    'util/',
+    'assert/',
+    'readable-stream/',
+    'crypto-browserify/'
+  ];
+  if (
+    !(
+      warning.code === 'CIRCULAR_DEPENDENCY' &&
+      packagesWithCircularDependencies.some((modulePath) => {
+        if (typeof warning.importer !== 'string') {
+          return false;
+        }
+        return warning.importer.includes(modulePath);
+      })
+    )
+  ) {
+    warningHandler(warning);
+  }
+}
+
+export default { handleCircularDependancyWarning };
+`
+      }
+
+      // Intercept path-browserify package to provide proper ESM exports
+      // path-browserify is CommonJS and doesn't have named exports
+      const isPathBrowserify = 
+        idWithoutQuery.includes('path-browserify') && 
+        (idWithoutQuery.endsWith('index.js') || idWithoutQuery.endsWith('path-browserify.js'))
+      
+      if (isPathBrowserify) {
+        log(`Intercepting path-browserify load: ${id} - providing ESM wrapper with named exports`)
+        // Provide an ESM wrapper that exports all path functions as named exports
+        // path-browserify is CommonJS, so we need to create the named exports manually
+        return `
+// Intercepted by seed-vite-plugin - ESM wrapper for path-browserify (CommonJS)
+// Import the CommonJS module and re-export with proper ESM named exports
+
+// path-browserify implementation (inline to avoid circular imports)
+// Based on path-browserify but adapted for ESM
+
+function assertPath(path) {
+  if (typeof path !== 'string') {
+    throw new TypeError('Path must be a string. Received ' + JSON.stringify(path));
+  }
+}
+
+function normalizeStringPosix(path, allowAboveRoot) {
+  var res = '';
+  var lastSegmentLength = 0;
+  var lastSlash = -1;
+  var dots = 0;
+  var code;
+  for (var i = 0; i <= path.length; ++i) {
+    if (i < path.length)
+      code = path.charCodeAt(i);
+    else if (code === 47)
+      break;
+    else
+      code = 47;
+    if (code === 47) {
+      if (lastSlash === i - 1 || dots === 1) {
+        // NOOP
+      } else if (lastSlash !== i - 1 && dots === 2) {
+        if (res.length < 2 || lastSegmentLength !== 2 || res.charCodeAt(res.length - 1) !== 46 || res.charCodeAt(res.length - 2) !== 46) {
+          if (res.length > 2) {
+            var lastSlashIndex = res.lastIndexOf('/');
+            if (lastSlashIndex !== res.length - 1) {
+              if (lastSlashIndex === -1) {
+                res = '';
+                lastSegmentLength = 0;
+              } else {
+                res = res.slice(0, lastSlashIndex);
+                lastSegmentLength = res.length - 1 - res.lastIndexOf('/');
+              }
+              lastSlash = i;
+              dots = 0;
+              continue;
+            }
+          } else if (res.length === 2 || res.length === 1) {
+            res = '';
+            lastSegmentLength = 0;
+            lastSlash = i;
+            dots = 0;
+            continue;
+          }
+        }
+        if (allowAboveRoot) {
+          if (res.length > 0)
+            res += '/..';
+          else
+            res = '..';
+          lastSegmentLength = 2;
+        }
+      } else {
+        if (res.length > 0)
+          res += '/' + path.slice(lastSlash + 1, i);
+        else
+          res = path.slice(lastSlash + 1, i);
+        lastSegmentLength = i - lastSlash - 1;
+      }
+      lastSlash = i;
+      dots = 0;
+    } else if (code === 46 && dots !== -1) {
+      ++dots;
+    } else {
+      dots = -1;
+    }
+  }
+  return res;
+}
+
+function _format(sep, pathObject) {
+  var dir = pathObject.dir || pathObject.root;
+  var base = pathObject.base || (pathObject.name || '') + (pathObject.ext || '');
+  if (!dir) {
+    return base;
+  }
+  if (dir === pathObject.root) {
+    return dir + base;
+  }
+  return dir + sep + base;
+}
+
+export const sep = '/';
+export const delimiter = ':';
+
+export function resolve() {
+  var resolvedPath = '';
+  var resolvedAbsolute = false;
+  var cwd;
+
+  for (var i = arguments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
+    var path;
+    if (i >= 0)
+      path = arguments[i];
+    else {
+      if (cwd === undefined)
+        cwd = '/';
+      path = cwd;
+    }
+
+    assertPath(path);
+
+    if (path.length === 0) {
+      continue;
+    }
+
+    resolvedPath = path + '/' + resolvedPath;
+    resolvedAbsolute = path.charCodeAt(0) === 47;
+  }
+
+  resolvedPath = normalizeStringPosix(resolvedPath, !resolvedAbsolute);
+
+  if (resolvedAbsolute) {
+    if (resolvedPath.length > 0)
+      return '/' + resolvedPath;
+    else
+      return '/';
+  } else if (resolvedPath.length > 0) {
+    return resolvedPath;
+  } else {
+    return '.';
+  }
+}
+
+export function normalize(path) {
+  assertPath(path);
+
+  if (path.length === 0) return '.';
+
+  var isAbsolute = path.charCodeAt(0) === 47;
+  var trailingSeparator = path.charCodeAt(path.length - 1) === 47;
+
+  path = normalizeStringPosix(path, !isAbsolute);
+
+  if (path.length === 0 && !isAbsolute) path = '.';
+  if (path.length > 0 && trailingSeparator) path += '/';
+
+  if (isAbsolute) return '/' + path;
+  return path;
+}
+
+export function isAbsolute(path) {
+  assertPath(path);
+  return path.length > 0 && path.charCodeAt(0) === 47;
+}
+
+export function join() {
+  if (arguments.length === 0)
+    return '.';
+  var joined;
+  for (var i = 0; i < arguments.length; ++i) {
+    var arg = arguments[i];
+    assertPath(arg);
+    if (arg.length > 0) {
+      if (joined === undefined)
+        joined = arg;
+      else
+        joined += '/' + arg;
+    }
+  }
+  if (joined === undefined)
+    return '.';
+  return normalize(joined);
+}
+
+export function relative(from, to) {
+  assertPath(from);
+  assertPath(to);
+
+  if (from === to) return '';
+
+  from = resolve(from);
+  to = resolve(to);
+
+  if (from === to) return '';
+
+  var fromStart = 1;
+  for (; fromStart < from.length; ++fromStart) {
+    if (from.charCodeAt(fromStart) !== 47)
+      break;
+  }
+  var fromEnd = from.length;
+  var fromLen = fromEnd - fromStart;
+
+  var toStart = 1;
+  for (; toStart < to.length; ++toStart) {
+    if (to.charCodeAt(toStart) !== 47)
+      break;
+  }
+  var toEnd = to.length;
+  var toLen = toEnd - toStart;
+
+  var length = fromLen < toLen ? fromLen : toLen;
+  var lastCommonSep = -1;
+  var i = 0;
+  for (; i <= length; ++i) {
+    if (i === length) {
+      if (toLen > length) {
+        if (to.charCodeAt(toStart + i) === 47) {
+          return to.slice(toStart + i + 1);
+        } else if (i === 0) {
+          return to.slice(toStart + i);
+        }
+      } else if (fromLen > length) {
+        if (from.charCodeAt(fromStart + i) === 47) {
+          lastCommonSep = i;
+        } else if (i === 0) {
+          lastCommonSep = 0;
+        }
+      }
+      break;
+    }
+    var fromCode = from.charCodeAt(fromStart + i);
+    var toCode = to.charCodeAt(toStart + i);
+    if (fromCode !== toCode)
+      break;
+    else if (fromCode === 47)
+      lastCommonSep = i;
+  }
+
+  var out = '';
+  for (i = fromStart + lastCommonSep + 1; i <= fromEnd; ++i) {
+    if (i === fromEnd || from.charCodeAt(i) === 47) {
+      if (out.length === 0)
+        out += '..';
+      else
+        out += '/..';
+    }
+  }
+
+  if (out.length > 0)
+    return out + to.slice(toStart + lastCommonSep);
+  else {
+    toStart += lastCommonSep;
+    if (to.charCodeAt(toStart) === 47)
+      ++toStart;
+    return to.slice(toStart);
+  }
+}
+
+export function dirname(path) {
+  assertPath(path);
+  if (path.length === 0) return '.';
+  var code = path.charCodeAt(0);
+  var hasRoot = code === 47;
+  var end = -1;
+  var matchedSlash = true;
+  for (var i = path.length - 1; i >= 1; --i) {
+    code = path.charCodeAt(i);
+    if (code === 47) {
+      if (!matchedSlash) {
+        end = i;
+        break;
+      }
+    } else {
+      matchedSlash = false;
+    }
+  }
+
+  if (end === -1) return hasRoot ? '/' : '.';
+  if (hasRoot && end === 1) return '//';
+  return path.slice(0, end);
+}
+
+export function basename(path, ext) {
+  if (ext !== undefined && typeof ext !== 'string') throw new TypeError('"ext" argument must be a string');
+  assertPath(path);
+
+  var start = 0;
+  var end = -1;
+  var matchedSlash = true;
+  var i;
+
+  if (ext !== undefined && ext.length > 0 && ext.length <= path.length) {
+    if (ext.length === path.length && ext === path) return '';
+    var extIdx = ext.length - 1;
+    var firstNonSlashEnd = -1;
+    for (i = path.length - 1; i >= 0; --i) {
+      var code = path.charCodeAt(i);
+      if (code === 47) {
+        if (!matchedSlash) {
+          start = i + 1;
+          break;
+        }
+      } else {
+        if (firstNonSlashEnd === -1) {
+          matchedSlash = false;
+          firstNonSlashEnd = i + 1;
+        }
+        if (extIdx >= 0) {
+          if (code === ext.charCodeAt(extIdx)) {
+            if (--extIdx === -1) {
+              end = i;
+            }
+          } else {
+            extIdx = -1;
+            end = firstNonSlashEnd;
+          }
+        }
+      }
+    }
+
+    if (start === end) end = firstNonSlashEnd;
+    else if (end === -1) end = path.length;
+    return path.slice(start, end);
+  } else {
+    for (i = path.length - 1; i >= 0; --i) {
+      if (path.charCodeAt(i) === 47) {
+        if (!matchedSlash) {
+          start = i + 1;
+          break;
+        }
+      } else if (end === -1) {
+        matchedSlash = false;
+        end = i + 1;
+      }
+    }
+
+    if (end === -1) return '';
+    return path.slice(start, end);
+  }
+}
+
+export function extname(path) {
+  assertPath(path);
+  var startDot = -1;
+  var startPart = 0;
+  var end = -1;
+  var matchedSlash = true;
+  var preDotState = 0;
+  for (var i = path.length - 1; i >= 0; --i) {
+    var code = path.charCodeAt(i);
+    if (code === 47) {
+      if (!matchedSlash) {
+        startPart = i + 1;
+        break;
+      }
+      continue;
+    }
+    if (end === -1) {
+      matchedSlash = false;
+      end = i + 1;
+    }
+    if (code === 46) {
+      if (startDot === -1)
+        startDot = i;
+      else if (preDotState !== 1)
+        preDotState = 1;
+    } else if (startDot !== -1) {
+      preDotState = -1;
+    }
+  }
+
+  if (startDot === -1 || end === -1 ||
+      preDotState === 0 ||
+      (preDotState === 1 && startDot === end - 1 && startDot === startPart + 1)) {
+    return '';
+  }
+  return path.slice(startDot, end);
+}
+
+export function format(pathObject) {
+  if (pathObject === null || typeof pathObject !== 'object') {
+    throw new TypeError('The "pathObject" argument must be of type Object. Received type ' + typeof pathObject);
+  }
+  return _format('/', pathObject);
+}
+
+export function parse(path) {
+  assertPath(path);
+
+  var ret = { root: '', dir: '', base: '', ext: '', name: '' };
+  if (path.length === 0) return ret;
+  var code = path.charCodeAt(0);
+  var isAbsolute = code === 47;
+  var start;
+  if (isAbsolute) {
+    ret.root = '/';
+    start = 1;
+  } else {
+    start = 0;
+  }
+  var startDot = -1;
+  var startPart = 0;
+  var end = -1;
+  var matchedSlash = true;
+  var i = path.length - 1;
+  var preDotState = 0;
+
+  for (; i >= start; --i) {
+    code = path.charCodeAt(i);
+    if (code === 47) {
+      if (!matchedSlash) {
+        startPart = i + 1;
+        break;
+      }
+      continue;
+    }
+    if (end === -1) {
+      matchedSlash = false;
+      end = i + 1;
+    }
+    if (code === 46) {
+      if (startDot === -1) startDot = i;
+      else if (preDotState !== 1) preDotState = 1;
+    } else if (startDot !== -1) {
+      preDotState = -1;
+    }
+  }
+
+  if (startDot === -1 || end === -1 ||
+      preDotState === 0 ||
+      (preDotState === 1 && startDot === end - 1 && startDot === startPart + 1)) {
+    if (end !== -1) {
+      if (startPart === 0 && isAbsolute) ret.base = ret.name = path.slice(1, end);
+      else ret.base = ret.name = path.slice(startPart, end);
+    }
+  } else {
+    if (startPart === 0 && isAbsolute) {
+      ret.name = path.slice(1, startDot);
+      ret.base = path.slice(1, end);
+    } else {
+      ret.name = path.slice(startPart, startDot);
+      ret.base = path.slice(startPart, end);
+    }
+    ret.ext = path.slice(startDot, end);
+  }
+
+  if (startPart > 0) ret.dir = path.slice(0, startPart - 1);
+  else if (isAbsolute) ret.dir = '/';
+
+  return ret;
+}
+
+// posix is the same as the main module for path-browserify
+export const posix = {
+  resolve,
+  normalize,
+  isAbsolute,
+  join,
+  relative,
+  dirname,
+  basename,
+  extname,
+  format,
+  parse,
+  sep,
+  delimiter,
+};
+
+// win32 is stubbed to use posix in browser
+export const win32 = posix;
+
+// Default export with all functions
+const path = {
+  resolve,
+  normalize,
+  isAbsolute,
+  join,
+  relative,
+  dirname,
+  basename,
+  extname,
+  format,
+  parse,
+  sep,
+  delimiter,
+  posix,
+  win32,
+};
+
+export default path;
+`
+      }
+
+      // Intercept path polyfill from vite-plugin-node-polyfills that uses require()
+      // This prevents "Dynamic require of path is not supported" errors
+      // Only intercept vite's optimized path polyfill, not path-browserify itself
+      // Match various patterns: .vite-electron-renderer/path.mjs, .vite/deps/path.mjs, etc.
+      // Be very permissive to catch all cases
+      const isPathPolyfill = 
+        // Must NOT be path-browserify itself (to avoid circular references)
+        !idWithoutQuery.includes('path-browserify') &&
+        // Must contain path and be in vite optimization directories
+        idWithoutQuery.includes('path') &&
+        (
+          // Vite electron renderer optimized path (most common case) - be very specific
+          (idWithoutQuery.includes('.vite-electron-renderer') && idWithoutQuery.includes('path.mjs')) ||
+          // Vite deps optimized path
+          (idWithoutQuery.includes('.vite/deps') && idWithoutQuery.includes('path.mjs')) ||
+          // Vite node polyfills path
+          (idWithoutQuery.includes('vite/node-polyfills') && idWithoutQuery.includes('path')) ||
+          // Any path.mjs in node_modules/.vite directories (but not path-browserify)
+          (idWithoutQuery.includes('node_modules/.vite') && idWithoutQuery.endsWith('path.mjs')) ||
+          // Catch the exact pattern from the error: node_modules/.vite-electron-renderer/path.mjs
+          (idWithoutQuery.includes('node_modules') && idWithoutQuery.includes('.vite-electron-renderer') && idWithoutQuery.includes('path'))
+        )
+      
+      if (isPathPolyfill) {
+        log(`Intercepting load of path polyfill: ${id} - using path-browserify`)
+        // Provide an ESM-compatible re-export from path-browserify
+        // This prevents "Dynamic require of path is not supported" errors
+        return `
+// Intercepted by seed-vite-plugin to prevent "Dynamic require of path is not supported" errors
+// Re-export from path-browserify which is ESM-compatible
+// Note: path-browserify is CommonJS, so we use namespace import
+import * as pathBrowserify from 'path-browserify';
+export default pathBrowserify;
+export const { basename, dirname, extname, format, isAbsolute, join, normalize, parse, relative, resolve, sep, delimiter, posix, win32 } = pathBrowserify;
+`
+      }
+      
+      // Debug: log ALL path-related files in vite directories to help diagnose
+      if (idWithoutQuery.includes('path') && !idWithoutQuery.includes('path-browserify') && (idWithoutQuery.includes('.vite') || idWithoutQuery.includes('node_modules/.vite'))) {
+        log(`[debug] Path-related file in vite dir: ${id} (not intercepted - pattern didn't match)`)
+      }
+
+      return null
+    },
+
+    handleHotUpdate({ file, server }) {
+      // Invalidate modules that import fs when the plugin file changes
+      // This helps with HMR scenarios where the cache might be stale
+      if (file.includes('node-stdlib-browser') && file.includes('empty')) {
+        log(`Invalidating modules due to fs polyfill change: ${file}`)
+        // Let Vite handle the invalidation naturally
+        return undefined
+      }
+      return undefined
+    },
+
+    transform(code, id) {
+      // #region agent log
+      // Debug: Track node-stdlib-browser/helpers/rollup module transform
+      const idWithoutQueryTransform = id.split('?')[0]
+      if (idWithoutQueryTransform.includes('node-stdlib-browser') && idWithoutQueryTransform.includes('rollup')) {
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-entry',message:'Transform called for node-stdlib-browser rollup module',data:{id,codeLength:code.length,hasModuleExports:code.includes('module.exports'),codeSnippet:code.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
+      }
+      // #endregion
+      
+      // === HELPER FUNCTION FOR EXISTING TRANSFORMATIONS ===
+      // Handles path and fs import transformations for non-Vite-optimized files
+      const handleExistingTransformations = (codeToTransform: string, fileId: string): { code: string; map: null } | null => {
+        // Handle static imports of path (e.g., import path from 'path')
+        // This is needed because path-browserify is CommonJS and doesn't have a default export
+        // We need to convert default imports to namespace imports
+        let transformedCode = codeToTransform
+        let hasPathImports = false
+        
+        // Transform: import path from 'path' -> import * as path from 'path-browserify'
+        // Also handle: import path from 'node:path' -> import * as path from 'path-browserify'
+        const defaultPathImportPattern = /import\s+(\w+)\s+from\s+['"`](path|node:path)['"`]/g
+        if (defaultPathImportPattern.test(codeToTransform)) {
+          hasPathImports = true
+          transformedCode = transformedCode.replace(defaultPathImportPattern, (match, importName) => {
+            log(`Transforming default path import to namespace import: ${match}`)
+            return `import * as ${importName} from 'path-browserify'`
+          })
+        }
+        
+        // Transform: import * as path from 'path' -> import * as path from 'path-browserify'
+        const namespacePathImportPattern = /import\s+\*\s+as\s+(\w+)\s+from\s+['"`](path|node:path)['"`]/g
+        if (namespacePathImportPattern.test(transformedCode)) {
+          hasPathImports = true
+          transformedCode = transformedCode.replace(namespacePathImportPattern, (match, importName) => {
+            return `import * as ${importName} from 'path-browserify'`
+          })
+        }
+
+        // Handle static imports of fs (e.g., import fs from 'fs' or import * as fs from 'fs')
+        // This is needed because aliases might not catch all cases, especially in bundled code
+        let hasFsImports = false
+
+        // Transform: import fs from 'fs' or import * as fs from 'fs'
+        const staticFsImportPattern = /import\s+(\w+|\*\s+as\s+\w+)\s+from\s+['"`](fs|node:fs)['"`]/g
+        const fsImportMatches = transformedCode.match(staticFsImportPattern)
+        if (fsImportMatches) {
+          hasFsImports = true
+          transformedCode = transformedCode.replace(staticFsImportPattern, (match) => {
+            return match.replace(/['"`](fs|node:fs)['"`]/, "'@zenfs/core'")
+          })
+        }
+
+        // Transform: import * as fs from 'fs/promises' or import fs from 'fs/promises'
+        const staticFsPromisesImportPattern = /import\s+(\w+|\*\s+as\s+\w+)\s+from\s+['"`](fs\/promises|node:fs\/promises)['"`]/g
+        const fsPromisesMatches = transformedCode.match(staticFsPromisesImportPattern)
+        if (fsPromisesMatches) {
+          hasFsImports = true
+          transformedCode = transformedCode.replace(staticFsPromisesImportPattern, (match) => {
+            return match.replace(/['"`](fs\/promises|node:fs\/promises)['"`]/, "'@zenfs/core/promises'")
+          })
+        }
+
+        // Transform side-effect imports: import 'fs' or import 'node:fs'
+        const sideEffectFsImportPattern = /import\s+['"`](fs|node:fs)['"`]/g
+        const sideEffectMatches = transformedCode.match(sideEffectFsImportPattern)
+        if (sideEffectMatches) {
+          hasFsImports = true
+          transformedCode = transformedCode.replace(sideEffectFsImportPattern, (match) => {
+            return match.replace(/['"`](fs|node:fs)['"`]/, "'@zenfs/core'")
+          })
+        }
+
+        // Handle dynamic imports of fs
+        const dynamicFsImportPattern = /import\s*\(\s*['"`](fs|node:fs|fs\/promises|node:fs\/promises)['"`]\s*\)/g
+        
+        if (dynamicFsImportPattern.test(transformedCode)) {
+          log(`Transforming dynamic fs imports in: ${fileId}`)
+          
+          transformedCode = transformedCode.replace(dynamicFsImportPattern, (match, moduleName) => {
+            const isPromise = moduleName.includes('promises')
+            const replacement = isPromise ? '@zenfs/core/promises' : '@zenfs/core'
+            return `import('${replacement}')`
+          })
+          hasFsImports = true
+        }
+
+        if (hasFsImports || hasPathImports) {
+          if (hasFsImports) {
+            log(`Transforming static fs imports in: ${fileId}`)
+          }
+          if (hasPathImports) {
+            log(`Transforming path imports to use path-browserify in: ${fileId}`)
+          }
+          return {
+            code: transformedCode,
+            map: null,
+          }
+        }
+
+        return null
+      }
+
+      // === EARLY RETURNS ===
+      
+      // Skip transforming our own plugin code to avoid circular issues
+      if (id.includes('seed-protocol-sdk') && (id.includes('vite/index') || id.includes('dist/vite'))) {
+        return null
+      }
+
+      // Fix SDK export patterns for better Rollup compatibility
+      // Transform: const waitForEvent = ...; export { waitForEvent };
+      // To: export const waitForEvent = ...;
+      // This helps Rollup's static analysis detect the export
+      if (id.includes('seed-protocol-sdk') && id.includes('events/index.js')) {
+        // Check if the file uses the const + separate export pattern
+        if (code.includes('const waitForEvent =') && code.includes('export { waitForEvent }')) {
+          if (debug) {
+            log(`[transform] Fixing export pattern in SDK events module: ${id}`)
+          }
+          // Transform: const waitForEvent = ...; export { waitForEvent };
+          // To: export const waitForEvent = ...;
+          const transformedCode = code
+            .replace(/const waitForEvent =/g, 'export const waitForEvent =')
+            .replace(/export \{ waitForEvent \};?\s*/g, '')
+          return {
+            code: transformedCode,
+            map: null,
+          }
+        }
+      }
+
+      // Note: Buffer files are now fully handled by the load hook which provides a complete
+      // self-contained Buffer polyfill. We no longer need to transform buffer files here.
+      // The load hook intercepts buffer.mjs (including Vite-optimized ones) and replaces
+      // them with our polyfill before the code even reaches the transform stage.
+
+      // === GENERIC REQUIRE() TRANSFORMER ===
+      // Only runs if transformRequires option is enabled (default: true)
+      
+      if (transformRequires) {
+        // Merge user-provided ESM-safe modules with defaults
+        const allEsmSafeModules = [...DEFAULT_ESM_SAFE_MODULES, ...esmSafeModules]
+        
+        // Skip known ESM-safe modules
+        if (allEsmSafeModules.some(mod => id.includes(mod))) {
+          // Still apply existing transformations for these files if they have path/fs imports
+          return handleExistingTransformations(code, id)
+        }
+        
+        // Process Vite-optimized files and typebox CJS files
+        // Vite-optimized files are pre-bundled and may contain unconverted require() calls
+        // Typebox CJS files need require() transformation when bundled into production output
+        const isViteOptimized = 
+          id.includes('.vite/deps') || 
+          id.includes('.vite-electron-renderer') ||
+          id.includes('node_modules/.vite')
+        
+        // Also process typebox CJS files (they use require() internally)
+        const isTypeboxCjs = id.includes('@sinclair/typebox/build/cjs')
+        
+        // In production builds, also process bundled files that contain require() calls
+        // This handles cases where CJS code (like typebox) is bundled into the final output
+        // A bundled file is any file that's not in node_modules or .vite directories
+        const isProduction = config?.mode === 'production'
+        const isBundledOutput = isProduction && 
+          !id.includes('node_modules') && 
+          !id.includes('.vite')
+        
+        // #region agent log
+        // Debug: Track require transformer execution
+        if (isProduction && (isBundledOutput || id.includes('index-') || id.includes('dist-electron'))) {
+          fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-require-check',message:'Checking require transformer conditions',data:{id:id.substring(0,200),isViteOptimized,isTypeboxCjs,isBundledOutput,isProduction,hasRequire:code.includes('require(')},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H3'})}).catch(()=>{});
+        }
+        // #endregion
+        
+        if (isViteOptimized || isTypeboxCjs || isBundledOutput) {
+          // Pattern matches: require('module'), require("module"), require(`module`)
+          // Also matches minified versions: require('module'), require("module")
+          // Captures the module name in group 2
+          // Does NOT match: require(variable), require('./relative') [relative is skipped later]
+          // More flexible pattern to catch minified code: require('x'),require("x"),require(`x`)
+          const requirePattern = /\brequire\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g
+          
+          // Test if there are any require() calls
+          const hasRequireCalls = requirePattern.test(code)
+          
+          // #region agent log
+          // Debug: Track require pattern matching
+          if (isBundledOutput && hasRequireCalls) {
+            fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-require-found',message:'Found require() calls in bundled output',data:{id:id.substring(0,200),codeSample:code.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H3'})}).catch(()=>{});
+          }
+          // #endregion
+          
+          if (hasRequireCalls) {
+            // Reset regex for collection pass
+            requirePattern.lastIndex = 0
+            
+            // Merge user-provided module replacements with defaults
+            const allModuleReplacements = { ...DEFAULT_MODULE_REPLACEMENTS, ...moduleReplacements }
+            
+            // Collect all require() calls
+            const requires = new Map<string, { varName: string; replacement: string }>()
+            let match
+            
+            while ((match = requirePattern.exec(code)) !== null) {
+              const moduleName = match[2]
+              
+              // Skip relative requires (these are handled by Vite's module resolution)
+              if (moduleName.startsWith('.') || moduleName.startsWith('/')) {
+                continue
+              }
+              
+              // Skip if we've already seen this module
+              if (requires.has(moduleName)) {
+                continue
+              }
+              
+              // Get replacement module name (use mapping if available, otherwise use original)
+              const replacement = allModuleReplacements[moduleName] || moduleName
+              
+              // Generate safe variable name (replace non-alphanumeric chars with underscore)
+              const varName = `__require_${moduleName.replace(/[^a-zA-Z0-9]/g, '_')}`
+              
+              requires.set(moduleName, { varName, replacement })
+            }
+            
+            // Only transform if we found non-relative requires
+            if (requires.size > 0) {
+              const context = isBundledOutput ? 'bundled output' : (isTypeboxCjs ? 'typebox CJS' : 'Vite-optimized')
+              log(`[require-transformer] Transforming ${requires.size} require() calls in ${context} file: ${id}`)
+              
+              // Build import statements to prepend
+              const imports = Array.from(requires.entries())
+                .map(([originalMod, { varName, replacement }]) => {
+                  log(`  - require('${originalMod}') -> import * as ${varName} from '${replacement}'`)
+                  return `import * as ${varName} from '${replacement}';`
+                })
+                .join('\n')
+              
+              // Replace require() calls with the imported variable names
+              let transformed = code
+              for (const [mod, { varName }] of requires) {
+                // Escape special regex characters in module name
+                const escapedMod = mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                const pattern = new RegExp(
+                  `\\brequire\\s*\\(\\s*['"\`]${escapedMod}['"\`]\\s*\\)`,
+                  'g'
+                )
+                transformed = transformed.replace(pattern, varName)
+              }
+              
+              // Prepend imports to the transformed code
+              const finalCode = imports + '\n' + transformed
+              
+              // Also apply existing transformations to handle any static imports
+              const existingResult = handleExistingTransformations(finalCode, id)
+              if (existingResult) {
+                return existingResult
+              }
+              
+              return {
+                code: finalCode,
+                map: null,
+              }
+            }
+          }
+        }
+      }
+
+      // === FALLBACK: EXISTING TRANSFORMATIONS ===
+      // For non-Vite-optimized files or when require() transformer is disabled
+      
+      // Skip node_modules except for specific problematic packages
+      if (id.includes('node_modules') && !id.includes('@seedprotocol')) {
+        return null
+      }
+
+      // Apply existing path/fs import transformations
+      return handleExistingTransformations(code, id)
+    },
+
+    transformIndexHtml(html) {
+      if (!autoInit) return html
+
+      // Inject ZenFS initialization script before other scripts
+      // Use a data URL approach or let the consuming app handle initialization
+      // The issue is that bare module specifiers in HTML scripts need to be resolved by Vite
+      // We'll use a script that Vite can process, but we need to ensure @zenfs/core is available
+      const debugFlag = debug ? 'true' : 'false'
+      // Check if we're in Electron (where fs might be available natively)
+      // Check multiple ways since nodeIntegration might be disabled
+      const isElectronCheck = `
+  // Check if we're in Electron (renderer or main process)
+  // Try multiple detection methods since nodeIntegration might be disabled
+  const isElectron = 
+    (typeof process !== 'undefined' && process.versions && process.versions.electron) ||
+    (typeof window !== 'undefined' && window.process && window.process.versions && window.process.versions.electron) ||
+    (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('Electron'));
+  const isElectronRenderer = typeof window !== 'undefined' && isElectron;
+`
+      const initScript = `
+<script type="module">
+  ${isElectronCheck}
+  // Try to import @zenfs/core - if it fails, the consuming app needs to install it
+  // or handle initialization themselves
+  // In Electron, fs might be available natively, so ZenFS might not be needed
+  (async () => {
+    // Skip auto-init in Electron main process (where Node.js fs is available)
+    if (typeof window === 'undefined') {
+      if (${debugFlag}) {
+        console.log('[seed-protocol] Skipping ZenFS auto-init in non-browser environment');
+      }
+      return;
+    }
+    
+    // In Electron renderer, try to initialize ZenFS, but don't error if it fails
+    // (native fs might be available via nodeIntegration)
+    try {
+      const { configure } = await import('@zenfs/core');
+      const { IndexedDB } = await import('@zenfs/dom');
+      
+      window.__seedFsReady = configure({
+        mounts: {
+          '/': IndexedDB,
+        },
+      }).then(() => {
+        if (${debugFlag}) {
+          console.log('[seed-protocol] ZenFS initialized');
+        }
+      }).catch(err => {
+        console.error('[seed-protocol] ZenFS initialization failed:', err);
+      });
+    } catch (err) {
+      // In Electron renderer, fs might be available natively, so this is not necessarily an error
+      // Never show warnings in Electron - silently fail since native fs might be available
+      // Only show warnings in non-Electron environments when debug is enabled
+      if (!isElectronRenderer) {
+        if (${debugFlag}) {
+          console.warn('[seed-protocol] Could not auto-initialize ZenFS:', err);
+          console.warn('[seed-protocol] Make sure @zenfs/core and @zenfs/dom are installed');
+        }
+      }
+      // In Electron renderer, don't log anything - native fs is likely available
+    }
+  })();
+</script>`
+
+      // Insert before closing head tag or at the start of body
+      if (html.includes('</head>')) {
+        return html.replace('</head>', `${initScript}\n</head>`)
+      }
+      
+      return html.replace('<body>', `<body>\n${initScript}`)
+    },
+
+    buildEnd() {
+      if (debug && interceptedResolutions.size > 0) {
+        log('Summary of intercepted resolutions:')
+        for (const [source, target] of interceptedResolutions) {
+          log(`  ${source} -> ${target}`)
+        }
+      }
+    },
+  }
+
+  /**
+   * Cleanup plugin: catches any remaining fs references in the final bundle
+   */
+  const cleanupPlugin: Plugin = {
+    name: 'seed-protocol:cleanup',
+    enforce: 'post',
+    apply: 'build',
+
+    // Transform hook to catch node:fs and node:crypto imports that weren't caught earlier
+    // This is especially important for packages like drizzle-orm/migrator that import these
+    renderChunk(code, chunk, options) {
+      // Check if this chunk contains require() calls (which will fail in browser/Electron renderer)
+      const requireMatches = code.match(/\brequire\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g) || []
+      const hasRequire = requireMatches.length > 0
+      
+      // Check if this chunk contains node:fs or node:crypto imports that need transformation
+      const hasNodeFs = /from\s*['"`]node:fs['"`]/.test(code) || /import\s+.*\s+from\s*['"`]node:fs['"`]/.test(code)
+      const hasNodeCrypto = /from\s*['"`]node:crypto['"`]/.test(code)
+      
+      if (hasRequire) {
+        // #region agent log
+        // Debug: Track require() calls in final bundle chunks
+        const requireModules = requireMatches.map(m => {
+          const match = m.match(/['"`]([^'"`]+)['"`]/)
+          return match ? match[1] : 'unknown'
+        })
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-renderChunk-require',message:'Found require() calls in final bundle chunk',data:{chunkName:chunk.name,requireCount:requireMatches.length,requireModules,codeSample:code.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H4'})}).catch(()=>{});
+        // #endregion
+        log(`[cleanup] WARNING: Found ${requireMatches.length} require() call(s) in chunk ${chunk.name}: ${requireModules.join(', ')}`)
+      }
+      
+      if (hasNodeFs || hasNodeCrypto) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-renderChunk',message:'Transforming node: imports in renderChunk',data:{chunkName:chunk.name,hasNodeFs,hasNodeCrypto},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
+        let transformedCode = code
+        
+        // Replace node:fs imports with @zenfs/core
+        if (hasNodeFs) {
+          // Match: import xxx from "node:fs" or import xxx from 'node:fs'
+          transformedCode = transformedCode.replace(
+            /import\s+(\w+|\*\s+as\s+\w+|\{[^}]+\})\s+from\s*['"`]node:fs['"`]/g,
+            (match, importPart) => {
+              log(`[cleanup] Transforming node:fs import in chunk ${chunk.name}: ${match}`)
+              return `import ${importPart} from '@zenfs/core'`
+            }
+          )
+        }
+        
+        // Replace node:crypto imports with a polyfill (crypto-browserify or webcrypto)
+        // For now, we'll replace with a dynamic import that can be polyfilled
+        if (hasNodeCrypto) {
+          // For crypto, we can't easily polyfill, so just log a warning
+          // The user should configure vite-plugin-node-polyfills with include: ['crypto']
+          log(`[cleanup] Warning: node:crypto import found in chunk ${chunk.name}. Configure vite-plugin-node-polyfills with include: ['crypto'] for browser support.`)
+        }
+        
+        if (transformedCode !== code) {
+          return {
+            code: transformedCode,
+            map: null, // Ideally we'd generate a source map, but for simplicity we return null
+          }
+        }
+      }
+      
+      return null // No transformation needed
+    },
+
+    generateBundle(options, bundle) {
+      for (const [fileName, chunk] of Object.entries(bundle)) {
+        if (chunk.type !== 'chunk') continue
+
+        // Check for any remaining problematic fs and buffer references
+        // We need to check line by line to avoid false positives from transformed imports
+        const lines = chunk.code.split('\n')
+        let hasIssue = false
+        const problematicLines: Array<{ line: number; content: string }> = []
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          
+          // Skip if this line contains transformed polyfill imports
+          if (line.includes('@zenfs') || line.includes('memfs') || line.includes('browserfs')) {
+            continue
+          }
+
+          // Check for problematic patterns
+          const patterns = [
+            /require\s*\(\s*['"`]fs['"`]\s*\)/,
+            /from\s*['"`]fs['"`]/,
+            /from\s*['"`]fs\/promises['"`]/,
+            /from\s*['"`]node:fs['"`]/,
+            /from\s*['"`]node:fs\/promises['"`]/,
+            /__vite-browser-external.*fs/,
+            /require\s*\(\s*['"`]buffer['"`]\s*\)/,
+            /__vite-browser-external.*buffer/,
+          ]
+
+          for (const pattern of patterns) {
+            if (pattern.test(line)) {
+              hasIssue = true
+              problematicLines.push({ line: i + 1, content: line.substring(0, 150) })
+              break // Only log each line once
+            }
+          }
+        }
+
+        if (hasIssue) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-generateBundle',message:'Found problematic fs/buffer reference in bundle',data:{fileName,problematicLinesCount:problematicLines.length,firstLine:problematicLines[0]?.content?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
+          // Only warn if debug is enabled, or if it's a clear error (require() or __vite-browser-external)
+          // For Electron builds, static imports might resolve at runtime even if they look problematic
+          const hasClearError = problematicLines.some(p => 
+            p.content.includes('require(') || p.content.includes('__vite-browser-external')
+          )
+          
+          // Check if this might be an Electron build where fs could be available
+          // In that case, these might be acceptable (though not recommended)
+          const mightBeElectron = fileName.includes('electron') || 
+            process.env.ELECTRON_RUN_AS_NODE === '1' ||
+            process.env.ELECTRON_IS_DEV === '1'
+          
+          // Warn if:
+          // 1. Debug is enabled (user wants to see all warnings)
+          // 2. It's a clear error (require() or __vite-browser-external) - these will definitely fail
+          // 3. It's not an Electron build (browser builds should never have fs)
+          if (debug || (hasClearError && !mightBeElectron) || (!mightBeElectron && !hasClearError)) {
+            const severity = hasClearError ? 'Error' : 'Warning'
+            log(`${severity}: Potential unresolved fs reference in ${fileName}`)
+            if (debug && problematicLines.length > 0) {
+              problematicLines.forEach(({ line, content }) => {
+                log(`  Line ${line}: ${content}...`)
+              })
+            } else if (hasClearError) {
+              // Always show context for clear errors
+              problematicLines.slice(0, 3).forEach(({ line, content }) => {
+                log(`  Line ${line}: ${content}...`)
+              })
+            }
+          }
+        }
+      }
+    },
+  }
+
+  // Plugin to check for user-provided polyfills configuration
+  // This is primarily useful when includeNodePolyfills: false is set
+  const polyfillsAutoConfigPlugin: Plugin = {
+    name: 'seed-protocol:auto-polyfills',
+    enforce: 'pre',
+    configResolved(resolvedConfig) {
+      // Only log warnings/info in debug mode when user has disabled auto-polyfills
+      if (!includeNodePolyfills && debug) {
+        // Check if user has provided their own vite-plugin-node-polyfills
+        const plugins = resolvedConfig.plugins || []
+        const hasUserPolyfills = plugins.some((p: any) => {
+          const name = p?.name || ''
+          return name === 'vite-plugin-node-polyfills' || name.includes('node-polyfills')
+        })
+        
+        if (!hasUserPolyfills) {
+          log('[seed-vite-plugin] includeNodePolyfills is false and no user-provided polyfills detected')
+          log('[seed-vite-plugin] Make sure to add vite-plugin-node-polyfills manually if you need polyfills')
+        } else {
+          log('[seed-vite-plugin] User-provided vite-plugin-node-polyfills detected')
+        }
+      }
+    },
+  }
+
+  // Build the plugins array
+  const plugins: Plugin[] = [polyfillsAutoConfigPlugin, observerPlugin, mainPlugin, cleanupPlugin]
+  
+  // Conditionally include vite-plugin-node-polyfills
+  if (includeNodePolyfills) {
+    plugins.push(nodePolyfills({
+      // Exclude fs-related modules since we use @zenfs/core for those
+      // Also exclude readline and module which can't be properly polyfilled in browsers
+      // Note: Type assertion needed as the type definitions don't include all valid module variants
+      exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises', 'module'] as any,
+      // Include all common Node.js polyfills needed by crypto-browserify chain
+      // string_decoder is needed by cipher-base -> create-hash -> crypto-browserify
+      include: ['crypto', 'stream', 'util', 'path', 'buffer', 'events', 'process', 'string_decoder'],
+      globals: { Buffer: true, global: true, process: true },
+      protocolImports: true,
+    }))
+  }
+  
+  return plugins
+}
+
+/**
+ * Helper to ensure ZenFS is ready before using fs operations
+ */
+export async function waitForFs(): Promise<void> {
+  if (typeof window !== 'undefined' && window.__seedFsReady) {
+    await window.__seedFsReady
+  }
+}
+
+// Type augmentation for the window object
+declare global {
+  interface Window {
+    __seedFsReady?: Promise<void>
+  }
+}
+
+// Note: seedVitePlugin is exported as a named export above (line 246)
+// Use: import { seedVitePlugin } from '@seedprotocol/sdk/vite'

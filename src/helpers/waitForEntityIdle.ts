@@ -1,5 +1,5 @@
 import { waitFor } from 'xstate'
-import type { ActorRefFrom } from 'xstate'
+import type { ActorRefFrom, SnapshotFrom } from 'xstate'
 
 interface EntityWithService {
   getService(): ActorRefFrom<any>
@@ -23,11 +23,11 @@ export async function waitForEntityIdle(
   
   // Check current state first - if already idle, return immediately
   const currentSnapshot = service.getSnapshot()
-  if (currentSnapshot.value === 'idle') {
+  if ('value' in currentSnapshot && currentSnapshot.value === 'idle') {
     return
   }
   
-  if (currentSnapshot.value === 'error') {
+  if ('value' in currentSnapshot && currentSnapshot.value === 'error') {
     if (throwOnError) {
       throw new Error('Entity failed to load')
     }
@@ -38,13 +38,13 @@ export async function waitForEntityIdle(
     await waitFor(
       service,
       (snapshot) => {
-        if (snapshot.value === 'error') {
+        if ('value' in snapshot && snapshot.value === 'error') {
           if (throwOnError) {
             throw new Error('Entity failed to load')
           }
           return true // Accept error state if not throwing
         }
-        return snapshot.value === 'idle'
+        return 'value' in snapshot && snapshot.value === 'idle'
       },
       { timeout }
     )

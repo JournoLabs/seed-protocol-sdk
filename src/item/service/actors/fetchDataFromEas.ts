@@ -9,9 +9,11 @@ import { BaseEasClient, BaseQueryClient } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
 
 
+import { FromCallbackInput, ItemMachineContext } from '@/types'
+
 export const fetchDataFromEas = fromCallback<
   EventObject,
-  typeof itemMachineSingle
+  FromCallbackInput<ItemMachineContext<any>>
 >(({ sendBack, input: { context } }) => {
   const { ModelClass, modelTableName, versionUid, modelName } = context
 
@@ -76,7 +78,7 @@ export const fetchDataFromEas = fromCallback<
       const selectedPropertiesMap: {
         [schemaId: string]: Attestation[]
       } = {}
-      itemProperties.forEach((property) => {
+      itemProperties.forEach((property: Attestation) => {
         const existingProperties = selectedPropertiesMap[property.schemaId] || []
         existingProperties.push(property)
         selectedPropertiesMap[property.schemaId] = existingProperties
