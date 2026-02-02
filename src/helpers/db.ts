@@ -474,8 +474,13 @@ async function checkIfPropertyIsEdited(
     const cacheKey = `${modelName}:${propertyName}`
     
     // First, check the in-memory cache (for current session edits)
-    // Dynamic import to break circular dependency
-    const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
+    // Robust dynamic import for consumer re-bundling (named or default export)
+    const mod = await import('@/ModelProperty/ModelProperty')
+    const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
+    if (!ModelProperty) {
+      logger('ModelProperty not available from dynamic import')
+      return false
+    }
     type ModelPropertyInstance = InstanceType<typeof ModelProperty>
     const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
       instanceCache: Map<string, { instance: ModelPropertyInstance; refCount: number }>

@@ -7,8 +7,11 @@ import { BaseFileManager } from '@/helpers'
 import { loadModelsFromDbForSchema } from '@/helpers/db'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
+import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 
 const logger = debug('seedSdk:schema:actors:checkExistingSchema')
 
@@ -23,8 +26,6 @@ const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
   }
 
   try {
-    const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
-    
     const modelRecords = await db
       .select({
         modelFileId: modelsTable.schemaFileId,
@@ -72,8 +73,12 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
   }
 
   try {
-    const { Model } = await import('@/Model/Model')
-    
+    const mod = await import('@/Model/Model')
+    const Model = mod?.Model ?? (mod as { default?: unknown })?.default
+    if (!Model) {
+      logger('Model not available from dynamic import')
+      return
+    }
     const createPromises = modelIds.map(async (modelFileId) => {
       try {
         const model = await Model.createById(modelFileId)
@@ -114,8 +119,7 @@ export const checkExistingSchema = fromCallback<
       return
     }
 
-    // Check if this is an internal SDK schema (Seed Protocol)
-    const { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+    // Check if this is an internal SDK schema (Seed Protocol) — use static import so consumer bundles resolve correctly
     const isInternal = isInternalSchema(schemaName)
     
     if (isInternal && schemaName === SEED_PROTOCOL_SCHEMA_NAME) {

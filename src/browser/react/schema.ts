@@ -136,7 +136,7 @@ export const useSchemas = () => {
       }
       
       const allSchemas = await Schema.all()
-      
+
       // Filter out schemas without an id and subscribe to state changes
       const readySchemas: Schema[] = []
       const loadingSchemasList: Schema[] = []
@@ -259,12 +259,12 @@ export const useSchemas = () => {
     const prevData = previousSchemasTableDataRef.current
     const prevDataJson = prevData ? JSON.stringify(prevData) : 'undefined'
     const currDataJson = schemasTableData ? JSON.stringify(schemasTableData) : 'undefined'
-    
+
     if (prevDataJson === currDataJson && prevData !== undefined) {
       // Data hasn't actually changed, skip refetch
       return
     }
-    
+
     // Update ref with current data
     previousSchemasTableDataRef.current = schemasTableData
 

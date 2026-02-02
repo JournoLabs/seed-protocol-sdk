@@ -7,6 +7,8 @@ import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { eq, desc, and } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
@@ -617,9 +619,6 @@ export class Schema {
     }
 
     // Query database to get schema name from ID
-    const { BaseDb } = await import('@/db/Db/BaseDb')
-    const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-
     const db = BaseDb.getAppDb()
     if (!db) {
       throw new Error('Database not available')
@@ -1042,8 +1041,6 @@ export class Schema {
     }
     
     const context = this._getSnapshotContext()
-    const { BaseDb } = await import('@/db/Db/BaseDb')
-    const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
     const { addSchemaToDb } = await import('@/helpers/db')
     
     if (!context._isDraft || !context._editedProperties || context._editedProperties.size === 0) {
@@ -1197,8 +1194,6 @@ export class Schema {
     } as any)
 
     // Clear edited flags on all ModelProperty instances and in database
-    const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
-    
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
       const cacheKey = `${modelName}:${propertyName}`
@@ -1260,7 +1255,6 @@ export class Schema {
     try {
       if (db && context._dbId) {
         // Get all models for this schema
-        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
         const modelRecords = await db
           .select({ id: modelsTable.id })
           .from(modelSchemas)
@@ -1471,8 +1465,6 @@ export class Schema {
       }
       const { addSchemaToDb } = await import('@/helpers/db')
       const { generateId } = await import('@/helpers')
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
 
       const db = BaseDb.getAppDb()
       if (!db) {
@@ -1842,10 +1834,6 @@ export class Schema {
 
     setupEntityLiveQuery(this, {
       getEntityId: async (schema) => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { schemas: schemasTable } = await import('@/seedSchema')
-        const { eq } = await import('drizzle-orm')
-        
         const db = BaseDb.getAppDb()
         if (!db) {
           return undefined
@@ -1870,10 +1858,6 @@ export class Schema {
         return schemaRecords[0].id
       },
       buildQuery: async (schemaId) => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
-        const { eq } = await import('drizzle-orm')
-        
         const db = BaseDb.getAppDb()
         if (!db) {
           throw new Error('Database not available')
@@ -1954,16 +1938,11 @@ export class Schema {
         }
       },
       createChildInstances: async (ids) => {
-        const { Model } = await import('@/Model/Model')
         for (const id of ids) {
           await Model.createById(id)
         }
       },
       queryInitialData: async (schemaId) => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
-        const { eq } = await import('drizzle-orm')
-        
         const db = BaseDb.getAppDb()
         if (!db) {
           return []

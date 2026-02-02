@@ -8,7 +8,7 @@ import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
 import { renameModelInDb } from '@/helpers/db'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
@@ -1897,10 +1897,6 @@ export class Model {
         // If we don't have _dbId yet, try to find it in the database
         if (!dbId) {
           try {
-            const { BaseDb } = await import('@/db/Db/BaseDb')
-            const { models: modelsTable } = await import('@/seedSchema')
-            const { eq } = await import('drizzle-orm')
-            
             const db = BaseDb.getAppDb()
             if (!db) {
               return undefined
@@ -1932,7 +1928,6 @@ export class Model {
         return dbId
       },
       buildQuery: async (modelId) => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
         return BaseDb.liveQuery<{ id: number; name: string; dataType: string; modelId: number; refModelId: number | null; refValueType: string | null; schemaFileId: string | null }>(
           (sql: any) => sql`
             SELECT id, name, data_type as dataType, model_id as modelId, ref_model_id as refModelId, ref_value_type as refValueType, schema_file_id as schemaFileId
@@ -1952,7 +1947,12 @@ export class Model {
         })
       },
       createChildInstances: async (ids) => {
-        const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
+        await modelPropertyImportPromise
+        const ModelProperty = getModelProperty()
+        if (!ModelProperty) {
+          logger('[Model._setupLiveQuerySubscription] ModelProperty not yet loaded')
+          return
+        }
         const createPromises = ids.map(async (propertyFileId: string) => {
           try {
             await ModelProperty.createById(propertyFileId)
@@ -1963,10 +1963,6 @@ export class Model {
         await Promise.all(createPromises)
       },
       queryInitialData: async (modelId) => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { properties: propertiesTable } = await import('@/seedSchema')
-        const { eq } = await import('drizzle-orm')
-        
         const db = BaseDb.getAppDb()
         if (!db) {
           return []
@@ -1999,10 +1995,6 @@ export class Model {
     }
 
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { properties: propertiesTable } = await import('@/seedSchema')
-      const { eq } = await import('drizzle-orm')
-      
       const db = BaseDb.getAppDb()
       if (!db) {
         return
@@ -2023,7 +2015,11 @@ export class Model {
       // This ensures they're in the cache when the properties getter is called
       if (propertyIds.length > 0) {
         try {
-          const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
+          await modelPropertyImportPromise
+          const ModelProperty = getModelProperty()
+          if (!ModelProperty) {
+            logger('[Model._refreshPropertiesFromDb] ModelProperty not yet loaded')
+          } else {
           const createPromises = propertyIds.map(async (propertyFileId: string) => {
             try {
               const property = await ModelProperty.createById(propertyFileId)
@@ -2038,6 +2034,7 @@ export class Model {
           })
           await Promise.all(createPromises)
           console.log(`[Model._refreshPropertiesFromDb] Created ${propertyIds.length} ModelProperty instances before updating context`)
+          }
         } catch (error) {
           logger(`[Model._refreshPropertiesFromDb] Error importing ModelProperty or creating instances: ${error}`)
         }

@@ -1,6 +1,8 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { ModelMachineContext } from '../modelMachine'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import debug from 'debug'
 
 const logger = debug('seedSdk:model:actors:createModelProperties')
@@ -28,11 +30,14 @@ export const createModelProperties = fromCallback<
     
     logger(`Creating ${Object.keys(propertyDefinitions).length} properties for model "${modelName}" (id: ${_dbId})`)
     
-    const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
-    const { BaseDb } = await import('@/db/Db/BaseDb')
-    const { properties: propertiesTable } = await import('@/seedSchema')
+    const mod = await import('@/ModelProperty/ModelProperty')
+    const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
+    if (!ModelProperty) {
+      logger('ModelProperty not available from dynamic import')
+      sendBack({ type: 'createModelPropertiesError', error: new Error('ModelProperty not available') })
+      return
+    }
     const { eq } = await import('drizzle-orm')
-    
     const db = BaseDb.getAppDb()
     
         for (const [propName, propData] of Object.entries(propertyDefinitions)) {
@@ -61,7 +66,6 @@ export const createModelProperties = fromCallback<
             logger(`Found refModelId ${refModelId} from database for property "${propName}"`)
           } else if (refModelName) {
             // Fallback: query models table directly by name
-            const { models: modelsTable } = await import('@/seedSchema')
             const refModelRecords = await db
               .select()
               .from(modelsTable)

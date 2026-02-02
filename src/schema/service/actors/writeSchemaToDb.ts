@@ -7,6 +7,7 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { eq } from 'drizzle-orm'
 import { getLatestSchemaVersion } from '@/helpers/schema'
 import debug from 'debug'
+import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 
 const logger = debug('seedSdk:schema:actors:writeSchemaToDb')
 
@@ -24,8 +25,7 @@ export const writeSchemaToDb = fromCallback<
     const { schemaName, schemaFile, existingDbSchema } = input
     
     try {
-      // Check if this is an internal SDK schema (Seed Protocol)
-      const { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+      // Check if this is an internal SDK schema (Seed Protocol) — use static import so consumer bundles resolve correctly
       const isInternal = isInternalSchema(schemaName)
       
       let finalSchema: SchemaFileFormat

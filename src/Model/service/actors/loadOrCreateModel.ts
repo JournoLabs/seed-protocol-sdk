@@ -22,8 +22,13 @@ const createPropertyInstances = async (propertyFileIds: string[]): Promise<void>
   }
 
   try {
-    const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
-    
+    const mod = await import('@/ModelProperty/ModelProperty')
+    const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
+    if (!ModelProperty) {
+      logger('createPropertyInstances: ModelProperty not available from dynamic import')
+      return
+    }
+
     // Create instances for all property IDs in parallel
     // ModelProperty.createById() will check cache first, then query DB and create if needed
     const createPromises = propertyFileIds.map(async (propertyFileId) => {

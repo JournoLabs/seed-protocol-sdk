@@ -4,6 +4,10 @@ import { ModelPropertyDataTypes, TProperty } from '@/Schema'
 import { modelPropertyMachine, ModelPropertyMachineContext } from './service/modelPropertyMachine'
 import { StorageType } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { properties as propertiesTable, models as modelsTable } from '@/seedSchema/ModelSchema'
+import { schemas } from '@/seedSchema/SchemaSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
@@ -221,10 +225,7 @@ export class ModelProperty {
     }
 
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
       const { eq, and } = await import('drizzle-orm')
-      
       const db = BaseDb.getAppDb()
       if (!db) {
         return fallbackIsEdited
@@ -274,11 +275,7 @@ export class ModelProperty {
     }
 
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const seedSchema = await import('@/seedSchema')
-      const modelsTable = seedSchema.models
       const { eq } = await import('drizzle-orm')
-      
       const db = BaseDb.getAppDb()
       if (!db) {
         return undefined
@@ -370,11 +367,6 @@ export class ModelProperty {
       // Try to get schema name from database first (more reliable)
       if (this.modelId) {
         try {
-          const { BaseDb } = await import('@/db/Db/BaseDb')
-          const seedSchema = await import('@/seedSchema')
-          const modelsTable = seedSchema.models
-          const modelSchemas = seedSchema.modelSchemas
-          const schemas = seedSchema.schemas
           const { eq } = await import('drizzle-orm')
           
           const db = BaseDb.getAppDb()
@@ -722,8 +714,6 @@ export class ModelProperty {
     }
 
     // Query database to get property data from ID
-    const { BaseDb } = await import('@/db/Db/BaseDb')
-    const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
     const { eq } = await import('drizzle-orm')
 
     const db = BaseDb.getAppDb()

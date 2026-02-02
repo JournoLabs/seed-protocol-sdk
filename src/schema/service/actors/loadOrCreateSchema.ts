@@ -9,6 +9,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
+import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 
 const logger = debug('seedSdk:schema:actors:loadOrCreateSchema')
 
@@ -185,8 +186,7 @@ export const loadOrCreateSchema = fromCallback<
   const _loadOrCreateSchema = async (): Promise<void> => {
     const { schemaName } = context
     
-    // Check if this is an internal SDK schema (should not create files in app directory)
-    const { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+    // Check if this is an internal SDK schema (should not create files in app directory) — use static import so consumer bundles resolve correctly
     const isInternal = isInternalSchema(schemaName)
     
     if (isInternal && schemaName === SEED_PROTOCOL_SCHEMA_NAME) {

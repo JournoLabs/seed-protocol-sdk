@@ -30,9 +30,15 @@ export const createPropertyInstances = fromCallback<
     }
 
     try {
-      const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
-      const { Model } = await import('@/Model/Model')
-      
+      const modProp = await import('@/ModelProperty/ModelProperty')
+      const ModelProperty = modProp?.ModelProperty ?? (modProp as { default?: unknown })?.default
+      const modModel = await import('@/Model/Model')
+      const Model = modModel?.Model ?? (modModel as { default?: unknown })?.default
+      if (!ModelProperty || !Model) {
+        logger('ModelProperty or Model not available from dynamic import')
+        sendBack({ type: 'instancesCreated', count: 0 })
+        return
+      }
       // Properties are typically loaded when Model instances are loaded
       // But we can verify they exist by checking Model instances
       let successCount = 0

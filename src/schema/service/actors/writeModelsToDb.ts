@@ -3,6 +3,8 @@ import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { generateId } from '@/helpers'
 import { addModelsToDb } from '@/helpers/db'
 import debug from 'debug'
+import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
+import { BaseDb } from '@/db/Db/BaseDb'
 
 const logger = debug('seedSdk:schema:actors:writeModelsToDb')
 
@@ -21,7 +23,6 @@ export const writeModelsToDb = fromCallback<
     
     try {
       // Check if models already exist in database
-      const { BaseDb } = await import('@/db/Db/BaseDb')
       const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
       const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
       const { eq } = await import('drizzle-orm')
@@ -78,8 +79,7 @@ export const writeModelsToDb = fromCallback<
       // Convert SchemaFileFormat to JsonImportSchema format
       const { createModelsFromJson } = await import('@/imports/json')
       
-      // Check if this is Seed Protocol schema (has different format)
-      const { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
+      // Check if this is Seed Protocol schema (has different format) — use static import so consumer bundles resolve correctly
       const isInternal = isInternalSchema(schemaName)
       
       let importData: JsonImportSchema
