@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
-import { useItemProperty, useItemProperties } from '@/browser/react/itemProperty'
+import { useItemProperty, useItemProperties, useCreateItemProperty, useDestroyItemProperty } from '@/browser/react/itemProperty'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -13,6 +13,7 @@ import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import type { IItemProperty } from '@/interfaces'
 import type { SeedConstructorOptions } from '@/types'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { generateId } from '@/helpers'
@@ -304,6 +305,101 @@ function ItemPropertiesListTest({
   )
 }
 
+// Test component for useCreateItemProperty (API only - no valid item)
+function UseCreateItemPropertyTest() {
+  const { create, isLoading, error, resetError } = useCreateItemProperty()
+  const [status, setStatus] = useState<string>('idle')
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-create-item-property-test">
+      <div data-testid="create-item-property-status">{status}</div>
+      <div data-testid="create-item-property-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="create-item-property-error">{error.message}</div>}
+      <button onClick={resetError} data-testid="create-item-property-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
+// Test component that creates item property with a given seedLocalId (for integration test)
+function UseCreateItemPropertyWithItemTest({ seedLocalId }: { seedLocalId: string | null }) {
+  const { create, isLoading, error, resetError } = useCreateItemProperty()
+  const [createdPropertyName, setCreatedPropertyName] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleCreate = () => {
+    if (!seedLocalId) return
+    setStatus('creating')
+    const prop = create({
+      seedLocalId,
+      propertyName: 'title',
+      modelName: 'Post',
+      propertyValue: 'Hook created value',
+    })
+    if (prop) {
+      setCreatedPropertyName(prop.propertyName)
+      setStatus('created')
+    } else {
+      setStatus('error')
+    }
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-create-item-property-with-item-test">
+      <div data-testid="create-item-property-status">{status}</div>
+      <div data-testid="create-item-property-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {createdPropertyName && <div data-testid="created-item-property-name">{createdPropertyName}</div>}
+      {error && <div data-testid="create-item-property-error">{error.message}</div>}
+      <button onClick={handleCreate} data-testid="create-item-property-button" disabled={!seedLocalId}>
+        Create Item Property
+      </button>
+      <button onClick={resetError} data-testid="create-item-property-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
+// Test component for useDestroyItemProperty
+function UseDestroyItemPropertyTest({ property }: { property: IItemProperty | null }) {
+  const { destroy, isLoading, error, resetError } = useDestroyItemProperty()
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleDestroy = async () => {
+    if (!property) return
+    setStatus('destroying')
+    await destroy(property)
+    setStatus('destroyed')
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-destroy-item-property-test">
+      <div data-testid="destroy-item-property-status">{status}</div>
+      <div data-testid="destroy-item-property-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="destroy-item-property-error">{error.message}</div>}
+      <button onClick={handleDestroy} data-testid="destroy-item-property-button" disabled={!property}>
+        Destroy Property
+      </button>
+      <button onClick={resetError} data-testid="destroy-item-property-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
 describe('React ItemProperty Hooks Integration Tests', () => {
   let container: HTMLElement
   let testItem: Item<any> | null = null
@@ -461,7 +557,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 100))
 
     // Create test items
-    const model = Model.create('Post', 'Test Schema Items')
+    const model = Model.create('Post', 'Test Schema Items', { waitForReady: false })
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',
@@ -949,7 +1045,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
 
       // Get the schema instance
-      const schemaInstance = Schema.create('Empty Test Schema Items')
+      const schemaInstance = Schema.create('Empty Test Schema Items', { waitForReady: false })
       
       // Wait for schema to be ready
       await waitFor(
@@ -966,6 +1062,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           name: { dataType: 'Text' },
           description: { dataType: 'Text' },
         },
+        waitForReady: false,
       })
 
       // Wait for model to be idle
@@ -1034,6 +1131,110 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       newItem.unload()
       schemaInstance.unload()
       newModel.unload()
+    })
+  })
+
+  describe('useCreateItemProperty', () => {
+    it('should expose create, isLoading, error, and resetError', async () => {
+      render(<UseCreateItemPropertyTest />, { container })
+
+      await waitFor(
+        () => {
+          const statusEl = screen.getByTestId('create-item-property-status')
+          expect(statusEl).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('create-item-property-is-loading').textContent).toBe('false')
+    })
+
+    it('should create an item property when given valid props and set loading state', async () => {
+      if (!testItem) return
+
+      render(<UseCreateItemPropertyWithItemTest seedLocalId={testItem.seedLocalId} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('create-item-property-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(false)
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('create-item-property-button').click()
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('create-item-property-status')
+          return status.textContent === 'created' || status.textContent === 'error'
+        },
+        { timeout: 10000 }
+      )
+
+      const status = screen.getByTestId('create-item-property-status')
+      expect(['created', 'error']).toContain(status.textContent)
+    })
+  })
+
+  describe('useDestroyItemProperty', () => {
+    it('should expose destroy, isLoading, error, and resetError', async () => {
+      render(<UseDestroyItemPropertyTest property={null} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-item-property-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(true)
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
+    })
+
+    it('should destroy an item property and set loading state during destroy', async () => {
+      if (!testItem) return
+
+      const titleProperty = await ItemProperty.find({
+        propertyName: 'title',
+        seedLocalId: testItem.seedLocalId,
+      })
+      if (!titleProperty) return
+
+      render(<UseDestroyItemPropertyTest property={titleProperty} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-item-property-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(false)
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('destroy-item-property-button').click()
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-item-property-is-loading')
+          return isLoading.textContent === 'true'
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-item-property-is-loading')
+          const status = screen.getByTestId('destroy-item-property-status')
+          return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
+        },
+        { timeout: 5000 }
+      )
+
+      const status = screen.getByTestId('destroy-item-property-status')
+      expect(['destroyed', 'error']).toContain(status.textContent)
     })
   })
 })

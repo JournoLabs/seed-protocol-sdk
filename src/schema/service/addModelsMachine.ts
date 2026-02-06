@@ -2,6 +2,7 @@ import { assign, setup, fromCallback } from 'xstate'
 import type { EventObject, DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
+import type { Schema } from '@/Schema/Schema'
 
 export type AddModelsMachineContext = {
   schemaContext: SchemaMachineContext
@@ -95,7 +96,9 @@ export const addModelsMachine = setup({
         const logger = debug('seedSdk:schema:addModels:createInstances')
         
         const schemaName = input.schemaContext.metadata?.name || input.schemaContext.schemaName
-        const schemaInstance = Schema.create(schemaName)
+        const schemaInstance = Schema.create(schemaName, {
+          waitForReady: false,
+        }) as Schema
         const modelInstances = new Map<string, Model>()
         
         // Get instance state to store model instances
@@ -137,7 +140,10 @@ export const addModelsMachine = setup({
             
             // Create new Model instance with modelFileId
             // Model.create() will set _modelFileId in the context automatically
-            const modelInstance = Model.create(modelName, schemaName, { modelFileId })
+            const modelInstance = Model.create(modelName, schemaName, {
+              modelFileId,
+              waitForReady: false,
+            }) as Model
             const service = modelInstance.getService()
             
             logger(`Created Model instance for "${modelName}" with modelFileId "${modelFileId}"`)

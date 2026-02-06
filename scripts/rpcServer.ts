@@ -46,48 +46,38 @@ function getModel(modelName: string) {
 const server = {
   // Model operations
   GetModels: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {
-    try {
-      const allModels = Model.getAll();
-      const models = [];
-
-      for (const model of allModels) {
-        const modelName = model.modelName;
-        if (!modelName) {
-          continue;
+    Model.all()
+      .then((allModels) => {
+        const models: any[] = [];
+        for (const model of allModels) {
+          const modelName = model.modelName;
+          if (!modelName) {
+            continue;
+          }
+          const modelProperties = model.properties || [];
+          if (modelProperties.length === 0) {
+            continue;
+          }
+          const schema = modelPropertiesToObject(modelProperties);
+          const props = Object.keys(schema).map((propName) => {
+            const prop = schema[propName];
+            return {
+              name: propName,
+              type: prop?.dataType || 'Text',
+              relation_model: prop?.ref || prop?.refModelName || '',
+              is_list: prop?.dataType === 'List',
+            };
+          });
+          models.push({ name: modelName, properties: props });
         }
-        
-        // Get properties from Model instance
-        const modelProperties = model.properties || [];
-        if (modelProperties.length === 0) {
-          continue;
-        }
-        
-        // Convert ModelProperty instances to schema object
-        const schema = modelPropertiesToObject(modelProperties);
-        
-        const props = Object.keys(schema).map(propName => {
-          const prop = schema[propName];
-          return {
-            name: propName,
-            type: prop?.dataType || 'Text',
-            relation_model: prop?.ref || prop?.refModelName || '',
-            is_list: prop?.dataType === 'List'
-          };
+        callback(null, { models });
+      })
+      .catch((error) => {
+        callback({
+          code: grpc.status.INTERNAL,
+          message: `Error getting models: ${getErrorMessage(error)}`,
         });
-
-        models.push({
-          name: modelName,
-          properties: props
-        });
-      }
-
-      callback(null, { models });
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: `Error getting models: ${getErrorMessage(error)}`
       });
-    }
   },
 
   GetModel: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) => {

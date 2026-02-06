@@ -26,7 +26,7 @@ export { Db } from './db/Db'
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'
 
 // Model access - use Model static methods instead
-// Models are accessible via Model.getAll(), Model.getById(), Model.getByName(), etc.
+// Models are accessible via Model.all(), Model.getById(), Model.getByName(), etc.
 
 // Helper exports
 export { getCorrectId } from '../helpers'

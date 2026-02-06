@@ -26,6 +26,7 @@ export interface IItemProperty<PropertyType = any> {
   subscribe(callback: Partial<BehaviorSubject<any>>): Subscription;
   save(): Promise<void>;
   unload(): void;
+  destroy(): Promise<void>;
   getService(): ActorRefFrom<any>;
   find(props: {
     propertyName: string;

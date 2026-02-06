@@ -59,7 +59,9 @@ export const validateModel = fromCallback<
       // This allows validation BEFORE registration, preventing update loops
       if (context.schemaName) {
         try {
-          const schema = Schema.create(context.schemaName)
+          const schema = Schema.create(context.schemaName, {
+            waitForReady: false,
+          }) as import('@/Schema/Schema').Schema
           const schemaSnapshot = schema.getService().getSnapshot()
           const schemaStatus = schemaSnapshot.value
           

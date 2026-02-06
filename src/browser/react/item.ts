@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { createNewItem } from '@/db/write/createNewItem'
 import { Item } from '@/Item/Item'
 import { orderBy } from 'lodash-es'
@@ -35,6 +36,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
   const [error, setError] = useState<Error | null>(null)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const hasSeenIdleRef = useRef(false)
 
   const isClientReady = useIsClientReady()
 
@@ -70,10 +72,16 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
         seedLocalId: seedLocalIdRef.current,
         seedUid: seedUidRef.current,
       }) as Item<T> | undefined
-      
+
       if (!foundItem) {
         logger('[useItem] [loadItem] no item found', modelNameRef.current, seedLocalIdRef.current)
-        setItem(undefined)
+        // Don't clear item if we already have one for the same request (e.g. duplicate loadItem from effect re-run)
+        setItem((prev) => {
+          if (!prev) return undefined
+          const match = (prev.seedLocalId && prev.seedLocalId === seedLocalIdRef.current) ||
+            (prev.seedUid && prev.seedUid === seedUidRef.current)
+          return match ? prev : undefined
+        })
         setIsLoading(false)
         setError(null)
         return
@@ -119,29 +127,34 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       // Clean up subscription if item is not available
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
+      hasSeenIdleRef.current = false
       return
     }
 
     // Clean up previous subscription
     subscriptionRef.current?.unsubscribe()
+    hasSeenIdleRef.current = false
 
-    // Subscribe to service changes
-    // Don't set isLoading here - it's already set correctly in loadItem
-    // Just subscribe to future state changes
+    // Subscribe to service changes. Only set isLoading to true after we've seen idle at least
+    // once, so we don't overwrite the ready state that loadItem() just set (find() waits for idle).
     const service = item.getService()
-    
+
     const subscription = service.subscribe((snapshot: any) => {
       // Update loading state based on service state changes
       if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
         const isIdle = snapshot.value === 'idle'
-        setIsLoading(!isIdle)
-        
-        // Clear error if service is in idle state
         if (isIdle) {
+          hasSeenIdleRef.current = true
+          setIsLoading(false)
           setError(null)
         } else if (snapshot.value === 'error') {
-          // Set error if service is in error state
           setError(new Error('Item service error'))
+          setIsLoading(false)
+        } else {
+          // Only show loading if we've already seen idle (real transition to loading)
+          if (hasSeenIdleRef.current) {
+            setIsLoading(true)
+          }
         }
       }
     })
@@ -176,13 +189,13 @@ type UseItems = (props: UseItemsProps) => UseItemsReturn
 
 export const useItems: UseItems = ({ modelName, deleted=false }) => {
   const [items, setItems] = useState<IItem<any>[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  // Start loading so status stays "loading" until first fetch completes; avoids test/UI seeing "loaded" with 0 items
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
   const isClientReady = useIsClientReady()
-  const subscriptionsRef = useRef<Map<IItem<any>, Subscription>>(new Map())
-  const loadingItemsRef = useRef<Set<IItem<any>>>(new Set())
   const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
   const itemsRef = useRef<IItem<any>[]>([]) // Track items for comparison without triggering effects
+  const lastFetchedIdsRef = useRef<Set<string>>(new Set()) // Only refetch when the set of ids actually changes (avoids loop from liveQuery re-emissions)
 
   // Watch the seeds table for changes
   // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
@@ -240,117 +253,18 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      const allItems = await Item.all(modelName, deleted)
-      
-      // Filter items into ready vs loading based on service state
-      const readyItems: IItem<any>[] = []
-      const loadingItemsList: IItem<any>[] = []
-      
-      // Clear previous loading set
-      loadingItemsRef.current.clear()
-      
-      for (const item of allItems) {
-        const snapshot = item.getService().getSnapshot()
-        const isIdle = snapshot.value === 'idle'
-        
-        if (isIdle) {
-          // Item is ready
-          readyItems.push(item)
-        } else {
-          // Item is still loading - subscribe to state changes
-          loadingItemsList.push(item)
-          loadingItemsRef.current.add(item)
-          
-          // Clean up any existing subscription for this item
-          const existingSub = subscriptionsRef.current.get(item)
-          if (existingSub) {
-            existingSub.unsubscribe()
-          }
-          
-          // Subscribe to state changes
-          const subscription = item.getService().subscribe((snapshot: any) => {
-            if (snapshot && typeof snapshot === 'object' && 'value' in snapshot) {
-              const isIdle = snapshot.value === 'idle'
-              
-              if (isIdle) {
-                // Item is now ready - update state
-                setItems(prev => {
-                  // Check if item is already in the list (by seedLocalId or seedUid)
-                  const exists = prev.some(i => 
-                    (i.seedLocalId && item.seedLocalId && i.seedLocalId === item.seedLocalId) ||
-                    (i.seedUid && item.seedUid && i.seedUid === item.seedUid)
-                  )
-                  if (exists) {
-                    return prev
-                  }
-                  // Add the newly ready item
-                  const updated = [...prev, item]
-                  itemsRef.current = updated // Update ref for comparison
-                  return updated
-                })
-                
-                // Remove from loading set and clean up subscription
-                loadingItemsRef.current.delete(item)
-                subscription.unsubscribe()
-                subscriptionsRef.current.delete(item)
-                
-                // Update loading state based on remaining loading items
-                setIsLoading(loadingItemsRef.current.size > 0)
-              } else if (snapshot.value === 'error') {
-                // Item failed to load - clean up subscription
-                loadingItemsRef.current.delete(item)
-                subscription.unsubscribe()
-                subscriptionsRef.current.delete(item)
-                
-                // Update loading state based on remaining loading items
-                setIsLoading(loadingItemsRef.current.size > 0)
-              }
-            }
-          })
-          
-          subscriptionsRef.current.set(item, subscription)
-        }
-      }
-      
-      // Set initial ready items
-      setItems(readyItems)
-      itemsRef.current = readyItems // Update ref for comparison
+
+      const allItems = await Item.all(modelName, deleted, { waitForReady: true })
+
+      setItems(allItems)
+      itemsRef.current = allItems
       setError(null)
-      setIsLoading(loadingItemsList.length > 0) // Still loading if any items are loading
-      
+      setIsLoading(false)
     } catch (error) {
       setError(error as Error)
       setIsLoading(false)
     }
   }, [modelName, deleted])
-
-  // Cleanup subscriptions for items that are no longer in the list
-  useEffect(() => {
-    const currentItemKeys = new Set<string>()
-    for (const item of items) {
-      const key = item.seedLocalId || item.seedUid || ''
-      if (key) {
-        currentItemKeys.add(key)
-      }
-    }
-    
-    // Clean up subscriptions for items that are no longer in the list
-    for (const [item, subscription] of subscriptionsRef.current.entries()) {
-      const key = item.seedLocalId || item.seedUid || ''
-      if (key && !currentItemKeys.has(key)) {
-        // Item is no longer in the list, clean up subscription
-        subscription.unsubscribe()
-        subscriptionsRef.current.delete(item)
-        loadingItemsRef.current.delete(item)
-      }
-    }
-    
-    // Update loading state based on remaining loading items
-    if (loadingItemsRef.current.size === 0 && isLoading) {
-      setIsLoading(false)
-    }
-  }, [items, isLoading])
 
   // Fetch items on initial mount when client is ready
   useEffect(() => {
@@ -361,24 +275,25 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
     fetchItems()
   }, [isClientReady, fetchItems])
 
-  // Refetch items when table data actually changes (not just reference)
+  // Refetch items when table data actually changes (not just reference or order)
   useEffect(() => {
     if (!isClientReady || !seedsTableData) {
       return
     }
 
-    // Check if seedsTableData actually changed by comparing with previous value
-    const prevData = previousSeedsTableDataRef.current
-    const prevDataJson = prevData ? JSON.stringify(prevData.map(s => ({ localId: s.localId, uid: s.uid }))) : 'undefined'
-    const currDataJson = seedsTableData ? JSON.stringify(seedsTableData.map(s => ({ localId: s.localId, uid: s.uid }))) : 'undefined'
-    
-    if (prevDataJson === currDataJson && prevData !== undefined) {
-      // Data hasn't actually changed, skip refetch
+    // Avoid refetch while a fetch is already in progress (prevents re-entrancy / infinite loop)
+    if (isLoading) {
       return
     }
-    
-    // Update ref with current data
-    previousSeedsTableDataRef.current = seedsTableData
+
+    // Build set of ids from current table data (order-independent)
+    const tableDataItemsSet = new Set<string>()
+    for (const dbSeed of seedsTableData) {
+      const key = dbSeed.localId || dbSeed.uid
+      if (key) {
+        tableDataItemsSet.add(key)
+      }
+    }
 
     // Extract identifying information from current items in state (using ref to avoid dependency)
     const currentItemsSet = new Set<string>()
@@ -389,37 +304,39 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       }
     }
 
-    // Extract identifying information from seedsTableData
-    const tableDataItemsSet = new Set<string>()
-    for (const dbSeed of seedsTableData) {
-      const key = dbSeed.localId || dbSeed.uid
-      if (key) {
-        tableDataItemsSet.add(key)
-      }
+    // Don't refetch when live query returns empty but we already have items (avoids overwriting with []
+    // due to timing: initial fetch completed and set items, then seedsTableData emitted [] before
+    // the real data, which would trigger a refetch and Item.all() could race and return [].)
+    if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) {
+      return
     }
 
-    // Compare sets to detect changes
-    const setsAreEqual = 
+    // Skip refetch if we already fetched for this exact set of ids (handles liveQuery re-emissions with same data, different array reference/order)
+    const lastFetched = lastFetchedIdsRef.current
+    if (
+      lastFetched.size === tableDataItemsSet.size &&
+      [...lastFetched].every((id) => tableDataItemsSet.has(id))
+    ) {
+      return
+    }
+
+    // Update ref for next comparison
+    previousSeedsTableDataRef.current = seedsTableData
+
+    // Compare sets: if our items already match table data, just record this set and skip (e.g. initial fetch already completed)
+    const setsAreEqual =
       currentItemsSet.size === tableDataItemsSet.size &&
-      [...currentItemsSet].every(id => tableDataItemsSet.has(id))
+      [...currentItemsSet].every((id) => tableDataItemsSet.has(id))
 
     if (setsAreEqual) {
-      // Items in state match table data, skip refetch
+      lastFetchedIdsRef.current = new Set(tableDataItemsSet)
       return
     }
 
     // Items have changed, fetch updated items
+    lastFetchedIdsRef.current = new Set(tableDataItemsSet)
     fetchItems()
-  }, [isClientReady, seedsTableData, fetchItems, modelName])
-
-  // Cleanup all subscriptions on unmount
-  useEffect(() => {
-    return () => {
-      subscriptionsRef.current.forEach(sub => sub.unsubscribe())
-      subscriptionsRef.current.clear()
-      loadingItemsRef.current.clear()
-    }
-  }, [])
+  }, [isClientReady, seedsTableData, fetchItems, modelName, isLoading])
 
   return {
     items: orderBy(
@@ -437,86 +354,115 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
   }
 }
 
-export const useCreateItem = <T>() => {
-  const [isCreatingItem, setIsCreatingItem] = useState(false)
+export type UseCreateItemReturn = {
+  createItem: (modelName: string, itemData?: Record<string, any>) => Promise<Item<any> | undefined>
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+export const useCreateItem = (): UseCreateItemReturn => {
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const resetError = useCallback(() => setError(null), [])
 
   const createItem = useCallback(
-    async (modelName: string, itemData?: Record<string, any>) => {
-      if (isCreatingItem) {
-        // TODO: should we setup a queue for this?
-        console.error(
-          `[useCreateItem] [createItem] already creating item`,
-          itemData,
-        )
-        return
+    async (modelName: string, itemData?: Record<string, any>): Promise<Item<any> | undefined> => {
+      if (isLoading) {
+        logger('[useCreateItem] [createItem] already creating item, skipping')
+        return undefined
       }
 
-      setIsCreatingItem(true)
+      setError(null)
+      // Flush loading=true synchronously so the UI (and tests) can observe it before async work runs.
+      flushSync(() => setIsLoading(true))
 
-      if (!itemData) {
-        itemData = {}
+      try {
+        const data = itemData ?? {}
+        const { seedLocalId } = await createNewItem({ modelName, ...data })
+        const newItem = await Item.find({ modelName, seedLocalId })
+        return (newItem ?? undefined) as Item<any> | undefined
+      } catch (err) {
+        logger('[useCreateItem] Error creating item:', err)
+        setError(err instanceof Error ? err : new Error(String(err)))
+        return undefined
+      } finally {
+        // Defer clearing loading so React can commit the loading=true render first.
+        // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
+        queueMicrotask(() => setIsLoading(false))
       }
-
-      const { seedLocalId } = await createNewItem({ modelName, ...itemData })
-
-      const newItem = await Item.find({ modelName, seedLocalId })
-
-      setIsCreatingItem(false)
     },
-    [isCreatingItem],
+    [isLoading],
   )
 
   return {
     createItem,
-    isCreatingItem,
+    isLoading,
+    error,
+    resetError,
   }
 }
 
-type PublishItemResult = Error | undefined | void
-
 type UsePublishItemReturn = {
-  publishItem: (
-    item: Item<any> | undefined,
-    callback?: (result: PublishItemResult) => any,
-  ) => void
-  isPublishing: boolean
+  publishItem: (item: Item<any> | undefined) => void
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
 }
 
-type PublishItemProps = [
-  Item<any> | undefined,
-  ((result: PublishItemResult) => any) | undefined
-]
-
-type PublishItem = (...props: PublishItemProps) => Promise<any>
-
 export const usePublishItem = (): UsePublishItemReturn => {
-  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishingItem, setPublishingItem] = useState<Item<any> | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
 
-  const isLocked = useRef(false)
+  const resetError = useCallback(() => setError(null), [])
 
-  const publishItem = useCallback(async (item: Item<any> | undefined, callback?: (result: PublishItemResult) => any) => {
-    if (!item || isLocked.current) {
+  const publishItem = useCallback((item: Item<any> | undefined) => {
+    if (!item) return
+    setPublishingItem(item)
+    setError(null)
+    item.publish().catch(() => {
+      // Error is surfaced via service state subscription; avoid unhandled rejection
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!publishingItem) {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+      setIsLoading(false)
       return
     }
-    isLocked.current = true
-    setIsPublishing(true)
-    try {
-      const uploads = await item.getPublishUploads()
-      const payload = await item.getPublishPayload(uploads)
-      if (callback) {
-        callback()
-      }
-    } catch (e) {
-      if (callback) {
-        callback(e as Error)
-      }
+
+    subscriptionRef.current?.unsubscribe()
+    const service = publishingItem.getService()
+    const subscription = service.subscribe((snapshot: any) => {
+      const value = snapshot?.value
+      const ctx = snapshot?.context
+      setIsLoading(value === 'publishing')
+      const publishError = ctx?._publishError
+      setError(publishError ? new Error(publishError.message) : null)
+    })
+
+    subscriptionRef.current = subscription
+    const snap = service.getSnapshot()
+    setIsLoading(snap?.value === 'publishing')
+    const ctx = snap?.context
+    const publishError = ctx?._publishError
+    setError(publishError ? new Error(publishError.message) : null)
+
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
     }
-    setIsPublishing(false)
-    isLocked.current = false
-  }, [])
+  }, [publishingItem])
 
   return {
     publishItem,
-    isPublishing,
+    isLoading,
+    error,
+    resetError,
   }
 }

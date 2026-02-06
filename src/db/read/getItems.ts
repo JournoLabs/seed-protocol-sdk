@@ -1,5 +1,6 @@
 import { ItemData } from '@/types'
 import { and, eq, gt, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
+import { toSnakeCase } from 'drizzle-orm/casing'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
@@ -20,7 +21,7 @@ export const getItemsData: GetItemsData = async ({
   const conditions: SQL[] = []
 
   if (modelName) {
-    conditions.push(eq(seeds.type, modelName.toLowerCase()))
+    conditions.push(eq(seeds.type, toSnakeCase(modelName)))
   }
 
   if (deleted) {
@@ -43,13 +44,19 @@ export const getItemsData: GetItemsData = async ({
 
   const versionData = getVersionData()
 
+  // When modelName is not provided (e.g. useItems({})), select each seed's type so Item.create
+  // can derive modelName via startCase(props.type). Otherwise loadOrCreateItem throws "modelName is required".
+  const selectModelNameOrType = modelName
+    ? { modelName: sql<string>`${modelName}` as any }
+    : { type: seeds.type }
+
   let query = appDb
     .with(versionData)
     .select({
       seedLocalId: seeds.localId,
       seedUid: seeds.uid,
       schemaUid: seeds.schemaUid,
-      modelName: sql<string>`${modelName}`,
+      ...selectModelNameOrType,
       attestationCreatedAt: seeds.attestationCreatedAt,
       versionsCount: versionData.versionsCount,
       lastVersionPublishedAt: versionData.lastVersionPublishedAt,

@@ -64,32 +64,18 @@ export const useModels: UseModels = (schemaId) => {
 
     try {
       setIsLoading(true)
-      const timestamp = Date.now()
-      console.log(`[useModels.fetchModels] [${timestamp}] Starting fetch, modelsTableData count:`, modelsTableData?.length, 'models:', modelsTableData?.map(m => m.modelName))
-      
-      // Use Model.createBySchemaId to get Model instances (handles caching)
-      const modelInstances = await Model.createBySchemaId(schemaId)
-      console.log(`[useModels.fetchModels] [${timestamp}] Model.createBySchemaId() returned:`, modelInstances.length, 'models:', modelInstances.map((m: any) => m.modelName))
-      
+
+      const modelInstances = await Model.all(schemaId, { waitForReady: true })
+
       setModels(prev => {
-        // Check if anything actually changed
         if (prev.length !== modelInstances.length) {
-          console.log('[useModels] Length changed:', prev.length, '->', modelInstances.length)
           return modelInstances
         }
-        
-        // Compare by modelFileId (schemaFileId) or name
-        const hasChanged = modelInstances.some((model, i) => 
-          !prev[i] || 
-          model.id !== prev[i].id || 
+        const hasChanged = modelInstances.some((model, i) =>
+          !prev[i] ||
+          model.id !== prev[i].id ||
           model.modelName !== prev[i].modelName
         )
-        
-        if (hasChanged) {
-          console.log('[useModels] Models changed (by ID or name)')
-        } else {
-          console.log('[useModels] No changes detected')
-        }
         return hasChanged ? modelInstances : prev
       })
       setError(null)
@@ -153,16 +139,6 @@ export const useModels: UseModels = (schemaId) => {
       // Models in state match table data, skip refetch
       return
     }
-
-    // Models have changed - log for debugging
-    console.log('[useModels] modelsTableData changed:', {
-      currentCount: currentModelsSet.size,
-      tableDataCount: tableDataModelsSet.size,
-      currentIds: Array.from(currentModelsSet),
-      tableDataIds: Array.from(tableDataModelsSet),
-      tableDataNames: modelsTableData.map(m => m.modelName),
-      tableDataFull: modelsTableData.map(m => ({ name: m.modelName, modelFileId: m.modelFileId })),
-    })
 
     // Models have changed, fetch updated models
     fetchModels()
@@ -325,5 +301,126 @@ export const useModel = (
     model: foundModel,
     isLoading: modelsLoading,
     error: modelsError,
+  }
+}
+
+export type UseCreateModelOptions = {
+  modelFileId?: string
+  properties?: { [propertyName: string]: any }
+  registerWithSchema?: boolean
+}
+
+export type UseCreateModelReturn = {
+  create: (
+    schemaName: string,
+    modelName: string,
+    options?: UseCreateModelOptions
+  ) => Model
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+export const useCreateModel = (): UseCreateModelReturn => {
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const resetError = useCallback(() => setError(null), [])
+
+  const create = useCallback(
+    (schemaName: string, modelName: string, options?: UseCreateModelOptions): Model => {
+      setError(null)
+      setIsLoading(true)
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+      const model = Model.create(modelName, schemaName, {
+        ...options,
+        waitForReady: false,
+      }) as import('@/Model/Model').Model
+      const subscription = model.getService().subscribe((snapshot) => {
+        if (snapshot.value === 'error') {
+          setError(
+            (snapshot.context as any)._loadingError?.error ??
+              new Error('Failed to create model')
+          )
+          setIsLoading(false)
+        }
+        if (snapshot.value === 'idle') {
+          setError(null)
+          setIsLoading(false)
+        }
+      })
+      subscriptionRef.current = subscription
+      return model
+    },
+    []
+  )
+
+  useEffect(() => {
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+    }
+  }, [])
+
+  return {
+    create,
+    isLoading,
+    error,
+    resetError,
+  }
+}
+
+export type UseDestroyModelReturn = {
+  destroy: (model: Model) => Promise<void>
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+export const useDestroyModel = (): UseDestroyModelReturn => {
+  const [currentInstance, setCurrentInstance] = useState<Model | null>(null)
+  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
+    isLoading: false,
+    error: null,
+  })
+
+  useEffect(() => {
+    if (!currentInstance) {
+      setDestroyState({ isLoading: false, error: null })
+      return
+    }
+    const service = currentInstance.getService()
+    const update = () => {
+      const snap = service.getSnapshot()
+      const ctx = snap.context as { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
+      setDestroyState({
+        isLoading: !!ctx._destroyInProgress,
+        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
+      })
+    }
+    update()
+    const sub = service.subscribe(update)
+    return () => sub.unsubscribe()
+  }, [currentInstance])
+
+  const destroy = useCallback(async (model: Model) => {
+    if (!model) return
+    setCurrentInstance(model)
+    await model.destroy()
+  }, [])
+
+  const resetError = useCallback(() => {
+    if (currentInstance) {
+      currentInstance.getService().send({ type: 'clearDestroyError' })
+    }
+  }, [currentInstance])
+
+  return {
+    destroy,
+    isLoading: destroyState.isLoading,
+    error: destroyState.error,
+    resetError,
   }
 }

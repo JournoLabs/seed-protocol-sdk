@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
-import { useModelProperties, useModelProperty } from '@/browser/react/modelProperty'
+import { useModelProperties, useModelProperty, useCreateModelProperty, useDestroyModelProperty } from '@/browser/react/modelProperty'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -185,6 +185,70 @@ function ModelPropertiesListTest({
         ))}
       </ul>
       <div data-testid="properties-count">{modelProperties?.length || 0}</div>
+    </div>
+  )
+}
+
+// Test component for useCreateModelProperty
+function UseCreateModelPropertyTest() {
+  const { create, isLoading, error, resetError } = useCreateModelProperty()
+  const [createdPropertyName, setCreatedPropertyName] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleCreate = () => {
+    setStatus('creating')
+    const prop = create('Test Schema Properties', 'Post', { name: 'hookAddedProp', dataType: 'Text' })
+    setCreatedPropertyName(prop.name)
+    setStatus('created')
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-create-model-property-test">
+      <div data-testid="create-property-status">{status}</div>
+      <div data-testid="create-property-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {createdPropertyName && <div data-testid="created-property-name">{createdPropertyName}</div>}
+      {error && <div data-testid="create-property-error">{error.message}</div>}
+      <button onClick={handleCreate} data-testid="create-property-button">
+        Create Property
+      </button>
+      <button onClick={resetError} data-testid="create-property-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
+// Test component for useDestroyModelProperty
+function UseDestroyModelPropertyTest({ modelProperty }: { modelProperty: ModelProperty | null }) {
+  const { destroy, isLoading, error, resetError } = useDestroyModelProperty()
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleDestroy = async () => {
+    if (!modelProperty) return
+    setStatus('destroying')
+    await destroy(modelProperty)
+    setStatus('destroyed')
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-destroy-model-property-test">
+      <div data-testid="destroy-property-status">{status}</div>
+      <div data-testid="destroy-property-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="destroy-property-error">{error.message}</div>}
+      <button onClick={handleDestroy} data-testid="destroy-property-button" disabled={!modelProperty}>
+        Destroy Property
+      </button>
+      <button onClick={resetError} data-testid="destroy-property-reset-error">
+        Reset Error
+      </button>
     </div>
   )
 }
@@ -388,7 +452,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
     it('should return properties when modelId provided', async () => {
       // First get the model to get its ID
-      const schema = Schema.create('Test Schema Properties')
+      const schema = Schema.create('Test Schema Properties', { waitForReady: false })
       await new Promise<void>((resolve) => {
         const subscription = schema.getService().subscribe((snapshot) => {
           if (snapshot.value === 'idle') {
@@ -593,7 +657,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(initialCount).toBeGreaterThanOrEqual(1)
 
       // Get the model instance
-      const model = Model.create('TestModel', 'LiveQuery Test Schema Properties')
+      const model = Model.create('TestModel', 'LiveQuery Test Schema Properties', { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
       // Add a new property to the model
@@ -744,7 +808,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(parseInt(initialCount.textContent || '0')).toBe(0)
 
       // Get the schema instance
-      const schemaInstance = Schema.create('Empty Test Schema Properties')
+      const schemaInstance = Schema.create('Empty Test Schema Properties', { waitForReady: false })
       
       // Wait for schema to be ready
       await waitFor(
@@ -761,6 +825,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           name: { dataType: 'Text' },
           description: { dataType: 'Text' },
         },
+        waitForReady: false,
       })
 
       // Wait for model to be idle
@@ -788,6 +853,114 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // Cleanup
       schemaInstance.unload()
       newModel.unload()
+    })
+  })
+
+  describe('useCreateModelProperty', () => {
+    it('should expose create, isLoading, error, and resetError', async () => {
+      render(<UseCreateModelPropertyTest />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('create-property-button')
+          expect(btn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('create-property-is-loading').textContent).toBe('false')
+      expect(screen.queryByTestId('create-property-error')).toBeNull()
+    })
+
+    it('should create a model property and set loading state', async () => {
+      render(<UseCreateModelPropertyTest />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('create-property-button')
+          expect(btn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('create-property-button').click()
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('create-property-status')
+          return status.textContent === 'created'
+        },
+        { timeout: 5000 }
+      )
+
+      const createdName = screen.getByTestId('created-property-name')
+      expect(createdName.textContent).toBe('hookAddedProp')
+    })
+  })
+
+  describe('useDestroyModelProperty', () => {
+    it('should expose destroy, isLoading, error, and resetError', async () => {
+      render(<UseDestroyModelPropertyTest modelProperty={null} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-property-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(true)
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
+    })
+
+    it('should destroy a model property and set loading state during destroy', async () => {
+      const model = Model.create('Post', 'Test Schema Properties', { waitForReady: false })
+      await waitFor(
+        () => {
+          const snapshot = model.getService().getSnapshot()
+          return snapshot.value === 'idle'
+        },
+        { timeout: 10000 }
+      )
+      const props = await ModelProperty.all(model.id!, { waitForReady: true })
+      const propertyToDestroy = props[0]
+      if (!propertyToDestroy) {
+        return
+      }
+
+      render(<UseDestroyModelPropertyTest modelProperty={propertyToDestroy} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-property-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(false)
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('destroy-property-button').click()
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-property-is-loading')
+          return isLoading.textContent === 'true'
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-property-is-loading')
+          const status = screen.getByTestId('destroy-property-status')
+          return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
+        },
+        { timeout: 5000 }
+      )
+
+      const status = screen.getByTestId('destroy-property-status')
+      expect(['destroyed', 'error']).toContain(status.textContent)
     })
   })
 })

@@ -90,7 +90,7 @@ testDescribe('Schema Models Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(schemaData) }, schemaData.version)
       
       console.log('Step 2: Creating Schema instance...')
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       console.log('Step 3: Waiting for schema to load...')
       // Wait for schema to load
@@ -190,7 +190,7 @@ testDescribe('Schema Models Integration Tests', () => {
       }
       
       // Create new Schema instance (should load from database)
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Wait for schema to load
       await new Promise<void>((resolve, reject) => {
@@ -263,7 +263,7 @@ testDescribe('Schema Models Integration Tests', () => {
       }
       
       // Create Schema instance (should fallback to internal schema)
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Wait for schema to load
       await new Promise<void>((resolve, reject) => {
@@ -309,7 +309,7 @@ testDescribe('Schema Models Integration Tests', () => {
       
       await importJsonSchema({ contents: JSON.stringify(schemaData) }, schemaData.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Wait for schema to load
       await new Promise<void>((resolve, reject) => {

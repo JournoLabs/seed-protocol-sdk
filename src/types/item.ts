@@ -1,5 +1,6 @@
 import { tags } from 'typia';
 import { ModelSchema } from '@/types'
+import { PropertyType as PropertySchemaType } from '@/types/property'
 import { Attestation } from '@/graphql/gql/graphql'
 import { PropertyType } from '@/seedSchema'
 import { IItem, IItemProperty } from '@/interfaces'
@@ -35,6 +36,11 @@ export type ItemMachineContext<T> = {
   versionsCount?: number
   lastVersionPublishedAt?: number
   createdAt?: number
+  /** Last publish failure; cleared on success or reset. Serializable for XState (use message string). */
+  _publishError?: { message: string } | null
+  /** Destroy lifecycle (for destroy hooks). */
+  _destroyInProgress?: boolean
+  _destroyError?: { message: string; name?: string } | null
 }
 
 export type NewItemProps<T> = Partial<ItemData> &
@@ -78,4 +84,5 @@ export type CreatePropertyInstanceProps = {
   storageTransactionId?: string
   propertyValue: any
   schemaUid?: string
+  propertyRecordSchema?: PropertySchemaType
 }

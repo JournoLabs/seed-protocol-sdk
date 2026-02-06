@@ -60,6 +60,9 @@ export type PropertyMachineContext = Partial<MetadataType> & {
   renderValue?: any
   storageTransactionId?: string
   newValue?: ItemPropertyValueType
+  /** Destroy lifecycle (for destroy hooks). */
+  _destroyInProgress?: boolean
+  _destroyError?: { message: string; name?: string } | null
 }
 
 export type ItemPropertyValueType =

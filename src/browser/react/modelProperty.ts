@@ -8,7 +8,7 @@ import debug from "debug"
 import { useLiveQuery } from "./liveQuery"
 import { BaseDb } from "@/db/Db/BaseDb"
 import { properties as propertiesTable, models as modelsTable } from "@/seedSchema/ModelSchema"
-import { eq, and } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { Model } from "@/Model/Model"
 
 const logger = debug('seedSdk:browser:react:modelProperty')
@@ -82,7 +82,7 @@ export const useModelProperties = (
   const propertiesTableData = useLiveQuery<{ id: number; name: string; dataType: string; schemaFileId: string | null }>(propertiesQuery)
 
   const fetchModelProperties = useCallback(async () => {
-    if (!modelNameForProperty || !model || !schemaIdOrModelId) {
+    if (!model?.id || !schemaIdOrModelId) {
       setModelProperties([])
       setIsLoading(false)
       setError(null)
@@ -91,51 +91,13 @@ export const useModelProperties = (
 
     try {
       setIsLoading(true)
-      const timestamp = Date.now()
-      console.log(`[useModelProperties.fetchModelProperties] [${timestamp}] Starting fetch, propertiesTableData count:`, propertiesTableData?.length, 'properties:', propertiesTableData?.map(p => p.name))
-      
-      // Use propertiesTableData (database state) as the source of truth instead of model.properties (schema file)
-      // This ensures we get the current names even after property renames
-      if (!propertiesTableData || propertiesTableData.length === 0) {
-        setModelProperties([])
-        setError(null)
-        setIsLoading(false)
-        return
-      }
 
-      const _modelProperties: ModelProperty[] = []
+      const _modelProperties = await ModelProperty.all(model.id, { waitForReady: true })
 
-      // Iterate over propertiesTableData and create ModelProperty instances by schemaFileId
-      // This works even when property names have changed, since schemaFileId is stable
-      for (const dbProperty of propertiesTableData) {
-        if (!dbProperty.schemaFileId) {
-          // If no schemaFileId, fall back to name-based lookup (for backwards compatibility)
-          const modelPropertyData = await getPropertySchema(modelNameForProperty, dbProperty.name)
-          if (modelPropertyData) {
-            const modelProperty = ModelProperty.create({
-              ...modelPropertyData,
-            })
-            _modelProperties.push(modelProperty)
-          }
-        } else {
-          // Use createById to get/create the instance by schemaFileId (stable across renames)
-          const modelProperty = await ModelProperty.createById(dbProperty.schemaFileId)
-          if (modelProperty) {
-            _modelProperties.push(modelProperty)
-          }
-        }
-      }
-
-      console.log(`[useModelProperties.fetchModelProperties] [${timestamp}] Created ${_modelProperties.length} ModelProperty instances`)
-      
       setModelProperties(prev => {
-        // Check if anything actually changed
         if (prev.length !== _modelProperties.length) {
-          console.log('[useModelProperties] Length changed:', prev.length, '->', _modelProperties.length)
           return _modelProperties
         }
-        
-        // Compare by property name or schemaFileId
         const hasChanged = _modelProperties.some((prop, i) => {
           if (!prev[i]) return true
           const prevContext = (prev[i] as any)._getSnapshotContext()
@@ -146,12 +108,6 @@ export const useModelProperties = (
           const currName = prop.name
           return prevId !== currId || prevName !== currName
         })
-        
-        if (hasChanged) {
-          console.log('[useModelProperties] Properties changed (by ID or name)')
-        } else {
-          console.log('[useModelProperties] No changes detected')
-        }
         return hasChanged ? _modelProperties : prev
       })
       setError(null)
@@ -160,7 +116,7 @@ export const useModelProperties = (
       setError(error as Error)
       setIsLoading(false)
     }
-  }, [modelNameForProperty, model, propertiesTableData, schemaIdOrModelId])
+  }, [model, schemaIdOrModelId])
 
   // Fetch model properties when dbModelId becomes available (model has finished loading)
   // This ensures we wait for the model to be fully loaded before trying to fetch properties
@@ -218,26 +174,14 @@ export const useModelProperties = (
     }
 
     // Compare sets to detect changes
-    // If currentPropertiesSet is empty but tableDataPropertiesSet has data, that's a change
-    const setsAreEqual = 
+    const setsAreEqual =
       currentPropertiesSet.size === tableDataPropertiesSet.size &&
-      currentPropertiesSet.size > 0 &&
-      [...currentPropertiesSet].every(id => tableDataPropertiesSet.has(id))
+      (currentPropertiesSet.size === 0 ||
+        [...currentPropertiesSet].every(id => tableDataPropertiesSet.has(id)))
 
     if (setsAreEqual) {
-      // Properties in state match table data, skip refetch
       return
     }
-
-    // Properties have changed - log for debugging
-    console.log('[useModelProperties] propertiesTableData changed:', {
-      currentCount: currentPropertiesSet.size,
-      tableDataCount: tableDataPropertiesSet.size,
-      currentIds: Array.from(currentPropertiesSet),
-      tableDataIds: Array.from(tableDataPropertiesSet),
-      tableDataNames: propertiesTableData.map(p => p.name),
-      tableDataFull: propertiesTableData.map(p => ({ name: p.name, schemaFileId: p.schemaFileId })),
-    })
 
     // Properties have changed, fetch updated properties
     fetchModelProperties()
@@ -491,5 +435,137 @@ export function useModelProperty(
     modelProperty,
     isLoading,
     error,
+  }
+}
+
+export type UseCreateModelPropertyOptions = {
+  name: string
+  dataType: string
+  [key: string]: any
+}
+
+export type UseCreateModelPropertyReturn = {
+  create: (
+    schemaId: string,
+    modelName: string,
+    property: UseCreateModelPropertyOptions
+  ) => ModelProperty
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+/**
+ * Hook to create a ModelProperty with loading and error state.
+ * create(schemaId, modelName, property) creates a new property on the model.
+ */
+export const useCreateModelProperty = (): UseCreateModelPropertyReturn => {
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const resetError = useCallback(() => setError(null), [])
+
+  const create = useCallback(
+    (
+      _schemaId: string,
+      modelName: string,
+      property: UseCreateModelPropertyOptions
+    ): ModelProperty => {
+      setError(null)
+      setIsLoading(true)
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+
+      if (!modelName || !property.name || !property.dataType) {
+        const err = new Error('modelName, property name and dataType are required')
+        setError(err)
+        setIsLoading(false)
+        throw err
+      }
+
+      const created = ModelProperty.create({ ...property, modelName } as Parameters<typeof ModelProperty.create>[0])
+      const subscription = created.getService().subscribe((snapshot) => {
+        if ((snapshot as { value?: string }).value === 'error') {
+          const err = (snapshot.context as any)._loadingError?.error ?? new Error('Failed to create model property')
+          setError(err instanceof Error ? err : new Error(String(err)))
+          setIsLoading(false)
+        }
+        if (snapshot.value === 'idle') {
+          setError(null)
+          setIsLoading(false)
+        }
+      })
+      subscriptionRef.current = subscription
+      return created
+    },
+    []
+  )
+
+  useEffect(() => {
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+    }
+  }, [])
+
+  return {
+    create,
+    isLoading,
+    error,
+    resetError,
+  }
+}
+
+export type UseDestroyModelPropertyReturn = {
+  destroy: (modelProperty: ModelProperty) => Promise<void>
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+export const useDestroyModelProperty = (): UseDestroyModelPropertyReturn => {
+  const [currentInstance, setCurrentInstance] = useState<ModelProperty | null>(null)
+  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
+    isLoading: false,
+    error: null,
+  })
+
+  useEffect(() => {
+    if (!currentInstance) {
+      setDestroyState({ isLoading: false, error: null })
+      return
+    }
+    const service = currentInstance.getService()
+    const update = () => {
+      const snap = service.getSnapshot()
+      const ctx = snap.context as { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
+      setDestroyState({
+        isLoading: !!ctx._destroyInProgress,
+        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
+      })
+    }
+    update()
+    const sub = service.subscribe(update)
+    return () => sub.unsubscribe()
+  }, [currentInstance])
+
+  const destroy = useCallback(async (modelProperty: ModelProperty) => {
+    if (!modelProperty) return
+    setCurrentInstance(modelProperty)
+    await modelProperty.destroy()
+  }, [])
+
+  const resetError = useCallback(() => {
+    if (currentInstance) {
+      currentInstance.getService().send({ type: 'clearDestroyError' })
+    }
+  }, [currentInstance])
+
+  return {
+    destroy,
+    isLoading: destroyState.isLoading,
+    error: destroyState.error,
+    resetError,
   }
 }

@@ -2,6 +2,7 @@ import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
 import { and, eq, getTableColumns, gt, SQL, sql, count, max } from "drizzle-orm"
+import { toSnakeCase } from "drizzle-orm/casing"
 import { getItemProperties } from "./getItemProperties"
 import { getVersionData } from "./subqueries/versionData"
 import { seeds, versions } from "@/seedSchema"
@@ -34,7 +35,7 @@ export const getItemData: GetItemData = async ({
   const whereClauses: SQL[] = []
 
   if (modelName) {
-    whereClauses.push(eq(seeds.type, modelName.toLowerCase()))
+    whereClauses.push(eq(seeds.type, toSnakeCase(modelName)))
   }
 
   if (seedUid) {

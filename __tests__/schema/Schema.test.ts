@@ -162,7 +162,7 @@ testDescribe('Schema Integration Tests', () => {
       const dbSchemas = await db.select().from(schemas)
       for (const dbSchema of dbSchemas) {
         try {
-          const schema = Schema.create(dbSchema.name)
+          const schema = Schema.create(dbSchema.name, { waitForReady: false })
           schema.unload()
         } catch (error) {
           // Schema might not exist, ignore
@@ -188,7 +188,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       expect(schema).toBeDefined()
       expect(schema.schemaName).toBe(schemaName)
       
@@ -205,8 +205,8 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema1 = Schema.create(schemaName)
-      const schema2 = Schema.create(schemaName)
+      const schema1 = Schema.create(schemaName, { waitForReady: false })
+      const schema2 = Schema.create(schemaName, { waitForReady: false })
       
       expect(schema1).toBe(schema2)
     })
@@ -246,7 +246,7 @@ testDescribe('Schema Integration Tests', () => {
       }
       
       // Create schema instance (should load from database)
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       const context = schema.getService().getSnapshot().context
@@ -367,7 +367,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create schema normally
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Verify initial state is correct
@@ -403,7 +403,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create schema normally
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Simulate the bug: set context.schemaName to ID
@@ -418,7 +418,8 @@ testDescribe('Schema Integration Tests', () => {
       
       // Create a Model using the Schema instance
       // Model.create() reads schemaInstance.schemaName, which should return the name, not ID
-      const model = Model.create('TestModel', schema)
+      const model = Model.create('TestModel', schema, {
+        waitForReady: false, waitForReady: false })
       
       // Verify Model received the actual schema name, not the ID
       expect(model.schemaName).toBe(schemaName)
@@ -440,7 +441,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create schema - it will be in loading state initially
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // During loading, context.schemaName might be the ID temporarily
       // But schemaName getter should prefer metadata.name if available
@@ -454,7 +455,8 @@ testDescribe('Schema Integration Tests', () => {
       expect(schema.schemaName).not.toBe(schemaFileId)
       
       // Create Model - should work correctly even if schema was just loading
-      const model = Model.create('TestModel', schema)
+      const model = Model.create('TestModel', schema, {
+        waitForReady: false, waitForReady: false })
       expect(model.schemaName).toBe(schemaName)
     })
 
@@ -482,7 +484,7 @@ testDescribe('Schema Integration Tests', () => {
       // Now create a Model using this Schema instance
       // Model.create() reads schemaInstance.schemaName and passes it to Schema.create()
       // This should pass the actual name, not the ID
-      const model = Model.create('TestModel', schemaWithId)
+      const model = Model.create('TestModel', schemaWithId, { waitForReady: false })
       
       // Verify Model has the correct schema name
       expect(model.schemaName).toBe(schemaName)
@@ -508,7 +510,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create schema first (this will cache it)
-      const schema1 = Schema.create(schemaName)
+      const schema1 = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema1)
       
       // Get by ID (should return cached instance)
@@ -595,6 +597,23 @@ testDescribe('Schema Integration Tests', () => {
         await waitForSchemaIdle(testSchema)
         const context = testSchema.getService().getSnapshot().context
         expect(context.version).toBe(2) // Latest version
+      }
+    })
+
+    it('should return all schemas in idle state when waitForReady is true', async () => {
+      const schema1 = createTestSchema('Test Schema WaitForReady 1')
+      const schema2 = createTestSchema('Test Schema WaitForReady 2')
+
+      await importJsonSchema({ contents: JSON.stringify(schema1) }, schema1.version)
+      await importJsonSchema({ contents: JSON.stringify(schema2) }, schema2.version)
+
+      const allSchemas = await Schema.all({ waitForReady: true })
+
+      expect(allSchemas).toBeDefined()
+      expect(allSchemas.length).toBeGreaterThanOrEqual(2)
+      for (const schema of allSchemas) {
+        const snapshot = schema.getService().getSnapshot()
+        expect(snapshot.value).toBe('idle')
       }
     })
 
@@ -719,7 +738,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
       // Create a Model directly in the database (simulating a model added via database)
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
       // Create a model which will be added to database
@@ -727,6 +746,7 @@ testDescribe('Schema Integration Tests', () => {
         properties: {
           content: { dataType: 'Text' },
         },
+        waitForReady: false,
       })
       await waitForModelIdle(articleModel, 20000)
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -795,7 +815,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         // Make a change to mark as draft - use Model.create() instead of direct assignment
@@ -803,6 +823,7 @@ testDescribe('Schema Integration Tests', () => {
           properties: {
             content: { dataType: 'Text' },
           },
+          waitForReady: false,
         })
         try {
           await waitForModelIdle(articleModel, 20000) // 20 seconds
@@ -837,7 +858,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         // Create an invalid schema state (this would need to be done through the state machine)
@@ -854,7 +875,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         // Simulate external update by directly updating the database
@@ -882,6 +903,7 @@ testDescribe('Schema Integration Tests', () => {
           properties: {
             content: { dataType: 'Text' },
           },
+          waitForReady: false,
         })
         try {
           await waitForModelIdle(articleModel, 20000) // 20 seconds
@@ -914,7 +936,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         // Update database directly (works in both environments)
@@ -1002,7 +1024,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         const validationResult = await schema.validate()
@@ -1018,7 +1040,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         const validationResult = await schema.validate()
@@ -1035,7 +1057,7 @@ testDescribe('Schema Integration Tests', () => {
 
         await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
         
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false })
         await waitForSchemaIdle(schema)
         
         // Verify service is running
@@ -1069,7 +1091,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Test property access
@@ -1088,7 +1110,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(oldName)
+      const schema = Schema.create(oldName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Update name
@@ -1130,7 +1152,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Wait for models to be loaded (they're created asynchronously)
@@ -1172,7 +1194,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Initially should not be a draft (loaded from file)
@@ -1197,7 +1219,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Check validation errors property
@@ -1212,7 +1234,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Status should be 'loading' or a nested loading state initially
       // Possible nested states: checkingExisting, writingSchema, verifyingSchema,
@@ -1271,7 +1293,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       expect(schema.schemaFileId).toBe(expectedId)
@@ -1286,7 +1308,7 @@ testDescribe('Schema Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create schema (cached by name initially)
-      const schema1 = Schema.create(schemaName)
+      const schema1 = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema1)
       
       // Get by ID (should find cached instance)
@@ -1302,7 +1324,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Initially, models array should be empty or not contain our test model
@@ -1316,6 +1338,7 @@ testDescribe('Schema Integration Tests', () => {
           title: { dataType: 'Text' },
           content: { dataType: 'Text' },
         },
+        waitForReady: false,
       })
       
       // Wait for model with a longer timeout, but don't fail if it takes a while
@@ -1402,7 +1425,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Wait for models to be loaded
@@ -1414,7 +1437,7 @@ testDescribe('Schema Integration Tests', () => {
       
       if (!model) {
         // If model not found, create one
-        const newModel = Model.create('TestModel', schema)
+        const newModel = Model.create('TestModel', schema, { waitForReady: false })
         await waitForModelIdle(newModel)
         await new Promise(resolve => setTimeout(resolve, 500))
         
@@ -1450,7 +1473,7 @@ testDescribe('Schema Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
       // Get models from schema

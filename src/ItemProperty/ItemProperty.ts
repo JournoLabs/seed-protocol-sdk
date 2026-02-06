@@ -3,18 +3,27 @@ import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
 import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
+import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
 import { propertyMachine } from './service/propertyMachine'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
+import { startCase } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
+import { getItemProperties } from '@/db/read/getItemProperties'
+import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager, getCorrectId } from '@/helpers'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import {
+  clearDestroySubscriptions,
+  forceRemoveFromCaches,
+  runDestroyLifecycle,
+} from '@/helpers/entity/entityDestroy'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -79,6 +88,8 @@ type ItemPropertyFindProps = {
   propertyLocalId?: string
   seedLocalId?: string
   seedUid?: string
+  /** When metadata has no modelType, callers (e.g. Item) can pass modelName so ItemProperty.create can succeed */
+  modelName?: string
 }
 
 export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
@@ -119,7 +130,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       storageTransactionId,
       // propertyRecordSchema will be loaded from database via loadOrCreateProperty actor
       // or can be provided in initialValues if available
-      propertyRecordSchema: (initialValues as any).propertyRecordSchema,
+      propertyRecordSchema: initialValues.propertyRecordSchema,
       schemaUid,
       isSaving: false,
       isRelation: false,
@@ -130,7 +141,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     // Property schema will be loaded from database via loadOrCreateProperty actor
     // For now, use propertyRecordSchema from initialValues if provided
-    const propertyRecordSchema = (initialValues as any).propertyRecordSchema
+    const propertyRecordSchema = initialValues.propertyRecordSchema
     if (propertyRecordSchema) {
       this._dataType = propertyRecordSchema.dataType
 
@@ -501,11 +512,24 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-  ): ItemProperty<any> | undefined {
+    options?: { waitForReady?: false },
+  ): ItemProperty<any> | undefined
+  static create(
+    props: Partial<CreatePropertyInstanceProps>,
+    options?: { waitForReady?: true; readyTimeout?: number },
+  ): Promise<ItemProperty<any> | undefined>
+  static create(
+    props: Partial<CreatePropertyInstanceProps>,
+    options?: CreateWaitOptions,
+  ): ItemProperty<any> | undefined | Promise<ItemProperty<any> | undefined> {
+    const waitForReady = options?.waitForReady !== false
+    const readyTimeout = options?.readyTimeout ?? 5000
+
     const { propertyName, seedLocalId, seedUid, versionLocalId, versionUid } =
       props
     if (!propertyName || (!seedLocalId && !seedUid)) {
-      return
+      if (!waitForReady) return undefined
+      return Promise.resolve(undefined)
     }
     const cacheKey = this.cacheKey(
       (seedUid || seedLocalId) as string,
@@ -518,7 +542,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           instance,
           refCount: refCount + 1,
         })
-        return instance
+        if (!waitForReady) return instance
+        return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+          () => instance,
+        )
       }
       if (!this.instanceCache.has(cacheKey)) {
         const newInstance = new ItemProperty(props)
@@ -543,14 +570,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           instance: proxiedInstance,
           refCount: 1,
         })
-        return proxiedInstance
+        if (!waitForReady) return proxiedInstance
+        return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+          () => proxiedInstance,
+        )
       }
     }
     if (seedUid && propertyName) {
       if (this.instanceCache.has(cacheKey)) {
         const { instance, refCount } = this.instanceCache.get(cacheKey)!
         this.instanceCache.set(cacheKey, { instance, refCount: refCount + 1 })
-        return instance
+        if (!waitForReady) return instance
+        return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+          () => instance,
+        )
       }
       if (!this.instanceCache.has(cacheKey)) {
         const newInstance = new ItemProperty(props)
@@ -572,13 +605,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         })
         
         this.instanceCache.set(cacheKey, { instance: proxiedInstance, refCount: 1 })
-        return proxiedInstance
+        if (!waitForReady) return proxiedInstance
+        return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+          () => proxiedInstance,
+        )
       }
     }
     const newInstance = new ItemProperty(props)
     
     // Wrap instance in Proxy for reactive property access
-    return createReactiveProxy<ItemProperty<any>>({
+    const result = createReactiveProxy<ItemProperty<any>>({
       instance: newInstance,
       service: newInstance._service,
       trackedProperties: TRACKED_PROPERTIES,
@@ -592,12 +628,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         })
       },
     })
+    if (!waitForReady) return result
+    return waitForEntityIdle(result, { timeout: readyTimeout }).then(
+      () => result,
+    )
   }
 
   static async find({
     propertyName,
     seedLocalId,
     seedUid,
+    modelName: modelNameOption,
     waitForReady = true,
     readyTimeout = 5000,
   }: ItemPropertyFindProps & {
@@ -630,7 +671,15 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       if (!propertyData) {
         return undefined
       }
-      foundProperty = await ItemProperty.create(propertyData)
+      // Ensure modelName for constructor: metadata may have modelType only, or neither (e.g. when Item passes it)
+      const data = propertyData as { modelName?: string; modelType?: string }
+      const modelName =
+        data.modelName ??
+        ((data.modelType ? startCase(data.modelType) : '') || modelNameOption || '')
+      foundProperty = ItemProperty.create(
+        { ...propertyData, modelName },
+        { waitForReady: false },
+      )
     }
 
     if (!foundProperty) {
@@ -642,6 +691,47 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     }
 
     return foundProperty
+  }
+
+  /**
+   * Get all ItemProperty instances for an item.
+   * Loads property data via getItemProperties, creates instances via create, optionally waits for idle.
+   */
+  static async all(
+    params: { seedLocalId?: string; seedUid?: string },
+    options?: { waitForReady?: boolean; readyTimeout?: number },
+  ): Promise<ItemProperty<any>[]> {
+    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { seedLocalId, seedUid } = params
+    if (!seedLocalId && !seedUid) {
+      return []
+    }
+
+    const propertiesData = await getItemProperties({ seedLocalId, seedUid })
+    const instances: ItemProperty<any>[] = []
+
+    for (const data of propertiesData) {
+      const createProps = {
+        ...data,
+        modelName: (data as { modelName?: string; modelType?: string }).modelName ?? (data as { modelType?: string }).modelType ?? '',
+      }
+      const instance = this.create(createProps, { waitForReady: false })
+      if (instance) {
+        instances.push(instance)
+      }
+    }
+
+    if (waitForReady && instances.length > 0) {
+      await Promise.all(
+        instances.map((p) =>
+          waitForEntityIdle(p as Parameters<typeof waitForEntityIdle>[0], {
+            timeout: readyTimeout,
+          }),
+        ),
+      )
+    }
+
+    return instances
   }
 
   find = ItemProperty.find
@@ -833,5 +923,61 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         // Service might already be stopped
       }
     }
+  }
+
+  /**
+   * Destroy the item property: remove from caches, delete metadata from DB, remove from parent Item, stop service.
+   */
+  async destroy(): Promise<void> {
+    const context = this._getSnapshotContext()
+    const cacheKey = ItemProperty.cacheKey(
+      context.seedUid || context.seedLocalId || '',
+      context.propertyName || '',
+    )
+    const cacheKeys: string[] = cacheKey && cacheKey !== 'Item__' ? [cacheKey] : []
+
+    clearDestroySubscriptions(this, {
+      instanceState: itemPropertyInstanceState,
+      onUnload: (instance) => (instance as ItemProperty<any>)._subscription?.unsubscribe(),
+    })
+
+    forceRemoveFromCaches(this, {
+      getCacheKeys: () => cacheKeys,
+      caches: [ItemProperty.instanceCache as Map<string, unknown>],
+    })
+
+    await runDestroyLifecycle(this, {
+      getService: (instance) =>
+        instance._service as { send: (ev: unknown) => void; stop: () => void },
+      doDestroy: async () => {
+        const db = BaseDb.getAppDb()
+        const seedLocalId = context.seedLocalId
+        const seedUid = context.seedUid
+        const propertyName = context.propertyName
+        if (!propertyName || (!seedLocalId && !seedUid)) return
+
+        if (db) {
+          const { metadata } = await import('@/seedSchema')
+          const { and, eq, or } = await import('drizzle-orm')
+          const conditions = [eq(metadata.propertyName, propertyName)]
+          if (seedLocalId && seedUid) {
+            conditions.push(or(eq(metadata.seedLocalId, seedLocalId), eq(metadata.seedUid, seedUid)) as any)
+          } else if (seedLocalId) {
+            conditions.push(eq(metadata.seedLocalId, seedLocalId))
+          } else if (seedUid) {
+            conditions.push(eq(metadata.seedUid, seedUid))
+          }
+          if (conditions.length > 1) {
+            await db.delete(metadata).where(and(...conditions))
+          }
+        }
+
+        const { Item } = await import('@/Item/Item')
+        const item = Item.getById((seedLocalId || seedUid) as string)
+        if (item) {
+          item.getService().send({ type: 'removePropertyInstance', propertyName })
+        }
+      },
+    })
   }
 }

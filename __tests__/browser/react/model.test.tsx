@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
-import { useModel, useModels } from '@/browser/react/model'
+import { useModel, useModels, useCreateModel, useDestroyModel } from '@/browser/react/model'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -168,6 +168,70 @@ function UseModelWithIdTest({ modelId }: { modelId: string | null | undefined })
   )
 }
 
+// Test component for useCreateModel
+function UseCreateModelTest() {
+  const { create, isLoading, error, resetError } = useCreateModel()
+  const [createdModelName, setCreatedModelName] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleCreate = () => {
+    setStatus('creating')
+    const model = create('Test Schema Models', 'HookTestModel', { properties: { name: { dataType: 'Text' } } })
+    setCreatedModelName(model.modelName)
+    setStatus('created')
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-create-model-test">
+      <div data-testid="create-model-status">{status}</div>
+      <div data-testid="create-model-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {createdModelName && <div data-testid="created-model-name">{createdModelName}</div>}
+      {error && <div data-testid="create-model-error">{error.message}</div>}
+      <button onClick={handleCreate} data-testid="create-model-button">
+        Create Model
+      </button>
+      <button onClick={resetError} data-testid="create-model-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
+// Test component for useDestroyModel
+function UseDestroyModelTest({ model }: { model: Model | null }) {
+  const { destroy, isLoading, error, resetError } = useDestroyModel()
+  const [status, setStatus] = useState<string>('idle')
+
+  const handleDestroy = async () => {
+    if (!model) return
+    setStatus('destroying')
+    await destroy(model)
+    setStatus('destroyed')
+  }
+
+  useEffect(() => {
+    if (error) setStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-destroy-model-test">
+      <div data-testid="destroy-model-status">{status}</div>
+      <div data-testid="destroy-model-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="destroy-model-error">{error.message}</div>}
+      <button onClick={handleDestroy} data-testid="destroy-model-button" disabled={!model}>
+        Destroy Model
+      </button>
+      <button onClick={resetError} data-testid="destroy-model-reset-error">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
 describe('React Model Hooks Integration Tests', () => {
   let container: HTMLElement
   let schemaId: string | null = null
@@ -239,7 +303,7 @@ describe('React Model Hooks Integration Tests', () => {
       },
       { timeout: 10000 }
     )
-    const schema = Schema.create('Test Schema Models')
+    const schema = Schema.create('Test Schema Models', { waitForReady: false })
     await new Promise<void>((resolve) => {
       const subscription = schema.getService().subscribe((snapshot) => {
         if (snapshot.value === 'idle') {
@@ -451,7 +515,7 @@ describe('React Model Hooks Integration Tests', () => {
       }
 
       // First get the model by name to get its ID
-      const schema = Schema.create('Test Schema Models')
+      const schema = Schema.create('Test Schema Models', { waitForReady: false })
       await new Promise<void>((resolve) => {
         const subscription = schema.getService().subscribe((snapshot) => {
           if (snapshot.value === 'idle') {
@@ -534,7 +598,7 @@ describe('React Model Hooks Integration Tests', () => {
       )
 
       // Get schema instance
-      const schema = Schema.create('Test Schema Dynamic')
+      const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
       await new Promise<void>((resolve) => {
         const subscription = schema.getService().subscribe((snapshot) => {
           if (snapshot.value === 'idle') {
@@ -577,6 +641,7 @@ describe('React Model Hooks Integration Tests', () => {
             type: 'Text',
           },
         },
+        waitForReady: false,
       })
       console.log('[TEST] Model created:', newModel.id, newModel.modelName)
 
@@ -645,6 +710,104 @@ describe('React Model Hooks Integration Tests', () => {
         await db.delete(schemas).where(eq(schemas.name, 'Test Schema Dynamic'))
       }
       Schema.clearCache()
+    })
+  })
+
+  describe('useCreateModel', () => {
+    it('should expose create, isLoading, error, and resetError', async () => {
+      render(<UseCreateModelTest />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('create-model-button')
+          expect(btn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('create-model-is-loading').textContent).toBe('false')
+      expect(screen.queryByTestId('create-model-error')).toBeNull()
+    })
+
+    it('should create a model and set loading state', async () => {
+      render(<UseCreateModelTest />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('create-model-button')
+          expect(btn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('create-model-button').click()
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('create-model-status')
+          return status.textContent === 'created'
+        },
+        { timeout: 3000 }
+      )
+
+      const createdName = screen.getByTestId('created-model-name')
+      expect(createdName.textContent).toBe('HookTestModel')
+    })
+  })
+
+  describe('useDestroyModel', () => {
+    it('should expose destroy, isLoading, error, and resetError', async () => {
+      render(<UseDestroyModelTest model={null} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-model-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(true)
+        },
+        { timeout: 5000 }
+      )
+
+      expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
+    })
+
+    it('should destroy a model and set loading state during destroy', async () => {
+      const modelToDestroy = Model.create('DestroyTestModel', 'Test Schema Models', {
+        properties: { name: { dataType: 'Text' } },
+        waitForReady: false,
+      })
+
+      render(<UseDestroyModelTest model={modelToDestroy} />, { container })
+
+      await waitFor(
+        () => {
+          const btn = screen.getByTestId('destroy-model-button')
+          expect(btn).toBeTruthy()
+          expect(btn.hasAttribute('disabled')).toBe(false)
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('destroy-model-button').click()
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-model-is-loading')
+          return isLoading.textContent === 'true'
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('destroy-model-status')
+          return status.textContent === 'destroyed' || status.textContent === 'error'
+        },
+        { timeout: 25000 }
+      )
+
+      const status = screen.getByTestId('destroy-model-status')
+      expect(['destroyed', 'error']).toContain(status.textContent)
     })
   })
 })

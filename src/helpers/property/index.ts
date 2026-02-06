@@ -42,7 +42,8 @@ export const TProperty = Type.Object({
   name: Type.Optional(Type.String()),
   dataType: TPropertyDataType,
   ref: Type.Optional(Type.String()),
-  modelId: Type.Optional(Type.Number()),
+  // modelId: string (modelFileId) in code; number only for DB foreign keys when resolved
+  modelId: Type.Optional(Type.Union([Type.Number(), Type.String()])),
   modelName: Type.Optional(Type.String()),
   refModelId: Type.Optional(Type.Number()),
   refModelName: Type.Optional(Type.String()),

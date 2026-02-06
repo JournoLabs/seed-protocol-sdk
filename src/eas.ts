@@ -15,7 +15,7 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
 
   // Dynamic import to break circular dependency
   const { Model } = await import('@/Model/Model')
-  const allModels = Model.getAll()
+  const allModels = await Model.all()
   const modelNames = allModels.map(m => m.modelName).filter((name): name is string => !!name)
 
   // If there are no models, return empty array instead of querying

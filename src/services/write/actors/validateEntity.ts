@@ -58,7 +58,9 @@ export const validateEntity = fromPromise<
             try {
               logger(`[validateEntity] Validating model against schema "${entityInput.entityData.schemaName}"`)
               const { Schema } = await import('@/Schema/Schema')
-              const schema = Schema.create(entityInput.entityData.schemaName)
+              const schema = Schema.create(entityInput.entityData.schemaName, {
+                waitForReady: false,
+              }) as import('@/Schema/Schema').Schema
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               logger(`[validateEntity] Schema status: ${schemaStatus}`)
@@ -108,7 +110,9 @@ export const validateEntity = fromPromise<
           if (entityInput.entityData._schemaName && entityInput.entityData.modelName) {
             try {
               const { Schema } = await import('@/Schema/Schema')
-              const schema = Schema.create(entityInput.entityData._schemaName)
+              const schema = Schema.create(entityInput.entityData._schemaName, {
+                waitForReady: false,
+              }) as import('@/Schema/Schema').Schema
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               

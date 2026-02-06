@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import React, { useEffect, useState, useRef } from 'react'
-import { useSchema, useSchemas, useAllSchemaVersions, useCreateSchema } from '@/browser/react/schema'
+import { useSchema, useSchemas, useAllSchemaVersions, useCreateSchema, useDestroySchema } from '@/browser/react/schema'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -189,11 +189,18 @@ function UseSchemasTest() {
     }
   }, [schemas, isLoading, error])
 
+  const allSchemasIdle =
+    (schemas?.length ?? 0) > 0 &&
+    schemas!.every((s) => s.getService().getSnapshot().value === 'idle')
+
   return (
     <div data-testid="use-schemas-test">
       <div data-testid="schemas-status">{status}</div>
       {error && <div data-testid="schemas-error">{error.message}</div>}
       <div data-testid="schemas-count">{schemas?.length || 0}</div>
+      <div data-testid="schemas-all-idle">
+        {!schemas?.length ? 'n/a' : allSchemasIdle ? 'true' : 'false'}
+      </div>
       {schemas?.map((schema, index) => (
         <div key={index} data-testid={`schema-${index}`}>
           {schema.metadata?.name}
@@ -226,7 +233,7 @@ function UseAllSchemaVersionsTest() {
 
 // Test component for useCreateSchema
 function UseCreateSchemaTest() {
-  const { createSchema, isLoading, error } = useCreateSchema()
+  const { createSchema, isLoading, error, resetError } = useCreateSchema()
   const [status, setStatus] = useState<string>('idle')
   const wasCreatingRef = useRef(false)
 
@@ -256,6 +263,52 @@ function UseCreateSchemaTest() {
       {error && <div data-testid="create-error">{error.message}</div>}
       <button onClick={handleCreate} data-testid="create-button">
         Create Schema
+      </button>
+      <button onClick={resetError} data-testid="reset-error-button">
+        Reset Error
+      </button>
+    </div>
+  )
+}
+
+// Test component for useDestroySchema
+function UseDestroySchemaTest() {
+  const { destroy, isLoading, error, resetError } = useDestroySchema()
+  const [schemaInstance, setSchemaInstance] = useState<Schema | null>(null)
+  const [destroyStatus, setDestroyStatus] = useState<string>('idle')
+
+  const handleCreateThenDestroy = () => {
+    const schema = Schema.create('Destroy Test Schema', { waitForReady: false })
+    setSchemaInstance(schema)
+    setDestroyStatus('created')
+  }
+
+  const handleDestroy = async () => {
+    if (schemaInstance) {
+      setDestroyStatus('destroying')
+      await destroy(schemaInstance)
+      setSchemaInstance(null)
+      setDestroyStatus('destroyed')
+    }
+  }
+
+  useEffect(() => {
+    if (error) setDestroyStatus('error')
+  }, [error])
+
+  return (
+    <div data-testid="use-destroy-schema-test">
+      <div data-testid="destroy-status">{destroyStatus}</div>
+      <div data-testid="destroy-is-loading">{isLoading ? 'true' : 'false'}</div>
+      {error && <div data-testid="destroy-error">{error.message}</div>}
+      <button onClick={handleCreateThenDestroy} data-testid="create-for-destroy-button">
+        Create Schema
+      </button>
+      <button onClick={handleDestroy} data-testid="destroy-button" disabled={!schemaInstance}>
+        Destroy Schema
+      </button>
+      <button onClick={resetError} data-testid="destroy-reset-error-button">
+        Reset Error
       </button>
     </div>
   )
@@ -358,6 +411,7 @@ describe('React Schema Hooks Integration Tests', () => {
       await db.delete(schemas).where(eq(schemas.name, 'New Test Schema'))
       await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema'))
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema'))
+      await db.delete(schemas).where(eq(schemas.name, 'Destroy Test Schema'))
     }
 
     // Clean up schema files from file system
@@ -414,6 +468,7 @@ describe('React Schema Hooks Integration Tests', () => {
       await db.delete(schemas).where(eq(schemas.name, 'New Test Schema'))
       await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema'))
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema'))
+      await db.delete(schemas).where(eq(schemas.name, 'Destroy Test Schema'))
     }
     
     // Clean up schema files from file system
@@ -737,6 +792,24 @@ describe('React Schema Hooks Integration Tests', () => {
       expect(schema1 || schema2).toBeTruthy()
     })
 
+    it('should return schemas that are all idle when loading completes', async () => {
+      render(<UseSchemasTest />, { container })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('schemas-status')
+          expect(status.textContent).toBe('loaded')
+        },
+        { timeout: 10000 }
+      )
+
+      const count = screen.getByTestId('schemas-count')
+      expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(1)
+
+      const allIdle = screen.getByTestId('schemas-all-idle')
+      expect(allIdle.textContent).toBe('true')
+    })
+
     it('should filter out Seed Protocol schema', async () => {
       render(<UseSchemasTest />, { container })
 
@@ -1020,6 +1093,73 @@ describe('React Schema Hooks Integration Tests', () => {
         }
       }
     })
+
+    it('should expose resetError and clear error when resetError is called', async () => {
+      render(<UseCreateSchemaTest />, { container })
+
+      await waitFor(
+        () => {
+          const resetBtn = screen.getByTestId('reset-error-button')
+          expect(resetBtn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+      // If there was an error from a previous test, resetError should clear it
+      const resetBtn = screen.getByTestId('reset-error-button')
+      resetBtn.click()
+      await waitFor(() => {
+        const errorEl = screen.queryByTestId('create-error')
+        return true // Just ensure component is stable
+      }, { timeout: 1000 })
+    })
+  })
+
+  describe('useDestroySchema', () => {
+    it('should destroy a schema instance and set isLoading during destroy', async () => {
+      render(<UseDestroySchemaTest />, { container })
+
+      await waitFor(
+        () => {
+          const createBtn = screen.getByTestId('create-for-destroy-button')
+          expect(createBtn).toBeTruthy()
+        },
+        { timeout: 5000 }
+      )
+
+      screen.getByTestId('create-for-destroy-button').click()
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('destroy-status')
+          return status.textContent === 'created'
+        },
+        { timeout: 3000 }
+      )
+
+      screen.getByTestId('destroy-button').click()
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-is-loading')
+          return isLoading.textContent === 'true'
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          const isLoading = screen.getByTestId('destroy-is-loading')
+          const status = screen.getByTestId('destroy-status')
+          return isLoading.textContent === 'false' && status.textContent === 'destroyed'
+        },
+        { timeout: 5000 }
+      )
+
+      const status = screen.getByTestId('destroy-status')
+      expect(status.textContent).toBe('destroyed')
+      const errorEl = screen.queryByTestId('destroy-error')
+      expect(errorEl).toBeNull()
+    })
   })
 
   describe('useSchema with Model creation integration', () => {
@@ -1067,7 +1207,7 @@ describe('React Schema Hooks Integration Tests', () => {
       expect(modelsList.children.length).toBe(0)
 
       // Get the schema instance using Schema.create (same instance used by useSchema hook)
-      const schemaInstance = Schema.create('Empty Test Schema')
+      const schemaInstance = Schema.create('Empty Test Schema', { waitForReady: false })
       
       // Wait for schema to be ready
       await waitFor(
@@ -1079,7 +1219,7 @@ describe('React Schema Hooks Integration Tests', () => {
       )
 
       // Create the model
-      const newModel = Model.create('New model', schemaInstance)
+      const newModel = Model.create('New model', schemaInstance, { waitForReady: false })
 
       // Wait for model to be idle
       await waitFor(

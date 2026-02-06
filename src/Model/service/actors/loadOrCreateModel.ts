@@ -58,7 +58,7 @@ export const loadOrCreateModel = fromCallback<
   FromCallbackInput<ModelMachineContext>
 >(({ sendBack, input: { context } }) => {
   const _loadOrCreateModel = async (): Promise<void> => {
-    const { modelName, schemaName, id } = context // id is now the schemaFileId (string)
+    const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
 
     console.log('loadOrCreateModel called for', modelName, 'with schemaName', schemaName, 'and id', id)
 
@@ -73,6 +73,7 @@ export const loadOrCreateModel = fromCallback<
     let schemaFileId = id // id is now the schemaFileId (string)
     let modelRecord: any = null
     let foundBySchemaFileId = false // Track if model was found by schemaFileId
+    let existingNumbersFromSchemaContext: Set<number> | null = null // When we fall through (same name, different id), schema model occupies base name
 
     console.log('has db', !!db)
 
@@ -231,7 +232,7 @@ export const loadOrCreateModel = fromCallback<
     // This handles the case where model exists in schema file but not yet in database
     try {
       const { Schema } = await import('@/Schema/Schema')
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
       const schemaSnapshot = schema.getService().getSnapshot()
       
       // Wait for schema to load if it's still loading
@@ -253,24 +254,38 @@ export const loadOrCreateModel = fromCallback<
       }
 
       const schemaContext = schema.getService().getSnapshot().context
-      
-      if (schemaContext.models && schemaContext.models[modelName]) {
-        const modelData = schemaContext.models[modelName]
-        logger(`Found model "${modelName}" in Schema context (database fallback)`)
-        
-        // Generate schemaFileId if not set
-        if (!schemaFileId) {
-          schemaFileId = generateId()
-          logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
+      // Check by name first; also check by schemaFileId so we recognize the schema model even when context is keyed differently or not yet updated
+      if (schemaContext.models) {
+        const byName = schemaContext.models[modelName] as { id?: string; properties?: Record<string, unknown> } | undefined
+        const schemaModelId = byName?.id ?? null
+        if (schemaFileId === schemaModelId) {
+          logger(`Found model "${modelName}" in Schema context (database fallback)`)
+          if (!schemaFileId) {
+            schemaFileId = generateId()
+            logger(`Generated id (schemaFileId) "${schemaFileId}" for model "${modelName}"`)
+          }
+          sendBack({
+            type: 'loadOrCreateModelSuccess',
+            model: { id: schemaFileId },
+          })
+          return
         }
-        
-        sendBack({
-          type: 'loadOrCreateModelSuccess',
-          model: {
-            id: schemaFileId, // schemaFileId (string) - public ID
-          },
-        })
-        return
+        // Same name but different id: runtime create colliding with schema model name; fall through
+        if (byName) {
+          existingNumbersFromSchemaContext = new Set([0])
+        } else if (schemaFileId) {
+          // Schema context may not have model by name yet (e.g. still loading). If our id appears in any schema model, we're the schema model.
+          for (const def of Object.values(schemaContext.models)) {
+            if ((def as any)?.id === schemaFileId) {
+              logger(`Found model in Schema context by id "${schemaFileId}" (database fallback)`)
+              sendBack({
+                type: 'loadOrCreateModelSuccess',
+                model: { id: schemaFileId },
+              })
+              return
+            }
+          }
+        }
       }
     } catch (error) {
       logger(`Error loading model from Schema context: ${error}`)
@@ -293,27 +308,29 @@ export const loadOrCreateModel = fromCallback<
       // Only skip duplicate check if:
       // 1. We found a model record to use (modelRecord is set), OR
       // 2. The model was found by schemaFileId (preserving original name from schema file), OR
-      // 3. This is an internal schema (internal schemas should preserve original names from schema files)
-      // We should NOT skip if we only have a schemaFileId but didn't find the model by that ID
-      // (that means it's a new model that might need renaming)
-      const shouldSkipDuplicateCheck = modelRecord !== null || foundBySchemaFileId || isInternal
+      // 3. This is an internal schema (internal schemas should preserve original names from schema files), OR
+      // 4. This instance was created with modelFileId from schema (_idFromSchema) - schema models keep their name
+      const shouldSkipDuplicateCheck = modelRecord !== null || foundBySchemaFileId || isInternal || !!_idFromSchema
       
-      logger(`Duplicate check: modelRecord=${modelRecord !== null}, foundBySchemaFileId=${foundBySchemaFileId}, isInternal=${isInternal}, schemaFileId=${schemaFileId}, shouldSkip=${shouldSkipDuplicateCheck}`)
+      logger(`Duplicate check: modelRecord=${modelRecord !== null}, foundBySchemaFileId=${foundBySchemaFileId}, isInternal=${isInternal}, _idFromSchema=${!!_idFromSchema}, schemaFileId=${schemaFileId}, shouldSkip=${shouldSkipDuplicateCheck}`)
       
       if (!shouldSkipDuplicateCheck) {
         try {
           const lowerModelName = modelName.toLowerCase()
-          const existingNumbers = new Set<number>()
+          const existingNumbers = new Set<number>(existingNumbersFromSchemaContext ?? [])
           
           // First, check Model cache for models (includes models from imported schemas that may not be in DB yet)
           try {
             const { Model } = await import('@/Model/Model')
             
             // Check name-based cache for this schema
+            // Skip the current model (context.id): Model.create() adds the new instance to the cache
+            // before this callback runs, so we must not count it as a duplicate.
             logger(`Checking Model cache for duplicates in schema "${schemaName}"`)
-            // Access instanceCacheByName via type assertion since it's protected
+            const currentModelFileId = schemaFileId ?? null
             const cacheByName = (Model as any).instanceCacheByName as Map<string, string>
-            for (const [nameKey, modelFileId] of cacheByName.entries()) {
+            for (const [nameKey, cachedModelFileId] of cacheByName.entries()) {
+              if (currentModelFileId && cachedModelFileId === currentModelFileId) continue // skip self
               const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
               if (cachedSchemaName === schemaName && cachedModelName) {
                 const lowerCachedName = cachedModelName.toLowerCase()
@@ -332,8 +349,11 @@ export const loadOrCreateModel = fromCallback<
               }
             }
             
-            // Also check legacy cache
-            for (const [nameKey] of (Model as any).instanceCache?.keys() || []) {
+            // Also check legacy cache (skip current model by id)
+            const legacyCache = (Model as any).instanceCache as Map<string, { instance: { _getSnapshotContext?: () => { id?: string } }; refCount: number }> | undefined
+            for (const [nameKey, entry] of legacyCache?.entries() || []) {
+              const legacyId = entry?.instance?._getSnapshotContext?.()?.id
+              if (currentModelFileId && legacyId === currentModelFileId) continue // skip self
               const [cachedSchemaName, cachedModelName] = nameKey.split(':', 2)
               if (cachedSchemaName === schemaName && cachedModelName) {
                 const lowerCachedName = cachedModelName.toLowerCase()
@@ -431,17 +451,18 @@ export const loadOrCreateModel = fromCallback<
       logger(`Generated id (schemaFileId) "${schemaFileId}" for new model "${finalModelName}"`)
     }
     
+    // Runtime creates use a placeholder cache key in Model.create; move it to the final name. Skip when schema model (_idFromSchema).
+    if (!_idFromSchema) {
+      const { Model } = await import('@/Model/Model')
+      Model.updateNameIndex('__pending__' + schemaFileId, finalModelName, schemaName, schemaFileId)
+    }
+
     // If model name was changed, store it in a temporary internal field so loadOrCreateModelSuccess can apply it
     // This avoids the issue where updateContext with modelName triggers validation and state transition
     // We use _pendingModelName (internal field) which won't trigger validation
     if (finalModelName !== modelName) {
       logger(`Model name changed from "${modelName}" to "${finalModelName}", storing in _pendingModelName for loadOrCreateModelSuccess`)
-      // Update the cache index
-      const { Model } = await import('@/Model/Model')
-      Model.updateNameIndex(modelName, finalModelName, schemaName, schemaFileId)
-      
       // Store the final name in a temporary internal field that will be picked up by loadOrCreateModelSuccess
-      // Using internal field (_pendingModelName) avoids triggering validation
       sendBack({
         type: 'updateContext',
         _pendingModelName: finalModelName,
@@ -462,9 +483,5 @@ export const loadOrCreateModel = fromCallback<
     logger('Error loading or creating model:', error)
     sendBack({ type: 'loadOrCreateModelError', error })
   })
-
-  return () => {
-    // Cleanup function (optional)
-  }
 })
 

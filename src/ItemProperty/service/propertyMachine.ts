@@ -61,6 +61,27 @@ export const propertyMachine = setup({
         return newContext
       }),
     },
+    destroyStarted: {
+      actions: assign({ _destroyInProgress: true, _destroyError: null }),
+    },
+    destroyDone: {
+      actions: assign({ _destroyInProgress: false }),
+    },
+    destroyError: {
+      actions: assign(({ event }) => ({
+        _destroyInProgress: false,
+        _destroyError:
+          (event as { type: 'destroyError'; error: unknown }).error instanceof Error
+            ? {
+                message: (event as { type: 'destroyError'; error: Error }).error.message,
+                name: (event as { type: 'destroyError'; error: Error }).error.name,
+              }
+            : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
+      })),
+    },
+    clearDestroyError: {
+      actions: assign({ _destroyError: null }),
+    },
   },
   states: {
     idle: {},

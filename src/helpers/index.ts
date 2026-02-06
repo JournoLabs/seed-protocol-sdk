@@ -9,6 +9,7 @@ export * from './ArweaveClient/BaseArweaveClient'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
+export { waitForEntityIdle } from './waitForEntityIdle'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary

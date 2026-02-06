@@ -1,8 +1,8 @@
 import { waitFor } from 'xstate'
-import type { ActorRefFrom, SnapshotFrom } from 'xstate'
 
+/** Any entity that exposes an xstate actor via getService(). Loosely typed so Schema/Model/Item/ModelProperty (different machine contexts) are all accepted. */
 interface EntityWithService {
-  getService(): ActorRefFrom<any>
+  getService(): any
 }
 
 /**
@@ -20,20 +20,20 @@ export async function waitForEntityIdle(
 ): Promise<void> {
   const { timeout = 5000, throwOnError = true } = options
   const service = entity.getService()
-  
-  // Check current state first - if already idle, return immediately
   const currentSnapshot = service.getSnapshot()
+
+  // Check current state first - if already idle, return immediately
   if ('value' in currentSnapshot && currentSnapshot.value === 'idle') {
     return
   }
-  
+
   if ('value' in currentSnapshot && currentSnapshot.value === 'error') {
     if (throwOnError) {
       throw new Error('Entity failed to load')
     }
     return
   }
-  
+
   try {
     await waitFor(
       service,

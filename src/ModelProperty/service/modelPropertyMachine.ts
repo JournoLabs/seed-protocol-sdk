@@ -21,6 +21,9 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   _propertyFileId?: string
   // Note: id field (from TProperty) is now the schemaFileId (string)
   // _dbId (from TProperty) stores the database integer ID
+  // Destroy lifecycle (for destroy hooks)
+  _destroyInProgress?: boolean
+  _destroyError?: { message: string; name?: string } | null
 }
 
 export const modelPropertyMachine = setup({
@@ -40,7 +43,11 @@ export const modelPropertyMachine = setup({
       | { type: 'validateProperty' }
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
-      | { type: 'requestWrite'; data: any },
+      | { type: 'requestWrite'; data: any }
+      | { type: 'destroyStarted' }
+      | { type: 'destroyDone' }
+      | { type: 'destroyError'; error: unknown }
+      | { type: 'clearDestroyError' },
   },
   actors: {
     saveToSchema,
@@ -113,6 +120,16 @@ export const modelPropertyMachine = setup({
           newContext[key] = value
         }
 
+        // Preserve modelName and dataType from context or _originalValues so validation and savePropertyToDb
+        // never run with missing required/needed fields (e.g. when a just-created property is renamed before
+        // the full context is available from the creator).
+        if (newContext.modelName === undefined && (context._originalValues as any)?.modelName !== undefined) {
+          newContext.modelName = (context._originalValues as any).modelName
+        }
+        if (newContext.dataType === undefined && (context._originalValues as any)?.dataType !== undefined) {
+          newContext.dataType = (context._originalValues as any).dataType
+        }
+
         // Compare with original values and set _isEdited flag (only for non-internal updates)
         if (!onlyInternalFields && context._originalValues) {
           const hasChanges = Object.keys(event).some((key: string) => {
@@ -183,6 +200,24 @@ export const modelPropertyMachine = setup({
         ...context,
         _schemaName: event.schemaName,
       })),
+    },
+    destroyStarted: {
+      actions: assign({ _destroyInProgress: true, _destroyError: null }),
+    },
+    destroyDone: {
+      actions: assign({ _destroyInProgress: false }),
+    },
+    destroyError: {
+      actions: assign(({ event }) => ({
+        _destroyInProgress: false,
+        _destroyError:
+          event.error instanceof Error
+            ? { message: event.error.message, name: event.error.name }
+            : { message: String(event.error) },
+      })),
+    },
+    clearDestroyError: {
+      actions: assign({ _destroyError: null }),
     },
   },
   states: {

@@ -3,6 +3,7 @@ import { modelMachine, ModelMachineContext } from './service/modelMachine'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { Item } from '@/Item/Item'
 import { ModelValues } from '@/types'
+import type { CreateWaitOptions } from '@/types'
 import { ItemData } from '@/types/item'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -13,6 +14,12 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import {
+  clearDestroySubscriptions,
+  forceRemoveFromCaches,
+  runDestroyLifecycle,
+} from '@/helpers/entity/entityDestroy'
+import { getModelsData } from '@/db/read/getModelsData'
 import { eq } from 'drizzle-orm'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
@@ -128,16 +135,18 @@ export class Model {
   // 'name' is available as an alias for 'modelName' via the proxy
 
   constructor(
-    modelName: string, 
-    schemaName: string, 
+    modelName: string,
+    schemaName: string,
     id?: string, // schemaFileId (string) - public ID
-    initialContext?: Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
+    initialContext?: Pick<ModelMachineContext, '_pendingPropertyDefinitions'>,
+    idFromSchema?: boolean // true when id was provided via options (schema model), not generated
   ) {
-    const serviceInput: Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions'> = {
+    const serviceInput: Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions' | '_idFromSchema'> = {
       modelName,
       schemaName,
       ...(id ? { id } : {}),
       ...(initialContext?._pendingPropertyDefinitions ? { _pendingPropertyDefinitions: initialContext._pendingPropertyDefinitions } : {}),
+      _idFromSchema: !!idFromSchema,
     }
 
     this._service = createActor(modelMachine as any, {
@@ -307,15 +316,41 @@ export class Model {
     modelName: string,
     schemaNameOrSchema: string | any, // Schema type - using any to avoid circular dependency
     options?: {
+      id?: string
+      modelFileId?: string
+      properties?: { [propertyName: string]: any }
+      registerWithSchema?: boolean
+      waitForReady?: false
+    },
+  ): Model
+  static create(
+    modelName: string,
+    schemaNameOrSchema: string | any,
+    options?: {
+      id?: string
+      modelFileId?: string
+      properties?: { [propertyName: string]: any }
+      registerWithSchema?: boolean
+      waitForReady?: true
+      readyTimeout?: number
+    },
+  ): Promise<Model>
+  static create(
+    modelName: string,
+    schemaNameOrSchema: string | any, // Schema type - using any to avoid circular dependency
+    options?: {
       id?: string // schemaFileId (string) - public ID (deprecated, use modelFileId)
       modelFileId?: string // Pre-existing model file ID (preferred)
       properties?: { [propertyName: string]: any }
       registerWithSchema?: boolean
-    }
-  ): Model {
+    } & CreateWaitOptions,
+  ): Model | Promise<Model> {
     if (!modelName) {
       throw new Error('Model name is required')
     }
+
+    const waitForReady = options?.waitForReady !== false
+    const readyTimeout = options?.readyTimeout ?? 5000
 
     // Extract schema name and instance
     let schemaName: string
@@ -343,7 +378,10 @@ export class Model {
         refCount: refCount + 1,
       })
       logger(`Model.create: Found instance in ID cache for "${modelName}" (ID: ${id})`)
-      return instance
+      if (!waitForReady) return instance
+      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+        () => instance,
+      )
     }
 
     // Step 2: Check for duplicate names and generate unique name if needed (before checking cache)
@@ -351,86 +389,71 @@ export class Model {
     // Skip all duplicate checks if modelFileId is provided (schema models should preserve original names)
     const skipAllChecks = !!id // If id (modelFileId) is provided, this is a schema model - skip schema check to preserve name
     const uniqueModelName = this.findUniqueModelName(modelName, schemaName, skipAllChecks)
-    
+
     // Step 3: Check name-based index with ORIGINAL name first (before using unique name)
     // Only return existing instance if the unique name matches the original (no rename needed)
     // If a rename is needed, we'll create a new model with the unique name
     let resolvedId = id
-    if (!resolvedId && uniqueModelName === modelName) {
-      // No rename needed - check if instance exists with original name
-      const originalNameKey = `${schemaName}:${modelName}`
-      resolvedId = this.instanceCacheByName.get(originalNameKey)
-      if (resolvedId && this.instanceCacheById.has(resolvedId)) {
-        const { instance, refCount } = this.instanceCacheById.get(resolvedId)!
-        this.instanceCacheById.set(resolvedId, {
-          instance,
-          refCount: refCount + 1,
-        })
-        logger(`Model.create: Found instance via name index for "${modelName}" (ID: ${resolvedId})`)
-        return instance
+    const originalNameKey = `${schemaName}:${modelName}`
+    // Step 3: When we have no id (runtime create), do not return from name cache. Each create('My Model')
+    // must get a new instance with an incremented name (My Model, My Model 1, ...). If the only cached
+    // instance with this name is the schema model (_idFromSchema), ensure we fall through to create new.
+    if (!resolvedId) {
+      const cachedId = this.instanceCacheByName.get(originalNameKey)
+      if (cachedId && this.instanceCacheById.has(cachedId)) {
+        const { instance, refCount } = this.instanceCacheById.get(cachedId)!
+        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean }
+        if (ctx._idFromSchema) {
+          resolvedId = undefined
+        }
+        // Never return by name when !id (runtime create); fall through to create new with unique name
       }
     }
-
-    // Step 4: Check legacy cache with original name (only if no rename needed)
-    if (uniqueModelName === modelName) {
-      const originalNameKey = `${schemaName}:${modelName}`
-      if (this.instanceCache.has(originalNameKey)) {
-        const { instance, refCount } = this.instanceCache.get(originalNameKey)!
-        this.instanceCache.set(originalNameKey, {
-          instance,
-          refCount: refCount + 1,
-        })
-        logger(`Model.create: Found instance in legacy cache for "${modelName}"`)
-        
-        // Migrate to new cache structure
-        const context = instance._getSnapshotContext()
-        const existingId = context.id // id is now the schemaFileId (string)
-        if (existingId) {
-          this.instanceCacheById.set(existingId, { instance, refCount: refCount + 1 })
-          this.instanceCacheByName.set(originalNameKey, existingId)
+    // Step 4: Check legacy cache with original name. Skip when !id (runtime create) so duplicate
+    // create('My Model') calls get new instances with incremented names.
+    if (id && uniqueModelName === modelName) {
+      const legacyKey = `${schemaName}:${modelName}`
+      if (this.instanceCache.has(legacyKey)) {
+        const { instance, refCount } = this.instanceCache.get(legacyKey)!
+        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean }
+        if (!ctx._idFromSchema) {
+          this.instanceCache.set(legacyKey, {
+            instance,
+            refCount: refCount + 1,
+          })
+          logger(`Model.create: Found instance in legacy cache for "${modelName}"`)
+          const existingId = (instance._getSnapshotContext() as { id?: string }).id
+          if (existingId) {
+            this.instanceCacheById.set(existingId, { instance, refCount: refCount + 1 })
+            this.instanceCacheByName.set(legacyKey, existingId)
+          }
+          if (!waitForReady) return instance
+          return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+            () => instance,
+          )
         }
-        
-        return instance
       }
     }
     
-    // Step 5: Log if rename is needed
+    // Step 5: When a rename is needed (uniqueModelName !== modelName), do NOT return a cached
+    // instance. The only cached instance with the original name at this point is the
+    // schema-defined model (created with modelFileId); returning it would give the user the
+    // schema model instead of a new runtime model with the unique name (e.g. "New model 1").
     if (uniqueModelName !== modelName) {
       logger(`Model.create: Found duplicate name "${modelName}" in schema "${schemaName}", using unique name "${uniqueModelName}"`)
-      
-      // CRITICAL: When a rename is detected, check all cached instances to see if any match the original name
-      // This handles the case where a model was created, saved to DB, then renamed in cache
-      // We need to find the existing instance by checking all cached instances for this schema
-      for (const [cachedId, { instance }] of this.instanceCacheById.entries()) {
-        const context = instance._getSnapshotContext()
-        // Check if this instance belongs to the same schema and has the original name
-        // Note: We check the context's modelName which reflects the current name (may be renamed)
-        // But we also need to check if it was originally created with the requested name
-        // Since we can't query DB synchronously, we check if the instance's current name matches
-        // the original name OR if it's in the same schema and might be the model we're looking for
-        if (context.schemaName === schemaName) {
-          // If the instance's current name matches the original name, return it
-          // This handles the case where the model wasn't actually renamed yet
-          if (context.modelName === modelName) {
-            const { refCount } = this.instanceCacheById.get(cachedId)!
-            this.instanceCacheById.set(cachedId, {
-              instance,
-              refCount: refCount + 1,
-            })
-            // Update name index to include original name if not already there
-            const originalNameKey = `${schemaName}:${modelName}`
-            if (!this.instanceCacheByName.has(originalNameKey)) {
-              this.instanceCacheByName.set(originalNameKey, cachedId)
-            }
-            logger(`Model.create: Found existing instance with original name "${modelName}" (ID: ${cachedId}) despite rename detection`)
-            return instance
-          }
-        }
-      }
     }
 
-    // Create name-based cache key using the unique name (for new instances)
-    const nameKey = `${schemaName}:${uniqueModelName}`
+    // Step 6a: Generate ID now when needed so we can use a placeholder cache key for runtime creates
+    if (!resolvedId) {
+      resolvedId = generateId()
+      logger(`Model.create: Generated new id (schemaFileId) "${resolvedId}" for model "${modelName}"`)
+    }
+
+    // Create name-based cache key. When no id (runtime create), use a placeholder so we don't
+    // overwrite the schema model's entry (e.g. "New model"); loadOrCreateModel will replace it with the final name.
+    const nameKey = id
+      ? `${schemaName}:${uniqueModelName}`
+      : `${schemaName}:__pending__${resolvedId}`
 
     // Step 6: Check legacy cache with unique name (backward compatibility during migration)
     // This is a fallback in case an instance was cached with a unique name
@@ -450,15 +473,12 @@ export class Model {
         this.instanceCacheByName.set(nameKey, existingId)
       }
       
-      return instance
+      if (!waitForReady) return instance
+      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+        () => instance,
+      )
     }
 
-    // Step 7: Generate ID if not provided (before creating instance)
-    if (!resolvedId) {
-      resolvedId = generateId()
-      logger(`Model.create: Generated new id (schemaFileId) "${resolvedId}" for model "${modelName}"`)
-    }
-    
     // Step 7: Create new instance with id in initial context
     // This ensures loadOrCreateModel sees the ID immediately
     // Pass _pendingPropertyDefinitions in initial context to avoid race condition with loadOrCreateModel
@@ -467,8 +487,8 @@ export class Model {
       ? { _pendingPropertyDefinitions: JSON.parse(JSON.stringify(options.properties)) } as Pick<ModelMachineContext, '_pendingPropertyDefinitions'>
       : undefined
     
-    // Use the unique model name for the instance
-    const newInstance = new this(uniqueModelName, schemaName, resolvedId, initialContext)
+    // Use the unique model name for the instance (idFromSchema: true when id was provided, so schema model is not renamed)
+    const newInstance = new this(uniqueModelName, schemaName, resolvedId, initialContext, !!id)
     
     if (options?.properties) {
       logger(`[Model.create] Created instance with _pendingPropertyDefinitions in initial context (${Object.keys(options.properties).length} properties) for model "${uniqueModelName}"`)
@@ -694,9 +714,13 @@ export class Model {
       refCount: 1,
     })
     
-    // Step 9: Store in name-based index
+    // Step 9: Store in name-based index (placeholder key when !id; loadOrCreateModel will replace with final name)
     this.instanceCacheByName.set(nameKey, resolvedId!)
-    
+    // Step 9b: When created with id (schema model) and unique name, also register original name so create(modelName) returns same instance
+    if (id && uniqueModelName !== modelName) {
+      this.instanceCacheByName.set(originalNameKey, resolvedId!)
+    }
+
     // Step 10: Also store in legacy cache (for backward compatibility during migration)
     this.instanceCache.set(nameKey, {
       instance: proxiedInstance,
@@ -967,7 +991,10 @@ export class Model {
       })
     }
     
-    return proxiedInstance
+    if (!waitForReady) return proxiedInstance
+    return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+      () => proxiedInstance,
+    )
   }
 
   /**
@@ -1247,7 +1274,8 @@ export class Model {
           // Create model instance (will be cached)
           const model = this.create(record.modelName, record.schemaName, {
             id: record.modelFileId, // id is now the schemaFileId (string)
-          })
+            waitForReady: false,
+          }) as Model
           modelInstances.push(model)
         }
       }
@@ -1261,71 +1289,85 @@ export class Model {
   }
 
   /**
-   * Get all Model instances currently in cache
-   * 
-   * @returns Array of all cached Model instances
+   * Get all Model instances, optionally filtered by schema.
+   * When DB is available, loads from DB via getModelsData; otherwise returns from cache.
+   * Supports waitForReady to wait for each model to reach idle state before returning.
    */
-  static getAll(): Model[] {
-    const instances: Model[] = []
-    const seen = new Set<string>()
-    
-    // Collect from ID cache (primary source)
-    for (const [id, entry] of this.instanceCacheById.entries()) {
-      if (!seen.has(id)) {
-        instances.push(entry.instance)
-        seen.add(id)
-      }
-    }
-    
-    // Also check legacy cache for any not in ID cache
-    for (const [nameKey, entry] of this.instanceCache.entries()) {
-      const context = entry.instance._getSnapshotContext()
-      const id = context.id // id is now the schemaFileId (string)
-      if (id && !seen.has(id)) {
-        instances.push(entry.instance)
-        seen.add(id)
-      }
-    }
-    
-    return instances
-  }
+  static async all(
+    schemaName?: string,
+    options?: { waitForReady?: boolean; readyTimeout?: number },
+  ): Promise<Model[]> {
+    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const appDb = BaseDb.getAppDb()
 
-  /**
-   * Get all Model instances for a specific schema from cache
-   * For database-backed lookup, use createBySchemaId() instead
-   * 
-   * @param schemaName - The schema name to filter by
-   * @returns Array of Model instances for the schema
-   */
-  static getAllBySchema(schemaName: string): Model[] {
+    if (!appDb) {
+      const instances: Model[] = []
+      const seen = new Set<string>()
+      if (schemaName !== undefined && schemaName !== '') {
+        for (const [nameKey, id] of this.instanceCacheByName.entries()) {
+          const [cachedSchemaName] = nameKey.split(':')
+          if (cachedSchemaName === schemaName) {
+            const instance = this.getById(id)
+            if (instance && !seen.has(id)) {
+              instances.push(instance)
+              seen.add(id)
+            }
+          }
+        }
+        for (const [nameKey, entry] of this.instanceCache.entries()) {
+          const [cachedSchemaName] = nameKey.split(':')
+          if (cachedSchemaName === schemaName) {
+            const context = entry.instance._getSnapshotContext()
+            const id = context.id
+            if (id && !seen.has(id)) {
+              instances.push(entry.instance)
+              seen.add(id)
+            }
+          }
+        }
+      } else {
+        for (const [id, entry] of this.instanceCacheById.entries()) {
+          if (!seen.has(id)) {
+            instances.push(entry.instance)
+            seen.add(id)
+          }
+        }
+        for (const [nameKey, entry] of this.instanceCache.entries()) {
+          const context = entry.instance._getSnapshotContext()
+          const id = context.id
+          if (id && !seen.has(id)) {
+            instances.push(entry.instance)
+            seen.add(id)
+          }
+        }
+      }
+      return instances
+    }
+
+    const rows = await getModelsData(schemaName)
     const instances: Model[] = []
-    const seen = new Set<string>()
-    
-    // Collect from name cache (filtered by schema)
-    for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const [cachedSchemaName] = nameKey.split(':')
-      if (cachedSchemaName === schemaName) {
-        const instance = this.getById(id)
-        if (instance && !seen.has(id)) {
+
+    for (const row of rows) {
+      if (row.schemaFileId) {
+        const instance = await this.createById(row.schemaFileId)
+        if (instance) {
           instances.push(instance)
-          seen.add(id)
         }
       }
     }
-    
-    // Also check legacy cache
-    for (const [nameKey, entry] of this.instanceCache.entries()) {
-      const [cachedSchemaName] = nameKey.split(':')
-      if (cachedSchemaName === schemaName) {
-        const context = entry.instance._getSnapshotContext()
-        const id = context.id // id is now the schemaFileId (string)
-        if (id && !seen.has(id)) {
-          instances.push(entry.instance)
-          seen.add(id)
-        }
-      }
+
+    if (waitForReady && instances.length > 0) {
+      await Promise.all(
+        instances.map((m) =>
+          waitForEntityIdle(m as Parameters<typeof waitForEntityIdle>[0], {
+            timeout: readyTimeout,
+            throwOnError: false,
+          }),
+        ),
+      )
+      return instances.filter((m) => (m as Model)._getSnapshot?.().value === 'idle')
     }
-    
+
     return instances
   }
 
@@ -1727,156 +1769,71 @@ export class Model {
   }
 
   /**
-   * Destroy the model instance completely
-   * - Removes instance from all caches (regardless of refCount)
-   * - Deletes model records from database (models, properties, model_schemas tables)
-   * - Removes model from Schema's models property and instance caches
-   * - Cleans up registered ModelProperty instances
-   * - Stops the model service
+   * Destroy the model instance completely: remove from caches, delete from database,
+   * update Schema context, stop service. Uses shared destroy helpers.
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
-    const modelFileId = context.id // id is now the schemaFileId (string)
+    const modelFileId = context.id
     const modelName = context.modelName
     const schemaName = context.schemaName
-    const nameKey = `${schemaName}:${modelName}`
-    
-    if (!modelFileId || !modelName || !schemaName) {
-      logger(`Model.destroy: Missing required context data (modelFileId: ${modelFileId}, modelName: ${modelName}, schemaName: ${schemaName})`)
-      // Still try to clean up what we can
-    }
-    
-    logger(`Model.destroy: Destroying model "${modelName}" (ID: ${modelFileId}) from schema "${schemaName}"`)
-    
-    // Get instanceState once at the top for reuse throughout the method
-    const instanceState = modelInstanceState.get(this)
-    
-    // Step 1: Clean up liveQuery subscription
-    if (instanceState && instanceState.liveQuerySubscription) {
-      try {
-        instanceState.liveQuerySubscription.unsubscribe()
-        logger(`Model.destroy: Unsubscribed from liveQuery`)
-      } catch (error) {
-        logger(`Model.destroy: Error unsubscribing from liveQuery: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      instanceState.liveQuerySubscription = null
-    }
-    
-    // Step 2: Remove from Model caches (force removal regardless of refCount)
-    if (modelFileId) {
-      Model.instanceCacheById.delete(modelFileId)
-      logger(`Model.destroy: Removed from instanceCacheById (ID: ${modelFileId})`)
-    }
-    Model.instanceCacheByName.delete(nameKey)
-    logger(`Model.destroy: Removed from instanceCacheByName (key: ${nameKey})`)
-    Model.instanceCache.delete(nameKey)
-    logger(`Model.destroy: Removed from legacy instanceCache (key: ${nameKey})`)
-    
-    // Step 3: Delete from database
-    try {
-      const db = BaseDb.getAppDb()
-      if (db && modelFileId) {
-        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-        const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-        const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-        const { eq } = await import('drizzle-orm')
-        
-        // First, find the model record by schemaFileId
-        const modelRecords = await db
-          .select()
-          .from(modelsTable)
-          .where(eq(modelsTable.schemaFileId, modelFileId))
-          .limit(1)
-        
-        if (modelRecords.length > 0) {
-          const modelRecord = modelRecords[0]
-          const modelId = modelRecord.id
-          
-          logger(`Model.destroy: Found model record in database (modelId: ${modelId})`)
-          
-          // Delete from model_schemas join table
-          await db
-            .delete(modelSchemas)
-            .where(eq(modelSchemas.modelId, modelId))
-          logger(`Model.destroy: Deleted from model_schemas table`)
-          
-          // Delete all properties for this model
-          await db
-            .delete(propertiesTable)
-            .where(eq(propertiesTable.modelId, typeof modelId === 'string' ? parseInt(modelId, 10) : modelId))
-          logger(`Model.destroy: Deleted properties from database`)
-          
-          // Finally, delete the model record itself
-          await db
-            .delete(modelsTable)
-            .where(eq(modelsTable.id, modelId))
-          logger(`Model.destroy: Deleted model record from database`)
-        } else {
-          logger(`Model.destroy: Model record not found in database (modelFileId: ${modelFileId})`)
+    const nameKey = schemaName && modelName ? `${schemaName}:${modelName}` : ''
+
+    clearDestroySubscriptions(this, { instanceState: modelInstanceState })
+
+    const cacheKeys: string[] = []
+    if (modelFileId) cacheKeys.push(modelFileId)
+    if (nameKey) cacheKeys.push(nameKey)
+    forceRemoveFromCaches(this, {
+      getCacheKeys: () => cacheKeys,
+      caches: [
+        Model.instanceCacheById as Map<string, unknown>,
+        Model.instanceCacheByName as Map<string, unknown>,
+        Model.instanceCache as Map<string, unknown>,
+      ],
+    })
+
+    await runDestroyLifecycle(this, {
+      getService: (instance) =>
+        instance._service as { send: (ev: unknown) => void; stop: () => void },
+      doDestroy: async () => {
+        const db = BaseDb.getAppDb()
+        if (db && modelFileId) {
+          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+          const { eq } = await import('drizzle-orm')
+
+          const modelRecords = await db
+            .select()
+            .from(modelsTable)
+            .where(eq(modelsTable.schemaFileId, modelFileId))
+            .limit(1)
+
+          if (modelRecords.length > 0) {
+            const modelId = modelRecords[0].id
+            await db.delete(modelSchemas).where(eq(modelSchemas.modelId, modelId))
+            await db
+              .delete(propertiesTable)
+              .where(eq(propertiesTable.modelId, typeof modelId === 'string' ? parseInt(modelId, 10) : modelId))
+            await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
+          }
         }
-      } else {
-        logger(`Model.destroy: Database not available`)
-      }
-    } catch (error) {
-      logger(`Model.destroy: Error deleting from database: ${error instanceof Error ? error.message : String(error)}`)
-      // Continue with cleanup even if database deletion fails
-    }
-    
-    // Step 4: Remove from Schema's models property and instance caches
-    try {
-      const { Schema } = await import('@/Schema/Schema')
-      const schema = Schema.create(schemaName)
-      const schemaSnapshot = schema.getService().getSnapshot()
-      const schemaContext = schemaSnapshot.context
-      
-      // Remove from Schema's models object in context
-      if (schemaContext.models && schemaContext.models[modelName!]) {
-        const updatedModels = { ...schemaContext.models }
-        delete updatedModels[modelName!]
-        
-        // Update Schema context - this will trigger liveQuery update which will
-        // automatically clean up the model from Schema's instance caches
-        schema.getService().send({
-          type: 'updateContext',
-          models: updatedModels,
-        })
-        
-        // Mark schema as draft
-        schema.getService().send({
-          type: 'markAsDraft',
-          propertyKey: `model:${modelName}`,
-        })
-        
-        logger(`Model.destroy: Removed model from Schema's models property`)
-        
-        // Wait a moment for liveQuery to process the change
-        // This ensures the Schema's instance caches are cleaned up
-        await new Promise(resolve => setTimeout(resolve, 100))
-      } else {
-        logger(`Model.destroy: Model "${modelName}" not found in Schema's models property`)
-      }
-      
-      logger(`Model.destroy: Updated Schema context to remove model`)
-    } catch (error) {
-      logger(`Model.destroy: Error removing from Schema: ${error instanceof Error ? error.message : String(error)}`)
-      // Continue with cleanup even if Schema update fails
-    }
-    
-    // Step 5: Stop the model service
-    try {
-      this._service.stop()
-      logger(`Model.destroy: Stopped model service`)
-    } catch (error) {
-      logger(`Model.destroy: Error stopping service: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    
-    // Clean up liveQuery subscription
-    if (instanceState?.liveQuerySubscription) {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
-    }
-    
-    logger(`Model.destroy: Successfully destroyed model "${modelName}" (ID: ${modelFileId})`)
+
+        if (schemaName && modelName) {
+          const { Schema } = await import('@/Schema/Schema')
+          const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
+          const schemaContext = schema.getService().getSnapshot().context
+          if (schemaContext.models?.[modelName]) {
+            const updatedModels = { ...schemaContext.models }
+            delete updatedModels[modelName]
+            schema.getService().send({ type: 'updateContext', models: updatedModels })
+            schema.getService().send({ type: 'markAsDraft', propertyKey: `model:${modelName}` })
+            await new Promise((resolve) => setTimeout(resolve, 100))
+          }
+        }
+      },
+    })
   }
 
   /**

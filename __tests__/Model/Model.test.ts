@@ -247,7 +247,9 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Basic', schemaName)
+      const model = Model.create('TestModel Basic', schemaName, {
+        waitForReady: false,
+      }) as Model
       expect(model).toBeDefined()
       expect(model.modelName).toBe('TestModel Basic')
       expect(model.schemaName).toBe(schemaName)
@@ -265,10 +267,12 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
       await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
       
-      const model = Model.create('TestModel Schema Instance', schema)
+      const model = Model.create('TestModel Schema Instance', schema, {
+        waitForReady: false,
+      }) as Model
       expect(model).toBeDefined()
       expect(model.modelName).toBe('TestModel Schema Instance')
       expect(model.schemaName).toBe(schemaName)
@@ -289,7 +293,8 @@ testDescribe('Model Integration Tests', () => {
       
       const model = Model.create('TestModel With Properties', schemaName, {
         properties,
-      })
+        waitForReady: false,
+      }) as Model
 
       model.getService().subscribe((snapshot) => {
         console.log('model snapshot.value', snapshot.value)
@@ -367,7 +372,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Empty Properties', schemaName)
+      const model = Model.create('TestModel Empty Properties', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       expect(model.properties).toBeDefined()
@@ -388,12 +393,12 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create first model
-      const model1 = Model.create('New model', schemaName)
+      const model1 = Model.create('New model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('New model 1')
       
       // Try to create second model with same name (different case)
-      const model2 = Model.create('new model', schemaName)
+      const model2 = Model.create('new model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model2)
       
       // Should be automatically renamed
@@ -412,15 +417,15 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create multiple models with the same base name
-      const model1 = Model.create('My Model', schemaName)
+      const model1 = Model.create('My Model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('My Model')
       
-      const model2 = Model.create('My Model', schemaName)
+      const model2 = Model.create('My Model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model2)
       expect(model2.modelName).toBe('My Model 1')
       
-      const model3 = Model.create('My Model', schemaName)
+      const model3 = Model.create('My Model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model3)
       expect(model3.modelName).toBe('My Model 2')
       
@@ -449,7 +454,7 @@ testDescribe('Model Integration Tests', () => {
       // then try to create one with the same name as the imported one
       
       // Try to create a model with the same name as the imported one (case-insensitive)
-      const newModel = Model.create('existing model', schemaName)
+      const newModel = Model.create('existing model', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(newModel)
       
       // Should be automatically renamed since 'Existing Model' exists in database
@@ -463,21 +468,21 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create models: base, 1, 3 (skipping 2)
-      const model1 = Model.create('Gap Model', schemaName)
+      const model1 = Model.create('Gap Model', schemaName, { waitForReady: false })
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('Gap Model')
       
-      const model2 = Model.create('Gap Model', schemaName)
+      const model2 = Model.create('Gap Model', schemaName, { waitForReady: false })
       await waitForModelIdle(model2)
       expect(model2.modelName).toBe('Gap Model 1')
       
       // Create model 3 directly by using the name
-      const model3 = Model.create('Gap Model 3', schemaName)
+      const model3 = Model.create('Gap Model 3', schemaName, { waitForReady: false })
       await waitForModelIdle(model3)
       expect(model3.modelName).toBe('Gap Model 3')
       
       // Now create another duplicate - should fill the gap at 2
-      const model4 = Model.create('Gap Model', schemaName)
+      const model4 = Model.create('Gap Model', schemaName, { waitForReady: false })
       await waitForModelIdle(model4)
       expect(model4.modelName).toBe('Gap Model 2')
     })
@@ -489,17 +494,17 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create model with lowercase
-      const model1 = Model.create('case test', schemaName)
+      const model1 = Model.create('case test', schemaName, { waitForReady: false })
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('case test')
       
       // Try to create with uppercase - should be treated as duplicate
-      const model2 = Model.create('CASE TEST', schemaName)
+      const model2 = Model.create('CASE TEST', schemaName, { waitForReady: false })
       await waitForModelIdle(model2)
       expect(model2.modelName).toBe('CASE TEST 1')
       
       // Try with mixed case - should also be treated as duplicate
-      const model3 = Model.create('Case Test', schemaName)
+      const model3 = Model.create('Case Test', schemaName, { waitForReady: false })
       await waitForModelIdle(model3)
       expect(model3.modelName).toBe('Case Test 2')
     })
@@ -511,12 +516,12 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create first model
-      const model1 = Model.create('Formatted Model', schemaName)
+      const model1 = Model.create('Formatted Model', schemaName, { waitForReady: false })
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('Formatted Model')
       
       // Create duplicate - should preserve original capitalization
-      const model2 = Model.create('Formatted Model', schemaName)
+      const model2 = Model.create('Formatted Model', schemaName, { waitForReady: false })
       await waitForModelIdle(model2)
       expect(model2.modelName).toBe('Formatted Model 1')
       
@@ -535,17 +540,17 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema2) }, testSchema2.version)
       
       // Create models with same name in different schemas
-      const model1 = Model.create('Shared Name', schemaName1)
+      const model1 = Model.create('Shared Name', schemaName1, { waitForReady: false })
       await waitForModelIdle(model1)
       expect(model1.modelName).toBe('Shared Name')
       
-      const model2 = Model.create('Shared Name', schemaName2)
+      const model2 = Model.create('Shared Name', schemaName2, { waitForReady: false })
       await waitForModelIdle(model2)
       // Should NOT be renamed since it's in a different schema
       expect(model2.modelName).toBe('Shared Name')
       
       // But duplicates within the same schema should be renamed
-      const model3 = Model.create('Shared Name', schemaName1)
+      const model3 = Model.create('Shared Name', schemaName1, { waitForReady: false })
       await waitForModelIdle(model3)
       expect(model3.modelName).toBe('Shared Name 1')
     })
@@ -585,7 +590,7 @@ testDescribe('Model Integration Tests', () => {
       let TestModel = await Model.getByNameAsync(modelName, schemaName)
       if (!TestModel) {
         // If not found, try creating it (will use the imported model from database or create new)
-        TestModel = Model.create(modelName, schemaName)
+        TestModel = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       }
       
       await waitForModelIdle(TestModel)
@@ -733,7 +738,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       const item = await model.create({
@@ -798,7 +803,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       const item = await model.create({} as any)
@@ -863,7 +868,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       // Create multiple items
@@ -917,19 +922,24 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestPost', schemaName)
-      await waitForModelIdle(model)
-      const modelFileId = model.id
 
-      // Find the model
+      // Use the schema-created model (import creates it with id; Model.create would get renamed to "TestPost 1" due to cache)
+      const model = await Model.find({
+        modelName: 'TestPost',
+        schemaName,
+      })
+      expect(model).toBeDefined()
+      await waitForModelIdle(model!)
+      const modelFileId = model!.id
+
+      // Find the model by modelFileId
       const foundModel = await Model.find({
         modelFileId: modelFileId!,
       })
 
       expect(foundModel).toBeDefined()
       expect(foundModel?.modelName).toBe('TestPost')
-      
+
       // Verify it's in idle state (find() should have waited)
       const service = foundModel!.getService()
       expect(service.getSnapshot().value).toBe('idle')
@@ -948,7 +958,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
 
       // Find the model by name
@@ -986,7 +996,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       const modelFileId = model.id
 
@@ -1013,7 +1023,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const modelFileId = generateId()
-      const model1 = Model.create('TestModel Get By ID', schemaName, { modelFileId })
+      const model1 = Model.create('TestModel Get By ID', schemaName, { modelFileId, waitForReady: false })
       await waitForModelIdle(model1)
       
       const model2 = Model.getById(modelFileId)
@@ -1036,7 +1046,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model1 = Model.create(modelName, schemaName)
+      const model1 = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model1)
       
       const model2 = Model.getByName(modelName, schemaName)
@@ -1050,6 +1060,76 @@ testDescribe('Model Integration Tests', () => {
     })
   })
 
+  describe('Model.all()', () => {
+    it('should return all models when called with no args', async () => {
+      const schemaName = 'Test Schema Model All'
+      const testSchema = createTestSchema(schemaName, {
+        'TestModelAll': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestModelAll', schemaName, { waitForReady: false })
+      await waitForModelIdle(model)
+
+      const allModels = await Model.all()
+      expect(allModels).toBeDefined()
+      expect(Array.isArray(allModels)).toBe(true)
+      expect(allModels.length).toBeGreaterThanOrEqual(1)
+      const found = allModels.find((m) => m.modelName === 'TestModelAll')
+      expect(found).toBeDefined()
+    })
+
+    it('should filter by schema when schemaName provided', async () => {
+      const schemaName1 = 'Test Schema Model All Filter 1'
+      const schemaName2 = 'Test Schema Model All Filter 2'
+      const testSchema1 = createTestSchema(schemaName1, {
+        'ModelA': { id: generateId(), properties: { title: { dataType: 'Text' } } },
+      })
+      const testSchema2 = createTestSchema(schemaName2, {
+        'ModelB': { id: generateId(), properties: { name: { dataType: 'Text' } } },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema1) }, testSchema1.version)
+      await importJsonSchema({ contents: JSON.stringify(testSchema2) }, testSchema2.version)
+      const model1 = Model.create('ModelA', schemaName1, { waitForReady: false })
+      const model2 = Model.create('ModelB', schemaName2, { waitForReady: false })
+      await waitForModelIdle(model1)
+      await waitForModelIdle(model2)
+
+      const forSchema1 = await Model.all(schemaName1)
+      expect(forSchema1.length).toBeGreaterThanOrEqual(1)
+      expect(forSchema1.every((m) => m.schemaName === schemaName1)).toBe(true)
+      const forSchema2 = await Model.all(schemaName2)
+      expect(forSchema2.length).toBeGreaterThanOrEqual(1)
+      expect(forSchema2.every((m) => m.schemaName === schemaName2)).toBe(true)
+    })
+
+    it('should return models all in idle state when waitForReady is true', async () => {
+      const schemaName = 'Test Schema Model All WaitForReady'
+      const testSchema = createTestSchema(schemaName, {
+        'TestModelWait': {
+          id: generateId(),
+          properties: { title: { dataType: 'Text' } },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestModelWait', schemaName, { waitForReady: false })
+      await waitForModelIdle(model)
+
+      const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: 15000 })
+      expect(allModels.length).toBeGreaterThanOrEqual(1)
+      for (const m of allModels) {
+        expect(m.getService().getSnapshot().value).toBe('idle')
+      }
+    })
+  })
+
   describe('Model property access', () => {
 
     it('should access model name via "name" alias', async () => {
@@ -1059,7 +1139,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       expect(model.name).toBe(modelName)
@@ -1073,7 +1153,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const modelFileId = generateId()
-      const model = Model.create('TestModel ID Property', schemaName, { modelFileId })
+      const model = Model.create('TestModel ID Property', schemaName, { modelFileId, waitForReady: false })
       await waitForModelIdle(model)
       
       expect(model.id).toBe(modelFileId)
@@ -1086,7 +1166,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       const oldName = model.modelName
@@ -1110,7 +1190,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Validation', schemaName)
+      const model = Model.create('TestModel Validation', schemaName, { waitForReady: false })
       await waitForModelIdle(model)
       
       // Check validation errors property
@@ -1125,7 +1205,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Status', schemaName)
+      const model = Model.create('TestModel Status', schemaName, { waitForReady: false })
       
       // Status should be 'loading' initially
       expect(['loading', 'idle']).toContain(model.status)
@@ -1145,6 +1225,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const model = Model.create('TestModel Validate', schemaName, {
+        waitForReady: false,
         properties: {
           title: { dataType: 'Text' },
         },
@@ -1164,7 +1245,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Validate Structure', schemaName)
+      const model = Model.create('TestModel Validate Structure', schemaName, { waitForReady: false })
       await waitForModelIdle(model)
       
       const validationResult = await model.validate()
@@ -1193,7 +1274,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       // Update database directly
@@ -1233,7 +1314,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestModel Unload', schemaName)
+      const model = Model.create('TestModel Unload', schemaName, { waitForReady: false })
       await waitForModelIdle(model)
       
       // Verify service is running
@@ -1257,7 +1338,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model)
       
       const modelId = model.id
@@ -1314,7 +1395,7 @@ testDescribe('Model Integration Tests', () => {
       
       // If still not found, the model might not have been loaded yet, so we'll need to get it via the schema
       if (!model) {
-        const schema = Schema.create(schemaName)
+        const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
         await waitForSchemaIdle(schema)
         // Wait for models to be loaded
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -1423,21 +1504,19 @@ testDescribe('Model Integration Tests', () => {
       // Note: The exact save mechanism depends on implementation
       // For now, we verify that a new Model instance loads from database
       
-      // Create a new Model instance with the same name
-      // It should load from database, not from Schema context
-      const model2 = Model.create(modelName, schemaName)
+      // Create a second Model instance with the same name. With duplicate-name semantics,
+      // when the schema already defines that name, create(name) yields new instances with
+      // incremented names (name 1, name 2, ...).
+      const model2 = Model.create(modelName, schemaName, { waitForReady: false }) as Model
       await waitForModelIdle(model2)
       
-      // Verify both instances exist (they're cached)
       expect(model1).toBeDefined()
       expect(model2).toBeDefined()
-      
-      // They should be the same instance (cached)
-      expect(model1).toBe(model2)
-      
-      // Verify the model loaded its data
-      expect(model2.modelName).toBe(modelName)
+      expect(model1.schemaName).toBe(schemaName)
       expect(model2.schemaName).toBe(schemaName)
+      // First create gets "name 1", second gets "name 2" (schema already has that name)
+      expect(model1.modelName).toBe(`${modelName} 1`)
+      expect(model2.modelName).toBe(`${modelName} 2`)
     })
   })
 
@@ -1448,7 +1527,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const newModel = Model.create('New model', schemaName)
+      const newModel = Model.create('New model', schemaName, { waitForReady: false }) as Model
       
       // Track subscription callbacks
       let callbackCount = 0
@@ -1566,14 +1645,15 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
       await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
       
       const newModel = Model.create('New model', schema, {
         properties: {
           title: { dataType: 'Text' },
         },
-      })
+        waitForReady: false,
+      }) as Model
       
       // Track subscription callbacks
       let callbackCount = 0
@@ -1633,7 +1713,8 @@ testDescribe('Model Integration Tests', () => {
         properties: {
           title: { dataType: 'Text' },
         },
-      })
+        waitForReady: false,
+      }) as Model
       
       // Track subscription callbacks
       let callbackCount = 0
@@ -1685,7 +1766,8 @@ testDescribe('Model Integration Tests', () => {
         properties: {
           title: { dataType: 'Text' },
         },
-      })
+        waitForReady: false,
+      }) as Model
       
       // Create multiple subscriptions (simulating React hooks)
       let callbackCount1 = 0
@@ -1727,6 +1809,40 @@ testDescribe('Model Integration Tests', () => {
       // Verify we didn't get an excessive number of callbacks
       expect(callbackCount1).toBeLessThanOrEqual(maxExpectedCallbacks)
       expect(callbackCount2).toBeLessThanOrEqual(maxExpectedCallbacks)
+    })
+  })
+
+  describe('Model.destroy()', () => {
+    it('should remove model from caches and DB after destroy', async () => {
+      const schemaName = 'Test Schema Model Destroy'
+      const testSchema = createTestSchema(schemaName, {
+        DestroyTarget: {
+          properties: {
+            name: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('DestroyTarget', schemaName, { waitForReady: false }) as Model
+      await waitForModelIdle(model)
+
+      const modelFileId = model.id
+      expect(modelFileId).toBeDefined()
+
+      await model.destroy()
+
+      expect(Model.getById(modelFileId!)).toBeUndefined()
+
+      const db = BaseDb.getAppDb()
+      if (db) {
+        const modelRecordsAfter = await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.schemaFileId, modelFileId!))
+        expect(modelRecordsAfter.length).toBe(0)
+      }
     })
   })
 })

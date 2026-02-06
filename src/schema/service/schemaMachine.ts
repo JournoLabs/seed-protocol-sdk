@@ -68,6 +68,9 @@ export type SchemaMachineContext = {
   _loadingStage?: string  // Current stage for debugging
   _loadingError?: { stage: string; error: Error }  // Stage-specific errors
   _schemaRecord?: any  // Schema database record
+  // Destroy lifecycle (for destroy hooks)
+  _destroyInProgress?: boolean
+  _destroyError?: { message: string; name?: string } | null
 }
 
 export const schemaMachine = setup({
@@ -99,7 +102,11 @@ export const schemaMachine = setup({
       | { type: 'propertiesWritten'; propertyIds: string[] }
       | { type: 'propertiesVerified'; propertyIds: string[] }
       | { type: 'verificationFailed'; stage: string; error: Error }
-      | { type: 'writeError'; error: Error },
+      | { type: 'writeError'; error: Error }
+      | { type: 'destroyStarted' }
+      | { type: 'destroyDone' }
+      | { type: 'destroyError'; error: unknown }
+      | { type: 'clearDestroyError' },
   },
   actors: {
     loadOrCreateSchema,
@@ -217,6 +224,24 @@ export const schemaMachine = setup({
         
         return newContext
       }),
+    },
+    destroyStarted: {
+      actions: assign({ _destroyInProgress: true, _destroyError: null }),
+    },
+    destroyDone: {
+      actions: assign({ _destroyInProgress: false }),
+    },
+    destroyError: {
+      actions: assign(({ event }) => ({
+        _destroyInProgress: false,
+        _destroyError:
+          event.error instanceof Error
+            ? { message: event.error.message, name: event.error.name }
+            : { message: String(event.error) },
+      })),
+    },
+    clearDestroyError: {
+      actions: assign({ _destroyError: null }),
     },
   },
   states: {

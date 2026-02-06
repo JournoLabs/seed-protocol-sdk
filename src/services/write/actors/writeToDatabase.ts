@@ -62,7 +62,37 @@ export const writeToDatabase = fromCallback<
         console.log(successMsg) // Always log to console
       } else if (input.entityType === 'modelProperty') {
         const { writePropertyToDb } = await import('@/helpers/db')
-        await writePropertyToDb(input.entityId, input.entityData)
+        // Use current ModelProperty context when available so a user rename before the
+        // initial write completes is not overwritten by the stale requestWrite payload.
+        let dataToWrite = input.entityData
+        try {
+          const mod = await import('@/ModelProperty/ModelProperty')
+          const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
+          if (ModelProperty && typeof ModelProperty.getById === 'function') {
+            const instance = ModelProperty.getById(input.entityId)
+            if (instance && typeof (instance as any)._getSnapshotContext === 'function') {
+              const ctx = (instance as any)._getSnapshotContext()
+              const nameChanged = ctx.name !== input.entityData.name
+              if (nameChanged) {
+                fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'writeToDatabase.ts:modelProperty',message:'Using current context for write (name differed)',data:{entityId:input.entityId,requestName:input.entityData.name,currentName:ctx.name},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix'})}).catch(()=>{});
+              }
+              dataToWrite = {
+                ...input.entityData,
+                name: ctx.name ?? input.entityData.name,
+                dataType: ctx.dataType ?? input.entityData.dataType,
+                refModelId: ctx.refModelId ?? input.entityData.refModelId,
+                refValueType: ctx.refValueType ?? input.entityData.refValueType,
+                refModelName: ctx.refModelName ?? input.entityData.refModelName,
+                storageType: ctx.storageType ?? input.entityData.storageType,
+                localStorageDir: ctx.localStorageDir ?? input.entityData.localStorageDir,
+                filenameSuffix: ctx.filenameSuffix ?? input.entityData.filenameSuffix,
+              }
+            }
+          }
+        } catch (_) {
+          // Fall back to input.entityData if instance not available
+        }
+        await writePropertyToDb(input.entityId, dataToWrite)
         output = input.entityData
       } else if (input.entityType === 'schema') {
         const { addSchemaToDb } = await import('@/helpers/db')

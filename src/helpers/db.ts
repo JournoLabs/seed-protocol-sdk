@@ -1079,6 +1079,58 @@ export const loadModelsFromDbForSchema = async (
 }
 
 /**
+ * Returns model name by database model ID.
+ */
+export async function getModelNameByModelId(modelId: number): Promise<string | undefined> {
+  const db = BaseDb.getAppDb()
+  if (!db) return undefined
+  try {
+    const rows = await db
+      .select({ name: modelsTable.name })
+      .from(modelsTable)
+      .where(eq(modelsTable.id, modelId))
+      .limit(1)
+    return rows.length > 0 ? rows[0].name : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Resolves modelName and dataType for a property by its schemaFileId (e.g. context.id).
+ * Used when machine context lacks these (e.g. just-created property renamed before full context is set).
+ */
+export async function getPropertyModelNameAndDataType(
+  schemaFileId: string,
+): Promise<{ modelName: string; dataType: string } | undefined> {
+  const db = BaseDb.getAppDb()
+  if (!db || !schemaFileId) return undefined
+  try {
+    const rows = await db
+      .select({
+        dataType: properties.dataType,
+        modelId: properties.modelId,
+      })
+      .from(properties)
+      .where(eq(properties.schemaFileId, schemaFileId))
+      .limit(1)
+    if (rows.length === 0) return undefined
+    const modelRows = await db
+      .select({ name: modelsTable.name })
+      .from(modelsTable)
+      .where(eq(modelsTable.id, rows[0].modelId))
+      .limit(1)
+    if (modelRows.length === 0) return undefined
+    return {
+      modelName: modelRows[0].name,
+      dataType: rows[0].dataType ?? '',
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Saves a property's changes to the database without updating the JSON schema file.
  * This is used when properties are edited but the schema hasn't been saved as a new version yet.
  * @param property - The ModelPropertyMachineContext with updated values

@@ -1297,7 +1297,8 @@ export const createModelFromJson = async (
     modelFileId: modelFileId, // Pass modelFileId (preferred) as id (schemaFileId) from JSON file
     id: modelFileId, // Also pass as id for backward compatibility
     properties: convertedProperties,
-  })
+    waitForReady: false,
+  }) as import('@/Model/Model').Model
 
   return modelInstance
 }

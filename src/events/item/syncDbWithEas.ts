@@ -329,7 +329,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
   // Dynamic import to break circular dependency
   const { Model } = await import('@/Model/Model')
-  const allModels = Model.getAll()
+  const allModels = await Model.all()
   const models = Object.fromEntries(allModels.map(m => [m.modelName!, m]))
 
   const appDb = BaseDb.getAppDb()

@@ -28,12 +28,16 @@ export type ModelMachineContext = {
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
+  _idFromSchema?: boolean // True when Model.create was called with modelFileId (schema model); skip duplicate-name rename
+  // Destroy lifecycle (for destroy hooks)
+  _destroyInProgress?: boolean
+  _destroyError?: { message: string; name?: string } | null
 }
 
 export const modelMachine = setup({
   types: {
     context: {} as ModelMachineContext,
-    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions'>,
+    input: {} as Pick<ModelMachineContext, 'modelName' | 'schemaName' | 'id' | '_pendingPropertyDefinitions' | '_idFromSchema'>,
     events: {} as
       | { type: 'updateContext'; [key: string]: any }
       | { type: 'loadOrCreateModel' }
@@ -50,7 +54,11 @@ export const modelMachine = setup({
       | { type: 'writeSuccess'; output: any }
       | { type: 'createModelPropertiesSuccess' }
       | { type: 'createModelPropertiesError'; error: Error }
-      | { type: 'refreshProperties' },
+      | { type: 'refreshProperties' }
+      | { type: 'destroyStarted' }
+      | { type: 'destroyDone' }
+      | { type: 'destroyError'; error: unknown }
+      | { type: 'clearDestroyError' },
   },
   actors: {
     loadOrCreateModel,
@@ -86,6 +94,7 @@ export const modelMachine = setup({
     modelName: input.modelName,
     schemaName: input.schemaName,
     _pendingPropertyDefinitions: input._pendingPropertyDefinitions,
+    _idFromSchema: input._idFromSchema,
     _isDraft: false,
     _editedProperties: new Set<string>(),
     _validationErrors: undefined,
@@ -232,6 +241,24 @@ export const modelMachine = setup({
           // Properties serialization happens separately when initializing original values
         },
       })),
+    },
+    destroyStarted: {
+      actions: assign({ _destroyInProgress: true, _destroyError: null }),
+    },
+    destroyDone: {
+      actions: assign({ _destroyInProgress: false }),
+    },
+    destroyError: {
+      actions: assign(({ event }) => ({
+        _destroyInProgress: false,
+        _destroyError:
+          event.error instanceof Error
+            ? { message: event.error.message, name: event.error.name }
+            : { message: String(event.error) },
+      })),
+    },
+    clearDestroyError: {
+      actions: assign({ _destroyError: null }),
     },
   },
   states: {

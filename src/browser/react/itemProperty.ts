@@ -59,23 +59,32 @@ export function useItemProperty(
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
   const [, setVersion] = useState(0) // Version counter to force re-renders
 
-  // Determine which lookup mode we're in based on arguments
+  // Extract primitives so useMemo/useCallback deps are stable when caller passes inline objects
+  const seedLocalId =
+    typeof arg1 === 'object' && arg1 != null ? arg1.seedLocalId : undefined
+  const seedUid =
+    typeof arg1 === 'object' && arg1 != null ? arg1.seedUid : undefined
+  const propertyNameFromObj =
+    typeof arg1 === 'object' && arg1 != null ? arg1.propertyName : undefined
+  const itemId = typeof arg1 === 'string' ? arg1 : undefined
+  const propertyNameFromArgs = typeof arg1 === 'string' ? arg2 : undefined
+  const propertyName = propertyNameFromObj ?? propertyNameFromArgs
+
+  // Determine which lookup mode we're in based on arguments (deps are primitives to avoid infinite loop)
   const lookupMode = useMemo(() => {
-    if (typeof arg1 === 'string' && arg2 !== undefined) {
-      // Two arguments: itemId, propertyName
-      return { type: 'itemId' as const, itemId: arg1, propertyName: arg2 }
-    } else if (typeof arg1 === 'object') {
-      // Object argument: { seedLocalId/seedUid, propertyName }
+    if (itemId !== undefined && propertyName !== undefined) {
+      return { type: 'itemId' as const, itemId, propertyName }
+    }
+    if ((seedLocalId != null || seedUid != null) && propertyName != null) {
       return {
         type: 'identifiers' as const,
-        seedLocalId: arg1.seedLocalId,
-        seedUid: arg1.seedUid,
-        propertyName: arg1.propertyName,
+        seedLocalId,
+        seedUid,
+        propertyName,
       }
-    } else {
-      return null
     }
-  }, [arg1, arg2])
+    return null
+  }, [itemId, propertyName, seedLocalId, seedUid])
 
   // Determine initial loading state
   const initialLoadingState = useMemo(() => {
@@ -411,20 +420,15 @@ export function useItemProperties(
 
   const fetchItemProperties = useCallback(async () => {
     if (!seedLocalId && !seedUid) {
-      propertiesLogger('[useItemProperties] fetchItemProperties: no identifiers, clearing properties')
       setProperties([])
       setIsLoading(false)
       setError(null)
       return
     }
 
-    // Don't fetch if propertiesTableData is not available yet
     if (propertiesTableData === undefined) {
-      propertiesLogger('[useItemProperties] fetchItemProperties: propertiesTableData is undefined, skipping')
       return
     }
-
-      propertiesLogger(`[useItemProperties] fetchItemProperties: starting with ${propertiesTableData?.length || 0} records from table`)
 
     try {
       setIsLoading(true)
@@ -432,22 +436,32 @@ export function useItemProperties(
 
       const db = BaseDb.getAppDb()
       if (!db) {
-        propertiesLogger('[useItemProperties] fetchItemProperties: no db available')
         setProperties([])
         setIsLoading(false)
         return
       }
 
-      // Get modelName from metadata records or from seeds table
-      let modelName: string | undefined
-      if (propertiesTableData && propertiesTableData.length > 0) {
-        const firstProperty = propertiesTableData[0]
-        if (firstProperty.modelType) {
-          modelName = startCase(firstProperty.modelType)
+      const baseList = await ItemProperty.all(
+        { seedLocalId: seedLocalId ?? undefined, seedUid: seedUid ?? undefined },
+        { waitForReady: true },
+      )
+      const _itemProperties: IItemProperty[] = [...(baseList as IItemProperty[])]
+
+      const propertiesWithMetadata = new Set<string>()
+      for (const p of baseList) {
+        if (p.propertyName) {
+          propertiesWithMetadata.add(p.propertyName)
         }
       }
-      
-      // If we don't have modelName from metadata, try to get it from seeds table
+
+      let modelName: string | undefined
+      if (baseList.length > 0) {
+        const first = baseList[0]
+        modelName = first.modelName ?? (first as any).modelType
+        if (modelName && typeof modelName === 'string') {
+          modelName = startCase(modelName)
+        }
+      }
       if (!modelName) {
         const seedRecords = await db
           .select({ type: seeds.type })
@@ -456,13 +470,11 @@ export function useItemProperties(
             seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!)
           )
           .limit(1)
-        
         if (seedRecords.length > 0 && seedRecords[0].type) {
           modelName = startCase(seedRecords[0].type)
         }
       }
 
-      // Get all ModelProperties for this Model
       const modelProperties: string[] = []
       if (modelName) {
         try {
@@ -477,53 +489,16 @@ export function useItemProperties(
           }
         } catch (error) {
           propertiesLogger(`[useItemProperties] Error getting ModelProperties for ${modelName}:`, error)
-          // Continue without ModelProperties - we'll still return properties from metadata
         }
       }
 
-      // Create a Set of property names that have metadata records
-      const propertiesWithMetadata = new Set<string>()
-      if (propertiesTableData) {
-        for (const dbProperty of propertiesTableData) {
-          if (dbProperty.propertyName) {
-            propertiesWithMetadata.add(dbProperty.propertyName)
-          }
-        }
-      }
-
-      const _itemProperties: IItemProperty[] = []
-
-      // First, create ItemProperty instances for properties that have metadata records
-      if (propertiesTableData && propertiesTableData.length > 0) {
-        for (const dbProperty of propertiesTableData) {
-          if (!dbProperty.propertyName) {
-            continue
-          }
-
-          try {
-            const itemProperty = await ItemProperty.find({
-              propertyName: dbProperty.propertyName,
-              seedLocalId: dbProperty.seedLocalId || undefined,
-              seedUid: dbProperty.seedUid || undefined,
-            })
-
-            if (itemProperty) {
-              _itemProperties.push(itemProperty as any as IItemProperty)
-            }
-          } catch (error) {
-            logger(`[useItemProperties] Error creating ItemProperty for ${dbProperty.propertyName}:`, error)
-            // Continue with other properties even if one fails
-          }
-        }
-      }
-
-      // Then, create ItemProperty instances for ModelProperties that don't have metadata records
+      // Add ItemProperty instances for ModelProperties that don't have metadata records
       if (modelName && modelProperties.length > 0) {
-        const resolvedSeedLocalId = propertiesTableData && propertiesTableData.length > 0 
-          ? propertiesTableData[0].seedLocalId || seedLocalId
+        const resolvedSeedLocalId = baseList.length > 0
+          ? (baseList[0].seedLocalId ?? seedLocalId)
           : seedLocalId
-        const resolvedSeedUid = propertiesTableData && propertiesTableData.length > 0
-          ? propertiesTableData[0].seedUid || seedUid
+        const resolvedSeedUid = baseList.length > 0
+          ? (baseList[0].seedUid ?? seedUid)
           : seedUid
 
         for (const propertyName of modelProperties) {
@@ -534,13 +509,16 @@ export function useItemProperties(
 
           try {
             // Create ItemProperty with empty value for properties without metadata records
-            const itemProperty = ItemProperty.create({
-              propertyName,
-              modelName,
-              seedLocalId: resolvedSeedLocalId || undefined,
-              seedUid: resolvedSeedUid || undefined,
-              propertyValue: null,
-            })
+            const itemProperty = ItemProperty.create(
+              {
+                propertyName,
+                modelName,
+                seedLocalId: resolvedSeedLocalId || undefined,
+                seedUid: resolvedSeedUid || undefined,
+                propertyValue: null,
+              },
+              { waitForReady: false },
+            )
 
             if (itemProperty) {
               _itemProperties.push(itemProperty as any as IItemProperty)
@@ -569,20 +547,23 @@ export function useItemProperties(
           
           if (!hasCreatedAtProperty && modelName) {
             try {
-              const resolvedSeedLocalId = propertiesTableData && propertiesTableData.length > 0 
-                ? propertiesTableData[0].seedLocalId || seedLocalId
+              const resolvedSeedLocalId = baseList.length > 0
+                ? (baseList[0].seedLocalId ?? seedLocalId)
                 : seedLocalId
-              const resolvedSeedUid = propertiesTableData && propertiesTableData.length > 0
-                ? propertiesTableData[0].seedUid || seedUid
+              const resolvedSeedUid = baseList.length > 0
+                ? (baseList[0].seedUid ?? seedUid)
                 : seedUid
 
-              const createdAtProperty = ItemProperty.create({
-                propertyName: createdAtPropertyName,
-                modelName,
-                seedLocalId: resolvedSeedLocalId || undefined,
-                seedUid: resolvedSeedUid || undefined,
-                propertyValue: seedRecords[0].createdAt.toString(),
-              })
+              const createdAtProperty = ItemProperty.create(
+                {
+                  propertyName: createdAtPropertyName,
+                  modelName,
+                  seedLocalId: resolvedSeedLocalId || undefined,
+                  seedUid: resolvedSeedUid || undefined,
+                  propertyValue: seedRecords[0].createdAt.toString(),
+                },
+                { waitForReady: false },
+              )
 
               if (createdAtProperty) {
                 _itemProperties.push(createdAtProperty as any as IItemProperty)
@@ -816,5 +797,138 @@ export function useItemProperties(
     properties,
     isLoading,
     error,
+  }
+}
+
+export type UseCreateItemPropertyProps = {
+  seedLocalId?: string
+  seedUid?: string
+  propertyName: string
+  modelName: string
+  propertyValue?: any
+  versionLocalId?: string
+  versionUid?: string
+  [key: string]: any
+}
+
+export type UseCreateItemPropertyReturn = {
+  create: (props: UseCreateItemPropertyProps) => IItemProperty | undefined
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+/**
+ * Hook to create an ItemProperty with loading and error state.
+ * create(props) creates a new property instance for an item; provide seedLocalId or seedUid, propertyName, and modelName.
+ */
+export const useCreateItemProperty = (): UseCreateItemPropertyReturn => {
+  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+
+  const resetError = useCallback(() => setError(null), [])
+
+  const create = useCallback((props: UseCreateItemPropertyProps): IItemProperty | undefined => {
+    if (!props.propertyName || (!props.seedLocalId && !props.seedUid) || !props.modelName) {
+      const err = new Error('seedLocalId or seedUid, propertyName, and modelName are required')
+      setError(err)
+      return undefined
+    }
+
+    setError(null)
+    setIsLoading(true)
+    subscriptionRef.current?.unsubscribe()
+    subscriptionRef.current = undefined
+
+    const instance = ItemProperty.create(props, { waitForReady: false })
+    if (!instance) {
+      setError(new Error('Failed to create item property'))
+      setIsLoading(false)
+      return undefined
+    }
+
+    const subscription = instance.getService().subscribe((snapshot: any) => {
+      if (snapshot?.value === 'error') {
+        const err = (snapshot.context as any)?._loadingError?.error ?? new Error('Failed to create item property')
+        setError(err instanceof Error ? err : new Error(String(err)))
+        setIsLoading(false)
+      }
+      if (snapshot?.value === 'idle') {
+        setError(null)
+        setIsLoading(false)
+      }
+    })
+    subscriptionRef.current = subscription
+    return instance
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      subscriptionRef.current?.unsubscribe()
+      subscriptionRef.current = undefined
+    }
+  }, [])
+
+  return {
+    create,
+    isLoading,
+    error,
+    resetError,
+  }
+}
+
+export type UseDestroyItemPropertyReturn = {
+  destroy: (itemProperty: IItemProperty) => Promise<void>
+  isLoading: boolean
+  error: Error | null
+  resetError: () => void
+}
+
+export const useDestroyItemProperty = (): UseDestroyItemPropertyReturn => {
+  const [currentInstance, setCurrentInstance] = useState<IItemProperty | null>(null)
+  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
+    isLoading: false,
+    error: null,
+  })
+
+  useEffect(() => {
+    if (!currentInstance) {
+      setDestroyState({ isLoading: false, error: null })
+      return
+    }
+    const service = currentInstance.getService()
+    const update = () => {
+      const snap = service.getSnapshot() as unknown as {
+        context: { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
+      }
+      const ctx = snap.context
+      setDestroyState({
+        isLoading: !!ctx._destroyInProgress,
+        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
+      })
+    }
+    update()
+    const sub = service.subscribe(update)
+    return () => sub.unsubscribe()
+  }, [currentInstance])
+
+  const destroy = useCallback(async (itemProperty: IItemProperty) => {
+    if (!itemProperty) return
+    setCurrentInstance(itemProperty)
+    await itemProperty.destroy()
+  }, [])
+
+  const resetError = useCallback(() => {
+    if (currentInstance) {
+      currentInstance.getService().send({ type: 'clearDestroyError' })
+    }
+  }, [currentInstance])
+
+  return {
+    destroy,
+    isLoading: destroyState.isLoading,
+    error: destroyState.error,
+    resetError,
   }
 }

@@ -3,15 +3,19 @@ import { Static } from '@sinclair/typebox'
 import { ModelPropertyDataTypes, TProperty } from '@/Schema'
 import { modelPropertyMachine, ModelPropertyMachineContext } from './service/modelPropertyMachine'
 import { StorageType } from '@/types'
+import type { CreateWaitOptions } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { and, eq } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
@@ -419,10 +423,24 @@ export class ModelProperty {
     })
   }
 
-  static create(property: Static<typeof TProperty>): ModelProperty {
+  static create(
+    property: Static<typeof TProperty>,
+    options?: { waitForReady?: false },
+  ): ModelProperty
+  static create(
+    property: Static<typeof TProperty>,
+    options?: { waitForReady?: true; readyTimeout?: number },
+  ): Promise<ModelProperty>
+  static create(
+    property: Static<typeof TProperty>,
+    options?: CreateWaitOptions,
+  ): ModelProperty | Promise<ModelProperty> {
     if (!property) {
       throw new Error('Property is required')
     }
+
+    const waitForReady = options?.waitForReady !== false
+    const readyTimeout = options?.readyTimeout ?? 5000
 
     // Debug: Log what's being passed to create()
     console.log(`[ModelProperty.create] Input property data:`, JSON.stringify({
@@ -501,7 +519,10 @@ export class ModelProperty {
         instance,
         refCount: refCount + 1,
       })
-      return instance
+      if (!waitForReady) return instance
+      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+        () => instance,
+      )
     }
 
     // Debug: Log what's being passed to the constructor
@@ -676,7 +697,10 @@ export class ModelProperty {
       setTimeout(checkAndSend, 0)
     }
     
-    return proxiedInstance
+    if (!waitForReady) return proxiedInstance
+    return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+      () => proxiedInstance,
+    )
   }
 
   /**
@@ -787,8 +811,8 @@ export class ModelProperty {
       }
     }
 
-    // Create ModelProperty instance
-    const instance = this.create(propertyData)
+    // Create ModelProperty instance (sync for createById so we can send updateContext)
+    const instance = this.create(propertyData, { waitForReady: false })
     
     // Set isEdited from database after creation
     if (isEditedFromDb) {
@@ -834,6 +858,44 @@ export class ModelProperty {
   }
 
   /**
+   * Get all ModelProperty instances for a model.
+   * Loads property rows from DB for the given modelFileId, creates instances via createById, optionally waits for idle.
+   */
+  static async all(
+    modelFileId: string,
+    options?: { waitForReady?: boolean; readyTimeout?: number },
+  ): Promise<ModelProperty[]> {
+    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    if (!modelFileId) {
+      return []
+    }
+
+    const rows = await getModelPropertiesData(modelFileId)
+    const instances: ModelProperty[] = []
+
+    for (const row of rows) {
+      if (row.schemaFileId) {
+        const instance = await this.createById(row.schemaFileId)
+        if (instance) {
+          instances.push(instance)
+        }
+      }
+    }
+
+    if (waitForReady && instances.length > 0) {
+      await Promise.all(
+        instances.map((p) =>
+          waitForEntityIdle(p as Parameters<typeof waitForEntityIdle>[0], {
+            timeout: readyTimeout,
+          }),
+        ),
+      )
+    }
+
+    return instances
+  }
+
+  /**
    * Track a pending write for a property
    */
   static trackPendingWrite(propertyFileId: string, modelId: number): void {
@@ -871,6 +933,14 @@ export class ModelProperty {
     return Array.from(this.pendingWrites.entries())
       .filter(([_, write]) => write.modelId === modelId && write.status !== 'error')
       .map(([propertyFileId]) => propertyFileId)
+  }
+
+  /**
+   * Get modelId for a property that has a pending write (row may not be in DB yet).
+   * Used to resolve modelName when validating a just-created property rename.
+   */
+  static getPendingModelId(propertyFileId: string): number | undefined {
+    return this.pendingWrites.get(propertyFileId)?.modelId
   }
 
   getService(): ModelPropertyService {
@@ -990,5 +1060,71 @@ export class ModelProperty {
     } catch (error) {
       // Service might already be stopped
     }
+  }
+
+  /**
+   * Destroy the model property: remove from caches, delete from database, update Schema context, stop service.
+   */
+  async destroy(): Promise<void> {
+    const context = this._getSnapshotContext()
+    const cacheKey =
+      context.modelName && context.name
+        ? `${context.modelName}:${context.name}`
+        : (context.id ?? '')
+    if (!cacheKey) return
+
+    forceRemoveFromCaches(this, {
+      getCacheKeys: () => [cacheKey],
+      caches: [ModelProperty.instanceCache as Map<string, unknown>],
+    })
+
+    await runDestroyLifecycle(this, {
+      getService: (instance) =>
+        instance._service as { send: (ev: unknown) => void; stop: () => void },
+      doDestroy: async () => {
+        const db = BaseDb.getAppDb()
+        const schemaName = context._schemaName
+        const modelName = context.modelName
+        const propertyName = context.name
+        if (!modelName || !propertyName) return
+
+        if (db && schemaName) {
+          const propertyRecords = await db
+            .select({ propertyId: propertiesTable.id })
+            .from(propertiesTable)
+            .innerJoin(modelsTable, eq(propertiesTable.modelId, modelsTable.id))
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemas, eq(modelSchemas.schemaId, schemas.id))
+            .where(
+              and(
+                eq(schemas.name, schemaName),
+                eq(modelsTable.name, modelName),
+                eq(propertiesTable.name, propertyName),
+              ),
+            )
+            .limit(1)
+          if (propertyRecords.length > 0 && propertyRecords[0].propertyId != null) {
+            await db
+              .delete(propertiesTable)
+              .where(eq(propertiesTable.id, propertyRecords[0].propertyId))
+          }
+        }
+
+        if (schemaName) {
+          const { Schema } = await import('@/Schema/Schema')
+          const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
+          const snapshot = schema.getService().getSnapshot()
+          const schemaContext = snapshot.context
+          if (schemaContext.models?.[modelName]?.properties?.[propertyName]) {
+            const updatedModels = { ...schemaContext.models }
+            const updatedProperties = { ...updatedModels[modelName].properties }
+            delete updatedProperties[propertyName]
+            updatedModels[modelName] = { ...updatedModels[modelName], properties: updatedProperties }
+            schema.getService().send({ type: 'updateContext', models: updatedModels })
+            schema.getService().send({ type: 'markAsDraft', propertyKey: `property:${modelName}:${propertyName}` })
+          }
+        }
+      },
+    })
   }
 }

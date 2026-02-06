@@ -12,6 +12,7 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   getPublishUploads(): Promise<any>
   getPublishPayload(uploadedTransactions: any[]): Promise<any>
   unload(): void
+  destroy(): Promise<void>
 
   readonly seedLocalId: string
   readonly seedUid?: string

@@ -14,12 +14,12 @@ import {
   NewItemProps,
   PropertyData
 } from '@/types'
+import type { CreateWaitOptions } from '@/types'
 
 import { BehaviorSubject } from 'rxjs'
 import { ActorRefFrom, Subscription, createActor, SnapshotFrom } from 'xstate'
 import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
-import { waitForEvent } from '@/events'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
@@ -27,9 +27,16 @@ import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
+import { modelPropertiesToObject } from '@/helpers/model'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import {
+  clearDestroySubscriptions,
+  forceRemoveFromCaches,
+  runDestroyLifecycle,
+} from '@/helpers/entity/entityDestroy'
+import { deleteItem } from '@/db/write/deleteItem'
 import { eq, and } from 'drizzle-orm'
 import debug from 'debug'
 
@@ -92,6 +99,7 @@ const TRACKED_PROPERTIES = [
 // This avoids issues with read-only properties when instances are frozen by Immer
 const itemInstanceState = new WeakMap<Item<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
+  definedPropertyNames: Set<string>
 }>()
 
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
@@ -103,7 +111,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   protected readonly _service: ActorRefFrom<typeof itemMachineSingle>;
 
   constructor(initialValues: NewItemProps<T>) {
-
     const {
       modelName,
       seedUid,
@@ -170,6 +177,20 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         propertiesObj[transformedKey] = propertyInstance
       }
 
+      // Define accessors for any property instances we don't have yet (e.g. from loadOrCreateItem)
+      const state = itemInstanceState.get(this)
+      const definedSet = state?.definedPropertyNames
+      if (definedSet) {
+        for (const key of context.propertyInstances.keys()) {
+          if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) {
+            continue
+          }
+          if (!definedSet.has(key)) {
+            this._definePropertyAccessor(key)
+          }
+        }
+      }
+
       this._propertiesSubject.next(propertiesObj)
     })
 
@@ -178,14 +199,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Initialize instance state in WeakMap
     itemInstanceState.set(this, {
       liveQuerySubscription: null,
+      definedPropertyNames: new Set(),
     })
     
     // Set up liveQuery subscription for cross-instance updates
     this._setupLiveQuerySubscription()
 
     // Properties are now loaded from database via loadOrCreateItem actor
-    // Only create property instances for values provided in initialValues
-    // The loadOrCreateItem actor will load all properties from metadata table
+    // Create property instances for all model properties plus any keys in initialValues,
+    // so that e.g. newPost.title = '...' works even when the item was created with no initial values.
     const itemPropertyBase: Partial<CreatePropertyInstanceProps> = {
       seedLocalId,
       seedUid,
@@ -194,29 +216,55 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelName,
     }
 
-    // Create property instances for any values provided in initialValues
-    // These will be merged with properties loaded from database
-    ; (Object.keys(initialValues) as Array<string & keyof Partial<T>>).forEach(
-      (key) => {
-        // Skip metadata properties
-        if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance' || 
-            key === 'seedLocalId' || key === 'seedUid' || key === 'schemaUid' ||
-            key === 'latestVersionLocalId' || key === 'latestVersionUid') {
-          return
-        }
+    const metadataKeys = [
+      'modelName',
+      'schemaName',
+      'modelInstance',
+      'seedLocalId',
+      'seedUid',
+      'schemaUid',
+      'latestVersionLocalId',
+      'latestVersionUid',
+    ] as const
 
-        this._createPropertyInstance({
-          ...itemPropertyBase,
-          propertyName: key,
-          propertyValue: initialValues[key],
-        })
-      },
+    const keysFromInitial = (Object.keys(initialValues) as Array<string & keyof Partial<T>>).filter(
+      (key) => !metadataKeys.includes(key as any),
     )
+    const schemaNameForModel = (initialValues as Record<string, unknown>).schemaName as string | undefined
+    const modelPropertyNames = this._getModelPropertyNames(schemaNameForModel)
+    const allKeys = new Set<string>([...keysFromInitial, ...modelPropertyNames])
+
+    let model: import('@/Model/Model').Model | undefined
+    try {
+      const M = getModel()
+      model = M != null ? M.getByName(modelName, schemaNameForModel) : undefined
+    } catch {
+      model = undefined
+    }
+    const propertySchemas = model?.properties?.length
+      ? modelPropertiesToObject(model.properties)
+      : {}
+
+    for (const key of allKeys) {
+      if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+        continue
+      }
+      this._createPropertyInstance({
+        ...itemPropertyBase,
+        propertyName: key,
+        propertyValue: (initialValues as Record<string, unknown>)[key] ?? undefined,
+        propertyRecordSchema: propertySchemas[key] ?? undefined,
+      })
+    }
   }
 
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
+    options?: CreateWaitOptions,
   ): Promise<Item<any>> {
+    const waitForReady = options?.waitForReady !== false
+    const readyTimeout = options?.readyTimeout ?? 5000
+
     if (!props.modelName && props.type) {
       props.modelName = startCase(props.type)
     }
@@ -244,6 +292,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             propertyValue,
           })
         }
+        if (!waitForReady) return instance
+        await waitForEntityIdle(instance, { timeout: readyTimeout })
         return instance
       }
       if (!this.instanceCache.has(seedId)) {
@@ -343,6 +393,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           instance: proxiedInstance,
           refCount: 1,
         })
+        if (!waitForReady) return proxiedInstance
+        await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
         return proxiedInstance
       }
     }
@@ -550,6 +602,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       instance: proxiedInstance,
       refCount: 1,
     })
+    if (!waitForReady) return proxiedInstance
+    await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
     return proxiedInstance
   }
 
@@ -664,7 +718,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   static async all(
     modelName?: string,
     deleted?: boolean,
+    options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<Item<any>[]> {
+    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
     const itemsData = await getItemsData({ modelName, deleted })
     const itemInstances: Item<any>[] = []
     for (const itemData of itemsData) {
@@ -676,6 +732,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       )
     }
 
+    if (waitForReady && itemInstances.length > 0) {
+      await Promise.all(
+        itemInstances.map((item) =>
+          waitForEntityIdle(item, { timeout: readyTimeout }),
+        ),
+      )
+    }
+
     return orderBy(itemInstances, ['createdAt'], ['desc'])
   }
 
@@ -684,7 +748,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       props.storageTransactionId = this._storageTransactionId
     }
 
-    const propertyInstance = ItemProperty.create(props)
+    const propertyInstance = ItemProperty.create(props, {
+        waitForReady: false,
+      })
 
     if (!propertyInstance || !props.propertyName) {
       return
@@ -696,26 +762,41 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       propertyInstance,
     })
 
-    Object.defineProperty(this, props.propertyName, {
-      get: () => propertyInstance.value,
-      set: (value) => (propertyInstance.value = value),
-      enumerable: true,
-    })
+    this._definePropertyAccessor(props.propertyName)
   }
 
+  /**
+   * Defines a property accessor on this Item that delegates get/set to the
+   * ItemProperty in context.propertyInstances at access time (so the correct
+   * instance is used after loadOrCreateItemSuccess merges DB-backed instances).
+   */
+  protected _definePropertyAccessor(propertyName: string): void {
+    let state = itemInstanceState.get(this)
+    if (!state) {
+      state = { liveQuerySubscription: null, definedPropertyNames: new Set() }
+      itemInstanceState.set(this, state)
+    }
+    if (state.definedPropertyNames.has(propertyName)) {
+      return
+    }
+    Object.defineProperty(this, propertyName, {
+      get: () => {
+        const inst = this._service.getSnapshot().context.propertyInstances?.get(propertyName)
+        return inst?.value
+      },
+      set: (value: any) => {
+        const inst = this._service.getSnapshot().context.propertyInstances?.get(propertyName)
+        if (inst) {
+          inst.value = value
+        }
+      },
+      enumerable: true,
+    })
+    state.definedPropertyNames.add(propertyName)
+  }
 
   static async publish(item: IItem<any>): Promise<void> {
-    await waitForEvent({
-      req: {
-        eventLabel: `item.${item.seedLocalId}.publish.request`,
-        data: {
-          seedLocalId: item.seedLocalId,
-        },
-      },
-      res: {
-        eventLabel: `item.${item.seedLocalId}.publish.success`,
-      },
-    })
+    await item.publish()
   }
 
   subscribe = (callback: (itemProps: any) => void): Subscription => {
@@ -736,16 +817,34 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   publish = async (): Promise<void> => {
-    await waitForEvent({
-      req: {
-        eventLabel: `item.publish.request`,
-        data: {
-          seedLocalId: this.seedLocalId,
-        },
-      },
-      res: {
-        eventLabel: `item.${this.seedLocalId}.publish.success`,
-      },
+    this._service.send({ type: 'startPublish' })
+    return new Promise<void>((resolve, reject) => {
+      let wasPublishing = false
+      const timeoutMs = 300000 // 5 minutes, match previous handler timeout
+      const timeoutId = setTimeout(() => {
+        unsub.unsubscribe()
+        if (!wasPublishing) {
+          reject(new Error('Publish did not start (timeout)'))
+        } else {
+          reject(new Error('Publish timed out'))
+        }
+      }, timeoutMs)
+      const unsub = this._service.subscribe((snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
+        const value = snapshot.value as string
+        if (value === 'publishing') {
+          wasPublishing = true
+        }
+        if (value === 'idle' && wasPublishing) {
+          clearTimeout(timeoutId)
+          unsub.unsubscribe()
+          const ctx = snapshot.context as { _publishError?: { message: string } | null }
+          if (ctx._publishError) {
+            reject(new Error(ctx._publishError.message))
+          } else {
+            resolve()
+          }
+        }
+      })
     })
   }
 
@@ -799,6 +898,43 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   get modelName(): string {
     return this.serviceContext.modelName as string
+  }
+
+  /**
+   * Returns model property names from the Model cache (for use in constructor when
+   * property instances are not yet available). Returns [] if modelName is missing
+   * or Model is not in cache. Pass schemaName when available so the correct model
+   * is resolved (cache is keyed by schemaName:modelName).
+   */
+  protected _getModelPropertyNames(schemaName?: string): string[] {
+    try {
+      const Model = getModel()
+      const modelName = this.modelName
+      if (!modelName) {
+        return []
+      }
+      const model = Model.getByName(modelName, schemaName)
+      if (!model) {
+        return []
+      }
+      const modelProperties = model.properties || []
+      if (modelProperties.length === 0) {
+        return []
+      }
+      const names: string[] = []
+      for (const modelProperty of modelProperties) {
+        const propContext = modelProperty._getSnapshotContext()
+        const propertyName = propContext.name
+        if (propertyName && !INTERNAL_PROPERTY_NAMES.includes(propertyName)) {
+          if (!names.includes(propertyName)) {
+            names.push(propertyName)
+          }
+        }
+      }
+      return names
+    } catch {
+      return []
+    }
   }
 
   /**
@@ -1119,12 +1255,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         if (initialMetadataIds.length > 0) {
           try {
             const { ItemProperty } = await import('@/ItemProperty/ItemProperty')
+            const itemModelName = this._service.getSnapshot().context.modelName
             const createPromises = initialMetadata.map(async (metaRow: any) => {
               try {
                 const property = await ItemProperty.find({
                   propertyName: metaRow.propertyName,
                   seedLocalId,
                   seedUid,
+                  modelName: itemModelName,
                 })
                 if (property) {
                   logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
@@ -1241,12 +1379,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               if (metadataRows.length > 0) {
                 try {
                   const { ItemProperty } = await import('@/ItemProperty/ItemProperty')
+                  const itemModelName = this._service.getSnapshot().context.modelName
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {
                       const property = await ItemProperty.find({
                         propertyName: metaRow.propertyName,
                         seedLocalId,
                         seedUid,
+                        modelName: itemModelName,
                       })
                       if (property) {
                         // Add property instance to context
@@ -1358,5 +1498,38 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // Service might already be stopped
       }
     }
+  }
+
+  /**
+   * Destroy the item: soft delete in DB, remove from caches, clean up subscriptions, stop service.
+   */
+  async destroy(): Promise<void> {
+    const context = this._getSnapshotContext()
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Item.ts:destroy',message:'destroy entered',data:{seedLocalId:context.seedLocalId,seedUid:context.seedUid},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    const cacheKey = context.seedUid || context.seedLocalId
+    const cacheKeys: string[] = cacheKey ? [cacheKey] : []
+
+    clearDestroySubscriptions(this, {
+      instanceState: itemInstanceState,
+      onUnload: (instance) => (instance as Item<any>)._subscription?.unsubscribe(),
+    })
+
+    forceRemoveFromCaches(this, {
+      getCacheKeys: () => cacheKeys,
+      caches: [Item.instanceCache as Map<string, unknown>],
+    })
+
+    await runDestroyLifecycle(this, {
+      getService: (instance) =>
+        instance._service as { send: (ev: unknown) => void; stop: () => void },
+      doDestroy: async () => {
+        await deleteItem({
+          seedLocalId: context.seedLocalId,
+          seedUid: context.seedUid,
+        })
+      },
+    })
   }
 }

@@ -80,7 +80,11 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
         return true // Indicate success
       }
       
-      // For non-tracked properties, use Reflect
+      // For non-tracked properties, use Reflect. Also trigger sendUpdate for virtual
+      // 'value' so the callback runs when .value is assigned (e.g. ItemProperty).
+      if (typeof prop === 'string' && prop === 'value') {
+        sendUpdate(instance, prop, value)
+      }
       return Reflect.set(target, prop, value)
     },
     

@@ -6,6 +6,7 @@ import { IItem, IItemProperty } from '@/interfaces'
 import { getContentHash } from '@/helpers/crypto'
 import { Item } from '@/Item/Item'
 import type { ArweaveTransaction } from '@/types/arweave'
+import { PublishUpload } from '@/types/publish'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -196,14 +197,6 @@ const processUploadProperty = async (
   return uploads
 }
 
-
-export type PublishUpload = {
-  itemPropertyName: string
-  itemPropertyLocalId: string
-  seedLocalId: string
-  versionLocalId: string
-  transactionToSign: ArweaveTransaction
-}
 export const getPublishUploads = async (
   item: IItem<any>,
   uploads: PublishUpload[] = [],

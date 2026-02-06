@@ -5,6 +5,7 @@
 
 export * from './entityCache'
 export * from './entityCommon'
+export * from './entityDestroy'
 export * from './entityFind'
 export * from './entityLiveQuery'
 export * from './entityUnload'

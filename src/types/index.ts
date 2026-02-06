@@ -1,6 +1,5 @@
 
 import type { Model } from '@/Model/Model'
-import { ModelClassType } from './model'
 
 export * from './db'
 export * from './model'
@@ -10,6 +9,7 @@ export * from './machines'
 export * from './seedProtocol'
 export * from './browser'
 export * from './arweave'
+export * from './publish'
 
 export type Endpoints = {
   filePaths: string
@@ -51,6 +51,15 @@ export interface SeedConfig {
 export interface SeedConstructorOptions {
   config: SeedConfig
   readonly addresses?: string[]
+}
+
+/**
+ * Options for Entity.create() when default behavior is to wait until idle.
+ * waitForReady defaults to true; pass { waitForReady: false } for sync return.
+ */
+export interface CreateWaitOptions {
+  waitForReady?: boolean
+  readyTimeout?: number
 }
 
 export type ClientCallback = (event: any) => void

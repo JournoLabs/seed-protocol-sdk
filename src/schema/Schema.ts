@@ -5,6 +5,7 @@ import { updateModelProperties, convertPropertyToSchemaUpdate } from '@/helpers/
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
+import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -17,6 +18,11 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import {
+  clearDestroySubscriptions,
+  forceRemoveFromCaches,
+  runDestroyLifecycle,
+} from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -66,6 +72,16 @@ export interface SchemaAllOptions {
    * @default false
    */
   includeInternal?: boolean
+  /**
+   * If true, wait for each schema to reach idle state before returning.
+   * @default false
+   */
+  waitForReady?: boolean
+  /**
+   * Timeout in ms for waiting for each schema to be ready (when waitForReady is true).
+   * @default 5000
+   */
+  readyTimeout?: number
 }
 
 export class Schema {
@@ -144,10 +160,21 @@ export class Schema {
     // Note: Property getters/setters are now handled by the Proxy in create()
   }
 
-  static create(schemaName: string): Schema {
+  static create(schemaName: string, options?: { waitForReady?: false }): Schema
+  static create(
+    schemaName: string,
+    options?: { waitForReady?: true; readyTimeout?: number },
+  ): Promise<Schema>
+  static create(
+    schemaName: string,
+    options?: CreateWaitOptions,
+  ): Schema | Promise<Schema> {
     if (!schemaName) {
       throw new Error('Schema name is required')
     }
+
+    const waitForReady = options?.waitForReady !== false
+    const readyTimeout = options?.readyTimeout ?? 5000
 
     // First, check if we have an instance cached by name
     if (this.instanceCacheByName.has(schemaName)) {
@@ -156,7 +183,10 @@ export class Schema {
         instance,
         refCount: refCount + 1,
       })
-      return instance
+      if (!waitForReady) return instance
+      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+        () => instance,
+      )
     }
 
     // Create new instance
@@ -523,9 +553,11 @@ export class Schema {
       instance: proxiedInstance,
       refCount: 1,
     })
-    // The proxiedInstance is Proxied<Schema> which preserves all methods
-    // TypeScript recognizes this as Schema with all methods intact
-    return proxiedInstance as Schema
+    const schema = proxiedInstance as Schema
+    if (!waitForReady) return schema
+    return waitForEntityIdle(schema, { timeout: readyTimeout }).then(
+      () => schema,
+    )
   }
 
   /**
@@ -693,7 +725,12 @@ export class Schema {
    * @returns Array of Schema instances
    */
   static async all(options: SchemaAllOptions = {}): Promise<Schema[]> {
-    const { includeAllVersions = false, includeInternal = false } = options
+    const {
+      includeAllVersions = false,
+      includeInternal = false,
+      waitForReady = false,
+      readyTimeout = 5000,
+    } = options
     
     try {
       // Use loadAllSchemasFromDb as single source of truth
@@ -786,13 +823,27 @@ export class Schema {
             schemaInstances.push(instance)
           } catch (error) {
             // Fallback to creating by name if createById fails
-            schemaInstances.push(this.create(schemaName))
+            schemaInstances.push(
+              this.create(schemaName, { waitForReady: false }) as Schema,
+            )
           }
         } else {
-          schemaInstances.push(this.create(schemaName))
+          schemaInstances.push(
+            this.create(schemaName, { waitForReady: false }) as Schema,
+          )
         }
       }
-      
+
+      if (waitForReady && schemaInstances.length > 0) {
+        await Promise.all(
+          schemaInstances.map((s) =>
+            waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
+              timeout: readyTimeout,
+            }),
+          ),
+        )
+      }
+
       return schemaInstances
     } catch (error) {
       // Fallback to file-based approach if database is unavailable
@@ -834,9 +885,21 @@ export class Schema {
       // Create Schema instances for each unique schema name
       const schemaInstances: Schema[] = []
       for (const schemaName of uniqueSchemaNames) {
-        schemaInstances.push(this.create(schemaName))
+        schemaInstances.push(
+          this.create(schemaName, { waitForReady: false }) as Schema,
+        )
       }
-      
+
+      if (waitForReady && schemaInstances.length > 0) {
+        await Promise.all(
+          schemaInstances.map((s) =>
+            waitForEntityIdle(s as Parameters<typeof waitForEntityIdle>[0], {
+              timeout: readyTimeout,
+            }),
+          ),
+        )
+      }
+
       return schemaInstances
     }
   }
@@ -1820,6 +1883,76 @@ export class Schema {
         // Service might already be stopped
       }
     }
+  }
+
+  /**
+   * Destroy the schema instance completely: remove from caches, delete from database (cascade),
+   * and stop the service. Uses shared destroy helpers.
+   */
+  async destroy(): Promise<void> {
+    const context = this._getSnapshotContext()
+    const schemaFileId = context.id
+    const schemaName = context.schemaName
+
+    clearDestroySubscriptions(this, {
+      instanceState: schemaInstanceState,
+      onUnload: () => schemaInstanceState.delete(this),
+    })
+
+    const cacheKeys: string[] = []
+    if (schemaFileId) cacheKeys.push(schemaFileId)
+    if (schemaName) cacheKeys.push(schemaName)
+    forceRemoveFromCaches(this, {
+      getCacheKeys: () => cacheKeys,
+      caches: [
+        Schema.instanceCacheById as Map<string, unknown>,
+        Schema.instanceCacheByName as Map<string, unknown>,
+      ],
+    })
+
+    await runDestroyLifecycle(this, {
+      getService: (instance) =>
+        instance._service as { send: (ev: unknown) => void; stop: () => void },
+      doDestroy: async () => {
+        const db = BaseDb.getAppDb()
+        if (!db || !schemaFileId) return
+
+        const schemaRecords = await db
+          .select({ id: schemasTable.id })
+          .from(schemasTable)
+          .where(eq(schemasTable.schemaFileId, schemaFileId))
+
+        if (schemaRecords.length === 0) return
+
+        const schemaIds = schemaRecords
+          .map((r: { id: number | null }) => r.id)
+          .filter((id: number | null): id is number => id != null)
+        if (schemaIds.length === 0) return
+
+        const { inArray } = await import('drizzle-orm')
+        const joinRows = await db
+          .select({ modelId: modelSchemas.modelId })
+          .from(modelSchemas)
+          .where(inArray(modelSchemas.schemaId, schemaIds))
+        const modelIds = [
+          ...new Set(
+            joinRows
+              .map((r: { modelId: number | null }) => r.modelId)
+              .filter((id: number | null): id is number => id != null),
+          ),
+        ] as number[]
+
+        await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
+
+        for (const modelId of modelIds) {
+          await db.delete(propertiesTable).where(eq(propertiesTable.modelId, modelId))
+        }
+        for (const modelId of modelIds) {
+          await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
+        }
+        await db.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+      },
+    })
   }
 
   /**

@@ -302,7 +302,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -369,7 +369,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -428,18 +428,24 @@ testDescribe('ItemProperty Integration Tests', () => {
     it('should throw error if modelName is not provided', () => {
       // ItemProperty.create() returns undefined if required fields are missing
       // The constructor throws, but create() might return undefined
-      const result = ItemProperty.create({
-        propertyName: 'title',
-      } as any)
+      const result = ItemProperty.create(
+        {
+          propertyName: 'title',
+        } as any,
+        { waitForReady: false }
+      )
       // create() might return undefined instead of throwing
       expect(result).toBeUndefined()
     })
 
     it('should throw error if propertyName is not provided', () => {
       // ItemProperty.create() returns undefined if required fields are missing
-      const result = ItemProperty.create({
-        modelName: 'TestPost',
-      } as any)
+      const result = ItemProperty.create(
+        {
+          modelName: 'TestPost',
+        } as any,
+        { waitForReady: false }
+      )
       // create() might return undefined instead of throwing
       expect(result).toBeUndefined()
     })
@@ -457,7 +463,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -546,7 +552,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -596,7 +602,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -666,7 +672,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -700,6 +706,79 @@ testDescribe('ItemProperty Integration Tests', () => {
     })
   })
 
+  describe('ItemProperty.all()', () => {
+    it('should return all properties for an item', async () => {
+      const schemaName = 'Test Schema ItemProperty All'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+            content: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'All Test Title',
+        content: 'All Test Content',
+      })
+      await waitForItemIdle(item)
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      const allProperties = await ItemProperty.all({ seedLocalId: item.seedLocalId })
+      expect(allProperties).toBeDefined()
+      expect(Array.isArray(allProperties)).toBe(true)
+      expect(allProperties.length).toBeGreaterThanOrEqual(2)
+      const names = allProperties.map((p) => p.propertyName)
+      expect(names).toContain('title')
+      expect(names).toContain('content')
+    })
+
+    it('should return all properties in idle state when waitForReady is true', async () => {
+      const schemaName = 'Test Schema ItemProperty All WaitForReady'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'WaitForReady Test',
+      })
+      await waitForItemIdle(item)
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      const allProperties = await ItemProperty.all(
+        { seedLocalId: item.seedLocalId },
+        { waitForReady: true }
+      )
+      expect(allProperties.length).toBeGreaterThanOrEqual(1)
+      for (const p of allProperties) {
+        expect(p.getService().getSnapshot().value).toBe('idle')
+      }
+    })
+  })
+
   describe('ItemProperty value getters and setters', () => {
     it('should get property value', async () => {
       const schemaName = 'Test Schema Property Get Value'
@@ -714,7 +793,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -776,7 +855,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -845,7 +924,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -923,7 +1002,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -997,7 +1076,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1071,7 +1150,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1155,14 +1234,14 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const authorModel = Model.create('Author', schemaName)
+      const authorModel = Model.create('Author', schemaName, { waitForReady: false })
       await waitFor(
         authorModel.getService(),
         (snapshot) => snapshot.value === 'idle',
         { timeout: 5000 }
       )
       
-      const postModel = Model.create('Post', schemaName)
+      const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1273,14 +1352,14 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const tagModel = Model.create('Tag', schemaName)
+      const tagModel = Model.create('Tag', schemaName, { waitForReady: false })
       await waitFor(
         tagModel.getService(),
         (snapshot) => snapshot.value === 'idle',
         { timeout: 5000 }
       )
       
-      const postModel = Model.create('Post', schemaName)
+      const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1392,7 +1471,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1515,7 +1594,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1587,7 +1666,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1670,7 +1749,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1750,7 +1829,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -1817,7 +1896,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
