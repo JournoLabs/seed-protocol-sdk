@@ -7,3 +7,10 @@ export * from './modelProperty'
 export { useDeleteItem } from './trash'
 export { useModels, useModel, useCreateModel, useDestroyModel } from './model'
 export { useLiveQuery } from './liveQuery'
+export { SeedProvider, invalidateItemPropertiesForItem } from './SeedProvider'
+export type { SeedProviderProps } from './SeedProvider'
+export {
+  createSeedQueryClient,
+  getSeedQueryDefaultOptions,
+  mergeSeedQueryDefaults,
+} from './queryClient'

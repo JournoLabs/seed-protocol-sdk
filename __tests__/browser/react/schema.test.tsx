@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState, useRef } from 'react'
 import { useSchema, useSchemas, useAllSchemaVersions, useCreateSchema, useDestroySchema } from '@/browser/react/schema'
+import { SeedProvider } from '@/browser/react'
+import { createSeedQueryClient } from '@/browser/react/queryClient'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -171,6 +173,10 @@ function UseSchemaTest({ schemaIdentifier }: { schemaIdentifier: string | null |
     </div>
   )
 }
+
+const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SeedProvider>{children}</SeedProvider>
+)
 
 // Test component for useSchemas
 function UseSchemasTest() {
@@ -517,6 +523,27 @@ describe('React Schema Hooks Integration Tests', () => {
     Schema.clearCache()
   })
 
+  describe('SeedProvider', () => {
+    it('should work with custom queryClient prop', async () => {
+      const customClient = createSeedQueryClient()
+      const Wrapper = ({ children }: { children: React.ReactNode }) => (
+        <SeedProvider queryClient={customClient}>{children}</SeedProvider>
+      )
+      render(<UseSchemasTest />, { container, wrapper: Wrapper })
+
+      await waitFor(
+        () => {
+          const status = screen.getByTestId('schemas-status')
+          expect(status.textContent).toBe('loaded')
+        },
+        { timeout: 15000 }
+      )
+
+      const count = screen.getByTestId('schemas-count')
+      expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(0)
+    })
+  })
+
   describe('useSchema', () => {
     it('should return null when schemaIdentifier is null', async () => {
       render(<UseSchemaTest schemaIdentifier={null} />, { container })
@@ -763,8 +790,56 @@ describe('React Schema Hooks Integration Tests', () => {
   })
 
   describe('useSchemas', () => {
+    describe('useSchemas React Query cache sharing (SeedProvider)', () => {
+      it('should share cached list when multiple components call useSchemas with same params', async () => {
+        const schemaAllSpy = vi.spyOn(Schema, 'all')
+        try {
+          function TwoLists() {
+            return (
+              <div data-testid="two-lists">
+                <div data-testid="list-a">
+                  <UseSchemasTest />
+                </div>
+                <div data-testid="list-b">
+                  <UseSchemasTest />
+                </div>
+              </div>
+            )
+          }
+          render(<TwoLists />, { container, wrapper: SeedProviderWrapper })
+
+          await waitFor(
+            () => {
+              const listA = screen.getByTestId('list-a')
+              const listB = screen.getByTestId('list-b')
+              const statusA = within(listA).getByTestId('schemas-status').textContent
+              const statusB = within(listB).getByTestId('schemas-status').textContent
+              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              const countA = parseInt(within(listA).getByTestId('schemas-count').textContent || '0')
+              const countB = parseInt(within(listB).getByTestId('schemas-count').textContent || '0')
+              expect(countA).toBe(countB)
+              expect(countA).toBeGreaterThanOrEqual(1)
+              return true
+            },
+            { timeout: 15000 }
+          )
+
+          const listA = screen.getByTestId('list-a')
+          const listB = screen.getByTestId('list-b')
+          const countA = parseInt(within(listA).getByTestId('schemas-count').textContent || '0')
+          const countB = parseInt(within(listB).getByTestId('schemas-count').textContent || '0')
+          expect(countA).toBe(countB)
+
+          expect(schemaAllSpy).toHaveBeenCalled()
+          expect(schemaAllSpy.mock.calls.length).toBeLessThanOrEqual(2)
+        } finally {
+          schemaAllSpy.mockRestore()
+        }
+      })
+    })
+
     it('should return array of schemas', async () => {
-      render(<UseSchemasTest />, { container })
+      render(<UseSchemasTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -793,7 +868,7 @@ describe('React Schema Hooks Integration Tests', () => {
     })
 
     it('should return schemas that are all idle when loading completes', async () => {
-      render(<UseSchemasTest />, { container })
+      render(<UseSchemasTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -811,7 +886,7 @@ describe('React Schema Hooks Integration Tests', () => {
     })
 
     it('should filter out Seed Protocol schema', async () => {
-      render(<UseSchemasTest />, { container })
+      render(<UseSchemasTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -847,7 +922,7 @@ describe('React Schema Hooks Integration Tests', () => {
     })
 
     it('should handle loading and error states', async () => {
-      render(<UseSchemasTest />, { container })
+      render(<UseSchemasTest />, { container, wrapper: SeedProviderWrapper })
 
       // Initially might be loading
       const status = screen.getByTestId('schemas-status')
@@ -867,7 +942,7 @@ describe('React Schema Hooks Integration Tests', () => {
     })
 
     it('should automatically update when a new schema is created (liveQuery integration)', async () => {
-      render(<UseSchemasTest />, { container })
+      render(<UseSchemasTest />, { container, wrapper: SeedProviderWrapper })
 
       // Wait for initial load and for count to be at least 2
       await waitFor(

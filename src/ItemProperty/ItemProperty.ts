@@ -24,6 +24,7 @@ import {
   forceRemoveFromCaches,
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
+import { eventEmitter } from '@/eventBus'
 // Dynamic import to break circular dependency: schema/index -> ... -> ItemProperty -> schema/index
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
@@ -531,22 +532,28 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       if (!waitForReady) return undefined
       return Promise.resolve(undefined)
     }
-    const cacheKey = this.cacheKey(
-      (seedUid || seedLocalId) as string,
-      propertyName,
-    )
+    const keyByLocal = seedLocalId ? this.cacheKey(seedLocalId, propertyName) : null
+    const keyByUid = seedUid ? this.cacheKey(seedUid, propertyName) : null
+    // Try both keys so we hit cache whether instance was created by find(seedLocalId) or from getItemProperties (may have only seedUid in row)
+    const cacheKey = keyByLocal || keyByUid!
+    const lookupKey = (keyByLocal && this.instanceCache.has(keyByLocal))
+      ? keyByLocal
+      : (keyByUid && this.instanceCache.has(keyByUid))
+        ? keyByUid
+        : null
+    if (lookupKey) {
+      const { instance, refCount } = this.instanceCache.get(lookupKey)!
+      const entry = { instance, refCount: refCount + 1 }
+      this.instanceCache.set(lookupKey, entry)
+      const otherKey = lookupKey === keyByLocal ? keyByUid : keyByLocal
+      if (otherKey) this.instanceCache.set(otherKey, entry)
+      // On cache hit, do not sync incoming value: refetches can race with in-memory updates (e.g. save()).
+      if (!waitForReady) return instance
+      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
+        () => instance,
+      )
+    }
     if (seedLocalId && propertyName) {
-      if (this.instanceCache.has(cacheKey)) {
-        const { instance, refCount } = this.instanceCache.get(cacheKey)!
-        this.instanceCache.set(cacheKey, {
-          instance,
-          refCount: refCount + 1,
-        })
-        if (!waitForReady) return instance
-        return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-          () => instance,
-        )
-      }
       if (!this.instanceCache.has(cacheKey)) {
         const newInstance = new ItemProperty(props)
         
@@ -566,10 +573,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           },
         })
         
-        this.instanceCache.set(cacheKey, {
-          instance: proxiedInstance,
-          refCount: 1,
-        })
+        const entry = { instance: proxiedInstance, refCount: 1 }
+        this.instanceCache.set(cacheKey, entry)
+        if (keyByUid && keyByUid !== cacheKey) this.instanceCache.set(keyByUid, entry)
         if (!waitForReady) return proxiedInstance
         return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
           () => proxiedInstance,
@@ -577,14 +583,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       }
     }
     if (seedUid && propertyName) {
-      if (this.instanceCache.has(cacheKey)) {
-        const { instance, refCount } = this.instanceCache.get(cacheKey)!
-        this.instanceCache.set(cacheKey, { instance, refCount: refCount + 1 })
-        if (!waitForReady) return instance
-        return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-          () => instance,
-        )
-      }
       if (!this.instanceCache.has(cacheKey)) {
         const newInstance = new ItemProperty(props)
         
@@ -604,7 +602,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           },
         })
         
-        this.instanceCache.set(cacheKey, { instance: proxiedInstance, refCount: 1 })
+        const entry = { instance: proxiedInstance, refCount: 1 }
+        this.instanceCache.set(cacheKey, entry)
+        if (keyByLocal && keyByLocal !== cacheKey) this.instanceCache.set(keyByLocal, entry)
         if (!waitForReady) return proxiedInstance
         return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
           () => proxiedInstance,
@@ -739,6 +739,15 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   static cacheKey(seedLocalIdOrUid: string, propertyName: string): string {
     const { uid, localId } = getCorrectId(seedLocalIdOrUid)
     return `Item_${uid || localId}_${propertyName}`
+  }
+
+  /** Clears instance cache for an item (for test isolation when run in group). */
+  static clearInstanceCacheForItem(seedLocalIdOrUid: string): void {
+    const { uid, localId } = getCorrectId(seedLocalIdOrUid)
+    const prefix = `Item_${uid || localId}_`
+    for (const key of Array.from(this.instanceCache.keys())) {
+      if (key.startsWith(prefix)) this.instanceCache.delete(key)
+    }
   }
 
   getService() {
@@ -876,6 +885,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         timeout: 10_000,
       },
     )
+    const ctx = this._getSnapshotContext()
+    const canonicalId = ctx?.seedLocalId ?? ctx?.seedUid
+    if (canonicalId) {
+      eventEmitter.emit('itemProperty.saved', { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid })
+      if (typeof window !== 'undefined' && window.__SEED_INVALIDATE_ITEM_PROPERTIES__) {
+        window.__SEED_INVALIDATE_ITEM_PROPERTIES__(canonicalId)
+      }
+    }
     // return new Promise((resolve) => {
     //   const saveSub = this._service.subscribe((snapshot) => {
     //     if (!snapshot.context.isSaving) {

@@ -79,23 +79,11 @@ export async function runDestroyLifecycle<T extends object>(
 ): Promise<void> {
   const service = config.getService(instance)
   service.send({ type: 'destroyStarted' } as { type: string; error?: unknown })
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'entityDestroy.ts:runDestroyLifecycle',message:'before doDestroy',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
   try {
     await config.doDestroy()
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'entityDestroy.ts:runDestroyLifecycle',message:'after doDestroy',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'entityDestroy.ts:runDestroyLifecycle',message:'doDestroy catch',data:{error: String(error)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     service.send({ type: 'destroyError', error } as { type: string; error?: unknown })
   } finally {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'entityDestroy.ts:runDestroyLifecycle',message:'finally destroyDone',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     service.send({ type: 'destroyDone' } as { type: string; error?: unknown })
     try {
       service.stop()

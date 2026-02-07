@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import { useModel, useModels, useCreateModel, useDestroyModel } from '@/browser/react/model'
+import { SeedProvider } from '@/browser/react'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -62,6 +63,10 @@ const testSchemaWithModels: SchemaFileFormat = {
   enums: {},
   migrations: [],
 }
+
+const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SeedProvider>{children}</SeedProvider>
+)
 
 // Test component for useModels
 function UseModelsTest({ schemaId }: { schemaId: string | null | undefined }) {
@@ -340,8 +345,57 @@ describe('React Model Hooks Integration Tests', () => {
   })
 
   describe('useModels', () => {
+    describe('useModels React Query cache sharing (SeedProvider)', () => {
+      it('should share cached list when multiple components call useModels with same params', async () => {
+        const modelAllSpy = vi.spyOn(Model, 'all')
+        try {
+          function TwoLists() {
+            return (
+              <div data-testid="two-lists">
+                <div data-testid="list-a">
+                  <UseModelsTest schemaId="Test Schema Models" />
+                </div>
+                <div data-testid="list-b">
+                  <UseModelsTest schemaId="Test Schema Models" />
+                </div>
+              </div>
+            )
+          }
+          render(<TwoLists />, { container, wrapper: SeedProviderWrapper })
+
+          await waitFor(
+            () => {
+              const listA = screen.getByTestId('list-a')
+              const listB = screen.getByTestId('list-b')
+              const statusA = within(listA).getByTestId('models-status').textContent
+              const statusB = within(listB).getByTestId('models-status').textContent
+              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              const countA = parseInt(within(listA).getByTestId('models-count').textContent || '0')
+              const countB = parseInt(within(listB).getByTestId('models-count').textContent || '0')
+              expect(countA).toBe(countB)
+              expect(countA).toBeGreaterThanOrEqual(3)
+              return true
+            },
+            { timeout: 15000 }
+          )
+
+          const listA = screen.getByTestId('list-a')
+          const listB = screen.getByTestId('list-b')
+          const countA = parseInt(within(listA).getByTestId('models-count').textContent || '0')
+          const countB = parseInt(within(listB).getByTestId('models-count').textContent || '0')
+          expect(countA).toBe(countB)
+
+          const testSchemaCalls = modelAllSpy.mock.calls.filter((call) => call[0] === 'Test Schema Models')
+          expect(testSchemaCalls.length).toBeGreaterThanOrEqual(1)
+          expect(testSchemaCalls.length).toBeLessThanOrEqual(2)
+        } finally {
+          modelAllSpy.mockRestore()
+        }
+      })
+    })
+
     it('should return empty array when schemaId is null', async () => {
-      render(<UseModelsTest schemaId={null} />, { container })
+      render(<UseModelsTest schemaId={null} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -357,7 +411,7 @@ describe('React Model Hooks Integration Tests', () => {
 
     it('should return all models for a schema', async () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
-      render(<UseModelsTest schemaId="Test Schema Models" />, { container })
+      render(<UseModelsTest schemaId="Test Schema Models" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -382,7 +436,7 @@ describe('React Model Hooks Integration Tests', () => {
 
     it('should update when schemaId changes', async () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
-      const { rerender } = render(<UseModelsTest schemaId="Test Schema Models" />, { container })
+      const { rerender } = render(<UseModelsTest schemaId="Test Schema Models" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -414,7 +468,7 @@ describe('React Model Hooks Integration Tests', () => {
         return
       }
 
-      render(<UseModelWithNameTest schemaId={schemaId} modelName={null} />, { container })
+      render(<UseModelWithNameTest schemaId={schemaId} modelName={null} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -430,7 +484,7 @@ describe('React Model Hooks Integration Tests', () => {
 
     it('should return model when schemaId and modelName are provided', async () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
-      render(<UseModelWithNameTest schemaId="Test Schema Models" modelName="Post" />, { container })
+      render(<UseModelWithNameTest schemaId="Test Schema Models" modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -451,7 +505,7 @@ describe('React Model Hooks Integration Tests', () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
       const { rerender } = render(
         <UseModelWithNameTest schemaId="Test Schema Models" modelName="Post" />,
-        { container }
+        { container, wrapper: SeedProviderWrapper }
       )
 
       await waitFor(
@@ -477,6 +531,7 @@ describe('React Model Hooks Integration Tests', () => {
     it('should return undefined for non-existent model', async () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
       render(<UseModelWithNameTest schemaId="Test Schema Models" modelName="NonExistentModel" />, {
+        wrapper: SeedProviderWrapper,
         container,
       })
 
@@ -613,7 +668,7 @@ describe('React Model Hooks Integration Tests', () => {
       })
 
       // Render component with useModels - should start with 0 models
-      render(<UseModelsTest schemaId="Test Schema Dynamic" />, { container })
+      render(<UseModelsTest schemaId="Test Schema Dynamic" />, { container, wrapper: SeedProviderWrapper })
 
       // Wait for initial render
       await waitFor(

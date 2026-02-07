@@ -14,6 +14,7 @@ import { seeds } from '@/seedSchema'
 import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import type { SeedType } from '@/seedSchema/SeedSchema'
 import { getVersionData } from '@/db/read/subqueries/versionData'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const logger = debug('seedSdk:react:item')
 
@@ -187,30 +188,37 @@ type UseItemsProps = {
 
 type UseItems = (props: UseItemsProps) => UseItemsReturn
 
-export const useItems: UseItems = ({ modelName, deleted=false }) => {
-  const [items, setItems] = useState<IItem<any>[]>([])
-  // Start loading so status stays "loading" until first fetch completes; avoids test/UI seeing "loaded" with 0 items
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+const getItemsQueryKey = (modelName?: string, deleted?: boolean) =>
+  ['seed', 'items', modelName ?? null, deleted ?? false] as const
+
+export const useItems: UseItems = ({ modelName, deleted = false }) => {
   const isClientReady = useIsClientReady()
+  const queryClient = useQueryClient()
   const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
-  const itemsRef = useRef<IItem<any>[]>([]) // Track items for comparison without triggering effects
-  const lastFetchedIdsRef = useRef<Set<string>>(new Set()) // Only refetch when the set of ids actually changes (avoids loop from liveQuery re-emissions)
+  const itemsRef = useRef<IItem<any>[]>([])
+  const lastFetchedIdsRef = useRef<Set<string>>(new Set())
+
+  const queryKey = useMemo(() => getItemsQueryKey(modelName, deleted), [modelName, deleted])
+
+  const {
+    data: items = [],
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey,
+    queryFn: () => Item.all(modelName, deleted, { waitForReady: true }),
+    enabled: isClientReady,
+  })
+  itemsRef.current = items
 
   // Watch the seeds table for changes
-  // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
-  // IMPORTANT: This query must match the logic in getItemsData() to ensure seedsTableData
-  // only includes seeds that Item.all() will return (i.e., seeds with versionsCount > 0)
   const db = isClientReady ? BaseDb.getAppDb() : null
   const seedsQuery = useMemo(() => {
     if (!db) return null
-    
     const conditions: any[] = []
-    
     if (modelName) {
       conditions.push(eq(seeds.type, modelName.toLowerCase()))
     }
-    
     if (deleted) {
       conditions.push(
         or(
@@ -226,11 +234,7 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
         ) as any
       )
     }
-    
-    // Join with versionData and filter by versionsCount > 0 to match getItemsData() logic
-    // This ensures we only watch seeds that have at least one version
     const versionData = getVersionData()
-    
     return db
       .with(versionData)
       .select({
@@ -249,69 +253,24 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
   }, [db, isClientReady, modelName, deleted])
   const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
-  const fetchItems = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      const allItems = await Item.all(modelName, deleted, { waitForReady: true })
-
-      setItems(allItems)
-      itemsRef.current = allItems
-      setError(null)
-      setIsLoading(false)
-    } catch (error) {
-      setError(error as Error)
-      setIsLoading(false)
-    }
-  }, [modelName, deleted])
-
-  // Fetch items on initial mount when client is ready
+  // Invalidate when table data actually changes so useQuery refetches
   useEffect(() => {
-    if (!isClientReady) {
-      return
-    }
-    // Initial fetch when client becomes ready
-    fetchItems()
-  }, [isClientReady, fetchItems])
+    if (!isClientReady || !seedsTableData) return
 
-  // Refetch items when table data actually changes (not just reference or order)
-  useEffect(() => {
-    if (!isClientReady || !seedsTableData) {
-      return
-    }
-
-    // Avoid refetch while a fetch is already in progress (prevents re-entrancy / infinite loop)
-    if (isLoading) {
-      return
-    }
-
-    // Build set of ids from current table data (order-independent)
     const tableDataItemsSet = new Set<string>()
     for (const dbSeed of seedsTableData) {
       const key = dbSeed.localId || dbSeed.uid
-      if (key) {
-        tableDataItemsSet.add(key)
-      }
+      if (key) tableDataItemsSet.add(key)
     }
 
-    // Extract identifying information from current items in state (using ref to avoid dependency)
     const currentItemsSet = new Set<string>()
     for (const item of itemsRef.current) {
       const key = item.seedLocalId || item.seedUid
-      if (key) {
-        currentItemsSet.add(key)
-      }
+      if (key) currentItemsSet.add(key)
     }
 
-    // Don't refetch when live query returns empty but we already have items (avoids overwriting with []
-    // due to timing: initial fetch completed and set items, then seedsTableData emitted [] before
-    // the real data, which would trigger a refetch and Item.all() could race and return [].)
-    if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) {
-      return
-    }
+    if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) return
 
-    // Skip refetch if we already fetched for this exact set of ids (handles liveQuery re-emissions with same data, different array reference/order)
     const lastFetched = lastFetchedIdsRef.current
     if (
       lastFetched.size === tableDataItemsSet.size &&
@@ -320,10 +279,8 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       return
     }
 
-    // Update ref for next comparison
     previousSeedsTableDataRef.current = seedsTableData
 
-    // Compare sets: if our items already match table data, just record this set and skip (e.g. initial fetch already completed)
     const setsAreEqual =
       currentItemsSet.size === tableDataItemsSet.size &&
       [...currentItemsSet].every((id) => tableDataItemsSet.has(id))
@@ -333,10 +290,9 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       return
     }
 
-    // Items have changed, fetch updated items
     lastFetchedIdsRef.current = new Set(tableDataItemsSet)
-    fetchItems()
-  }, [isClientReady, seedsTableData, fetchItems, modelName, isLoading])
+    queryClient.invalidateQueries({ queryKey })
+  }, [isClientReady, seedsTableData, queryClient, queryKey])
 
   return {
     items: orderBy(
@@ -350,7 +306,7 @@ export const useItems: UseItems = ({ modelName, deleted=false }) => {
       ['desc'],
     ),
     isLoading,
-    error,
+    error: queryError as Error | null,
   }
 }
 

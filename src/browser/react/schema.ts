@@ -11,6 +11,7 @@ import { BaseDb } from "@/db/Db/BaseDb"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { desc } from "drizzle-orm"
 import type { SchemaType as DbSchemaType } from "@/seedSchema/SchemaSchema"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 const logger = debug('seedSdk:react:schema')
 
@@ -107,16 +108,26 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
 
 }
 
-export const useSchemas = () => {
-  const [schemas, setSchemas] = useState<Schema[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-  const isClientReady = useIsClientReady()
-  const previousSchemasTableDataRef = useRef<DbSchemaType[] | undefined>(undefined)
-  const schemasRef = useRef<Schema[]>([]) // Track schemas for comparison without triggering effects
+const SEED_SCHEMAS_QUERY_KEY = ['seed', 'schemas'] as const
 
-  // Watch the schemas table for changes
-  // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
+export const useSchemas = () => {
+  const isClientReady = useIsClientReady()
+  const queryClient = useQueryClient()
+  const previousSchemasTableDataRef = useRef<DbSchemaType[] | undefined>(undefined)
+  const schemasRef = useRef<Schema[]>([])
+
+  const {
+    data: schemas = [],
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey: SEED_SCHEMAS_QUERY_KEY,
+    queryFn: () => Schema.all({ waitForReady: true }),
+    enabled: isClientReady,
+  })
+  schemasRef.current = schemas
+
+  // Watch the schemas table for changes and invalidate so useQuery refetches
   const db = isClientReady ? BaseDb.getAppDb() : null
   const schemasQuery = useMemo(() => {
     if (!db) return null
@@ -124,59 +135,27 @@ export const useSchemas = () => {
   }, [db, isClientReady])
   const schemasTableData = useLiveQuery<DbSchemaType>(schemasQuery)
 
-  const fetchSchemas = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      const allSchemas = await Schema.all({ waitForReady: true })
-
-      setSchemas(allSchemas)
-      schemasRef.current = allSchemas
-      setIsLoading(false)
-    } catch (error) {
-      setError(error as Error)
-      setIsLoading(false)
-    }
-  }, [])
-
-  // Fetch schemas on initial mount when client is ready
-  useEffect(() => {
-    if (!isClientReady) {
-      return
-    }
-    // Initial fetch when client becomes ready
-    fetchSchemas()
-  }, [isClientReady, fetchSchemas])
-
-  // Refetch schemas when table data actually changes (not just reference)
   useEffect(() => {
     if (!isClientReady || !schemasTableData) {
       return
     }
 
-    // Check if schemasTableData actually changed by comparing with previous value
     const prevData = previousSchemasTableDataRef.current
     const prevDataJson = prevData ? JSON.stringify(prevData) : 'undefined'
     const currDataJson = schemasTableData ? JSON.stringify(schemasTableData) : 'undefined'
 
     if (prevDataJson === currDataJson && prevData !== undefined) {
-      // Data hasn't actually changed, skip refetch
       return
     }
 
-    // Update ref with current data
     previousSchemasTableDataRef.current = schemasTableData
 
-    // Extract identifying information from current schemas in state (using ref to avoid dependency)
-    // Use schemaFileId if available, otherwise fall back to name+version
     const currentSchemasSet = new Set<string>()
     for (const schema of schemasRef.current) {
       const schemaFileId = schema.id || schema.schemaFileId
       if (schemaFileId) {
         currentSchemasSet.add(schemaFileId)
       } else {
-        // Fallback to name+version if schemaFileId not available
         const name = schema.metadata?.name
         const version = schema.version
         if (name && version !== undefined) {
@@ -185,43 +164,30 @@ export const useSchemas = () => {
       }
     }
 
-    // Extract identifying information from schemasTableData
     const tableDataSchemasSet = new Set<string>()
     for (const dbSchema of schemasTableData) {
-      // Skip internal Seed Protocol schema for comparison (it's filtered out by Schema.all())
-      if (dbSchema.name === 'Seed Protocol') {
-        continue
-      }
+      if (dbSchema.name === 'Seed Protocol') continue
       if (dbSchema.schemaFileId) {
         tableDataSchemasSet.add(dbSchema.schemaFileId)
-      } else {
-        // Fallback to name+version if schemaFileId not available
-        if (dbSchema.name && dbSchema.version !== undefined) {
-          tableDataSchemasSet.add(`${dbSchema.name}:${dbSchema.version}`)
-        }
+      } else if (dbSchema.name != null && dbSchema.version !== undefined) {
+        tableDataSchemasSet.add(`${dbSchema.name}:${dbSchema.version}`)
       }
     }
 
-    // Compare sets to detect changes
-    const setsAreEqual = 
+    const setsAreEqual =
       currentSchemasSet.size === tableDataSchemasSet.size &&
-      [...currentSchemasSet].every(id => tableDataSchemasSet.has(id))
+      [...currentSchemasSet].every((id) => tableDataSchemasSet.has(id))
 
-    if (setsAreEqual) {
-      // Schemas in state match table data, skip refetch
-      return
+    if (!setsAreEqual) {
+      queryClient.invalidateQueries({ queryKey: SEED_SCHEMAS_QUERY_KEY })
     }
-
-    // Schemas have changed, fetch updated schemas
-    fetchSchemas()
-  }, [isClientReady, schemasTableData, fetchSchemas])
+  }, [isClientReady, schemasTableData, queryClient])
 
   return {
     schemas,
     isLoading,
-    error,
+    error: queryError as Error | null,
   }
-
 }
 
 export const useCreateSchema = () => {

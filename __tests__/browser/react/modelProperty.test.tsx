@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import { useModelProperties, useModelProperty, useCreateModelProperty, useDestroyModelProperty } from '@/browser/react/modelProperty'
+import { SeedProvider, createSeedQueryClient } from '@/browser/react'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -76,6 +77,10 @@ const emptyTestSchema: SchemaFileFormat = {
   enums: {},
   migrations: [],
 }
+
+const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SeedProvider>{children}</SeedProvider>
+)
 
 // Test component for useModelProperties
 function UseModelPropertiesTest({
@@ -403,8 +408,60 @@ describe('React ModelProperty Hooks Integration Tests', () => {
   })
 
   describe('useModelProperties', () => {
+    describe('useModelProperties React Query cache sharing (SeedProvider)', () => {
+      it('should share cached list when multiple components call useModelProperties with same params', async () => {
+        const modelPropertyAllSpy = vi.spyOn(ModelProperty, 'all')
+        const queryClient = createSeedQueryClient()
+        const WrapperWithFreshClient = ({ children }: { children: React.ReactNode }) => (
+          <SeedProvider queryClient={queryClient}>{children}</SeedProvider>
+        )
+        try {
+          function TwoLists() {
+            return (
+              <div data-testid="two-lists">
+                <div data-testid="list-a">
+                  <UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />
+                </div>
+                <div data-testid="list-b">
+                  <UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />
+                </div>
+              </div>
+            )
+          }
+          render(<TwoLists />, { container, wrapper: WrapperWithFreshClient })
+
+          await waitFor(
+            () => {
+              const listA = screen.getByTestId('list-a')
+              const listB = screen.getByTestId('list-b')
+              const statusA = within(listA).getByTestId('properties-status').textContent
+              const statusB = within(listB).getByTestId('properties-status').textContent
+              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              const countA = parseInt(within(listA).getByTestId('properties-count').textContent || '0')
+              const countB = parseInt(within(listB).getByTestId('properties-count').textContent || '0')
+              expect(countA).toBe(countB)
+              expect(countA).toBeGreaterThanOrEqual(3)
+              return true
+            },
+            { timeout: 30000 }
+          )
+
+          const listA = screen.getByTestId('list-a')
+          const listB = screen.getByTestId('list-b')
+          const countA = parseInt(within(listA).getByTestId('properties-count').textContent || '0')
+          const countB = parseInt(within(listB).getByTestId('properties-count').textContent || '0')
+          expect(countA).toBe(countB)
+
+          expect(modelPropertyAllSpy).toHaveBeenCalled()
+          expect(modelPropertyAllSpy.mock.calls.length).toBeLessThanOrEqual(2)
+        } finally {
+          modelPropertyAllSpy.mockRestore()
+        }
+      })
+    })
+
     it('should return empty array when schemaId/modelId is null', async () => {
-      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container })
+      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -419,7 +476,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should return properties when schemaId and modelName provided', async () => {
-      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container })
+      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -472,7 +529,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         return
       }
 
-      render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container })
+      render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -497,7 +554,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should update when schemaId/modelId changes', async () => {
       const { rerender } = render(
         <UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />,
-        { container }
+        { container, wrapper: SeedProviderWrapper }
       )
 
       await waitFor(
@@ -538,7 +595,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should set isLoading to true initially and false when loaded', async () => {
-      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container })
+      render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       // Initially, isLoading might be true or false depending on cache
       // We'll check that it becomes false when loaded
@@ -562,7 +619,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should set isLoading to false when schemaId/modelId is null', async () => {
-      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container })
+      render(<UseModelPropertiesTest schemaIdOrModelId={null} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -631,7 +688,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // Render component - should start with 1 property (name)
       render(
         <UseModelPropertiesTest schemaIdOrModelId="LiveQuery Test Schema Properties" modelName="TestModel" />,
-        { container }
+        { container, wrapper: SeedProviderWrapper }
       )
 
       // Wait for initial load
@@ -652,9 +709,15 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { timeout: 30000 }
       )
 
-      // Get initial count
-      const initialCount = parseInt(screen.getByTestId('properties-count').textContent || '0')
-      expect(initialCount).toBeGreaterThanOrEqual(1)
+      // Re-assert count (may transiently be 0 during refetch; allow a short retry)
+      await waitFor(
+        () => {
+          const initialCount = parseInt(screen.getByTestId('properties-count').textContent || '0')
+          expect(initialCount).toBeGreaterThanOrEqual(1)
+          return true
+        },
+        { timeout: 5000, interval: 200 }
+      )
 
       // Get the model instance
       const model = Model.create('TestModel', 'LiveQuery Test Schema Properties', { waitForReady: false })

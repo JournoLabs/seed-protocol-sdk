@@ -107,20 +107,11 @@ export const PropertyConstructor = (propertyType: Static<typeof TProperty>) => {
       Reflect.getMetadata(PropertyMetadataKey, parentClassPrototype) || []
 
     existingProperties.push({ propertyKey, propertyType })
-    // console.log('existingProperties', existingProperties)
-    // console.log('propertyKey', propertyKey)
-    // console.log('propertyType', propertyType)
-    // console.log('PropertyMetadataKey', PropertyMetadataKey)
-    // console.log('typeof target', typeof target)
     Reflect.defineMetadata(
       PropertyMetadataKey,
       existingProperties,
       parentClassPrototype,
     )
-    // console.log(
-    //   `After adding ${propertyKey}:`,
-    //   Reflect.getMetadata(PropertyMetadataKey, parentClassPrototype),
-    // )
   }
 }
 

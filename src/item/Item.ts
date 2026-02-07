@@ -1505,9 +1505,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Item.ts:destroy',message:'destroy entered',data:{seedLocalId:context.seedLocalId,seedUid:context.seedUid},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     const cacheKey = context.seedUid || context.seedLocalId
     const cacheKeys: string[] = cacheKey ? [cacheKey] : []
 

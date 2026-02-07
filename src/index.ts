@@ -34,7 +34,13 @@ export {
   useCreateModelProperty,
   useDestroyModelProperty,
   usePublishItem,
+  SeedProvider,
+  invalidateItemPropertiesForItem,
+  createSeedQueryClient,
+  getSeedQueryDefaultOptions,
+  mergeSeedQueryDefaults,
 } from './browser/react'
+export type { SeedProviderProps } from './browser/react'
 
 
 export { BaseFileManager as FileManager } from './helpers'

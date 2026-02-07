@@ -234,10 +234,73 @@ In a React app you can use hooks for schemas, models, items, and item properties
 - `useItemProperty`, `useItemProperties`, `useCreateItemProperty`, `useDestroyItemProperty`
 - `useModelProperty`, `useModelProperties`, `useCreateModelProperty`, `useDestroyModelProperty`
 
+List hooks (`useSchemas`, `useItems`, `useModels`, `useItemProperties`, `useModelProperties`) use [TanStack React Query](https://tanstack.com/query/latest) for caching when used inside a React Query provider. Wrap your app (or the subtree that uses these hooks) with a provider so results are cached and shared across components.
+
+### SeedProvider and QueryClient options
+
+The SDK supports three ways to supply a React Query client:
+
+1. **Use SeedProvider as-is (default)**  
+   Wrap your app with `<SeedProvider>` after `client.init()`. The SDK creates and uses an internal QueryClient with Seed defaults.
+
+   ```tsx
+   import { SeedProvider, client } from '@seedprotocol/sdk'
+
+   await client.init({ config: { ... } })
+
+   root.render(
+     <SeedProvider>
+       <App />
+     </SeedProvider>
+   )
+   ```
+
+2. **Pass your own QueryClient**  
+   If you already have a QueryClient (e.g. from another part of your app), pass it so Seed hooks use the same cache. You can merge Seed defaults when creating it (see option 3).
+
+   ```tsx
+   import { SeedProvider, getSeedQueryDefaultOptions } from '@seedprotocol/sdk'
+   import { QueryClient } from '@tanstack/react-query'
+
+   const queryClient = new QueryClient({
+     defaultOptions: getSeedQueryDefaultOptions(),
+   })
+
+   <SeedProvider queryClient={queryClient}>
+     <App />
+   </SeedProvider>
+   ```
+
+3. **Use your own QueryClientProvider**  
+   If you want a single provider for your app and Seed, create a client with Seed defaults and pass it to TanStack’s `QueryClientProvider`, or merge Seed defaults into your existing client config.
+
+   ```tsx
+   import { createSeedQueryClient, mergeSeedQueryDefaults } from '@seedprotocol/sdk'
+   import { QueryClientProvider } from '@tanstack/react-query'
+
+   const queryClient = createSeedQueryClient()
+   <QueryClientProvider client={queryClient}>
+     <App />
+   </QueryClientProvider>
+   ```
+
+   To merge Seed defaults into your own defaults:
+
+   ```tsx
+   import { mergeSeedQueryDefaults } from '@seedprotocol/sdk'
+   import { QueryClient } from '@tanstack/react-query'
+
+   const queryClient = new QueryClient({
+     defaultOptions: mergeSeedQueryDefaults({
+       queries: { gcTime: 1000 * 60 * 60 },
+     }),
+   })
+   ```
+
 Example: create a schema and model in a component, then create and display an item and update its title.
 
 ```tsx
-import { useSchema, useCreateModel, useModel, useCreateItem, useItem } from '@seedprotocol/sdk'
+import { SeedProvider, useSchema, useCreateModel, useModel, useCreateItem, useItem } from '@seedprotocol/sdk'
 
 function BlogEditor() {
   const schema = useSchema('Blog')
@@ -272,6 +335,13 @@ function BlogEditor() {
     </div>
   )
 }
+
+// Wrap your app with SeedProvider so list hooks (useSchemas, useItems, etc.) use shared caching.
+root.render(
+  <SeedProvider>
+    <BlogEditor />
+  </SeedProvider>
+)
 ```
 
 ---

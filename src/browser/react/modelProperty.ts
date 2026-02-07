@@ -10,6 +10,7 @@ import { BaseDb } from "@/db/Db/BaseDb"
 import { properties as propertiesTable, models as modelsTable } from "@/seedSchema/ModelSchema"
 import { eq } from "drizzle-orm"
 import { Model } from "@/Model/Model"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 const logger = debug('seedSdk:browser:react:modelProperty')
 
@@ -48,24 +49,36 @@ export const useModelProperties = (
       return undefined
     }
   }, [model])
-  const [modelProperties, setModelProperties] = useState<ModelProperty[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
   const isClientReady = useIsClientReady()
+  const queryClient = useQueryClient()
 
   // Get _dbId (database ID) from model context
   const dbModelId = useMemo(() => {
     if (!model) return null
     try {
       const context = (model as any)._getSnapshotContext()
-      return context._dbId as number | undefined // _dbId is the database integer ID
+      return context._dbId as number | undefined
     } catch {
       return null
     }
   }, [model])
 
-  // Watch the properties table for changes
-  // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
+  const modelId = model?.id
+  const modelPropertiesQueryKey = useMemo(
+    () => ['seed', 'modelProperties', modelId ?? ''] as const,
+    [modelId],
+  )
+
+  const {
+    data: modelProperties = [],
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey: modelPropertiesQueryKey,
+    queryFn: () => ModelProperty.all(modelId!, { waitForReady: true }),
+    enabled: isClientReady && !!modelId,
+  })
+
   const db = isClientReady ? BaseDb.getAppDb() : null
   const propertiesQuery = useMemo(() => {
     if (!db || !dbModelId) return null
@@ -81,116 +94,44 @@ export const useModelProperties = (
   }, [db, isClientReady, dbModelId])
   const propertiesTableData = useLiveQuery<{ id: number; name: string; dataType: string; schemaFileId: string | null }>(propertiesQuery)
 
-  const fetchModelProperties = useCallback(async () => {
-    if (!model?.id || !schemaIdOrModelId) {
-      setModelProperties([])
-      setIsLoading(false)
-      setError(null)
-      return
-    }
+  const modelPropertiesRef = useRef<ModelProperty[]>([])
+  modelPropertiesRef.current = modelProperties
 
-    try {
-      setIsLoading(true)
-
-      const _modelProperties = await ModelProperty.all(model.id, { waitForReady: true })
-
-      setModelProperties(prev => {
-        if (prev.length !== _modelProperties.length) {
-          return _modelProperties
-        }
-        const hasChanged = _modelProperties.some((prop, i) => {
-          if (!prev[i]) return true
-          const prevContext = (prev[i] as any)._getSnapshotContext()
-          const currContext = (prop as any)._getSnapshotContext()
-          const prevId = prevContext?.id
-          const currId = currContext?.id
-          const prevName = prev[i].name
-          const currName = prop.name
-          return prevId !== currId || prevName !== currName
-        })
-        return hasChanged ? _modelProperties : prev
-      })
-      setError(null)
-      setIsLoading(false)
-    } catch (error) {
-      setError(error as Error)
-      setIsLoading(false)
-    }
-  }, [model, schemaIdOrModelId])
-
-  // Fetch model properties when dbModelId becomes available (model has finished loading)
-  // This ensures we wait for the model to be fully loaded before trying to fetch properties
   useEffect(() => {
-    if (!isClientReady || !dbModelId || !modelNameForProperty || !model || !schemaIdOrModelId) {
-      return
-    }
-    // Wait for propertiesTableData to be available before initial fetch
-    // (it may be undefined initially while the query is starting)
-    if (propertiesTableData === undefined) {
-      return
-    }
-    // Initial fetch when model is ready and dbModelId is available
-    fetchModelProperties()
-  }, [isClientReady, dbModelId, fetchModelProperties, modelNameForProperty, model, schemaIdOrModelId, propertiesTableData])
+    if (!isClientReady || !model?.id || !propertiesTableData || !modelPropertiesQueryKey) return
 
-  // Refetch model properties when table data actually changes (not just reference)
-  useEffect(() => {
-    if (!isClientReady || !modelNameForProperty || !model || !schemaIdOrModelId || !dbModelId) {
-      return
-    }
-
-    // If propertiesTableData is undefined, the query hasn't started yet - wait for it
-    if (propertiesTableData === undefined) {
-      return
-    }
-
-    // Extract identifying information from current properties in state
     const currentPropertiesSet = new Set<string>()
-    for (const prop of modelProperties) {
+    for (const prop of modelPropertiesRef.current) {
       const context = (prop as any)._getSnapshotContext()
       const propertyFileId = context?.id
-      if (propertyFileId) {
-        currentPropertiesSet.add(propertyFileId)
-      } else {
-        // Fallback to name if propertyFileId not available
-        const name = prop.name
-        if (name) {
-          currentPropertiesSet.add(name)
-        }
-      }
+      if (propertyFileId) currentPropertiesSet.add(propertyFileId)
+      else if (prop.name) currentPropertiesSet.add(prop.name)
     }
 
-    // Extract identifying information from propertiesTableData
     const tableDataPropertiesSet = new Set<string>()
     for (const dbProperty of propertiesTableData) {
-      if (dbProperty.schemaFileId) {
-        tableDataPropertiesSet.add(dbProperty.schemaFileId)
-      } else {
-        // Fallback to name if schemaFileId not available
-        if (dbProperty.name) {
-          tableDataPropertiesSet.add(dbProperty.name)
-        }
-      }
+      if (dbProperty.schemaFileId) tableDataPropertiesSet.add(dbProperty.schemaFileId)
+      else if (dbProperty.name) tableDataPropertiesSet.add(dbProperty.name)
     }
 
-    // Compare sets to detect changes
     const setsAreEqual =
       currentPropertiesSet.size === tableDataPropertiesSet.size &&
       (currentPropertiesSet.size === 0 ||
-        [...currentPropertiesSet].every(id => tableDataPropertiesSet.has(id)))
+        [...currentPropertiesSet].every((id) => tableDataPropertiesSet.has(id)))
 
-    if (setsAreEqual) {
-      return
+    // Don't invalidate when query data isn't in yet (currentSize 0); only invalidate when we have
+    // cached data that is out of sync with the table (avoids extra refetches on initial load).
+    const shouldInvalidate = !setsAreEqual && currentPropertiesSet.size > 0
+
+    if (shouldInvalidate) {
+      queryClient.invalidateQueries({ queryKey: modelPropertiesQueryKey })
     }
-
-    // Properties have changed, fetch updated properties
-    fetchModelProperties()
-  }, [isClientReady, propertiesTableData, modelProperties, fetchModelProperties, modelNameForProperty, model, schemaIdOrModelId])
+  }, [isClientReady, propertiesTableData, model?.id, queryClient, modelPropertiesQueryKey])
 
   return {
     modelProperties,
     isLoading,
-    error,
+    error: queryError as Error | null,
   }
 }
 
@@ -373,8 +314,14 @@ export function useModelProperty(
         }
 
         // Use existing getPropertySchema for schemaId + modelName + propertyName
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:before getPropertySchema',message:'schemaId branch calling getPropertySchema without schemaId',data:{schemaId:lookupMode.schemaId,modelName:lookupMode.modelName,propertyName:lookupMode.propertyName},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName)
         resolvedModelName = lookupMode.modelName
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:after getPropertySchema',message:'result of getPropertySchema',data:{propertyDataDefined:!!propertyData,resolvedModelName,propertyDataName:propertyData?.name},timestamp:Date.now(),hypothesisId:'C_D'})}).catch(()=>{});
+        // #endregion
       }
 
       if (propertyData && resolvedModelName) {
@@ -382,7 +329,8 @@ export function useModelProperty(
           ...propertyData,
           modelName: resolvedModelName,
         })
-        setModelProperty(createdProperty)
+        const resolvedProperty = createdProperty instanceof Promise ? await createdProperty : createdProperty
+        setModelProperty(resolvedProperty)
         setIsLoading(false)
         setError(null)
       } else {
@@ -400,6 +348,9 @@ export function useModelProperty(
 
   // Fetch/refetch when lookup parameters change or client becomes ready
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:effect',message:'shouldLoad effect',data:{shouldLoad,isClientReady,lookupType:lookupMode.type,schemaId:lookupMode.type==='schemaId'?lookupMode.schemaId:undefined,modelName:lookupMode.modelName,propertyName:lookupMode.propertyName},timestamp:Date.now(),hypothesisId:'A_E'})}).catch(()=>{});
+    // #endregion
     if (!shouldLoad) {
       setModelProperty(undefined)
       setIsLoading(false)

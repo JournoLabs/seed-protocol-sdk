@@ -53,7 +53,9 @@ export const getPropertySchema = async (
   const model = await Model.getByNameAsync(modelName)
 
   console.log('getPropertySchema model', model)
-  
+  // #region agent log
+  try { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'property.ts:getPropertySchema',message:'after getByNameAsync',data:{modelName,propertyName,modelNull:!model,modelId:model?.id,schemaName:model?.schemaName},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{}); } catch (_) {}
+  // #endregion
   if (!model) {
     return undefined
   }
@@ -78,6 +80,9 @@ export const getPropertySchema = async (
       } else {
         console.log('getPropertySchema: model', modelName, 'not found in schemaContext.models')
       }
+      // #region agent log
+      try { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'property.ts:getPropertySchema',message:'after schema context',data:{modelName,schemaKeys:Object.keys(schema).length,hasModelInContext:!!(schemaContext.models&&schemaContext.models[modelName]),modelKeys:schemaContext.models?Object.keys(schemaContext.models):[]},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{}); } catch (_) {}
+      // #endregion
     }
   } catch (error) {
     console.log('getPropertySchema: Error getting schema from Schema instance, falling back to modelPropertiesToObject:', error)
@@ -120,6 +125,9 @@ export const getPropertySchema = async (
   
   const resolvedPropertyName = resolvePropertyName(propertyName)
   console.log('resolvedPropertyName', resolvedPropertyName)
+  // #region agent log
+  try { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'property.ts:getPropertySchema',message:'resolvedPropertyName',data:{propertyName,resolvedPropertyName,schemaKeys:Object.keys(schema).length},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{}); } catch (_) {}
+  // #endregion
   if (!resolvedPropertyName) {
     return undefined
   }
@@ -312,6 +320,8 @@ export const getPropertySchema = async (
     
     return propertySchema
   }
-  
+  // #region agent log
+  try { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'property.ts:getPropertySchema',message:'returning undefined (no DB match, no schemaFromFile)',data:{modelName,propertyName,resolvedPropertyName},timestamp:Date.now(),hypothesisId:'C_D'})}).catch(()=>{}); } catch (_) {}
+  // #endregion
   return undefined
 }

@@ -8,6 +8,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'xstate'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 type UseModelsResult = {
   models: Model[]
@@ -26,14 +27,26 @@ type UseModels = (schemaId: UseModelsParams) => UseModelsResult
  * @param schemaId - The schema ID (schema file ID) or schema name to get models from
  * @returns Array of Model instances belonging to the schema
  */
-export const useModels: UseModels = (schemaId) => {
-  const [models, setModels] = useState<Model[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-  const isClientReady = useIsClientReady()
+const getModelsQueryKey = (schemaId: UseModelsParams) => ['seed', 'models', schemaId] as const
 
-  // Watch the models table for changes via model_schemas join table
-  // Memoize the query so it's stable across renders - this is critical for distinctUntilChanged to work
+export const useModels: UseModels = (schemaId) => {
+  const isClientReady = useIsClientReady()
+  const queryClient = useQueryClient()
+  const modelsRef = useRef<Model[]>([])
+
+  const queryKey = useMemo(() => getModelsQueryKey(schemaId), [schemaId])
+
+  const {
+    data: models = [],
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey,
+    queryFn: () => Model.all(schemaId!, { waitForReady: true }),
+    enabled: isClientReady && !!schemaId,
+  })
+  modelsRef.current = models
+
   const db = isClientReady ? BaseDb.getAppDb() : null
   const modelsQuery = useMemo(() => {
     if (!db || !schemaId) return null
@@ -54,102 +67,36 @@ export const useModels: UseModels = (schemaId) => {
   }, [db, isClientReady, schemaId])
   const modelsTableData = useLiveQuery<{ modelFileId: string | null; modelName: string }>(modelsQuery)
 
-  const fetchModels = useCallback(async () => {
-    if (!schemaId) {
-      setModels([])
-      setIsLoading(false)
-      setError(null)
-      return
-    }
-
-    try {
-      setIsLoading(true)
-
-      const modelInstances = await Model.all(schemaId, { waitForReady: true })
-
-      setModels(prev => {
-        if (prev.length !== modelInstances.length) {
-          return modelInstances
-        }
-        const hasChanged = modelInstances.some((model, i) =>
-          !prev[i] ||
-          model.id !== prev[i].id ||
-          model.modelName !== prev[i].modelName
-        )
-        return hasChanged ? modelInstances : prev
-      })
-      setError(null)
-      setIsLoading(false)
-    } catch (error) {
-      setError(error as Error)
-      setIsLoading(false)
-    }
-  }, [schemaId])
-
-  // Fetch models on initial mount when client is ready
   useEffect(() => {
-    if (!isClientReady) {
-      return
-    }
-    // Initial fetch when client becomes ready
-    fetchModels()
-  }, [isClientReady, fetchModels])
+    if (!isClientReady || !modelsTableData || !schemaId) return
 
-  // Refetch models when table data actually changes (not just reference)
-  useEffect(() => {
-    if (!isClientReady || !modelsTableData || !schemaId) {
-      return
-    }
-
-    // Extract identifying information from current models in state
-    // Use modelFileId (schemaFileId) if available, otherwise fall back to name
     const currentModelsSet = new Set<string>()
-    for (const model of models) {
+    for (const model of modelsRef.current) {
       const modelFileId = model.id || (model as any).modelFileId
-      if (modelFileId) {
-        currentModelsSet.add(modelFileId)
-      } else {
-        // Fallback to name if modelFileId not available
-        const name = model.modelName
-        if (name) {
-          currentModelsSet.add(name)
-        }
-      }
+      if (modelFileId) currentModelsSet.add(modelFileId)
+      else if (model.modelName) currentModelsSet.add(model.modelName)
     }
 
-    // Extract identifying information from modelsTableData
     const tableDataModelsSet = new Set<string>()
     for (const dbModel of modelsTableData) {
-      if (dbModel.modelFileId) {
-        tableDataModelsSet.add(dbModel.modelFileId)
-      } else {
-        // Fallback to name if modelFileId not available
-        if (dbModel.modelName) {
-          tableDataModelsSet.add(dbModel.modelName)
-        }
-      }
+      if (dbModel.modelFileId) tableDataModelsSet.add(dbModel.modelFileId)
+      else if (dbModel.modelName) tableDataModelsSet.add(dbModel.modelName)
     }
 
-    // Compare sets to detect changes
-    const setsAreEqual = 
+    const setsAreEqual =
       currentModelsSet.size === tableDataModelsSet.size &&
-      [...currentModelsSet].every(id => tableDataModelsSet.has(id))
+      [...currentModelsSet].every((id) => tableDataModelsSet.has(id))
 
-    if (setsAreEqual) {
-      // Models in state match table data, skip refetch
-      return
+    if (!setsAreEqual) {
+      queryClient.invalidateQueries({ queryKey })
     }
-
-    // Models have changed, fetch updated models
-    fetchModels()
-  }, [isClientReady, modelsTableData, models, fetchModels, schemaId])
+  }, [isClientReady, modelsTableData, schemaId, queryClient, queryKey])
 
   return {
     models,
     isLoading,
-    error,
+    error: queryError as Error | null,
   }
-
 }
 
 type UseModelResult = {

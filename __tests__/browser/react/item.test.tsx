@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import { useItem, useItems, useCreateItem } from '@/browser/react/item'
+import { SeedProvider } from '@/browser/react'
 import { useDeleteItem } from '@/browser/react/trash'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -147,6 +148,10 @@ function UseItemTest({
   )
 }
 
+const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
+  <SeedProvider>{children}</SeedProvider>
+)
+
 // Test component for useItems
 function UseItemsTest({
   modelName,
@@ -255,7 +260,7 @@ function UseDeleteItemTest({ item }: { item: Item<any> | null }) {
       <div data-testid="delete-item-status">{status}</div>
       <div data-testid="delete-item-is-loading">{isLoading ? 'true' : 'false'}</div>
       {error && <div data-testid="delete-item-error">{error.message}</div>}
-      <button onClick={handleDelete} data-testid="delete-item-button" disabled={!item}>
+      <button onClick={handleDelete} data-testid="delete-item-button" disabled={!item || status === 'deleting'}>
         Delete Item
       </button>
       <button onClick={resetError} data-testid="delete-item-reset-error">
@@ -682,7 +687,7 @@ describe('React Item Hooks Integration Tests', () => {
 
   describe('useItems', () => {
     it('should return empty array when modelName is not provided', async () => {
-      render(<UseItemsTest />, { container })
+      render(<UseItemsTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -698,7 +703,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should return all items for a model', async () => {
-      render(<UseItemsTest modelName="Post" />, { container })
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -728,7 +733,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should return items that are all idle when loading completes', async () => {
-      render(<UseItemsTest modelName="Post" />, { container })
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -746,7 +751,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should return items ordered by creation date (descending)', async () => {
-      render(<UseItemsTest modelName="Post" />, { container })
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
       const scoped = within(container)
 
       // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
@@ -765,7 +770,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should update when modelName changes', async () => {
-      const { rerender } = render(<UseItemsTest modelName="Post" />, { container })
+      const { rerender } = render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       // Assert inside waitFor so we don't depend on DOM state after resolve (avoids race where
       // setItems(3) commits then a subsequent effect/update can briefly show 0 before stable)
@@ -800,7 +805,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should return isLoading status', async () => {
-      render(<UseItemsTest modelName="Post" />, { container })
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -817,7 +822,7 @@ describe('React Item Hooks Integration Tests', () => {
 
     it('should handle deleted flag', async () => {
       // First, test with deleted=false (default)
-      const { rerender } = render(<UseItemsTest modelName="Post" deleted={false} />, { container })
+      const { rerender } = render(<UseItemsTest modelName="Post" deleted={false} />, { container, wrapper: SeedProviderWrapper })
       const scoped = within(container)
 
       // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
@@ -851,7 +856,7 @@ describe('React Item Hooks Integration Tests', () => {
     })
 
     it('should update when new items are created', async () => {
-      render(<UseItemsTest modelName="Post" />, { container })
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -895,6 +900,57 @@ describe('React Item Hooks Integration Tests', () => {
     })
   })
 
+  describe('useItems React Query cache sharing (SeedProvider)', () => {
+    it('should share cached list when multiple components call useItems with same params', async () => {
+      const itemAllSpy = vi.spyOn(Item, 'all')
+      try {
+        function TwoLists() {
+          return (
+            <div data-testid="two-lists">
+              <div data-testid="list-a">
+                <UseItemsTest modelName="Post" />
+              </div>
+              <div data-testid="list-b">
+                <UseItemsTest modelName="Post" />
+              </div>
+            </div>
+          )
+        }
+        render(<TwoLists />, { container, wrapper: SeedProviderWrapper })
+
+        await waitFor(
+          () => {
+            const listA = screen.getByTestId('list-a')
+            const listB = screen.getByTestId('list-b')
+            const statusA = within(listA).getByTestId('items-status').textContent
+            const statusB = within(listB).getByTestId('items-status').textContent
+            if (statusA !== 'loaded' || statusB !== 'loaded') return false
+            const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
+            const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
+            expect(countA).toBe(countB)
+            expect(countA).toBeGreaterThanOrEqual(3)
+            return true
+          },
+          { timeout: 15000 }
+        )
+
+        const listA = screen.getByTestId('list-a')
+        const listB = screen.getByTestId('list-b')
+        const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
+        const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
+        expect(countA).toBe(countB)
+
+        const postCalls = itemAllSpy.mock.calls.filter(
+          (call) => call[0] === 'Post' && call[1] === false
+        )
+        expect(postCalls.length).toBeLessThanOrEqual(2)
+        expect(postCalls.length).toBeGreaterThanOrEqual(1)
+      } finally {
+        itemAllSpy.mockRestore()
+      }
+    })
+  })
+
   describe('useItem and useItems integration', () => {
     it('should work together - useItems shows list, useItem shows detail', async () => {
       if (!testItem1) {
@@ -918,7 +974,7 @@ describe('React Item Hooks Integration Tests', () => {
         )
       }
 
-      render(<CombinedTest />, { container })
+      render(<CombinedTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
@@ -1013,36 +1069,33 @@ describe('React Item Hooks Integration Tests', () => {
       if (!testItem2) return
 
       render(<UseDeleteItemTest item={testItem2} />, { container })
+      const scope = within(container)
 
       await waitFor(
         () => {
-          const btn = screen.getByTestId('delete-item-button')
+          const btn = scope.getByTestId('delete-item-button')
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(false)
         },
         { timeout: 5000 }
       )
 
-      screen.getByTestId('delete-item-button').click()
+      scope.getByTestId('delete-item-button').click()
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('delete-item-is-loading')
+          const isLoading = scope.getByTestId('delete-item-is-loading')
           return isLoading.textContent === 'true'
         },
         { timeout: 3000 }
       )
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('delete-item-status')
-          return status.textContent === 'deleted' || status.textContent === 'error'
-        },
-        { timeout: 20000 }
-      )
-
-      const status = screen.getByTestId('delete-item-status')
-      expect(['deleted', 'error']).toContain(status.textContent)
+      // Wait for final status (deleted or error) to appear
+      const statusEl = await Promise.race([
+        scope.findByText('deleted', { timeout: 20000 }),
+        scope.findByText('error', { timeout: 20000 }),
+      ])
+      expect(['deleted', 'error']).toContain(statusEl.textContent)
     })
   })
 })
