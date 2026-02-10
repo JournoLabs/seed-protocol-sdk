@@ -11,6 +11,7 @@ import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { getClient } from '@/client/ClientManager'
 import { ClientManagerEvents } from '@/client/constants'
+import { BaseDb } from '@/db/Db/BaseDb'
 
 const logger = debug('seedSdk:imports:json')
 
@@ -31,7 +32,7 @@ const verifyPropertiesPersisted = async (
   maxRetries: number = 10,
   retryDelay: number = 100
 ): Promise<void> => {
-  const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+  const { properties: propertiesTable } = await import('../seedSchema/ModelSchema')
   const { eq } = await import('drizzle-orm')
 
   console.log(`[verifyPropertiesPersisted] Starting verification for model "${modelName}" (modelId: ${modelId})`)
@@ -415,7 +416,7 @@ export async function importJsonSchema(
   }
 
   // Check if this is an internal SDK schema (should not create files in app directory)
-  const { isInternalSchema } = await import('@/helpers/constants')
+  const { isInternalSchema } = await import('../helpers/constants')
   const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
   
   if (isInternal) {
@@ -528,8 +529,7 @@ export async function importJsonSchema(
     } as Parameters<typeof addSchemaToDb>[0]
 
     // Use dynamic import to break circular dependency
-    const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
-    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { addSchemaToDb, addModelsToDb } = await import('../helpers/db')
     
     // Try to add schema and models to database if database is available
     try {
@@ -554,8 +554,8 @@ export async function importJsonSchema(
           // CRITICAL: Verify all expected models are linked via join table
           // Retry querying until all models are visible (browser environments may have delays)
           const expectedModelNames = Object.keys(schemaFile.models || {})
-          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+          const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+          const { models: modelsTable } = await import('../seedSchema/ModelSchema')
           const { eq, and } = await import('drizzle-orm')
           
           let allModelsLinked = false
@@ -755,7 +755,7 @@ export async function importJsonSchema(
           // After properties are created, ensure schemaFile has the correct IDs from database
           // Query the database to get the actual schemaFileId values that were used
           // This ensures schemaData matches what's actually in the database
-          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+          const { properties: propertiesTable } = await import('../seedSchema/ModelSchema')
           
           let schemaFileUpdated = false
           for (const [modelName, modelFileId] of modelFileIds.entries()) {
@@ -794,7 +794,7 @@ export async function importJsonSchema(
           const updatedSchemaData = JSON.stringify(schemaFile, null, 2)
           
           // Update the schema record in the database with current schemaData
-          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+          const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
           await db
             .update(schemasTable)
             .set({ schemaData: updatedSchemaData })
@@ -1050,8 +1050,7 @@ export const loadSchemaFromFile = async (
     } as Parameters<typeof addSchemaToDb>[0]
 
     // Use dynamic import to break circular dependency
-    const { addSchemaToDb, addModelsToDb } = await import('@/helpers/db')
-    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { addSchemaToDb, addModelsToDb } = await import('../helpers/db')
     
     // Try to add schema and models to database if database is available
     try {
@@ -1078,8 +1077,8 @@ export const loadSchemaFromFile = async (
           
           console.log(`[importJsonSchema] Starting property verification for schema "${schemaName}" (schemaRecord.id: ${schemaRecord.id})`)
           // Query the database to get model IDs that were just created
-          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+          const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+          const { models: modelsTable } = await import('../seedSchema/ModelSchema')
           const { eq } = await import('drizzle-orm')
           
           // Try to find models directly by schemaFileId first (more reliable than join table)
@@ -1153,7 +1152,7 @@ export const loadSchemaFromFile = async (
           // After properties are created, ensure schemaFile has the correct IDs from database
           // Query the database to get the actual schemaFileId values that were used
           // This ensures schemaData matches what's actually in the database
-          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+          const { properties: propertiesTable } = await import('../seedSchema/ModelSchema')
           
           let schemaFileUpdated = false
           for (const [modelName, modelFileId] of modelFileIds.entries()) {
@@ -1192,7 +1191,7 @@ export const loadSchemaFromFile = async (
           const updatedSchemaData = JSON.stringify(schemaFile, null, 2)
           
           // Update the schema record in the database with current schemaData
-          const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+          const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
           await db
             .update(schemasTable)
             .set({ schemaData: updatedSchemaData })
@@ -1241,7 +1240,7 @@ export const createModelFromJson = async (
   modelFileId?: string, // Optional modelFileId from JSON file
   propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
 ): Promise<any> => {
-  const { Model } = await import('@/Model')
+  const { Model } = await import('../Model/Model')
   
   // Convert JSON properties to schema format
   const convertedProperties: { [propName: string]: any } = {}

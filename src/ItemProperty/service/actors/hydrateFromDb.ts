@@ -34,7 +34,7 @@ export const hydrateFromDb = fromCallback<
 
   const _hydrateFromDb = async () => {
     // Use dynamic import to break circular dependency
-    const { ModelPropertyDataTypes } = await import('@/Schema')
+    const { ModelPropertyDataTypes } = await import('../../../Schema')
     
     const appDb = BaseDb.getAppDb()
 

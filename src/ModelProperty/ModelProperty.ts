@@ -7,8 +7,13 @@ import type { CreateWaitOptions } from '@/types'
 import { BaseFileManager, generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
+import { getModelId, getModelIdByFileId } from '@/helpers/db'
+import { modelPropertiesToObject } from '@/helpers/model'
+import { Model } from '@/Model/Model'
+import { Schema } from '@/Schema/Schema'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas } from '@/seedSchema/SchemaSchema'
+import { getSchemaNameFromModel } from './service/actors/saveToSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { and, eq } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
@@ -229,7 +234,6 @@ export class ModelProperty {
     }
 
     try {
-      const { eq, and } = await import('drizzle-orm')
       const db = BaseDb.getAppDb()
       if (!db) {
         return fallbackIsEdited
@@ -279,7 +283,6 @@ export class ModelProperty {
     }
 
     try {
-      const { eq } = await import('drizzle-orm')
       const db = BaseDb.getAppDb()
       if (!db) {
         return undefined
@@ -314,8 +317,6 @@ export class ModelProperty {
     }
 
     try {
-      const { Model } = await import('@/Model/Model')
-      const { modelPropertiesToObject } = await import('@/helpers/model')
       const model = await Model.getByNameAsync(property.modelName)
       
       if (!model || !model.properties || model.properties.length === 0) {
@@ -371,8 +372,6 @@ export class ModelProperty {
       // Try to get schema name from database first (more reliable)
       if (this.modelId) {
         try {
-          const { eq } = await import('drizzle-orm')
-          
           const db = BaseDb.getAppDb()
           if (db) {
             const modelSchemaRecords = await db
@@ -396,7 +395,6 @@ export class ModelProperty {
 
       // Fall back to schema file lookup if database didn't work
       if (!schemaName) {
-        const { getSchemaNameFromModel } = await import('./service/actors/saveToSchema')
         schemaName = await getSchemaNameFromModel(modelName)
       }
 
@@ -606,7 +604,6 @@ export class ModelProperty {
             } else if (typeof propertyWithId.modelId === 'string') {
               // modelId is a string (modelFileId), need to convert to database ID
               try {
-                const { getModelIdByFileId } = await import('@/helpers/db')
                 resolvedModelId = await getModelIdByFileId(propertyWithId.modelId)
                 logger(`Converted modelFileId "${propertyWithId.modelId}" to database modelId: ${resolvedModelId}`)
               } catch (error) {
@@ -619,7 +616,6 @@ export class ModelProperty {
           // If we still don't have a modelId, try to resolve it from modelName
           if (!resolvedModelId && propertyWithId.modelName) {
             try {
-              const { getModelId } = await import('@/helpers/db')
               // Get schemaName from context if available
               const schemaName = snapshot.context._schemaName
               resolvedModelId = await getModelId(propertyWithId.modelName, schemaName)
@@ -738,8 +734,6 @@ export class ModelProperty {
     }
 
     // Query database to get property data from ID
-    const { eq } = await import('drizzle-orm')
-
     const db = BaseDb.getAppDb()
     console.log('db', !!db)
     if (!db) {
@@ -1111,7 +1105,6 @@ export class ModelProperty {
         }
 
         if (schemaName) {
-          const { Schema } = await import('@/Schema/Schema')
           const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
           const snapshot = schema.getService().getSnapshot()
           const schemaContext = snapshot.context

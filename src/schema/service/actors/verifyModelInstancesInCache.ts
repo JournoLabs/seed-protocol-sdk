@@ -53,7 +53,7 @@ export const verifyModelInstancesInCache = fromCallback<
 
     try {
       const result = await verifyWithRetry(async () => {
-        const { Model } = await import('@/Model/Model')
+        const { Model } = await import('../../../Model/Model')
         
         // Check each model ID in the cache
         const verifiedInstances: string[] = []

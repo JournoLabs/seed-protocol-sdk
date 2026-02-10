@@ -1,5 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import debug from 'debug'
+import { BaseDb } from '@/db/Db/BaseDb'
 
 const logger = debug('seedSdk:schema:actors:writePropertiesToDb')
 
@@ -22,8 +23,7 @@ export const writePropertiesToDb = fromCallback<
     const { modelIds } = input
     
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { models: modelsTable, properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
+      const { models: modelsTable, properties: propertiesTable } = await import('../../../seedSchema/ModelSchema')
       const { eq } = await import('drizzle-orm')
       
       const db = BaseDb.getAppDb()

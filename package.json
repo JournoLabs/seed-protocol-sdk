@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
@@ -41,7 +41,8 @@
     "cli:init": "tsx packages/cli/src/bin.ts init",
     "cli:export-sql": "tsx packages/cli/src/bin.ts export-sql",
     "cli:seed": "tsx packages/cli/src/bin.ts seed",
-    "drizzle:track": "tsx scripts/track-drizzle-changes.ts"
+    "drizzle:track": "tsx scripts/track-drizzle-changes.ts",
+    "check:dist:fragile": "node scripts/check-dist-fragile-dynamic-imports.js"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
@@ -218,6 +219,9 @@
       }
     },
     "./package.json": "./package.json"
+  },
+  "overrides": {
+    "@tanstack/query-core": "5.90.15"
   },
   "trustedDependencies": [
     "protobufjs"

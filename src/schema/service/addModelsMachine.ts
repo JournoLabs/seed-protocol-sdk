@@ -2,9 +2,14 @@ import { assign, setup, fromCallback } from 'xstate'
 import type { EventObject, DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
-import type { Schema } from '@/Schema/Schema'
+import type { Schema } from '../Schema'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { generateId } from '@/helpers'
 import { addModelsToDb } from '@/helpers/db'
 import { createModelFromJson } from '@/imports/json'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
+import { eq, desc } from 'drizzle-orm'
 
 export type AddModelsMachineContext = {
   schemaContext: SchemaMachineContext
@@ -89,22 +94,17 @@ export const addModelsMachine = setup({
       { schemaContext: SchemaMachineContext; models: { [modelName: string]: any } }
     >(({ sendBack, input }) => {
       const _createInstances = async () => {
-        const { Schema } = await import('@/Schema/Schema')
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-        const { eq } = await import('drizzle-orm')
-        const { generateId } = await import('@/helpers')
         const debug = (await import('debug')).default
         const logger = debug('seedSdk:schema:addModels:createInstances')
-        
+        const { Schema: SchemaClass, schemaInstanceState } = await import('../Schema')
+
         const schemaName = input.schemaContext.metadata?.name || input.schemaContext.schemaName
-        const schemaInstance = Schema.create(schemaName, {
+        const schemaInstance = SchemaClass.create(schemaName, {
           waitForReady: false,
         }) as Schema
         const modelInstances = new Map<string, Model>()
-        
+
         // Get instance state to store model instances
-        const { schemaInstanceState } = await import('@/Schema/Schema')
         const instanceState = schemaInstanceState.get(schemaInstance)
         if (!instanceState) {
           throw new Error('Schema instance state not found')
@@ -351,10 +351,6 @@ export const addModelsMachine = setup({
         const debug = (await import('debug')).default
         const logger = debug('seedSdk:schema:addModels:persist')
 
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-        const { eq } = await import('drizzle-orm')
-        
         // Only process in browser environment where store is available
         if (typeof window === 'undefined') {
           logger('Not in browser environment, skipping store update')
@@ -412,7 +408,6 @@ export const addModelsMachine = setup({
           // FALLBACK: If not found by schemaFileId, try by name (prefer draft records)
           if (!schemaRecord) {
             logger(`Looking up schema by name: "${schemaName}" (attempt ${attempt + 1})`)
-            const { desc } = await import('drizzle-orm')
             const schemasByName = await db
               .select()
               .from(schemasTable)

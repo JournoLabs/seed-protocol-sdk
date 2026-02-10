@@ -28,7 +28,7 @@ const createItemPropertyInstances = async (
   }
 
   try {
-    const { ItemProperty } = await import('@/ItemProperty/ItemProperty')
+    const { ItemProperty } = await import('../../../ItemProperty/ItemProperty')
     
     // Create instances for all metadata records in parallel
     const createPromises = metadataRows.map(async (metaRow) => {

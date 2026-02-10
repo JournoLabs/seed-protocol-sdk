@@ -4,6 +4,7 @@ import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 import { convertPropertyToSchemaUpdate, updateModelProperties, getModelNameFromId } from '@/helpers/updateSchema'
 // Dynamic import to break circular dependency: schema/index -> ... -> saveToSchema -> SchemaValidationService -> schema/index
 // import { SchemaValidationService } from '@/Schema/service/validation/SchemaValidationService'
+import { BaseDb } from '@/db/Db/BaseDb'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:actors:saveToSchema')
@@ -15,12 +16,12 @@ const logger = debug('seedSdk:modelProperty:actors:saveToSchema')
  */
 export async function getSchemaNameFromModel(modelName: string): Promise<string | undefined> {
   // Get the latest schema files and find which one contains this model
-  const { listLatestSchemaFiles } = await import('@/helpers/schema')
+  const { listLatestSchemaFiles } = await import('../../../helpers/schema')
   const latestSchemas = await listLatestSchemaFiles()
 
   for (const schema of latestSchemas) {
     try {
-      const { BaseFileManager } = await import('@/helpers/FileManager/BaseFileManager')
+      const { BaseFileManager } = await import('../../../helpers/FileManager/BaseFileManager')
       const content = await BaseFileManager.readFileAsString(schema.filePath)
       const schemaFile = JSON.parse(content) as any
 
@@ -42,7 +43,7 @@ export const saveToSchema = fromCallback<
 >(({ sendBack, input: { context } }) => {
   const _saveToSchema = async (): Promise<void> => {
     // Use dynamic import to break circular dependency
-    const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
     const validationService = new SchemaValidationService()
     
     // Validate property structure before saving
@@ -82,8 +83,7 @@ export const saveToSchema = fromCallback<
 
     // Clear isEdited flag in database after saving to schema file
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { properties: propertiesTable, models: modelsTable } = await import('@/seedSchema')
+      const { properties: propertiesTable, models: modelsTable } = await import('../../../seedSchema')
       const { eq, and } = await import('drizzle-orm')
       
       const db = BaseDb.getAppDb()

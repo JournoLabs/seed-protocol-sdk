@@ -48,8 +48,8 @@ export const getPropertySchema = async (
   propertyName: string,
 ): Promise<(Static<typeof TProperty> & { _propertyFileId?: string }) | undefined> => {
   // Dynamic import to break circular dependency
-  const { Model } = await import('@/Model/Model')
-  const { Schema } = await import('@/Schema/Schema')
+  const { Model } = await import('../Model/Model')
+  const { Schema } = await import('../Schema/Schema')
   const model = await Model.getByNameAsync(modelName)
 
   console.log('getPropertySchema model', model)

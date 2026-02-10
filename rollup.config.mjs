@@ -118,12 +118,12 @@ const config = [
       commonjs({
         include: ['node_modules/**'],
       }),
-      copy({
-        targets: [
-          { src: 'src/db/seedSchema', dest: 'dist/db' },
-          { src: 'src/seedSchema', dest: 'dist' },
-        ],
-      }),
+      // copy({
+      //   targets: [
+      //     { src: 'src/db/seedSchema', dest: 'dist/db' },
+      //     { src: 'src/seedSchema', dest: 'dist' },
+      //   ],
+      // }),
       postProcess(),
     ],
   },

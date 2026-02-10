@@ -27,10 +27,10 @@ export const validateProperty = fromCallback<
       // Brief wait so trackPendingWrite from ModelProperty.create() has time to run (it's in setTimeout(0))
       await new Promise((r) => setTimeout(r, 60))
       try {
-        const { getPropertyModelNameAndDataType, getModelNameByModelId } = await import('@/helpers/db')
+        const { getPropertyModelNameAndDataType, getModelNameByModelId } = await import('../../../helpers/db')
         // Try pending write first (property row may not exist yet)
         if (fullContext.modelName === undefined && schemaFileId) {
-          const mod = await import('@/ModelProperty/ModelProperty')
+          const mod = await import('../../../ModelProperty/ModelProperty')
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileId)
           if (pendingModelId != null) {
@@ -56,7 +56,7 @@ export const validateProperty = fromCallback<
         }
         // If still no modelName, try pending write again (may have been set during retries)
         if (fullContext.modelName === undefined && schemaFileId) {
-          const mod = await import('@/ModelProperty/ModelProperty')
+          const mod = await import('../../../ModelProperty/ModelProperty')
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           const pendingModelId = ModelProperty?.getPendingModelId?.(schemaFileId)
           if (pendingModelId != null) {
@@ -82,9 +82,9 @@ export const validateProperty = fromCallback<
       _originalValues: fullContext._originalValues 
     })
     // Use dynamic imports to break circular dependencies
-    const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
     const validationService = new SchemaValidationService()
-    const { Schema } = await import('@/Schema/Schema')
+    const { Schema } = await import('../../../Schema/Schema')
     
     // Validate property structure
     console.log('[validateProperty] Validating property structure...')

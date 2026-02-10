@@ -475,7 +475,7 @@ async function checkIfPropertyIsEdited(
     
     // First, check the in-memory cache (for current session edits)
     // Robust dynamic import for consumer re-bundling (named or default export)
-    const mod = await import('@/ModelProperty/ModelProperty')
+    const mod = await import('../ModelProperty/ModelProperty')
     const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
     if (!ModelProperty) {
       logger('ModelProperty not available from dynamic import')
@@ -755,7 +755,7 @@ export const addModelsToDb = async (
       // Use pending property definitions (from JSON import)
       schema = pendingProperties
     } else {
-      const { modelPropertiesToObject } = await import('@/helpers/model')
+      const { modelPropertiesToObject } = await import('./model')
       const modelProperties = modelClass.properties || []
       schema = modelPropertiesToObject(modelProperties)
     }
@@ -779,7 +779,7 @@ export const addModelsToDb = async (
       // If no propertyFileId from map, generate a random ID
       // IDs should be generated in the import process before calling addModelsToDb
       if (!propertyFileId) {
-        const { generateId } = await import('@/helpers')
+        const { generateId } = await import('./index')
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${modelName}:${propertyName}" (not found in propertyFileIds map)`)
       }
@@ -1429,7 +1429,7 @@ export async function writeModelToDb(
       }
       
       // Verify schemaId exists and get name/fileId for invalidation broadcast
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+      const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
       const schemaCheck = await db
         .select({
           id: schemasTable.id,
@@ -1501,7 +1501,7 @@ export async function writeModelToDb(
       } else {
         // Generate random propertyFileId
         // IDs should be generated in the import process before calling writeModelToDb
-        const { generateId } = await import('@/helpers')
+        const { generateId } = await import('./index')
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${data.modelName}:${propName}"`)
       }
@@ -1673,7 +1673,7 @@ export async function getSchemaId(
     throw new Error('Database not available')
   }
 
-  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
   const { eq, desc } = await import('drizzle-orm')
 
   // Try to find by schemaFileId first (more reliable)
@@ -1713,7 +1713,7 @@ export async function getSchemaIdByFileId(schemaFileId: string): Promise<number>
     throw new Error('Database not available')
   }
 
-  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
   const { eq, desc } = await import('drizzle-orm')
 
   const records = await db
@@ -1746,7 +1746,7 @@ export async function getModelId(
     throw new Error('Database not available')
   }
 
-  const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+  const { models: modelsTable } = await import('../seedSchema/ModelSchema')
   const { eq, and, or } = await import('drizzle-orm')
 
   // Try to find by modelFileId first (more reliable)
@@ -1762,8 +1762,8 @@ export async function getModelId(
     
     // If schema is provided, narrow the search
     if (schemaNameOrId !== undefined) {
-      const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
+      const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+      const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
       
       if (typeof schemaNameOrId === 'number') {
         // schemaNameOrId is schemaId
@@ -1823,7 +1823,7 @@ export async function getModelIdByFileId(modelFileId: string): Promise<number> {
     throw new Error('Database not available')
   }
 
-  const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
+  const { models: modelsTable } = await import('../seedSchema/ModelSchema')
   const { eq } = await import('drizzle-orm')
 
   const records = await db

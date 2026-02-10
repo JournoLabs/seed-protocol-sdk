@@ -61,7 +61,7 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
   }
 
   try {
-    const { Model } = await import('@/Model/Model')
+    const { Model } = await import('../../../Model/Model')
     
     // Create instances for all model IDs in parallel
     // Model.createById() will check cache first, then query DB and create if needed
@@ -192,7 +192,7 @@ export const loadOrCreateSchema = fromCallback<
       logger(`Loading internal Seed Protocol schema from SDK`)
       console.log('[loadOrCreateSchema] Loading internal Seed Protocol schema from SDK')
       try {
-        const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+        const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
         const schemaFile = internalSchema.default as SchemaFileFormat
         console.log('[loadOrCreateSchema] Loaded schema file, models count:', Object.keys(schemaFile.models || {}).length)
         
@@ -769,7 +769,7 @@ export const loadOrCreateSchema = fromCallback<
           // Ensure models are populated (fallback for seed-protocol if missing)
           if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
             try {
-              const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+              const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
               const internalSchemaFile = internalSchema.default as SchemaFileFormat
               mergedModels = { ...(internalSchemaFile.models || {}) }
               logger(`Populated models for seed-protocol schema from internal file`)
@@ -985,7 +985,7 @@ export const loadOrCreateSchema = fromCallback<
           // Ensure models are populated (fallback for seed-protocol if missing)
           if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
             try {
-              const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+              const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
               const internalSchemaFile = internalSchema.default as SchemaFileFormat
               mergedModels = { ...(internalSchemaFile.models || {}) }
               logger(`Populated models for seed-protocol schema from internal file`)
@@ -1067,7 +1067,7 @@ export const loadOrCreateSchema = fromCallback<
             // Ensure models are populated (fallback for seed-protocol if missing)
             if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
               try {
-                const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+                const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
                 const internalSchemaFile = internalSchema.default as SchemaFileFormat
                 mergedModels = { ...(internalSchemaFile.models || {}) }
                 logger(`Populated models for seed-protocol schema from internal file`)
@@ -1140,7 +1140,7 @@ export const loadOrCreateSchema = fromCallback<
         // If schemaData is missing, try to load from internal schema file for seed-protocol
         if (!dbSchema.schemaData && schemaName === 'Seed Protocol') {
           try {
-            const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+            const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
             const schemaFile = internalSchema.default as SchemaFileFormat
             logger(`Found seed-protocol schema in internal file (schemaData missing, using internal schema)`)
             
@@ -1270,7 +1270,7 @@ export const loadOrCreateSchema = fromCallback<
       // Ensure models are populated (fallback for seed-protocol if missing)
       if ((!mergedModels || Object.keys(mergedModels).length === 0) && schemaName === 'Seed Protocol') {
         try {
-          const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+          const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
           const internalSchemaFile = internalSchema.default as SchemaFileFormat
           mergedModels = { ...(internalSchemaFile.models || {}) }
           logger(`Populated models for seed-protocol schema from internal file`)

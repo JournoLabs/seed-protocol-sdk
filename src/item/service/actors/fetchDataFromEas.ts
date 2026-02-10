@@ -26,7 +26,7 @@ export const fetchDataFromEas = fromCallback<
       modelSchema = modelPropertiesToObject(ModelClass.properties)
     } else if (modelName) {
       // Dynamic import to break circular dependency
-      const { Model } = await import('@/Model/Model')
+      const { Model } = await import('../../../Model/Model')
       const model = Model.getByName(modelName)
       modelSchema = model?.properties ? modelPropertiesToObject(model.properties) : undefined
     }

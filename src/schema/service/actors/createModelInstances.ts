@@ -29,7 +29,7 @@ export const createModelInstances = fromCallback<
     }
 
     try {
-      const { Model } = await import('@/Model/Model')
+      const { Model } = await import('../../../Model/Model')
       
       // Create instances for all model IDs in parallel
       // Model.createById() will check cache first, then query DB and create if needed

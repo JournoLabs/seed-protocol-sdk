@@ -1,4 +1,8 @@
 import { EventObject, fromCallback } from 'xstate'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { addSchemaToDb, writeModelToDb, writePropertyToDb } from '@/helpers/db'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { eq } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:write:writeToDatabase')
@@ -15,7 +19,6 @@ export const writeToDatabase = fromCallback<
 >(({ sendBack, input }) => {
   const _write = async (): Promise<void> => {
     try {
-      const { BaseDb } = await import('@/db/Db/BaseDb')
       const db = BaseDb.getAppDb()
       
       if (!db) {
@@ -25,10 +28,6 @@ export const writeToDatabase = fromCallback<
       let output: any = input.entityData
 
       if (input.entityType === 'model') {
-        const { writeModelToDb } = await import('@/helpers/db')
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-        const { eq } = await import('drizzle-orm')
         const writeMsg = `Writing model to database: ${input.entityData.modelName} (schemaId: ${input.entityData.schemaId})`
         logger(writeMsg)
         console.log(writeMsg) // Always log to console
@@ -61,21 +60,16 @@ export const writeToDatabase = fromCallback<
         logger(successMsg)
         console.log(successMsg) // Always log to console
       } else if (input.entityType === 'modelProperty') {
-        const { writePropertyToDb } = await import('@/helpers/db')
         // Use current ModelProperty context when available so a user rename before the
         // initial write completes is not overwritten by the stale requestWrite payload.
         let dataToWrite = input.entityData
         try {
-          const mod = await import('@/ModelProperty/ModelProperty')
+          const mod = await import('../../../ModelProperty/ModelProperty')
           const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
           if (ModelProperty && typeof ModelProperty.getById === 'function') {
             const instance = ModelProperty.getById(input.entityId)
             if (instance && typeof (instance as any)._getSnapshotContext === 'function') {
               const ctx = (instance as any)._getSnapshotContext()
-              const nameChanged = ctx.name !== input.entityData.name
-              if (nameChanged) {
-                fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'writeToDatabase.ts:modelProperty',message:'Using current context for write (name differed)',data:{entityId:input.entityId,requestName:input.entityData.name,currentName:ctx.name},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix'})}).catch(()=>{});
-              }
               dataToWrite = {
                 ...input.entityData,
                 name: ctx.name ?? input.entityData.name,
@@ -95,7 +89,6 @@ export const writeToDatabase = fromCallback<
         await writePropertyToDb(input.entityId, dataToWrite)
         output = input.entityData
       } else if (input.entityType === 'schema') {
-        const { addSchemaToDb } = await import('@/helpers/db')
         const schemaRecord = await addSchemaToDb(
           input.entityData,
           input.entityId, // schemaFileId (string)

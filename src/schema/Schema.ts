@@ -2,7 +2,6 @@ import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { updateModelProperties, convertPropertyToSchemaUpdate, writeFullSchemaNewVersion } from '@/helpers/updateSchema'
-import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
@@ -13,6 +12,11 @@ import { models as modelsTable, properties as propertiesTable } from '@/seedSche
 import { eq, desc, and } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
+import { getClient } from '@/client/ClientManager'
+import { ClientManagerState } from '@/client/constants'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { addSchemaToDb } from '@/helpers/db'
+import { generateId } from '@/helpers'
 import { isInternalSchema } from '@/helpers/constants'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
@@ -1118,8 +1122,7 @@ export class Schema {
     }
     
     const context = this._getSnapshotContext()
-    const { addSchemaToDb } = await import('@/helpers/db')
-    
+
     if (!context._isDraft || !context._editedProperties || context._editedProperties.size === 0) {
       logger('No changes to save')
       return ''
@@ -1179,6 +1182,7 @@ export class Schema {
 
     // Collect all edited properties and convert them to SchemaPropertyUpdate format
     const propertyUpdates = []
+    const { ModelProperty } = await import('../ModelProperty/ModelProperty')
 
     for (const propertyKey of context._editedProperties) {
       // Skip schema-level changes (like schema name changes)
@@ -1197,7 +1201,7 @@ export class Schema {
       // Get ModelProperty instance from cache
       const cacheKey = `${modelName}:${propertyName}`
       const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-        instanceCache: Map<string, { instance: ModelProperty; refCount: number }>
+        instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
       }
       
       const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
@@ -1224,7 +1228,6 @@ export class Schema {
       // When only new models were added, _editedProperties contains 'schema:models' and we write the full schema
       if (context._editedProperties.has('schema:models')) {
         const newFilePath = await writeFullSchemaNewVersion(this.schemaName, currentSchema)
-        const { BaseFileManager } = await import('@/helpers/FileManager/BaseFileManager')
         const fileContent = await BaseFileManager.readFileAsString(newFilePath)
         const publishedSchema = JSON.parse(fileContent) as SchemaFileFormat
         if (dbSchema.length > 0) {
@@ -1256,7 +1259,6 @@ export class Schema {
 
     // STEP 3: After file is written, update database to mark as published (isDraft = false)
     // Load the file to get the final schema with IDs
-    const { BaseFileManager } = await import('@/helpers/FileManager/BaseFileManager')
     const fileContent = await BaseFileManager.readFileAsString(newFilePath)
     const publishedSchema = JSON.parse(fileContent) as SchemaFileFormat
 
@@ -1302,7 +1304,7 @@ export class Schema {
       const cacheKey = `${modelName}:${propertyName}`
       
       const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-        instanceCache: Map<string, { instance: ModelProperty; refCount: number }>
+        instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
       }
       
       const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
@@ -1488,9 +1490,6 @@ export class Schema {
       
       if (shouldRecheck) {
         try {
-          // Use dynamic import for browser compatibility (require() doesn't work in browsers)
-          const { getClient } = await import('@/client/ClientManager')
-          const { ClientManagerState } = await import('@/client/constants')
           const client = getClient()
           const clientSnapshot = client.getService().getSnapshot()
           // Check if state is IDLE (primary check) - isInitialized is set in entry action so should be true
@@ -1566,8 +1565,6 @@ export class Schema {
           _editedProperties: new Set<string>(),
         } as SchemaMachineContext
       }
-      const { addSchemaToDb } = await import('@/helpers/db')
-      const { generateId } = await import('@/helpers')
 
       const db = BaseDb.getAppDb()
       if (!db) {

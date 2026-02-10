@@ -38,7 +38,7 @@ export const validateEntity = fromPromise<
         logger(structureMsg)
         console.log(structureMsg) // Always log to console
         // Use existing Model validation
-        const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+        const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
         const validationService = new SchemaValidationService()
         
         // Validate model structure
@@ -57,10 +57,10 @@ export const validateEntity = fromPromise<
           if (entityInput.entityData.schemaName) {
             try {
               logger(`[validateEntity] Validating model against schema "${entityInput.entityData.schemaName}"`)
-              const { Schema } = await import('@/Schema/Schema')
+              const { Schema } = await import('../../../Schema/Schema')
               const schema = Schema.create(entityInput.entityData.schemaName, {
                 waitForReady: false,
-              }) as import('@/Schema/Schema').Schema
+              }) as import('../../../Schema/Schema').Schema
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               logger(`[validateEntity] Schema status: ${schemaStatus}`)
@@ -94,7 +94,7 @@ export const validateEntity = fromPromise<
         }
       } else if (entityInput.entityType === 'modelProperty') {
         // Use existing ModelProperty validation
-        const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+        const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
         const validationService = new SchemaValidationService()
         
         // Validate property structure
@@ -109,7 +109,7 @@ export const validateEntity = fromPromise<
           // If schema name and model name provided, validate against schema
           if (entityInput.entityData._schemaName && entityInput.entityData.modelName) {
             try {
-              const { Schema } = await import('@/Schema/Schema')
+              const { Schema } = await import('../../../Schema/Schema')
               const schema = Schema.create(entityInput.entityData._schemaName, {
                 waitForReady: false,
               }) as import('@/Schema/Schema').Schema
@@ -143,7 +143,7 @@ export const validateEntity = fromPromise<
         }
       } else if (entityInput.entityType === 'schema') {
         // Schema validation - use existing validation
-        const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+        const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
         const validationService = new SchemaValidationService()
         
         const schemaResult = validationService.validateSchema(entityInput.entityData)

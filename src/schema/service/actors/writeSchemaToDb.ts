@@ -34,7 +34,7 @@ export const writeSchemaToDb = fromCallback<
       if (isInternal && schemaName === SEED_PROTOCOL_SCHEMA_NAME) {
         // For Seed Protocol, load from internal file
         logger(`Loading internal Seed Protocol schema from SDK`)
-        const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+        const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
         finalSchema = internalSchema.default as SchemaFileFormat
         
         const db = BaseDb.getAppDb()

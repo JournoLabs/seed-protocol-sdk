@@ -1,6 +1,10 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
 import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
+import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
+import { desc, eq, sql } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schema')
@@ -413,10 +417,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   source: 'db' | 'file' | 'db+file'
   schemaRecordId?: number
 }>> {
-  const { BaseDb } = await import('@/db/Db/BaseDb')
-  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-  const { desc } = await import('drizzle-orm')
-
   const db = BaseDb.getAppDb()
   if (!db) {
     throw new Error('Database not found')
@@ -431,7 +431,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
 
   // STEP 1: Query all schemas from database
   // Also do a direct SQL query to verify what's actually in the database
-  const { sql } = await import('drizzle-orm')
   const directQuery = await db.run(sql.raw(`SELECT name, version, schema_file_id, id FROM schemas ORDER BY name, version DESC`))
   console.log(`[loadAllSchemasFromDb] Direct SQL query result:`, directQuery.rows?.map((row: any) => ({ name: row[0], version: row[1], schemaFileId: row[2], id: row[3] })) || [])
   
@@ -467,7 +466,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
           // Build merged models without mutating schemaFile (read-only approach)
           let mergedModels = { ...(schemaFile.models || {}) }
           if (dbSchema.id) {
-            const { loadModelsFromDbForSchema } = await import('@/helpers/db')
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
               // Merge: database models take precedence for properties, but preserve schemaData models for full structure
@@ -539,7 +537,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
 
           // If file is newer, update DB with file content
           if (fileUpdatedAt > dbUpdatedAt && schemaFile.id === dbSchema.schemaFileId) {
-            const { addSchemaToDb } = await import('@/helpers/db')
             await addSchemaToDb(
               {
                 name: schemaName,
@@ -578,7 +575,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
           // Build merged models without mutating schemaFile (read-only approach)
           let mergedModels = { ...(schemaFile.models || {}) }
           if (dbSchema.id) {
-            const { loadModelsFromDbForSchema } = await import('@/helpers/db')
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
               // Merge: database models take precedence for properties, but preserve schemaData models for full structure
@@ -637,7 +633,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
         const schemaFile = JSON.parse(content) as SchemaFileFormat
 
         // Import this schema to database (mark as non-draft since it's in a file)
-        const { addSchemaToDb } = await import('@/helpers/db')
         const schemaRecord = await addSchemaToDb(
           {
             name: schemaFile.metadata.name,
@@ -673,11 +668,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
  * @returns Number of schemas migrated
  */
 export async function migrateFileSchemasToDb(): Promise<number> {
-  const { BaseDb } = await import('@/db/Db/BaseDb')
-  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-  const { eq } = await import('drizzle-orm')
-  const { addSchemaToDb } = await import('@/helpers/db')
-
   const db = BaseDb.getAppDb()
   if (!db) {
     throw new Error('Database not found')

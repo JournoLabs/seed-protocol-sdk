@@ -38,9 +38,9 @@ export const validateModel = fromCallback<
   const _validateModel = async (): Promise<void> => {
     try {
       // Use dynamic imports to break circular dependencies
-      const { SchemaValidationService } = await import('@/Schema/service/validation/SchemaValidationService')
+      const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
       const validationService = new SchemaValidationService()
-      const { Schema } = await import('@/Schema/Schema')
+      const { Schema } = await import('../../../Schema/Schema')
       
       // Validate model structure
       const structureResult = validationService.validateModelStructure(context)

@@ -73,7 +73,7 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
   }
 
   try {
-    const mod = await import('@/Model/Model')
+    const mod = await import('../../../Model/Model')
     const Model = mod?.Model ?? (mod as { default?: unknown })?.default
     if (!Model) {
       logger('Model not available from dynamic import')
@@ -125,7 +125,7 @@ export const checkExistingSchema = fromCallback<
     if (isInternal && schemaName === SEED_PROTOCOL_SCHEMA_NAME) {
       // For Seed Protocol, check if it exists in database
       try {
-        const internalSchema = await import('@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
+        const internalSchema = await import('../../../seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json')
         const schemaFile = internalSchema.default as SchemaFileFormat
         
         if (db && schemaFile.id) {

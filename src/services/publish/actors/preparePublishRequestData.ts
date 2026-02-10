@@ -15,7 +15,7 @@ export const preparePublishRequestData = fromCallback<
 
   const _preparePublishRequestData = async () => {
     // Dynamic import to break circular dependency
-    const { Item } = await import('@/Item/Item')
+    const { Item } = await import('../../../Item/Item')
     const item = await Item.find({ seedLocalId: localId })
 
     if (!item) {

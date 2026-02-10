@@ -53,7 +53,7 @@ export const verifyPropertyInstancesInCache = fromCallback<
 
     try {
       const result = await verifyWithRetry(async () => {
-        const mod = await import('@/ModelProperty/ModelProperty')
+        const mod = await import('../../../ModelProperty/ModelProperty')
         const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
         if (!ModelProperty) {
           throw new Error('ModelProperty not available from dynamic import')

@@ -8,8 +8,13 @@ import { ItemData } from '@/types/item'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ConflictError, ConflictResult } from '@/Schema/errors'
+import { getClient } from '@/client/ClientManager'
+import { ClientManagerState } from '@/client/constants'
 import { renameModelInDb } from '@/helpers/db'
+import { modelPropertiesToObject } from '@/helpers/model'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
@@ -20,7 +25,7 @@ import {
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
-import { eq } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -770,9 +775,6 @@ export class Model {
               // But verify it exists in database before using it
               if (schemaContext._dbId && typeof schemaContext._dbId === 'number' && schemaContext._dbId > 0) {
                 try {
-                  const { BaseDb } = await import('@/db/Db/BaseDb')
-                  const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-                  const { eq } = await import('drizzle-orm')
                   const db = BaseDb.getAppDb()
                   
                   if (db) {
@@ -801,9 +803,6 @@ export class Model {
                 
                 if (schemaFileId) {
                   try {
-                    const { BaseDb } = await import('@/db/Db/BaseDb')
-                    const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-                    const { eq } = await import('drizzle-orm')
                     const db = BaseDb.getAppDb()
                     
                     if (db) {
@@ -830,9 +829,6 @@ export class Model {
             } else if (schemaName) {
               // If no schema instance but we have schema name, look it up by name
               try {
-                const { BaseDb } = await import('@/db/Db/BaseDb')
-                const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-                const { eq } = await import('drizzle-orm')
                 const db = BaseDb.getAppDb()
                 
                 if (db) {
@@ -865,9 +861,6 @@ export class Model {
             } else if (finalSnapshot.context.id) {
               // Verify schema exists in database before proceeding (additional safety check)
               try {
-                const { BaseDb } = await import('@/db/Db/BaseDb')
-                const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-                const { eq } = await import('drizzle-orm')
                 const db = BaseDb.getAppDb()
                 
                 if (db) {
@@ -922,7 +915,6 @@ export class Model {
                     }
                   } else {
                     // Fallback: convert ModelProperty instances to object format
-                    const { modelPropertiesToObject } = await import('@/helpers/model')
                     const properties = proxiedInstance.properties || []
                     propertiesObject = modelPropertiesToObject(properties)
                   }
@@ -1093,10 +1085,6 @@ export class Model {
       }
 
       try {
-        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-        const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-        const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-        const { eq } = await import('drizzle-orm')
 
         // Query model by name
         const modelRecords = await db
@@ -1160,10 +1148,6 @@ export class Model {
     }
 
     try {
-      const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-      const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-      const { eq } = await import('drizzle-orm')
 
       // Query model by schemaFileId and join to get schema name
       const modelRecords = await db
@@ -1263,10 +1247,6 @@ export class Model {
     }
 
     try {
-      const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-      const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-      const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
-      const { eq, or } = await import('drizzle-orm')
 
       // Query all models for this schema - support both schemaFileId and schema name
       const modelRecords = await db
@@ -1529,8 +1509,6 @@ export class Model {
       if (shouldRecheck) {
         try {
           // Use dynamic import for browser compatibility (require() doesn't work in browsers)
-          const { getClient } = await import('@/client/ClientManager')
-          const { ClientManagerState } = await import('@/client/constants')
           const client = getClient()
           const clientSnapshot = client.getService().getSnapshot()
           // Check if state is IDLE (primary check) - isInitialized is set in entry action so should be true
@@ -1857,9 +1835,6 @@ export class Model {
       doDestroy: async () => {
         const db = BaseDb.getAppDb()
         if (db && modelFileId) {
-          const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-          const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-          const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
           const { eq } = await import('drizzle-orm')
 
           const modelRecords = await db
@@ -1879,7 +1854,8 @@ export class Model {
         }
 
         if (schemaName && modelName) {
-          const { Schema } = await import('@/Schema/Schema')
+          const Schema = await schemaImportPromise
+          if (!Schema) throw new Error('Schema not loaded')
           const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
           const schemaContext = schema.getService().getSnapshot().context
           if (schemaContext.models?.[modelName]) {

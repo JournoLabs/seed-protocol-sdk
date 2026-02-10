@@ -19,7 +19,7 @@ export const runPublish = fromCallback<
     }
 
     try {
-      const { Item } = await import('@/Item/Item')
+      const { Item } = await import('../../../Item/Item')
       const item = await Item.find({ seedLocalId })
 
       if (!item) {
@@ -27,8 +27,8 @@ export const runPublish = fromCallback<
         return
       }
 
-      const { getPublishUploads } = await import('@/db/read/getPublishUploads')
-      const { getPublishPayload } = await import('@/db/read/getPublishPayload')
+      const { getPublishUploads } = await import('../../../db/read/getPublishUploads')
+      const { getPublishPayload } = await import('../../../db/read/getPublishPayload')
 
       await getPublishUploads(item)
       // For first iteration: no Arweave sign/upload - pass empty uploadedTransactions.

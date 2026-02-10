@@ -4,7 +4,7 @@ import { getLatestSchemaVersion } from './schema'
 import { createModelsFromJson, loadSchemaFromFile } from '@/imports/json'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
-import { SchemaType } from '@/seedSchema/SchemaSchema'
+import { schemas, SchemaType } from '@/seedSchema/SchemaSchema'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
 import { ModelPropertyDataTypes } from '@/helpers/property'
@@ -118,11 +118,8 @@ const getSchemaFilePath = (name: string, version: number, schemaFileId?: string)
  * @throws Error if schema not found or missing schemaFileId
  */
 async function getSchemaFileId(schemaName: string): Promise<string> {
-  const { BaseDb } = await import('@/db/Db/BaseDb')
   const db = BaseDb.getAppDb()
-  const { schemas } = await import('@/seedSchema/SchemaSchema')
-  const { eq, desc } = await import('drizzle-orm')
-  
+  if (!db) throw new Error('Database not available')
   const dbSchema = await db
     .select()
     .from(schemas)
@@ -487,7 +484,6 @@ async function loadSchemaWithRenames(
 
   // Generate schema ID if missing
   if (!schemaFile.id) {
-    const { generateId } = await import('@/helpers')
     schemaFile.id = generateId()
     logger('Generated schema ID for schema:', schemaFile.id)
   }
@@ -496,8 +492,7 @@ async function loadSchemaWithRenames(
   // This ensures Model instances are created with correct IDs
   const modelFileIds = new Map<string, string>()
   const propertyFileIds = new Map<string, Map<string, string>>()
-  const { generateId } = await import('@/helpers')
-  
+
   for (const [modelName, model] of Object.entries(schemaFile.models)) {
     // Generate model ID if missing
     if (!model.id) {

@@ -2,6 +2,7 @@ import { fromCallback } from "xstate";
 import { EventObject } from "xstate";
 import debug from "debug";
 import { appState } from "@/seedSchema";
+import { BaseDb } from '@/db/Db/BaseDb'
 
 const logger = debug('seedSdk:client:writeToDb')
 
@@ -18,10 +19,6 @@ SaveAppStateInput
 
     const _saveAppState = async () => {
       try {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        if (!BaseDb) {
-          throw new Error('BaseDb not found')
-        }
         const appDb = BaseDb.getAppDb()
         if (!appDb) {
           // In test environments, continue anyway

@@ -30,7 +30,7 @@ export const createModelProperties = fromCallback<
     
     logger(`Creating ${Object.keys(propertyDefinitions).length} properties for model "${modelName}" (id: ${_dbId})`)
     
-    const mod = await import('@/ModelProperty/ModelProperty')
+    const mod = await import('../../../ModelProperty/ModelProperty')
     const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
     if (!ModelProperty) {
       logger('ModelProperty not available from dynamic import')
@@ -43,7 +43,7 @@ export const createModelProperties = fromCallback<
         for (const [propName, propData] of Object.entries(propertyDefinitions)) {
           // Use provided ID or generate a random one
           // IDs should be generated in the import process before creating properties
-          const { generateId } = await import('@/helpers')
+          const { generateId } = await import('../../../helpers')
           const propertyFileId = propData.id || generateId()
           
           logger(`Creating property "${propName}" with fileId "${propertyFileId}"`)

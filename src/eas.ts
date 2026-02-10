@@ -1,5 +1,4 @@
 // Dynamic import to break circular dependency: syncDbWithEas -> stores/eas -> eas -> Model
-// import { Model } from "@/Model/Model"
 import { toSnakeCase } from "@/helpers"
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient"
@@ -14,7 +13,7 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const easClient = BaseEasClient.getEasClient()
 
   // Dynamic import to break circular dependency
-  const { Model } = await import('@/Model/Model')
+  const { Model } = await import('./Model/Model')
   const allModels = await Model.all()
   const modelNames = allModels.map(m => m.modelName).filter((name): name is string => !!name)
 

@@ -197,7 +197,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         }
 
         // Use dynamic import to break circular dependency
-        const { ModelPropertyDataTypes } = await import('@/Schema')
+        const { ModelPropertyDataTypes } = await import('../Schema')
 
         const { context } = snapshot
         const { propertyRecordSchema } = context
@@ -350,10 +350,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       logger(`[ItemProperty._setupLiveQuerySubscription] Setting up liveQuery for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
       
       try {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { metadata } = await import('@/seedSchema')
+        const { metadata } = await import('../seedSchema')
         const { eq, and, isNotNull } = await import('drizzle-orm')
-        const { getMetadataLatest } = await import('@/db/read/subqueries/metadataLatest')
+        const { getMetadataLatest } = await import('../db/read/subqueries/metadataLatest')
         
         const db = BaseDb.getAppDb()
         if (!db) {
@@ -974,7 +973,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (!propertyName || (!seedLocalId && !seedUid)) return
 
         if (db) {
-          const { metadata } = await import('@/seedSchema')
+          const { metadata } = await import('../seedSchema')
           const { and, eq, or } = await import('drizzle-orm')
           const conditions = [eq(metadata.propertyName, propertyName)]
           if (seedLocalId && seedUid) {
@@ -989,7 +988,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           }
         }
 
-        const { Item } = await import('@/Item/Item')
+        const { Item } = await import('../Item/Item')
         const item = Item.getById((seedLocalId || seedUid) as string)
         if (item) {
           item.getService().send({ type: 'removePropertyInstance', propertyName })

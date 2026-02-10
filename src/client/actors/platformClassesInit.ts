@@ -11,7 +11,7 @@ import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
-
+import { BaseDb } from '../../db/Db/BaseDb'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
@@ -61,8 +61,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
       throw new Error('Config must include endpoints with filePaths and files')
     }
-
-    const BaseDb = (await import('../../db/Db/BaseDb')).BaseDb
 
     let FileManager: typeof BaseFileManager
     let Db: typeof BaseDb

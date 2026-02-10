@@ -30,9 +30,9 @@ export const createPropertyInstances = fromCallback<
     }
 
     try {
-      const modProp = await import('@/ModelProperty/ModelProperty')
+      const modProp = await import('../../../ModelProperty/ModelProperty')
       const ModelProperty = modProp?.ModelProperty ?? (modProp as { default?: unknown })?.default
-      const modModel = await import('@/Model/Model')
+      const modModel = await import('../../../Model/Model')
       const Model = modModel?.Model ?? (modModel as { default?: unknown })?.default
       if (!ModelProperty || !Model) {
         logger('ModelProperty or Model not available from dynamic import')
