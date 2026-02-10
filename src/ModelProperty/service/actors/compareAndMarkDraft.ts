@@ -22,7 +22,8 @@ export const compareAndMarkDraft = fromCallback<
     const schemaFileIdForResolve = fullContext._propertyFileId || (typeof fullContext.id === 'string' ? fullContext.id : undefined)
     if (schemaFileIdForResolve && (fullContext.modelName === undefined || fullContext.dataType === undefined)) {
       try {
-        const { getPropertyModelNameAndDataType, getModelNameByModelId } = await import('../../../helpers/db')
+        const dbMod = await import('../../../helpers/db')
+        const { getPropertyModelNameAndDataType, getModelNameByModelId } = dbMod
         let fromDb: { modelName: string; dataType: string } | undefined
         for (let attempt = 0; attempt < 6; attempt++) {
           fromDb = await getPropertyModelNameAndDataType(schemaFileIdForResolve)
@@ -64,7 +65,8 @@ export const compareAndMarkDraft = fromCallback<
       if (fullContext.modelName && fullContext.name && schemaFileId) {
         logger(`[compareAndMarkDraft] _originalValues not set, but saving to database anyway for property ${context.modelName}:${context.name} (schemaFileId: ${schemaFileId})`)
         try {
-          const { savePropertyToDb } = await import('../../../helpers/db')
+          const dbMod = await import('../../../helpers/db')
+          const { savePropertyToDb } = dbMod
           // Ensure _propertyFileId is set for savePropertyToDb to find the property
           const contextWithFileId = {
             ...fullContext,
@@ -124,7 +126,8 @@ export const compareAndMarkDraft = fromCallback<
       logger(`[compareAndMarkDraft] Context when saving: id=${fullContext.id}, _propertyFileId=${fullContext._propertyFileId}, name=${fullContext.name}, _originalValues.name=${fullContext._originalValues?.name}`)
 
       // Use dynamic import to break circular dependency
-      const { savePropertyToDb } = await import('../../../helpers/db')
+      const dbMod = await import('../../../helpers/db')
+      const { savePropertyToDb } = dbMod
       // Save to database (but not JSON file) - always save to DB when there are changes
       try {
         await savePropertyToDb(fullContext)
@@ -137,7 +140,8 @@ export const compareAndMarkDraft = fromCallback<
       // Mark schema as draft if schema name is available
       if (fullContext._schemaName) {
         // Get the Schema instance and mark it as draft
-        const { Schema } = await import('../../../Schema/Schema')
+        const schemaMod = await import('../../../Schema/Schema')
+        const { Schema } = schemaMod
         const schema = Schema.create(fullContext._schemaName, {
           waitForReady: false,
         }) as import('@/Schema/Schema').Schema
@@ -154,8 +158,10 @@ export const compareAndMarkDraft = fromCallback<
       
       // Clear isEdited flag in database
       try {
-        const { properties: propertiesTable, models: modelsTable } = await import('../../../seedSchema')
-        const { eq, and } = await import('drizzle-orm')
+        const seedSchemaMod = await import('../../../seedSchema')
+        const { properties: propertiesTable, models: modelsTable } = seedSchemaMod
+        const drizzleMod = await import('drizzle-orm')
+        const { eq, and } = drizzleMod
         
         const db = BaseDb.getAppDb()
         if (db && fullContext.modelName && fullContext.name) {

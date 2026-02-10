@@ -120,7 +120,8 @@ export const loadOrCreateModel = fromCallback<
             // schemaFileId to match the database, both will point to the same cached instance.
             if (dbSchemaFileId) {
               try {
-                const { Model } = await import('../../../Model/Model')
+                const modelMod = await import('../../../Model/Model')
+                const { Model } = modelMod
                 // Access instanceCacheById via type assertion since it's protected
                 const cacheById = (Model as any).instanceCacheById as Map<string, any>
                 if (cacheById.has(dbSchemaFileId)) {
@@ -231,7 +232,8 @@ export const loadOrCreateModel = fromCallback<
     // Step 2: Fallback to Schema context (only if database doesn't have the model)
     // This handles the case where model exists in schema file but not yet in database
     try {
-      const { Schema } = await import('../../../Schema/Schema')
+      const schemaMod = await import('../../../Schema/Schema')
+      const { Schema } = schemaMod
       const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
       const schemaSnapshot = schema.getService().getSnapshot()
       
@@ -302,7 +304,8 @@ export const loadOrCreateModel = fromCallback<
     let finalModelName = modelName
     if (db) {
       // Check if this is an internal schema (Seed Protocol)
-      const { isInternalSchema } = await import('../../../helpers/constants')
+      const constantsMod = await import('../../../helpers/constants')
+      const { isInternalSchema } = constantsMod
       const isInternal = isInternalSchema(schemaName)
       
       // Only skip duplicate check if:
@@ -321,8 +324,9 @@ export const loadOrCreateModel = fromCallback<
           
           // First, check Model cache for models (includes models from imported schemas that may not be in DB yet)
           try {
-            const { Model } = await import('../../../Model/Model')
-            
+            const modelMod = await import('../../../Model/Model')
+            const { Model } = modelMod
+
             // Check name-based cache for this schema
             // Skip the current model (context.id): Model.create() adds the new instance to the cache
             // before this callback runs, so we must not count it as a duplicate.
@@ -378,8 +382,10 @@ export const loadOrCreateModel = fromCallback<
           
           // Also check database for models (in case they're persisted but not in Schema context)
           if (db) {
-            const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
-            const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
+            const modelSchemaSchemaMod = await import('../../../seedSchema/ModelSchemaSchema')
+            const { modelSchemas } = modelSchemaSchemaMod
+            const schemaSchemaMod = await import('../../../seedSchema/SchemaSchema')
+            const { schemas: schemasTable } = schemaSchemaMod
             
             // Query all models for this schema to check for duplicates (case-insensitive)
             logger(`Checking database for duplicate model names in schema "${schemaName}"`)
@@ -453,7 +459,8 @@ export const loadOrCreateModel = fromCallback<
     
     // Runtime creates use a placeholder cache key in Model.create; move it to the final name. Skip when schema model (_idFromSchema).
     if (!_idFromSchema) {
-      const { Model } = await import('../../../Model/Model')
+      const modelMod = await import('../../../Model/Model')
+      const { Model } = modelMod
       Model.updateNameIndex('__pending__' + schemaFileId, finalModelName, schemaName, schemaFileId)
     }
 
@@ -473,7 +480,8 @@ export const loadOrCreateModel = fromCallback<
 
     // Mark schema as draft when a new model is created so saveNewVersion() can persist it
     try {
-      const { Schema } = await import('../../../Schema/Schema')
+      const schemaMod = await import('../../../Schema/Schema')
+      const { Schema } = schemaMod
       const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
       schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
     } catch (err) {

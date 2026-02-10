@@ -37,13 +37,15 @@ export const createModelProperties = fromCallback<
       sendBack({ type: 'createModelPropertiesError', error: new Error('ModelProperty not available') })
       return
     }
-    const { eq } = await import('drizzle-orm')
+    const drizzleMod = await import('drizzle-orm')
+    const { eq } = drizzleMod
     const db = BaseDb.getAppDb()
     
         for (const [propName, propData] of Object.entries(propertyDefinitions)) {
           // Use provided ID or generate a random one
           // IDs should be generated in the import process before creating properties
-          const { generateId } = await import('../../../helpers')
+          const helpersMod = await import('../../../helpers')
+          const { generateId } = helpersMod
           const propertyFileId = propData.id || generateId()
           
           logger(`Creating property "${propName}" with fileId "${propertyFileId}"`)

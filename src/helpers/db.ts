@@ -755,7 +755,8 @@ export const addModelsToDb = async (
       // Use pending property definitions (from JSON import)
       schema = pendingProperties
     } else {
-      const { modelPropertiesToObject } = await import('./model')
+      const modelHelpersMod = await import('./model')
+      const { modelPropertiesToObject } = modelHelpersMod
       const modelProperties = modelClass.properties || []
       schema = modelPropertiesToObject(modelProperties)
     }
@@ -779,7 +780,8 @@ export const addModelsToDb = async (
       // If no propertyFileId from map, generate a random ID
       // IDs should be generated in the import process before calling addModelsToDb
       if (!propertyFileId) {
-        const { generateId } = await import('./index')
+        const helpersIndexMod = await import('./index')
+        const { generateId } = helpersIndexMod
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${modelName}:${propertyName}" (not found in propertyFileIds map)`)
       }
@@ -1429,7 +1431,8 @@ export async function writeModelToDb(
       }
       
       // Verify schemaId exists and get name/fileId for invalidation broadcast
-      const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+      const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+      const { schemas: schemasTable } = schemaSchemaMod
       const schemaCheck = await db
         .select({
           id: schemasTable.id,
@@ -1501,7 +1504,8 @@ export async function writeModelToDb(
       } else {
         // Generate random propertyFileId
         // IDs should be generated in the import process before calling writeModelToDb
-        const { generateId } = await import('./index')
+        const helpersIndexMod = await import('./index')
+        const { generateId } = helpersIndexMod
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${data.modelName}:${propName}"`)
       }
@@ -1673,8 +1677,10 @@ export async function getSchemaId(
     throw new Error('Database not available')
   }
 
-  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
-  const { eq, desc } = await import('drizzle-orm')
+  const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+  const { schemas: schemasTable } = schemaSchemaMod
+  const drizzleMod = await import('drizzle-orm')
+  const { eq, desc } = drizzleMod
 
   // Try to find by schemaFileId first (more reliable)
   let records = await db
@@ -1713,8 +1719,10 @@ export async function getSchemaIdByFileId(schemaFileId: string): Promise<number>
     throw new Error('Database not available')
   }
 
-  const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
-  const { eq, desc } = await import('drizzle-orm')
+  const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+  const { schemas: schemasTable } = schemaSchemaMod
+  const drizzleMod = await import('drizzle-orm')
+  const { eq, desc } = drizzleMod
 
   const records = await db
     .select()
@@ -1746,8 +1754,10 @@ export async function getModelId(
     throw new Error('Database not available')
   }
 
-  const { models: modelsTable } = await import('../seedSchema/ModelSchema')
-  const { eq, and, or } = await import('drizzle-orm')
+  const modelSchemaMod = await import('../seedSchema/ModelSchema')
+  const { models: modelsTable } = modelSchemaMod
+  const drizzleMod = await import('drizzle-orm')
+  const { eq, and, or } = drizzleMod
 
   // Try to find by modelFileId first (more reliable)
   let records = await db
@@ -1762,8 +1772,10 @@ export async function getModelId(
     
     // If schema is provided, narrow the search
     if (schemaNameOrId !== undefined) {
-      const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
-      const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+      const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
+      const { modelSchemas } = modelSchemaSchemaMod
+      const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+      const { schemas: schemasTable } = schemaSchemaMod
       
       if (typeof schemaNameOrId === 'number') {
         // schemaNameOrId is schemaId
@@ -1823,8 +1835,10 @@ export async function getModelIdByFileId(modelFileId: string): Promise<number> {
     throw new Error('Database not available')
   }
 
-  const { models: modelsTable } = await import('../seedSchema/ModelSchema')
-  const { eq } = await import('drizzle-orm')
+  const modelSchemaMod = await import('../seedSchema/ModelSchema')
+  const { models: modelsTable } = modelSchemaMod
+  const drizzleMod = await import('drizzle-orm')
+  const { eq } = drizzleMod
 
   const records = await db
     .select()

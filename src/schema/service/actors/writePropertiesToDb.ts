@@ -23,8 +23,10 @@ export const writePropertiesToDb = fromCallback<
     const { modelIds } = input
     
     try {
-      const { models: modelsTable, properties: propertiesTable } = await import('../../../seedSchema/ModelSchema')
-      const { eq } = await import('drizzle-orm')
+      const modelSchemaMod = await import('../../../seedSchema/ModelSchema')
+      const { models: modelsTable, properties: propertiesTable } = modelSchemaMod
+      const drizzleMod = await import('drizzle-orm')
+      const { eq } = drizzleMod
       
       const db = BaseDb.getAppDb()
       if (!db) {

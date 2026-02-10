@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
@@ -29,8 +29,8 @@
     "test:watch": "vitest",
     "compile": "graphql-codegen --config codegen.ts",
     "watch": "graphql-codegen -w",
-    "build:dev": "node scripts/build-with-tests.js \"rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && tsc -p tsconfig.declarations.json\"",
-    "build:publish": "node scripts/build-with-tests.js \"bun run sync-versions && rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && tsc -p tsconfig.declarations.json && npm publish --access public\"",
+    "build:dev": "node scripts/build-with-tests.js \"rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && node scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json\"",
+    "build:publish": "node scripts/build-with-tests.js \"bun run sync-versions && rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && node scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public\"",
     "build:cli": "node scripts/build-with-tests.js \"cd packages/cli && bun run build\"",
     "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build && bun run build:cli\"",
     "sync-versions": "node scripts/sync-versions.js",

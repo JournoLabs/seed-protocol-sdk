@@ -35,7 +35,8 @@ class FileManager extends BaseFileManager {
   static async initializeFileSystem(workingDir?: string): Promise<void> {
 
     const zenfs = await this.getFs()
-    const {WebAccess} = await import('@zenfs/dom')
+    const zenfsDomMod = await import('@zenfs/dom')
+    const { WebAccess } = zenfsDomMod
     const {configureSingle} = zenfs
 
     const handle = await navigator.storage.getDirectory()

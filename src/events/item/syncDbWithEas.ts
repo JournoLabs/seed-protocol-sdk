@@ -328,7 +328,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
   const propertyUids = itemProperties.map((property) => property.id)
 
   // Dynamic import to break circular dependency
-  const { Model } = await import('../../Model/Model')
+  const modelMod = await import('../../Model/Model')
+  const { Model } = modelMod
   const allModels = await Model.all()
   const models = Object.fromEntries(allModels.map(m => [m.modelName!, m]))
 

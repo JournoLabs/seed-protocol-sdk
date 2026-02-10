@@ -197,7 +197,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         }
 
         // Use dynamic import to break circular dependency
-        const { ModelPropertyDataTypes } = await import('../Schema')
+        const schemaMod = await import('../Schema')
+        const { ModelPropertyDataTypes } = schemaMod
 
         const { context } = snapshot
         const { propertyRecordSchema } = context
@@ -350,9 +351,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       logger(`[ItemProperty._setupLiveQuerySubscription] Setting up liveQuery for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
       
       try {
-        const { metadata } = await import('../seedSchema')
-        const { eq, and, isNotNull } = await import('drizzle-orm')
-        const { getMetadataLatest } = await import('../db/read/subqueries/metadataLatest')
+        const seedSchemaMod = await import('../seedSchema')
+        const { metadata } = seedSchemaMod
+        const drizzleMod = await import('drizzle-orm')
+        const { eq, and, isNotNull } = drizzleMod
+        const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
+        const { getMetadataLatest } = metadataLatestMod
         
         const db = BaseDb.getAppDb()
         if (!db) {
@@ -973,8 +977,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (!propertyName || (!seedLocalId && !seedUid)) return
 
         if (db) {
-          const { metadata } = await import('../seedSchema')
-          const { and, eq, or } = await import('drizzle-orm')
+          const seedSchemaMod = await import('../seedSchema')
+          const { metadata } = seedSchemaMod
+          const drizzleMod = await import('drizzle-orm')
+          const { and, eq, or } = drizzleMod
           const conditions = [eq(metadata.propertyName, propertyName)]
           if (seedLocalId && seedUid) {
             conditions.push(or(eq(metadata.seedLocalId, seedLocalId), eq(metadata.seedUid, seedUid)) as any)
@@ -988,7 +994,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           }
         }
 
-        const { Item } = await import('../Item/Item')
+        const itemMod = await import('../Item/Item')
+        const { Item } = itemMod
         const item = Item.getById((seedLocalId || seedUid) as string)
         if (item) {
           item.getService().send({ type: 'removePropertyInstance', propertyName })

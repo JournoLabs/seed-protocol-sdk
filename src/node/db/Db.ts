@@ -21,7 +21,8 @@ export interface DbConfig {
 
 const getConfig = async (dotSeedDir: string, config?: DbConfig) => {
   // Create config inline - config values can be passed in or use defaults
-  const { defineConfig } = await import('drizzle-kit')
+  const drizzleKitMod = await import('drizzle-kit')
+  const { defineConfig } = drizzleKitMod
   const appSchemaDir = config?.schemaDir || path.join(dotSeedDir, 'schema')
   const outDir = config?.outDir || `${dotSeedDir}/db`
   const dbUrl = config?.dbUrl || `${dotSeedDir}/db/seed.db`
@@ -268,7 +269,8 @@ class Db extends BaseDb implements IDb {
       // migrate(this.db, { migrationsFolder: pathToDbDir })
       
       // NEW CODE: Use libsql migrator
-      const {migrate} = await import('drizzle-orm/libsql/migrator')
+      const migratorMod = await import('drizzle-orm/libsql/migrator')
+      const { migrate } = migratorMod
       // migrationsFolder should point to the directory containing migration SQL files
       // In drizzle-kit, migrations are generated in the 'out' directory (which is pathToDbDir)
       await migrate(this.db, { migrationsFolder: pathToDbDir })

@@ -16,12 +16,14 @@ const logger = debug('seedSdk:modelProperty:actors:saveToSchema')
  */
 export async function getSchemaNameFromModel(modelName: string): Promise<string | undefined> {
   // Get the latest schema files and find which one contains this model
-  const { listLatestSchemaFiles } = await import('../../../helpers/schema')
+  const schemaHelpersMod = await import('../../../helpers/schema')
+  const { listLatestSchemaFiles } = schemaHelpersMod
   const latestSchemas = await listLatestSchemaFiles()
 
   for (const schema of latestSchemas) {
     try {
-      const { BaseFileManager } = await import('../../../helpers/FileManager/BaseFileManager')
+      const fileManagerMod = await import('../../../helpers/FileManager/BaseFileManager')
+      const { BaseFileManager } = fileManagerMod
       const content = await BaseFileManager.readFileAsString(schema.filePath)
       const schemaFile = JSON.parse(content) as any
 
@@ -43,7 +45,8 @@ export const saveToSchema = fromCallback<
 >(({ sendBack, input: { context } }) => {
   const _saveToSchema = async (): Promise<void> => {
     // Use dynamic import to break circular dependency
-    const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
+    const validationServiceMod = await import('../../../Schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = validationServiceMod
     const validationService = new SchemaValidationService()
     
     // Validate property structure before saving
@@ -83,8 +86,10 @@ export const saveToSchema = fromCallback<
 
     // Clear isEdited flag in database after saving to schema file
     try {
-      const { properties: propertiesTable, models: modelsTable } = await import('../../../seedSchema')
-      const { eq, and } = await import('drizzle-orm')
+      const seedSchemaMod = await import('../../../seedSchema')
+      const { properties: propertiesTable, models: modelsTable } = seedSchemaMod
+      const drizzleMod = await import('drizzle-orm')
+      const { eq, and } = drizzleMod
       
       const db = BaseDb.getAppDb()
       if (db && context.modelName && context.name) {

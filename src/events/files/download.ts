@@ -59,7 +59,8 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
 
   if (!BaseDb.isAppDbReady()) {
     // Wait for ClientManager to be ready (DB_INIT state or later)
-    const { getClient } = await import('../../client/ClientManager')
+    const clientManagerMod = await import('../../client/ClientManager')
+    const { getClient } = clientManagerMod
     const clientManager = getClient()
     const clientService = clientManager.getService()
     

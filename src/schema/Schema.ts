@@ -1182,7 +1182,8 @@ export class Schema {
 
     // Collect all edited properties and convert them to SchemaPropertyUpdate format
     const propertyUpdates = []
-    const { ModelProperty } = await import('../ModelProperty/ModelProperty')
+    const modelPropertyMod = await import('../ModelProperty/ModelProperty')
+    const { ModelProperty } = modelPropertyMod
 
     for (const propertyKey of context._editedProperties) {
       // Skip schema-level changes (like schema name changes)
@@ -1966,7 +1967,8 @@ export class Schema {
           .filter((id: number | null): id is number => id != null)
         if (schemaIds.length === 0) return
 
-        const { inArray } = await import('drizzle-orm')
+        const drizzleMod = await import('drizzle-orm')
+        const { inArray } = drizzleMod
         const joinRows = await db
           .select({ modelId: modelSchemas.modelId })
           .from(modelSchemas)

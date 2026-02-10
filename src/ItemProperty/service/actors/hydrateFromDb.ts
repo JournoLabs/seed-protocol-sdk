@@ -34,7 +34,8 @@ export const hydrateFromDb = fromCallback<
 
   const _hydrateFromDb = async () => {
     // Use dynamic import to break circular dependency
-    const { ModelPropertyDataTypes } = await import('../../../Schema')
+    const schemaMod = await import('../../../Schema')
+    const { ModelPropertyDataTypes } = schemaMod
     
     const appDb = BaseDb.getAppDb()
 
@@ -250,7 +251,8 @@ export const hydrateFromDb = fromCallback<
       propertyRecordSchema.storageType &&
       propertyRecordSchema.storageType === 'ItemStorage'
     ) {
-      const { Item } = await import(`@/Item/Item`)
+      const itemMod = await import(`@/Item/Item`)
+      const { Item } = itemMod
       const item = await Item.find({
         seedLocalId: seedLocalId ?? undefined,
         modelName,

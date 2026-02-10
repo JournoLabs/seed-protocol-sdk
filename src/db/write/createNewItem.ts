@@ -32,7 +32,8 @@ export const createNewItem = async ({
   const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
   // Dynamic import to break circular dependency
-  const { Model } = await import('../../Model/Model')
+  const modelMod = await import('../../Model/Model')
+  const { Model } = modelMod
   const model = await Model.getByNameAsync(modelName)
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 

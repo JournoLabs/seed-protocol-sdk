@@ -280,7 +280,8 @@ async function fetchItemPropertiesList(
   const modelProperties: string[] = []
   if (modelName) {
     try {
-      const { Model } = await import('../../Model/Model')
+      const modelMod = await import('../../Model/Model')
+      const { Model } = modelMod
       const model = await Model.getByNameAsync(modelName)
       if (model?.properties) {
         for (const modelProperty of model.properties) {

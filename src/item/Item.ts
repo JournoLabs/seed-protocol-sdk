@@ -425,8 +425,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       
       // If we have a schema name, join with modelSchemas to filter by schema
       if (schemaName) {
-        const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
-        const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+        const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
+        const { modelSchemas } = modelSchemaSchemaMod
+        const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+        const { schemas: schemasTable } = schemaSchemaMod
         
         modelRecords = await db
           .select({ id: modelsTable.id })
@@ -860,13 +862,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   getPublishUploads = async () => {
     // Use dynamic import to break circular dependency
-    const { getPublishUploads } = await import('../db/read/getPublishUploads')
+    const getPublishUploadsMod = await import('../db/read/getPublishUploads')
+    const { getPublishUploads } = getPublishUploadsMod
     return await getPublishUploads(this)
   }
 
   getPublishPayload = async (uploadedTransactions: any[]) => {
     // Use dynamic import to break circular dependency
-    const { getPublishPayload } = await import('../db/read/getPublishPayload')
+    const getPublishPayloadMod = await import('../db/read/getPublishPayload')
+    const { getPublishPayload } = getPublishPayloadMod
     return await getPublishPayload(this, uploadedTransactions)
   }
 
@@ -1190,9 +1194,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       logger(`[Item._setupLiveQuerySubscription] Setting up liveQuery for seedLocalId: ${seedLocalId}`)
       
       try {
-        const { seeds, versions, metadata } = await import('../seedSchema')
-        const { eq, and } = await import('drizzle-orm')
-        const { getVersionData } = await import('../db/read/subqueries/versionData')
+        const seedSchemaMod = await import('../seedSchema')
+        const { seeds, versions, metadata } = seedSchemaMod
+        const drizzleMod = await import('drizzle-orm')
+        const { eq, and } = drizzleMod
+        const versionDataMod = await import('../db/read/subqueries/versionData')
+        const { getVersionData } = versionDataMod
         
         const db = BaseDb.getAppDb()
         if (!db) {
@@ -1251,7 +1258,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // CRITICAL: Create ItemProperty instances BEFORE updating context
         if (initialMetadataIds.length > 0) {
           try {
-            const { ItemProperty } = await import('../ItemProperty/ItemProperty')
+            const itemPropertyMod = await import('../ItemProperty/ItemProperty')
+            const { ItemProperty } = itemPropertyMod
             const itemModelName = this._service.getSnapshot().context.modelName
             const createPromises = initialMetadata.map(async (metaRow: any) => {
               try {
@@ -1375,7 +1383,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               // CRITICAL: Create ItemProperty instances BEFORE updating context
               if (metadataRows.length > 0) {
                 try {
-                  const { ItemProperty } = await import('../ItemProperty/ItemProperty')
+                  const itemPropertyMod = await import('../ItemProperty/ItemProperty')
+                  const { ItemProperty } = itemPropertyMod
                   const itemModelName = this._service.getSnapshot().context.modelName
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {

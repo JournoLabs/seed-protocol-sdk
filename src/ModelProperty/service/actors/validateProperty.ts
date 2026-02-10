@@ -27,7 +27,8 @@ export const validateProperty = fromCallback<
       // Brief wait so trackPendingWrite from ModelProperty.create() has time to run (it's in setTimeout(0))
       await new Promise((r) => setTimeout(r, 60))
       try {
-        const { getPropertyModelNameAndDataType, getModelNameByModelId } = await import('../../../helpers/db')
+        const dbMod = await import('../../../helpers/db')
+        const { getPropertyModelNameAndDataType, getModelNameByModelId } = dbMod
         // Try pending write first (property row may not exist yet)
         if (fullContext.modelName === undefined && schemaFileId) {
           const mod = await import('../../../ModelProperty/ModelProperty')
@@ -82,9 +83,11 @@ export const validateProperty = fromCallback<
       _originalValues: fullContext._originalValues 
     })
     // Use dynamic imports to break circular dependencies
-    const { SchemaValidationService } = await import('../../../Schema/service/validation/SchemaValidationService')
+    const validationServiceMod = await import('../../../Schema/service/validation/SchemaValidationService')
+    const { SchemaValidationService } = validationServiceMod
     const validationService = new SchemaValidationService()
-    const { Schema } = await import('../../../Schema/Schema')
+    const schemaMod = await import('../../../Schema/Schema')
+    const { Schema } = schemaMod
     
     // Validate property structure
     console.log('[validateProperty] Validating property structure...')

@@ -96,7 +96,8 @@ export const addModelsMachine = setup({
       const _createInstances = async () => {
         const debug = (await import('debug')).default
         const logger = debug('seedSdk:schema:addModels:createInstances')
-        const { Schema: SchemaClass, schemaInstanceState } = await import('../Schema')
+        const schemaMod = await import('../Schema')
+        const { Schema: SchemaClass, schemaInstanceState } = schemaMod
 
         const schemaName = input.schemaContext.metadata?.name || input.schemaContext.schemaName
         const schemaInstance = SchemaClass.create(schemaName, {

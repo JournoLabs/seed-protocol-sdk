@@ -531,7 +531,8 @@ async function loadSchemaWithRenames(
   }
 
   // Use dynamic import to break circular dependency
-  const { addSchemaToDb, addModelsToDb } = await import('./db')
+  const dbMod = await import('./db')
+  const { addSchemaToDb, addModelsToDb } = dbMod
   
   // Add schema to database with schemaFileId
   const schemaRecord = await addSchemaToDb(schemaInput as SchemaType, schemaFile.id)

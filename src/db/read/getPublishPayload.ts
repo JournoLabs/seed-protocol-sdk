@@ -177,7 +177,8 @@ const processRelationOrImageProperty = async (
   const { localId: seedLocalId, uid: seedUid } = getCorrectId(value)
 
   // Use dynamic import to break circular dependency
-  const { getItem } = await import('../../db/read/getItem')
+  const getItemMod = await import('../../db/read/getItem')
+  const { getItem } = getItemMod
   const relatedItem = await getItem({
     seedLocalId,
     seedUid,
@@ -296,7 +297,8 @@ const processListProperty = async (
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(seedId)
 
     // Use dynamic import to break circular dependency
-    const { getItem } = await import('../../db/read/getItem')
+    const getItemMod = await import('../../db/read/getItem')
+    const { getItem } = getItemMod
     const relatedItem = await getItem({
       seedLocalId,
       seedUid,

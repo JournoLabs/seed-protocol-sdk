@@ -61,8 +61,9 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
   }
 
   try {
-    const { Model } = await import('../../../Model/Model')
-    
+    const modelMod = await import('../../../Model/Model')
+    const { Model } = modelMod
+
     // Create instances for all model IDs in parallel
     // Model.createById() will check cache first, then query DB and create if needed
     const createPromises = modelIds.map(async (modelFileId) => {

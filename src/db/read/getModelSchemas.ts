@@ -24,7 +24,8 @@ type GetModelSchemas = () => Promise<GetModelSchemasReturn>
 
 export const getModelSchemas: GetModelSchemas = async () => {
   // Dynamic import to break circular dependency
-  const { Model } = await import('../../Model/Model')
+  const modelMod = await import('../../Model/Model')
+  const { Model } = modelMod
   const allModels = await Model.all()
   const modelRecords: ModelRecord[] = []
 

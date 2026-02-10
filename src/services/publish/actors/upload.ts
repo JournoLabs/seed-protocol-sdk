@@ -25,8 +25,10 @@ export const upload = fromCallback<
 
   const _upload = async () => {
     // Dynamic imports to break circular dependencies
-    const { Item } = await import('../../../Item/Item')
-    const { ModelPropertyDataTypes } = await import('../../../Schema')
+    const itemMod = await import('../../../Item/Item')
+    const { Item } = itemMod
+    const schemaMod = await import('../../../Schema')
+    const { ModelPropertyDataTypes } = schemaMod
     
     const item = await Item.find({ seedLocalId: localId })
 

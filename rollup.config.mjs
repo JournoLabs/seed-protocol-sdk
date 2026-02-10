@@ -17,6 +17,67 @@ const postProcess = () => {
   }
 }
 
+/**
+ * Rewrites fragile dynamic-import pattern to two-step form so consumer re-bundles
+ * (e.g. Electron) don't break: replace
+ *   const { x } = await import('./chunk.js').then(n => n.aR);
+ * with
+ *   const _mod_0 = await import('./chunk.js');
+ *   const _ns_0 = _mod_0.aR;
+ *   const { x } = _ns_0;
+ * Uses a per-chunk counter (_mod_0, _ns_0, _mod_1, _ns_1, ...) so multiple
+ * replacements in one chunk do not produce duplicate declarations.
+ * ESM build only (renderChunk receives format from output options).
+ */
+function twoStepDynamicImportPlugin() {
+  // One full line: indent, LHS (destructure or id), path, then .then(...);
+  const LINE_FUNC = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.(\w+)\s*;\s*\}\s*\)\s*;/gm
+  const LINE_ARROW = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.(\w+)\s*\)\s*;/gm
+  // Promise form (no await): const x = import('...').then(function (n) { return n.X; }) - rewrite to async IIFE
+  const PROMISE_FUNC = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.(\w+)\s*;\s*\}\s*\)/gm
+  const PROMISE_ARROW = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.(\w+)\s*\)/gm
+
+  return {
+    name: 'two-step-dynamic-import',
+    renderChunk(code, _chunk, options) {
+      if (options.format !== 'es') return null
+      let out = code
+      let chunkIndex = 0
+      let changed = true
+      while (changed) {
+        changed = false
+        out = out.replace(LINE_FUNC, (_, indent, lhs, path, exportName) => {
+          changed = true
+          const i = chunkIndex++
+          return `${indent}const _mod_${i} = await import(${path});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
+        })
+        if (!changed) {
+          out = out.replace(LINE_ARROW, (_, indent, lhs, path, exportName) => {
+            changed = true
+            const i = chunkIndex++
+            return `${indent}const _mod_${i} = await import(${path});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
+          })
+        }
+        if (!changed) {
+          out = out.replace(PROMISE_FUNC, (_, indent, lhs, path, exportName) => {
+            changed = true
+            const i = chunkIndex++
+            return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${path}); return _mod_${i}.${exportName}; })()`
+          })
+        }
+        if (!changed) {
+          out = out.replace(PROMISE_ARROW, (_, indent, lhs, path, exportName) => {
+            changed = true
+            const i = chunkIndex++
+            return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${path}); return _mod_${i}.${exportName}; })()`
+          })
+        }
+      }
+      return out
+    },
+  }
+}
+
 const config = [
   // ESM build
   {
@@ -57,6 +118,7 @@ const config = [
           { src: 'src/db/drizzle', dest: 'dist/db/drizzle' },
         ],
       }),
+      twoStepDynamicImportPlugin(),
       postProcess(),
     ],
   },

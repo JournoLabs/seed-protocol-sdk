@@ -1835,7 +1835,8 @@ export class Model {
       doDestroy: async () => {
         const db = BaseDb.getAppDb()
         if (db && modelFileId) {
-          const { eq } = await import('drizzle-orm')
+          const drizzleMod = await import('drizzle-orm')
+          const { eq } = drizzleMod
 
           const modelRecords = await db
             .select()
