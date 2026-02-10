@@ -2,8 +2,7 @@ import { EventObject, fromCallback } from "xstate"
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
 import { ClientManagerEvents } from "@/client/constants"
 import { listSchemaFiles, loadAllSchemasFromDb } from "@/helpers/schema"
-// Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
-// import { createModelsFromJsonFile, importJsonSchema, loadSchemaFromFile } from "@/imports/json"
+import { createModelsFromJsonFile, importJsonSchema, loadSchemaFromFile } from "@/imports/json"
 import { SchemaFileFormat } from "@/types/import"
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager"
 import debug from "debug"
@@ -59,9 +58,6 @@ export const processSchemaFiles = fromCallback<
   }, PROCESS_SCHEMA_FILES_TIMEOUT_MS)
 
   const _processSchemaFiles = async () => {
-    // Use dynamic import to break circular dependency
-    const { importJsonSchema, loadSchemaFromFile, createModelsFromJsonFile } = await import('@/imports/json')
-
     console.log('processSchemaFiles _processSchemaFiles started')
     
     // First, load the internal seed-protocol schema

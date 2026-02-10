@@ -399,7 +399,7 @@ export const addSchemaToDb = async (
     createdAt: schema.createdAt,
     updatedAt: schema.updatedAt,
   } as NewSchemaRecord).returning()
-  
+
   return newSchema[0]
 }
 
@@ -1411,8 +1411,6 @@ export async function writeModelToDb(
     )
     .limit(1)
 
-  console.log('existingJoin', existingJoin)
-  
   if (existingJoin.length === 0) {
     // Only provide modelId and schemaId - id is auto-increment and should not be included
     // Don't use type cast - let Drizzle infer the correct type without id
@@ -1430,10 +1428,14 @@ export async function writeModelToDb(
         throw new Error(`Model with id ${modelId} does not exist in database. Cannot create join record.`)
       }
       
-      // Verify schemaId exists (double-check)
+      // Verify schemaId exists and get name/fileId for invalidation broadcast
       const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
       const schemaCheck = await db
-        .select({ id: schemasTable.id })
+        .select({
+          id: schemasTable.id,
+          name: schemasTable.name,
+          schemaFileId: schemasTable.schemaFileId,
+        })
         .from(schemasTable)
         .where(eq(schemasTable.id, data.schemaId))
         .limit(1)
@@ -1448,7 +1450,18 @@ export async function writeModelToDb(
         modelId,
         schemaId: data.schemaId,
       })
-      
+      // Notify React useModels so it can invalidate; live query over join often doesn't re-run when model_schemas is inserted.
+      // Yield so the insert is visible to the refetch that will run when the broadcast is received.
+      if (typeof BroadcastChannel !== 'undefined') {
+        await new Promise((r) => setTimeout(r, 10))
+        const row = schemaCheck[0]
+        try {
+          new BroadcastChannel('seed-models-invalidate').postMessage({
+            schemaName: row.name ?? undefined,
+            schemaFileId: row.schemaFileId ?? undefined,
+          })
+        } catch (_) {}
+      }
       logger(`Successfully created join record for model ${data.modelName} (id: ${modelId}) to schema (id: ${data.schemaId})`)
     } catch (error: any) {
       if (error?.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {

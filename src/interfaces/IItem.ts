@@ -11,6 +11,7 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   publish(): Promise<void>
   getPublishUploads(): Promise<any>
   getPublishPayload(uploadedTransactions: any[]): Promise<any>
+  persistSeedUid(): Promise<void>
   unload(): void
   destroy(): Promise<void>
 

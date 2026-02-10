@@ -29,6 +29,9 @@ type UseModels = (schemaId: UseModelsParams) => UseModelsResult
  */
 const getModelsQueryKey = (schemaId: UseModelsParams) => ['seed', 'models', schemaId] as const
 
+// Last-known-good models per schemaId so we never flash [] after remount or refetch race (survives component unmount).
+const lastModelsBySchemaId = new Map<string, Model[]>()
+
 export const useModels: UseModels = (schemaId) => {
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
@@ -42,15 +45,70 @@ export const useModels: UseModels = (schemaId) => {
     error: queryError,
   } = useQuery({
     queryKey,
-    queryFn: () => Model.all(schemaId!, { waitForReady: true }),
+    queryFn: async () => {
+      // Capture previous data before any async work so we don't overwrite good cache with [].
+      const prev = queryClient.getQueryData<Model[]>(queryKey)
+      // Use waitForReady: false so we return models as soon as they exist; waitForReady: true
+      // filters to only idle models and can return [] while a model is in creatingProperties.
+      const next = await Model.all(schemaId!, { waitForReady: false })
+      // getModelsData can intermittently return [] after returning data; keep prev to avoid overwrite.
+      if (Array.isArray(prev) && prev.length > 0 && Array.isArray(next) && next.length === 0) {
+        return [...prev]
+      }
+      // If this refetch returned [], avoid overwriting non-empty cache (e.g. race where another refetch already wrote data).
+      if (Array.isArray(next) && next.length === 0) {
+        const current = queryClient.getQueryData<Model[]>(queryKey)
+        if (Array.isArray(current) && current.length > 0) {
+          return [...current]
+        }
+      }
+      return next
+    },
     enabled: isClientReady && !!schemaId,
   })
-  modelsRef.current = models
+  // Never expose [] when we previously had models (avoids flash from refetch races, remounts, or intermittent getModelsData returning []).
+  // When schemaId is null/undefined, always show [] — do not use fallback from a previous schema.
+  const schemaIdKey = schemaId && typeof schemaId === 'string' ? schemaId : ''
+  if (models.length > 0) {
+    lastModelsBySchemaId.set(schemaIdKey, models)
+  }
+  const fallback = modelsRef.current.length > 0 ? modelsRef.current : lastModelsBySchemaId.get(schemaIdKey)
+  const displayModels =
+    !schemaId
+      ? models
+      : models.length > 0
+        ? models
+        : fallback?.length
+          ? fallback
+          : models
+  modelsRef.current = displayModels
 
-  const db = isClientReady ? BaseDb.getAppDb() : null
-  const modelsQuery = useMemo(() => {
-    if (!db || !schemaId) return null
-    return db
+  // When a model is created, writeModelToDb posts to this channel; live query over join often doesn't re-run
+  useEffect(() => {
+    if (!schemaId || typeof BroadcastChannel === 'undefined') return
+    const ch = new BroadcastChannel('seed-models-invalidate')
+    const onMessage = (event: MessageEvent<{ schemaName?: string; schemaFileId?: string }>) => {
+      const { schemaName, schemaFileId } = event.data || {}
+      if (schemaId === schemaName || schemaId === schemaFileId) {
+        queryClient.invalidateQueries({ queryKey })
+        queryClient.refetchQueries({ queryKey })
+      }
+    }
+    ch.addEventListener('message', onMessage)
+    return () => {
+      ch.removeEventListener('message', onMessage)
+      ch.close()
+    }
+  }, [schemaId, queryClient, queryKey])
+
+  // Stabilize query reference: only recreate when (schemaId, isClientReady) change, not when db reference changes.
+  // This keeps the same liveQuery observable/subscription alive so effects can deliver updates when a new model is added.
+  const stableModelsQueryKeyRef = useRef<{ schemaId: string; ready: boolean } | null>(null)
+  const stableModelsQueryRef = useRef<ReturnType<typeof buildModelsQuery> | null>(null)
+  function buildModelsQuery() {
+    const currentDb = BaseDb.getAppDb()
+    if (!currentDb || !schemaId) return null
+    return currentDb
       .select({
         modelFileId: modelsTable.schemaFileId,
         modelName: modelsTable.name,
@@ -64,7 +122,26 @@ export const useModels: UseModels = (schemaId) => {
           eq(schemasTable.name, schemaId)
         )
       )
-  }, [db, isClientReady, schemaId])
+  }
+  const modelsQuery = useMemo(() => {
+    if (!schemaId || !isClientReady) return null
+    const key = { schemaId, ready: isClientReady }
+    const prevKey = stableModelsQueryKeyRef.current
+    if (
+      prevKey &&
+      prevKey.schemaId === key.schemaId &&
+      prevKey.ready === key.ready &&
+      stableModelsQueryRef.current !== null
+    ) {
+      return stableModelsQueryRef.current
+    }
+    const q = buildModelsQuery()
+    if (!q) return null
+    stableModelsQueryKeyRef.current = key
+    stableModelsQueryRef.current = q
+    return q
+  }, [schemaId, isClientReady])
+
   const modelsTableData = useLiveQuery<{ modelFileId: string | null; modelName: string }>(modelsQuery)
 
   useEffect(() => {
@@ -87,13 +164,20 @@ export const useModels: UseModels = (schemaId) => {
       currentModelsSet.size === tableDataModelsSet.size &&
       [...currentModelsSet].every((id) => tableDataModelsSet.has(id))
 
-    if (!setsAreEqual) {
+    // Only invalidate when the table has rows we might be missing (live query saw new data).
+    // Do NOT invalidate when we have more than the table: the live query may not have updated
+    // yet (e.g. join over model_schemas), and refetching would overwrite cache with [].
+    const tableHasNewRows =
+      tableDataModelsSet.size > 0 &&
+      [...tableDataModelsSet].some((id) => !currentModelsSet.has(id))
+
+    if (!setsAreEqual && tableHasNewRows) {
       queryClient.invalidateQueries({ queryKey })
     }
   }, [isClientReady, modelsTableData, schemaId, queryClient, queryKey])
 
   return {
-    models,
+    models: displayModels,
     isLoading,
     error: queryError as Error | null,
   }

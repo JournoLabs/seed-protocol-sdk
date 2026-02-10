@@ -603,16 +603,25 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
         continue
       }
 
+      try {
+        await appDb
+          .insert(modelUids)
+          .values({
+            modelId: foundModel.id,
+            uid: modelSchema.id,
+          })
+          .onConflictDoNothing()
+      } catch (err: unknown) {
+        // Model may have been deleted by test teardown or another process; skip to avoid unhandled rejection
+        const e = err as { code?: string; rawCode?: number; cause?: { code?: string; rawCode?: number } }
+        const code = e?.code ?? e?.rawCode ?? e?.cause?.code ?? e?.cause?.rawCode
+        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 787) {
+          continue
+        }
+        throw err
+      }
+
       schemaUids.push(modelSchema.id)
-
-      await appDb
-        .insert(modelUids)
-        .values({
-          modelId: foundModel.id,
-          uid: modelSchema.id,
-        })
-        .onConflictDoNothing()
-
     }
 
     // If no schemas were found, skip the rest of the sync process

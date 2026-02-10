@@ -673,25 +673,21 @@ describe('React Schema Hooks Integration Tests', () => {
     it('should set isLoading to true initially and false when loaded', async () => {
       render(<UseSchemaTest schemaIdentifier="Test Schema 1" />, { container })
 
-      // Initially, isLoading should be true (or false if already cached and idle)
-      // We'll check that it becomes false when loaded
+      // Scope queries to our container so we never read a stale/wrong element when tests run in group
+      const scoped = within(container)
+
+      // Wait for both status and isLoading in one waitFor and assert once, so we don't read DOM twice
+      // (reading twice was flaky when run in group: parent isLoading update could commit after child status)
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('schema-status')
-          // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          const status = scoped.getByTestId('schema-status')
+          const isLoading = scoped.getByTestId('is-loading')
+          expect(status.textContent).toBe('loaded')
+          expect(isLoading.textContent).toBe('false')
+          return true
         },
         { timeout: 10000 }
       )
-
-      // Verify isLoading is false after loading
-      const isLoading = screen.getByTestId('is-loading')
-      expect(isLoading.textContent).toBe('false')
     })
 
     it('should set isLoading to false when schemaIdentifier is null', async () => {

@@ -37,6 +37,11 @@ const config = [
       },
     ],
     plugins: [
+      alias({
+        entries: [
+          { find: /^@\/(.*)$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'src/$1') }
+        ]
+      }),
       json(),
       tsConfigPaths(),
       typescript({

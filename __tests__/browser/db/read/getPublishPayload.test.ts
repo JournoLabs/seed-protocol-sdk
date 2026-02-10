@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA } from '@/helpers/constants'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment } from '../../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -9,11 +9,9 @@ import {
   createItemWithList,
   createItemWithImage,
   createItemWithAllPropertyTypes,
-} from '../../test-utils/getPublishPayloadIntegrationHelpers'
+} from '../../../test-utils/getPublishPayloadIntegrationHelpers'
 
-const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
-
-testDescribe('getPublishPayload integration', () => {
+describe('getPublishPayload integration (browser)', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
@@ -42,6 +40,21 @@ testDescribe('getPublishPayload integration', () => {
       versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
       listOfAttestations: expect.any(Array),
     })
+    expect(result[0].listOfAttestations).toBeDefined()
+    expect(Array.isArray(result[0].listOfAttestations)).toBe(true)
+    // Item was just created; basic properties have no uid yet, so we must get at least one property attestation
+    expect(result[0].listOfAttestations.length).toBeGreaterThanOrEqual(1)
+  }, 30000)
+
+  it('returns attestation for title when item has title set (regression: missing ItemProperty attestation)', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({
+      title: 'A new title 2',
+    })
+    const result = await getPublishPayload(item, [])
+    expect(result).toHaveLength(1)
+    expect(result[0].listOfAttestations).toBeDefined()
+    expect(Array.isArray(result[0].listOfAttestations)).toBe(true)
+    // Original bug: getPublishPayload returned only Seed/Version attestations and no attestation for the title ItemProperty
     expect(result[0].listOfAttestations.length).toBeGreaterThanOrEqual(1)
   }, 30000)
 
@@ -103,6 +116,6 @@ testDescribe('getPublishPayload integration', () => {
       authorProp.value = '0000000000'
       await authorProp.save()
     }
-    await expect(getPublishPayload(postItem, [])).rejects.toThrow('Related item not found')
+    await expect(getPublishPayload(postItem, [])).rejects.toThrow('No related item found')
   }, 30000)
 })

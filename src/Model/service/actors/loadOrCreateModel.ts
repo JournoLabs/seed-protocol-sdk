@@ -470,7 +470,16 @@ export const loadOrCreateModel = fromCallback<
     } else {
       logger(`Model name unchanged: "${modelName}"`)
     }
-    
+
+    // Mark schema as draft when a new model is created so saveNewVersion() can persist it
+    try {
+      const { Schema } = await import('@/Schema/Schema')
+      const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
+      schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
+    } catch (err) {
+      logger(`Failed to mark schema as draft after creating model: ${err}`)
+    }
+
     sendBack({
       type: 'loadOrCreateModelSuccess',
       model: {

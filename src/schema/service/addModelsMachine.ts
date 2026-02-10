@@ -3,6 +3,8 @@ import type { EventObject, DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
 import type { Schema } from '@/Schema/Schema'
+import { addModelsToDb } from '@/helpers/db'
+import { createModelFromJson } from '@/imports/json'
 
 export type AddModelsMachineContext = {
   schemaContext: SchemaMachineContext
@@ -348,9 +350,7 @@ export const addModelsMachine = setup({
       const _persist = async () => {
         const debug = (await import('debug')).default
         const logger = debug('seedSdk:schema:addModels:persist')
-        
-        const { createModelFromJson } = await import('@/imports/json')
-        const { addModelsToDb } = await import('@/helpers/db')
+
         const { BaseDb } = await import('@/db/Db/BaseDb')
         const { schemas: schemasTable } = await import('@/seedSchema/SchemaSchema')
         const { eq } = await import('drizzle-orm')

@@ -1,5 +1,6 @@
 import { useModel } from "./model"
 import { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import { flushSync } from "react-dom"
 import { getPropertySchema } from "@/helpers/property"
 import { ModelProperty } from "@/ModelProperty/ModelProperty"
 import { useIsClientReady } from "./client"
@@ -97,6 +98,20 @@ export const useModelProperties = (
   const modelPropertiesRef = useRef<ModelProperty[]>([])
   modelPropertiesRef.current = modelProperties
 
+  // Fallback: when we have modelId but query returned [] (e.g. properties not in DB yet or
+  // propertiesTableData is undefined because model._dbId isn't set yet), schedule refetches
+  // so we pick up properties after they're written.
+  useEffect(() => {
+    if (!modelId || modelProperties.length > 0 || !queryClient || !modelPropertiesQueryKey) return
+    const delays = [400, 1200, 2500]
+    const timers = delays.map((ms) =>
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: modelPropertiesQueryKey })
+      }, ms)
+    )
+    return () => timers.forEach((t) => clearTimeout(t))
+  }, [modelId, modelProperties.length, queryClient, modelPropertiesQueryKey])
+
   useEffect(() => {
     if (!isClientReady || !model?.id || !propertiesTableData || !modelPropertiesQueryKey) return
 
@@ -119,9 +134,11 @@ export const useModelProperties = (
       (currentPropertiesSet.size === 0 ||
         [...currentPropertiesSet].every((id) => tableDataPropertiesSet.has(id)))
 
-    // Don't invalidate when query data isn't in yet (currentSize 0); only invalidate when we have
-    // cached data that is out of sync with the table (avoids extra refetches on initial load).
-    const shouldInvalidate = !setsAreEqual && currentPropertiesSet.size > 0
+    // Invalidate when cached list is out of sync with the table: either we have stale cached data
+    // (currentPropertiesSet.size > 0) or the table has new rows we don't have yet (tableDataPropertiesSet.size > 0).
+    // The latter handles the case where the initial query returned [] before properties were written.
+    const shouldInvalidate =
+      !setsAreEqual && (currentPropertiesSet.size > 0 || tableDataPropertiesSet.size > 0)
 
     if (shouldInvalidate) {
       queryClient.invalidateQueries({ queryKey: modelPropertiesQueryKey })
@@ -314,25 +331,21 @@ export function useModelProperty(
         }
 
         // Use existing getPropertySchema for schemaId + modelName + propertyName
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:before getPropertySchema',message:'schemaId branch calling getPropertySchema without schemaId',data:{schemaId:lookupMode.schemaId,modelName:lookupMode.modelName,propertyName:lookupMode.propertyName},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName)
         resolvedModelName = lookupMode.modelName
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:after getPropertySchema',message:'result of getPropertySchema',data:{propertyDataDefined:!!propertyData,resolvedModelName,propertyDataName:propertyData?.name},timestamp:Date.now(),hypothesisId:'C_D'})}).catch(()=>{});
-        // #endregion
       }
 
       if (propertyData && resolvedModelName) {
-        const createdProperty = ModelProperty.create({
-          ...propertyData,
-          modelName: resolvedModelName,
-        })
+        const createdProperty = ModelProperty.create(
+          { ...propertyData, modelName: resolvedModelName },
+          { waitForReady: false }
+        )
         const resolvedProperty = createdProperty instanceof Promise ? await createdProperty : createdProperty
-        setModelProperty(resolvedProperty)
-        setIsLoading(false)
-        setError(null)
+        flushSync(() => {
+          setModelProperty(resolvedProperty)
+          setIsLoading(false)
+          setError(null)
+        })
       } else {
         setModelProperty(undefined)
         setIsLoading(false)
@@ -348,9 +361,6 @@ export function useModelProperty(
 
   // Fetch/refetch when lookup parameters change or client becomes ready
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:effect',message:'shouldLoad effect',data:{shouldLoad,isClientReady,lookupType:lookupMode.type,schemaId:lookupMode.type==='schemaId'?lookupMode.schemaId:undefined,modelName:lookupMode.modelName,propertyName:lookupMode.propertyName},timestamp:Date.now(),hypothesisId:'A_E'})}).catch(()=>{});
-    // #endregion
     if (!shouldLoad) {
       setModelProperty(undefined)
       setIsLoading(false)
@@ -360,9 +370,12 @@ export function useModelProperty(
     updateModelProperty()
   }, [shouldLoad, updateModelProperty])
 
-  // Subscribe to service changes when modelProperty is available
+  // Subscribe to service changes when modelProperty is available.
+  // Skip subscription for schemaId/modelFileId lookups where we created the instance locally—
+  // refetching on every snapshot would set loading and can race with the initial render.
+  const shouldSubscribe = lookupMode.type === 'propertyFileId'
   useEffect(() => {
-    if (!modelProperty) {
+    if (!modelProperty || !shouldSubscribe) {
       return
     }
 
@@ -380,7 +393,7 @@ export function useModelProperty(
       subscriptionRef.current?.unsubscribe()
       subscriptionRef.current = undefined
     }
-  }, [modelProperty, updateModelProperty])
+  }, [modelProperty, updateModelProperty, shouldSubscribe])
 
   return {
     modelProperty,
@@ -435,7 +448,10 @@ export const useCreateModelProperty = (): UseCreateModelPropertyReturn => {
         throw err
       }
 
-      const created = ModelProperty.create({ ...property, modelName } as Parameters<typeof ModelProperty.create>[0])
+      const created = ModelProperty.create(
+        { ...property, modelName } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false }
+      ) as ModelProperty
       const subscription = created.getService().subscribe((snapshot) => {
         if ((snapshot as { value?: string }).value === 'error') {
           const err = (snapshot.context as any)._loadingError?.error ?? new Error('Failed to create model property')

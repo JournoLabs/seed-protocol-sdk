@@ -1,7 +1,7 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
-import { updateModelProperties, convertPropertyToSchemaUpdate } from '@/helpers/updateSchema'
+import { updateModelProperties, convertPropertyToSchemaUpdate, writeFullSchemaNewVersion } from '@/helpers/updateSchema'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
@@ -588,7 +588,7 @@ export class Schema {
    * Get schema instance by schemaFileId (preferred method)
    * Returns null if not found in cache
    */
-  static getById(schemaFileId: string): Schema | undefined {
+  static getById(schemaFileId: string): Schema | null {
     if (this.instanceCacheById.has(schemaFileId)) {
       const { instance, refCount } = this.instanceCacheById.get(schemaFileId)!
       this.instanceCacheById.set(schemaFileId, {
@@ -597,7 +597,7 @@ export class Schema {
       })
       return instance
     }
-    return undefined
+    return null
   }
 
   /**
@@ -736,7 +736,7 @@ export class Schema {
       // Use loadAllSchemasFromDb as single source of truth
       // This intelligently merges database and file data, including drafts
       const allSchemasData = await loadAllSchemasFromDb()
-      
+
       // Filter internal schemas unless explicitly included
       let filteredSchemas = includeInternal
         ? allSchemasData
@@ -771,7 +771,7 @@ export class Schema {
         }
         filteredSchemas = Array.from(schemaMap.values())
       }
-      
+
       // Create Schema instances using the schemaFileId from filtered data to ensure correct version
       const schemaInstances: Schema[] = []
       const processedSchemaNames = new Set<string>()
@@ -951,29 +951,43 @@ export class Schema {
    */
   get models(): Model[] {
     const context = this._getSnapshotContext()
-    
+    const schemaName = context.schemaName
+
     // Get model IDs from service context (reactive state)
     const liveQueryIds = context._liveQueryModelIds || []
-    
+
     // Get pending model IDs (not yet in DB)
     // Note: schemaId lookup is async, so we skip pending IDs here
     // They will be included when schemaId is available asynchronously
     const pendingIds: string[] = []
-    
+
     // Combine and deduplicate
     const allModelIds = [...new Set([...liveQueryIds, ...pendingIds])]
-    
-    // Get Model instances from static cache
+
+    // Get Model instances from static cache (from schema load)
+    const seen = new Set<string>()
     const modelInstances: Model[] = []
     for (const modelFileId of allModelIds) {
       const model = Model.getById(modelFileId)
-      if (model) {
+      if (model && modelFileId && !seen.has(modelFileId)) {
         modelInstances.push(model)
+        seen.add(modelFileId)
       }
-      // Note: Cannot create models asynchronously in this synchronous getter
-      // Models will be created elsewhere when needed
     }
-    
+
+    // Include models created at runtime via Model.create() that belong to this schema
+    // (they may not be in _liveQueryModelIds until schema context is updated)
+    if (schemaName) {
+      const cachedForSchema = Model.getCachedInstancesForSchema(schemaName)
+      for (const model of cachedForSchema) {
+        const id = model.id
+        if (id && !seen.has(id)) {
+          modelInstances.push(model)
+          seen.add(id)
+        }
+      }
+    }
+
     // Return a new array reference (snapshot at time of access)
     return [...modelInstances]
   }
@@ -1157,9 +1171,15 @@ export class Schema {
       true, // isDraft = true (still a draft until file is written)
     )
 
+    const dbSchema = await db
+      .select()
+      .from(schemasTable)
+      .where(eq(schemasTable.name, this.schemaName))
+      .limit(1)
+
     // Collect all edited properties and convert them to SchemaPropertyUpdate format
     const propertyUpdates = []
-    
+
     for (const propertyKey of context._editedProperties) {
       // Skip schema-level changes (like schema name changes)
       if (propertyKey === 'schema:name') {
@@ -1201,6 +1221,32 @@ export class Schema {
     }
 
     if (propertyUpdates.length === 0) {
+      // When only new models were added, _editedProperties contains 'schema:models' and we write the full schema
+      if (context._editedProperties.has('schema:models')) {
+        const newFilePath = await writeFullSchemaNewVersion(this.schemaName, currentSchema)
+        const { BaseFileManager } = await import('@/helpers/FileManager/BaseFileManager')
+        const fileContent = await BaseFileManager.readFileAsString(newFilePath)
+        const publishedSchema = JSON.parse(fileContent) as SchemaFileFormat
+        if (dbSchema.length > 0) {
+          await db
+            .update(schemasTable)
+            .set({
+              isDraft: false,
+              isEdited: false,
+              schemaFileId: publishedSchema.id,
+              schemaData: JSON.stringify(publishedSchema, null, 2),
+              version: publishedSchema.version,
+              updatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
+            })
+            .where(eq(schemasTable.id, dbSchema[0].id!))
+        }
+        this._service.send({
+          type: 'clearDraft',
+          _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
+          _dbVersion: publishedSchema.version,
+        } as any)
+        return newFilePath
+      }
       logger('No valid property updates to save')
       return ''
     }
@@ -1215,12 +1261,6 @@ export class Schema {
     const publishedSchema = JSON.parse(fileContent) as SchemaFileFormat
 
     // Update database record: set isDraft = false and update schemaFileId
-    const dbSchema = await db
-      .select()
-      .from(schemasTable)
-      .where(eq(schemasTable.name, this.schemaName))
-      .limit(1)
-
     if (dbSchema.length > 0) {
       await db
         .update(schemasTable)

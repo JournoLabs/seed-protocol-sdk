@@ -1040,6 +1040,37 @@ export class Model {
   }
 
   /**
+   * Get all Model instances for a schema from cache only (synchronous).
+   * Includes models created at runtime via Model.create() that may not yet be in schema context.
+   */
+  static getCachedInstancesForSchema(schemaName: string): Model[] {
+    const instances: Model[] = []
+    const seen = new Set<string>()
+    for (const [nameKey, id] of this.instanceCacheByName.entries()) {
+      const [cachedSchemaName] = nameKey.split(':')
+      if (cachedSchemaName === schemaName && id && !seen.has(id)) {
+        const instance = this.getById(id)
+        if (instance) {
+          instances.push(instance)
+          seen.add(id)
+        }
+      }
+    }
+    for (const [nameKey, entry] of this.instanceCache.entries()) {
+      const [cachedSchemaName] = nameKey.split(':')
+      if (cachedSchemaName === schemaName) {
+        const context = entry.instance._getSnapshotContext()
+        const id = context.id
+        if (id && !seen.has(id)) {
+          instances.push(entry.instance)
+          seen.add(id)
+        }
+      }
+    }
+    return instances
+  }
+
+  /**
    * Get Model instance by name, querying database if not in cache
    * This is an async version that can query the database when schemaName is not provided
    * 
@@ -1346,12 +1377,39 @@ export class Model {
 
     const rows = await getModelsData(schemaName)
     const instances: Model[] = []
+    const seen = new Set<string>()
 
     for (const row of rows) {
       if (row.schemaFileId) {
         const instance = await this.createById(row.schemaFileId)
         if (instance) {
           instances.push(instance)
+          seen.add(instance.id ?? row.schemaFileId)
+        }
+      }
+    }
+
+    // Merge in any instances from cache for this schema (e.g. just-created model not yet visible in DB read).
+    if (schemaName !== undefined && schemaName !== '') {
+      for (const [nameKey, id] of this.instanceCacheByName.entries()) {
+        const [cachedSchemaName] = nameKey.split(':')
+        if (cachedSchemaName === schemaName && id && !seen.has(id)) {
+          const instance = this.getById(id)
+          if (instance) {
+            instances.push(instance)
+            seen.add(id)
+          }
+        }
+      }
+      for (const [nameKey, entry] of this.instanceCache.entries()) {
+        const [cachedSchemaName] = nameKey.split(':')
+        if (cachedSchemaName === schemaName) {
+          const context = entry.instance._getSnapshotContext()
+          const id = context.id
+          if (id && !seen.has(id)) {
+            instances.push(entry.instance)
+            seen.add(id)
+          }
         }
       }
     }

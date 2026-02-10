@@ -564,13 +564,6 @@ class Db extends BaseDb implements IDb {
       // Subscribe to SQLocal's subscription API
       const subscription = reactiveQueryResult.subscribe(
         (data: Record<string, any>[]) => {
-          // Log the actual data structure for debugging
-          if (data && data.length > 0) {
-            // Try to extract IDs/names for logging (check common field names)
-            const sampleIds = data.map((d: any) => {
-              return d.id || d.modelId || d.schemaId || d.modelFileId || d.schemaFileId || d.name || d.modelName || JSON.stringify(d).substring(0, 50)
-            })
-          }
           // Emit data through RxJS Observable (cast to T[] since SQLocal returns Record<string, any>[])
           subscriber.next(data as T[])
         },

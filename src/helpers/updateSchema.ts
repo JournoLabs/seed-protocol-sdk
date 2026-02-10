@@ -1,8 +1,7 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
 import { SchemaFileFormat, JsonImportSchema } from '@/types/import'
 import { getLatestSchemaVersion } from './schema'
-// Dynamic import to break circular dependency with imports/json -> helpers/db -> ModelProperty -> updateSchema
-// import { loadSchemaFromFile, createModelsFromJson } from '@/imports/json'
+import { createModelsFromJson, loadSchemaFromFile } from '@/imports/json'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
 import { SchemaType } from '@/seedSchema/SchemaSchema'
@@ -136,6 +135,44 @@ async function getSchemaFileId(schemaName: string): Promise<string> {
   }
   
   return dbSchema[0].schemaFileId
+}
+
+/**
+ * Write the full schema to a new version file (e.g. when new models were added).
+ * Used when _editedProperties contains 'schema:models' and there are no property-level updates.
+ * @param schemaName - Schema name
+ * @param schema - Full schema object (e.g. from _buildModelsFromInstances)
+ * @returns The file path of the new schema version
+ */
+export async function writeFullSchemaNewVersion(
+  schemaName: string,
+  schema: SchemaFileFormat,
+): Promise<string> {
+  const latestVersion = await getLatestSchemaVersion(schemaName)
+  const newVersion = latestVersion + 1
+  const schemaWithNewVersion: SchemaFileFormat = {
+    ...schema,
+    version: newVersion,
+    metadata: {
+      ...schema.metadata,
+      updatedAt: new Date().toISOString(),
+    },
+    migrations: [
+      ...(schema.migrations || []),
+      {
+        version: newVersion,
+        timestamp: new Date().toISOString(),
+        description: 'New schema version (e.g. new models added)',
+        changes: [{ type: 'full_schema_write' as const }],
+      },
+    ],
+  }
+  const newFilePath = getSchemaFilePath(schemaName, newVersion, schema.id ?? (await getSchemaFileId(schemaName)))
+  const newContent = JSON.stringify(schemaWithNewVersion, null, 2)
+  await BaseFileManager.saveFile(newFilePath, newContent)
+  await BaseFileManager.waitForFileWithContent(newFilePath)
+  logger(`Created new schema version ${newVersion} for ${schemaName} at ${newFilePath}`)
+  return newFilePath
 }
 
 /**
@@ -448,9 +485,6 @@ async function loadSchemaWithRenames(
     ) as JsonImportSchema['models'],
   }
 
-  // Use dynamic import to break circular dependency
-  const { createModelsFromJson } = await import('@/imports/json')
-  
   // Generate schema ID if missing
   if (!schemaFile.id) {
     const { generateId } = await import('@/helpers')
@@ -641,9 +675,6 @@ export async function renameModelProperty(
 
   logger(`Renamed property ${oldPropertyName} to ${newPropertyName} in schema ${schemaName} v${newVersion}`)
 
-  // Use dynamic import to break circular dependency
-  const { loadSchemaFromFile } = await import('@/imports/json')
-  
   // Load the new schema file
   await loadSchemaFromFile(newFilePath)
 
@@ -807,9 +838,6 @@ export async function deleteModelFromSchema(
 
   logger(`Deleted model ${modelName} from schema ${schemaName} v${newVersion}`)
 
-  // Use dynamic import to break circular dependency
-  const { loadSchemaFromFile } = await import('@/imports/json')
-  
   // Load the new schema file
   await loadSchemaFromFile(newFilePath)
 
@@ -921,9 +949,6 @@ export async function deletePropertyFromModel(
 
   logger(`Deleted property ${propertyName} from model ${modelName} in schema ${schemaName} v${newVersion}`)
 
-  // Use dynamic import to break circular dependency
-  const { loadSchemaFromFile } = await import('@/imports/json')
-  
   // Load the new schema file
   await loadSchemaFromFile(newFilePath)
 

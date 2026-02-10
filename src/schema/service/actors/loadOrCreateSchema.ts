@@ -4,9 +4,12 @@ import { SchemaMachineContext } from '../schemaMachine'
 import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schema'
 import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { BaseFileManager, generateId, } from '@/helpers'
-import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
+import { addModelsToDb, addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
+import { createModelsFromJson } from '@/imports/json'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
 import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
@@ -27,8 +30,6 @@ const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
   }
 
   try {
-    const { modelSchemas, models: modelsTable } = await import('@/seedSchema')
-    
     const modelRecords = await db
       .select({
         modelFileId: modelsTable.schemaFileId,
@@ -105,9 +106,6 @@ const verifyPropertiesPersisted = async (
   if (!db) {
     throw new Error('Database not available for property verification')
   }
-
-  const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-  const { eq } = await import('drizzle-orm')
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const props = await db
@@ -228,9 +226,6 @@ export const loadOrCreateSchema = fromCallback<
             
             // Also add models and properties to database
             // Convert to JsonImportSchema format for processing
-            const { createModelsFromJson } = await import('@/imports/json')
-            const { addModelsToDb } = await import('@/helpers/db')
-            
             const importData: JsonImportSchema = {
               name: schemaName,
               models: Object.fromEntries(
@@ -335,8 +330,6 @@ export const loadOrCreateSchema = fromCallback<
               
               // Verify properties are persisted (important for browser environments)
               // Query the database to get model IDs that were just created
-              const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-              const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
               const modelLinks = await db
                 .select({
                   modelId: modelSchemas.modelId,
@@ -359,10 +352,6 @@ export const loadOrCreateSchema = fromCallback<
             // Schema exists, but always ensure models/properties are in database
             // This handles the case where schema was added but models weren't (from previous code)
             // or where models were added but properties weren't
-            const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
-            const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
-            const { properties: propertiesTable } = await import('@/seedSchema/ModelSchema')
-            
             // Check if models are linked to the schema
             const modelLinks = await db
               .select({
@@ -405,9 +394,6 @@ export const loadOrCreateSchema = fromCallback<
             if (missingModels.length > 0 || missingProperties || modelLinks.length === 0) {
               logger(`Seed Protocol schema exists but models/properties incomplete (missing models: ${missingModels.length}, missing properties: ${missingProperties}), adding them now`)
               console.log(`[loadOrCreateSchema] Adding models/properties: missingModels=${missingModels.length}, missingProperties=${missingProperties}, modelLinks=${modelLinks.length}`)
-              const { createModelsFromJson } = await import('@/imports/json')
-              const { addModelsToDb } = await import('@/helpers/db')
-              
               // Convert SchemaFileFormat to JsonImportSchema format
               // Schema format: { dataType, ref, refValueType, storageType, localStorageDir, filenameSuffix }
               // JSON import format: { type, model, items, storage: { type, path, extension } }

@@ -4,6 +4,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, models, properties } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
+import { startCase } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import debug from 'debug'
 
@@ -77,11 +78,13 @@ export const loadOrCreateProperty = fromCallback<
     const modelName = metadataRecord.modelType || context.modelName
     if (modelName) {
       try {
+        // Normalize to PascalCase so "post" (from seeds.type/metadata) matches "Post" in models table
+        const normalizedModelName = startCase(modelName)
         // Query properties table to get property schema
         const modelRecords = await db
           .select({ id: models.id })
           .from(models)
-          .where(eq(models.name, modelName))
+          .where(eq(models.name, normalizedModelName))
           .limit(1)
 
         if (modelRecords.length > 0 && modelRecords[0].id) {

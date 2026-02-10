@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import { useModel, useModels, useCreateModel, useDestroyModel } from '@/browser/react/model'
-import { SeedProvider } from '@/browser/react'
+import { SeedProvider, createSeedQueryClient } from '@/browser/react'
+import type { QueryClient } from '@tanstack/react-query'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
@@ -71,7 +72,7 @@ const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
 // Test component for useModels
 function UseModelsTest({ schemaId }: { schemaId: string | null | undefined }) {
   console.log('[UseModelsTest] schemaId:', schemaId)
-  const { models } = useModels(schemaId)
+  const { models, isLoading } = useModels(schemaId)
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
@@ -80,13 +81,13 @@ function UseModelsTest({ schemaId }: { schemaId: string | null | undefined }) {
     console.log('[UseModelsTest] models.length:', models.length)
     console.log('[UseModelsTest] models details:', models.map(m => ({ name: m.modelName, id: m.id })))
     // If schemaId is null/undefined, we're done (empty array is expected)
-    // If schemaId is provided, wait for models to actually be loaded (length > 0)
+    // If schemaId is provided: loaded when we have models or when initial load has completed (even with 0 models)
     if (schemaId === null || schemaId === undefined) {
       setStatus('loaded')
-    } else if (models.length > 0) {
+    } else if (models.length > 0 || !isLoading) {
       setStatus('loaded')
     }
-  }, [models, schemaId])
+  }, [models, schemaId, isLoading])
 
   return (
     <div data-testid="use-models-test">
@@ -486,10 +487,11 @@ describe('React Model Hooks Integration Tests', () => {
       // Use schema name instead of ID to ensure we get the same instance with models loaded
       render(<UseModelWithNameTest schemaId="Test Schema Models" modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
+      // Wait for component to settle (status 'loaded') so model is available and effect has run
       await waitFor(
         () => {
-          const modelName = screen.queryByTestId('model-name')
-          return modelName !== null
+          const status = screen.getByTestId('model-status')
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
@@ -609,7 +611,18 @@ describe('React Model Hooks Integration Tests', () => {
   })
 
   describe('useModels with dynamic model creation', () => {
+    const modelsQueryClientRef: React.MutableRefObject<QueryClient | null> = { current: null }
+    const SeedProviderWithQueryClientRef = ({ children }: { children: React.ReactNode }) => {
+      const client = React.useMemo(() => createSeedQueryClient(), [])
+      return (
+        <SeedProvider queryClient={client} queryClientRef={modelsQueryClientRef}>
+          {children}
+        </SeedProvider>
+      )
+    }
+
     it('should immediately show newly created model in useModels without page reload', async () => {
+      modelsQueryClientRef.current = null
       // Create an empty schema for this test
       const emptySchema: SchemaFileFormat = {
         $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -667,8 +680,11 @@ describe('React Model Hooks Integration Tests', () => {
         }, 5000)
       })
 
-      // Render component with useModels - should start with 0 models
-      render(<UseModelsTest schemaId="Test Schema Dynamic" />, { container, wrapper: SeedProviderWrapper })
+      // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
+      render(<UseModelsTest schemaId="Test Schema Dynamic" />, {
+        container,
+        wrapper: SeedProviderWithQueryClientRef,
+      })
 
       // Wait for initial render
       await waitFor(
@@ -720,7 +736,7 @@ describe('React Model Hooks Integration Tests', () => {
       // Check if model was written to DB
       const testDb = BaseDb.getAppDb()
       if (testDb) {
-        const { models: modelsTable } = await import('@/seedSchema/SchemaSchema')
+        const { models: modelsTable } = await import('@/seedSchema/ModelSchema')
         const modelRecords = await testDb
           .select()
           .from(modelsTable)
@@ -730,28 +746,19 @@ describe('React Model Hooks Integration Tests', () => {
       }
 
       // Wait for the model to appear in useModels - this is the critical test
-      // The component should update immediately without needing a page reload
+      // Wait for query cache first (broadcast triggers refetch), then flush React and assert on DOM.
+      await new Promise((r) => setTimeout(r, 200))
+      const queryKey = ['seed', 'models', 'Test Schema Dynamic'] as const
       await waitFor(
         () => {
-          const count = screen.getByTestId('models-count')
-          const modelCount = parseInt(count.textContent || '0')
-          return modelCount >= 1
+          const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
+          return Array.isArray(data) && data.length >= 1
         },
-        { timeout: 15000 },
-        {
-          onTimeout: (error) => {
-            // Log helpful debug info if test fails
-            const count = screen.getByTestId('models-count')
-            const currentCount = count.textContent
-            throw new Error(
-              `Model did not appear in useModels after creation. Current count: ${currentCount}. ` +
-              `This indicates the bug where newly created models don't appear until page reload.`
-            )
-          },
-        }
+        { timeout: 10000 }
       )
-
-      // Verify the model appears in the UI
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0))
+      })
       const finalCount = screen.getByTestId('models-count')
       expect(parseInt(finalCount.textContent || '0')).toBeGreaterThanOrEqual(1)
 
@@ -826,44 +833,53 @@ describe('React Model Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
     })
 
-    it('should destroy a model and set loading state during destroy', async () => {
-      const modelToDestroy = Model.create('DestroyTestModel', 'Test Schema Models', {
-        properties: { name: { dataType: 'Text' } },
-        waitForReady: false,
-      })
+    it(
+      'should destroy a model and set loading state during destroy',
+      async () => {
+        const modelToDestroy = Model.create('DestroyTestModel', 'Test Schema Models', {
+          properties: { name: { dataType: 'Text' } },
+          waitForReady: false,
+        })
 
-      render(<UseDestroyModelTest model={modelToDestroy} />, { container })
+        render(<UseDestroyModelTest model={modelToDestroy} />, { container })
 
-      await waitFor(
-        () => {
-          const btn = screen.getByTestId('destroy-model-button')
-          expect(btn).toBeTruthy()
-          expect(btn.hasAttribute('disabled')).toBe(false)
-        },
-        { timeout: 5000 }
-      )
+        await waitFor(
+          () => {
+            const btn = screen.getByTestId('destroy-model-button')
+            expect(btn).toBeTruthy()
+            expect(btn.hasAttribute('disabled')).toBe(false)
+          },
+          { timeout: 5000 }
+        )
 
-      screen.getByTestId('destroy-model-button').click()
+        screen.getByTestId('destroy-model-button').click()
 
-      await waitFor(
-        () => {
-          const isLoading = screen.getByTestId('destroy-model-is-loading')
-          return isLoading.textContent === 'true'
-        },
-        { timeout: 2000 }
-      )
+        await waitFor(
+          () => {
+            const isLoading = screen.getByTestId('destroy-model-is-loading')
+            return isLoading.textContent === 'true'
+          },
+          { timeout: 2000 }
+        )
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('destroy-model-status')
-          return status.textContent === 'destroyed' || status.textContent === 'error'
-        },
-        { timeout: 25000 }
-      )
+        // Let destroy() complete and React flush setStatus('destroyed') (destroy resolves in ~10ms)
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100))
+        })
 
-      const status = screen.getByTestId('destroy-model-status')
-      expect(['destroyed', 'error']).toContain(status.textContent)
-    })
+        await waitFor(
+          () => {
+            const status = screen.getByTestId('destroy-model-status')
+            return status.textContent === 'destroyed' || status.textContent === 'error'
+          },
+          { timeout: 25000 }
+        )
+
+        const status = screen.getByTestId('destroy-model-status')
+        expect(['destroyed', 'error']).toContain(status.textContent)
+      },
+      30000
+    )
   })
 })
 

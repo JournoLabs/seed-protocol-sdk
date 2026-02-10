@@ -752,20 +752,15 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
 
     it('should return property when modelName and propertyName provided', async () => {
-      render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
-
-      await waitFor(
-        () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null
-        },
-        { timeout: 15000 }
+      const view = render(
+        <UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />,
+        { container, wrapper: SeedProviderWrapper }
       )
 
-      const propertyName = screen.getByTestId('property-name')
-      expect(propertyName.textContent).toBe('title')
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 15000 })
+      expect(propertyNameEl.textContent).toBe('title')
 
-      const propertyDataType = screen.getByTestId('property-data-type')
+      const propertyDataType = within(view.container).getByTestId('property-data-type')
       expect(propertyDataType.textContent).toBe('Text')
     })
 
@@ -826,8 +821,17 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { timeout: 15000 }
       )
 
-      const validationErrorsCount = screen.getByTestId('validation-errors-count')
-      expect(parseInt(validationErrorsCount.textContent || '0')).toBeGreaterThanOrEqual(0)
+      // Assert inside waitFor so we read the value while the element is in the DOM (it can disappear shortly after)
+      await waitFor(
+        () => {
+          const validationErrorsCount = screen.queryByTestId('validation-errors-count')
+          if (validationErrorsCount === null) return false
+          const count = parseInt(validationErrorsCount.textContent || '0', 10)
+          expect(count).toBeGreaterThanOrEqual(0)
+          return true
+        },
+        { timeout: 15000 }
+      )
     })
   })
 
@@ -851,10 +855,10 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { timeout: 10000 }
       )
 
-      // Render component with empty schema
+      // Render component with empty schema (must use SeedProvider so useIsClientReady and React Query work)
       render(
         <ModelPropertiesListTest schemaIdOrModelId="Empty Test Schema Properties" modelName="NewModel" />,
-        { container }
+        { container, wrapper: SeedProviderWrapper }
       )
 
       // Wait for component to render
@@ -899,6 +903,9 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         },
         { timeout: 10000 }
       )
+
+      // Give useModels poll/refetch time to pick up the new model before waiting for properties
+      await new Promise((r) => setTimeout(r, 800))
 
       // Wait for properties to appear in the UI
       await waitFor(

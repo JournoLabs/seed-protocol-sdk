@@ -1,5 +1,6 @@
 import { loadAllSchemasFromDb, } from "@/helpers/schema"
 import { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import { flushSync } from "react-dom"
 import debug from "debug"
 import { useIsClientReady } from "./client"
 import { Schema } from "@/Schema/Schema"
@@ -46,17 +47,21 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
 
       // Set initial loading state based on whether status is 'idle'
       const isIdle = initialSnapshot.value === 'idle'
-      setIsLoading(!isIdle)
       if (isIdle) {
+        flushSync(() => setIsLoading(false))
         setError(null)
+      } else {
+        setIsLoading(true)
       }
 
       // Subscribe to all status changes and update isLoading based on whether status is 'idle'
       subscriptionRef.current = service.subscribe((snapshot: SchemaSnapshot) => {
         const isIdle = snapshot.value === 'idle'
-        setIsLoading(!isIdle)
         if (isIdle) {
+          flushSync(() => setIsLoading(false))
           setError(null)
+        } else {
+          setIsLoading(true)
         }
       })
 

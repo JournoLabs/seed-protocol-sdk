@@ -37,14 +37,13 @@ export function useLiveQuery<T>(
   const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
   const previousDataRef = useRef<T[] | undefined>(undefined)
   const isClientReady = useIsClientReady()
-  
+
   // Create Observable outside useEffect so it's stable and distinctUntilChanged can work
   // Only recreate when query or isClientReady changes
   const observable = useMemo(() => {
     if (!isClientReady || !query) {
       return null
     }
-    
     try {
       return BaseDb.liveQuery<T>(query)
     } catch (error) {
@@ -52,33 +51,33 @@ export function useLiveQuery<T>(
       return null
     }
   }, [query, isClientReady])
-  
+
   useEffect(() => {
     // Cleanup previous subscription if it exists
     if (subscriptionRef.current) {
       subscriptionRef.current.unsubscribe()
       subscriptionRef.current = null
     }
-    
+
     // Don't subscribe if observable is null
     if (!observable) {
       return
     }
-    
+
     const subscription = observable.subscribe({
       next: (results) => {
         const prev = previousDataRef.current
         const prevJson = prev ? JSON.stringify(prev) : 'undefined'
         const currJson = results ? JSON.stringify(results) : 'undefined'
         const isSameValue = prevJson === currJson
-        
+
         // Defensive check: don't update state if values are the same
         // This should be handled by distinctUntilChanged, but adding as safety
         // (especially important for Drizzle query builders which may not work with distinctUntilChanged)
         if (isSameValue && prev !== undefined) {
           return
         }
-        
+
         previousDataRef.current = results
         setData(results)
       },
@@ -88,9 +87,9 @@ export function useLiveQuery<T>(
         // This prevents UI flickering on transient errors
       },
     })
-    
+
     subscriptionRef.current = subscription
-    
+
     // Cleanup on unmount or observable change
     return () => {
       if (subscriptionRef.current) {
@@ -99,7 +98,7 @@ export function useLiveQuery<T>(
       }
     }
   }, [observable]) // Only re-subscribe when observable changes
-  
+
   return data
 }
 

@@ -115,6 +115,12 @@ const processBasicProperties = async (
       value = newValues
     }
 
+    // uint256 (Date) must be numeric/BigInt; normalize ISO strings to Unix seconds
+    if (easDataType === 'uint256' && (typeof value === 'string' || value instanceof Date)) {
+      const ms = value instanceof Date ? value.getTime() : new Date(value).getTime()
+      value = BigInt(Math.floor(ms / 1000))
+    }
+
     let data = [
       {
         name: propertyNameForSchema,
@@ -147,8 +153,12 @@ const processRelationOrImageProperty = async (
   uploadedTransactions: UploadedTransaction[],
   originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
-
-  if (!relationOrImageProperty.schemaUid) {
+  let relationOrImageSchemaUid = relationOrImageProperty.schemaUid
+  if (!relationOrImageSchemaUid && relationOrImageProperty.propertyDef) {
+    const propertyData = await getPropertyData(relationOrImageProperty)
+    relationOrImageSchemaUid = propertyData.schemaUid
+  }
+  if (!relationOrImageSchemaUid) {
     throw new Error(
       `Schema uid not found for relation or image property: ${relationOrImageProperty.propertyName}`,
     )
@@ -212,7 +222,7 @@ const processRelationOrImageProperty = async (
     propertiesToUpdate: [
       {
         publishLocalId: originalSeedLocalId,
-        propertySchemaUid: relationOrImageProperty.schemaUid,
+        propertySchemaUid: relationOrImageSchemaUid,
       },
     ],
   }
@@ -248,8 +258,12 @@ const processListProperty = async (
   multiPublishPayload: MultiPublishPayload,
   originalSeedLocalId: string,
 ): Promise<MultiPublishPayload> => {
-
-  if (!listProperty.schemaUid) {
+  let listPropertySchemaUid = listProperty.schemaUid
+  if (!listPropertySchemaUid && listProperty.propertyDef) {
+    const propertyData = await getPropertyData(listProperty)
+    listPropertySchemaUid = propertyData.schemaUid
+  }
+  if (!listPropertySchemaUid) {
     throw new Error(
       `Schema uid not found for list property: ${listProperty.propertyName}`,
     )
@@ -332,7 +346,7 @@ const processListProperty = async (
       propertiesToUpdate: [
         {
           publishLocalId: originalSeedLocalId,
-          propertySchemaUid: listProperty.schemaUid,
+          propertySchemaUid: listPropertySchemaUid,
         },
       ],
     }

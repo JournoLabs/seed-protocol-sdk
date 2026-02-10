@@ -37,6 +37,7 @@ import {
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
 import { deleteItem } from '@/db/write/deleteItem'
+import { updateSeedUid } from '@/db/write/updateSeedUid'
 import { eq, and } from 'drizzle-orm'
 import debug from 'debug'
 
@@ -344,6 +345,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 type: 'updateContext',
                 [prop]: value,
               })
+              // Auto-persist seedUid to DB when assigned so future loads and getPublishPayload see it
+              if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
+                const seedLocalId = target._getSnapshotContext().seedLocalId
+                if (seedLocalId) {
+                  void updateSeedUid({ seedLocalId, seedUid: value }).catch((err) => {
+                    itemLogger('updateSeedUid failed:', err)
+                  })
+                }
+              }
               return true
             }
             
@@ -860,6 +870,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return await getPublishPayload(this, uploadedTransactions)
   }
 
+  persistSeedUid = async (): Promise<void> => {
+    const ctx = this._getSnapshotContext()
+    const seedLocalId = ctx.seedLocalId
+    const seedUid = ctx.seedUid
+    if (seedLocalId && seedUid && typeof seedUid === 'string' && seedUid.length > 0) {
+      await updateSeedUid({ seedLocalId, seedUid })
+    }
+  }
+
   get serviceContext() {
     const snapshot = this._service.getSnapshot()
     return (snapshot as any).context || {}
@@ -1032,58 +1051,37 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   /**
    * Helper method to determine if a property key is a model-specific property
    * (as opposed to an internal/common property)
-   * 
-   * Since properties are transformed in the subscription to match schema keys
-   * (e.g., "authorId" -> "author", "tagIds" -> "tags"), the transformed key
-   * should match a schema key directly. We also check the property instance's
-   * original propertyName to handle edge cases.
+   *
+   * Uses the same transformation as _getSchemaKeysFromPropertyInstances so that
+   * Map keys (e.g. "authorId", "tagIds") are correctly matched to schema keys
+   * (e.g. "author", "tags").
    */
   protected _isModelProperty(key: string, modelSchemaKeys: string[]): boolean {
-    // Direct match with schema (transformed keys should match schema keys)
+    if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+      return false
+    }
     if (modelSchemaKeys.includes(key)) {
       return true
     }
-
-    // Check property instances to see if this key corresponds to a model property
-    // This handles cases where the transformation might not perfectly match
-    const serviceContext = this.serviceContext
-    const propertyInstances = serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
-    
-    if (propertyInstances) {
-      for (const [originalKey, propertyInstance] of propertyInstances) {
-        // Skip internal properties
-        if (INTERNAL_PROPERTY_NAMES.includes(originalKey as string)) {
-          continue
-        }
-
-        // Reconstruct the transformation to see if it matches our key
-        let transformedKey = originalKey as string
-        
-        if (propertyInstance.alias) {
-          transformedKey = propertyInstance.alias
-        } else if (originalKey.endsWith('Ids')) {
-          transformedKey = pluralize(originalKey.slice(0, -3))
-        } else if (originalKey.endsWith('Id')) {
-          transformedKey = originalKey.slice(0, -2)
-        }
-        
-        // If the transformed key matches, check if it's a model property
-        if (transformedKey === key) {
-          // Check if the base property name (without Id/Ids) is in the schema
-          const baseName = originalKey.endsWith('Id') 
-            ? originalKey.slice(0, -2)
-            : originalKey.endsWith('Ids')
-            ? pluralize(originalKey.slice(0, -3))
-            : originalKey
-          
-          // Also check the alias if it exists
-          const checkName = propertyInstance.alias || baseName
-          return modelSchemaKeys.includes(checkName)
-        }
-      }
+    const propertyInstances = this.serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
+    if (!propertyInstances) {
+      return false
     }
-
-    return false
+    const propertyInstance = propertyInstances.get(key)
+    if (!propertyInstance) {
+      return false
+    }
+    // Apply same transformation as _getSchemaKeysFromPropertyInstances
+    const propertyName = propertyInstance.propertyName || key
+    let transformedKey = propertyName
+    if (propertyInstance.alias) {
+      transformedKey = propertyInstance.alias
+    } else if (propertyName.endsWith('Ids')) {
+      transformedKey = pluralize(propertyName.slice(0, -3))
+    } else if (propertyName.endsWith('Id')) {
+      transformedKey = propertyName.slice(0, -2)
+    }
+    return modelSchemaKeys.includes(transformedKey)
   }
 
   /**
