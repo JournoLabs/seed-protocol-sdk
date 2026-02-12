@@ -48,9 +48,19 @@ export interface SeedConfig {
   dbConfig?: DbConfig
 }
 
+/**
+ * Address configuration for owned vs watched wallets.
+ * - owned: addresses the user controls (create, edit, publish)
+ * - watched: addresses to browse (read-only, sync from EAS)
+ * Legacy: string[] is treated as owned only.
+ */
+export type AddressConfiguration =
+  | { owned: string[]; watched?: string[] }
+  | string[]
+
 export interface SeedConstructorOptions {
   config: SeedConfig
-  readonly addresses?: string[]
+  readonly addresses?: AddressConfiguration
 }
 
 /**

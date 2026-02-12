@@ -1,3 +1,4 @@
+import type { AddressConfiguration } from '@/types'
 import debug                      from 'debug'
 import { createActor, waitFor }   from 'xstate'
 import { clientManagerMachine }   from '@/client/clientManagerMachine'
@@ -8,6 +9,10 @@ import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
 import { BaseDb }           from '@/db/Db/BaseDb'
 import { appState, models } from '@/seedSchema'
 import { eq }               from 'drizzle-orm'
+import {
+  getOwnedAddressesFromDb,
+  getWatchedAddressesFromDb,
+} from '@/helpers/db'
 
 const logger               = debug('seedSdk:client')
 
@@ -79,6 +84,8 @@ const clientInstance = {
           isSaving: false,
           endpoints: undefined,
           addresses: undefined,
+          ownedAddresses: undefined,
+          watchedAddresses: undefined,
           models: undefined,
           arweaveDomain: undefined,
           filesDir: undefined,
@@ -124,7 +131,7 @@ const clientInstance = {
       throw error
     }
   },
-  setAddresses: async (addresses: string[]) => {
+  setAddresses: async (addresses: AddressConfiguration) => {
     ensureInitialized();
     logger('setAddresses', addresses);
     clientManager.send({ type: 'setAddresses', addresses });
@@ -133,9 +140,17 @@ const clientInstance = {
   },
   getAddresses: async () => {
     ensureInitialized();
-    const db = await BaseDb.getAppDb();
-    const results = await db.select().from(appState).where(eq(appState.key, 'addresses'));
-    return JSON.parse(results[0]?.value);
+    const owned = await getOwnedAddressesFromDb();
+    const watched = await getWatchedAddressesFromDb();
+    return { owned, watched };
+  },
+  getOwnedAddresses: async () => {
+    ensureInitialized();
+    return getOwnedAddressesFromDb();
+  },
+  getWatchedAddresses: async () => {
+    ensureInitialized();
+    return getWatchedAddressesFromDb();
   },
   addModel: async (modelDef: ModelDefObj) => {
     const db = await BaseDb.getAppDb();

@@ -1,11 +1,15 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, eq, getTableColumns, gt, SQL, sql, count, max } from "drizzle-orm"
+import { and, eq, getTableColumns, SQL, sql, count, max } from "drizzle-orm"
 import { toSnakeCase } from "drizzle-orm/casing"
+import { startCase } from "lodash-es"
 import { getItemProperties } from "./getItemProperties"
 import { getVersionData } from "./subqueries/versionData"
 import { seeds, versions } from "@/seedSchema"
+import { models } from "@/seedSchema/ModelSchema"
+import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
+import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -67,6 +71,26 @@ export const getItemData: GetItemData = async ({
   const seedRow = seedRows[0]
   const resolvedSeedLocalId = seedRow.seedLocalId
 
+  // Fix 5: Derive schemaName for multi-schema Model resolution (models -> model_schemas -> schemas)
+  let schemaName: string | undefined
+  const normalizedModelName = modelName ? startCase(modelName) : (seedRow.type ? startCase(seedRow.type) : undefined)
+  if (appDb && normalizedModelName) {
+    try {
+      const schemaRows = await appDb
+        .select({ schemaName: schemasTable.name })
+        .from(models)
+        .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
+        .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+        .where(eq(models.name, normalizedModelName))
+        .limit(1)
+      if (schemaRows.length > 0 && schemaRows[0].schemaName) {
+        schemaName = schemaRows[0].schemaName
+      }
+    } catch (error) {
+      logger('[getItemData] Error deriving schemaName:', error)
+    }
+  }
+
   // Now get version data if it exists - query versions table directly
   let versionRow = {
     versionsCount: 0,
@@ -99,6 +123,7 @@ export const getItemData: GetItemData = async ({
   let itemData = {
     ...seedRow,
     ...versionRow,
+    schemaName,
   } as ItemData & { [key: string]: any }
 
   const propertiesData = await getItemProperties({

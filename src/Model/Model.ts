@@ -25,6 +25,7 @@ import {
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
+import { toSnakeCase } from 'drizzle-orm/casing'
 import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
@@ -740,7 +741,12 @@ export class Model {
     // Step 11: Register with schema if requested, OR trigger write if properties are provided
     // If properties are provided, we need to write the model to get modelId for property creation
     // If schema provided, trigger write process instead of registration
-    const shouldTriggerWrite = (registerWithSchema && schemaInstance) || (options?.properties && Object.keys(options.properties).length > 0)
+    // When schemaName is passed as string (e.g. useCreateModel), we must trigger write so runtime-created
+    // models get persisted to DB and show up in useModels (which queries the database).
+    const shouldTriggerWrite =
+      (registerWithSchema && schemaInstance) ||
+      (options?.properties && Object.keys(options.properties).length > 0) ||
+      typeof schemaNameOrSchema === 'string'
     if (shouldTriggerWrite) {
       queueMicrotask(async () => {
         try {
@@ -1025,6 +1031,22 @@ export class Model {
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
       const [, cachedModelName] = nameKey.split(':')
       if (cachedModelName === modelName) {
+        return this.getById(id)
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Find Model by modelType (snake_case from DB/metadata).
+   * Handles model names with spaces: "new_model" -> finds "New model" (toSnakeCase("New model") === "new_model").
+   */
+  static findByModelType(modelType: string): Model | undefined {
+    if (!modelType) return undefined
+    for (const [nameKey, id] of this.instanceCacheByName.entries()) {
+      const parts = nameKey.split(':', 2)
+      const cachedModelName = parts[1]
+      if (cachedModelName && toSnakeCase(cachedModelName) === modelType) {
         return this.getById(id)
       }
     }

@@ -1,7 +1,7 @@
 import { eventEmitter } from '@/eventBus'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
-import { getAddressesFromDb } from '@/helpers/db'
+import { getAllAddressesFromDb } from '@/helpers/db'
 import {
   BaseFileManager,
 } from '@/helpers'
@@ -54,7 +54,7 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
   let addresses: string[] | undefined
 
   if (BaseDb.isAppDbReady()) {
-    addresses = await getAddressesFromDb()
+    addresses = await getAllAddressesFromDb()
   }
 
   if (!BaseDb.isAppDbReady()) {
@@ -73,7 +73,7 @@ export const downloadAllFilesBinaryRequestHandler = async () => {
              state === 'addModelsToDb' ||
              state === 'idle'
     }, { timeout: 30000 })
-    addresses = await getAddressesFromDb()
+    addresses = await getAllAddressesFromDb()
   }
 
   if (!addresses || addresses.length === 0) {

@@ -730,10 +730,20 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   static async all(
     modelName?: string,
     deleted?: boolean,
-    options?: { waitForReady?: boolean; readyTimeout?: number },
+    options?: {
+      waitForReady?: boolean
+      readyTimeout?: number
+      includeEas?: boolean
+      addressFilter?: 'owned' | 'watched' | 'all'
+    },
   ): Promise<Item<any>[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
-    const itemsData = await getItemsData({ modelName, deleted })
+    const {
+      waitForReady = false,
+      readyTimeout = 5000,
+      includeEas = false,
+      addressFilter,
+    } = options ?? {}
+    const itemsData = await getItemsData({ modelName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     for (const itemData of itemsData) {
       itemInstances.push(
@@ -829,6 +839,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   publish = async (): Promise<void> => {
+    const { assertItemOwned } = await import('@/helpers/ownership')
+    await assertItemOwned(this)
     this._service.send({ type: 'startPublish' })
     return new Promise<void>((resolve, reject) => {
       let wasPublishing = false
@@ -1510,6 +1522,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * Destroy the item: soft delete in DB, remove from caches, clean up subscriptions, stop service.
    */
   async destroy(): Promise<void> {
+    const { assertItemOwned } = await import('@/helpers/ownership')
+    await assertItemOwned(this)
     const context = this._getSnapshotContext()
     const cacheKey = context.seedUid || context.seedLocalId
     const cacheKeys: string[] = cacheKey ? [cacheKey] : []

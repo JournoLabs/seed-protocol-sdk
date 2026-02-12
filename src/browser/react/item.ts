@@ -184,21 +184,35 @@ type UseItemsReturn = {
 type UseItemsProps = {
   modelName?: string
   deleted?: boolean
+  includeEas?: boolean
+  addressFilter?: 'owned' | 'watched' | 'all'
 }
 
 type UseItems = (props: UseItemsProps) => UseItemsReturn
 
-const getItemsQueryKey = (modelName?: string, deleted?: boolean) =>
-  ['seed', 'items', modelName ?? null, deleted ?? false] as const
+const getItemsQueryKey = (
+  modelName?: string,
+  deleted?: boolean,
+  includeEas?: boolean,
+  addressFilter?: 'owned' | 'watched' | 'all'
+) => ['seed', 'items', modelName ?? null, deleted ?? false, includeEas ?? false, addressFilter ?? null] as const
 
-export const useItems: UseItems = ({ modelName, deleted = false }) => {
+export const useItems: UseItems = ({
+  modelName,
+  deleted = false,
+  includeEas = false,
+  addressFilter,
+}) => {
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
   const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
   const itemsRef = useRef<IItem<any>[]>([])
   const lastFetchedIdsRef = useRef<Set<string>>(new Set())
 
-  const queryKey = useMemo(() => getItemsQueryKey(modelName, deleted), [modelName, deleted])
+  const queryKey = useMemo(
+    () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter),
+    [modelName, deleted, includeEas, addressFilter],
+  )
 
   const {
     data: items = [],
@@ -206,7 +220,7 @@ export const useItems: UseItems = ({ modelName, deleted = false }) => {
     error: queryError,
   } = useQuery({
     queryKey,
-    queryFn: () => Item.all(modelName, deleted, { waitForReady: true }),
+    queryFn: () => Item.all(modelName, deleted, { waitForReady: true, includeEas, addressFilter }),
     enabled: isClientReady,
   })
   itemsRef.current = items
@@ -216,6 +230,9 @@ export const useItems: UseItems = ({ modelName, deleted = false }) => {
   const seedsQuery = useMemo(() => {
     if (!db) return null
     const conditions: any[] = []
+    if (!includeEas) {
+      conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as any)
+    }
     if (modelName) {
       conditions.push(eq(seeds.type, modelName.toLowerCase()))
     }
@@ -250,7 +267,7 @@ export const useItems: UseItems = ({ modelName, deleted = false }) => {
       .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
       .where(and(gt(versionData.versionsCount, 0), ...conditions))
       .groupBy(seeds.localId)
-  }, [db, isClientReady, modelName, deleted])
+  }, [db, isClientReady, modelName, deleted, includeEas])
   const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
   // Invalidate when table data actually changes so useQuery refetches

@@ -4,7 +4,8 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, models, properties } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
-import { startCase } from 'lodash-es'
+import { toSnakeCase } from 'drizzle-orm/casing'
+import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import debug from 'debug'
 
@@ -78,8 +79,8 @@ export const loadOrCreateProperty = fromCallback<
     const modelName = metadataRecord.modelType || context.modelName
     if (modelName) {
       try {
-        // Normalize to PascalCase so "post" (from seeds.type/metadata) matches "Post" in models table
-        const normalizedModelName = startCase(modelName)
+        // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
+        const normalizedModelName = upperFirst(camelCase(modelName))
         // Query properties table to get property schema
         const modelRecords = await db
           .select({ id: models.id })
@@ -114,6 +115,30 @@ export const loadOrCreateProperty = fromCallback<
       } catch (error) {
         logger(`Error loading propertyRecordSchema from database: ${error}`)
         // Continue without propertyRecordSchema
+      }
+    }
+
+    // Fix 1: Fallback to in-memory Model when DB doesn't have model/properties yet (e.g. runtime-created model)
+    const fromDbBeforeFallback = !!propertyRecordSchema
+    if (!propertyRecordSchema && modelName) {
+      try {
+        const { Model } = await import('../../../Model/Model')
+        const { modelPropertiesToObject } = await import('../../../helpers/model')
+        const normalizedModelName = upperFirst(camelCase(modelName))
+        // Try PascalCase first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
+        let model = Model.getByName(normalizedModelName)
+        if (!model?.properties?.length) {
+          model = Model.findByModelType(toSnakeCase(modelName))
+        }
+        if (model?.properties?.length) {
+          const schemas = modelPropertiesToObject(model.properties)
+          propertyRecordSchema = schemas[propertyName]
+          if (propertyRecordSchema) {
+            logger(`Fallback: loaded propertyRecordSchema from Model for propertyName "${propertyName}"`)
+          }
+        }
+      } catch (error) {
+        logger(`Fallback Model lookup failed for propertyName "${propertyName}": ${error}`)
       }
     }
 

@@ -10,16 +10,19 @@ import debug from 'debug'
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
 
 /**
- * Create ItemProperty instances for all metadata records to ensure they're cached
+ * Create ItemProperty instances for all metadata records to ensure they're cached.
+ * Passes propertyRecordSchema from Model when available (Fix 3: enables value persistence for runtime-created models).
  * @param metadataRows - Array of metadata records to create ItemProperty instances for
  * @param seedLocalId - Seed local ID
  * @param seedUid - Seed UID
+ * @param modelName - Model name for resolving propertyRecordSchema from Model
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
   metadataRows: any[],
   seedLocalId: string,
-  seedUid?: string
+  seedUid: string | undefined,
+  modelName: string
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
   
@@ -30,20 +33,43 @@ const createItemPropertyInstances = async (
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
     const { ItemProperty } = itemPropertyMod
+    const { modelPropertiesToObject } = await import('../../../helpers/model')
+    const { Model } = await import('../../../Model/Model')
     
-    // Create instances for all metadata records in parallel
+    // Resolve Model and build property schemas for propertyRecordSchema (Fix 3)
+    let propertySchemas: Record<string, any> = {}
+    const model = Model.getByName(modelName)
+    if (model?.properties?.length) {
+      propertySchemas = modelPropertiesToObject(model.properties)
+    }
+
+    // Create instances for all metadata records in parallel with propertyRecordSchema
     const createPromises = metadataRows.map(async (metaRow) => {
       try {
-        const property = await ItemProperty.find({
-          propertyName: metaRow.propertyName,
+        const propertyName = metaRow.propertyName
+        if (!propertyName) {
+          logger(`Metadata row missing propertyName, skipping`)
+          return
+        }
+        
+        const createProps = {
+          propertyName,
           seedLocalId,
           seedUid,
-        })
+          modelName,
+          propertyValue: metaRow.propertyValue ?? undefined,
+          versionLocalId: metaRow.versionLocalId ?? undefined,
+          versionUid: metaRow.versionUid ?? undefined,
+          schemaUid: metaRow.schemaUid ?? undefined,
+          propertyRecordSchema: propertySchemas[propertyName] ?? undefined,
+        }
+
+        const property = ItemProperty.create(createProps, { waitForReady: false })
         if (property) {
-          propertyInstances.set(metaRow.propertyName, property)
-          logger(`Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+          propertyInstances.set(propertyName, property)
+          logger(`Created/cached ItemProperty instance for propertyName "${propertyName}" with propertyRecordSchema: ${!!createProps.propertyRecordSchema}`)
         } else {
-          logger(`ItemProperty.find returned undefined for propertyName "${metaRow.propertyName}"`)
+          logger(`ItemProperty.create returned undefined for propertyName "${propertyName}"`)
         }
       } catch (error) {
         logger(`Error creating ItemProperty instance for propertyName "${metaRow.propertyName}": ${error}`)
@@ -68,7 +94,6 @@ export const loadOrCreateItem = fromCallback<
   const _loadOrCreateItem = async (): Promise<void> => {
     const { seedLocalId, seedUid, modelName } = context
 
-    console.log(`[loadOrCreateItem] Called for modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
     logger(`loadOrCreateItem called for modelName: ${modelName}, seedLocalId: ${seedLocalId}, seedUid: ${seedUid}`)
 
     if (!seedLocalId && !seedUid) {
@@ -198,18 +223,12 @@ export const loadOrCreateItem = fromCallback<
       )
 
     logger(`Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
-    console.log(`[loadOrCreateItem] Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
-    if (metadataRecords.length > 0) {
-      console.log(`[loadOrCreateItem] Metadata property names:`, metadataRecords.map((r: { propertyName: string }) => r.propertyName))
-    }
 
     // Step 4: Create ItemProperty instances from metadata records
     // This ensures they're in the cache when Item.properties getter is called
     const propertyInstances = metadataRecords.length > 0
-      ? await createItemPropertyInstances(metadataRecords, resolvedSeedLocalId, resolvedSeedUid)
+      ? await createItemPropertyInstances(metadataRecords, resolvedSeedLocalId, resolvedSeedUid, modelName)
       : new Map<string, any>()
-
-    console.log(`[loadOrCreateItem] Created ${propertyInstances.size} property instances:`, Array.from(propertyInstances.keys()))
 
     // Step 5: Return loaded item data with property instances
     sendBack({

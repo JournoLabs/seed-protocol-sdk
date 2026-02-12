@@ -37,12 +37,19 @@ export const createNewItem = async ({
   const model = await Model.getByNameAsync(modelName)
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
-  for (const [propertyName, propertyValue] of Object.entries(propertyData)) {
-    let propertyRecordSchema
-
-    if (propertySchemas && propertySchemas[propertyName]) {
-      propertyRecordSchema = propertySchemas[propertyName]
+  // Build set of all properties to create metadata for: union of model schema + propertyData
+  // This ensures we create metadata for ALL model properties even when creating with no initial values
+  // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
+  const allPropertyNames = new Set<string>(Object.keys(propertyData))
+  if (propertySchemas) {
+    for (const name of Object.keys(propertySchemas)) {
+      allPropertyNames.add(name)
     }
+  }
+
+  for (const propertyName of allPropertyNames) {
+    const propertyValue = propertyData[propertyName]
+    const propertyRecordSchema = propertySchemas?.[propertyName]
 
     await createMetadata(
       {

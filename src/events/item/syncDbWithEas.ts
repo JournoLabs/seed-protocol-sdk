@@ -19,7 +19,7 @@ import {
   GET_SEEDS,
   GET_VERSIONS,
 } from '@/Item/queries'
-import { escapeSqliteString, getAddressesFromDb } from '@/helpers/db'
+import { escapeSqliteString, getAllAddressesFromDb } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -105,6 +105,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
       uid: seed.id,
       schemaUid: seed.schemaId,
       type: seed.schema.schemaNames[0].name,
+      publisher: seed.attester,
       createdAt: Date.now(),
       attestationCreatedAt: seed.timeCreated * 1000,
       attestationRaw,
@@ -584,6 +585,11 @@ const getRelatedSeedsAndVersions = async () => {
 
 const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
   async (_) => {
+    const addresses = await getAllAddressesFromDb()
+    if (!addresses || addresses.length === 0) {
+      return
+    }
+
     const appDb = BaseDb.getAppDb()
 
     const { schemaStringToModelRecord } = await getModelSchemas()
@@ -630,8 +636,6 @@ const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
     if (schemaUids.length === 0) {
       return
     }
-
-    const addresses = await getAddressesFromDb()
 
     const itemSeeds = await getSeedsFromSchemaUids({
       schemaUids,

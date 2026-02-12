@@ -1,5 +1,6 @@
 import { ClientManagerContext, SeedConstructorOptions } from "@/types"
 import { assign, setup } from "xstate"
+import { normalizeAddressConfig } from "@/helpers/addresses"
 import { platformClassesInit } from "./actors/platformClassesInit"
 import { saveAppState } from "./actors/saveAppState"
 import { fileSystemInit } from "./actors/fileSystemInit"
@@ -191,15 +192,18 @@ export const clientManagerMachine = setup({
         [SET_ADDRESSES]: {
           actions: [
             assign(({ event, spawn }) => {
-              const { addresses } = event
+              const { addresses } = event as { type: string; addresses: string[] | { owned: string[]; watched?: string[] } }
+              const normalized = normalizeAddressConfig(addresses)
               spawn('saveAppState', {
                 input: {
                   key: 'addresses',
-                  value: addresses,
+                  value: { owned: normalized.owned, watched: normalized.watched },
                 },
               })
               return {
-                addresses,
+                addresses: normalized.owned,
+                ownedAddresses: normalized.owned,
+                watchedAddresses: normalized.watched,
                 isSaving: true,
               }
             })

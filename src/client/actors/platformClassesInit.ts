@@ -12,6 +12,7 @@ import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { BaseDb } from '../../db/Db/BaseDb'
+import { normalizeAddressConfig } from '@/helpers/addresses'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
@@ -150,11 +151,14 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       // If it's an absolute path that exists or is a valid filesystem path, use it as-is
     }
 
+    const normalizedAddresses = normalizeAddressConfig(addresses)
     sendBack({ type: 'updateContext', context: { 
       models: models || {}, 
       endpoints, 
       arweaveDomain, 
-      addresses: addresses || [], 
+      addresses: normalizedAddresses.owned,
+      ownedAddresses: normalizedAddresses.owned,
+      watchedAddresses: normalizedAddresses.watched,
       filesDir: normalizedFilesDir,
       dbConfig,
     } })

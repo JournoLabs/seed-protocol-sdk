@@ -29,6 +29,13 @@
       "when": 1768415440282,
       "tag": "0003_cultured_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1768500000000,
+      "tag": "0004_add_publisher_to_seeds",
+      "breakpoints": true
     }
   ]
 }

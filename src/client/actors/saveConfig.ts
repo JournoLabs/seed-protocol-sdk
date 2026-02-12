@@ -14,7 +14,7 @@ export const saveConfig = fromCallback<
 
   logger('saveConfig starting')
 
-  const { endpoints, addresses, arweaveDomain } = context
+  const { endpoints, addresses, ownedAddresses, watchedAddresses, arweaveDomain } = context
 
   // Validate endpoints - required for proper initialization
   // If endpoints are missing or invalid, initialization should fail
@@ -38,7 +38,9 @@ export const saveConfig = fromCallback<
       }
       
       const endpointsValueString = JSON.stringify(endpoints)
-      const addressesValueString = JSON.stringify(addresses)
+      const owned = ownedAddresses ?? addresses ?? []
+      const watched = watchedAddresses ?? []
+      const addressesValueString = JSON.stringify({ owned, watched })
 
       // TODO: Figure out how to define on conflict with multiple rows added
       await appDb
@@ -54,7 +56,7 @@ export const saveConfig = fromCallback<
           },
         })
 
-      if (addresses) {
+      if (owned.length > 0 || watched.length > 0) {
         await appDb
           .insert(appState)
         .values({

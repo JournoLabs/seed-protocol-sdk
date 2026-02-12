@@ -56,6 +56,7 @@ export interface ItemData {
   seedLocalId?: string;
   seedUid?: string;
   modelName?: string;
+  schemaName?: string;
   schemaUid?: string;
   attestationCreatedAt?: number & tags.Type<"int64">;
   latestVersionUid?: string;

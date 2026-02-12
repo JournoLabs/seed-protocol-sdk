@@ -2,7 +2,7 @@ import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from '
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
-import { CreatePropertyInstanceProps, PropertyMachineContext } from '@/types'
+import { CreatePropertyInstanceProps, PropertyMachineContext, PropertyType } from '@/types'
 import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
@@ -10,7 +10,7 @@ import { propertyMachine } from './service/propertyMachine'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
-import { startCase } from 'lodash-es'
+import { camelCase, startCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -54,6 +54,36 @@ const getModel = (): typeof import('@/Model/Model').Model => {
   }
   return ModelClass
 }
+
+/**
+ * Resolve propertyRecordSchema from in-memory Model (Fix 6: enables value persistence when useItemProperty path doesn't go through loadOrCreateItem).
+ * Tries getByName(pascalCase) first; if that fails (e.g. "New model" vs "NewModel"), falls back to findByModelType(modelType).
+ */
+const resolvePropertyRecordSchemaFromModel = async (
+  modelName: string,
+  propertyName: string,
+  modelType?: string
+): Promise<PropertyType | undefined> => {
+  if (!modelName && !modelType) return undefined
+  try {
+    const { Model } = await import('@/Model/Model')
+    const { modelPropertiesToObject } = await import('@/helpers/model')
+    let model = modelName ? Model.getByName(modelName) : undefined
+    if (!model?.properties?.length && modelType) {
+      model = Model.findByModelType(modelType)
+    }
+    if (!model?.properties?.length) return undefined
+    const schemas = modelPropertiesToObject(model.properties)
+    const schema = schemas[propertyName]
+    return schema as PropertyType | undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Convert modelType (snake_case from DB) to Model name (PascalCase). startCase adds spaces ("Test Post"); Model names are "TestPost". */
+const modelTypeToModelName = (modelType: string): string =>
+  modelType ? upperFirst(camelCase(modelType)) : ''
 
 const logger = debug('seedSdk:property:class')
 
@@ -675,12 +705,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         return undefined
       }
       // Ensure modelName for constructor: metadata may have modelType only, or neither (e.g. when Item passes it)
+      // Use modelTypeToModelName: modelType is snake_case ("test_post"); Model names are PascalCase ("TestPost")
       const data = propertyData as { modelName?: string; modelType?: string }
       const modelName =
         data.modelName ??
-        ((data.modelType ? startCase(data.modelType) : '') || modelNameOption || '')
+        ((data.modelType ? modelTypeToModelName(data.modelType) : '') || modelNameOption || '')
+      // Fix 6: resolve propertyRecordSchema from Model so value setter can persist (useItemProperty path)
+      // Pass modelType for fallback: "New model" -> "new_model" can't be reversed to exact name; findByModelType handles it
+      const propertyRecordSchema = await resolvePropertyRecordSchemaFromModel(
+        modelName,
+        propertyName,
+        data.modelType
+      )
       foundProperty = ItemProperty.create(
-        { ...propertyData, modelName },
+        { ...propertyData, modelName, propertyRecordSchema },
         { waitForReady: false },
       )
     }
@@ -714,9 +752,17 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const instances: ItemProperty<any>[] = []
 
     for (const data of propertiesData) {
+      const d = data as { modelName?: string; modelType?: string; propertyName?: string }
+      const modelName =
+        d.modelName ?? (d.modelType ? modelTypeToModelName(d.modelType) : '') ?? ''
+      // Fix 6: resolve propertyRecordSchema from Model so value setter can persist
+      const propertyRecordSchema = d.propertyName
+        ? await resolvePropertyRecordSchemaFromModel(modelName, d.propertyName, d.modelType)
+        : undefined
       const createProps = {
         ...data,
-        modelName: (data as { modelName?: string; modelType?: string }).modelName ?? (data as { modelType?: string }).modelType ?? '',
+        modelName,
+        propertyRecordSchema,
       }
       const instance = this.create(createProps, { waitForReady: false })
       if (instance) {
@@ -881,6 +927,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   }
 
   async save(): Promise<void> {
+    const ctx = this._getSnapshotContext()
+    const { assertItemOwned } = await import('@/helpers/ownership')
+    await assertItemOwned({
+      seedLocalId: ctx?.seedLocalId ?? undefined,
+      seedUid: ctx?.seedUid ?? undefined,
+    })
     await waitFor(
       this._service,
       (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
@@ -888,7 +940,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         timeout: 10_000,
       },
     )
-    const ctx = this._getSnapshotContext()
     const canonicalId = ctx?.seedLocalId ?? ctx?.seedUid
     if (canonicalId) {
       eventEmitter.emit('itemProperty.saved', { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid })

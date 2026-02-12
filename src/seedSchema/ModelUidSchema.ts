@@ -1,6 +1,6 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
-import { models } from './ModelSchema.js'
+import { models } from './ModelSchema'
 
 export const modelUids = sqliteTable('model_uids', {
   id: int('id').primaryKey({ autoIncrement: true }),

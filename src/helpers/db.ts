@@ -1276,14 +1276,53 @@ export const savePropertyToDb = async (
   }
 }
 
-export const getAddressesFromDb = async (): Promise<string[]> => {
+type NormalizedAddressConfig = { owned: string[]; watched: string[] }
+
+function parseAddressConfig(value: string | null): NormalizedAddressConfig | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return { owned: parsed, watched: [] }
+    }
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.owned)) {
+      return {
+        owned: parsed.owned,
+        watched: Array.isArray(parsed.watched) ? parsed.watched : [],
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export const getOwnedAddressesFromDb = async (): Promise<string[]> => {
+  const config = await getAddressConfigFromDb()
+  return config?.owned ?? []
+}
+
+export const getWatchedAddressesFromDb = async (): Promise<string[]> => {
+  const config = await getAddressConfigFromDb()
+  return config?.watched ?? []
+}
+
+/**
+ * Returns owned + watched addresses. Use for EAS sync and file download.
+ */
+export const getAllAddressesFromDb = async (): Promise<string[]> => {
+  const config = await getAddressConfigFromDb()
+  if (!config) return []
+  return [...config.owned, ...config.watched]
+}
+
+async function getAddressConfigFromDb(): Promise<NormalizedAddressConfig | null> {
   const appDb = BaseDb.getAppDb()
 
   if (!appDb) {
     return new Promise((resolve) => {
       setTimeout(async () => {
-        const addresses = await getAddressesFromDb()
-        resolve(addresses)
+        resolve(await getAddressConfigFromDb())
       }, 500)
     })
   }
@@ -1295,18 +1334,28 @@ export const getAddressesFromDb = async (): Promise<string[]> => {
     .limit(1)
 
   if (!appStatesRecords || appStatesRecords.length === 0) {
-    throw new Error('No appStatesRecords for addresses found')
+    return null
   }
 
-  const addressRecord = appStatesRecords[0]
+  const addressArrayString = appStatesRecords[0].value
+  return parseAddressConfig(addressArrayString)
+}
 
-  const addressArrayString = addressRecord.value
-
-  if (!addressArrayString) {
+export const getAddressesFromDb = async (): Promise<string[]> => {
+  const config = await getAddressConfigFromDb()
+  if (!config || config.owned.length === 0) {
     throw new Error('No addresses found')
   }
+  return config.owned
+}
 
-  return JSON.parse(addressArrayString)
+/**
+ * Like getAddressesFromDb but returns [] instead of throwing when no addresses are configured.
+ * Returns owned addresses. Use getAllAddressesFromDb for sync (owned + watched).
+ */
+export const getAddressesFromDbOptional = async (): Promise<string[]> => {
+  const config = await getAddressConfigFromDb()
+  return config?.owned ?? []
 }
 
 /**

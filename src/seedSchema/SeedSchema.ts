@@ -8,6 +8,7 @@ export const seeds = sqliteTable(
     uid: text('uid'),
     schemaUid: text('schema_uid'),
     type: text('type'),
+    publisher: text('publisher'),
     attestationRaw: text('attestation_raw'),
     attestationCreatedAt: int('attestation_created_at'),
     createdAt: int('created_at'),

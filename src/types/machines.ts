@@ -43,6 +43,8 @@ export type ClientManagerContext = {
   isSaving: boolean
   endpoints?: Endpoints
   addresses?: string[]
+  ownedAddresses?: string[]
+  watchedAddresses?: string[]
   models?: { [key: string]: Model }
   schemas?: { [schemaName: string]: SchemaFileFormat }
   arweaveDomain?: string

@@ -7,6 +7,7 @@ import alias from '@rollup/plugin-alias'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import json from '@rollup/plugin-json'
+import MagicString from 'magic-string'
 
 
 const postProcess = () => {
@@ -28,6 +29,7 @@ const postProcess = () => {
  * Uses a per-chunk counter (_mod_0, _ns_0, _mod_1, _ns_1, ...) so multiple
  * replacements in one chunk do not produce duplicate declarations.
  * ESM build only (renderChunk receives format from output options).
+ * Uses MagicString to preserve source maps when transforming.
  */
 function twoStepDynamicImportPlugin() {
   // One full line: indent, LHS (destructure or id), path, then .then(...);
@@ -41,39 +43,38 @@ function twoStepDynamicImportPlugin() {
     name: 'two-step-dynamic-import',
     renderChunk(code, _chunk, options) {
       if (options.format !== 'es') return null
-      let out = code
+
+      const magicString = new MagicString(code)
       let chunkIndex = 0
-      let changed = true
-      while (changed) {
-        changed = false
-        out = out.replace(LINE_FUNC, (_, indent, lhs, path, exportName) => {
-          changed = true
-          const i = chunkIndex++
-          return `${indent}const _mod_${i} = await import(${path});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
-        })
-        if (!changed) {
-          out = out.replace(LINE_ARROW, (_, indent, lhs, path, exportName) => {
-            changed = true
-            const i = chunkIndex++
-            return `${indent}const _mod_${i} = await import(${path});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
-          })
-        }
-        if (!changed) {
-          out = out.replace(PROMISE_FUNC, (_, indent, lhs, path, exportName) => {
-            changed = true
-            const i = chunkIndex++
-            return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${path}); return _mod_${i}.${exportName}; })()`
-          })
-        }
-        if (!changed) {
-          out = out.replace(PROMISE_ARROW, (_, indent, lhs, path, exportName) => {
-            changed = true
-            const i = chunkIndex++
-            return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${path}); return _mod_${i}.${exportName}; })()`
-          })
-        }
+      let changed = false
+
+      magicString.replaceAll(LINE_FUNC, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const _mod_${i} = await import(${importPath});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
+      })
+      magicString.replaceAll(LINE_ARROW, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const _mod_${i} = await import(${importPath});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}const ${lhs} = _ns_${i};`
+      })
+      magicString.replaceAll(PROMISE_FUNC, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(PROMISE_ARROW, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+
+      if (!changed) return null
+
+      return {
+        code: magicString.toString(),
+        map: magicString.generateMap({ hires: true }),
       }
-      return out
     },
   }
 }

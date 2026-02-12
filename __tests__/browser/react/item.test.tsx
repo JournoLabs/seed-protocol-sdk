@@ -7,8 +7,8 @@ import { useDeleteItem } from '@/browser/react/trash'
 import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
-import { seeds } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
+import { metadata, seeds } from '@/seedSchema'
+import { and, eq } from 'drizzle-orm'
 import { importJsonSchema } from '@/imports/json'
 import { SchemaFileFormat } from '@/types/import'
 import { Schema } from '@/Schema/Schema'
@@ -84,6 +84,69 @@ async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise
     }
     throw new Error(`Item loading timeout after ${timeout}ms`)
   }
+}
+
+// Helper function to wait for item property to be in idle state
+async function waitForItemPropertyIdle(property: { getService: () => { getSnapshot: () => { value: string } } }, timeout: number = 5000): Promise<void> {
+  const service = property.getService()
+  try {
+    await xstateWaitFor(
+      service,
+      (snapshot) => {
+        if (snapshot.value === 'error') {
+          throw new Error('ItemProperty failed to load')
+        }
+        return snapshot.value === 'idle'
+      },
+      { timeout }
+    )
+  } catch (error: any) {
+    if (error.message === 'ItemProperty failed to load') {
+      throw error
+    }
+    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
+  }
+}
+
+// Test component that displays an item and allows editing an ItemProperty via button click
+function EditableItemTest({
+  seedLocalId,
+  newTitle,
+  onEditComplete,
+}: {
+  seedLocalId: string
+  newTitle: string
+  onEditComplete?: () => void
+}) {
+  const { item } = useItem({ modelName: 'Post', seedLocalId })
+  const [editDone, setEditDone] = useState(false)
+
+  const handleEdit = async () => {
+    if (item) {
+      const titleProp = item.properties.find((p) => p.propertyName === 'title')
+      if (titleProp) {
+        titleProp.value = newTitle
+        await titleProp.save()
+        await waitForItemPropertyIdle(titleProp)
+        setEditDone(true)
+        onEditComplete?.()
+      }
+    }
+  }
+
+  return (
+    <div data-testid="editable-item-test">
+      {item && (
+        <>
+          <div data-testid="item-title">{String(item.properties.find((p) => p.propertyName === 'title')?.value ?? '')}</div>
+          <button onClick={handleEdit} data-testid="edit-title-button" disabled={editDone}>
+            Edit Title
+          </button>
+          {editDone && <div data-testid="edit-done">done</div>}
+        </>
+      )}
+    </div>
+  )
 }
 
 // Test component for useItem
@@ -948,6 +1011,93 @@ describe('React Item Hooks Integration Tests', () => {
       } finally {
         itemAllSpy.mockRestore()
       }
+    })
+  })
+
+  describe('ItemProperty edit persistence and reload', () => {
+    it('persists ItemProperty edit to db and displays new value after reload', async () => {
+      if (!testItem1) return
+
+      const editedTitle = 'Edited Title After React Edit'
+      const seedLocalId = testItem1.seedLocalId
+
+      // 1. Render component and wait for item to load
+      const { unmount } = render(
+        <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
+        { container, wrapper: SeedProviderWrapper }
+      )
+
+      await waitFor(
+        () => {
+          const titleEl = screen.queryByTestId('item-title')
+          return titleEl !== null && titleEl.textContent === 'Test Post Title 1'
+        },
+        { timeout: 15000 }
+      )
+
+      // 2. Edit the ItemProperty via the React component (simulates user editing)
+      // Use findByTestId to avoid race where item unmounts between waitFor and getByTestId
+      const editButton = await screen.findByTestId('edit-title-button', {}, { timeout: 5000 })
+      editButton.click()
+
+      // 3. Wait for edit/save to complete
+      await waitFor(
+        () => {
+          const editDoneEl = screen.queryByTestId('edit-done')
+          return editDoneEl !== null
+        },
+        { timeout: 10000 }
+      )
+
+      // 4. Verify the new value is persisted to the database
+      const db = BaseDb.getAppDb()
+      expect(db).toBeTruthy()
+      if (db) {
+        await waitFor(
+          async () => {
+            const rows = await db
+              .select()
+              .from(metadata)
+              .where(
+                and(
+                  eq(metadata.seedLocalId, seedLocalId),
+                  eq(metadata.propertyName, 'title'),
+                  eq(metadata.propertyValue, editedTitle)
+                )
+            )
+            return rows.length > 0
+          },
+          { timeout: 5000 }
+        )
+      }
+
+      // 5. Simulate page reload: unload item to clear cache, unmount, then remount
+      testItem1.unload()
+
+      unmount()
+
+      // 6. Remount (simulates fresh page load - component loads item from db)
+      // Use a fresh container to avoid "Cannot update an unmounted root"
+      const remountContainer = document.createElement('div')
+      remountContainer.id = 'root-remount'
+      document.body.appendChild(remountContainer)
+      render(
+        <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
+        { container: remountContainer, wrapper: SeedProviderWrapper }
+      )
+
+      // 7. Verify the new value is displayed as the current value after reload
+      await waitFor(
+        () => {
+          const titleEl = screen.queryByTestId('item-title')
+          if (titleEl !== null && titleEl.textContent === editedTitle) {
+            expect(titleEl.textContent).toBe(editedTitle)
+            return true
+          }
+          return false
+        },
+        { timeout: 15000 }
+      )
     })
   })
 

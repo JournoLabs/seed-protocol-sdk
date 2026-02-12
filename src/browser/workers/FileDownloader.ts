@@ -1,5 +1,5 @@
 import { saveAppState } from '@/db/write/saveAppState';
-import filesDownload from './filesDownload.js'
+import filesDownload from './filesDownload'
 import debug from 'debug'
 
 const logger = debug('seedSdk:browser:workers:FileDownloader')
