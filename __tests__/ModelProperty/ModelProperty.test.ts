@@ -1632,6 +1632,215 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
   })
 
+  describe('ModelProperty dataType persistence', () => {
+    it('should persist property dataType changes to database', async () => {
+      const schemaName = 'Test Schema Property DataType DB'
+      const modelName = 'TestModel Property DataType DB'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            score: {
+              id: generateId(),
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      const model = Model.create(modelName, schemaName, { waitForReady: false })
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      const propertyData = await getPropertySchema(modelName, 'score')
+      expect(propertyData).toBeDefined()
+
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData, { waitForReady: false })
+      await waitForModelPropertyIdle(property)
+
+      expect(property.dataType).toBe('Text')
+
+      const propertyContext = (property as any)._getSnapshotContext()
+      const modelId = propertyContext.modelId
+      const schemaFileId = propertyContext._propertyFileId || (typeof propertyContext.id === 'string' ? propertyContext.id : undefined)
+
+      await new Promise(resolve => setTimeout(resolve, 300))
+
+      property.dataType = 'Number'
+
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      expect(property.dataType).toBe('Number')
+
+      const db = BaseDb.getAppDb()
+      if (db && modelId && schemaFileId) {
+        for (let i = 0; i < 30; i++) {
+          const propertyBySchemaFileId = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(eq(propertiesTable.schemaFileId, schemaFileId), eq(propertiesTable.modelId, modelId))
+            )
+            .limit(1)
+          if (propertyBySchemaFileId.length > 0 && propertyBySchemaFileId[0].dataType === 'Number') {
+            break
+          }
+          await new Promise(resolve => setTimeout(resolve, 200))
+        }
+        const propertyBySchemaFileId = await db
+          .select()
+          .from(propertiesTable)
+          .where(
+            and(eq(propertiesTable.schemaFileId, schemaFileId), eq(propertiesTable.modelId, modelId))
+          )
+          .limit(1)
+
+        expect(propertyBySchemaFileId.length).toBe(1)
+        expect(propertyBySchemaFileId[0].dataType).toBe('Number')
+      }
+    })
+
+    it('should persist property dataType changes across reloads (simulating page reload)', async () => {
+      const schemaName = 'Test Schema Property DataType Persistence'
+      const modelName = 'TestModel Property DataType Persistence'
+      const propertyFileId = generateId()
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            amount: {
+              id: propertyFileId,
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      const model = Model.create(modelName, schemaName, { waitForReady: false })
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      const propertyData = await getPropertySchema(modelName, 'amount')
+      expect(propertyData).toBeDefined()
+
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData, { waitForReady: false })
+      await waitForModelPropertyIdle(property)
+
+      property.dataType = 'Number'
+
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      expect(property.dataType).toBe('Number')
+
+      property.unload()
+
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      const reloadedProperty = await ModelProperty.createById(propertyFileId)
+      expect(reloadedProperty).toBeDefined()
+
+      if (reloadedProperty) {
+        await waitForModelPropertyIdle(reloadedProperty)
+
+        expect(reloadedProperty.dataType).toBe('Number')
+
+        const reloadedContext = (reloadedProperty as any)._getSnapshotContext()
+        const originalContext = (property as any)._getSnapshotContext()
+        const reloadedSchemaFileId = reloadedContext._propertyFileId || (typeof reloadedContext.id === 'string' ? reloadedContext.id : undefined)
+        const originalSchemaFileId = originalContext._propertyFileId || (typeof originalContext.id === 'string' ? originalContext.id : undefined)
+
+        expect(reloadedSchemaFileId).toBe(originalSchemaFileId)
+        expect(reloadedSchemaFileId).toBe(propertyFileId)
+      }
+    })
+
+    it('should correctly detect dataType changes in comparison logic', async () => {
+      const schemaName = 'Test Schema Property DataType Comparison'
+      const modelName = 'TestModel Property DataType Comparison'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: {
+          id: generateId(),
+          properties: {
+            value: {
+              id: generateId(),
+              type: 'Text',
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      const model = Model.create(modelName, schemaName, { waitForReady: false })
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      const propertyData = await getPropertySchema(modelName, 'value')
+      expect(propertyData).toBeDefined()
+
+      if (!propertyData) {
+        throw new Error('Property data not found')
+      }
+
+      const property = ModelProperty.create(propertyData, { waitForReady: false })
+      await waitForModelPropertyIdle(property)
+
+      for (let i = 0; i < 50; i++) {
+        const ctx = (property as any)._getSnapshotContext()
+        if (ctx._originalValues != null) break
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      const contextBefore = (property as any)._getSnapshotContext()
+      expect(contextBefore._originalValues).toBeDefined()
+      expect(contextBefore._originalValues?.dataType).toBe('Text')
+
+      property.dataType = 'Number'
+
+      await waitForModelPropertyIdle(property)
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      expect(property.dataType).toBe('Number')
+      expect(property.isEdited).toBe(true)
+
+      const db = BaseDb.getAppDb()
+      if (db) {
+        const contextAfter = (property as any)._getSnapshotContext()
+        const modelId = contextAfter.modelId
+
+        if (modelId) {
+          const dbProperties = await db
+            .select()
+            .from(propertiesTable)
+            .where(
+              and(
+                eq(propertiesTable.modelId, modelId),
+                eq(propertiesTable.name, 'value')
+              )
+            )
+            .limit(1)
+
+          expect(dbProperties.length).toBeGreaterThan(0)
+          expect(dbProperties[0].dataType).toBe('Number')
+          expect(dbProperties[0].isEdited).toBe(true)
+        }
+      }
+    })
+  })
+
   describe('ModelProperty subscription handling', () => {
     it('should not cause infinite loop when subscribing immediately after create', async () => {
       const schemaName = 'Test Schema Property Subscription'

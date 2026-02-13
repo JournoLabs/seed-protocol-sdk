@@ -140,6 +140,22 @@ export const useSchemas = () => {
   }, [db, isClientReady])
   const schemasTableData = useLiveQuery<DbSchemaType>(schemasQuery)
 
+  // When a schema is created, addSchemaToDb posts to this channel; live query often doesn't re-run when schemas table is inserted.
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return
+    const ch = new BroadcastChannel('seed-schemas-invalidate')
+    const onMessage = () => {
+      // Only invalidate when we have data (past initial load). Avoids disrupting loading state.
+      if (schemasRef.current.length === 0) return
+      queryClient.invalidateQueries({ queryKey: SEED_SCHEMAS_QUERY_KEY })
+    }
+    ch.addEventListener('message', onMessage)
+    return () => {
+      ch.removeEventListener('message', onMessage)
+      ch.close()
+    }
+  }, [queryClient])
+
   useEffect(() => {
     if (!isClientReady || !schemasTableData) {
       return
@@ -183,7 +199,16 @@ export const useSchemas = () => {
       currentSchemasSet.size === tableDataSchemasSet.size &&
       [...currentSchemasSet].every((id) => tableDataSchemasSet.has(id))
 
-    if (!setsAreEqual) {
+    // Only invalidate when we have data and the table has rows we might be missing (live query saw new data).
+    // Skip during initial load (currentSchemasSet empty) to avoid disrupting loading state.
+    // Do NOT invalidate when we have more than the table: the live query may not have updated
+    // yet, and refetching could overwrite cache with stale/empty data.
+    const tableHasNewRows =
+      currentSchemasSet.size > 0 &&
+      tableDataSchemasSet.size > 0 &&
+      [...tableDataSchemasSet].some((id) => !currentSchemasSet.has(id))
+
+    if (!setsAreEqual && tableHasNewRows) {
       queryClient.invalidateQueries({ queryKey: SEED_SCHEMAS_QUERY_KEY })
     }
   }, [isClientReady, schemasTableData, queryClient])

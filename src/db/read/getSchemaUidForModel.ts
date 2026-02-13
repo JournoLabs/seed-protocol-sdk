@@ -5,7 +5,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import { eq } from 'drizzle-orm'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 
-export const getSchemaUidForModel = async (
+export const getEasSchemaUidForModel = async (
   modelName: string,
 ): Promise<string | null | undefined> => {
   const queryClient = BaseQueryClient.getQueryClient()

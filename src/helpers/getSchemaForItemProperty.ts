@@ -20,7 +20,7 @@ type GetSchemaForPropertyProps = {
 type GetSchemaForProperty = (
   props: GetSchemaForPropertyProps,
 ) => Promise<EASSchema | void>
-export const getSchemaForItemProperty: GetSchemaForProperty = async ({
+export const getEasSchemaForItemProperty: GetSchemaForProperty = async ({
   schemaUid,
   propertyName,
   easDataType,

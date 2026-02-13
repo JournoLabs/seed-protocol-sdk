@@ -7,7 +7,7 @@ import {
 } from '@/types/property'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 
-import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
@@ -107,7 +107,7 @@ export const analyzeInput = fromCallback<
             .eas as TypedData['type']
         }
 
-        const schemaFromEas = await getSchemaForItemProperty({
+        const schemaFromEas = await getEasSchemaForItemProperty({
           propertyName: propertyName!,
           easDataType,
         })

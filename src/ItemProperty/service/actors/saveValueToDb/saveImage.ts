@@ -10,7 +10,7 @@ import { getDataTypeFromString, getMimeType } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
-import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
+import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { eventEmitter } from '@/eventBus'
 import { ImageSize } from '@/helpers/constants'
@@ -99,7 +99,7 @@ export const saveImage = fromCallback<
     let fileName
 
     if (!imageSchemaUid) {
-      const fetchedSchemaUid = await getSchemaUidForModel('Image')
+      const fetchedSchemaUid = await getEasSchemaUidForModel('Image')
       imageSchemaUid = fetchedSchemaUid ?? undefined
     }
 

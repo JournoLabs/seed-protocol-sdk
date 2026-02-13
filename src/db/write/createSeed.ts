@@ -1,7 +1,7 @@
 import { generateId } from '@/helpers'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
+import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 
 type CreateSeedProps = {
   type: string
@@ -9,7 +9,7 @@ type CreateSeedProps = {
 }
 
 export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<string> => {
-  const schemaUid = await getSchemaUidForModel(type)
+  const schemaUid = await getEasSchemaUidForModel(type)
 
   // schemaUid is optional - Items can be created without a schemaUid
   // if the EAS schema hasn't been published yet

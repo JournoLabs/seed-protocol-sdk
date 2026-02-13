@@ -400,6 +400,14 @@ export const addSchemaToDb = async (
     updatedAt: schema.updatedAt,
   } as NewSchemaRecord).returning()
 
+  // Notify React useSchemas so it can invalidate; live query often doesn't re-run when schemas table is inserted.
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      await new Promise((r) => setTimeout(r, 10))
+      new BroadcastChannel('seed-schemas-invalidate').postMessage({})
+    } catch (_) {}
+  }
+
   return newSchema[0]
 }
 

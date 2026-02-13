@@ -133,7 +133,7 @@ type GetSchemaUidBySchemaName = (
   props: GetSchemaUidBySchemaNameProps,
 ) => Promise<string | undefined>
 
-export const getSchemaUidBySchemaName: GetSchemaUidBySchemaName = async ({ schemaName }) => {
+export const getEasSchemaUidBySchemaName: GetSchemaUidBySchemaName = async ({ schemaName }) => {
   try {
     const queryClient = BaseQueryClient.getQueryClient()
     const easClient = BaseEasClient.getEasClient()
@@ -143,7 +143,7 @@ export const getSchemaUidBySchemaName: GetSchemaUidBySchemaName = async ({ schem
     }
     
     const { schemas } = await queryClient.fetchQuery({
-      queryKey: [`getSchemaUidBySchemaName`],
+      queryKey: [`getEasSchemaUidBySchemaName`],
       queryFn: async () =>
         easClient.request(GET_SCHEMAS, {
           where: {

@@ -1,0 +1,51 @@
+{
+  "name": "@seedprotocol/publish",
+  "version": "0.4.7",
+  "description": "Publish UI components and helpers for Seed Protocol",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")"
+  },
+  "dependencies": {
+    "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+    "@seedprotocol/sdk": "file:../../",
+    "debug": "^4.4.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "thirdweb": "^5.118.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

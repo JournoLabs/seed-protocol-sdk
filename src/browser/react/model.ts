@@ -327,6 +327,12 @@ export const useModel = (
     }
   }, [isModelIdLookup, foundModel])
 
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'model.ts:useModel schemaId+modelName',message:'useModel state',data:{hasFoundModel:!!foundModel,modelId:foundModel?.id,modelsLoading},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{})
+  }, [foundModel, modelsLoading])
+  // #endregion
+
   // For schemaId + modelName lookup, derive loading/error from useModels
   return {
     model: foundModel,

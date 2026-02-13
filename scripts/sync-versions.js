@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Version synchronization script for monorepo packages
- * Ensures SDK and CLI packages have matching versions
+ * Ensures SDK, CLI, and Publish packages have matching versions
  */
 
 import { readFileSync, writeFileSync } from 'fs'
@@ -35,9 +35,11 @@ function writePackageJson(path, data) {
 function syncVersions(newVersion = null) {
   const sdkPackagePath = join(rootDir, 'package.json')
   const cliPackagePath = join(rootDir, 'packages', 'cli', 'package.json')
+  const publishPackagePath = join(rootDir, 'packages', 'publish', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
   const cliPackage = readPackageJson(cliPackagePath)
+  const publishPackage = readPackageJson(publishPackagePath)
 
   // Use SDK version as source of truth, or use provided version
   const targetVersion = newVersion || sdkPackage.version
@@ -71,9 +73,24 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] CLI SDK dependency: ${cliPackage.dependencies['@seedprotocol/sdk']}`)
   }
 
+  // Update Publish version
+  if (publishPackage.version !== targetVersion) {
+    publishPackage.version = targetVersion
+    writePackageJson(publishPackagePath, publishPackage)
+    console.log(`[Version Sync] Updated Publish version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Publish version already at ${targetVersion}`)
+  }
+
+  // Update Publish's SDK dependency version to match
+  if (publishPackage.dependencies && publishPackage.dependencies['@seedprotocol/sdk']) {
+    console.log(`[Version Sync] Publish SDK dependency: ${publishPackage.dependencies['@seedprotocol/sdk']}`)
+  }
+
   console.log('[Version Sync] Version synchronization complete!')
   console.log(`[Version Sync] SDK: ${sdkPackage.version}`)
   console.log(`[Version Sync] CLI: ${cliPackage.version}`)
+  console.log(`[Version Sync] Publish: ${publishPackage.version}`)
 }
 
 // Run if called directly (simplified - always execute when run as script)

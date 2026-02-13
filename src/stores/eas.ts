@@ -1,6 +1,6 @@
-import { getSchemaUidBySchemaName } from '@/eas'
+import { getEasSchemaUidBySchemaName } from '@/eas'
 import { toSnakeCase } from '@/helpers'
-import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 
 const schemaUidForSchemaDefinition = new Map<string, string>()
 
@@ -26,10 +26,10 @@ type GetSchemaUidForSchemaDefinition = (
   props: GetSchemaUidForSchemaDefinitionProps,
 ) => Promise<string | undefined>
 
-export const getSchemaUidForSchemaDefinition: GetSchemaUidForSchemaDefinition = async ({ schemaText }) => {
+export const getEasSchemaUidForSchemaDefinition: GetSchemaUidForSchemaDefinition = async ({ schemaText }) => {
   const textSnakeCase = toSnakeCase(schemaText)
   if (!schemaUidForSchemaDefinition.has(textSnakeCase)) {
-    const schemaUid = await getSchemaUidBySchemaName({ schemaName: textSnakeCase })
+    const schemaUid = await getEasSchemaUidBySchemaName({ schemaName: textSnakeCase })
     if (schemaUid) {
       setSchemaUidForSchemaDefinition({ text: textSnakeCase, schemaUid })
     }
@@ -39,7 +39,7 @@ export const getSchemaUidForSchemaDefinition: GetSchemaUidForSchemaDefinition = 
 }
 
 export const fetchSchemaUids = async () => {
-  const versionSchema = await getSchemaForItemProperty({
+  const versionSchema = await getEasSchemaForItemProperty({
     propertyName: 'version',
     easDataType: 'bytes32',
   })
@@ -49,7 +49,7 @@ export const fetchSchemaUids = async () => {
       schemaUid: versionSchema.id,
     })
   }
-  const imageSchema = await getSchemaForItemProperty({
+  const imageSchema = await getEasSchemaForItemProperty({
     propertyName: 'image',
     easDataType: 'bytes32',
   })

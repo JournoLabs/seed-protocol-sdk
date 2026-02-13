@@ -45,17 +45,21 @@ export type { SeedProviderProps } from './browser/react'
 
 export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
+export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
+export { setSchemaUidForSchemaDefinition } from './stores/eas'
 
 export {
   getModelSchemasFromEas, 
   getItemVersionsFromEas, 
   getItemPropertiesFromEas, 
-  getSchemaUidBySchemaName,
+  getEasSchemaUidBySchemaName,
   getSeedsFromSchemaUids,
   getSeedsBySchemaName,
 } from './eas'
 
-export { SeedModels } from './helpers/constants'
+export { SeedModels, INTERNAL_DATA_TYPES } from './helpers/constants'
+
+export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 
 export { getFeedItemsBySchemaName } from './feed'
 

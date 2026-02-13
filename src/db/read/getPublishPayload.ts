@@ -11,11 +11,11 @@ import {
   AttestationRequestData,
 } from '@ethereum-attestation-service/eas-sdk'
 
-import { getSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { toSnakeCase } from '@/helpers'
 import pluralize from 'pluralize'
-import { getSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
-import { getSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForModel } from './getSchemaUidForModel'
+import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItemProperty } from '@/interfaces'
@@ -48,9 +48,9 @@ const getPropertyData = async (itemProperty: IItemProperty<any>) => {
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
   if (!schemaUid) {
-    schemaUid = await getSchemaUidForSchemaDefinition({ schemaText: schemaDef })
+    schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: schemaDef })
     if (!schemaUid) {
-      const schema = await getSchemaForItemProperty({
+      const schema = await getEasSchemaForItemProperty({
         propertyName: 'version',
         easDataType: 'bytes32',
       })
@@ -206,7 +206,7 @@ const processRelationOrImageProperty = async (
     throw new Error(`Model name not found for relation or image property: ${relationOrImageProperty.propertyName}`)
   }
 
-  const seedSchemaUid = await getSchemaUidForModel(modelName)
+  const seedSchemaUid = await getEasSchemaUidForModel(modelName)
   
   if (!seedSchemaUid) {
     throw new Error(`Schema UID not found for model: ${modelName}`)
@@ -331,7 +331,7 @@ const processListProperty = async (
       throw new Error(`Model name not found for list property: ${listProperty.propertyName}`)
     }
 
-    const seedSchemaUid = await getSchemaUidForModel(modelName)
+    const seedSchemaUid = await getEasSchemaUidForModel(modelName)
     
     if (!seedSchemaUid) {
       throw new Error(`Schema UID not found for model: ${modelName}`)
@@ -403,7 +403,7 @@ export const getPublishPayload = async (
   // Check if the item has a schema UID
   let itemSchemaUid = item.schemaUid
   if (!itemSchemaUid) {
-    const schemaUid = await getSchemaUidForModel(item.modelName)
+    const schemaUid = await getEasSchemaUidForModel(item.modelName)
     if (!schemaUid) {
       throw new Error(`Schema UID not found for model: ${item.modelName}`)
     }

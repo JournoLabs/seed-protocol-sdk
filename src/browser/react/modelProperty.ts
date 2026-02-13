@@ -80,6 +80,12 @@ export const useModelProperties = (
     enabled: isClientReady && !!modelId,
   })
 
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:useModelProperties',message:'useModelProperties state',data:{modelId,isLoading,propsLen:modelProperties?.length,hasData:!!modelProperties?.length},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{})
+  }, [modelId, isLoading, modelProperties?.length])
+  // #endregion
+
   const db = isClientReady ? BaseDb.getAppDb() : null
   const propertiesQuery = useMemo(() => {
     if (!db || !dbModelId) return null
@@ -141,13 +147,21 @@ export const useModelProperties = (
       !setsAreEqual && (currentPropertiesSet.size > 0 || tableDataPropertiesSet.size > 0)
 
     if (shouldInvalidate) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.ts:invalidate',message:'useLiveQuery invalidation triggered',data:{modelId:model?.id,currentSize:modelPropertiesRef.current.length,tableSize:propertiesTableData?.length},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{})
+      // #endregion
       queryClient.invalidateQueries({ queryKey: modelPropertiesQueryKey })
     }
   }, [isClientReady, propertiesTableData, model?.id, queryClient, modelPropertiesQueryKey])
 
+  // When we have cached modelProperties, do not report isLoading: true even if the query
+  // is refetching (e.g. after useModels refetch causes modelId to change briefly). UX expects
+  // isLoading false once we have shown data.
+  const effectiveIsLoading = isLoading && modelProperties.length === 0
+
   return {
     modelProperties,
-    isLoading,
+    isLoading: effectiveIsLoading,
     error: queryError as Error | null,
   }
 }

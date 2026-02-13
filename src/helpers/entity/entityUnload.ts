@@ -21,9 +21,13 @@ export interface UnloadConfig<T extends object> {
   secondaryCaches?: Map<string, string>[]
   /**
    * Instance state WeakMap
-   * Used to clean up liveQuery subscriptions
+   * Used to clean up liveQuery subscriptions (liveQuerySubscription, schemaLiveQuerySubscription, etc.)
    */
-  instanceState: WeakMap<T, { liveQuerySubscription?: { unsubscribe: () => void } | null }>
+  instanceState: WeakMap<T, {
+    liveQuerySubscription?: { unsubscribe: () => void } | null
+    schemaLiveQuerySubscription?: { unsubscribe: () => void } | null
+    [key: string]: unknown
+  }>
   /**
    * Get service from instance
    * Service will be stopped during unload
@@ -43,14 +47,19 @@ export interface UnloadConfig<T extends object> {
  * @param config - Unload configuration
  */
 export function unloadEntity<T extends object>(instance: T, config: UnloadConfig<T>): void {
-  // Clean up liveQuery subscription
+  // Clean up liveQuery subscriptions
   const instanceState = config.instanceState.get(instance)
-  if (instanceState?.liveQuerySubscription) {
-    try {
-      instanceState.liveQuerySubscription.unsubscribe()
-      instanceState.liveQuerySubscription = null
-    } catch (error) {
-      // Ignore errors during cleanup
+  if (instanceState) {
+    for (const key of ['liveQuerySubscription', 'schemaLiveQuerySubscription'] as const) {
+      const sub = instanceState[key]
+      if (sub?.unsubscribe) {
+        try {
+          sub.unsubscribe()
+          ;(instanceState as Record<string, unknown>)[key] = null
+        } catch (error) {
+          // Ignore errors during cleanup
+        }
+      }
     }
   }
   

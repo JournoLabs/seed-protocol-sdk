@@ -112,6 +112,7 @@ const TRACKED_PROPERTIES = [
 // This avoids issues with read-only properties when instances are frozen by Immer
 const itemPropertyInstanceState = new WeakMap<ItemProperty<any>, {
   liveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for cross-instance updates
+  schemaLiveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for properties table (schema changes)
 }>()
 
 type ItemPropertyFindProps = {
@@ -345,10 +346,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // Initialize instance state in WeakMap
     itemPropertyInstanceState.set(this, {
       liveQuerySubscription: null,
+      schemaLiveQuerySubscription: null,
     })
     
     // Set up liveQuery subscription for cross-instance updates
     this._setupLiveQuerySubscription()
+    this._setupPropertySchemaLiveQuery()
   }
 
   /**
@@ -540,6 +543,132 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if ((seedLocalId || seedUid) && propertyName && !setupState.subscriptionSetUp) {
       setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined).catch((error) => {
         logger(`[ItemProperty._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
+      })
+    }
+  }
+
+  /**
+   * Set up liveQuery subscription to watch for property schema changes in the properties table.
+   * When ModelProperty dataType (or other schema fields) changes in the database, ItemProperty
+   * receives the update and refreshes its propertyRecordSchema.
+   */
+  private _setupPropertySchemaLiveQuery(): void {
+    const isBrowser = typeof window !== 'undefined'
+    const logger = debug('seedSdk:itemProperty:schemaLiveQuery')
+
+    const setupState = { subscriptionSetUp: false }
+
+    const setupSchemaLiveQuery = async (modelName: string, propertyName: string) => {
+      if (setupState.subscriptionSetUp) return
+      if (!modelName || !propertyName) return
+
+      setupState.subscriptionSetUp = true
+      logger(`[ItemProperty._setupPropertySchemaLiveQuery] Setting up for modelName: ${modelName}, propertyName: ${propertyName}`)
+
+      try {
+        const db = BaseDb.getAppDb()
+        if (!db) {
+          logger('[ItemProperty._setupPropertySchemaLiveQuery] Database not available')
+          return
+        }
+
+        if (!isBrowser) {
+          logger('[ItemProperty._setupPropertySchemaLiveQuery] Skipping in Node.js environment')
+          return
+        }
+
+        const schema$ = BaseDb.liveQuery<{
+          dataType: string
+          refValueType: string | null
+          refModelName: string | null
+        }>(
+          (sql: any) => sql`
+            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName
+            FROM properties p
+            INNER JOIN models m ON p.model_id = m.id
+            LEFT JOIN models ref ON p.ref_model_id = ref.id
+            WHERE m.name = ${modelName} AND p.name = ${propertyName}
+            LIMIT 1
+          `
+        )
+
+        const instanceState = itemPropertyInstanceState.get(this)
+        if (!instanceState) {
+          logger('[ItemProperty._setupPropertySchemaLiveQuery] Instance state not found')
+          return
+        }
+
+        const subscription = schema$.subscribe({
+          next: (rows) => {
+            if (rows.length === 0) return
+
+            const row = rows[0]
+            const propertyRecordSchema = {
+              dataType: row.dataType,
+              ref: row.refModelName || undefined,
+              refValueType: row.refValueType || undefined,
+              storageType: undefined as string | undefined,
+              localStorageDir: undefined as string | undefined,
+              filenameSuffix: undefined as string | undefined,
+            }
+
+            logger(`[ItemProperty._setupPropertySchemaLiveQuery] Schema updated for ${propertyName}: dataType=${row.dataType}`)
+
+            this._service.send({
+              type: 'updateContext',
+              propertyRecordSchema,
+            })
+
+            // Update instance fields to match new schema (mirror constructor logic)
+            this._dataType = propertyRecordSchema.dataType
+            if (propertyRecordSchema.dataType === 'Relation') {
+              ;(this as any)._isRelation = true
+            } else {
+              ;(this as any)._isRelation = false
+            }
+            if (
+              propertyRecordSchema.dataType === 'List' &&
+              propertyRecordSchema.ref
+            ) {
+              ;(this as any)._isList = true
+              ;(this as any)._isRelation = true
+            } else {
+              ;(this as any)._isList = false
+            }
+          },
+          error: (error) => {
+            logger(`[ItemProperty._setupPropertySchemaLiveQuery] LiveQuery error: ${error}`)
+          },
+        })
+
+        instanceState.schemaLiveQuerySubscription = subscription
+        logger(`[ItemProperty._setupPropertySchemaLiveQuery] Subscription set up for ${modelName}.${propertyName}`)
+      } catch (error) {
+        logger(`[ItemProperty._setupPropertySchemaLiveQuery] Error: ${error}`)
+        setupState.subscriptionSetUp = false
+      }
+    }
+
+    const setupSubscription = this._service.subscribe((snapshot) => {
+      const modelName = snapshot.context.modelName
+      const propertyName = snapshot.context.propertyName
+
+      if (!modelName || !propertyName) return
+      if (!setupState.subscriptionSetUp) {
+        setupSchemaLiveQuery(modelName, propertyName)
+        if (setupState.subscriptionSetUp) {
+          setupSubscription.unsubscribe()
+        }
+      }
+    })
+
+    const currentSnapshot = this._service.getSnapshot()
+    const modelName = currentSnapshot.context.modelName
+    const propertyName = currentSnapshot.context.propertyName
+
+    if (modelName && propertyName && !setupState.subscriptionSetUp) {
+      setupSchemaLiveQuery(modelName, propertyName).catch((error) => {
+        logger(`[ItemProperty._setupPropertySchemaLiveQuery] Error in immediate setup: ${error}`)
       })
     }
   }
@@ -976,8 +1105,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         instanceState: itemPropertyInstanceState,
         getService: (instance) => instance._service,
         onUnload: (instance) => {
-          // Clean up additional subscription
+          // Clean up additional subscriptions
           instance._subscription?.unsubscribe()
+          const state = itemPropertyInstanceState.get(instance)
+          if (state?.schemaLiveQuerySubscription) {
+            state.schemaLiveQuerySubscription.unsubscribe()
+            state.schemaLiveQuerySubscription = null
+          }
         },
       })
     } catch (error) {
@@ -986,6 +1120,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       if (instanceState?.liveQuerySubscription) {
         instanceState.liveQuerySubscription.unsubscribe()
         instanceState.liveQuerySubscription = null
+      }
+      if (instanceState?.schemaLiveQuerySubscription) {
+        instanceState.schemaLiveQuerySubscription.unsubscribe()
+        instanceState.schemaLiveQuerySubscription = null
       }
       this._subscription?.unsubscribe()
       try {

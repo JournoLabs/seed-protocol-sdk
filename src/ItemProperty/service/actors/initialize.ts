@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { getSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 
@@ -30,7 +30,7 @@ export const initialize = fromCallback<
       )
     ) {
       try {
-        schemaUid = await getSchemaUidForSchemaDefinition({ schemaText: propertyName })
+        schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: propertyName })
         if (schemaUid) {
           sendBack({ type: 'updateContext', schemaUid })
         }

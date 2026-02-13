@@ -32,7 +32,8 @@
     "build:dev": "node scripts/build-with-tests.js \"rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && node scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json\"",
     "build:publish": "node scripts/build-with-tests.js \"bun run sync-versions && rm -rf dist && NODE_ENV=production rollup -c && node scripts/check-dist-no-alias.js && node scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public\"",
     "build:cli": "node scripts/build-with-tests.js \"cd packages/cli && bun run build\"",
-    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build && bun run build:cli\"",
+    "build:publish-pkg": "node scripts/build-with-tests.js \"cd packages/publish && bun run build\"",
+    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build && bun run build:cli && bun run build:publish-pkg\"",
     "sync-versions": "node scripts/sync-versions.js",
     "version": "node scripts/sync-versions.js",
     "test:browser": "vitest --project=browser",
@@ -94,6 +95,7 @@
     "rimraf": "^6.0.1",
     "rxjs": "^7.8.1",
     "sqlocal": "^0.16.0",
+    "thirdweb": "^5.118.1",
     "ts-import": "5.0.0-beta.1",
     "ts-morph": "^27.0.2",
     "ts-proto": "^2.6.0",
@@ -221,5 +223,6 @@
   ],
   "_bundleHint": {
     "note": "If bundling this package, mark the following as external: nunjucks, fsevents, better-sqlite3, drizzle-kit, and other native Node.js modules. For Vite projects, also exclude drizzle-kit and database drivers (@electric-sql/pglite, pg, postgres, etc.) from optimizeDeps."
-  }
+  },
+  "packageManager": "yarn@4.5.3+sha512.3003a14012e2987072d244c720506549c1aab73ee728208f1b2580a9fd67b92d61ba6b08fe93f6dce68fd771e3af1e59a0afa28dd242dd0940d73b95fedd4e90"
 }
