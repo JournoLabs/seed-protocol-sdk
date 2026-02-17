@@ -149,3 +149,4 @@ vite/app-files
 packages/cli/dist
 packages/sdk/dist
 packages/feed/dist
+packages/publish/dist
