@@ -130,7 +130,20 @@ export const saveImage = fromCallback<
       fileData = await readFileAsArrayBuffer(newValue)
     }
 
-    if (!fileData) {
+    // Handle existing file reference: filename from listImageFiles() that exists in images folder
+    let isExistingFileReference = false
+    if (
+      typeof newValue === 'string' &&
+      getDataTypeFromString(newValue) === null
+    ) {
+      const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
+      if (await BaseFileManager.pathExists(existingFilePath)) {
+        isExistingFileReference = true
+        fileName = newValue
+      }
+    }
+
+    if (!fileData && !isExistingFileReference) {
       throw new Error('No file data found')
     }
 
@@ -174,12 +187,14 @@ export const saveImage = fromCallback<
       }
     }
 
-
-    await BaseFileManager.resizeImage({filePath, width: ImageSize.EXTRA_SMALL, height: ImageSize.EXTRA_SMALL})
-    await BaseFileManager.resizeImage({filePath, width: ImageSize.SMALL, height: ImageSize.SMALL})
-    await BaseFileManager.resizeImage({filePath, width: ImageSize.MEDIUM, height: ImageSize.MEDIUM})
-    await BaseFileManager.resizeImage({filePath, width: ImageSize.LARGE, height: ImageSize.LARGE})
-    await BaseFileManager.resizeImage({filePath, width: ImageSize.EXTRA_LARGE, height: ImageSize.EXTRA_LARGE})
+    // Resize image (skip for existing file reference - file may already have sized versions)
+    if (!isExistingFileReference) {
+      await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_SMALL, height: ImageSize.EXTRA_SMALL })
+      await BaseFileManager.resizeImage({ filePath, width: ImageSize.SMALL, height: ImageSize.SMALL })
+      await BaseFileManager.resizeImage({ filePath, width: ImageSize.MEDIUM, height: ImageSize.MEDIUM })
+      await BaseFileManager.resizeImage({ filePath, width: ImageSize.LARGE, height: ImageSize.LARGE })
+      await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_LARGE, height: ImageSize.EXTRA_LARGE })
+    }
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 

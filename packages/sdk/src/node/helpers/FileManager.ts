@@ -45,6 +45,16 @@ class FileManager extends BaseFileManager {
     return await fsAsync.access(filePath).then(() => true).catch(() => false)
   }
 
+  static async listImageFiles(): Promise<string[]> {
+    const imageDir = BaseFileManager.getFilesPath('images')
+    const exists = await this.pathExists(imageDir)
+    if (!exists) {
+      return []
+    }
+    const entries = await fsAsync.readdir(imageDir, { withFileTypes: true })
+    return entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
+  }
+
   static async createDirIfNotExists(filePath: string): Promise<void> {
     await fsAsync.mkdir(filePath, { recursive: true })
   }

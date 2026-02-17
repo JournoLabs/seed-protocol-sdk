@@ -34,6 +34,7 @@ export {
   useCreateModelProperty,
   useDestroyModelProperty,
   usePublishItem,
+  useImageFiles,
   SeedProvider,
   invalidateItemPropertiesForItem,
   createSeedQueryClient,

@@ -76,6 +76,17 @@ class FileManager extends BaseFileManager {
     await imageResizer.resizeAll({ width, height })
   }
 
+  static async listImageFiles(): Promise<string[]> {
+    const imageDir = BaseFileManager.getFilesPath('images')
+    const exists = await this.pathExists(imageDir)
+    if (!exists) {
+      return []
+    }
+    const zenfs = await this.getFs()
+    const entries = await zenfs.promises.readdir(imageDir, { withFileTypes: true })
+    return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
+  }
+
   static async pathExists(filePath: string): Promise<boolean> {
     try {
       const zenfs = await this.getFs()

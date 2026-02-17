@@ -147,3 +147,5 @@ vite/app-files
 **/__screenshots__/
 
 packages/cli/dist
+packages/sdk/dist
+packages/feed/dist
