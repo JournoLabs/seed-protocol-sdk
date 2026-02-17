@@ -66,6 +66,42 @@ export async function ensureEasSchemasForItem(
 
     if (onChainRecord) {
       setSchemaUidForSchemaDefinition({ text: schemaDef, schemaUid })
+
+      // Schema exists on-chain; check if it has a naming attestation (schemaNames in indexer).
+      // If not, add one so EASSCAN displays it. Schema may not be in indexer yet (indexer lag).
+      const schemaById = await getEasSchemaForItemProperty({
+        schemaUid,
+        propertyName: property.propertyName,
+      })
+      const hasNameAttestation = (schemaById?.schemaNames?.length ?? 0) > 0
+
+      if (!hasNameAttestation) {
+        try {
+          const attestTx = prepareNameSchemaAttestation(client, chain, {
+            schemaUid,
+            schemaName: propertyNameSnakeCase,
+          })
+
+          const attestResult = await sendTransaction({
+            account,
+            transaction: attestTx,
+          })
+
+          await waitForReceipt({
+            client,
+            chain,
+            transactionHash: attestResult.transactionHash,
+          })
+        } catch (err) {
+          // Log and continue - may already have attestation (duplicate) or indexer lag
+          const msg = err instanceof Error ? err.message : String(err)
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(
+              `Name attestation for schema ${schemaUid} (${property.propertyName}): ${msg}`,
+            )
+          }
+        }
+      }
       continue
     }
 

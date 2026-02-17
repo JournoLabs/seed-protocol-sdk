@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Version synchronization script for monorepo packages
- * Ensures SDK, CLI, and Publish packages have matching versions
+ * Ensures SDK, CLI, Publish, and Feed packages have matching versions
  */
 
 import { readFileSync, writeFileSync } from 'fs'
@@ -33,13 +33,15 @@ function writePackageJson(path, data) {
  * @param {string} newVersion - Optional version to set. If not provided, uses SDK version as source of truth
  */
 function syncVersions(newVersion = null) {
-  const sdkPackagePath = join(rootDir, 'package.json')
+  const sdkPackagePath = join(rootDir, 'packages', 'sdk', 'package.json')
   const cliPackagePath = join(rootDir, 'packages', 'cli', 'package.json')
   const publishPackagePath = join(rootDir, 'packages', 'publish', 'package.json')
+  const feedPackagePath = join(rootDir, 'packages', 'feed', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
   const cliPackage = readPackageJson(cliPackagePath)
   const publishPackage = readPackageJson(publishPackagePath)
+  const feedPackage = readPackageJson(feedPackagePath)
 
   // Use SDK version as source of truth, or use provided version
   const targetVersion = newVersion || sdkPackage.version
@@ -87,10 +89,25 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] Publish SDK dependency: ${publishPackage.dependencies['@seedprotocol/sdk']}`)
   }
 
+  // Update Feed version
+  if (feedPackage.version !== targetVersion) {
+    feedPackage.version = targetVersion
+    writePackageJson(feedPackagePath, feedPackage)
+    console.log(`[Version Sync] Updated Feed version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Feed version already at ${targetVersion}`)
+  }
+
+  // Update Feed's SDK dependency version to match
+  if (feedPackage.dependencies && feedPackage.dependencies['@seedprotocol/sdk']) {
+    console.log(`[Version Sync] Feed SDK dependency: ${feedPackage.dependencies['@seedprotocol/sdk']}`)
+  }
+
   console.log('[Version Sync] Version synchronization complete!')
   console.log(`[Version Sync] SDK: ${sdkPackage.version}`)
   console.log(`[Version Sync] CLI: ${cliPackage.version}`)
   console.log(`[Version Sync] Publish: ${publishPackage.version}`)
+  console.log(`[Version Sync] Feed: ${feedPackage.version}`)
 }
 
 // Run if called directly (simplified - always execute when run as script)

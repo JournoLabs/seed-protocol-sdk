@@ -1,5 +1,5 @@
 import { createThirdwebClient, getContract, sendTransaction, waitForReceipt, } from 'thirdweb'
-import { createWallet, Account, inAppWallet, } from 'thirdweb/wallets'
+import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
 import { isContractDeployed } from 'thirdweb/utils'
@@ -10,6 +10,7 @@ import {
   getAddress as getFactoryAddress,
 } from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
 import debug from 'debug'
+import type { TransactionReceipt } from 'thirdweb/transaction'
 import { getPublishConfig } from '../config'
 
 const logger = debug('permaPress:helpers:thirdweb')
@@ -145,7 +146,9 @@ export const ExternalWalletsForDeploy = [
   createWallet('me.rainbow',),
 ]
 
-export const deploySmartWalletContract = async ( localAccount: Account, ) => {
+export const deploySmartWalletContract = async (
+  localAccount: Account,
+): Promise<TransactionReceipt> => {
   const managedAccountFactoryContract = getManagedAccountFactoryContract()
   const createAccountTx = createAccount({
     contract : managedAccountFactoryContract,
@@ -179,7 +182,7 @@ export const appMetadata = {
   url: "https://seedprotocol.io",
 }
 
-export function getWalletsForConnectButton() {
+export function getWalletsForConnectButton(): Wallet[] {
   const { thirdwebAccountFactoryAddress } = getPublishConfig()
   return [
     inAppWallet({

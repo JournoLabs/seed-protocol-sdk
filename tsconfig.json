@@ -1,47 +1,17 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "WebWorker",
-      "es2022",
-      "WebWorker.AsyncIterable"
-    ],
     "baseUrl": ".",
-    "importHelpers": true,
-    "inlineSources": true,
-    "allowJs": true,
-    "allowSyntheticDefaultImports": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "strictNullChecks": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "declaration": true,
     "declarationMap": true,
     "declarationDir": "./dist",
     "emitDeclarationOnly": true,
-    "sourceMap": true,
-    "forceConsistentCasingInFileNames": true,
-    "esModuleInterop": true,
-    "module": "preserve",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "preserve",
-    "types": ["node"],
     "outDir": "./dist",
     "paths": {
-      "@/*": ["src/*"],
-      "@/test/*": ["__tests__/*"]
+      "@/*": ["packages/sdk/src/*"],
+      "@/test/*": ["packages/sdk/__tests__/*"]
     }
   },
-  "include": [
-    "src/**/*",
-    "__tests__/**/*",
-    "scripts/**/*",
-    "rollup.typia-proto.js"
-  ],
-  "exclude": ["__tests__/__fixtures__/invalid-type.ts"]
+  "include": ["packages/sdk/src/**/*", "packages/sdk/__tests__/**/*", "scripts/**/*"],
+  "exclude": ["packages/sdk/__tests__/__fixtures__/invalid-type.ts"]
 }

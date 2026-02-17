@@ -17,7 +17,7 @@ bun add @seedprotocol/sdk
 
 ## Prerequisites
 
-- Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (endpoints, `filesDir`, optional `dbConfig`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details.
+- Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (endpoints, `filesDir`, optional `dbConfig`, optional `schemaFile`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details.
 
 ```typescript
 import { client } from '@seedprotocol/sdk'
@@ -55,6 +55,8 @@ and use the returned instance after the promise resolves. Use `{ waitForReady: f
 
 1. Create the schema by name: `await Schema.create('Blog')`.
 2. Add models with `await Model.create(modelName, schema, { properties })`. Property definitions use `dataType` (e.g. `'Text'`, `'Number'`, `'Boolean'`, `'Date'`, `'Json'`, `'Html'`, `'Image'`, `'File'`, `'List'`, `'Relation'`).
+
+**Multi-value restriction:** Only `dataType: 'List'` can have multiple values. Relation, Text, Number, and all other types are single-valued. For a list of strings, use `dataType: 'List'` with `refValueType: 'Text'`. For a list of relations, use `dataType: 'List'` with `refValueType: 'Relation'` and `ref` (model name).
 
 **Example: schema with a single model**
 
@@ -351,3 +353,4 @@ root.render(
 - [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) – client configuration and database options
 - [DATA_ACCESS_PATTERNS.md](DATA_ACCESS_PATTERNS.md) – patterns for reading and writing data
 - [SCHEMA_CREATION_FLOW.md](SCHEMA_CREATION_FLOW.md) – how schema and model creation work under the hood
+- [PUBLISHING.md](PUBLISHING.md) – publish flow and schema setup requirements

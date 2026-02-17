@@ -20,9 +20,9 @@ import { migrate } from 'drizzle-orm/libsql/migrator'
 const PROJECT_ROOT = process.cwd()
 const DOT_SEED_DIR = path.join(PROJECT_ROOT, '.seed')
 const DRIZZLE_TEMP_DIR = path.join(DOT_SEED_DIR, 'drizzle-temp')
-const DRIZZLE_CONFIG_PATH = path.join(PROJECT_ROOT, 'src/db/configs/dev.schema.config.ts')
-const TARGET_DRIZZLE_DIR = path.join(PROJECT_ROOT, 'src/db/drizzle')
-const DRIZZLE_FILES_TS = path.join(PROJECT_ROOT, 'src/browser/db/drizzleFiles.ts')
+const DRIZZLE_CONFIG_PATH = path.join(PROJECT_ROOT, 'packages/sdk/src/db/configs/dev.schema.config.ts')
+const TARGET_DRIZZLE_DIR = path.join(PROJECT_ROOT, 'packages/sdk/src/db/drizzle')
+const DRIZZLE_FILES_TS = path.join(PROJECT_ROOT, 'packages/sdk/src/browser/db/drizzleFiles.ts')
 const STATE_DB_PATH = path.join(DOT_SEED_DIR, 'drizzle-state.db')
 
 // Ensure .seed directory exists
@@ -153,7 +153,7 @@ function copyMigrationsToTarget() {
     }
   }
 
-  console.log('✅ Copied migrations to src/db/drizzle')
+  console.log('✅ Copied migrations to packages/sdk/src/db/drizzle')
 }
 
 // Update drizzleFiles.ts with the new migration content
@@ -213,7 +213,7 @@ function updateDrizzleFiles() {
 
   // Generate the TypeScript file
   const content = `// This file embeds the drizzle migration files as strings for browser runtime
-// These files are copied from src/db/drizzle at build time
+// These files are copied from packages/sdk/src/db/drizzle at build time
 
 // Individual migration SQL files
 ${migrationExports.join('\n\n')}
@@ -227,7 +227,7 @@ export const snapshotJson = \`${escapeTemplateLiteral(snapshotJson)}\`
 `
 
   fs.writeFileSync(DRIZZLE_FILES_TS, content, 'utf-8')
-  console.log('✅ Updated src/browser/db/drizzleFiles.ts')
+  console.log('✅ Updated packages/sdk/src/browser/db/drizzleFiles.ts')
 }
 
 // Copy existing migrations to temp directory so drizzle-kit can compare against them
@@ -274,7 +274,7 @@ async function main() {
   const previousJournal = readJournal(targetJournalPath)
   const previousEntryCount = previousJournal?.entries?.length || 0
 
-  console.log(`📊 Existing migrations in src/db/drizzle: ${previousEntryCount}`)
+  console.log(`📊 Existing migrations in packages/sdk/src/db/drizzle: ${previousEntryCount}`)
 
   // Initialize state database from existing migrations if it doesn't exist
   const stateDbExists = fs.existsSync(STATE_DB_PATH)

@@ -32,14 +32,14 @@
   },
   "scripts": {
     "build": "tsc && rollup -c",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")",
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")",
     "dev": "tsx src/bin.ts",
     "dev:init": "tsx src/bin.ts init",
     "dev:export-sql": "tsx src/bin.ts export-sql",
     "dev:seed": "tsx src/bin.ts seed"
   },
   "dependencies": {
-    "@seedprotocol/sdk": "file:../../",
+    "@seedprotocol/sdk": "workspace:*",
     "@grpc/grpc-js": "^1.13.3",
     "@grpc/proto-loader": "^0.7.15",
     "better-sqlite3": "^12.2.0",

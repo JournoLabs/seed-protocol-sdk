@@ -62,7 +62,7 @@ export async function getSchemaRecord(
   const contract = getSchemaRegistryContract(client, chain)
   const result = await readContract({
     contract,
-    method: 'function getSchema(bytes32 uid) view returns ((bytes32 uid, address resolver, bool revocable, string schema))',
+    method: 'getSchema',
     params: [uid as `0x${string}`],
   })
   if (!result || (result as SchemaRecord).uid === ZERO_BYTES32) {
@@ -85,7 +85,7 @@ export function registerSchema(
   const contract = getSchemaRegistryContract(client, chain)
   return prepareContractCall({
     contract,
-    method: 'function register(string schema, address resolver, bool revocable) returns (bytes32)',
+    method: 'register',
     params: [params.schema, params.resolverAddress as `0x${string}`, params.revocable],
   })
 }

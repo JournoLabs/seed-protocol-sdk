@@ -1,0 +1,140 @@
+{
+  "name": "@seedprotocol/sdk",
+  "version": "0.4.7",
+  "description": "The SDK for Seed Protocol",
+  "type": "module",
+  "main": "./dist/main.cjs",
+  "module": "./dist/main.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">= 20 <= 24"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json\"",
+    "build:watch": "tsc -w -p tsconfig.json",
+    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json\"",
+    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public\"",
+    "compile": "graphql-codegen --config codegen.ts",
+    "watch": "graphql-codegen -w",
+    "test": "vitest run --reporter=default",
+    "test:ui": "vitest --ui --reporter=default",
+    "test:watch": "vitest",
+    "test:browser": "vitest --project=browser"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "@tanstack/react-query": "^5"
+  },
+  "optionalDependencies": {
+    "@tanstack/react-query": "^5.90.15",
+    "@zenfs/core": "^2.4.4",
+    "@zenfs/dom": "^1.2.6",
+    "fsevents": "^2.3.3"
+  },
+"dependencies": {
+  "@seedprotocol/feed": "workspace:*",
+  "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
+    "@libsql/client": "^0.15.15",
+    "@misskey-dev/browser-image-resizer": "^2024.1.0",
+    "@sinclair/typebox": "^0.34.45",
+    "@sqlite.org/sqlite-wasm": "^3.51.1-build2",
+    "@statelyai/inspect": "^0.4.0",
+    "@tanstack/query-sync-storage-persister": "^5.90.17",
+    "@tanstack/react-query-persist-client": "^5.90.17",
+    "@xstate/react": "^6.0.0",
+    "arweave": "^1.15.5",
+    "better-sqlite3": "^12.5.0",
+    "debug": "^4.4.1",
+    "dotenv": "^17.2.3",
+    "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.44.3",
+    "ethers": "^6.13.0",
+    "eventemitter3": "^5.0.1",
+    "glob": "^13.0.0",
+    "globals": "^16.5.0",
+    "graphql": "^16.10.0",
+    "graphql-request": "^7.3.5",
+    "immer": "^11.0.1",
+    "js-sha3": "^0.9.3",
+    "js-yaml": "^4.1.1",
+    "lodash-es": "^4.17.22",
+    "nanoid": "^5.1.5",
+    "nanoid-dictionary": "^5.0.0",
+    "nunjucks": "^3.2.4",
+    "path-browserify": "^1.0.1",
+    "pluralize": "^8.0.0",
+    "protobufjs": "^7.4.0",
+    "reflect-metadata": "^0.2.2",
+    "rimraf": "^6.0.1",
+    "rxjs": "^7.8.1",
+    "sqlocal": "^0.16.0",
+    "ts-import": "5.0.0-beta.1",
+    "ts-morph": "^27.0.2",
+    "ts-proto": "^2.6.0",
+    "tslib": "^2.8.1",
+    "use-immer": "^0.11.0",
+    "vite-plugin-node-polyfills": "^0.24.0",
+    "webpack": "^5.98.0",
+    "xstate": "^5.19.0"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/main.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/main.cjs"
+      }
+    },
+    "./node": {
+      "import": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node.js"
+      },
+      "require": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/main.cjs"
+      }
+    },
+    "./vite": {
+      "import": {
+        "types": "./dist/vite/index.d.ts",
+        "default": "./dist/vite.js"
+      },
+      "require": {
+        "types": "./dist/vite/index.d.ts",
+        "default": "./dist/vite.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "overrides": {
+    "@tanstack/query-core": "5.90.15"
+  },
+  "devDependencies": {
+    "@rollup/plugin-alias": "^6.0.0",
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "magic-string": "^0.30.21",
+    "rollup": "^4.53.0",
+    "rollup-plugin-copy": "^3.5.0",
+    "rollup-plugin-tsconfig-paths": "^1.5.2",
+    "typescript": "~5.9.3"
+  },
+  "trustedDependencies": [
+    "protobufjs"
+  ],
+  "_bundleHint": {
+    "note": "If bundling this package, mark the following as external: nunjucks, fsevents, better-sqlite3, drizzle-kit, and other native Node.js modules. For Vite projects, also exclude drizzle-kit and database drivers (@electric-sql/pglite, pg, postgres, etc.) from optimizeDeps."
+  }
+}

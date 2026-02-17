@@ -22,11 +22,11 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../package.json').version)\")"
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
-    "@seedprotocol/sdk": "file:../../",
+    "@seedprotocol/sdk": "workspace:*",
     "debug": "^4.4.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

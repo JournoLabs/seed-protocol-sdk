@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const rootDir = path.join(__dirname, '..')
-const distDir = path.join(rootDir, 'dist')
+const distDir = path.join(rootDir, 'packages', 'sdk', 'dist')
 
 const BAD_PATTERNS = ["import('@/", 'import("@/']
 

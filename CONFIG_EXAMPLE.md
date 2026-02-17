@@ -23,6 +23,25 @@ await ClientManager.init({
 })
 ```
 
+## Schema File
+
+You can load a schema from a JSON file on init by passing `schemaFile`:
+
+```typescript
+await ClientManager.init({
+  config: {
+    endpoints: { filePaths: '...', files: '.seed' },
+    filesDir: '.seed',
+    schemaFile: 'schema.json',  // Path relative to project root (Node) or working dir (browser)
+  },
+  addresses: [],
+})
+```
+
+- **Supported formats:** Minimal (`{ "name": "MySchema", "models": { ... } }`) or complete (`{ "$schema": "...", "metadata": { "name": "MySchema" }, "models": { ... } }`)
+- **Path resolution:** Node = relative to `process.cwd()`; Browser = relative to working dir (OPFS)
+- **Idempotent:** If the schema already exists in the database, it will not create duplicates
+
 ## Database Configuration
 
 To customize database settings, you'll need to pass a `dbConfig` object. The `DbConfig` interface supports:
