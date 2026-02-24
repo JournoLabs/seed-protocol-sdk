@@ -1,8 +1,11 @@
+import type { Account } from 'thirdweb/wallets'
 import { setup, assign, } from 'xstate'
 import {
   ArweaveTransactionInfo,
   PublishMachineContext,
-}                                                                                            from '~/types/types'
+  ReimbursementResponse,
+  PublishUpload,
+}                                                                                            from '../../types'
 import {
   createArweaveTransactions,
   createAttestations,
@@ -10,12 +13,12 @@ import {
   pollForConfirmation,
   uploadData,
 } from './actors'
+import { createAttestationsDirectToEas } from './actors/createAttestationsDirectToEas'
 import { checking, } from './actors/checking'
-import { ReimbursementResponse, } from '../upload'
 import {
   PublishMachineStates,
 } from '~/helpers/constants'
-import { PublishUpload } from '@seedprotocol/sdk'
+import { getPublishConfig } from '~/config'
 
 
 const {
@@ -34,6 +37,7 @@ export const publishMachine = setup({
     pollForConfirmation,
     uploadData,
     createAttestations,
+    createAttestationsDirectToEas,
     checking,
   },
   actions : {
@@ -61,6 +65,13 @@ export const publishMachine = setup({
       error     : ( { event, }, ) => event.error,
       errorStep : () => 'creatingAttestations',
     },),
+    assignErrorCreatingAttestationsDirectToEas : assign({
+      error     : ( { event, }, ) => event.error,
+      errorStep : () => 'creatingAttestationsDirectToEas',
+    },),
+    assignAccountFromRetry : assign({
+      account : ( { event, }, ) => (event as { account?: Account }).account,
+    },),
   },
 
 },).createMachine({
@@ -76,23 +87,34 @@ export const publishMachine = setup({
         validPublishProcess: {
           target: 'creatingArweaveTransactions',
         },
-        skipArweave: {
-          target: 'creatingAttestations',
-          actions: assign({
-            arweaveTransactions: () => [],
-            publishUploads: () => [],
-          }),
-        },
+        skipArweave: [
+          {
+            guard: () => getPublishConfig().useDirectEas,
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              arweaveTransactions: () => [],
+              publishUploads: () => [],
+            }),
+          },
+          {
+            guard: () => !getPublishConfig().useDirectEas,
+            target: 'creatingAttestations',
+            actions: assign({
+              arweaveTransactions: () => [],
+              publishUploads: () => [],
+            }),
+          },
+        ],
       },
       invoke : {
         src    : 'checking',
-        input  : ( { context, }, ) => ({ context, }),
+        input  : ( { context } ) => ({ context } as { context: PublishMachineContext }),
       },
     },
     creatingArweaveTransactions : {
       invoke : {
         src    : 'createArweaveTransactions',
-        input  : ( { context, event, }, ) => ({ context, event, }),
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target  : 'sendingReimbursementRequest',
           actions : assign({
@@ -109,7 +131,7 @@ export const publishMachine = setup({
     sendingReimbursementRequest : {
       invoke : {
         src    : 'sendReimbursementRequest',
-        input  : ( { context, event, }, ) => ({ context, event, }),
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target  : 'pollingForConfirmation',
           actions : assign({
@@ -126,7 +148,7 @@ export const publishMachine = setup({
     pollingForConfirmation : {
       invoke : {
         src    : 'pollForConfirmation',
-        input  : ( { context, event, }, ) => ({ context, event, }),
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target  : 'uploadingData',
           actions : assign({
@@ -150,12 +172,22 @@ export const publishMachine = setup({
             },
           },),
         },
-        uploadComplete : {
-          target  : 'creatingAttestations',
-          actions : assign({
-            completionPercentage : 100,
-          },),
-        },
+        uploadComplete : [
+          {
+            guard: () => getPublishConfig().useDirectEas,
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
+            }),
+          },
+          {
+            guard: () => !getPublishConfig().useDirectEas,
+            target: 'creatingAttestations',
+            actions: assign({
+              completionPercentage: 100,
+            }),
+          },
+        ],
         uploadError : {
           target  : 'failure',
           actions : [ 'assignErrorUploadingData', 'handleError', ],
@@ -163,24 +195,53 @@ export const publishMachine = setup({
       },
       invoke : {
         src   : 'uploadData',
-        input : ( { context, }, ) => ({ context, }),
+        input : ( { context } ) => ({ context }) as { context: PublishMachineContext },
       },
     },
     creatingAttestations : {
       invoke : {
         src    : 'createAttestations',
-        input  : ( { context, event, }, ) => ({ context, event, }),
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target : SUCCESS,
         },
         onError : {
-          target  : FAILURE,
+          target  : 'attestationFailureRecoverable',
           actions : [ 'assignErrorCreatingAttestations', 'handleError', ],
         },
       },
     },
+    attestationFailureRecoverable : {
+      on : {
+        retry : {
+          target  : 'creatingAttestations',
+          actions : [ 'assignAccountFromRetry', ],
+        },
+      },
+    },
+    creatingAttestationsDirectToEas : {
+      invoke : {
+        src    : 'createAttestationsDirectToEas',
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
+        onDone : {
+          target : SUCCESS,
+        },
+        onError : {
+          target  : 'attestationFailureRecoverableDirectToEas',
+          actions : [ 'assignErrorCreatingAttestationsDirectToEas', 'handleError', ],
+        },
+      },
+    },
+    attestationFailureRecoverableDirectToEas : {
+      on : {
+        retry : {
+          target  : 'creatingAttestationsDirectToEas',
+          actions : [ 'assignAccountFromRetry', ],
+        },
+      },
+    },
     stopping: {
-      entry: ( { context, }: { context: Partial<PublishMachineContext> }, ) => {
+      entry: ( { context }: { context: Partial<PublishMachineContext> } ) => {
         console.log(`Actor for ${context.item?.seedLocalId} stopped`,)
       },
       type: 'final',

@@ -140,18 +140,21 @@ const processBasicProperties = async (
         ? itemPublishData.versionUid
         : defaultAttestationData.refUID
 
-    const attestationEntry: AttestationRequest & {
+    const attestationEntry: Omit<AttestationRequest, 'data'> & {
+      data: AttestationRequestData[]
       _propertyName?: string
       _schemaDef?: string
       _unresolvedValue?: string
       _easDataType?: string
     } = {
       schema: schemaUid!,
-      data: {
-        ...defaultAttestationData,
-        refUID: refUid,
-        data: encodedData,
-      } as AttestationRequestData,
+      data: [
+        {
+          ...defaultAttestationData,
+          refUID: refUid,
+          data: encodedData,
+        } as AttestationRequestData,
+      ],
     }
 
     // For relation/image properties with seedLocalId, store resolution hints for resolvePublishPayloadValues
@@ -202,6 +205,11 @@ const processRelationOrImageProperty = async (
 
   const { localId: seedLocalId, uid: seedUid } = getCorrectId(value)
 
+  // Value is not a valid seed reference (10-char localId or 66-char uid); skip (e.g. Html with inline content)
+  if (!seedLocalId && !seedUid) {
+    return multiPublishPayload
+  }
+
   // Use dynamic import to break circular dependency
   const getItemMod = await import('../../db/read/getItem')
   const { getItem } = getItemMod
@@ -238,7 +246,8 @@ const processRelationOrImageProperty = async (
   }
 
   if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Relation) {
-    modelName = relationOrImageProperty.propertyDef!.ref as string
+    const def = relationOrImageProperty.propertyDef as { ref?: string; refModelName?: string }
+    modelName = def.ref ?? def.refModelName
   }
 
   if (!modelName) {
@@ -252,7 +261,7 @@ const processRelationOrImageProperty = async (
   }
 
   let publishPayload: PublishPayload = {
-    localId: relationOrImageProperty.localId,
+    localId: relatedItem.seedLocalId,
     seedIsRevocable: true,
     versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
     seedUid: seedUid || ZERO_BYTES32,
@@ -364,8 +373,9 @@ const processListProperty = async (
 
     let modelName: string | undefined
 
-    if (listProperty.propertyDef?.ref) {
-      modelName = listProperty.propertyDef!.ref as string
+    if (listProperty.propertyDef?.ref || (listProperty.propertyDef as { refModelName?: string }).refModelName) {
+      const def = listProperty.propertyDef as { ref?: string; refModelName?: string }
+      modelName = def.ref ?? def.refModelName
     }
 
     if (listProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
@@ -426,7 +436,8 @@ type PublishPayload = {
   seedUid: string
   versionSchemaUid: string
   versionUid: string
-  listOfAttestations: (AttestationRequest & {
+  listOfAttestations: (Omit<AttestationRequest, 'data'> & {
+    data: AttestationRequestData[]
     _propertyName?: string
     _schemaDef?: string
     _unresolvedValue?: string
@@ -530,7 +541,100 @@ export const getPublishPayload = async (
 
   multiPublishPayload.push(itemPublishData)
 
+  // Ensure requests are ordered so that when A has propertiesToUpdate pointing to B (publishLocalId),
+  // A (the updater) is published before B (the updatee). The contract injects A's seedUid into B's
+  // attestation before B is sent to EAS.
+  multiPublishPayload = orderPayloadByDependencies(multiPublishPayload)
+
+  // Ensure attestations referenced in propertiesToUpdate have at least one data element.
+  // The contract writes the seed UID into data[0].data; empty data causes Panic 50.
+  multiPublishPayload = ensurePropertiesToUpdateAttestationsHaveData(multiPublishPayload)
+
   return multiPublishPayload
+}
+
+/**
+ * Normalize a schema UID to 0x-prefixed 64-char hex for comparison.
+ */
+function normalizeSchemaUid(v: string | undefined): string {
+  if (v == null || v === '') return ''
+  const raw = v.startsWith('0x') ? v.slice(2) : v
+  const hex = raw.replace(/[^0-9a-fA-F]/g, '0').padStart(64, '0').slice(-64)
+  return ('0x' + hex).toLowerCase()
+}
+
+/**
+ * Ensure that when request A has propertiesToUpdate with (publishLocalId: B, propertySchemaUid: X),
+ * request B has an attestation for schema X with at least one data element. The contract writes
+ * the seed UID into data[0].data; empty data causes Panic 50.
+ */
+function ensurePropertiesToUpdateAttestationsHaveData(
+  payload: MultiPublishPayload,
+): MultiPublishPayload {
+  const byLocalId = new Map<string, PublishPayload>()
+  for (const p of payload) {
+    byLocalId.set(p.localId, p)
+  }
+
+  const placeholderData: AttestationRequestData = {
+    ...defaultAttestationData,
+    data: ZERO_BYTES32,
+  }
+
+  for (const req of payload) {
+    for (const pu of req.propertiesToUpdate ?? []) {
+      const targetId = (pu as { publishLocalId?: string }).publishLocalId
+      const schemaUid = (pu as { propertySchemaUid?: string }).propertySchemaUid
+      if (!targetId || !schemaUid) continue
+
+      const targetReq = byLocalId.get(targetId)
+      if (!targetReq?.listOfAttestations) continue
+
+      const wantSchema = normalizeSchemaUid(schemaUid)
+      const att = targetReq.listOfAttestations.find(
+        (a) => normalizeSchemaUid(a?.schema) === wantSchema,
+      )
+      if (!att) continue
+
+      if (!Array.isArray(att.data) || att.data.length === 0) {
+        att.data = [placeholderData]
+      }
+    }
+  }
+
+  return payload
+}
+
+/**
+ * Topological sort: when request A has propertiesToUpdate with publishLocalId B,
+ * A (the updater) must appear before B (the updatee). The contract injects A's seedUid
+ * into B's attestation before B is sent to EAS; if B is processed first, B's attestation
+ * goes out with wrong data (string instead of bytes32).
+ */
+function orderPayloadByDependencies(payload: MultiPublishPayload): MultiPublishPayload {
+  const byLocalId = new Map<string, PublishPayload>()
+  for (const p of payload) {
+    byLocalId.set(p.localId, p)
+  }
+  const visited = new Set<string>()
+  const result: PublishPayload[] = []
+
+  const visit = (localId: string) => {
+    if (visited.has(localId)) return
+    visited.add(localId)
+    const p = byLocalId.get(localId)
+    if (!p) return
+    result.push(p)
+    for (const u of p.propertiesToUpdate ?? []) {
+      const targetId = (u as { publishLocalId?: string }).publishLocalId
+      if (targetId && targetId !== localId) visit(targetId)
+    }
+  }
+
+  for (const p of payload) {
+    visit(p.localId)
+  }
+  return result
 }
 
 /**
@@ -553,11 +657,9 @@ export const resolvePublishPayloadValues = async (
     const updatedAttestations: PublishPayload['listOfAttestations'] = []
 
     for (const attestation of payload.listOfAttestations) {
-      const entry = attestation as AttestationRequest & {
-        _propertyName?: string
-        _schemaDef?: string
-        _unresolvedValue?: string
+      const entry = attestation as PublishPayload['listOfAttestations'][0] & {
         _easDataType?: string
+        data?: AttestationRequestData[] | AttestationRequestData
       }
 
       const resolvedUid = entry._unresolvedValue && resolvedUids[entry._unresolvedValue]
@@ -571,16 +673,23 @@ export const resolvePublishPayloadValues = async (
             value: resolvedUid,
           },
         ])
+        const baseData = Array.isArray(entry.data) ? entry.data[0] : (entry.data as AttestationRequestData)
         updatedAttestations.push({
           ...entry,
-          data: {
-            ...entry.data,
-            data: encodedData,
-          } as AttestationRequestData,
+          data: [
+            {
+              ...baseData,
+              data: encodedData,
+            } as AttestationRequestData,
+          ],
           _unresolvedValue: undefined,
         })
       } else {
-        updatedAttestations.push(entry)
+        const normalizedEntry: PublishPayload['listOfAttestations'][0] = {
+          ...entry,
+          data: Array.isArray(entry.data) ? entry.data : [entry.data as AttestationRequestData],
+        }
+        updatedAttestations.push(normalizedEntry)
       }
     }
 

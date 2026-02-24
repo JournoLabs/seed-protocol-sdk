@@ -1,6 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
@@ -75,12 +76,12 @@ export const saveConfig = fromCallback<
         .insert(appState)
         .values({
           key: 'arweaveDomain',
-          value: arweaveDomain || 'arweave.net',
+          value: arweaveDomain || DEFAULT_ARWEAVE_HOST,
         })
         .onConflictDoUpdate({
           target: appState.key,
           set: {
-            value: arweaveDomain || 'arweave.net',
+            value: arweaveDomain || DEFAULT_ARWEAVE_HOST,
           },
         })
     } catch (error: any) {

@@ -10,20 +10,49 @@ import { PublishUpload } from '@/types/publish'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
+const EXTENSION_TO_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  html: 'text/html',
+  htm: 'text/html',
+  json: 'application/json',
+  txt: 'text/plain',
+}
+
+const getMimeTypeFromPath = (filePathOrName: string): string | undefined => {
+  const ext = filePathOrName.split('.').pop()?.toLowerCase()
+  return ext ? EXTENSION_TO_MIME[ext] : undefined
+}
+
+const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    return new Uint8Array(await data.arrayBuffer())
+  }
+  return new Uint8Array(data as Buffer)
+}
+
 export const prepareArweaveTransaction = async (
   data: string | Uint8Array,
   contentHash: string | undefined,
+  contentType?: string,
 ): Promise<ArweaveTransaction> => {
-  const tags = contentHash
-    ? [{ name: 'Content-SHA-256', value: contentHash }]
-    : undefined
-
+  const tags: { name: string; value: string }[] = []
   if (contentHash) {
+    tags.push({ name: 'Content-SHA-256', value: contentHash })
     logger('contentHash', contentHash)
     logger('adding content hash tag')
   }
+  if (contentType) {
+    tags.push({ name: 'Content-Type', value: contentType })
+  }
 
-  const tx = await BaseArweaveClient.createTransaction(data, { tags })
+  const tx = await BaseArweaveClient.createTransaction(data, {
+    tags: tags.length ? tags : undefined,
+  })
 
   return tx
 }
@@ -74,11 +103,17 @@ const getStorageSeedUploads = async (
       continue
     }
 
-    const fileContents = await BaseFileManager.readFileAsString(filePath)
+    const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
+    const fileContents = await toUint8Array(fileBuffer)
 
     const contentHash = await getContentHash(fileContents)
+    const contentType = getMimeTypeFromPath(refResolvedValue)
 
-    const transaction = await prepareArweaveTransaction(fileContents, contentHash)
+    const transaction = await prepareArweaveTransaction(
+      fileContents,
+      contentHash,
+      contentType,
+    )
 
     uploads.push({
       itemPropertyName: itemProperty.propertyName,
@@ -142,14 +177,14 @@ const processUploadProperty = async (
       const exists = await BaseFileManager.pathExists(filePath)
       if (!exists) {
         return uploads
-
       }
 
       try {
-        fileContents = await BaseFileManager.readFileAsString(filePath)
+        const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
+        fileContents = await toUint8Array(fileBuffer)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
-        fileContents = fs.readFileSync(filePath)
+        fileContents = await toUint8Array(fs.readFileSync(filePath))
       }
     }
     if (!fileContents) {
@@ -189,15 +224,22 @@ const processUploadProperty = async (
     throw new Error(`No file contents found for ${itemProperty.propertyName}`)
   }
 
-  const uint8Array = new Uint8Array(
-    fileContents.buffer,
-    fileContents.byteOffset,
-    fileContents.byteLength,
-  )
+  const uint8Array = new Uint8Array(fileContents)
 
   const contentHash = await getContentHash(uint8Array)
 
-  transaction = await prepareArweaveTransaction(fileContents, contentHash)
+  let contentType: string | undefined
+  if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
+    contentType = getMimeTypeFromPath(relatedItemProperty.localStoragePath)
+  } else if (childUploads.length > 0) {
+    contentType = 'application/octet-stream'
+  }
+
+  transaction = await prepareArweaveTransaction(
+    uint8Array,
+    contentHash,
+    contentType,
+  )
 
   let itemPropertyLocalId = relatedItemProperty
     ? relatedItemProperty.localId

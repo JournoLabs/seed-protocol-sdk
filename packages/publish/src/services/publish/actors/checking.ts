@@ -1,5 +1,6 @@
-import { FromCallbackInput } from "~/types/machines";
-import { PublishMachineContext } from "~/types/types";
+import type { PublishMachineContext } from '../../../types'
+
+type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from "xstate";
 import { itemNeedsArweaveUpload } from "../helpers/itemNeedsArweave";
 

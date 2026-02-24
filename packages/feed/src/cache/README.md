@@ -6,7 +6,7 @@ The feed caching system can be configured using environment variables.
 
 - `CACHE_TTL` - Cache time-to-live in seconds (default: 3600 = 1 hour)
 - `CACHE_DIR` - Directory for persistent cache files (default: `./cache`)
-- `CACHE_ENABLED` - Enable/disable caching (default: `true`, set to `false` to disable)
+- `CACHE_ENABLED` - Enable/disable caching. In development (`NODE_ENV=development`), cache is disabled by default. Set to `true` to enable in dev, or `false` to disable in production.
 - `CACHE_BACKGROUND_REFRESH` - Enable background refresh job (default: `false`)
 - `CACHE_REFRESH_INTERVAL` - Background refresh interval in seconds (default: 300 = 5 minutes)
 

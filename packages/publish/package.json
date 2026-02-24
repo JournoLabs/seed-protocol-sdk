@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -26,11 +26,14 @@
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
-    "@seedprotocol/sdk": "workspace:*",
+    "@seedprotocol/sdk": "0.4.8",
+    "arweave": "^1.15.7",
     "debug": "^4.4.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "thirdweb": "^5.118.1"
+    "thirdweb": "^5.118.1",
+    "viem": "^2.46.2",
+    "xstate": "^5.28.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

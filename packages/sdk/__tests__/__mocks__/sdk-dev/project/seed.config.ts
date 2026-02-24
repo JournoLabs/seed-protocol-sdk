@@ -1,3 +1,4 @@
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { Image, List, Model, Relation, Text, Date, Number, Boolean } from '@/Schema'
 
 
@@ -39,7 +40,7 @@ const endpoints = {
   files: '/app-files',
 }
 
-const arweaveDomain = 'arweave.net'
+const arweaveDomain = DEFAULT_ARWEAVE_HOST
 
 export { models, endpoints, arweaveDomain }
 

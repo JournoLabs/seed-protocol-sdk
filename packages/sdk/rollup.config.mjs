@@ -32,11 +32,12 @@ const postProcess = () => {
  */
 function twoStepDynamicImportPlugin() {
   // One full line: indent, LHS (destructure or id), path, then .then(...);
-  const LINE_FUNC = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.(\w+)\s*;\s*\}\s*\)\s*;/gm
-  const LINE_ARROW = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.(\w+)\s*\)\s*;/gm
+  // Export names may be minified (e.g. a, a$, a0) - use [\w$]+ to match
+  const LINE_FUNC = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)\s*;/gm
+  const LINE_ARROW = /^(\s*)const\s+(\{[^}]+\}|\w+)\s*=\s*await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)\s*;/gm
   // Promise form (no await): const x = import('...').then(function (n) { return n.X; }) - rewrite to async IIFE
-  const PROMISE_FUNC = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.(\w+)\s*;\s*\}\s*\)/gm
-  const PROMISE_ARROW = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.(\w+)\s*\)/gm
+  const PROMISE_FUNC = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)/gm
+  const PROMISE_ARROW = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)/gm
 
   return {
     name: 'two-step-dynamic-import',

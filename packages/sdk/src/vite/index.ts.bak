@@ -417,13 +417,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // Remove query parameters for matching
       const sourceWithoutQuery = source.split('?')[0]
       
-      // #region agent log
-      // Debug: Track node-stdlib-browser/helpers/rollup module resolution
-      if (source.includes('node-stdlib-browser') && source.includes('rollup')) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId',message:'Resolving node-stdlib-browser rollup module',data:{source,importer:importer?.substring(0,200),sourceWithoutQuery},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-      }
-      // #endregion
-      
       // Intercept node-stdlib-browser/helpers/rollup/plugin and redirect to virtual module
       // This ensures our ESM wrapper is ALWAYS served, bypassing any /@fs/ caching issues
       if (
@@ -431,9 +424,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         sourceWithoutQuery.includes('helpers/rollup/plugin')
       ) {
         log(`[observer:resolveId] Redirecting node-stdlib-browser rollup plugin to virtual module`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId-redirect',message:'Redirecting to virtual module',data:{source,importer:importer?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7-FIX'})}).catch(()=>{});
-        // #endregion
         // Return a virtual module ID that we control
         return '\0virtual:node-stdlib-browser-rollup-plugin'
       }
@@ -457,9 +447,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // Intercept fs imports early, before other plugins can create polyfills
       // This is critical for packages like drizzle-orm/migrator that import node:fs
       if (fsModules.includes(source) || fsModules.includes(sourceWithoutQuery)) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-resolveId-fs',message:'Intercepting fs module in observer resolveId',data:{source,importer:importer?.substring(0,150)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         log(`[observer] Early interception of: "${source}" from ${importer}`)
         
         const isPromiseVariant = source.includes('promises')
@@ -526,9 +513,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // bypasses all Vite filesystem caching mechanisms
       if (id === '\0virtual:node-stdlib-browser-rollup-plugin') {
         log(`[observer:load] Serving virtual module for node-stdlib-browser rollup plugin`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-load-virtual-node-stdlib',message:'Serving VIRTUAL module for node-stdlib-browser rollup plugin',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7-FIX'})}).catch(()=>{});
-        // #endregion
         return `
 // Virtual module: node-stdlib-browser/helpers/rollup/plugin (ESM wrapper)
 // This virtual module ensures the ESM wrapper is ALWAYS served
@@ -571,9 +555,6 @@ export default { handleCircularDependancyWarning };
       
       if (isNodeStdlibBrowserRollupPlugin) {
         log(`[observer:load] Intercepting node-stdlib-browser rollup plugin: ${id} - providing ESM wrapper`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:observer-load-node-stdlib-browser-rollup',message:'EARLY intercept of node-stdlib-browser rollup plugin in observer (pre)',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-FIX'})}).catch(()=>{});
-        // #endregion
         return `
 // Intercepted by seed-vite-plugin (observer:pre) - ESM wrapper for node-stdlib-browser/helpers/rollup/plugin.js
 // This MUST be intercepted early (enforce: 'pre') to ensure ESM wrapper is served instead of CommonJS
@@ -965,20 +946,6 @@ export { plugin };
     },
 
     async resolveId(source, importer, options) {
-      // #region agent log
-      // Debug: Track node-stdlib-browser rollup resolution
-      if (source.includes('node-stdlib-browser') && source.includes('rollup')) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId',message:'Resolving node-stdlib-browser rollup module in mainPlugin',data:{source,importer:importer?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-      }
-      // #endregion
-      
-      // #region agent log
-      // Debug: Track picomatch resolution
-      if (source.includes('picomatch') || (importer && importer.includes('picomatch'))) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId-picomatch',message:'Resolving picomatch-related module',data:{source,importer:importer?.substring(0,150)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-      }
-      // #endregion
-      
       // Note: We don't intercept buffer here because vite-plugin-node-polyfills should handle it
       // when configured with include: ['buffer']. Intercepting here could interfere with
       // the plugin's own resolution mechanism. The transform hook will handle any require() calls.
@@ -987,11 +954,6 @@ export { plugin };
       // The ESM build uses `export * from './module.mjs'` which Rollup can't trace properly
       // The CJS build doesn't have this issue
       if (source === '@sinclair/typebox' || source === '@sinclair/typebox/value') {
-        // #region agent log
-        // Debug: Track typebox resolution to see if this hook runs in the Electron build
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:mainPlugin-resolveId-typebox',message:'Intercepting @sinclair/typebox resolution',data:{source,importer:importer?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H4'})}).catch(()=>{});
-        // #endregion
-
         // Skip if already resolving to CJS build
         if (importer && importer.includes('@sinclair/typebox/build/cjs')) {
           return null
@@ -1215,20 +1177,6 @@ export { plugin };
       // Remove query parameters for matching (e.g., ?v=392cb483)
       const idWithoutQuery = id.split('?')[0]
       
-      // #region agent log
-      // Debug: Track node-stdlib-browser/helpers/rollup module loading
-      if (idWithoutQuery.includes('node-stdlib-browser') && idWithoutQuery.includes('rollup')) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-entry',message:'Loading node-stdlib-browser rollup module',data:{id,idWithoutQuery,isViteOptimized:idWithoutQuery.includes('.vite')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-      }
-      // #endregion
-      
-      // #region agent log
-      // Debug: Track picomatch and glob-related module loading
-      if (idWithoutQuery.includes('picomatch') || idWithoutQuery.includes('micromatch') || idWithoutQuery.includes('glob')) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-entry-glob',message:'Loading glob-related module',data:{id,idWithoutQuery,isViteOptimized:idWithoutQuery.includes('.vite')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H4'})}).catch(()=>{});
-      }
-      // #endregion
-      
       // Early check for path polyfill files - check this first before other logic
       // This catches vite-plugin-node-polyfills path polyfills that may use require() or have other issues
       // We intercept ALL path polyfills from Vite's optimization directories to ensure compatibility
@@ -1346,19 +1294,9 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
       
       if (isNpmBufferPackage) {
         log(`Intercepting npm buffer package load: ${id} - providing self-contained Buffer polyfill`)
-        // #region agent log
-        // Debug instrumentation for hypothesis testing
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-isNpmBufferPackage',message:'Intercepting npm buffer package in load hook - providing polyfill',data:{id,idWithoutQuery,isViteOptimized},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX3'})}).catch(()=>{});
-        // #endregion
         // Provide a self-contained Buffer polyfill that works without globals or require()
         // This is based on the feross/buffer implementation but simplified for browser use
         return `
-// #region agent log
-(function() {
-  fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'buffer-polyfill-loaded',message:'Self-contained Buffer polyfill loaded successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX3'})}).catch(function(){});
-})();
-// #endregion
-
 // Intercepted by seed-vite-plugin - Self-contained Buffer polyfill for browser/Electron renderer
 // First check if a global Buffer already exists (e.g., from vite-plugin-node-polyfills)
 const existingBuffer = typeof globalThis !== 'undefined' && globalThis.Buffer 
@@ -1733,9 +1671,6 @@ export { EventEmitter };
       
       if (isProcessPackage) {
         log(`Intercepting npm process package load: ${id} - providing self-contained process polyfill`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-isProcessPackage',message:'Intercepting process package in load hook - providing polyfill',data:{id,idWithoutQuery,isViteOptimized},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'PROCESS'})}).catch(()=>{});
-        // #endregion
         // Provide a self-contained process polyfill for browser environments
         return `
 // Intercepted by seed-vite-plugin - Self-contained process polyfill for browser/Electron renderer
@@ -2014,9 +1949,6 @@ export default moduleStub;
       
       if (isPkgDir) {
         log(`Intercepting pkg-dir load: ${id} - providing ESM wrapper`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-pkg-dir-intercept',message:'Intercepting and wrapping pkg-dir',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
-        // #endregion
         // Provide an ESM wrapper for pkg-dir
         // pkg-dir finds the root directory of a Node.js project - stub for browser
         return `
@@ -2046,9 +1978,6 @@ export { packageDirectory, packageDirectorySync };
       
       if (isCreateRequire) {
         log(`Intercepting create-require load: ${id} - providing ESM wrapper`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-create-require-intercept',message:'Intercepting and wrapping create-require',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
-        // #endregion
         // Provide an ESM wrapper for create-require
         // create-require exports a function that creates a require function for ESM
         return `
@@ -2096,9 +2025,6 @@ export { createRequire };
       
       if (isPicomatch) {
         log(`Intercepting picomatch load: ${id} - providing ESM wrapper`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-picomatch-intercept',message:'Intercepting and wrapping picomatch',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
-        // #endregion
         // Provide a minimal ESM wrapper for picomatch
         // picomatch exports a function with additional methods attached
         return `
@@ -2309,9 +2235,6 @@ export const constants = picomatch.constants;
       
       if (isNodeStdlibBrowserRollupPlugin) {
         log(`Intercepting node-stdlib-browser rollup plugin load: ${id} - providing ESM wrapper`)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:load-node-stdlib-browser-rollup-intercept',message:'Intercepting and wrapping node-stdlib-browser rollup plugin',data:{id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
-        // #endregion
         // Provide an ESM wrapper with the handleCircularDependancyWarning export
         // This function is used by vite-plugin-node-polyfills to suppress circular dependency warnings
         return `
@@ -2898,14 +2821,6 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
     },
 
     transform(code, id) {
-      // #region agent log
-      // Debug: Track node-stdlib-browser/helpers/rollup module transform
-      const idWithoutQueryTransform = id.split('?')[0]
-      if (idWithoutQueryTransform.includes('node-stdlib-browser') && idWithoutQueryTransform.includes('rollup')) {
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-entry',message:'Transform called for node-stdlib-browser rollup module',data:{id,codeLength:code.length,hasModuleExports:code.includes('module.exports'),codeSnippet:code.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
-      }
-      // #endregion
-      
       // === HELPER FUNCTION FOR EXISTING TRANSFORMATIONS ===
       // Handles path and fs import transformations for non-Vite-optimized files
       const handleExistingTransformations = (codeToTransform: string, fileId: string): { code: string; map: null } | null => {
@@ -3065,13 +2980,6 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
           !id.includes('node_modules') && 
           !id.includes('.vite')
         
-        // #region agent log
-        // Debug: Track require transformer execution
-        if (isProduction && (isBundledOutput || id.includes('index-') || id.includes('dist-electron'))) {
-          fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-require-check',message:'Checking require transformer conditions',data:{id:id.substring(0,200),isViteOptimized,isTypeboxCjs,isBundledOutput,isProduction,hasRequire:code.includes('require(')},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H3'})}).catch(()=>{});
-        }
-        // #endregion
-        
         if (isViteOptimized || isTypeboxCjs || isBundledOutput) {
           // Pattern matches: require('module'), require("module"), require(`module`)
           // Also matches minified versions: require('module'), require("module")
@@ -3082,13 +2990,6 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
           
           // Test if there are any require() calls
           const hasRequireCalls = requirePattern.test(code)
-          
-          // #region agent log
-          // Debug: Track require pattern matching
-          if (isBundledOutput && hasRequireCalls) {
-            fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:transform-require-found',message:'Found require() calls in bundled output',data:{id:id.substring(0,200),codeSample:code.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H3'})}).catch(()=>{});
-          }
-          // #endregion
           
           if (hasRequireCalls) {
             // Reset regex for collection pass
@@ -3282,21 +3183,14 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
       const hasNodeCrypto = /from\s*['"`]node:crypto['"`]/.test(code)
       
       if (hasRequire) {
-        // #region agent log
-        // Debug: Track require() calls in final bundle chunks
         const requireModules = requireMatches.map(m => {
           const match = m.match(/['"`]([^'"`]+)['"`]/)
           return match ? match[1] : 'unknown'
         })
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-renderChunk-require',message:'Found require() calls in final bundle chunk',data:{chunkName:chunk.name,requireCount:requireMatches.length,requireModules,codeSample:code.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1-H4'})}).catch(()=>{});
-        // #endregion
         log(`[cleanup] WARNING: Found ${requireMatches.length} require() call(s) in chunk ${chunk.name}: ${requireModules.join(', ')}`)
       }
       
       if (hasNodeFs || hasNodeCrypto) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-renderChunk',message:'Transforming node: imports in renderChunk',data:{chunkName:chunk.name,hasNodeFs,hasNodeCrypto},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         
         let transformedCode = code
         
@@ -3371,9 +3265,6 @@ export const { basename, dirname, extname, format, isAbsolute, join, normalize, 
         }
 
         if (hasIssue) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'vite/index.ts:cleanup-generateBundle',message:'Found problematic fs/buffer reference in bundle',data:{fileName,problematicLinesCount:problematicLines.length,firstLine:problematicLines[0]?.content?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           // Only warn if debug is enabled, or if it's a clear error (require() or __vite-browser-external)
           // For Electron builds, static imports might resolve at runtime even if they look problematic
           const hasClearError = problematicLines.some(p => 

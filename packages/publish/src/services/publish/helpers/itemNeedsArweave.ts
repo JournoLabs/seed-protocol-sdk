@@ -1,22 +1,24 @@
 import { Item } from '@seedprotocol/sdk'
 
+type ItemInstance = InstanceType<typeof Item>
+
 /**
  * Resolve a full Item (with getPublishUploads) by seedLocalId, polling until found.
  * Used when the input item might not have the data needed for the "needs Arweave" check.
  */
-const resolveItem = async (seedLocalId: string): Promise<Item<unknown>> => {
-  let item: Item<unknown> | undefined
+const resolveItem = async (seedLocalId: string): Promise<ItemInstance> => {
+  let item: ItemInstance | undefined
   try {
-    item = await Item.find({ seedLocalId })
+    item = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
   } catch {
     // No-op: Error is intentionally ignored
   }
   if (item) return item
 
-  return new Promise<Item<unknown>>((resolve) => {
+  return new Promise<ItemInstance>((resolve) => {
     const interval = setInterval(() => {
-      Item.find({ seedLocalId })
-        .then((found: Item<unknown> | undefined) => {
+      Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
+        .then((found: ItemInstance | undefined) => {
           if (found) {
             clearInterval(interval)
             resolve(found)
@@ -38,7 +40,7 @@ const resolveItem = async (seedLocalId: string): Promise<Item<unknown>> => {
  * context, this could be replaced by an explicit check using propertyDef.storageType
  * and itemProperty.value.
  */
-export async function itemNeedsArweaveUpload(item: Item<unknown>): Promise<boolean> {
+export async function itemNeedsArweaveUpload(item: ItemInstance): Promise<boolean> {
   const resolved = typeof item.getPublishUploads === 'function'
     ? item
     : await resolveItem(item.seedLocalId)

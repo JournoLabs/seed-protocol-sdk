@@ -25,7 +25,7 @@ export const INTERNAL_DATA_TYPES = {
     eas: 'uint8',
   },
   Image: {
-    eas: 'string',
+    eas: 'bytes32',
   },
   Relation: {
     eas: 'bytes32',
@@ -34,10 +34,10 @@ export const INTERNAL_DATA_TYPES = {
     eas: 'bytes32[]',
   },
   File: {
-    eas: 'string',
+    eas: 'bytes32',
   },
   Json: {
-    eas: 'string',
+    eas: 'bytes32',
   },
   Blob: {
     eas: 'bytes32',
@@ -49,7 +49,7 @@ export const INTERNAL_DATA_TYPES = {
     eas: 'uint256',
   },
   Html: {
-    eas: 'string',
+    eas: 'bytes32',
   },
 }
 
@@ -68,7 +68,6 @@ export const INTERNAL_PROPERTY_NAMES = [
   'latestVersionUid',
   'lastLocalUpdateAt',
   'modelName',
-  'storageTransactionId',
   'refSeedType',
   'refValueType',
   'refResolvedValue',
@@ -117,6 +116,12 @@ export enum SeedModels {
 // Internal SDK schema that should not be created in app's files directory
 export const SEED_PROTOCOL_SCHEMA_NAME = 'Seed Protocol'
 export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
+
+/** Default Arweave gateway host used across all packages */
+export const DEFAULT_ARWEAVE_HOST = 'arweave.net'
+
+/** Default Arweave gateways for fallback / metadata fetching (ordered by preference) */
+export const DEFAULT_ARWEAVE_GATEWAYS = ['arweave.net', 'ar-io.net'] as const
 
 /**
  * Check if a schema is an internal SDK schema that should not be created in app files

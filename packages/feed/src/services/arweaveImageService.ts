@@ -1,3 +1,4 @@
+import { DEFAULT_ARWEAVE_GATEWAYS } from '@seedprotocol/sdk'
 import sizeOf from 'image-size'
 import type { ImageMetadata } from '../types'
 
@@ -20,7 +21,7 @@ export class ArweaveImageService {
    * Detect if an Arweave transaction ID links to an image and extract metadata
    */
   async detectImage(transactionId: string): Promise<ImageMetadata> {
-    const gateways = this.config.gateways || ['arweave.net']
+    const gateways = this.config.gateways || [...DEFAULT_ARWEAVE_GATEWAYS]
     
     // Try each gateway until one succeeds
     for (const gateway of gateways) {

@@ -30,6 +30,7 @@
  */
 
 import { BaseDb } from '@/db/Db/BaseDb'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
 import { and } from 'drizzle-orm'
@@ -410,7 +411,7 @@ export function createTestConfig(overrides: Partial<SeedConstructorOptions> = {}
         filePaths: '/api/seed/migrations',
         files: defaultFilesDir,
       },
-      arweaveDomain: 'arweave.net',
+      arweaveDomain: DEFAULT_ARWEAVE_HOST,
       // Explicitly set filesDir in config to ensure it's used
       filesDir: defaultFilesDir,
     },

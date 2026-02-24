@@ -1,5 +1,5 @@
 import { createThirdwebClient, getContract, sendTransaction, waitForReceipt, } from 'thirdweb'
-import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
+import { createWallet, Account, inAppWallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
 import { isContractDeployed } from 'thirdweb/utils'
@@ -10,8 +10,8 @@ import {
   getAddress as getFactoryAddress,
 } from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
 import debug from 'debug'
-import type { TransactionReceipt } from 'thirdweb/transaction'
 import { getPublishConfig } from '../config'
+import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
 
 const logger = debug('permaPress:helpers:thirdweb')
 
@@ -74,7 +74,7 @@ export const useActiveSmartWalletContract = () => {
     }
 
     setContract(getContract({
-      client : getClient(),
+      client: getClient(),
       chain   : optimismSepolia,
       address : account.address,
     },),)
@@ -87,7 +87,7 @@ export const useActiveSmartWalletContract = () => {
 export const getManagedAccountFactoryContract = () => {
   const { thirdwebAccountFactoryAddress } = getPublishConfig()
   const contract = getContract({
-    client : getClient(),
+    client: getClient(),
     chain   : optimismSepolia,
     address : thirdwebAccountFactoryAddress,
   },)
@@ -115,7 +115,7 @@ export async function getSmartWalletAddressForAdmin (
  */
 export async function isSmartWalletDeployed ( smartWalletAddress: string, ): Promise<boolean> {
   const contract = getContract({
-    client : getClient(),
+    client: getClient(),
     chain   : optimismSepolia,
     address : smartWalletAddress,
   },)
@@ -125,6 +125,10 @@ export async function isSmartWalletDeployed ( smartWalletAddress: string, ): Pro
 /**
  * Resolves the smart wallet address and account to use for publish.
  * If the user has no connected account or no deployed ManagedAccount, returns needsDeploy.
+ *
+ * When using EIP4337 (in-app wallet with account abstraction), account.address is already
+ * the smart wallet address. We detect that case and use it directly instead of deriving
+ * via getSmartWalletAddressForAdmin (which assumes account.address is the EOA admin).
  */
 export async function resolveSmartWalletForPublish (
   account: Account | null,
@@ -132,6 +136,12 @@ export async function resolveSmartWalletForPublish (
   if ( !account ) {
     return { needsDeploy: true }
   }
+  // If account.address is already a deployed smart wallet (e.g. from EIP4337), use it directly
+  const accountIsDeployedSmartWallet = await isSmartWalletDeployed(account.address,)
+  if ( accountIsDeployedSmartWallet ) {
+    return { address: account.address, account }
+  }
+  // Otherwise derive smart wallet from EOA admin (e.g. MetaMask)
   const smartWalletAddress = await getSmartWalletAddressForAdmin(account.address,)
   const deployed = await isSmartWalletDeployed(smartWalletAddress,)
   if ( deployed ) {
@@ -146,9 +156,7 @@ export const ExternalWalletsForDeploy = [
   createWallet('me.rainbow',),
 ]
 
-export const deploySmartWalletContract = async (
-  localAccount: Account,
-): Promise<TransactionReceipt> => {
+export const deploySmartWalletContract = async ( localAccount: Account, ) => {
   const managedAccountFactoryContract = getManagedAccountFactoryContract()
   const createAccountTx = createAccount({
     contract : managedAccountFactoryContract,
@@ -164,7 +172,7 @@ export const deploySmartWalletContract = async (
   logger('createAccountTx result:', result,)
 
   const receipt = await waitForReceipt({
-    client : getClient(),
+    client: getClient(),
     transactionHash : result.transactionHash,
     chain           : optimismSepolia,
   },)
@@ -182,26 +190,129 @@ export const appMetadata = {
   url: "https://seedprotocol.io",
 }
 
-export function getWalletsForConnectButton(): Wallet[] {
-  const { thirdwebAccountFactoryAddress } = getPublishConfig()
-  return [
-    inAppWallet({
-      auth: {
-        options: [
-          "farcaster",
-          "email",
-          "passkey",
-          "phone",
-        ],
+export const getManagedAccountWallet = () => {
+  return inAppWallet({
+    auth: {
+      options: [
+        "farcaster",
+        "email",
+        "passkey",
+        "phone",
+      ],
+    },
+    executionMode: {
+      mode: 'EIP4337',
+      smartAccount: {
+        chain: optimismSepolia,
+        factoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
+        gasless: true,
       },
-      executionMode: {
-        mode: 'EIP4337',
-        smartAccount: {
-          chain: optimismSepolia,
-          factoryAddress: thirdwebAccountFactoryAddress,
-          gasless: true,
-        }
-      }
-    }),
-  ]
+    },
+     // executionMode: {
+      //   mode: 'EIP4337',
+      //   smartAccount: {
+      //     chain: optimismSepolia,
+      //     factoryAddress: thirdwebAccountFactoryAddress,
+      //     gasless: true,
+      //     overrides: {
+      //       // Custom paymaster that passes through but lets you modify the UserOp
+      //       paymaster: async (userOp) => {
+
+      //         const hexifyBigInts: any = (obj: any) => {
+      //           if (typeof obj === "bigint") return `0x${obj.toString(16)}`;
+      //           if (Array.isArray(obj)) return obj.map(hexifyBigInts);
+      //           if (obj && typeof obj === "object") {
+      //             return Object.fromEntries(
+      //               Object.entries(obj).map(([k, v]) => [k, hexifyBigInts(v)])
+      //             );
+      //           }
+      //           return obj;
+      //         };
+
+      //         const chainIdHex = `0x${optimismSepolia.id.toString(16)}`;
+
+      //         // Increase callGasLimit before sending to paymaster
+      //         const modifiedUserOp = hexifyBigInts({
+      //           ...userOp,
+      //           callGasLimit: BigInt(8000000), // Double it, or set a fixed value
+      //         });
+
+      //         console.log("[SmartWallet Paymaster]", getPublishConfig().thirdwebClientId);
+              
+      //         // Call thirdweb's default paymaster endpoint
+      //         const response = await fetch(
+      //           `https://${optimismSepolia.id}.bundler.thirdweb.com/v2`,
+      //           {
+      //             method: "POST",
+      //             headers: { 
+      //               "Content-Type": "application/json",
+      //               "X-Client-Id": getPublishConfig().thirdwebClientId,
+      //             },
+      //             body: JSON.stringify({
+      //               id: 1,
+      //               jsonrpc: "2.0",
+      //               method: "pm_sponsorUserOperation",
+      //               params: [modifiedUserOp, '0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789', chainIdHex],
+      //             }),
+      //           }
+      //         );
+              
+      //         const data = await response.json();
+      //         console.log("[SmartWallet Paymaster Response]", data);
+      //         return {
+      //           paymasterAndData: data.result.paymasterAndData,
+      //           preVerificationGas: data.result.preVerificationGas,
+      //           verificationGasLimit: data.result.verificationGasLimit,
+      //           callGasLimit: data.result.callGasLimit,
+      //         };
+      //       },
+      //       execute: (accountContract, transaction) => {
+      //         // Log the gas that was set on the transaction
+      //         console.log("[SmartWallet Execute]", {
+      //           gas: transaction.gas,
+      //           to: transaction.to,
+      //           dataLength: transaction.data?.length,
+      //         });
+        
+      //         // Return the default execute call — don't change behavior,
+      //         // just observe what's being passed through
+      //         return prepareContractCall({
+      //           contract: accountContract,
+      //           method: "function execute(address, uint256, bytes)",
+      //           params: [
+      //             transaction.to ?? "",
+      //             transaction.value ?? 0n,
+      //             transaction.data ?? "0x",
+      //           ],
+      //           gas: transaction.gas, // Pass through whatever was set
+      //         });
+      //       },
+      //     },
+      //   }
+      // }
+  })
 }
+
+export const getModularAccountWallet = () => {
+  return inAppWallet({
+    auth: {
+      options: [
+        "farcaster",
+        "email",
+        "passkey",
+        "phone",
+      ],
+    },
+    executionMode: {
+      mode: 'EIP7702',
+      sponsorGas: true,
+      
+    },
+  })
+}
+
+export const getWalletsForConnectButton = () => {
+  return [
+    getModularAccountWallet(),
+  ]
+};

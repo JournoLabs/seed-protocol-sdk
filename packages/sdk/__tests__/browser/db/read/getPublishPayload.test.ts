@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA } from '@/helpers/constants'
+import { Item } from '@/Item/Item'
 import { setupTestEnvironment, teardownTestEnvironment } from '../../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -9,6 +10,9 @@ import {
   createItemWithList,
   createItemWithImage,
   createItemWithAllPropertyTypes,
+  createItemWithImageAndUploadedTx,
+  createImageItemWithMissingStorageTxMetadata,
+  waitForPropertyInstances,
 } from '../../../test-utils/getPublishPayloadIntegrationHelpers'
 
 describe('getPublishPayload integration (browser)', () => {
@@ -117,5 +121,52 @@ describe('getPublishPayload integration (browser)', () => {
       await authorProp.save()
     }
     await expect(getPublishPayload(postItem, [])).rejects.toThrow('No related item found')
+  }, 30000)
+
+  it('with image and uploadedTransactions: includes storageTransactionId attestation when Image has placeholder property', async () => {
+    const { imageSeedLocalId } = await createImageItemWithMissingStorageTxMetadata()
+    const imageItem = await Item.find({ seedLocalId: imageSeedLocalId })
+    if (!imageItem) throw new Error('Image item not found')
+    const postItem = await Item.create({
+      modelName: 'Post',
+      title: 'Post with image placeholder',
+      coverImage: imageSeedLocalId,
+    })
+    await waitForPropertyInstances(postItem)
+
+    const result = await getPublishPayload(postItem, [
+      { txId: 'test-arweave-tx-id', seedLocalId: imageSeedLocalId },
+    ])
+    expect(result.length).toBeGreaterThanOrEqual(2)
+    const imagePayload =
+      result.find((p) => p.localId === imageSeedLocalId) ??
+      result.find(
+        (p) =>
+          p.localId !== postItem.seedLocalId &&
+          p.propertiesToUpdate?.some((u: any) => u.publishLocalId === postItem.seedLocalId)
+      )
+    expect(imagePayload).toBeDefined()
+    expect(imagePayload!.listOfAttestations).toBeDefined()
+    expect(imagePayload!.listOfAttestations.length).toBeGreaterThanOrEqual(1)
+  }, 30000)
+
+  it('with image and uploadedTransactions: Image model has storageTransactionId in properties', async () => {
+    const { postItem, imageItem } = await createItemWithImageAndUploadedTx({
+      postTitle: 'Post with image and tx',
+    })
+    const result = await getPublishPayload(postItem, [
+      { txId: 'test-arweave-tx-id', seedLocalId: imageItem.seedLocalId },
+    ])
+    expect(result.length).toBeGreaterThanOrEqual(2)
+    const imagePayload =
+      result.find((p) => p.localId === imageItem.seedLocalId) ??
+      result.find(
+        (p) =>
+          p.localId !== postItem.seedLocalId &&
+          p.propertiesToUpdate?.some((u: any) => u.publishLocalId === postItem.seedLocalId)
+      )
+    expect(imagePayload).toBeDefined()
+    expect(imagePayload!.listOfAttestations).toBeDefined()
+    expect(imagePayload!.listOfAttestations.length).toBeGreaterThanOrEqual(1)
   }, 30000)
 })

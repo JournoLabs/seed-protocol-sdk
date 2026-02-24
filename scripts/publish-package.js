@@ -2,7 +2,7 @@
 /**
  * Publish a package to npm with SDK dependency validation
  *
- * Usage: node scripts/publish-package.js <package>
+ * Usage: node scripts/publish-package.js [-f] <package>
  *
  * Packages: sdk, feed, publish, cli
  *
@@ -10,6 +10,7 @@
  * - If SDK version is not published, prompts to publish it first
  * - If user declines, script exits
  * - If user accepts (or SDK already published), publishes the requested package
+ * - Use -f or --force to skip running tests before build
  */
 
 import { readFileSync } from 'fs'
@@ -89,9 +90,19 @@ function runCommand(command, options = {}) {
   })
 }
 
-async function publishSdk() {
+const SDK_BUILD_PUBLISH_CMD =
+  'bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public'
+
+async function publishSdk(skipTests = false) {
   console.log('\n📦 Publishing @seedprotocol/sdk...\n')
-  await runCommand('bun run build:publish', { cwd: join(rootDir, 'packages', 'sdk') })
+  if (skipTests) {
+    await runCommand(
+      `node scripts/build-with-tests.js -f "${SDK_BUILD_PUBLISH_CMD}"`,
+      { cwd: rootDir }
+    )
+  } else {
+    await runCommand('bun run build:publish', { cwd: join(rootDir, 'packages', 'sdk') })
+  }
   console.log('\n✅ SDK published successfully!\n')
 }
 
@@ -103,18 +114,25 @@ async function publishPackage(packageName) {
 }
 
 async function main() {
-  const packageArg = process.argv[2]
+  const args = process.argv.slice(2)
+  const forceIndex = args.findIndex((arg) => arg === '-f' || arg === '--force')
+  const skipTests = forceIndex !== -1
+  const packageArg = args.filter((_, i) => i !== forceIndex)[0]
 
   if (!packageArg || !VALID_PACKAGES.includes(packageArg)) {
     console.error('❌ Error: Invalid or missing package name')
-    console.error(`Usage: node scripts/publish-package.js <package>`)
+    console.error(`Usage: node scripts/publish-package.js [-f] <package>`)
     console.error(`Valid packages: ${VALID_PACKAGES.join(', ')}`)
+    console.error(`  -f, --force  Skip running tests before build`)
     process.exit(1)
   }
 
   const sdkVersion = getSdkVersion()
   console.log(`[Publish] Target package: ${packageArg}`)
   console.log(`[Publish] SDK version in monorepo: ${sdkVersion}`)
+  if (skipTests) {
+    console.log('[Publish] -f flag: skipping tests before build')
+  }
 
   if (packageArg !== 'sdk') {
     console.log('\n[Publish] Checking if @seedprotocol/sdk is published on npm...')
@@ -132,7 +150,7 @@ async function main() {
       }
 
       try {
-        await publishSdk()
+        await publishSdk(skipTests)
       } catch (error) {
         console.error('\n❌ SDK publish failed:', error.message)
         process.exit(1)
@@ -144,7 +162,7 @@ async function main() {
 
   if (packageArg === 'sdk') {
     try {
-      await publishSdk()
+      await publishSdk(skipTests)
     } catch (error) {
       console.error('\n❌ SDK publish failed:', error.message)
       process.exit(1)

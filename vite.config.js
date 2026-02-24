@@ -48,6 +48,7 @@ export default defineConfig({
         resolve: {
           alias: {
             '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+            '~': resolve(__dirname, 'packages/publish/src'),
             // Ensure fs modules are aliased to @zenfs/core in browser environment
             'fs': '@zenfs/core',
             'fs/promises': '@zenfs/core/promises',
@@ -98,6 +99,8 @@ export default defineConfig({
             'validation-timeout.test.ts',
             'commonjs-compatibility.test.ts',
             'client/schemaFileInit.test.ts',
+            'helpers/easDirect.test.ts',
+            'feed/**',
           ],
           hookTimeout: 90000,
           testTimeout: 30000,
@@ -116,6 +119,11 @@ export default defineConfig({
         plugins: [
           tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
         ],
+        resolve: {
+          alias: {
+            '~': resolve(__dirname, 'packages/publish/src'),
+          },
+        },
         optimizeDeps: {
           exclude: [
             '@seedprotocol/cli',

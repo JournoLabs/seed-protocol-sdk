@@ -9,7 +9,7 @@ import { ClientManager } from '@/client/ClientManager'
 import { client as sdkClient }                              from "@/client"
 import { commandExists } from '@/helpers/scripts'
 import { execSync } from 'child_process'
-import { CLIENT_NOT_INITIALIZED }        from '@/helpers/constants'
+import { CLIENT_NOT_INITIALIZED, DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -76,7 +76,7 @@ describe('RPC Server', () => {
       files: './__tests__/__mocks__/node/project/.seed',
       filePaths: 'api/seed/migrations',
     },
-    arweaveDomain: 'arweave.net',
+    arweaveDomain: DEFAULT_ARWEAVE_HOST,
   }
   let rpcClient: SeedService
   let server: grpc.Server

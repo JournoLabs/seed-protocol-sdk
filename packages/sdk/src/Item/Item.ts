@@ -1051,11 +1051,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
    * (e.g. "author", "tags").
    */
   protected _isModelProperty(key: string, modelSchemaKeys: string[]): boolean {
-    if (INTERNAL_PROPERTY_NAMES.includes(key)) {
-      return false
-    }
+    // Include if in model schema (even when in INTERNAL_PROPERTY_NAMES, e.g. Image.storageTransactionId)
     if (modelSchemaKeys.includes(key)) {
       return true
+    }
+    if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+      return false
     }
     const propertyInstances = this.serviceContext.propertyInstances as Map<string, IItemProperty> | undefined
     if (!propertyInstances) {
@@ -1097,11 +1098,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Convert Map to array, filtering by model schema
     const properties: IItemProperty[] = []
     for (const [key, propertyInstance] of propertyInstances) {
-      // Skip internal properties
-      if (INTERNAL_PROPERTY_NAMES.includes(key)) {
+      // Skip internal properties unless they're in the model schema (e.g. Image.storageTransactionId)
+      if (INTERNAL_PROPERTY_NAMES.includes(key) && !modelSchemaKeys.includes(key)) {
         continue
       }
-      
+
       // Include if it's a model property
       const isModelProp = this._isModelProperty(key, modelSchemaKeys)
       if (isModelProp) {

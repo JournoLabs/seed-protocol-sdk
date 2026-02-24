@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest'
 import { client } from '@/client'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { execSync } from 'child_process'
 import os from 'os'
 
@@ -583,7 +584,7 @@ testDescribe('Client in node', () => {
         filePaths: '/api/seed/migrations',
         files: path.join(mockProjectPath, '.seed'),
       },
-      arweaveDomain: 'arweave.net',
+      arweaveDomain: DEFAULT_ARWEAVE_HOST,
     }
 
     // Initialize the client - this matches how external projects would use it:
@@ -612,7 +613,7 @@ testDescribe('Client in node', () => {
           filePaths: '/api/seed/migrations',
           files: path.join(mockProjectPath, '.seed'),
         },
-        arweaveDomain: 'arweave.net',
+        arweaveDomain: DEFAULT_ARWEAVE_HOST,
       }
 
       await testClient.init({

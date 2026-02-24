@@ -420,6 +420,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             versionLocalId: metaRow.versionLocalId || undefined,
             versionUid: metaRow.versionUid || undefined,
             schemaUid: metaRow.schemaUid || undefined,
+            refResolvedValue: metaRow.refResolvedValue || undefined,
+            refResolvedDisplayValue: metaRow.refResolvedDisplayValue || undefined,
+            localStorageDir: metaRow.localStorageDir || undefined,
           })
         }
 
@@ -430,12 +433,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const resolvedSeedUid = seedUid || null
           const resolvedSeedLocalId = seedLocalId || null
           
-          const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null }>(
+          const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }>(
             (sql: any) => {
               if (resolvedSeedUid) {
                 return sql`
                   SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                   FROM metadata
                   WHERE seed_uid = ${resolvedSeedUid}
                     AND property_name = ${propertyName}
@@ -446,7 +450,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               } else if (resolvedSeedLocalId) {
                 return sql`
                   SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                   FROM metadata
                   WHERE seed_local_id = ${resolvedSeedLocalId}
                     AND property_name = ${propertyName}
@@ -458,7 +463,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 // Fallback - should not happen, but handle gracefully
                 return sql`
                   SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid
+                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                   FROM metadata
                   WHERE 1 = 0
                 `
@@ -490,6 +496,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                 versionLocalId: metaRow.versionLocalId || undefined,
                 versionUid: metaRow.versionUid || undefined,
                 schemaUid: metaRow.schemaUid || undefined,
+                refResolvedValue: metaRow.refResolvedValue || undefined,
+                refResolvedDisplayValue: metaRow.refResolvedDisplayValue || undefined,
+                localStorageDir: metaRow.localStorageDir || undefined,
               })
             },
             error: (error) => {

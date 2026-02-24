@@ -7,12 +7,10 @@ import type {
   DownloadResult,
   CreateTransactionOptions,
 } from '@/types/arweave'
-
-// Default configuration
-const DEFAULT_HOST = 'arweave.net'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 
 // Internal state
-let _host = DEFAULT_HOST
+let _host = DEFAULT_ARWEAVE_HOST
 let _hostExplicitlySet = false
 
 export abstract class BaseArweaveClient {

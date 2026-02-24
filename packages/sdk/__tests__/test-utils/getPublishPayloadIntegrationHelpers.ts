@@ -13,8 +13,8 @@ import { generateId } from '@/helpers'
 import type { SchemaFileFormat } from '@/types/import'
 import type { Item as ItemClass } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { eq } from 'drizzle-orm'
-import { models as modelsTable, modelUids } from '@/seedSchema'
+import { eq, and } from 'drizzle-orm'
+import { models as modelsTable, modelUids, metadata } from '@/seedSchema'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
 
@@ -276,6 +276,74 @@ export async function createItemWithImage(
   await waitForItemIdle(postItem)
   await waitForPropertyInstances(postItem)
   return { postItem }
+}
+
+export type CreateItemWithImageAndUploadedTxOptions = {
+  postTitle?: string
+  imageUri?: string
+  imageAlt?: string
+}
+
+/**
+ * Create an Image item and a Post with coverImage referencing it.
+ * Use for tests that verify getPublishPayload with uploadedTransactions.
+ */
+export async function createItemWithImageAndUploadedTx(
+  options: CreateItemWithImageAndUploadedTxOptions = {}
+): Promise<{ postItem: ItemClass<any>; imageItem: ItemClass<any> }> {
+  const {
+    postTitle = 'Post with image',
+    imageUri = 'https://example.com/img.png',
+    imageAlt = 'Alt',
+  } = options
+  const imageItem = await Item.create({
+    modelName: 'Image',
+    uri: imageUri,
+    alt: imageAlt,
+  })
+  await waitForItemIdle(imageItem)
+  await waitForPropertyInstances(imageItem)
+  const postItem = await Item.create({
+    modelName: 'Post',
+    title: postTitle,
+    coverImage: imageItem.seedLocalId,
+  })
+  await waitForItemIdle(postItem)
+  await waitForPropertyInstances(postItem)
+  return { postItem, imageItem }
+}
+
+/**
+ * Create an Image item, then delete its storageTransactionId metadata row.
+ * Returns the image item's seedLocalId so tests can reload it and verify
+ * the placeholder property fix (loadOrCreateItem creates ItemProperty for
+ * model schema properties without metadata).
+ */
+export async function createImageItemWithMissingStorageTxMetadata(): Promise<{
+  imageSeedLocalId: string
+}> {
+  const imageItem = await Item.create({
+    modelName: 'Image',
+    uri: 'https://example.com/img.png',
+    alt: 'Test alt',
+  })
+  await waitForItemIdle(imageItem)
+  await waitForPropertyInstances(imageItem)
+
+  const db = BaseDb.getAppDb()
+  if (!db) {
+    throw new Error('Database not available')
+  }
+  await db
+    .delete(metadata)
+    .where(
+      and(
+        eq(metadata.propertyName, 'storageTransactionId'),
+        eq(metadata.seedLocalId, imageItem.seedLocalId)
+      )
+    )
+
+  return { imageSeedLocalId: imageItem.seedLocalId }
 }
 
 export type CreateItemWithAllPropertyTypesOptions = {

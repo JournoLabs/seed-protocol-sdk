@@ -58,9 +58,6 @@ export const modelPropertyMachine = setup({
   guards: {
     isPropertyValid: ({ context }) => {
       const valid = !context._validationErrors || context._validationErrors.length === 0
-      // #region agent log
-      if (!valid) fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelPropertyMachine.ts:isPropertyValid',message:'guard blocked - has validation errors',data:{name:context.name,_validationErrors:context._validationErrors},timestamp:Date.now(),hypothesisId:'H6'})}).catch(()=>{});
-      // #endregion
       return valid
     },
     hasValidationErrors: ({ context }) => {

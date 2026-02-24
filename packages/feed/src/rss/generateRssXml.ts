@@ -253,6 +253,18 @@ function serializeItemProperty(
     return
   }
 
+  // Array of strings (e.g. resolved relation URLs for list relations like images)
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
+    const tagName = key.endsWith('s') ? key.slice(0, -1) : key
+    for (const v of value) {
+      if (v) {
+        const ele = itemParent.ele(tagName)
+        addTextOrCdata(ele, v)
+      }
+    }
+    return
+  }
+
   const ele = itemParent.ele(key)
   addTextOrCdata(ele, String(value))
 }

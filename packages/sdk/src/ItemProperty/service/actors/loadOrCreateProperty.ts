@@ -102,9 +102,19 @@ export const loadOrCreateProperty = fromCallback<
 
           if (propertyRecords.length > 0) {
             const propRecord = propertyRecords[0]
+            // properties table has refModelId but not refModelName; resolve ref model name when refModelId is set
+            let refModelName: string | undefined
+            if (propRecord.refModelId != null) {
+              const refModelRows = await db
+                .select({ name: models.name })
+                .from(models)
+                .where(eq(models.id, propRecord.refModelId))
+                .limit(1)
+              refModelName = refModelRows[0]?.name ?? undefined
+            }
             propertyRecordSchema = {
               dataType: propRecord.dataType,
-              ref: propRecord.refModelName || undefined,
+              ref: refModelName ?? undefined,
               refValueType: propRecord.refValueType || undefined,
               storageType: propRecord.storageType || undefined,
               localStorageDir: propRecord.localStorageDir || undefined,

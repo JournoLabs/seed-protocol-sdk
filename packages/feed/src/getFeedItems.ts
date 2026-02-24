@@ -39,6 +39,7 @@ interface AttestationLike {
   refUID: string;
   schemaId: string;
   timeCreated: number;
+  attester?: string;
   schema?: { schemaNames?: Array<{ name: string }> };
 }
 
@@ -188,6 +189,12 @@ const setFeedItemDefaults = (
   } else if (item.SeedUid && !item.seedUid) {
     item.seedUid = item.SeedUid;
   }
+
+  if (item.attester && !item.Attester) {
+    item.Attester = item.attester;
+  } else if (item.Attester && !item.attester) {
+    item.attester = item.Attester;
+  }
 };
 
 const seedUidToModelType = new Map<string, string>();
@@ -201,9 +208,9 @@ const processItemProperty = async (
   property: AttestationLike,
   itemSeeds: AttestationLike[]
 ): Promise<void> => {
-  let metadata: { name: string; value: string | string[] };
+  let metadata: { name: string; value: string | string[]; type?: string };
   try {
-    metadata = JSON.parse(property.decodedDataJson)[0].value;
+    metadata = JSON.parse(property.decodedDataJson)[0]?.value ?? {};
   } catch (error) {
     console.error('[feed] [processItemProperty] Error parsing metadata:', error);
     return;
@@ -222,26 +229,32 @@ const processItemProperty = async (
 
   let isRelation = false;
   let isList = false;
-  if (
+  const easType = metadata.type;
+  const isBytes32Relation =
+    (easType === 'bytes32' || easType === 'bytes32[]') &&
+    propertyNameSnake !== 'storage_transaction_id' &&
+    propertyNameSnake !== 'storage_provider_transaction_id';
+  const isNamingConventionRelation =
+    !isBytes32Relation &&
     (propertyNameSnake.endsWith('_id') || propertyNameSnake.endsWith('_ids')) &&
     propertyNameSnake !== 'storage_transaction_id' &&
-    propertyNameSnake !== 'storage_provider_transaction_id'
-  ) {
+    propertyNameSnake !== 'storage_provider_transaction_id';
+
+  if (isBytes32Relation || isNamingConventionRelation) {
     isRelation = true;
     if (Array.isArray(metadata.value)) {
       isList = true;
-      const result = parseEasRelationPropertyName(propertyNameSnake);
-      if (result) {
-        propertyNameSnake = result.propertyName;
+      if (isNamingConventionRelation) {
+        const result = parseEasRelationPropertyName(propertyNameSnake);
+        if (result) {
+          propertyNameSnake = result.propertyName;
+        }
       }
       metadata.value.forEach((value: string) => {
-        relatedSeedUids.add(value);
+        if (!relationValuesToExclude.includes(value)) relatedSeedUids.add(value);
       });
-    }
-    if (!isList) {
-      if (!relationValuesToExclude.includes(metadata.value as string)) {
-        relatedSeedUids.add(metadata.value as string);
-      }
+    } else if (!relationValuesToExclude.includes(metadata.value as string)) {
+      relatedSeedUids.add(metadata.value as string);
     }
   }
 
@@ -294,6 +307,7 @@ const processSeeds = async (seeds: AttestationLike[]): Promise<void> => {
       assembledFeedItems.set(seed.id, {
         seedUid: seed.id,
         timeCreated: seed.timeCreated,
+        attester: seed.attester,
       });
     }
   }
@@ -325,6 +339,103 @@ const processSeeds = async (seeds: AttestationLike[]): Promise<void> => {
   }
 };
 
+const RESERVED_KEYS = new Set([
+  'seedUid',
+  'SeedUid',
+  'timeCreated',
+  'attester',
+  'Attester',
+  'storage_transaction_id',
+  'storage_provider_transaction_id',
+  'storageTransactionId',
+  'storageProviderTransactionId',
+]);
+
+/**
+ * Resolves relation properties to Arweave URLs when the related item has a
+ * storageTransactionId. Detects relations by value-in-assembledFeedItems
+ * (value is an attestation UID we fetched). Supports optional _id/_ids key
+ * normalization for backward compatibility.
+ */
+function resolveRelationPropertiesToUrls(schemaName: string): void {
+  const itemsToProcess = Array.from(assembledFeedItems.entries()).filter(
+    ([seedUid]) => seedUidToModelType.get(seedUid) === schemaName
+  );
+
+  for (const [, item] of itemsToProcess) {
+    const keysToProcess = Object.keys(item).filter(
+      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k)
+    );
+
+    for (const key of keysToProcess) {
+      const value = item[key];
+      const isList = Array.isArray(value);
+
+      if (isList) {
+        const uids = value as unknown[];
+        const hasRelationUid = uids.some(
+          (v) =>
+            typeof v === 'string' &&
+            !relationValuesToExclude.includes(v) &&
+            assembledFeedItems.has(v)
+        );
+        if (!hasRelationUid) continue;
+
+        const urls: string[] = [];
+        let resolved = false;
+        for (const uid of uids) {
+          if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+            urls.push(String(uid));
+            continue;
+          }
+          const related = assembledFeedItems.get(uid);
+          const txId =
+            (related?.storageTransactionId ?? related?.storage_transaction_id) as string | undefined;
+          if (txId && typeof txId === 'string' && txId.trim()) {
+            try {
+              urls.push(getArweaveUrlForTransaction(txId));
+              resolved = true;
+            } catch {
+              urls.push(uid);
+            }
+          } else {
+            urls.push(uid);
+          }
+        }
+        if (resolved) {
+          const outputKey = key.endsWith('_ids') ? key.replace(/_ids$/, '') : key;
+          item[outputKey] = urls;
+          if (outputKey !== key) {
+            delete item[key];
+            const camelKey = toCamelCase(key);
+            if (camelKey !== key) delete item[camelKey];
+          }
+        }
+      } else if (typeof value === 'string') {
+        if (relationValuesToExclude.includes(value)) continue;
+        if (!assembledFeedItems.has(value)) continue;
+
+        const related = assembledFeedItems.get(value);
+        const txId =
+          (related?.storageTransactionId ?? related?.storage_transaction_id) as string | undefined;
+        if (txId && typeof txId === 'string' && txId.trim()) {
+          try {
+            const outputKey = key.endsWith('_id') ? key.replace(/_id$/, '') : key;
+            item[outputKey] = getArweaveUrlForTransaction(txId);
+            if (outputKey !== key) {
+              delete item[key];
+              const camelKey = toCamelCase(key);
+              if (camelKey !== key) delete item[camelKey];
+            }
+          } catch {
+            // keep original on error
+          }
+        }
+      }
+    }
+  }
+}
+
 export const getFeedItemsBySchemaName = async (schemaName: string): Promise<Record<string, unknown>[]> => {
   const feedConfig = loadFeedConfig();
   const easClient = EasClient.getEasClient();
@@ -342,6 +453,8 @@ export const getFeedItemsBySchemaName = async (schemaName: string): Promise<Reco
   });
 
   await processSeeds((relatedSeeds ?? []) as AttestationLike[]);
+
+  resolveRelationPropertiesToUrls(schemaName);
 
   const setFeedItemDefaultsOptions: SetFeedItemDefaultsOptions = {
     itemUrlBase: feedConfig.itemUrlBase,

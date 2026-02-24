@@ -13,6 +13,22 @@ Wrap your app with `PublishProvider` so that `ConnectButton` and other publish c
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
+`thirdwebClientId` and `uploadApiBaseUrl` are required. Other values (account factory, EAS contract) are defined as constants in the package.
+
+### useIntegerLocalIds
+
+When using the new contract that expects `uint256` localIdIndex/publishLocalIdIndex instead of string localId/publishLocalId (gas-efficient), set `useIntegerLocalIds: true`:
+
+```tsx
+initPublish({
+  thirdwebClientId: '...',
+  uploadApiBaseUrl: '...',
+  useIntegerLocalIds: true,  // Use integer-based payload for new contract
+})
+```
+
+To revert to the old contract (string-based), set `useIntegerLocalIds: false` or omit the flag. No code changes required beyond config.
+
 ### Option A: Config via provider
 
 ```tsx
@@ -22,8 +38,8 @@ function App() {
   return (
     <PublishProvider
       config={{
-        thirdwebClientId: 'your-client-id',
-        thirdwebAccountFactoryAddress: '0x...',
+        thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
+        uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
       }}
     >
       <ConnectButton />
@@ -38,8 +54,8 @@ function App() {
 import { PublishProvider, ConnectButton, initPublish } from '@seedprotocol/publish'
 
 initPublish({
-  thirdwebClientId: 'your-client-id',
-  thirdwebAccountFactoryAddress: '0x...',
+  thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
+  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
 })
 
 function App() {

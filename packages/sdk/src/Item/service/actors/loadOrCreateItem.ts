@@ -10,48 +10,61 @@ import debug from 'debug'
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
 
 /**
- * Create ItemProperty instances for all metadata records to ensure they're cached.
- * Passes propertyRecordSchema from Model when available (Fix 3: enables value persistence for runtime-created models).
+ * Create ItemProperty instances for all metadata records plus placeholder instances
+ * for model schema properties that have no metadata. Ensures items (e.g. Image) have
+ * all model properties (e.g. storageTransactionId) so getSegmentedItemProperties
+ * can find them for getPublishPayload.
  * @param metadataRows - Array of metadata records to create ItemProperty instances for
  * @param seedLocalId - Seed local ID
  * @param seedUid - Seed UID
  * @param modelName - Model name for resolving propertyRecordSchema from Model
+ * @param versionLocalId - Latest version local ID (for placeholder properties)
+ * @param versionUid - Latest version UID (for placeholder properties)
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
   metadataRows: any[],
   seedLocalId: string,
   seedUid: string | undefined,
-  modelName: string
+  modelName: string,
+  versionLocalId?: string,
+  versionUid?: string
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
-  
-  if (metadataRows.length === 0) {
-    return propertyInstances
-  }
 
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
     const { ItemProperty } = itemPropertyMod
     const { modelPropertiesToObject } = await import('../../../helpers/model')
     const { Model } = await import('../../../Model/Model')
-    
-    // Resolve Model and build property schemas for propertyRecordSchema (Fix 3)
+
+    // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    const model = Model.getByName(modelName)
+    let model = Model.getByName(modelName)
+    if (!model?.properties?.length) {
+      model = await Model.getByNameAsync(modelName) ?? undefined
+    }
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
     }
 
-    // Create instances for all metadata records in parallel with propertyRecordSchema
-    const createPromises = metadataRows.map(async (metaRow) => {
+    // Build map of metadata by propertyName for lookup
+    const metadataByProperty = new Map<string, any>()
+    for (const metaRow of metadataRows) {
+      if (metaRow.propertyName) {
+        metadataByProperty.set(metaRow.propertyName, metaRow)
+      }
+    }
+
+    // Create instances for all metadata records
+    for (const metaRow of metadataRows) {
       try {
         const propertyName = metaRow.propertyName
         if (!propertyName) {
           logger(`Metadata row missing propertyName, skipping`)
-          return
+          continue
         }
-        
+
         const createProps = {
           propertyName,
           seedLocalId,
@@ -73,17 +86,42 @@ const createItemPropertyInstances = async (
         }
       } catch (error) {
         logger(`Error creating ItemProperty instance for propertyName "${metaRow.propertyName}": ${error}`)
-        // Don't throw - continue with other properties
       }
-    })
-    
-    await Promise.all(createPromises)
+    }
+
+    // Create placeholder ItemProperty instances for model schema properties without metadata
+    for (const [propertyName, propSchema] of Object.entries(propertySchemas)) {
+      if (propertyInstances.has(propertyName)) continue
+
+      try {
+        const createProps = {
+          propertyName,
+          seedLocalId,
+          seedUid,
+          modelName,
+          propertyValue: undefined,
+          versionLocalId: versionLocalId ?? undefined,
+          versionUid: versionUid ?? undefined,
+          schemaUid: undefined,
+          propertyRecordSchema: propSchema,
+        }
+
+        const property = ItemProperty.create(createProps, { waitForReady: false })
+        if (property) {
+          propertyInstances.set(propertyName, property)
+          logger(`Created placeholder ItemProperty for model property "${propertyName}" (no metadata)`)
+        }
+      } catch (error) {
+        logger(`Error creating placeholder ItemProperty for "${propertyName}": ${error}`)
+      }
+    }
+
     logger(`Finished creating/caching ${propertyInstances.size} ItemProperty instances`)
   } catch (error) {
     logger(`Error in createItemPropertyInstances: ${error}`)
     // Don't throw - this is best-effort to pre-populate cache
   }
-  
+
   return propertyInstances
 }
 
@@ -224,11 +262,16 @@ export const loadOrCreateItem = fromCallback<
 
     logger(`Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
 
-    // Step 4: Create ItemProperty instances from metadata records
-    // This ensures they're in the cache when Item.properties getter is called
-    const propertyInstances = metadataRecords.length > 0
-      ? await createItemPropertyInstances(metadataRecords, resolvedSeedLocalId, resolvedSeedUid, modelName)
-      : new Map<string, any>()
+    // Step 4: Create ItemProperty instances from metadata records + placeholders for model schema properties
+    // Always call when we have a valid version so placeholders are created for properties without metadata
+    const propertyInstances = await createItemPropertyInstances(
+      metadataRecords,
+      resolvedSeedLocalId,
+      resolvedSeedUid,
+      modelName,
+      latestVersionLocalId,
+      latestVersionUid
+    )
 
     // Step 5: Return loaded item data with property instances
     sendBack({

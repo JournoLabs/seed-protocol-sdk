@@ -2280,10 +2280,94 @@ export function multiPublish(
     }
   ]
 ],
-    params: [options.requests]
+    params: [options.requests],
   });
 };
 
+/**
+ * multiPublish variant that uses uint256 localIdIndex and publishLocalIdIndex instead of strings.
+ * Use when the contract expects integer-based IDs (gas-efficient).
+ * Selector: keccak256("multiPublish((uint256,bytes32,...)[])[]") -> 0xd688e801
+ */
+export type MultiPublishWithIntegerIdsParams = {
+  requests: Array<{
+    localIdIndex: bigint
+    seedUid: `0x${string}`
+    seedSchemaUid: `0x${string}`
+    versionUid: `0x${string}`
+    versionSchemaUid: `0x${string}`
+    seedIsRevocable: boolean
+    listOfAttestations: Array<{
+      schema: `0x${string}`
+      data: Array<{
+        recipient: `0x${string}`
+        expirationTime: bigint
+        revocable: boolean
+        refUID: `0x${string}`
+        data: `0x${string}`
+        value: bigint
+      }>
+    }>
+    propertiesToUpdate: Array<{
+      publishLocalIdIndex: bigint
+      propertySchemaUid: `0x${string}`
+    }>
+  }>
+}
+
+export function multiPublishWithIntegerIds(
+  options: BaseTransactionOptions<MultiPublishWithIntegerIdsParams>,
+) {
+  return prepareContractCall({
+    contract: options.contract,
+    method: [
+      "0xd688e801",
+      [
+        {
+          "type": "tuple[]",
+          "name": "requests",
+          "components": [
+            { "type": "uint256", "name": "localIdIndex" },
+            { "type": "bytes32", "name": "seedUid" },
+            { "type": "bytes32", "name": "seedSchemaUid" },
+            { "type": "bytes32", "name": "versionUid" },
+            { "type": "bytes32", "name": "versionSchemaUid" },
+            { "type": "bool", "name": "seedIsRevocable" },
+            {
+              "type": "tuple[]",
+              "name": "listOfAttestations",
+              "components": [
+                { "type": "bytes32", "name": "schema" },
+                {
+                  "type": "tuple[]",
+                  "name": "data",
+                  "components": [
+                    { "type": "address", "name": "recipient" },
+                    { "type": "uint64", "name": "expirationTime" },
+                    { "type": "bool", "name": "revocable" },
+                    { "type": "bytes32", "name": "refUID" },
+                    { "type": "bytes", "name": "data" },
+                    { "type": "uint256", "name": "value" },
+                  ],
+                },
+              ],
+            },
+            {
+              "type": "tuple[]",
+              "name": "propertiesToUpdate",
+              "components": [
+                { "type": "uint256", "name": "publishLocalIdIndex" },
+                { "type": "bytes32", "name": "propertySchemaUid" },
+              ],
+            },
+          ],
+        },
+      ],
+      [{ "type": "bytes32[]" }],
+    ],
+    params: [options.requests],
+  });
+}
 
 /**
  * Represents the parameters for the "publish" function.

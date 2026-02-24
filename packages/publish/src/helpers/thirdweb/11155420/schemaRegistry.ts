@@ -54,15 +54,26 @@ export function getSchemaRegistryContract(client: ThirdwebClient, chain: Chain) 
   })
 }
 
+/** Use string signature for getSchema - the EAS SchemaRegistry expects this exact selector.
+ * The ABI-based method resolution can produce a different selector (e.g. from internalType
+ * or tuple encoding) causing "Router: function does not exist" on proxy/router contracts. */
+const GET_SCHEMA_SIGNATURE =
+  'function getSchema(bytes32 uid) view returns ((bytes32 uid, address resolver, bool revocable, string schema))' as const
+
 export async function getSchemaRecord(
   client: ThirdwebClient,
   chain: Chain,
   uid: string,
 ): Promise<SchemaRecord | null> {
-  const contract = getSchemaRegistryContract(client, chain)
+  const contract = getContract({
+    client,
+    chain,
+    address: SCHEMA_REGISTRY_ADDRESS,
+    // No ABI - use string method so thirdweb parses the exact signature and produces correct selector
+  })
   const result = await readContract({
     contract,
-    method: 'getSchema',
+    method: GET_SCHEMA_SIGNATURE,
     params: [uid as `0x${string}`],
   })
   if (!result || (result as SchemaRecord).uid === ZERO_BYTES32) {

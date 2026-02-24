@@ -2,41 +2,10 @@ import { getContract, prepareContractCall } from 'thirdweb'
 import type { ThirdwebClient } from 'thirdweb'
 import type { Chain } from 'thirdweb/chains'
 import { SchemaEncoder, NO_EXPIRATION, ZERO_BYTES32 } from '@ethereum-attestation-service/eas-sdk'
-import { EAS_CONTRACT_ADDRESS, EAS_SCHEMA_NAME_ATTESTATION_UID } from '~/helpers/constants'
+import { getPublishConfig } from '~/config'
+import { EAS_SCHEMA_NAME_ATTESTATION_UID } from '~/helpers/constants'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-
-const EAS_ATTEST_ABI = [
-  {
-    inputs: [
-      {
-        components: [
-          { internalType: 'bytes32', name: 'schema', type: 'bytes32' },
-          {
-            components: [
-              { internalType: 'address', name: 'recipient', type: 'address' },
-              { internalType: 'uint64', name: 'expirationTime', type: 'uint64' },
-              { internalType: 'bool', name: 'revocable', type: 'bool' },
-              { internalType: 'bytes32', name: 'refUID', type: 'bytes32' },
-              { internalType: 'bytes', name: 'data', type: 'bytes' },
-              { internalType: 'uint256', name: 'value', type: 'uint256' },
-            ],
-            internalType: 'struct AttestationRequestData',
-            name: 'data',
-            type: 'tuple',
-          },
-        ],
-        internalType: 'struct AttestationRequest',
-        name: 'request',
-        type: 'tuple',
-      },
-    ],
-    name: 'attest',
-    outputs: [{ internalType: 'bytes32', name: '', type: 'bytes32' }],
-    stateMutability: 'payable',
-    type: 'function',
-  },
-] as const
 
 export type NameSchemaAttestationParams = {
   schemaUid: string
@@ -54,16 +23,18 @@ export function prepareNameSchemaAttestation(
     { name: 'name', value: params.schemaName, type: 'string' },
   ])
 
+  const { easContractAddress } = getPublishConfig()
   const contract = getContract({
     client,
     chain,
-    address: EAS_CONTRACT_ADDRESS as `0x${string}`,
-    abi: EAS_ATTEST_ABI,
+    address: easContractAddress as `0x${string}`,
+    // No ABI - use string method so thirdweb parses the exact signature
   })
 
   return prepareContractCall({
     contract,
-    method: 'function attest((bytes32 schema,(address recipient,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,uint256 value) data) request) payable returns (bytes32)',
+    method:
+      'function attest((bytes32 schema,(address recipient,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,uint256 value) data) request) payable returns (bytes32)' as const,
     params: [
       {
         schema: EAS_SCHEMA_NAME_ATTESTATION_UID as `0x${string}`,

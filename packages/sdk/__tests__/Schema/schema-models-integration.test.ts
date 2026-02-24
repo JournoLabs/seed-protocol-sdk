@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import { client } from '@/client'
 import { Schema } from '@/Schema/Schema'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { eq } from 'drizzle-orm'
@@ -38,7 +39,7 @@ testDescribe('Schema Models Integration Tests', () => {
             filePaths: '/api/seed/migrations',
             files: '/app-files',
           },
-          arweaveDomain: 'arweave.net',
+          arweaveDomain: DEFAULT_ARWEAVE_HOST,
         },
       },
     })

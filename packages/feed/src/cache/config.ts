@@ -1,10 +1,12 @@
+import { DEFAULT_ARWEAVE_GATEWAYS } from '@seedprotocol/sdk'
 import type { CacheConfig, ImageMetadataConfig } from './types';
 
 /**
  * Load cache configuration from environment variables
- * 
+ *
  * Environment variables:
- * - CACHE_ENABLED: Set to 'false' to disable caching (default: 'true')
+ * - CACHE_ENABLED: Set to 'false' to disable caching. Set to 'true' to enable (overrides NODE_ENV).
+ *   In development (NODE_ENV=development), cache is disabled by default unless CACHE_ENABLED='true'.
  * - CACHE_TTL: Cache time-to-live in seconds (default: 3600)
  * - CACHE_DIR: Directory for cache files (default: './cache')
  * - CACHE_BACKGROUND_REFRESH: Enable background refresh (default: 'false')
@@ -13,22 +15,45 @@ import type { CacheConfig, ImageMetadataConfig } from './types';
 export function loadCacheConfig(): CacheConfig {
   const ttl = parseInt(process.env.CACHE_TTL || '3600', 10);
   const cacheDir = process.env.CACHE_DIR || './cache';
-  // CACHE_ENABLED can be 'false', '0', 'no', or any falsy value to disable
-  const enabled = !(
+
+  // CACHE_ENABLED explicitly disables: 'false', '0', 'no', 'off'
+  const cacheDisabledByEnvVar =
     process.env.CACHE_ENABLED === 'false' ||
     process.env.CACHE_ENABLED === '0' ||
     process.env.CACHE_ENABLED === 'no' ||
-    process.env.CACHE_ENABLED === 'off'
-  );
+    process.env.CACHE_ENABLED === 'off';
+  // CACHE_ENABLED explicitly enables (overrides NODE_ENV=development)
+  const cacheEnabledByEnvVar =
+    process.env.CACHE_ENABLED === 'true' ||
+    process.env.CACHE_ENABLED === '1' ||
+    process.env.CACHE_ENABLED === 'yes';
+  const isDev = process.env.NODE_ENV === 'development';
+
+  let enabled: boolean;
+  if (cacheDisabledByEnvVar) {
+    enabled = false;
+  } else if (cacheEnabledByEnvVar) {
+    enabled = true;
+  } else if (isDev) {
+    enabled = false; // Disable cache in dev mode by default
+  } else {
+    enabled = true;
+  }
+
   const backgroundRefresh = process.env.CACHE_BACKGROUND_REFRESH === 'true';
   const refreshInterval = parseInt(
     process.env.CACHE_REFRESH_INTERVAL || '300',
     10
   );
-  
+
   // Log cache status on startup
   if (!enabled) {
-    console.log('⚠️  Cache is DISABLED (CACHE_ENABLED=false)');
+    const reason = cacheDisabledByEnvVar
+      ? 'CACHE_ENABLED=false'
+      : isDev
+        ? 'NODE_ENV=development'
+        : 'CACHE_ENABLED=false';
+    console.log(`⚠️  Cache is DISABLED (${reason})`);
   }
 
   // Image metadata configuration
@@ -36,7 +61,7 @@ export function loadCacheConfig(): CacheConfig {
   const imageMetadataTtl = parseInt(process.env.IMAGE_METADATA_TTL || '604800', 10); // 7 days default
   const imageMetadataGateways = process.env.IMAGE_METADATA_GATEWAYS
     ? process.env.IMAGE_METADATA_GATEWAYS.split(',').map(g => g.trim())
-    : ['arweave.net', 'ar-io.net'];
+    : [...DEFAULT_ARWEAVE_GATEWAYS];
   const imageMetadataTimeout = parseInt(process.env.IMAGE_METADATA_TIMEOUT || '5000', 10);
 
   const imageMetadata: ImageMetadataConfig = {

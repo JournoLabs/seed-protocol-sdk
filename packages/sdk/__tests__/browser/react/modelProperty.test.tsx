@@ -96,9 +96,6 @@ function UseModelPropertiesTest({
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.test:UseModelPropertiesTest effect',message:'effect run',data:{isLoading,propsDefined:modelProperties!==undefined,propsLen:modelProperties?.length},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{})
-    // #endregion
     if (error) {
       setStatus('error')
     } else if (!isLoading && modelProperties !== undefined) {
@@ -633,11 +630,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         () => {
           const isLoading = screen.getByTestId('is-loading')
           const status = screen.getByTestId('properties-status')
-          // #region agent log
-          if (status.textContent === 'loaded' && isLoading.textContent !== 'false') {
-            fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'modelProperty.test:waitFor',message:'FAIL state: status=loaded but isLoading=true',data:{status:status.textContent,isLoading:isLoading.textContent},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{})
-          }
-          // #endregion
           // Once status is loaded, isLoading should be false
           if (status.textContent === 'loaded') {
             expect(isLoading.textContent).toBe('false')

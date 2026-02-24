@@ -58,13 +58,15 @@ export {
   getSeedsBySchemaName,
 } from './eas'
 
-export { SeedModels, INTERNAL_DATA_TYPES } from './helpers/constants'
+export { getCorrectId } from './helpers'
+
+export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS } from './helpers/constants'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 
 export { getFeedItemsBySchemaName } from '@seedprotocol/feed'
 
-export { getArweaveUrlForTransaction } from './helpers'
+export { BaseArweaveClient, getArweaveUrlForTransaction } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export { setUploadExecutor, getUploadExecutor } from './helpers/publishConfig'
 export type { UploadExecutor } from './helpers/publishConfig'
@@ -82,6 +84,8 @@ export {
   resolvePublishPayloadValues,
   type ResolvedSeedUids,
 } from './db/read/getPublishPayload'
+
+export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
 
 export {
   updateModelProperties,
@@ -103,3 +107,4 @@ export {
 export { client } from './client'
 
 export * from './types'
+export type { PublishUpload } from './types/publish'

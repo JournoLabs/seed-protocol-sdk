@@ -1,4 +1,4 @@
-import { client as seedClient } from '@seedprotocol/sdk';
+import { client as seedClient, DEFAULT_ARWEAVE_HOST, getArweaveUrlForTransaction } from '@seedprotocol/sdk';
 import { getFeedItemsBySchemaName } from './getFeedItems';
 
 export { getFeedItemsBySchemaName };
@@ -58,7 +58,7 @@ export const initializeSeedClient = async (): Promise<void> => {
           filePaths: 'app-files',
           files: '/app-files',
         },
-        arweaveDomain: 'arweave.net',
+        arweaveDomain: DEFAULT_ARWEAVE_HOST,
       }, addresses: [], });
       console.log('✅ Seed Protocol client initialized successfully');
       client = seedClient;
@@ -571,7 +571,7 @@ export const createFeed = (
             // If it's a URL, use it directly; if it's an Arweave transaction ID, construct URL
             const enclosureUrl = typeof imageUrl === 'string' && imageUrl.startsWith('http')
               ? imageUrl
-              : `https://arweave.net/${imageUrl}`
+              : getArweaveUrlForTransaction(imageUrl)
             
             rssItem.enclosures = [{
               url: enclosureUrl,
