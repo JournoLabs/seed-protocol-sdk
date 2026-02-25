@@ -64,8 +64,6 @@ export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, D
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 
-export { getFeedItemsBySchemaName } from '@seedprotocol/feed'
-
 export { BaseArweaveClient, getArweaveUrlForTransaction } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export { setUploadExecutor, getUploadExecutor } from './helpers/publishConfig'

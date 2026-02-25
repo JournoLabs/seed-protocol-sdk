@@ -1127,6 +1127,10 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         const qc: QueryClient | null = queryClientRef.current ?? fromContainerWindow ?? fromWindow ?? fromParent ?? null
         if (qc) {
           const key = ['seed', 'itemProperties', testItem.seedLocalId] as const
+          // Clear instance cache before refetch so fetchItemPropertiesList creates fresh instances
+          // from DB (with "Updated Title") instead of returning cached instances that may not
+          // have synced the new value to the UI's React Query cache
+          ItemProperty.clearInstanceCacheForItem(testItem.seedLocalId)
           qc.invalidateQueries({ queryKey: key })
           await qc.refetchQueries({ queryKey: key })
           // Wait for cache to show updated value (refetch until we see it; later refetch can overwrite when run in group)

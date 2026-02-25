@@ -4,8 +4,8 @@ import {
   getItemPropertiesFromEas,
   EasClient,
   setSchemaUidForSchemaDefinition,
-  getArweaveUrlForTransaction,
 } from '@seedprotocol/sdk';
+import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { gql } from 'graphql-request';
 import { loadFeedConfig } from './config';
 

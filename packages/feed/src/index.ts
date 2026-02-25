@@ -1,4 +1,5 @@
-import { client as seedClient, DEFAULT_ARWEAVE_HOST, getArweaveUrlForTransaction } from '@seedprotocol/sdk';
+import { client as seedClient, DEFAULT_ARWEAVE_HOST } from '@seedprotocol/sdk';
+import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { getFeedItemsBySchemaName } from './getFeedItems';
 
 export { getFeedItemsBySchemaName };

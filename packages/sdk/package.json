@@ -1,11 +1,11 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.8",
+  "version": "0.4.11",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
   "module": "./dist/main.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "engines": {
     "node": ">= 20 <= 24"
   },
@@ -36,9 +36,8 @@
     "@zenfs/dom": "^1.2.6",
     "fsevents": "^2.3.3"
   },
-"dependencies": {
-  "@seedprotocol/feed": "workspace:*",
-  "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+  "dependencies": {
+    "@ethereum-attestation-service/eas-sdk": "^2.9.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "@libsql/client": "^0.15.15",
@@ -87,31 +86,31 @@
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.ts",
+        "types": "./dist/src/index.d.ts",
         "default": "./dist/main.js"
       },
       "require": {
-        "types": "./dist/index.d.ts",
+        "types": "./dist/src/index.d.ts",
         "default": "./dist/main.cjs"
       }
     },
     "./node": {
       "import": {
-        "types": "./dist/node/index.d.ts",
+        "types": "./dist/src/node/index.d.ts",
         "default": "./dist/node.js"
       },
       "require": {
-        "types": "./dist/node/index.d.ts",
+        "types": "./dist/src/node/index.d.ts",
         "default": "./dist/main.cjs"
       }
     },
     "./vite": {
       "import": {
-        "types": "./dist/vite/index.d.ts",
+        "types": "./dist/src/vite/index.d.ts",
         "default": "./dist/vite.js"
       },
       "require": {
-        "types": "./dist/vite/index.d.ts",
+        "types": "./dist/src/vite/index.d.ts",
         "default": "./dist/vite.cjs"
       }
     },

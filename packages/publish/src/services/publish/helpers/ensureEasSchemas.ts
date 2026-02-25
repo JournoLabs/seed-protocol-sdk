@@ -187,15 +187,25 @@ export async function ensureEasSchemasForItem(
   for (const property of allProperties) {
     if (!property.propertyDef) continue
 
-    const easDataType =
+    const easDataTypeRaw =
       (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[property.propertyDef.dataType]?.eas ?? 'string'
     const propertyNameSnakeCase = toSnakeCase(property.propertyName)
-    const schemaDef = `${easDataType} ${propertyNameSnakeCase}`
+    const schemaDef = `${easDataTypeRaw} ${propertyNameSnakeCase}`
+
+    // getEasSchemaForItemProperty expects TypedData['type'] which excludes 'bytes32[]'
+    const validEasTypes = [
+      'string', 'address', 'bool', 'bytes', 'bytes32',
+      'uint8', 'uint16', 'uint32', 'uint64', 'uint128', 'uint256',
+    ] as const
+    const easDataTypeForLookup =
+      validEasTypes.includes(easDataTypeRaw as (typeof validEasTypes)[number])
+        ? (easDataTypeRaw as (typeof validEasTypes)[number])
+        : undefined
 
     let schema = await getEasSchemaForItemProperty({
       schemaUid: property.schemaUid,
       propertyName: property.propertyName,
-      easDataType,
+      easDataType: easDataTypeForLookup,
     })
 
     if (schema) {

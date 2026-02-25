@@ -411,6 +411,49 @@ export class ModelProperty {
   }
 
   /**
+   * Resolve schema name from DB when _schemaName is missing (e.g. destroy ran before _setSchemaName finished).
+   * Uses context.id (schemaFileId) and context.modelId to query properties → model_schemas → schemas.
+   */
+  private async _resolveSchemaNameForDestroy(
+    db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+    context: ModelPropertyMachineContext,
+  ): Promise<string | undefined> {
+    try {
+      let modelId = context.modelId
+      const schemaFileId = context.id ?? context._propertyFileId
+
+      // If we don't have modelId, get it from the property row by schemaFileId
+      if (modelId == null && schemaFileId) {
+        const propRows = await db
+          .select({ modelId: propertiesTable.modelId })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.schemaFileId, schemaFileId))
+          .limit(1)
+        if (propRows.length > 0 && propRows[0].modelId != null) {
+          modelId = propRows[0].modelId
+        }
+      }
+
+      if (modelId == null) return undefined
+
+      // Resolve modelFileId (string) to database ID (number) if needed - modelSchemas.modelId expects number
+      const modelIdNum: number =
+        typeof modelId === 'string' ? await getModelIdByFileId(modelId) : modelId
+
+      const modelSchemaRecords = await db
+        .select({ schemaName: schemas.name })
+        .from(modelSchemas)
+        .innerJoin(schemas, eq(modelSchemas.schemaId, schemas.id))
+        .where(eq(modelSchemas.modelId, modelIdNum))
+        .limit(1)
+
+      return modelSchemaRecords.length > 0 ? modelSchemaRecords[0].schemaName ?? undefined : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Manually set the schema name for this property
    * Useful when you know the schema name from context (e.g., when working with Schema instances)
    */
@@ -740,6 +783,10 @@ export class ModelProperty {
 
     // Build property data
     // id is now the schemaFileId (string), _dbId is the database integer ID
+    // #region agent log
+    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'ModelProperty.ts:createById',message:'createById loading from DB',data:{propertyFileId,name:propertyRecord.name,modelName},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{}); }
+    // #endregion
+
     const propertyData: Static<typeof TProperty> = {
       id: propertyFileId, // schemaFileId (string) - public ID
       _dbId: propertyRecord.id ?? undefined, // Database integer ID - internal only
@@ -1048,10 +1095,15 @@ export class ModelProperty {
         instance._service as { send: (ev: unknown) => void; stop: () => void },
       doDestroy: async () => {
         const db = BaseDb.getAppDb()
-        const schemaName = context._schemaName
+        let schemaName = context._schemaName
         const modelName = context.modelName
         const propertyName = context.name
         if (!modelName || !propertyName) return
+
+        // Resolve schema name from DB when _schemaName is missing (e.g. destroy ran before _setSchemaName finished)
+        if (!schemaName && db) {
+          schemaName = await this._resolveSchemaNameForDestroy(db, context)
+        }
 
         if (db && schemaName) {
           const propertyRecords = await db

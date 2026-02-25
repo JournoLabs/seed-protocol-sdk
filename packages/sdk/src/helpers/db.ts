@@ -1242,27 +1242,62 @@ export const savePropertyToDb = async (
     throw new Error('Database not found')
   }
 
-  if (!property.modelName || !property.name) {
-    throw new Error('Model name and property name are required')
+  if (!property.name) {
+    throw new Error('Property name is required')
   }
 
-  // Find the model
-  const modelRecords = await db
-    .select()
-    .from(modelsTable)
-    .where(eq(modelsTable.name, property.modelName))
-    .limit(1)
-
-  if (modelRecords.length === 0) {
-    throw new Error(`Model ${property.modelName} not found in database`)
+  // Find the model: prefer modelId (reliable), then modelName as name, then modelName as schemaFileId
+  // (context.modelName can be a model schemaFileId when schema uses that as identifier)
+  let modelRecord: { id: number; name: string; schemaFileId: string | null } | undefined
+  if (property.modelId != null && typeof property.modelId === 'number') {
+    const byId = await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.id, property.modelId))
+      .limit(1)
+    modelRecord = byId[0]
   }
-
-  const modelRecord = modelRecords[0]
+  if (!modelRecord && property.modelName) {
+    const byName = await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.name, property.modelName))
+      .limit(1)
+    modelRecord = byName[0]
+  }
+  if (!modelRecord && property.modelName) {
+    const bySchemaFileId = await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.schemaFileId, property.modelName))
+      .limit(1)
+    modelRecord = bySchemaFileId[0]
+  }
+  // Fallback: resolve model from existing property row (by schemaFileId) when modelName is wrong
+  const schemaFileId = property._propertyFileId || (typeof property.id === 'string' ? property.id : undefined)
+  if (!modelRecord && schemaFileId) {
+    const propRows = await db
+      .select({ modelId: properties.modelId })
+      .from(properties)
+      .where(eq(properties.schemaFileId, schemaFileId))
+      .limit(1)
+    if (propRows.length > 0 && propRows[0].modelId) {
+      const byPropModelId = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.id, propRows[0].modelId))
+        .limit(1)
+      modelRecord = byPropModelId[0]
+    }
+  }
+  if (!modelRecord) {
+    throw new Error(
+      `Model not found in database (modelId=${property.modelId}, modelName=${property.modelName})`
+    )
+  }
 
   // Find existing property - try multiple strategies to handle name changes
   // 1. First try by schemaFileId (most reliable - doesn't change when name changes)
-  // Use _propertyFileId first (from getPropertySchema), then id if it's a string (schemaFileId)
-  const schemaFileId = property._propertyFileId || (typeof property.id === 'string' ? property.id : undefined)
   let existingProperties: any[] = []
   
   logger(`[savePropertyToDb] Looking for property ${property.modelName}:${property.name} (schemaFileId: ${schemaFileId}, originalName: ${property._originalValues?.name})`)
@@ -1361,6 +1396,10 @@ export const savePropertyToDb = async (
       })
       .where(eq(properties.id, existingProperty.id!))
     logger(`Updated property ${property.modelName}:${property._originalValues?.name || 'unknown'} -> ${property.name} in database`)
+
+    // #region agent log
+    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'db.ts:savePropertyToDb-update',message:'savePropertyToDb UPDATED row',data:{oldName:property._originalValues?.name,newName:property.name,dbId:existingProperty.id},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); }
+    // #endregion
   } else {
     // Property doesn't exist, create it
     // Set isEdited = true for runtime-created properties
@@ -1369,6 +1408,10 @@ export const savePropertyToDb = async (
       isEdited: true, // Runtime-created properties are edited
     })
     logger(`Created property ${property.modelName}:${property.name} in database`)
+
+    // #region agent log
+    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'db.ts:savePropertyToDb-insert',message:'savePropertyToDb INSERTED new row',data:{name:property.name,schemaFileId},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); }
+    // #endregion
   }
 }
 
@@ -1751,16 +1794,14 @@ export async function writePropertyToDb(
   // are not stored in the properties table but may be in the schema JSON
   
   if (existingProperties.length > 0) {
-    // Property exists, update it with new values
+    // Property exists, update it with new values.
+    // Use existing row id for WHERE (not name+modelId) so renames work: the row
+    // may have the old name but we're updating to the new one.
+    const existing = existingProperties[0]
     await db
       .update(properties)
       .set(propertyData)
-      .where(
-        and(
-          eq(properties.name, data.name),
-          eq(properties.modelId, data.modelId),
-        ),
-      )
+      .where(eq(properties.id, existing.id!))
     logger(`Updated property ${data.name} (${propertyFileId}) in database`)
   } else {
     // Property doesn't exist, create it
