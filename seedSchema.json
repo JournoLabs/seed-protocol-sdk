@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "name": "Post",
+      "properties": [
+        {
+          "name": "title",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Identity",
+      "properties": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}

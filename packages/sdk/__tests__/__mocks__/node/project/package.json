@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "typescript": "^5.0.0",
+    "@libsql/client": "^0.15.15"
+  }
+}

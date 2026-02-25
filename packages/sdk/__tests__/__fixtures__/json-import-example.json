@@ -1,0 +1,120 @@
+{
+  "name": "blog-schema",
+  "models": {
+    "Post": {
+      "description": "A blog post",
+      "properties": {
+        "title": {
+          "type": "Text",
+          "required": true,
+          "description": "Post title"
+        },
+        "summary": {
+          "type": "Text",
+          "required": false,
+          "description": "Brief summary of the post"
+        },
+        "html": {
+          "type": "Text",
+          "storage": {
+            "type": "ItemStorage",
+            "path": "/html",
+            "extension": ".html"
+          }
+        },
+        "json": {
+          "type": "Text",
+          "storage": {
+            "type": "ItemStorage",
+            "path": "/json",
+            "extension": ".json"
+          }
+        },
+        "featureImage": {
+          "type": "Relation",
+          "model": "Image",
+          "required": false
+        },
+        "authors": {
+          "type": "List",
+          "items": {
+            "type": "Relation",
+            "model": "Identity"
+          },
+          "required": true
+        },
+        "storageTransactionId": {
+          "type": "Text",
+          "required": false
+        },
+        "importUrl": {
+          "type": "Text",
+          "required": false
+        }
+      },
+      "indexes": ["title", "storageTransactionId"]
+    },
+    "Image": {
+      "description": "An image asset",
+      "properties": {
+        "storageTransactionId": {
+          "type": "Text",
+          "required": true
+        },
+        "uri": {
+          "type": "Text",
+          "required": true
+        },
+        "alt": {
+          "type": "Text",
+          "required": false
+        }
+      },
+      "indexes": ["storageTransactionId", "uri"]
+    },
+    "Identity": {
+      "description": "A person or entity",
+      "properties": {
+        "name": {
+          "type": "Text",
+          "required": true
+        },
+        "profile": {
+          "type": "Text",
+          "required": false
+        },
+        "displayName": {
+          "type": "Text",
+          "required": false
+        },
+        "avatarImage": {
+          "type": "Relation",
+          "model": "Image",
+          "required": false
+        },
+        "coverImage": {
+          "type": "Relation",
+          "model": "Image",
+          "required": false
+        }
+      },
+      "indexes": ["name"]
+    },
+    "Link": {
+      "description": "A hyperlink",
+      "properties": {
+        "url": {
+          "type": "Text",
+          "required": true,
+          "validation": {
+            "pattern": "^https?://.*"
+          }
+        },
+        "text": {
+          "type": "Text",
+          "required": true
+        }
+      }
+    }
+  }
+}

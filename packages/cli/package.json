@@ -1,0 +1,65 @@
+{
+  "name": "@seedprotocol/cli",
+  "version": "0.4.11",
+  "description": "CLI tool for Seed Protocol",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "cli": "./dist/bin.js",
+    "seed": "./dist/bin.js",
+    "seed-init": "./dist/bin.js",
+    "seed-add-model": "./dist/addModel.js",
+    "seed-rpc-server": "./dist/rpcServer.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">= 20 <= 24"
+  },
+  "scripts": {
+    "build": "tsc && rollup -c",
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")",
+    "dev": "tsx src/bin.ts",
+    "dev:init": "tsx src/bin.ts init",
+    "dev:export-sql": "tsx src/bin.ts export-sql",
+    "dev:seed": "tsx src/bin.ts seed"
+  },
+  "dependencies": {
+    "@seedprotocol/sdk": "workspace:*",
+    "@grpc/grpc-js": "^1.13.3",
+    "@grpc/proto-loader": "^0.7.15",
+    "better-sqlite3": "^12.2.0",
+    "commander": "^12.1.0",
+    "drizzle-kit": "^0.31.4",
+    "drizzle-orm": "^0.44.3",
+    "rimraf": "^6.0.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "rollup": "^4.29.1",
+    "rollup-plugin-copy": "^3.5.0",
+    "rollup-plugin-preserve-shebang": "^1.0.1",
+    "typescript": "~5.7.2"
+  },
+  "author": "Keith Axline <keith@journodao.xyz>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}
