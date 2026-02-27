@@ -1,6 +1,6 @@
 {
   "name": "seed-protocol-sdk-monorepo",
-  "version": "0.4.11",
+  "version": "0.4.14",
   "private": true,
   "description": "Seed Protocol SDK monorepo",
   "type": "module",

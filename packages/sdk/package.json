@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
@@ -51,7 +51,7 @@
     "@statelyai/inspect": "^0.4.0",
     "@tanstack/query-sync-storage-persister": "^5.90.17",
     "@tanstack/react-query-persist-client": "^5.90.17",
-    "@xstate/react": "^6.0.0",
+    "@xstate/react": "^6.1.0",
     "arweave": "^1.15.5",
     "better-sqlite3": "^12.5.0",
     "debug": "^4.4.1",
@@ -83,9 +83,11 @@
     "ts-proto": "^2.6.0",
     "tslib": "^2.8.1",
     "use-immer": "^0.11.0",
+    "use-isomorphic-layout-effect": "^1.2.1",
+    "use-sync-external-store": "^1.6.0",
     "vite-plugin-node-polyfills": "^0.24.0",
     "webpack": "^5.98.0",
-    "xstate": "^5.19.0"
+    "xstate": "^5.28.0"
   },
   "exports": {
     ".": {
