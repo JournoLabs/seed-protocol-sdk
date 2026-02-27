@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.11",
+  "version": "0.4.13",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -26,12 +26,10 @@
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
-    "@seedprotocol/sdk": "0.4.11",
+    "@seedprotocol/sdk": "workspace:*",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "thirdweb": "^5.118.1",
+    "isows": "^1.0.7",
     "viem": "^2.46.2",
     "xstate": "^5.28.0"
   },
@@ -40,10 +38,16 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "thirdweb": "^5.118.1",
     "typescript": "~5.9.3",
     "vite": "^7.3.0"
   },
   "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19",
+    "thirdweb": "^5",
     "typescript": "^5"
   },
   "author": "Keith Axline <keith@journodao.xyz>",

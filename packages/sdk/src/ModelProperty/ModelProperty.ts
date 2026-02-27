@@ -783,10 +783,6 @@ export class ModelProperty {
 
     // Build property data
     // id is now the schemaFileId (string), _dbId is the database integer ID
-    // #region agent log
-    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'ModelProperty.ts:createById',message:'createById loading from DB',data:{propertyFileId,name:propertyRecord.name,modelName},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{}); }
-    // #endregion
-
     const propertyData: Static<typeof TProperty> = {
       id: propertyFileId, // schemaFileId (string) - public ID
       _dbId: propertyRecord.id ?? undefined, // Database integer ID - internal only

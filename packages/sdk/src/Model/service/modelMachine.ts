@@ -361,11 +361,12 @@ export const modelMachine = setup({
             target: 'creatingProperties',
             actions: assign(({ context, event }) => {
               logger(`[writeSuccess] Transitioning to creatingProperties for model "${context.modelName}"`)
-              // Update _dbId from write output if available
+              // Update _dbId from write output if available (writeToDatabase returns _dbId, not id)
               const newContext = { ...context }
-              if (event.output?.id) {
-                newContext._dbId = event.output.id
-                logger(`[writeSuccess] Updated _dbId to ${event.output.id}`)
+              const dbId = event.output?._dbId ?? event.output?.id
+              if (dbId != null) {
+                newContext._dbId = dbId
+                logger(`[writeSuccess] Updated _dbId to ${dbId}`)
               }
               return newContext
             }),
@@ -373,10 +374,11 @@ export const modelMachine = setup({
           {
             target: 'idle',
             actions: assign(({ context, event }) => {
-              // Update _dbId from write output if available
+              // Update _dbId from write output if available (writeToDatabase returns _dbId, not id)
               const newContext = { ...context }
-              if (event.output?.id) {
-                newContext._dbId = event.output.id
+              const dbId = event.output?._dbId ?? event.output?.id
+              if (dbId != null) {
+                newContext._dbId = dbId
               }
               return newContext
             }),

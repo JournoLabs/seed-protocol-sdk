@@ -69,9 +69,6 @@ export const writeToDatabase = fromCallback<
             if (instance && typeof (instance as any)._getSnapshotContext === 'function') {
               const ctx = (instance as any)._getSnapshotContext()
               const ctxName = ctx.name ?? input.entityData.name
-              // #region agent log
-              if (ctx.name !== input.entityData.name && typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'writeToDatabase.ts:modelProperty',message:'writeToDatabase using ctx name (rename detected)',data:{requestWriteName:input.entityData.name,ctxName:ctx.name,finalName:ctxName},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{}); }
-              // #endregion
               dataToWrite = {
                 ...input.entityData,
                 name: ctxName,
@@ -89,9 +86,6 @@ export const writeToDatabase = fromCallback<
           // Fall back to input.entityData if instance not available
         }
         await writePropertyToDb(input.entityId, dataToWrite)
-        // #region agent log
-        if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'writeToDatabase.ts:writePropertyToDbDone',message:'writePropertyToDb completed',data:{entityId:input.entityId,name:dataToWrite.name},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{}); }
-        // #endregion
         output = input.entityData
       } else if (input.entityType === 'schema') {
         const schemaRecord = await addSchemaToDb(

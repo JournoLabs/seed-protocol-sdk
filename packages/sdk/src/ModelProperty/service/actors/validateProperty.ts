@@ -86,9 +86,6 @@ export const validateProperty = fromCallback<
     const structureResult = validationService.validatePropertyStructure(fullContext)
     
     if (!structureResult.isValid) {
-      // #region agent log
-      if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'validateProperty.ts:structureInvalid',message:'validateProperty structure validation FAILED',data:{name:fullContext.name,errors:structureResult.errors?.map((e:any)=>e.message||e.code)},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{}); }
-      // #endregion
       sendBack({ type: 'validationError', errors: structureResult.errors })
       return
     }
@@ -139,9 +136,6 @@ export const validateProperty = fromCallback<
               })
               
               if (criticalErrors.length > 0) {
-                // #region agent log
-                if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'validateProperty.ts:schemaCriticalErrors',message:'validateProperty schema validation FAILED (critical)',data:{name:fullContext.name,isRenamed:!!(fullContext._originalValues?.name&&fullContext._originalValues.name!==fullContext.name),criticalErrors:criticalErrors?.map((e:any)=>e.message||e.code)},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{}); }
-                // #endregion
                 sendBack({ type: 'validationError', errors: criticalErrors })
                 return
               }

@@ -26,6 +26,7 @@ export default defineConfig({
         'thirdweb/react',
         'thirdweb/utils',
         'thirdweb/wallets',
+        'viem',
         '@seedprotocol/sdk',
         '@ethereum-attestation-service/eas-sdk',
       ],

@@ -112,12 +112,23 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // Ensure ZenFS packages are discoverable
           '@zenfs/core',
           '@zenfs/dom',
+          // Dependencies of @zenfs/core; must be pre-bundled for resolution
+          'kerium',
+          'utilium',
+          'memium',
+          'readable-stream',
+          // viem dynamically imports isows; pre-bundle both so Rollup can resolve them
+          'viem',
+          'isows',
         ],
       }
 
       return {
         resolve: {
           alias,
+          // Prevent duplicate React/thirdweb instances when @seedprotocol/publish is workspace-linked.
+          // Multiple copies break context (e.g. useActiveAccount must be used within ThirdwebProvider).
+          dedupe: ['react', 'react-dom', 'thirdweb'],
         },
         optimizeDeps,
       }
@@ -168,7 +179,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
 
       // Externalize Node.js-only dev/build tools that should never be bundled
-      // These are build-time tools, not runtime dependencies
       const nodeOnlyPackages = [
         'drizzle-kit',
         'better-sqlite3', // Native SQLite binding (Node.js only)

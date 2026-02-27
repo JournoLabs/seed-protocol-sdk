@@ -692,8 +692,6 @@ testDescribe('Model Integration Tests', () => {
           )
         )
 
-      console.log('metadataRecords', metadataRecords)
-
       expect(metadataRecords.length).toBeGreaterThanOrEqual(3)
 
       // Verify title metadata
@@ -1493,7 +1491,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       // Create first model instance and save to database
-      const model1 = Model.create(modelName, schemaName)
+      const model1 = await Model.create(modelName, schemaName)
       await waitForModelIdle(model1)
       
       // Note: description is not supported - JSON files can have it but we ignore it at runtime
@@ -1588,7 +1586,8 @@ testDescribe('Model Integration Tests', () => {
           title: { dataType: 'Text' },
           content: { dataType: 'Text' },
         },
-      })
+        waitForReady: false,
+      }) as Model
       
       // Track subscription callbacks
       let callbackCount = 0
@@ -1635,7 +1634,6 @@ testDescribe('Model Integration Tests', () => {
       
       // Verify the model eventually reached idle state
       const finalSnapshot = newModel.getService().getSnapshot()
-      console.log('finalSnapshot.value', finalSnapshot.value)
       expect(finalSnapshot.value).toBe('idle')
     })
 

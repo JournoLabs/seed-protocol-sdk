@@ -59,10 +59,6 @@ export const compareAndMarkDraft = fromCallback<
       logger('No original values to compare against')
       logger(`[compareAndMarkDraft] Context: modelName=${fullContext.modelName}, name=${fullContext.name}, id=${fullContext.id}, _propertyFileId=${fullContext._propertyFileId}`)
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'compareAndMarkDraft.ts:noOriginalValues',message:'compareAndMarkDraft early path - no _originalValues',data:{name:fullContext.name,modelName:fullContext.modelName,schemaFileId:schemaFileId,willSave:!!(fullContext.modelName&&fullContext.name&&schemaFileId)},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
       // If we have a name and modelName, try to save to database anyway
       // This ensures name changes are persisted even if _originalValues isn't initialized yet
       // We need either schemaFileId (id or _propertyFileId) to find the property in the database
@@ -91,10 +87,6 @@ export const compareAndMarkDraft = fromCallback<
 
     logger(`[compareAndMarkDraft] Comparing: context.name=${fullContext.name}, _originalValues.name=${fullContext._originalValues?.name}`)
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'compareAndMarkDraft.ts:beforeHasChanges',message:'compareAndMarkDraft before hasChanges',data:{name:fullContext.name,originalName:fullContext._originalValues?.name,id:fullContext.id,schemaFileId:fullContext._propertyFileId||fullContext.id},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     // Compare current values with original
     // Only compare property fields, not internal fields
     const propertyFields = ['name', 'dataType', 'ref', 'refModelName', 'refModelId', 'refValueType', 'storageType', 'localStorageDir', 'filenameSuffix', 'modelName', 'modelId']
@@ -133,10 +125,6 @@ export const compareAndMarkDraft = fromCallback<
       logger(`Property ${fullContext.modelName}:${fullContext.name} has changes, marking as edited`)
       logger(`[compareAndMarkDraft] Context when saving: id=${fullContext.id}, _propertyFileId=${fullContext._propertyFileId}, name=${fullContext.name}, _originalValues.name=${fullContext._originalValues?.name}`)
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'compareAndMarkDraft.ts:hasChanges-callingSave',message:'compareAndMarkDraft calling savePropertyToDb',data:{name:fullContext.name,originalName:fullContext._originalValues?.name,schemaFileId:fullContext._propertyFileId||fullContext.id},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       // Use dynamic import to break circular dependency
       const dbMod = await import('../../../helpers/db')
       const { savePropertyToDb } = dbMod
@@ -144,15 +132,8 @@ export const compareAndMarkDraft = fromCallback<
       try {
         await savePropertyToDb(fullContext)
         logger(`[compareAndMarkDraft] Successfully saved property ${fullContext.modelName}:${fullContext.name} to database`)
-
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'compareAndMarkDraft.ts:savePropertyToDbSuccess',message:'savePropertyToDb completed successfully',data:{name:fullContext.name},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
       } catch (error) {
         logger(`[compareAndMarkDraft] Error saving property to database: ${error}`)
-        // #region agent log
-        if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'compareAndMarkDraft.ts:savePropertyToDbError',message:'savePropertyToDb FAILED',data:{name:fullContext.name,error:String(error)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); }
-        // #endregion
         throw error
       }
 

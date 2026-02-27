@@ -19,9 +19,10 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import type { IItemProperty } from '@/interfaces'
 
 // Helper function to wait for ItemProperty to be in idle state
-async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 10000): Promise<void> {
+async function waitForItemPropertyIdle(property: IItemProperty<any>, timeout: number = 10000): Promise<void> {
   const service = property.getService()
   
   // Check current state first - if already idle, return immediately
@@ -1345,7 +1346,7 @@ testDescribe('ItemProperty Integration Tests', () => {
           id: postModelId,
           properties: {
             title: { dataType: 'Text' },
-            tags: { dataType: 'List', ref: 'Tag' },
+            tags: { dataType: 'List', items: { type: 'Relation', model: 'Tag' } },
           },
         },
       })

@@ -1014,7 +1014,16 @@ export const addModelsToDb = async (
           isEdited: false,
         }
         logger(`Creating new property ${modelName}:${propertyName} with schemaFileId: ${propertyData.schemaFileId}`)
-        const result = await db.insert(properties).values(propertyDataWithIsEdited)
+        try {
+          await db.insert(properties).values(propertyDataWithIsEdited)
+        } catch (insertError: any) {
+          // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb call)
+          if (insertError?.code === 'SQLITE_CONSTRAINT_UNIQUE' || insertError?.message?.includes('UNIQUE constraint')) {
+            logger(`Property ${modelName}:${propertyName} already exists (UNIQUE constraint), treating as success`)
+          } else {
+            throw insertError
+          }
+        }
       }
     }
     } catch (error: any) {
@@ -1396,10 +1405,6 @@ export const savePropertyToDb = async (
       })
       .where(eq(properties.id, existingProperty.id!))
     logger(`Updated property ${property.modelName}:${property._originalValues?.name || 'unknown'} -> ${property.name} in database`)
-
-    // #region agent log
-    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'db.ts:savePropertyToDb-update',message:'savePropertyToDb UPDATED row',data:{oldName:property._originalValues?.name,newName:property.name,dbId:existingProperty.id},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); }
-    // #endregion
   } else {
     // Property doesn't exist, create it
     // Set isEdited = true for runtime-created properties
@@ -1408,10 +1413,6 @@ export const savePropertyToDb = async (
       isEdited: true, // Runtime-created properties are edited
     })
     logger(`Created property ${property.modelName}:${property.name} in database`)
-
-    // #region agent log
-    if (typeof fetch === 'function') { fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'db.ts:savePropertyToDb-insert',message:'savePropertyToDb INSERTED new row',data:{name:property.name,schemaFileId},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); }
-    // #endregion
   }
 }
 

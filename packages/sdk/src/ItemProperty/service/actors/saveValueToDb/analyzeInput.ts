@@ -155,8 +155,11 @@ export const analyzeInput = fromCallback<
       schemaUid,
     } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
 
+    const stringValueForContext =
+      typeof newValue === 'string' ? newValue : (newValue !== null && newValue !== undefined ? String(newValue) : undefined)
     let updatedContext: Partial<PropertyMachineContext> = {
-      propertyValue: typeof newValue === 'string' ? newValue : (newValue !== null && newValue !== undefined ? String(newValue) : undefined),
+      propertyValue: stringValueForContext,
+      renderValue: stringValueForContext,
     }
 
     if (localId) {

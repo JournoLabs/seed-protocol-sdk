@@ -16,8 +16,9 @@ const localStoragePersister = createSyncStoragePersister({
   storage: typeof window !== 'undefined' ? window.localStorage : null,
 })
 
+// Type assertion: persistQueryClient and QueryClient may resolve different @tanstack/query-core copies in the monorepo, causing TS2322. Runtime is compatible.
 persistQueryClient({
-  queryClient,
+  queryClient: queryClient as Parameters<typeof persistQueryClient>[0]['queryClient'],
   persister: localStoragePersister,
 })
 

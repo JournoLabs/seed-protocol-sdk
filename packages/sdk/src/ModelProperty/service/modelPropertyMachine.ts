@@ -87,12 +87,6 @@ export const modelPropertyMachine = setup({
       actions: assign(({ context, event }) => {
         const newContext = Object.assign({}, context) as any
 
-        // #region agent log
-        if ((event as any).name !== undefined && (event as any).name !== context.name) {
-          fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ee076'},body:JSON.stringify({sessionId:'9ee076',location:'modelPropertyMachine.ts:updateContext',message:'Name change via updateContext',data:{oldName:context.name,newName:(event as any).name,id:context.id,_propertyFileId:context._propertyFileId,hasOriginalValues:!!context._originalValues},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        }
-        // #endregion
-
         // Check if this is only updating internal fields
         const onlyInternalFields = Object.keys(event).every((key: string) => {
           return key === 'type' || key.startsWith('_')

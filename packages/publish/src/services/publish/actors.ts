@@ -422,15 +422,9 @@ export const createAttestations = fromPromise(async ({ input: { context, event }
   //     easAddress = await getEas({
   //       contract: smartWalletContract,
   //     },) as string
-  //     // #region agent log
-  //     fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:getEas-success',message:'getEas succeeded (EAS already set)',data:{easAddress,address},timestamp:Date.now()})}).catch(()=>{});
-  //     // #endregion
   //   } catch (getEasErr: unknown) {
   //     const err = getEasErr instanceof Error ? getEasErr : new Error(String(getEasErr))
   //     const msg = err.message
-  //     // #region agent log
-  //     fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:getEas-error',message:'getEas failed (will attempt setEas if zero data)',data:{errorMessage:msg,errorName:err.name,address},timestamp:Date.now()})}).catch(()=>{});
-  //     // #endregion
   //     // Contract returned "0x" (e.g. EOA or not deployed). Treat as EAS not set so we attempt setEas; if address has no code, sendTransaction will fail with a clear error.
   //     if (err.name === 'AbiDecodingZeroDataError' || /Cannot decode zero data/i.test(msg)) {
   //       easAddress = ZERO_ADDRESS
@@ -443,11 +437,6 @@ export const createAttestations = fromPromise(async ({ input: { context, event }
   //   // This assumes the contract allows the smart account as tx sender for these calls.
   //   // If the contract only allows an EOA owner, revisit: fall back to EOA connection or update the contract.
   //   if ( easAddress === ZERO_ADDRESS ) {
-  //     // #region agent log
-  //     try {
-  //       fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:setEas-entry',message:'Attempting setEas',data:{easContractAddress:getPublishConfig().easContractAddress,address},timestamp:Date.now()})}).catch(()=>{});
-  //     } catch { /* noop */ }
-  //     // #endregion
   //     const { easContractAddress } = getPublishConfig()
   //     const tx = setEas({
   //       contract: smartWalletContract,
@@ -467,28 +456,14 @@ export const createAttestations = fromPromise(async ({ input: { context, event }
   //       },)
 
   //       if ( !receipt ) {
-  //         // #region agent log
-  //         fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:setEas-receipt-null',message:'setEas failed: receipt is null',data:{transactionHash:result.transactionHash},timestamp:Date.now()})}).catch(()=>{});
-  //         // #endregion
   //         throw new Error('Failed to set EAS address',)
   //       }
 
-  //       // #region agent log
-  //       fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:setEas-success',message:'setEas succeeded',data:{transactionHash:result.transactionHash,receiptStatus:receipt.status},timestamp:Date.now()})}).catch(()=>{});
   //       // Verify getEas returns expected value after setEas
   //       try {
-  //         const easAfterSet = await getEas({ contract: smartWalletContract }) as string
-  //         fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:getEas-after-setEas',message:'getEas after setEas',data:{easAddress:easAfterSet,expected:easContractAddress,match:easAfterSet?.toLowerCase()===easContractAddress?.toLowerCase()},timestamp:Date.now()})}).catch(()=>{});
-  //       } catch (getEasAfterErr: unknown) {
-  //         const e = getEasAfterErr instanceof Error ? getEasAfterErr : new Error(String(getEasAfterErr))
-  //         fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:getEas-after-setEas-error',message:'getEas after setEas failed',data:{errorMessage:e.message,errorName:e.name},timestamp:Date.now()})}).catch(()=>{});
-  //       }
-  //       // #endregion
+  //         await getEas({ contract: smartWalletContract }) as string
+  //       } catch { /* noop */ }
   //     } catch (setEasErr: unknown) {
-  //       // #region agent log
-  //       const err = setEasErr instanceof Error ? setEasErr : new Error(String(setEasErr))
-  //       fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4756f9'},body:JSON.stringify({sessionId:'4756f9',location:'actors.ts:setEas-error',message:'setEas failed',data:{errorMessage:err.message,errorName:err.name,stack:err.stack},timestamp:Date.now()})}).catch(()=>{});
-  //       // #endregion
   //       throw setEasErr
   //     }
   //   }
