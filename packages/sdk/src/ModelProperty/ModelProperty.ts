@@ -792,6 +792,7 @@ export class ModelProperty {
       modelName,
       refModelId: propertyRecord.refModelId || undefined,
       refValueType: propertyRecord.refValueType ? (propertyRecord.refValueType as ModelPropertyDataTypes) : undefined,
+      required: propertyRecord.required ?? false,
     }
     
     // Load isEdited from database

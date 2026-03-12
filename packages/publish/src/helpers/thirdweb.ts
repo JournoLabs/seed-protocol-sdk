@@ -4,6 +4,7 @@ import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
 import { isContractDeployed } from 'thirdweb/utils'
 import { useEffect, useRef, useState, } from 'react'
+import type { Chain } from 'thirdweb/chains'
 import { optimismSepolia, } from 'thirdweb/chains'
 import {
   createAccount,
@@ -188,6 +189,41 @@ export const appMetadata = {
   name: "Seed Protocol",
   description: "Seed Protocol",
   url: "https://seedprotocol.io",
+}
+
+/**
+ * Connects the managed account wallet (EIP4337 in-app wallet) and returns its address.
+ * Use this when you need the connected managed account address for publish flows.
+ *
+ * @param chain - The chain to connect to (defaults to optimismSepolia)
+ * @returns The connected managed account's address
+ * @throws Error if the managed account cannot be connected or retrieved
+ */
+export async function getConnectedManagedAccountAddress(
+  chain: Chain = optimismSepolia
+): Promise<string> {
+  const managedAccountWallet = getManagedAccountWallet()
+  await managedAccountWallet.autoConnect({ client: getClient(), chain })
+  const managedAccount = managedAccountWallet.getAccount()
+  if (!managedAccount) {
+    throw new Error('Failed to get managed account')
+  }
+  return managedAccount.address
+}
+
+/**
+ * Returns the connected account for transaction signing (e.g. revoke).
+ * Uses the modular account wallet. Returns null if not connected.
+ */
+export async function getConnectedAccount(): Promise<Account | null> {
+  try {
+    const wallet = getModularAccountWallet()
+    await wallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+    const account = wallet.getAccount()
+    return account ?? null
+  } catch {
+    return null
+  }
 }
 
 export const getManagedAccountWallet = () => {

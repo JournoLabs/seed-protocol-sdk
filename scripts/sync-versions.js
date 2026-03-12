@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Version synchronization script for monorepo packages
- * Ensures SDK, CLI, Publish, and Feed packages have matching versions
+ * Ensures SDK, CLI, Publish, Feed, and Ghost packages have matching versions
  */
 
 import { readFileSync, writeFileSync } from 'fs'
@@ -34,14 +34,18 @@ function writePackageJson(path, data) {
  */
 function syncVersions(newVersion = null) {
   const sdkPackagePath = join(rootDir, 'packages', 'sdk', 'package.json')
+  const reactPackagePath = join(rootDir, 'packages', 'react', 'package.json')
   const cliPackagePath = join(rootDir, 'packages', 'cli', 'package.json')
   const publishPackagePath = join(rootDir, 'packages', 'publish', 'package.json')
   const feedPackagePath = join(rootDir, 'packages', 'feed', 'package.json')
+  const ghostPackagePath = join(rootDir, 'packages', 'ghost', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
+  const reactPackage = readPackageJson(reactPackagePath)
   const cliPackage = readPackageJson(cliPackagePath)
   const publishPackage = readPackageJson(publishPackagePath)
   const feedPackage = readPackageJson(feedPackagePath)
+  const ghostPackage = readPackageJson(ghostPackagePath)
 
   // Use SDK version as source of truth, or use provided version
   const targetVersion = newVersion || sdkPackage.version
@@ -57,6 +61,15 @@ function syncVersions(newVersion = null) {
     sdkPackage.version = newVersion
     writePackageJson(sdkPackagePath, sdkPackage)
     console.log(`[Version Sync] Updated SDK version to ${newVersion}`)
+  }
+
+  // Update React version
+  if (reactPackage.version !== targetVersion) {
+    reactPackage.version = targetVersion
+    writePackageJson(reactPackagePath, reactPackage)
+    console.log(`[Version Sync] Updated React version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] React version already at ${targetVersion}`)
   }
 
   // Update CLI version
@@ -103,11 +116,27 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] Feed SDK dependency: ${feedPackage.dependencies['@seedprotocol/sdk']}`)
   }
 
+  // Update Ghost version
+  if (ghostPackage.version !== targetVersion) {
+    ghostPackage.version = targetVersion
+    writePackageJson(ghostPackagePath, ghostPackage)
+    console.log(`[Version Sync] Updated Ghost version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Ghost version already at ${targetVersion}`)
+  }
+
+  // Update Ghost's SDK dependency version to match
+  if (ghostPackage.dependencies && ghostPackage.dependencies['@seedprotocol/sdk']) {
+    console.log(`[Version Sync] Ghost SDK dependency: ${ghostPackage.dependencies['@seedprotocol/sdk']}`)
+  }
+
   console.log('[Version Sync] Version synchronization complete!')
   console.log(`[Version Sync] SDK: ${sdkPackage.version}`)
+  console.log(`[Version Sync] React: ${reactPackage.version}`)
   console.log(`[Version Sync] CLI: ${cliPackage.version}`)
   console.log(`[Version Sync] Publish: ${publishPackage.version}`)
   console.log(`[Version Sync] Feed: ${feedPackage.version}`)
+  console.log(`[Version Sync] Ghost: ${ghostPackage.version}`)
 }
 
 // Run if called directly (simplified - always execute when run as script)

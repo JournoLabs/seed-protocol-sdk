@@ -11,6 +11,7 @@ export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
 export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
+export * from './easRevokedFilter'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary

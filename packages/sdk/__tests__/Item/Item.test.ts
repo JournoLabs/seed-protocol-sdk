@@ -1265,6 +1265,112 @@ testDescribe('Item Integration Tests', () => {
     })
   })
 
+  describe('Item.publisher', () => {
+    it('should expose publisher when seed has publisher set', async () => {
+      const schemaName = 'Test Schema Item Publisher'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const createdItem = await Item.create({
+        modelName: 'TestPost',
+        title: 'Publisher Test',
+      })
+      await waitForItemIdle(createdItem)
+
+      const seedLocalId = createdItem.seedLocalId
+      const testPublisher = '0x1234567890abcdef1234567890abcdef12345678'
+
+      // Update seed with publisher in DB (simulates EAS sync)
+      const db = BaseDb.getAppDb()
+      if (!db) throw new Error('Database not available')
+      await db.update(seeds).set({ publisher: testPublisher }).where(eq(seeds.localId, seedLocalId))
+
+      // Unload to clear cache so next find gets fresh data from DB
+      createdItem.unload()
+
+      const foundItem = await Item.find({ modelName: 'TestPost', seedLocalId })
+      expect(foundItem).toBeDefined()
+      await waitForItemIdle(foundItem!)
+
+      expect(foundItem!.publisher).toBe(testPublisher)
+    })
+
+    it('should have publisher undefined for locally created items', async () => {
+      const schemaName = 'Test Schema Item Publisher Undefined'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'No Publisher',
+      })
+      await waitForItemIdle(item)
+
+      expect(item.publisher).toBeUndefined()
+    })
+
+    it('should throw when attempting to set publisher', async () => {
+      const schemaName = 'Test Schema Item Publisher ReadOnly'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'ReadOnly Test',
+      })
+      await waitForItemIdle(item)
+
+      expect(() => {
+        ;(item as any).publisher = '0x123'
+      }).toThrow('Cannot set item.publisher: publisher is read-only.')
+    })
+  })
+
   describe('Item unload', () => {
     it('should clean up liveQuery subscription on unload', async () => {
       const schemaName = 'Test Schema Item Unload'

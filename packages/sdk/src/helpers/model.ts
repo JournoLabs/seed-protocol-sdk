@@ -17,6 +17,7 @@ export function modelPropertiesToObject(properties: ModelProperty[]): { [propert
         storageType: propContext.storageType,
         localStorageDir: propContext.localStorageDir,
         filenameSuffix: propContext.filenameSuffix,
+        required: propContext.required,
       }
     }
   }

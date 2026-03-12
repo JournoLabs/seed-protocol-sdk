@@ -69,6 +69,16 @@ describe('List-only multi-value restriction', () => {
       expect(result.isValid).toBe(true)
     })
 
+    it('accepts List with lowercase refValueType "relation" and ref', () => {
+      const result = schema.validatePropertyStructure({
+        dataType: ModelPropertyDataTypes.List,
+        refValueType: 'relation',
+        ref: 'Tag',
+        name: 'tags',
+      } as any)
+      expect(result.isValid).toBe(true)
+    })
+
     it('rejects refValueType on non-List types (except Relation+Image)', () => {
       const result = schema.validatePropertyStructure({
         dataType: ModelPropertyDataTypes.Text,
@@ -90,6 +100,57 @@ describe('List-only multi-value restriction', () => {
     })
   })
 
+  describe('validatePropertyValue with enum', () => {
+    const schema = new SchemaValidationService()
+
+    it('accepts value in enum for Text', () => {
+      const result = schema.validatePropertyValue('draft', ModelPropertyDataTypes.Text, {
+        enum: ['draft', 'published', 'archived'],
+      })
+      expect(result.isValid).toBe(true)
+    })
+
+    it('rejects value not in enum for Text with descriptive message', () => {
+      const result = schema.validatePropertyValue('invalid', ModelPropertyDataTypes.Text, {
+        enum: ['draft', 'published', 'archived'],
+      })
+      expect(result.isValid).toBe(false)
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0].code).toBe('enum_violation')
+      expect(result.errors[0].message).toContain('Expected one of')
+      expect(result.errors[0].message).toContain('draft')
+      expect(result.errors[0].message).toContain('published')
+      expect(result.errors[0].message).toContain('archived')
+      expect(result.errors[0].message).toContain('invalid')
+    })
+
+    it('validates each element of List with refValueType Text and enum', () => {
+      const result = schema.validatePropertyValue(
+        ['draft', 'invalid', 'published'],
+        ModelPropertyDataTypes.List,
+        { enum: ['draft', 'published', 'archived'] },
+        ModelPropertyDataTypes.Text
+      )
+      expect(result.isValid).toBe(false)
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0].field).toBe('value[1]')
+      expect(result.errors[0].code).toBe('enum_violation')
+      expect(result.errors[0].message).toContain('Element at index 1')
+      expect(result.errors[0].message).toContain('Expected one of')
+      expect(result.errors[0].message).toContain('invalid')
+    })
+
+    it('accepts List when all elements are in enum', () => {
+      const result = schema.validatePropertyValue(
+        ['draft', 'published'],
+        ModelPropertyDataTypes.List,
+        { enum: ['draft', 'published', 'archived'] },
+        ModelPropertyDataTypes.Text
+      )
+      expect(result.isValid).toBe(true)
+    })
+  })
+
   describe('getSegmentedItemProperties', () => {
     const createMockItemProperty = (
       dataType: string,
@@ -100,24 +161,24 @@ describe('List-only multi-value restriction', () => {
         propertyDef: { dataType, ref },
       }) as IItemProperty<any>
 
-    it('splits list-of-relations to itemListProperties', () => {
+    it('splits list-of-relations to itemListProperties', async () => {
       const item = {
         properties: [
           createMockItemProperty(ModelPropertyDataTypes.List, 'Tag'),
         ],
       } as IItem<any>
-      const { itemListProperties, itemBasicProperties } = getSegmentedItemProperties(item)
+      const { itemListProperties, itemBasicProperties } = await getSegmentedItemProperties(item)
       expect(itemListProperties).toHaveLength(1)
       expect(itemBasicProperties).toHaveLength(0)
     })
 
-    it('splits list-of-primitives to itemBasicProperties', () => {
+    it('splits list-of-primitives to itemBasicProperties', async () => {
       const item = {
         properties: [
           createMockItemProperty(ModelPropertyDataTypes.List),
         ],
       } as IItem<any>
-      const { itemListProperties, itemBasicProperties } = getSegmentedItemProperties(item)
+      const { itemListProperties, itemBasicProperties } = await getSegmentedItemProperties(item)
       expect(itemListProperties).toHaveLength(0)
       expect(itemBasicProperties).toHaveLength(1)
     })

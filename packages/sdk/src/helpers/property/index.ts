@@ -77,13 +77,14 @@ export const TProperty = Type.Object({
   localStorageDir: Type.Optional(Type.String()),
   filenameSuffix: Type.Optional(Type.String()),
   validation: Type.Optional(TValidationRules),
+  required: Type.Optional(Type.Boolean()),
 })
 
 export const TPropertyConstructor = Type.Function(
   [
     Type.Optional(Type.Union([Type.String(), TStorageType, Type.Undefined()])),
     Type.Optional(Type.Union([Type.String(), TPropertyDataType])),
-    Type.Optional(Type.String()),
+    Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
   ],
   TProperty,
 )
@@ -120,10 +121,11 @@ export const Property = {
     ref,
     refValueType,
   }),
-  Relation: (ref?: string, refValueType?: PropertyDataType) => ({
+  Relation: (ref?: string, refValueType?: PropertyDataType, required?: boolean) => ({
     dataType: ModelPropertyDataTypes.Relation,
     ref,
     refValueType,
+    required,
   }),
   Image: () => ({ dataType: ModelPropertyDataTypes.Image }),
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
@@ -156,8 +158,8 @@ export const Number = () => PropertyConstructor(Property.Number())
 export const Json  = () => PropertyConstructor(Property.Json())
 export const File  = () => PropertyConstructor(Property.File())
 export const Image = () => PropertyConstructor(Property.Image())
-export const Relation = (ref: string, refValueType?: PropertyDataType) =>
-  PropertyConstructor(Property.Relation(ref, refValueType)) // Adjust for actual relation type
+export const Relation = (ref: string, refValueType?: PropertyDataType, required?: boolean) =>
+  PropertyConstructor(Property.Relation(ref, refValueType, required)) // Adjust for actual relation type
 export const List = (refValueType: PropertyDataType, ref?: string) =>
   PropertyConstructor(Property.List(refValueType, ref))
 export const Boolean = () => PropertyConstructor(Property.Boolean())

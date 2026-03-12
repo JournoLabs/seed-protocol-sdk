@@ -22,6 +22,9 @@ export type JsonImportSchema = {
           }
           model?: string
           accessor?: string
+          refValueType?: string
+          ref?: string
+          /** @deprecated Use refValueType and ref instead */
           items?: {
             type: string
             model?: string

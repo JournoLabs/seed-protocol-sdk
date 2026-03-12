@@ -1,5 +1,6 @@
 // Dynamic import to break circular dependency: syncDbWithEas -> stores/eas -> eas -> Model
-import { toSnakeCase } from "@/helpers"
+import { getAddress } from "ethers"
+import { toSnakeCase, withExcludeRevokedFilter } from "@/helpers"
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient"
 import { GET_PROPERTIES, GET_SCHEMAS, GET_SEEDS, GET_VERSIONS } from "@/Item/queries"
@@ -26,13 +27,23 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const OR: Record<string, unknown>[] = []
   const hasImageModel = modelNames.includes('Image')
 
-  // Add schema queries for each model
+  // Add schema queries for each model (exact + case-variant for compatibility)
   for (const modelName of modelNames) {
+    const snake = toSnakeCase(modelName)
     OR.push({
       schema: {
-        equals: `bytes32 ${toSnakeCase(modelName)}`,
+        equals: `bytes32 ${snake}`,
       },
     })
+    // Fallback: schema may have been registered with model name casing (e.g. "bytes32 Resource")
+    const altSchema = `bytes32 ${modelName}`
+    if (altSchema !== `bytes32 ${snake}`) {
+      OR.push({
+        schema: {
+          equals: altSchema,
+        },
+      })
+    }
   }
 
   // Add bytes32 image schema query only once, and only if Image model exists
@@ -72,26 +83,29 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
 
 type GetItemVersionsFromEasProps = {
   seedUids: string[]
+  excludeRevoked?: boolean
 }
 
 type GetItemVersionsFromEas = (
   props: GetItemVersionsFromEasProps,
 ) => Promise<Attestation[]>
 
-
-export const getItemVersionsFromEas: GetItemVersionsFromEas = async ({ seedUids }) => {
+export const getItemVersionsFromEas: GetItemVersionsFromEas = async ({
+  seedUids,
+  excludeRevoked = true,
+}) => {
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
+  const where = excludeRevoked
+    ? withExcludeRevokedFilter({ refUID: { in: seedUids } })
+    : { refUID: { in: seedUids } }
+
   const { itemVersions } = await queryClient.fetchQuery({
-    queryKey: [`getVersionsForAllModels`, [...seedUids].sort()],
+    queryKey: [`getVersionsForAllModels`, [...seedUids].sort(), excludeRevoked],
     queryFn: async () =>
       easClient.request(GET_VERSIONS, {
-        where: {
-          refUID: {
-            in: seedUids,
-          },
-        },
+        where,
       }),
   })
 
@@ -100,25 +114,29 @@ export const getItemVersionsFromEas: GetItemVersionsFromEas = async ({ seedUids 
 
 type GetItemPropertiesFromEasProps = {
   versionUids: string[]
+  excludeRevoked?: boolean
 }
 
 type GetItemPropertiesFromEas = (
   props: GetItemPropertiesFromEasProps,
 ) => Promise<Attestation[]>
 
-export const getItemPropertiesFromEas: GetItemPropertiesFromEas = async ({ versionUids }) => {
+export const getItemPropertiesFromEas: GetItemPropertiesFromEas = async ({
+  versionUids,
+  excludeRevoked = true,
+}) => {
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
-  
+
+  const where = excludeRevoked
+    ? withExcludeRevokedFilter({ refUID: { in: versionUids } })
+    : { refUID: { in: versionUids } }
+
   const { itemProperties } = await queryClient.fetchQuery({
-    queryKey: [`getPropertiesForAllModels`, [...versionUids].sort()],
+    queryKey: [`getPropertiesForAllModels`, [...versionUids].sort(), excludeRevoked],
     queryFn: async () =>
       easClient.request(GET_PROPERTIES, {
-        where: {
-          refUID: {
-            in: versionUids,
-          },
-        },
+        where,
       }),
   })
 
@@ -170,37 +188,43 @@ export const getEasSchemaUidBySchemaName: GetSchemaUidBySchemaName = async ({ sc
 }
 
 
-export const getSeedsFromSchemaUids = async ({ schemaUids, addresses }: { schemaUids: string[], addresses: string[] }) => {
-  const AND = [
-    {
-      OR: [] as Record<string, unknown>[],
+export const getSeedsFromSchemaUids = async ({
+  schemaUids,
+  addresses,
+  excludeRevoked = true,
+}: {
+  schemaUids: string[]
+  addresses: string[]
+  excludeRevoked?: boolean
+}) => {
+  const attesterAddresses = addresses.map((a) => {
+    try {
+      return getAddress(a)
+    } catch {
+      return a
+    }
+  })
+  let where: Record<string, unknown> = {
+    attester: {
+      in: attesterAddresses,
     },
-  ]
+    schemaId: {
+      in: schemaUids,
+    },
+  }
 
-  for (const schemaUid of schemaUids) {
-    AND[0].OR.push({
-      decodedDataJson: {
-        contains: schemaUid,
-      },
-    })
+  if (excludeRevoked) {
+    where = withExcludeRevokedFilter(where)
   }
 
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
   const { itemSeeds } = await queryClient.fetchQuery({
-    queryKey: [`getSeedsForAllModels`],
+    queryKey: [`getSeedsForAllModels`, excludeRevoked, [...schemaUids].sort(), [...addresses].sort()],
     queryFn: async () =>
       easClient.request(GET_SEEDS, {
-        where: {
-          attester: {
-            in: addresses,
-          },
-          schemaId: {
-            in: schemaUids,
-          },
-          AND,
-        },
+        where,
       }),
   })
 
@@ -208,22 +232,21 @@ export const getSeedsFromSchemaUids = async ({ schemaUids, addresses }: { schema
 }
 
 export const getSeedsBySchemaName = async (schemaName: string, limit: number = 10) => {
-
   const variables = {
-    where: {
+    where: withExcludeRevokedFilter({
       schema: {
         is: {
           schemaNames: {
             some: {
               name: {
                 equals: schemaName,
-              }
-            }
-          }
-        }
-      }
-    },
-    take: limit
+              },
+            },
+          },
+        },
+      },
+    }),
+    take: limit,
   }
 
   const queryClient = BaseQueryClient.getQueryClient()
@@ -236,7 +259,6 @@ export const getSeedsBySchemaName = async (schemaName: string, limit: number = 1
   })
 
   return itemSeeds
-
 }
 
 export const getSeedUidsBySchemaName = async (schemaName: string, limit: number = 10) => {

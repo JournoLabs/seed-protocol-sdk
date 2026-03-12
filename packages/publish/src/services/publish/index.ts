@@ -1,5 +1,6 @@
 import type { Account } from 'thirdweb/wallets'
-import { setup, assign, } from 'xstate'
+import type { ActorRefFrom } from 'xstate'
+import { setup, assign } from 'xstate'
 import {
   ArweaveTransactionInfo,
   PublishMachineContext,
@@ -9,12 +10,12 @@ import {
 import {
   createArweaveTransactions,
   createAttestations,
+  createAttestationsDirectToEas,
   sendReimbursementRequest,
   pollForConfirmation,
   uploadData,
+  checking,
 } from './actors'
-import { createAttestationsDirectToEas } from './actors/createAttestationsDirectToEas'
-import { checking, } from './actors/checking'
 import {
   PublishMachineStates,
 } from '~/helpers/constants'
@@ -25,6 +26,12 @@ const {
   SUCCESS,
   FAILURE,
 } = PublishMachineStates
+
+/** Extract error from event. Supports event.error (custom events like uploadError) and event.data (XState fromPromise invoke errors). */
+function getErrorFromEvent(event: unknown): unknown {
+  const e = event as { error?: unknown; data?: unknown }
+  return e.error ?? e.data
+}
 
 export const publishMachine = setup({
   types : {
@@ -41,36 +48,58 @@ export const publishMachine = setup({
     checking,
   },
   actions : {
-    /** Log error; error/errorStep are assigned per transition. */
+    /** Log error; error/errorStep are assigned per transition. Supports both event.error (custom events) and event.data (XState fromPromise invoke errors). */
     handleError : ( { event, }, ) => {
-      console.error(event.error,)
+      const err = getErrorFromEvent(event,)
+      if (err != null) {
+        console.error(err,)
+      } else {
+        console.error('Unknown error (full event):', event,)
+      }
     },
     assignErrorCreatingArweaveTransactions : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingArweaveTransactions',
     },),
     assignErrorSendingReimbursementRequest : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'sendingReimbursementRequest',
     },),
     assignErrorPollingForConfirmation : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'pollingForConfirmation',
     },),
     assignErrorUploadingData : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'uploadingData',
     },),
     assignErrorCreatingAttestations : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingAttestations',
     },),
     assignErrorCreatingAttestationsDirectToEas : assign({
-      error     : ( { event, }, ) => event.error,
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingAttestationsDirectToEas',
     },),
     assignAccountFromRetry : assign({
       account : ( { event, }, ) => (event as { account?: Account }).account,
+    },),
+    assignErrorNotOwner : assign({
+      error     : () => new Error('Item is read-only: you do not own this item. Only the publisher can publish.'),
+      errorStep : () => 'checking',
+    },),
+    assignErrorValidationFailed : assign({
+      error     : ( { event, }, ) => {
+        const ev = event as { errors?: Array<{ field?: string; message: string }> }
+        const errors = ev.errors ?? []
+        const message = errors.length > 0
+          ? `Validation failed (${errors.length} error${errors.length === 1 ? '' : 's'}):\n${errors.map((e) => e.message).join('\n')}`
+          : 'Validation failed'
+        const err = new Error(message) as Error & { validationErrors?: typeof errors }
+        err.validationErrors = errors
+        return err
+      },
+      errorStep : () => 'checking',
     },),
   },
 
@@ -81,6 +110,14 @@ export const publishMachine = setup({
   states  : {
     checking : {
       on: {
+        notOwner: {
+          target: FAILURE,
+          actions: ['assignErrorNotOwner', 'handleError'],
+        },
+        validationFailed: {
+          target: FAILURE,
+          actions: ['assignErrorValidationFailed', 'handleError'],
+        },
         redundantPublishProcess: {
           target: 'stopping',
         },
@@ -204,6 +241,9 @@ export const publishMachine = setup({
         input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target : SUCCESS,
+          actions : assign({
+            easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
+          },),
         },
         onError : {
           target  : 'attestationFailureRecoverable',
@@ -225,6 +265,9 @@ export const publishMachine = setup({
         input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
         onDone : {
           target : SUCCESS,
+          actions : assign({
+            easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
+          },),
         },
         onError : {
           target  : 'attestationFailureRecoverableDirectToEas',
@@ -253,6 +296,6 @@ export const publishMachine = setup({
       type : 'final',
     },
   },
-},)
+})
 
-
+export type PublishActor = ActorRefFrom<typeof publishMachine>

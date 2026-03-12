@@ -1,6 +1,9 @@
 import { Type, TSchema } from '@sinclair/typebox'
 import { ModelPropertyDataTypes } from '@/helpers/property'
 
+/** Default maximum length for Text and Html properties when not explicitly set */
+export const DEFAULT_TEXT_MAX_LENGTH = 255
+
 /**
  * Validation rules that can be applied to properties
  * Matches the ValidationRules definition in protocol/schema.json

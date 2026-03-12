@@ -6,7 +6,7 @@ type SubscribeToProcess = ( actor: Actor<ActorLogic<any, any>>, saveFn: ( params
 
 export const subscribeToProcess: SubscribeToProcess = ( actor, saveFn,) => {
 
-  const processListener = async ( _, ) => {
+  const processListener = async (_snapshot: unknown) => {
     const persistedSnapshot = actor.getPersistedSnapshot()
     await saveFn({ persistedSnapshot, },)
   }

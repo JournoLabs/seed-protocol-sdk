@@ -5,7 +5,7 @@ import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schem
 import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { BaseFileManager, generateId, } from '@/helpers'
 import { addModelsToDb, addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
-import { createModelsFromJson } from '@/imports/json'
+import { createModelsFromJson, getRefValueType } from '@/imports/json'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -252,11 +252,12 @@ export const loadOrCreateSchema = fromCallback<
                           jsonProp.model = schemaProp.refModelName || schemaProp.ref
                         }
                         
-                        // Handle List type
-                        if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
-                          jsonProp.items = { type: schemaProp.refValueType }
+                        // Handle List type (case-insensitive refValueType)
+                        const listRefValueType = getRefValueType(schemaProp as Record<string, unknown>)
+                        if (schemaProp.dataType === 'List' && listRefValueType) {
+                          jsonProp.refValueType = listRefValueType
                           if (schemaProp.ref || schemaProp.refModelName) {
-                            jsonProp.items.model = schemaProp.refModelName || schemaProp.ref
+                            jsonProp.ref = schemaProp.refModelName || schemaProp.ref
                           }
                         }
                         
@@ -412,11 +413,13 @@ export const loadOrCreateSchema = fromCallback<
                             jsonProp.model = schemaProp.refModelName || schemaProp.ref
                           }
                           
-                          // Handle List type
-                          if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
-                            jsonProp.items = { type: schemaProp.refValueType }
-                            if (schemaProp.ref || schemaProp.refModelName) {
-                              jsonProp.items.model = schemaProp.refModelName || schemaProp.ref
+                          // Handle List type (support both refValueType and legacy items, case-insensitive)
+                          if (schemaProp.dataType === 'List' || schemaProp.type === 'List') {
+                            const refValueType = getRefValueType(schemaProp as Record<string, unknown>)
+                            if (refValueType) {
+                              jsonProp.refValueType = refValueType
+                              const ref = schemaProp.ref ?? schemaProp.refModelName ?? schemaProp.items?.model
+                              if (ref) jsonProp.ref = ref
                             }
                           }
                           

@@ -2,7 +2,7 @@ import React, { FC } from "react"
 import type { MutableRefObject } from "react"
 import type { QueryClient } from "@tanstack/react-query"
 import { ThirdwebProvider } from "thirdweb/react"
-import { SeedProvider } from "@seedprotocol/sdk"
+import { SeedProvider } from '@seedprotocol/react'
 import { initPublish, type PublishConfig } from "../config"
 
 export interface PublishProviderProps {

@@ -4,6 +4,8 @@ import { seeds } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
+import { createSeed } from '@/db/write/createSeed'
+import { setGetPublisherForNewSeeds, getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -62,5 +64,55 @@ testDescribe('updateSeedUid and persistSeedUid', () => {
     await updateSeedUid({ seedLocalId: '', seedUid: '0x123' })
     await updateSeedUid({ seedLocalId: 'some-id', seedUid: '' })
     // Should not throw; no rows updated is acceptable
+  })
+
+  it('updateSeedUid does not overwrite existing publisher (immutability)', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({
+      title: 'Publisher immutability test',
+      count: 1,
+    })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+
+    // Set initial publisher directly in DB (simulates creation with publisher)
+    const originalPublisher = '0xOriginalPublisher1234567890abcdef1234567890'
+    await db.update(seeds).set({ publisher: originalPublisher }).where(eq(seeds.localId, seedLocalId))
+
+    // Try to overwrite with different publisher via updateSeedUid
+    await updateSeedUid({
+      seedLocalId,
+      seedUid: TEST_SEED_UID,
+      publisher: '0xDifferentPublisher1234567890abcdef12345678',
+    })
+
+    // Publisher should remain unchanged
+    const [row] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, seedLocalId))
+    expect(row?.publisher).toBe(originalPublisher)
+  })
+
+  it('createSeed sets publisher when getPublisherForNewSeeds is configured', async () => {
+    const testPublisher = '0xCreateSeedPublisher1234567890abcdef12'
+    setGetPublisherForNewSeeds(async () => testPublisher)
+    try {
+      const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'b'.repeat(64) })
+      const db = BaseDb.getAppDb()
+      const [row] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, seedLocalId))
+      expect(row?.publisher).toBe(testPublisher)
+    } finally {
+      setGetPublisherForNewSeeds(null)
+    }
+  })
+
+  it('createSeed leaves publisher null when getter is not configured', async () => {
+    const prev = getGetPublisherForNewSeeds()
+    setGetPublisherForNewSeeds(null)
+    try {
+      const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'c'.repeat(64) })
+      const db = BaseDb.getAppDb()
+      const [row] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, seedLocalId))
+      expect(row?.publisher).toBeNull()
+    } finally {
+      setGetPublisherForNewSeeds(prev)
+    }
   })
 })

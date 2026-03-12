@@ -36,6 +36,8 @@ export type ItemMachineContext<T> = {
   versionsCount?: number
   lastVersionPublishedAt?: number
   createdAt?: number
+  publisher?: string
+  revokedAt?: number
   /** Last publish failure; cleared on success or reset. Serializable for XState (use message string). */
   _publishError?: { message: string } | null
   /** Destroy lifecycle (for destroy hooks). */
@@ -67,6 +69,8 @@ export interface ItemData {
   type?: string;
   createdAt?: number & tags.Type<"int64">;
   updatedAt?: number & tags.Type<"int64">;
+  publisher?: string;
+  revokedAt?: number & tags.Type<"int64">;
 }
 
 export type ItemFindProps = {

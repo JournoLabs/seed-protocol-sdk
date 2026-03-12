@@ -274,7 +274,7 @@ export const getPublishUploads = async (
   // }
 
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
-    getSegmentedItemProperties(item)
+    await getSegmentedItemProperties(item)
 
   for (const uploadProperty of itemUploadProperties) {
     uploads = await processUploadProperty(

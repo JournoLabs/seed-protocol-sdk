@@ -1,0 +1,1 @@
+{"version":3,"file":"waitForEntityIdle.d.ts","sourceRoot":"","sources":["waitForEntityIdle.ts"],"names":[],"mappings":"AAEA,gKAAgK;AAChK,UAAU,iBAAiB;IACzB,UAAU,IAAI,GAAG,CAAA;CAClB;AAED;;;;;GAKG;AACH,wBAAsB,iBAAiB,CACrC,MAAM,EAAE,iBAAiB,EACzB,OAAO,GAAE;IACP,OAAO,CAAC,EAAE,MAAM,CAAA;IAChB,YAAY,CAAC,EAAE,OAAO,CAAA;CAClB,GACL,OAAO,CAAC,IAAI,CAAC,CAqCf"}

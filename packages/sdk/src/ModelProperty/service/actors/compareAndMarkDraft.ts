@@ -89,7 +89,7 @@ export const compareAndMarkDraft = fromCallback<
 
     // Compare current values with original
     // Only compare property fields, not internal fields
-    const propertyFields = ['name', 'dataType', 'ref', 'refModelName', 'refModelId', 'refValueType', 'storageType', 'localStorageDir', 'filenameSuffix', 'modelName', 'modelId']
+    const propertyFields = ['name', 'dataType', 'ref', 'refModelName', 'refModelId', 'refValueType', 'storageType', 'localStorageDir', 'filenameSuffix', 'modelName', 'modelId', 'required']
     const hasChanges = propertyFields.some(key => {
       const currentValue = (fullContext as any)[key]
       const originalValue = (fullContext._originalValues as any)?.[key]

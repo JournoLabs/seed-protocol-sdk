@@ -5,6 +5,7 @@ import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
 import { getOwnedAddressesFromDb, getWatchedAddressesFromDb } from '@/helpers/db'
+import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 
 type GetItemsDataProps = {
   modelName?: string
@@ -34,7 +35,20 @@ export const getItemsData: GetItemsData = async ({
   }
 
   if (addressFilter === 'owned') {
-    const ownedAddresses = await getOwnedAddressesFromDb()
+    let ownedAddresses = await getOwnedAddressesFromDb()
+    const additionalGetter = getGetAdditionalSyncAddresses()
+    if (additionalGetter) {
+      const additional = await additionalGetter()
+      if (additional?.length) {
+        const seen = new Set(ownedAddresses.map((a) => a.toLowerCase()))
+        for (const addr of additional) {
+          if (addr && !seen.has(addr.toLowerCase())) {
+            seen.add(addr.toLowerCase())
+            ownedAddresses = [...ownedAddresses, addr]
+          }
+        }
+      }
+    }
     if (ownedAddresses.length > 0) {
       conditions.push(
         or(

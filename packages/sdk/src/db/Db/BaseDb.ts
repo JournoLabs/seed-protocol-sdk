@@ -15,6 +15,9 @@ export abstract class BaseDb implements IDb {
   }
 
   static getAppDb(): any {
+    if (!this.PlatformClass) {
+      return undefined
+    }
     return this.PlatformClass.getAppDb()
   }
 

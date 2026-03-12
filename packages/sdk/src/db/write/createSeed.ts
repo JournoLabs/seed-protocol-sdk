@@ -2,6 +2,7 @@ import { generateId } from '@/helpers'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
+import { getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 
 type CreateSeedProps = {
   type: string
@@ -18,12 +19,23 @@ export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<st
 
   const newSeedLocalId = generateId()
 
+  let publisher: string | undefined
+  const getPublisher = getGetPublisherForNewSeeds()
+  if (getPublisher) {
+    try {
+      publisher = await getPublisher()
+    } catch {
+      // User not connected or getter failed - leave publisher null
+    }
+  }
+
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,
     type,
     uid: seedUid,
     createdAt: Date.now(),
     schemaUid: schemaUid || null,
+    ...(publisher != null && publisher !== '' && { publisher }),
   })
 
   return newSeedLocalId

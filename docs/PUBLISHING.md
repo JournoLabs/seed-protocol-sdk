@@ -33,3 +33,7 @@ EAS schemas must be:
 2. **Named** via a naming attestation (Schema #1) so EASSCAN displays them
 
 If a schema is registered but has no naming attestation, attestations will work but EASSCAN will not show a friendly name. The publish package's `ensureEasSchemasForItem` handles both steps.
+
+## Revoking (Unpublishing)
+
+To revoke attestations and remove an item from feeds and discovery, call `item.unpublish()`. Revocation is permanent; see [ATTESTATION_REVOCATION.md](./ATTESTATION_REVOCATION.md) for permanence, UX guidance, and republishing.

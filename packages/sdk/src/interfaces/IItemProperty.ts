@@ -22,6 +22,7 @@ export interface IItemProperty<PropertyType = any> {
   readonly refResolvedValue: string | undefined;
   value: any;
   readonly published: boolean;
+  readonly saveValidationErrors: import('@/Schema/validation').ValidationError[];
 
   subscribe(callback: Partial<BehaviorSubject<any>>): Subscription;
   save(): Promise<void>;

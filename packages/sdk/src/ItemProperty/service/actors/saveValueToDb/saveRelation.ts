@@ -113,9 +113,13 @@ export const saveRelation = fromCallback<
     // })
   }
 
-  _saveRelation().then((isDone) => {
-    if (isDone) {
-      sendBack({ type: 'saveRelationSuccess' })
-    }
-  })
+  _saveRelation()
+    .then((isDone) => {
+      if (isDone) {
+        sendBack({ type: 'saveRelationSuccess' })
+      }
+    })
+    .catch((error) => {
+      sendBack({ type: 'saveRelationError', error })
+    })
 })

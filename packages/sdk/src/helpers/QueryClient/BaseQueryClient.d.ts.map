@@ -1,0 +1,1 @@
+{"version":3,"file":"BaseQueryClient.d.ts","sourceRoot":"","sources":["BaseQueryClient.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,YAAY,EAAE,MAAM,2BAA2B,CAAA;AAExD,8BAAsB,eAAe;IACnC,MAAM,CAAC,aAAa,EAAE,OAAO,eAAe,CAAA;IAE5C,MAAM,CAAC,gBAAgB,CAAC,aAAa,EAAE,OAAO,eAAe;IAI7D,MAAM,CAAC,cAAc,IAAI,YAAY;CAQtC"}

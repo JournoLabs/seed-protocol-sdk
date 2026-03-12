@@ -38,6 +38,7 @@ export const properties = sqliteTable(
     refValueType: text('ref_value_type'),
     schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
     isEdited: integer('is_edited', { mode: 'boolean' }), // true if property has been edited locally, false if matches schema file
+    required: integer('required', { mode: 'boolean' }), // true if relation/image property is required (publish fails when related item not found)
   },
   (table) => {
     return {

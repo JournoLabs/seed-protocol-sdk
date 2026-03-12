@@ -4,6 +4,8 @@ Publish UI components and helpers for Seed Protocol.
 
 The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `getPublishPayload`, which registers EAS schemas and adds naming attestations so EASSCAN displays them. If you build a custom publish flow that calls `item.getPublishPayload()` directly, you must run schema setup first or use this package's flow.
 
+`initPublish()` also registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
+
 ## Setup
 
 Wrap your app with `PublishProvider` so that `ConnectButton` and other publish components work correctly. The provider includes:

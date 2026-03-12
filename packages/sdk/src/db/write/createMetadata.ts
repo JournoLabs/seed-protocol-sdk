@@ -1,25 +1,57 @@
 import { metadata, MetadataType } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
 import { PropertyType } from '@/types'
+import { getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 import { BaseDb } from '../Db/BaseDb'
 import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { Schema as EASSchema } from '@/graphql/gql/graphql'
+import { ModelPropertyDataTypes } from '@/helpers/property'
 
+/** Validation error shape for MetadataValidationError */
+type MetadataValidationErrorItem = { field: string; message: string; code?: string }
+
+/** Error thrown when metadata validation fails (e.g. enum violation). */
+export class MetadataValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly validationErrors: MetadataValidationErrorItem[],
+  ) {
+    super(message)
+    this.name = 'MetadataValidationError'
+  }
+}
+
+type CreateMetadataOptions = { skipValidation?: boolean }
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType> & { modelName?: string },
   propertyRecordSchema?: PropertyType | undefined,
+  options?: CreateMetadataOptions,
 ) => Promise<MetadataType>
 
 export const createMetadata: CreateMetadata = async (
   metadataValues,
   propertyRecordSchema?,
+  options?,
 ) => {
   const appDb = BaseDb.getAppDb()
 
   metadataValues.localId = generateId()
+
+  let publisher: string | undefined
+  const getPublisher = getGetPublisherForNewSeeds()
+  if (getPublisher) {
+    try {
+      publisher = await getPublisher()
+    } catch {
+      // User not connected or getter failed - leave publisher null
+    }
+  }
+  if (publisher != null && publisher !== '') {
+    metadataValues.publisher = publisher
+  }
 
   if (!metadataValues.modelType && metadataValues.modelName) {
     metadataValues.modelType = toSnakeCase(metadataValues.modelName)
@@ -43,6 +75,34 @@ export const createMetadata: CreateMetadata = async (
   if (metadataValues.propertyValue !== undefined && metadataValues.propertyValue !== null) {
     if (typeof metadataValues.propertyValue !== 'string') {
       metadataValues.propertyValue = String(metadataValues.propertyValue)
+    }
+  }
+
+  // Validate against property validation rules (enum, pattern, minLength, maxLength) unless skipped
+  if (
+    !options?.skipValidation &&
+    propertyRecordSchema?.validation &&
+    metadataValues.propertyValue != null &&
+    metadataValues.propertyValue !== ''
+  ) {
+    const { SchemaValidationService } = await import(
+      '@/Schema/service/validation/SchemaValidationService'
+    )
+    const validationService = new SchemaValidationService()
+    const validationResult = validationService.validatePropertyValue(
+      metadataValues.propertyValue,
+      propertyRecordSchema.dataType as ModelPropertyDataTypes,
+      propertyRecordSchema.validation,
+      propertyRecordSchema.refValueType as string | undefined,
+    )
+    if (!validationResult.isValid && validationResult.errors.length > 0) {
+      const validationErrors: MetadataValidationErrorItem[] = validationResult.errors.map((e) => ({
+        field: e.field,
+        message: e.message,
+        code: e.code,
+      }))
+      const message = validationErrors.map((e) => e.message).join('; ')
+      throw new MetadataValidationError(message, validationErrors)
     }
   }
 

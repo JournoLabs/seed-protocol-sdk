@@ -577,7 +577,7 @@ export const renameModelInDb = async (
 async function checkIfPropertyIsEdited(
   modelName: string,
   propertyName: string,
-  schemaFileValue?: { dataType?: string; ref?: string; refValueType?: string },
+  schemaFileValue?: { dataType?: string; ref?: string; refValueType?: string; required?: boolean },
 ): Promise<boolean> {
   try {
     const cacheKey = `${modelName}:${propertyName}`
@@ -668,6 +668,16 @@ async function checkIfPropertyIsEdited(
             if (dbProperty.refValueType !== (schemaFileValue.refValueType || null)) {
               logger(`Property ${modelName}:${propertyName} has been edited (refValueType differs)`)
               return true
+            }
+
+            // Check required (for Relation/Image properties)
+            if (schemaFileValue.required !== undefined) {
+              const schemaRequired = !!schemaFileValue.required
+              const dbRequired = dbProperty.required === true
+              if (dbRequired !== schemaRequired) {
+                logger(`Property ${modelName}:${propertyName} has been edited (required differs: DB=${dbRequired}, Schema=${schemaRequired})`)
+                return true
+              }
             }
           }
         }
@@ -910,6 +920,7 @@ export const addModelsToDb = async (
         modelId: modelRecord.id!,
         dataType: propertyValues.dataType,
         schemaFileId: propertyFileId || null,
+        required: propertyValues.required ?? false,
       }
 
       // Handle ref property - create ref model if needed
@@ -978,6 +989,7 @@ export const addModelsToDb = async (
             dataType: propertyValues.dataType,
             ref: propertyValues.ref,
             refValueType: propertyValues.refValueType,
+            required: propertyValues.required,
           },
         )
         
@@ -1393,6 +1405,8 @@ export const savePropertyToDb = async (
     propertyData.refValueType = null
   }
 
+  propertyData.required = property.required ?? false
+
   if (existingProperties.length > 0) {
     // Property exists, update it with new values (including new name)
     // Set isEdited = true when property is edited
@@ -1725,6 +1739,7 @@ export async function writePropertyToDb(
     refModelName?: string
     refModelId?: number
     refValueType?: string
+    required?: boolean
     storageType?: string
     localStorageDir?: string
     filenameSuffix?: string
@@ -1790,7 +1805,9 @@ export async function writePropertyToDb(
     // If refValueType is not set, ensure it's null
     propertyData.refValueType = null
   }
-  
+
+  propertyData.required = data.required ?? false
+
   // Note: Additional property fields like storageType, localStorageDir, filenameSuffix
   // are not stored in the properties table but may be in the schema JSON
   

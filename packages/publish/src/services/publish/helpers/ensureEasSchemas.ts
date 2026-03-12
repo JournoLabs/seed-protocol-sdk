@@ -27,9 +27,9 @@ function toSnakeCase(str: string): string {
 /**
  * Collects all model names used by the item (item's model + relation refs + list refs + Image).
  */
-function getModelNamesForItem(item: ItemInstance): Set<string> {
+async function getModelNamesForItem(item: ItemInstance): Promise<Set<string>> {
   const { itemRelationProperties, itemImageProperties, itemListProperties } =
-    getSegmentedItemProperties(item)
+    await getSegmentedItemProperties(item)
   const modelNames = new Set<string>()
 
   if (item.modelName) {
@@ -66,7 +66,7 @@ export async function ensureEasSchemasForItem(
   chain: Chain,
 ): Promise<void> {
   const { itemBasicProperties, itemRelationProperties, itemImageProperties, itemListProperties } =
-    getSegmentedItemProperties(item)
+    await getSegmentedItemProperties(item)
 
   const allProperties = [
     ...itemBasicProperties,
@@ -78,7 +78,7 @@ export async function ensureEasSchemasForItem(
   const registeredSchemaUids = new Set<string>()
 
   // Ensure model schemas (bytes32 <model_name>) so getPublishPayload can resolve seedSchemaUid
-  const modelNames = getModelNamesForItem(item)
+  const modelNames = await getModelNamesForItem(item)
   const registeredModelSchemaUids = new Set<string>()
 
   for (const modelName of modelNames) {

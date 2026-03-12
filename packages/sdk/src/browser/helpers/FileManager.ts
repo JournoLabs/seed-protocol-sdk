@@ -77,13 +77,17 @@ class FileManager extends BaseFileManager {
   }
 
   static async listImageFiles(): Promise<string[]> {
-    const imageDir = BaseFileManager.getFilesPath('images')
-    const exists = await this.pathExists(imageDir)
+    return this.listFiles('images')
+  }
+
+  static async listFiles(dir: string): Promise<string[]> {
+    const targetDir = BaseFileManager.getFilesPath(dir)
+    const exists = await this.pathExists(targetDir)
     if (!exists) {
       return []
     }
     const zenfs = await this.getFs()
-    const entries = await zenfs.promises.readdir(imageDir, { withFileTypes: true })
+    const entries = await zenfs.promises.readdir(targetDir, { withFileTypes: true })
     return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
   }
 

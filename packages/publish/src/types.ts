@@ -42,5 +42,7 @@ export interface PublishMachineContext {
   error?: unknown
   /** Which state failed (e.g. creatingArweaveTransactions, sendingReimbursementRequest). */
   errorStep?: string
+  /** Raw EAS attestation payload from getPublishPayload, stored for later retrieval. */
+  easPayload?: unknown
   [key: string]: unknown
 }

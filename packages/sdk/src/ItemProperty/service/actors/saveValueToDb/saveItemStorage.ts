@@ -157,9 +157,13 @@ export const saveItemStorage = fromCallback<
     return true
   }
 
-  _saveItemStorage().then((success) => {
-    if (success) {
-      sendBack({ type: 'saveItemStorageSuccess' })
-    }
-  })
+  _saveItemStorage()
+    .then((success) => {
+      if (success) {
+        sendBack({ type: 'saveItemStorageSuccess' })
+      }
+    })
+    .catch((error) => {
+      sendBack({ type: 'saveItemStorageError', error })
+    })
 })

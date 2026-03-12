@@ -24,6 +24,7 @@ export const metadata = sqliteTable('metadata', {
   contentHash: text('content_hash'),
   createdAt: int('created_at'),
   updatedAt: int('updated_at'),
+  publisher: text('publisher'),
 })
 
 export type MetadataType = InferSelectModel<typeof metadata>

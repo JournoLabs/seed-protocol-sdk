@@ -13,18 +13,41 @@ import {
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { toSnakeCase } from '@/helpers'
+import { toSnakeCase as toSnakeCaseDb } from 'drizzle-orm/casing'
 import pluralize from 'pluralize'
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { getPropertySchema } from '@/helpers/property'
+import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
+import { camelCase, upperFirst } from 'lodash-es'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { models, properties } from '@/seedSchema'
+import { eq, and } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import debug from 'debug'
 import {ethers} from 'ethers'
 import { ModelPropertyDataTypes } from '@/Schema'
+import type { ValidationError } from '@/Schema/validation'
 const logger = debug('seedSdk:db:getPublishPayload')
+
+/** Validation error collected during publish payload building. */
+export type PublishValidationError = Pick<ValidationError, 'field' | 'message'> & { code?: string }
+
+/** Context for collecting validation errors instead of throwing on first error. */
+export type PublishValidationContext = { errors: PublishValidationError[] }
+
+function addValidationError(
+  ctx: PublishValidationContext,
+  message: string,
+  field?: string,
+  code = 'publish_validation',
+): void {
+  ctx.errors.push({ field: field ?? '', message, code })
+}
 
 const getVersionUid = (item: IItem<any>): string => {
   const latestVersion = item.latestVersionUid
@@ -37,9 +60,30 @@ const getVersionUid = (item: IItem<any>): string => {
   return ZERO_BYTES32
 }
 
-const getPropertyData = async (itemProperty: IItemProperty<any>) => {
-  const easDataType =
-    INTERNAL_DATA_TYPES[itemProperty.propertyDef!.dataType].eas
+type PropertyDataResult = {
+  schemaUid: string | undefined
+  easDataType: string
+  schemaDef: string
+  propertyNameForSchema: string
+}
+
+const getPropertyData = async (
+  itemProperty: IItemProperty<any>,
+  ctx?: PublishValidationContext,
+): Promise<PropertyDataResult | null> => {
+  const dataType = itemProperty.propertyDef?.dataType
+  const entry = dataType != null ? INTERNAL_DATA_TYPES[dataType as keyof typeof INTERNAL_DATA_TYPES] : undefined
+  const easDataType = entry?.eas
+  if (!easDataType) {
+    if (ctx) {
+      addValidationError(
+        ctx,
+        `Unknown or unsupported property data type "${dataType ?? 'undefined'}" for property: ${itemProperty.propertyName}. Supported types: ${Object.keys(INTERNAL_DATA_TYPES).join(', ')}.`,
+        itemProperty.propertyName,
+      )
+    }
+    return null
+  }
 
   let schemaUid: string | undefined = itemProperty.schemaUid
 
@@ -68,6 +112,97 @@ const getPropertyData = async (itemProperty: IItemProperty<any>) => {
   }
 }
 
+/** Resolve propertyDef from Model for properties that lack it (e.g. cached instances
+ * created before loadOrCreateProperty was fixed). Ensures both new and existing items get property attestations.
+ * Also ensures Relation/Image properties have required from schema when missing (for publish validation). */
+const ensurePropertyDefs = async (targetItem: IItem<any>) => {
+  const toFix = targetItem.properties.filter(
+    (p) =>
+      targetItem.modelName &&
+      (!p.propertyDef || (p.propertyDef?.dataType === 'Relation' && p.propertyDef?.required === undefined)),
+  )
+  let schema: any
+  for (const itemProperty of targetItem.properties) {
+    if (!itemProperty.propertyDef && targetItem.modelName) {
+      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName)
+      if (!schema) {
+        try {
+          const { Model } = await import('@/Model/Model')
+          const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
+          let model = Model.getByName(normalizedModelName)
+          if (!model?.properties?.length) {
+            model = Model.findByModelType(toSnakeCaseDb(targetItem.modelName))
+          }
+          const modelFound = !!model
+          const propsCount = model?.properties?.length ?? 0
+          const schemaKeys: string[] = []
+          if (model?.properties?.length) {
+            const schemas = modelPropertiesToObject(model.properties)
+            schemaKeys.push(...Object.keys(schemas))
+            schema = schemas[itemProperty.propertyName]
+          }
+        } catch (err) {
+          schema = undefined
+        }
+      }
+      if (!schema) {
+        const db = BaseDb.getAppDb()
+        if (db) {
+          try {
+            const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
+            const modelRecords = await db
+              .select({ id: models.id })
+              .from(models)
+              .where(eq(models.name, normalizedModelName))
+              .limit(1)
+            if (modelRecords.length > 0 && modelRecords[0].id) {
+              const propertyRecords = await db
+                .select()
+                .from(properties)
+                .where(
+                  and(
+                    eq(properties.modelId, modelRecords[0].id),
+                    eq(properties.name, itemProperty.propertyName),
+                  ),
+                )
+                .limit(1)
+              if (propertyRecords.length > 0) {
+                const propRecord = propertyRecords[0]
+                let refModelName: string | undefined
+                if (propRecord.refModelId != null) {
+                  const refModelRows = await db
+                    .select({ name: models.name })
+                    .from(models)
+                    .where(eq(models.id, propRecord.refModelId))
+                    .limit(1)
+                  refModelName = refModelRows[0]?.name ?? undefined
+                }
+                schema = {
+                  dataType: propRecord.dataType,
+                  ref: refModelName ?? undefined,
+                  refValueType: propRecord.refValueType || undefined,
+                  storageType: propRecord.storageType || undefined,
+                  localStorageDir: propRecord.localStorageDir || undefined,
+                  filenameSuffix: propRecord.filenameSuffix || undefined,
+                  required: propRecord.required ?? undefined,
+                }
+              }
+            }
+          } catch {
+            schema = undefined
+          }
+        }
+      }
+      if (schema) {
+        itemProperty.getService().send({
+          type: 'updateContext',
+          propertyRecordSchema: schema,
+        })
+      }
+    }
+  }
+}
+
 // Lazy import SchemaEncoder to avoid module resolution issues with ts-import
 let SchemaEncoderClass: typeof import('@ethereum-attestation-service/eas-sdk').SchemaEncoder | null = null
 const getSchemaEncoder = async () => {
@@ -81,31 +216,83 @@ const getSchemaEncoder = async () => {
 const processBasicProperties = async (
   itemBasicProperties: IItemProperty<any>[],
   itemPublishData: PublishPayload,
+  ctx: PublishValidationContext,
 ): Promise<PublishPayload> => {
   for (const basicProperty of itemBasicProperties) {
     const snapshot = basicProperty.getService().getSnapshot()
     const context = 'context' in snapshot ? snapshot.context : null
+    // Use basicProperty.value (canonical getter: renderValue || propertyValue, or refResolvedValue for Image)
+    // so we pick up values regardless of which context field they're stored in
+    let value =
+      (basicProperty as IItemProperty<any>).value ??
+      (context ? (context as any).propertyValue : undefined)
+    const hasContext = !!context
+    const hasValue = value != null && value !== ''
+    const hasUid = !!basicProperty.uid
+    const skipReason = !hasContext ? 'no_context' : (!hasValue || hasUid) ? (hasUid ? 'has_uid' : 'no_value') : null
     if (!context) {
       continue
     }
-    let value = (context as any).propertyValue
-
     if (!value || basicProperty.uid) {
       continue
     }
 
-    const { schemaUid, easDataType, schemaDef } =
-      await getPropertyData(basicProperty)
+    const propertyData = await getPropertyData(basicProperty, ctx)
+    if (!propertyData) continue
+    const { schemaUid, easDataType, schemaDef, propertyNameForSchema } = propertyData
+    if (!schemaDef) continue
 
-    const propertyNameForSchema = toSnakeCase(basicProperty.propertyName)
+    // Normalize value: string that parses to array (e.g. from browser storage) -> array
+    if (schemaDef.startsWith('bytes32[]') && typeof value === 'string' && value.trim().startsWith('[')) {
+      try {
+        value = JSON.parse(value)
+      } catch {
+        // fall through to array check
+      }
+    }
 
     if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
-      throw new Error(`Invalid value for property: ${basicProperty.propertyName}. Expected an array of bytes32, got ${value}.`)
+      addValidationError(
+        ctx,
+        `Invalid value for property: ${basicProperty.propertyName}. Expected an array of bytes32, got ${value}.`,
+        basicProperty.propertyName,
+      )
+      continue
+    }
+
+    // Validate against property validation rules (enum, pattern, minLength, maxLength) before encoding
+    const propertyDef =
+      basicProperty.propertyDef ?? (context ? (context as any).propertyRecordSchema : undefined)
+    if (propertyDef?.validation) {
+      const { SchemaValidationService } = await import(
+        '@/Schema/service/validation/SchemaValidationService'
+      )
+      const validationService = new SchemaValidationService()
+      const validationResult = validationService.validatePropertyValue(
+        value,
+        propertyDef.dataType as ModelPropertyDataTypes,
+        propertyDef.validation,
+        propertyDef.refValueType as string | undefined,
+      )
+      if (!validationResult.isValid && validationResult.errors.length > 0) {
+        const firstError = validationResult.errors[0]
+        addValidationError(
+          ctx,
+          firstError.message,
+          basicProperty.propertyName,
+          firstError.code ?? 'publish_validation',
+        )
+        continue
+      }
     }
 
     if (schemaDef.startsWith('bytes32[]')) {
       const newValues = []
-      for (const seedId of value) {
+      const iterableValue =
+        Array.isArray(value) ? value
+        : value != null && typeof value[Symbol.iterator] === 'function' ? value
+        : []
+      for (const seedId of iterableValue) {
         if (seedId.length !== 66 && !seedId.startsWith('0x')) {
           newValues.push(ethers.encodeBytes32String(seedId))
           continue
@@ -129,10 +316,19 @@ const processBasicProperties = async (
       },
     ]
 
-    const SchemaEncoder = await getSchemaEncoder()
-    const dataEncoder = new SchemaEncoder(schemaDef)
-
-    const encodedData = dataEncoder.encodeData(data)
+    let encodedData: string
+    try {
+      const SchemaEncoder = await getSchemaEncoder()
+      const dataEncoder = new SchemaEncoder(schemaDef)
+      encodedData = dataEncoder.encodeData(data) as string
+    } catch (encodeErr) {
+      addValidationError(
+        ctx,
+        `Failed to encode property ${basicProperty.propertyName}: ${encodeErr instanceof Error ? encodeErr.message : String(encodeErr)}`,
+        basicProperty.propertyName,
+      )
+      continue
+    }
 
     // For storageTransactionId, set refUID to versionUid so it references the Version attestation (contract may use when supported)
     const refUid =
@@ -181,16 +377,21 @@ const processRelationOrImageProperty = async (
   multiPublishPayload: MultiPublishPayload,
   uploadedTransactions: UploadedTransaction[],
   originalSeedLocalId: string,
+  ctx: PublishValidationContext,
 ): Promise<MultiPublishPayload> => {
   let relationOrImageSchemaUid = relationOrImageProperty.schemaUid
   if (!relationOrImageSchemaUid && relationOrImageProperty.propertyDef) {
-    const propertyData = await getPropertyData(relationOrImageProperty)
+    const propertyData = await getPropertyData(relationOrImageProperty, ctx)
+    if (!propertyData) return multiPublishPayload
     relationOrImageSchemaUid = propertyData.schemaUid
   }
   if (!relationOrImageSchemaUid) {
-    throw new Error(
+    addValidationError(
+      ctx,
       `Schema uid not found for relation or image property: ${relationOrImageProperty.propertyName}`,
+      relationOrImageProperty.propertyName,
     )
+    return multiPublishPayload
   }
 
   const snapshot = relationOrImageProperty.getService().getSnapshot()
@@ -199,14 +400,73 @@ const processRelationOrImageProperty = async (
     return multiPublishPayload
   }
   const value = (context as any).propertyValue
+  const propertyDef = relationOrImageProperty.propertyDef
+  let isRequired = propertyDef?.required === true
+  // Resolve required from schema/DB when propertyDef lacks it
+  if (!isRequired && relationOrImageProperty.modelName) {
+    let schema = await getPropertySchema(
+      relationOrImageProperty.modelName,
+      relationOrImageProperty.propertyName,
+    )
+    if (!schema && BaseDb.getAppDb()) {
+      const normalizedModelName = upperFirst(camelCase(relationOrImageProperty.modelName))
+      const modelRecords = await BaseDb.getAppDb()!
+        .select({ id: models.id })
+        .from(models)
+        .where(eq(models.name, normalizedModelName))
+        .limit(1)
+      if (modelRecords.length > 0 && modelRecords[0].id) {
+        const propertyRecords = await BaseDb.getAppDb()!
+          .select()
+          .from(properties)
+          .where(
+            and(
+              eq(properties.modelId, modelRecords[0].id),
+              eq(properties.name, relationOrImageProperty.propertyName),
+            ),
+          )
+          .limit(1)
+        if (propertyRecords.length > 0) {
+          schema = {
+            dataType: propertyRecords[0].dataType,
+            ref: undefined,
+            required: propertyRecords[0].required ?? undefined,
+          } as any
+        }
+      }
+    }
+    if (schema?.required === true || (schema as any)?.required === 1) {
+      isRequired = true
+    }
+  }
+
+  // Required relation with no value: cannot publish
+  if (isRequired && !value) {
+    addValidationError(
+      ctx,
+      `Required relation ${relationOrImageProperty.propertyName} has no value. ` +
+        `A value pointing to a valid ${propertyDef?.ref ?? propertyDef?.refModelName ?? 'related'} item is required to publish.`,
+      relationOrImageProperty.propertyName,
+    )
+    return multiPublishPayload
+  }
+
   if (!value || relationOrImageProperty.uid) {
     return multiPublishPayload
   }
 
   const { localId: seedLocalId, uid: seedUid } = getCorrectId(value)
 
-  // Value is not a valid seed reference (10-char localId or 66-char uid); skip (e.g. Html with inline content)
+  // Value is not a valid seed reference (10-char localId or 66-char uid)
   if (!seedLocalId && !seedUid) {
+    if (isRequired) {
+      addValidationError(
+        ctx,
+        `Required relation ${relationOrImageProperty.propertyName} has invalid value: ${JSON.stringify(value)}. ` +
+          `Value must be a valid seed reference (localId or uid) pointing to a ${propertyDef?.ref ?? propertyDef?.refModelName ?? 'related'} item.`,
+        relationOrImageProperty.propertyName,
+      )
+    }
     return multiPublishPayload
   }
 
@@ -218,10 +478,18 @@ const processRelationOrImageProperty = async (
     seedUid,
   })
 
+  // When related item not found (e.g. different DB, not yet created)
   if (!relatedItem) {
-    throw new Error(
-      `No related item found for relation or image property: ${relationOrImageProperty.propertyName}`,
-    )
+    if (isRequired) {
+      addValidationError(
+        ctx,
+        `No related item found for required relation: ${relationOrImageProperty.propertyName}. ` +
+          `Value: ${JSON.stringify(value)} (seedLocalId/seedUid). ` +
+          `The related item may be missing, in a different database, or the reference may be broken.`,
+        relationOrImageProperty.propertyName,
+      )
+    }
+    return multiPublishPayload
   }
 
   // When Image/Relation already has seedUid (published), skip creating its payload—only add the property to parent
@@ -251,13 +519,23 @@ const processRelationOrImageProperty = async (
   }
 
   if (!modelName) {
-    throw new Error(`Model name not found for relation or image property: ${relationOrImageProperty.propertyName}`)
+    addValidationError(
+      ctx,
+      `Model name not found for relation or image property: ${relationOrImageProperty.propertyName}`,
+      relationOrImageProperty.propertyName,
+    )
+    return multiPublishPayload
   }
 
   const seedSchemaUid = await getEasSchemaUidForModel(modelName)
   
   if (!seedSchemaUid) {
-    throw new Error(`Schema UID not found for model: ${modelName}`)
+    addValidationError(
+      ctx,
+      `Schema UID not found for model: ${modelName}`,
+      relationOrImageProperty.propertyName,
+    )
+    return multiPublishPayload
   }
 
   let publishPayload: PublishPayload = {
@@ -276,8 +554,9 @@ const processRelationOrImageProperty = async (
     ],
   }
 
+  await ensurePropertyDefs(relatedItem)
   const { itemBasicProperties, itemUploadProperties } =
-    getSegmentedItemProperties(relatedItem)
+    await getSegmentedItemProperties(relatedItem)
 
   if (itemUploadProperties.length === 1) {
     const uploadProperty = itemUploadProperties[0]
@@ -295,6 +574,7 @@ const processRelationOrImageProperty = async (
   publishPayload = await processBasicProperties(
     itemBasicProperties,
     publishPayload,
+    ctx,
   )
 
   multiPublishPayload.push(publishPayload)
@@ -306,22 +586,30 @@ const processListProperty = async (
   listProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
   originalSeedLocalId: string,
+  ctx: PublishValidationContext,
 ): Promise<MultiPublishPayload> => {
   // processListProperty only handles list-of-relations; list-of-primitives go to itemBasicProperties
   if (!listProperty.propertyDef?.ref) {
-    throw new Error(
+    addValidationError(
+      ctx,
       `processListProperty requires ref (list of relations). List property "${listProperty.propertyName}" has no ref. List-of-primitives should be in itemBasicProperties.`,
+      listProperty.propertyName,
     )
+    return multiPublishPayload
   }
   let listPropertySchemaUid = listProperty.schemaUid
   if (!listPropertySchemaUid && listProperty.propertyDef) {
-    const propertyData = await getPropertyData(listProperty)
+    const propertyData = await getPropertyData(listProperty, ctx)
+    if (!propertyData) return multiPublishPayload
     listPropertySchemaUid = propertyData.schemaUid
   }
   if (!listPropertySchemaUid) {
-    throw new Error(
+    addValidationError(
+      ctx,
       `Schema uid not found for list property: ${listProperty.propertyName}`,
+      listProperty.propertyName,
     )
+    return multiPublishPayload
   }
 
   const snapshot = listProperty.getService().getSnapshot()
@@ -347,8 +635,22 @@ const processListProperty = async (
     }
   }
 
-  for (const seedId of value) {
-    const { localId: seedLocalId, uid: seedUid } = getCorrectId(seedId)
+  const iterableValue = Array.isArray(value)
+    ? value
+    : value != null
+      ? [value]
+      : []
+
+  for (const seedId of iterableValue) {
+    const idStr =
+      typeof seedId === 'string'
+        ? seedId
+        : seedId &&
+          typeof seedId === 'object' &&
+          (seedId.seedLocalId ?? seedId.seedUid ?? seedId.localId ?? seedId.uid)
+    if (!idStr) continue
+    const { localId: seedLocalId, uid: seedUid } = getCorrectId(idStr)
+    if (!seedLocalId && !seedUid) continue
 
     // Use dynamic import to break circular dependency
     const getItemMod = await import('../../db/read/getItem')
@@ -366,7 +668,7 @@ const processListProperty = async (
     }
 
     if (relatedItem.seedUid) {
-      return multiPublishPayload
+      continue
     }
 
     const versionUid = getVersionUid(relatedItem)
@@ -391,13 +693,23 @@ const processListProperty = async (
     }
 
     if (!modelName) {
-      throw new Error(`Model name not found for list property: ${listProperty.propertyName}`)
+      addValidationError(
+        ctx,
+        `Model name not found for list property: ${listProperty.propertyName}`,
+        listProperty.propertyName,
+      )
+      continue
     }
 
     const seedSchemaUid = await getEasSchemaUidForModel(modelName)
     
     if (!seedSchemaUid) {
-      throw new Error(`Schema UID not found for model: ${modelName}`)
+      addValidationError(
+        ctx,
+        `Schema UID not found for model: ${modelName}`,
+        listProperty.propertyName,
+      )
+      continue
     }
 
     let publishPayload: PublishPayload = {
@@ -416,11 +728,13 @@ const processListProperty = async (
       ],
     }
 
-    const { itemBasicProperties } = getSegmentedItemProperties(relatedItem)
+    await ensurePropertyDefs(relatedItem)
+    const { itemBasicProperties } = await getSegmentedItemProperties(relatedItem)
 
     publishPayload = await processBasicProperties(
       itemBasicProperties,
       publishPayload,
+      ctx,
     )
 
     multiPublishPayload.push(publishPayload)
@@ -458,10 +772,22 @@ type UploadedTransaction = {
   itemPropertyName?: string
 }
 
+/** Error thrown when publish validation fails. Includes all validation errors for user to fix. */
+export class PublishValidationFailedError extends Error {
+  constructor(
+    message: string,
+    public readonly validationErrors: PublishValidationError[],
+  ) {
+    super(message)
+    this.name = 'PublishValidationFailedError'
+  }
+}
+
 export const getPublishPayload = async (
   item: Item<any>,
   uploadedTransactions: UploadedTransaction[],
 ): Promise<MultiPublishPayload> => {
+  const validationCtx: PublishValidationContext = { errors: [] }
 
   let multiPublishPayload: MultiPublishPayload = []
 
@@ -476,9 +802,11 @@ export const getPublishPayload = async (
   if (!itemSchemaUid) {
     const schemaUid = await getEasSchemaUidForModel(item.modelName)
     if (!schemaUid) {
-      throw new Error(`Schema UID not found for model: ${item.modelName}`)
+      addValidationError(validationCtx, `Schema UID not found for model: ${item.modelName}`)
+      itemSchemaUid = ZERO_BYTES32 // placeholder so we can continue collecting errors
+    } else {
+      itemSchemaUid = schemaUid
     }
-    itemSchemaUid = schemaUid
   }
 
   let itemPublishData: PublishPayload = {
@@ -492,15 +820,60 @@ export const getPublishPayload = async (
     propertiesToUpdate: [],
   }
 
+  await ensurePropertyDefs(item)
+
   const {
     itemBasicProperties,
     itemListProperties,
     itemUploadProperties,
     itemImageProperties,
     itemRelationProperties,
-  } = getSegmentedItemProperties(item)
+  } = await getSegmentedItemProperties(item)
 
   const relationAndImageProperties = [...itemRelationProperties, ...itemImageProperties]
+
+  // Validate required relations have values before processing
+  for (const relProp of itemRelationProperties) {
+    const snapshot = relProp.getService().getSnapshot()
+    const ctx = 'context' in snapshot ? snapshot.context : null
+    const val = ctx ? (ctx as any).renderValue ?? (ctx as any).propertyValue : undefined
+    if (val != null && typeof val === 'string' && val.trim() !== '') continue
+    // No value - check if required from propertyDef or DB
+    let isRequired = relProp.propertyDef?.required === true
+    if (!isRequired && BaseDb.getAppDb() && item.modelName) {
+      const normalizedModelName = upperFirst(camelCase(item.modelName))
+      const modelRows = await BaseDb.getAppDb()!
+        .select({ id: models.id })
+        .from(models)
+        .where(eq(models.name, normalizedModelName))
+        .limit(1)
+      if (modelRows.length > 0) {
+        const propRows = await BaseDb.getAppDb()!
+          .select({ required: properties.required, refModelId: properties.refModelId })
+          .from(properties)
+          .where(
+            and(
+              eq(properties.modelId, modelRows[0].id),
+              eq(properties.name, relProp.propertyName),
+              eq(properties.dataType, 'Relation'),
+            ),
+          )
+          .limit(1)
+        if (propRows.length > 0 && (propRows[0].required === true || propRows[0].required === 1)) {
+          isRequired = true
+        }
+      }
+    }
+    if (isRequired) {
+      const refModel = relProp.propertyDef?.ref ?? relProp.propertyDef?.refModelName ?? 'related'
+      addValidationError(
+        validationCtx,
+        `Required relation ${relProp.propertyName} has no value. ` +
+          `A value pointing to a valid ${refModel} item is required to publish.`,
+        relProp.propertyName,
+      )
+    }
+  }
 
   if (itemUploadProperties.length === 1) {
     const uploadProperty = itemUploadProperties[0]
@@ -521,6 +894,7 @@ export const getPublishPayload = async (
       multiPublishPayload,
       uploadedTransactions,
       item.seedLocalId,
+      validationCtx,
     )
     itemBasicProperties.push(relationProperty)
   }
@@ -530,13 +904,15 @@ export const getPublishPayload = async (
       listProperty,
       multiPublishPayload,
       item.seedLocalId,
+      validationCtx,
     )
     itemBasicProperties.push(listProperty)
   }
-  
+
   itemPublishData = await processBasicProperties(
     itemBasicProperties,
     itemPublishData,
+    validationCtx,
   )
 
   multiPublishPayload.push(itemPublishData)
@@ -550,7 +926,45 @@ export const getPublishPayload = async (
   // The contract writes the seed UID into data[0].data; empty data causes Panic 50.
   multiPublishPayload = ensurePropertiesToUpdateAttestationsHaveData(multiPublishPayload)
 
+  if (validationCtx.errors.length > 0) {
+    const combinedMessage = validationCtx.errors.map((e) => e.message).join('\n')
+    throw new PublishValidationFailedError(
+      `Validation failed (${validationCtx.errors.length} error${validationCtx.errors.length === 1 ? '' : 's'}):\n${combinedMessage}`,
+      validationCtx.errors,
+    )
+  }
+
+  // #region agent log
+  const versionUidFromItem = getVersionUid(item)
+  fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'getPublishPayload.ts:return',message:'getPublishPayload result',data:{itemSeedLocalId:item.seedLocalId,itemSeedUid:item.seedUid??null,itemLatestVersionUidRaw:item.latestVersionUid,versionUidFromItem,payloadCount:multiPublishPayload.length,payloads:multiPublishPayload.map((p,i)=>({idx:i,localId:p.localId,seedUid:p.seedUid,versionUid:p.versionUid,listOfAttestationsCount:p.listOfAttestations?.length??0,propertiesToUpdateCount:p.propertiesToUpdate?.length??0}))},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
+
   return multiPublishPayload
+}
+
+export type ValidateItemForPublishResult = {
+  isValid: boolean
+  errors: PublishValidationError[]
+}
+
+/**
+ * Validates an item for publishing without performing Arweave or EAS work.
+ * Use in the checking step to fail fast before creating transactions.
+ * Pass empty array for uploadedTransactions when validating before Arweave upload.
+ */
+export const validateItemForPublish = async (
+  item: Item<any>,
+  uploadedTransactions: UploadedTransaction[] = [],
+): Promise<ValidateItemForPublishResult> => {
+  try {
+    await getPublishPayload(item, uploadedTransactions)
+    return { isValid: true, errors: [] }
+  } catch (err) {
+    if (err instanceof PublishValidationFailedError) {
+      return { isValid: false, errors: err.validationErrors }
+    }
+    throw err
+  }
 }
 
 /**

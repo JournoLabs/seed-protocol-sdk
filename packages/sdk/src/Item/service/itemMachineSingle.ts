@@ -200,6 +200,8 @@ export const itemMachineSingle = setup({
               lastVersionPublishedAt: item.lastVersionPublishedAt || context.lastVersionPublishedAt,
               attestationCreatedAt: item.attestationCreatedAt || context.attestationCreatedAt,
               createdAt: item.createdAt || context.createdAt,
+              publisher: item.publisher ?? context.publisher,
+              revokedAt: item.revokedAt ?? context.revokedAt,
               propertyInstances: existingPropertyInstances,
             }
           }),

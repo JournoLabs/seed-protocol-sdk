@@ -6,41 +6,6 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 const _req = createRequire(import.meta.url)
 
-function resolveXstateDep(id: string, importer?: string): string | null {
-  const searchPaths: string[] = [process.cwd()]
-  if (importer) {
-    let dir = path.dirname(importer)
-    for (let i = 0; i < 5 && dir; i++) {
-      searchPaths.push(dir)
-      dir = path.dirname(dir)
-    }
-  }
-  const sdkDir = path.resolve(fileURLToPath(import.meta.url), '../../..')
-  searchPaths.push(sdkDir, path.resolve(sdkDir, '../..'))
-  for (const dir of searchPaths) {
-    try {
-      return _req.resolve(id, { paths: [dir] })
-    } catch {
-      continue
-    }
-  }
-  return null
-}
-
-// #region agent log
-const _dbg = (d: { hypothesisId?: string; location: string; message: string; data?: object }) => {
-  fetch('http://127.0.0.1:7242/ingest/0978b378-ebae-46bf-8fd3-134ef2e16cdd', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '73e96f' },
-    body: JSON.stringify({
-      sessionId: '73e96f',
-      ...d,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {})
-}
-// #endregion
-
 export interface SeedVitePluginOptions {
   /**
    * Additional modules to alias to ZenFS equivalents.
@@ -98,14 +63,6 @@ const DEFAULT_FS_MODULES = [
  *   await configure({ mounts: { '/': IndexedDB } });
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
-  // #region agent log
-  _dbg({
-    hypothesisId: 'D',
-    location: 'vite/index.ts:seedVitePlugin',
-    message: 'seedVitePlugin loaded',
-    data: { options: Object.keys(options) },
-  })
-  // #endregion
   const {
     fsModules = DEFAULT_FS_MODULES,
     autoInit = false,
@@ -129,41 +86,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         // path: 'path-browserify',
       }
 
-      // Resolve @xstate/react transitive deps for production builds (optimizeDeps only helps dev).
-      // Bun/workspace layouts can leave these in virtual store; Rollup fails to resolve them.
-      const xstateDepIds = [
-        'use-isomorphic-layout-effect',
-        'use-sync-external-store',
-        'use-sync-external-store/shim',
-        'use-sync-external-store/shim/with-selector',
-      ]
-      let xstateResolved = 0
-      for (const id of xstateDepIds) {
-        // const resolved = resolveXstateDep(id)
-        // if (resolved) {
-        //   alias[id] = resolved
-        //   xstateResolved++
-        // }
-      }
-      if (xstateResolved > 0) {
-        // #region agent log
-        _dbg({
-          hypothesisId: 'fix',
-          location: 'vite/index.ts:configPlugin.alias',
-          message: 'resolve.alias added for @xstate/react deps',
-          data: { aliasKeys: Object.keys(alias) },
-        })
-        // #endregion
-      } else {
-        // #region agent log
-        _dbg({
-          hypothesisId: 'fix',
-          location: 'vite/index.ts:configPlugin.alias',
-          message: 'failed to resolve any @xstate/react deps',
-          data: { cwd: process.cwd() },
-        })
-        // #endregion
-      }
 
       for (const mod of fsModules) {
         const isPromises = mod.includes('promises')
@@ -204,24 +126,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // viem dynamically imports isows; pre-bundle both so Rollup can resolve them
           'viem',
           'isows',
-          // @xstate/react transitive deps; must be pre-bundled so Rollup can resolve them
-          // (Bun/workspace layouts can leave these in virtual store, breaking resolution)
-          'use-isomorphic-layout-effect',
-          'use-sync-external-store',
         ],
       }
-
-      // #region agent log
-      _dbg({
-        hypothesisId: 'A,B',
-        location: 'vite/index.ts:configPlugin.config',
-        message: 'configPlugin returning optimizeDeps',
-        data: {
-          optimizeDepsInclude: optimizeDeps.include,
-          userOptimizeDepsInclude: userConfig.optimizeDeps?.include,
-        },
-      })
-      // #endregion
 
       return {
         resolve: {
@@ -232,19 +138,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         },
         optimizeDeps,
       }
-    },
-    configResolved(resolvedConfig) {
-      // #region agent log
-      _dbg({
-        hypothesisId: 'B',
-        location: 'vite/index.ts:configPlugin.configResolved',
-        message: 'final merged optimizeDeps',
-        data: {
-          include: resolvedConfig.optimizeDeps?.include,
-          exclude: resolvedConfig.optimizeDeps?.exclude,
-        },
-      })
-      // #endregion
     },
   }
 
@@ -377,37 +270,7 @@ if (!window.__seedFsReady) {
     },
   }
 
-  const resolveXstateDepsPlugin: Plugin = {
-    name: 'seed-protocol:resolve-xstate-deps',
-    enforce: 'pre',
-    resolveId(id, importer) {
-      if (id === 'use-isomorphic-layout-effect' || id.startsWith('use-sync-external-store')) {
-        const resolved = resolveXstateDep(id, importer)
-        if (resolved) {
-          // #region agent log
-          _dbg({
-            hypothesisId: 'fix',
-            location: 'vite/index.ts:resolveXstateDepsPlugin',
-            message: 'resolved @xstate/react dep',
-            data: { id, resolved },
-          })
-          // #endregion
-          return resolved
-        }
-        // #region agent log
-        _dbg({
-          hypothesisId: 'fix',
-          location: 'vite/index.ts:resolveXstateDepsPlugin',
-          message: 'failed to resolve @xstate/react dep',
-          data: { id, importer: importer ?? 'unknown' },
-        })
-        // #endregion
-      }
-      return null
-    },
-  }
-
-  const plugins: Plugin[] = [configPlugin, resolveXstateDepsPlugin, mainPlugin]
+  const plugins: Plugin[] = [configPlugin, mainPlugin]
 
   if (includeNodePolyfills) {
     log('Including vite-plugin-node-polyfills with default settings')

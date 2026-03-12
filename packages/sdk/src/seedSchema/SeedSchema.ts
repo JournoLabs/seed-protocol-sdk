@@ -14,6 +14,7 @@ export const seeds = sqliteTable(
     createdAt: int('created_at'),
     updatedAt: int('updated_at'),
     _markedForDeletion: int('_marked_for_deletion'),
+    revokedAt: int('revoked_at'),
   },
   // {
   //   triggers: [

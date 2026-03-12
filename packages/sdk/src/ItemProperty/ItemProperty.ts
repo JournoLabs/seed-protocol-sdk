@@ -2,7 +2,7 @@ import { ActorRefFrom, createActor, SnapshotFrom, Subscription, waitFor } from '
 import { BehaviorSubject, Subscriber } from 'rxjs'
 import { Static } from '@sinclair/typebox'
 import { IItemProperty } from '@/interfaces/IItemProperty'
-import { CreatePropertyInstanceProps, PropertyMachineContext, PropertyType } from '@/types'
+import { CreatePropertyInstanceProps, PropertyMachineContext, PropertyType as SchemaPropertyType } from '@/types'
 import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
@@ -63,7 +63,7 @@ const resolvePropertyRecordSchemaFromModel = async (
   modelName: string,
   propertyName: string,
   modelType?: string
-): Promise<PropertyType | undefined> => {
+): Promise<SchemaPropertyType | undefined> => {
   if (!modelName && !modelType) return undefined
   try {
     const { Model } = await import('@/Model/Model')
@@ -75,7 +75,7 @@ const resolvePropertyRecordSchemaFromModel = async (
     if (!model?.properties?.length) return undefined
     const schemas = modelPropertiesToObject(model.properties)
     const schema = schemas[propertyName]
-    return schema as PropertyType | undefined
+    return schema as SchemaPropertyType | undefined
   } catch {
     return undefined
   }
@@ -360,7 +360,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // Use a closure variable to track setup state per instance
     const setupState = { subscriptionSetUp: false }
 
-    const setupLiveQuery = async (seedLocalId: string, seedUid: string | undefined, propertyName: string, versionLocalId: string | undefined) => {
+    const setupLiveQuery = async (
+      seedLocalId: string,
+      seedUid: string | undefined,
+      propertyName: string,
+      versionLocalId: string | undefined,
+      propertyRecordSchema?: SchemaPropertyType,
+    ) => {
       if (setupState.subscriptionSetUp) {
         return
       }
@@ -379,10 +385,26 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       logger(`[ItemProperty._setupLiveQuerySubscription] Setting up liveQuery for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
       
       try {
+        const schemaMod = await import('../Schema')
+        const { ModelPropertyDataTypes } = schemaMod
+        const isFile = propertyRecordSchema?.dataType === ModelPropertyDataTypes.File
+        const isImage = propertyRecordSchema?.dataType === ModelPropertyDataTypes.Image
+        const isRelation =
+          propertyRecordSchema?.ref &&
+          propertyRecordSchema?.dataType === ModelPropertyDataTypes.Relation
+        const needsIdVariant = isFile || isImage || isRelation
+
+        let propertyNameVariant: string | undefined
+        if (needsIdVariant) {
+          propertyNameVariant = propertyName.endsWith('Id')
+            ? propertyName.slice(0, -2)
+            : propertyName + 'Id'
+        }
+
         const seedSchemaMod = await import('../seedSchema')
         const { metadata } = seedSchemaMod
         const drizzleMod = await import('drizzle-orm')
-        const { eq, and, isNotNull } = drizzleMod
+        const { eq, and, or } = drizzleMod
         const metadataLatestMod = await import('../db/read/subqueries/metadataLatest')
         const { getMetadataLatest } = metadataLatestMod
         
@@ -393,17 +415,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         }
 
         // Query initial metadata using getMetadataLatest subquery pattern
+        // For File/Image/Relation, also check the Id variant (e.g. "textId") since metadata is stored with that
         const metadataLatest = getMetadataLatest({ seedLocalId, seedUid })
+        const propertyNameWhere = propertyNameVariant
+          ? or(
+              eq(metadataLatest.propertyName, propertyName),
+              eq(metadataLatest.propertyName, propertyNameVariant),
+            )
+          : eq(metadataLatest.propertyName, propertyName)
         const initialMetadata = await db
           .with(metadataLatest)
           .select()
           .from(metadataLatest)
-          .where(
-            and(
-              eq(metadataLatest.propertyName, propertyName),
-              eq(metadataLatest.rowNum, 1)
-            )
-          )
+          .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
           .limit(1)
 
         if (initialMetadata.length > 0) {
@@ -433,9 +457,23 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const resolvedSeedUid = seedUid || null
           const resolvedSeedLocalId = seedLocalId || null
           
+          // For File/Image/Relation, query both propertyName and propertyNameId (metadata stores with Id suffix)
           const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }>(
             (sql: any) => {
               if (resolvedSeedUid) {
+                if (propertyNameVariant) {
+                  return sql`
+                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                    FROM metadata
+                    WHERE seed_uid = ${resolvedSeedUid}
+                      AND (property_name = ${propertyName} OR property_name = ${propertyNameVariant})
+                      AND property_name IS NOT NULL
+                    ORDER BY COALESCE(created_at, attestation_created_at) DESC
+                    LIMIT 1
+                  `
+                }
                 return sql`
                   SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
                          version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
@@ -448,6 +486,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                   LIMIT 1
                 `
               } else if (resolvedSeedLocalId) {
+                if (propertyNameVariant) {
+                  return sql`
+                    SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
+                           version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
+                           ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
+                    FROM metadata
+                    WHERE seed_local_id = ${resolvedSeedLocalId}
+                      AND (property_name = ${propertyName} OR property_name = ${propertyNameVariant})
+                      AND property_name IS NOT NULL
+                    ORDER BY COALESCE(created_at, attestation_created_at) DESC
+                    LIMIT 1
+                  `
+                }
                 return sql`
                   SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
                          version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
@@ -460,14 +511,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                   LIMIT 1
                 `
               } else {
-                // Fallback - should not happen, but handle gracefully
-                return sql`
-                  SELECT local_id as localId, uid, property_name as propertyName, property_value as propertyValue, 
-                         version_local_id as versionLocalId, version_uid as versionUid, schema_uid as schemaUid,
-                         ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
-                  FROM metadata
-                  WHERE 1 = 0
-                `
+                return sql`SELECT 1 WHERE 1 = 0`
               }
             }
           )
@@ -523,6 +567,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const seedUid = snapshot.context.seedUid
       const propertyName = snapshot.context.propertyName
       const versionLocalId = snapshot.context.versionLocalId
+      const propertyRecordSchema = snapshot.context.propertyRecordSchema
       
       if ((!seedLocalId && !seedUid) || !propertyName) {
         return // Need seed ID and propertyName to proceed
@@ -530,7 +575,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
       // Once we have required context, set up the liveQuery subscription (only once)
       if ((seedLocalId || seedUid) && propertyName && !setupState.subscriptionSetUp) {
-        await setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined)
+        await setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined, propertyRecordSchema)
         if (setupState.subscriptionSetUp) {
           setupSubscription.unsubscribe()
         }
@@ -543,9 +588,10 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const seedUid = currentSnapshot.context.seedUid
     const propertyName = currentSnapshot.context.propertyName
     const versionLocalId = currentSnapshot.context.versionLocalId
+    const propertyRecordSchema = currentSnapshot.context.propertyRecordSchema
     
     if ((seedLocalId || seedUid) && propertyName && !setupState.subscriptionSetUp) {
-      setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined).catch((error) => {
+      setupLiveQuery(seedLocalId || '', seedUid || undefined, propertyName, versionLocalId || undefined, propertyRecordSchema).catch((error) => {
         logger(`[ItemProperty._setupLiveQuerySubscription] Error in immediate setup: ${error}`)
       })
     }
@@ -1004,6 +1050,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   get status() {
     return this._getSnapshot().value
+  }
+
+  /** Validation errors from last failed save (enum, pattern, minLength, maxLength). Cleared on successful save. */
+  get saveValidationErrors(): import('@/Schema/validation').ValidationError[] {
+    return this._getSnapshotContext()._saveValidationErrors ?? []
   }
 
   get alias() {

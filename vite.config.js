@@ -117,6 +117,76 @@ export default defineConfig({
       },
       {
         plugins: [
+          react(),
+          tsConfigPaths({ projects: ['./packages/react/tsconfig.json'] }),
+          ...seedVitePlugin({ autoInit: false, debug: false }),
+          nodePolyfills({
+            exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
+            include: ['crypto', 'stream', 'util', 'path'],
+            globals: {
+              Buffer: true,
+              global: true,
+              process: true,
+            },
+            protocolImports: true,
+          }),
+        ],
+        resolve: {
+          alias: {
+            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+            '@seedprotocol/react': resolve(__dirname, 'packages/react/src'),
+            'fs': '@zenfs/core',
+            'fs/promises': '@zenfs/core/promises',
+            'node:fs': '@zenfs/core',
+            'node:fs/promises': '@zenfs/core/promises',
+            'path': 'path-browserify',
+            'node:path': 'path-browserify',
+          },
+        },
+        optimizeDeps: {
+          exclude: [
+            '@sqlite.org/sqlite-wasm',
+            'drizzle-kit',
+            'drizzle-orm',
+            'sqlocal',
+          ],
+          include: [
+            '@testing-library/react',
+            'react',
+            'react-dom',
+          ],
+        },
+        test: {
+          name: 'browser-react',
+          dir: './packages/react/__tests__',
+          env: {
+            DEBUG: '*',
+          },
+          setupFiles: [
+            './packages/react/__tests__/setup.browser.ts',
+          ],
+          include: [
+            '**/*.test.{ts,tsx}',
+          ],
+          exclude: [
+            ...configDefaults.exclude,
+            'dist/**',
+          ],
+          hookTimeout: 90000,
+          testTimeout: 30000,
+          maxWorkers: 1,
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [
+              { browser: 'chromium' },
+            ],
+          },
+        },
+      },
+      {
+        plugins: [
           tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
         ],
         resolve: {

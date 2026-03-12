@@ -1,0 +1,1 @@
+{"version":3,"file":"writeModelsToDb.d.ts","sourceRoot":"","sources":["writeModelsToDb.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,WAAW,EAAgB,MAAM,QAAQ,CAAA;AAClD,OAAO,EAAE,gBAAgB,EAAyB,MAAM,gBAAgB,CAAA;AAaxE,MAAM,MAAM,oBAAoB,GAAG;IACjC,MAAM,EAAE,gBAAgB,CAAA;IACxB,YAAY,EAAE,GAAG,CAAA;IACjB,UAAU,EAAE,MAAM,CAAA;CACnB,CAAA;AAED,eAAO,MAAM,eAAe,qFAuM1B,CAAA"}

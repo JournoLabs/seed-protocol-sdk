@@ -4,9 +4,11 @@ import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import { sendTransaction, waitForReceipt } from 'thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { getClient } from '~/helpers/thirdweb'
-import { Item } from '@seedprotocol/sdk'
+import { Item, updateVersionUid } from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult } from './persistSeedUid'
+import { verifyAttestations } from '../helpers/verifyAttestations'
+import { AttestationVerificationError } from '../../../errors'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { getPublishConfig } from '~/config'
 import {
@@ -100,7 +102,7 @@ type NormalizedRequest = {
 }
 
 export const createAttestationsDirectToEas = fromPromise(
-  async ({ input: { context, event } }: PublishInput): Promise<void> => {
+  async ({ input: { context, event } }: PublishInput): Promise<{ easPayload: unknown }> => {
     const { address, account } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
@@ -119,7 +121,8 @@ export const createAttestationsDirectToEas = fromPromise(
         'Attestation recovery failed: Item data is missing. Delete this publish record and try a full publish from the beginning.',
       )
     }
-    if (typeof item.getPublishUploads !== 'function') {
+    const waitForItemUsed = typeof item.getPublishUploads !== 'function'
+    if (waitForItemUsed) {
       item = await waitForItem(item.seedLocalId)
     }
 
@@ -150,6 +153,11 @@ export const createAttestationsDirectToEas = fromPromise(
 
     const requestData = await item.getPublishPayload(uploadDataWithTxIds)
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
+
+    // #region agent log
+    const firstReq = reqs[0]
+    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestationsDirectToEas.ts:after getPublishPayload',message:'raw payload from getPublishPayload',data:{reqCount:reqs.length,firstReqSeedUid:firstReq?.seedUid,firstReqVersionUid:firstReq?.versionUid,firstReqListCount:firstReq?.listOfAttestations?.length??0,uploadDataCount:uploadDataWithTxIds.length},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     const normalizedRequests: NormalizedRequest[] = reqs.map((req: any) => {
       const listOfAttestations = (req?.listOfAttestations ?? []).map((att: any) => {
@@ -211,6 +219,10 @@ export const createAttestationsDirectToEas = fromPromise(
       let newSeedUid = request.seedUid
       let newVersionUid = request.versionUid
 
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestationsDirectToEas.ts:loop-start',message:'request attestation decisions',data:{idx:i,localId:request.localId,newSeedUid,newVersionUid,willCreateSeed:newSeedUid===ZERO_BYTES32,willCreateVersion:newSeedUid!==ZERO_BYTES32&&newVersionUid===ZERO_BYTES32,listOfAttestationsCount:request.listOfAttestations?.length??0},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+
       if (newSeedUid === ZERO_BYTES32) {
         const attestTx = prepareEasAttest(client, optimismSepolia, {
           schema: request.seedSchemaUid as `0x${string}`,
@@ -234,6 +246,9 @@ export const createAttestationsDirectToEas = fromPromise(
         }
         newSeedUid = seedUidFromReceipt
         request.seedUid = seedUidFromReceipt
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestationsDirectToEas.ts:created-seed',message:'created new Seed attestation',data:{idx:i,newSeedUid},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         logger('created Seed attestation', newSeedUid)
       }
 
@@ -260,7 +275,19 @@ export const createAttestationsDirectToEas = fromPromise(
         }
         newVersionUid = versionUidFromReceipt
         request.versionUid = versionUidFromReceipt
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestationsDirectToEas.ts:created-version',message:'created new Version attestation',data:{idx:i,newVersionUid,reason:'newVersionUid was ZERO_BYTES32'},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
+        await updateVersionUid({
+          seedLocalId: request.localId,
+          versionUid: versionUidFromReceipt,
+          publisher: address,
+        })
         logger('created Version attestation', newVersionUid)
+      } else if (newVersionUid !== ZERO_BYTES32) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestationsDirectToEas.ts:skipped-version',message:'skipping Version creation - using existing',data:{idx:i,existingVersionUid:newVersionUid},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
       }
 
       for (const att of request.listOfAttestations) {
@@ -306,15 +333,26 @@ export const createAttestationsDirectToEas = fromPromise(
     }
 
     persistSeedUidFromPublishResult(item as { seedUid?: string }, normalizedRequests)
-    const itemWithPersist = item as { persistSeedUid?: () => Promise<void> }
+    const itemWithPersist = item as { persistSeedUid?: (publisher?: string) => Promise<void> }
     if (
       normalizedRequests[0]?.seedUid &&
       normalizedRequests[0].seedUid !== ZERO_BYTES32 &&
       typeof itemWithPersist.persistSeedUid === 'function'
     ) {
-      await itemWithPersist.persistSeedUid()
+      await itemWithPersist.persistSeedUid(address)
+    }
+
+    try {
+      await verifyAttestations({ normalizedRequests, item })
+    } catch (err) {
+      if (err instanceof AttestationVerificationError) {
+        throw err
+      }
+      logger('verifyAttestations failed (non-verification error):', err)
+      throw err
     }
 
     logger('direct EAS publish complete')
+    return { easPayload: requestData }
   },
 )

@@ -15,6 +15,76 @@ import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('seedSdk:imports:json')
 
 /**
+ * Get refValueType from a property object with case-insensitive key lookup.
+ * Handles refValueType, refvaluetype, ref_value_type, elementType, and legacy items.type / items.Type.
+ * Also handles items as string (e.g. items: "Relation").
+ */
+/**
+ * Normalize schema file format: convert models/properties arrays to objects if needed.
+ * Some tools output models/properties as arrays; we need object format keyed by name or index.
+ */
+function normalizeSchemaModels(
+  models: SchemaFileFormat['models'] | unknown,
+): SchemaFileFormat['models'] {
+  if (!models || typeof models !== 'object') return {}
+  if (!Array.isArray(models)) return models as SchemaFileFormat['models']
+
+  const result: SchemaFileFormat['models'] = {}
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i] as any
+    const key = m?.name ?? m?.id ?? String(i)
+    const props = m?.properties
+    let properties: Record<string, any> = {}
+    if (props && typeof props === 'object') {
+      if (Array.isArray(props)) {
+        for (let j = 0; j < props.length; j++) {
+          const p = props[j] as any
+          const pKey = p?.name ?? p?.id ?? String(j)
+          properties[pKey] = p
+        }
+      } else {
+        properties = props
+      }
+    }
+    result[key] = { ...m, properties }
+  }
+  return result
+}
+
+/**
+ * Get refValueType from a property object with case-insensitive key lookup.
+ */
+export function getRefValueType(prop: Record<string, unknown>): string | undefined {
+  const refValueType =
+    prop.refValueType ??
+    prop.refvaluetype ??
+    (prop as any).RefValueType ??
+    (prop as any).REFVALUETYPE ??
+    (prop as any).ref_value_type
+  if (refValueType != null && String(refValueType).trim() !== '') {
+    return String(refValueType)
+  }
+  const elementType = (prop as any).elementType ?? (prop as any).element_type
+  if (elementType != null && String(elementType).trim() !== '') {
+    return String(elementType)
+  }
+  const items = prop.items
+  if (items != null) {
+    if (typeof items === 'string' && items.trim() !== '') {
+      return items.trim()
+    }
+    if (items && typeof items === 'object') {
+      const itemsType =
+        (items as any).type ?? (items as any).Type ?? (items as any).TYPE
+      if (itemsType != null && String(itemsType).trim() !== '') {
+        return String(itemsType)
+      }
+    }
+  }
+  return undefined
+}
+
+/**
  * Verify that properties are persisted to the database for a given model
  * This is important in browser environments where database writes may not be immediately visible
  * @param db - Database instance
@@ -115,10 +185,14 @@ function compareSchemasStructurally(
       // Compare property types
       if (prop1.type !== prop2.type) return false
       
-      // Compare other relevant fields (ref, items, etc.)
+      // Compare other relevant fields (ref, refValueType for List, etc.)
       if (prop1.ref !== prop2.ref) return false
-      if (prop1.items?.type !== prop2.items?.type) return false
-      if (prop1.items?.model !== prop2.items?.model) return false
+      const refVal1 = prop1.refValueType ?? prop1.items?.type
+      const refVal2 = prop2.refValueType ?? prop2.items?.type
+      if (refVal1 !== refVal2) return false
+      const model1 = prop1.ref ?? prop1.items?.model
+      const model2 = prop2.ref ?? prop2.items?.model
+      if (model1 !== model2) return false
     }
   }
   
@@ -136,6 +210,47 @@ function compareSchemasStructurally(
   // and may differ even for the same schema structure
   
   return true
+}
+
+/**
+ * Create a canonical JSON string for schema comparison (ignores IDs and timestamps).
+ * Used to detect if schema content has changed via string comparison of schemaData.
+ */
+function getSchemaContentForComparison(schema: SchemaFileFormat): string {
+  const normalized: Record<string, unknown> = {
+    name: schema.metadata?.name,
+    version: schema.version,
+    models: {},
+    enums: schema.enums || {},
+  }
+  for (const modelName of Object.keys(schema.models || {}).sort()) {
+    const model = schema.models![modelName]
+    const props: Record<string, unknown> = {}
+    for (const propName of Object.keys(model.properties || {}).sort()) {
+      const prop = model.properties![propName] as Record<string, unknown>
+      const items = prop.items as { type?: string; model?: string } | undefined
+      props[propName] = {
+        type: prop.type ?? prop.dataType,
+        ref: prop.ref ?? prop.refModelName,
+        refValueType: prop.refValueType ?? items?.type,
+        model: prop.model ?? items?.model,
+        storage: prop.storage,
+      }
+    }
+    ;(normalized.models as Record<string, unknown>)[modelName] = {
+      description: model.description,
+      properties: props,
+    }
+  }
+  return JSON.stringify(normalized)
+}
+
+/**
+ * Compare two schemas by structure (ignoring IDs and timestamps).
+ * Returns true if schema content is equivalent.
+ */
+function compareSchemaContent(schema1: SchemaFileFormat, schema2: SchemaFileFormat): boolean {
+  return getSchemaContentForComparison(schema1) === getSchemaContentForComparison(schema2)
 }
 
 /**
@@ -159,10 +274,17 @@ export const transformImportToSchemaFile = (
     
     for (const [propertyName, propertyDef] of Object.entries(modelDef.properties)) {
       const propertyId = generateId()
-      propertiesWithIds[propertyName] = {
-        ...propertyDef,
-        id: propertyId,
+      const prop = propertyDef as any
+      const isList = (prop.type ?? prop.dataType) === 'List'
+      let normalized = { ...prop, id: propertyId }
+      // Normalize List: convert legacy items to refValueType/ref (case-insensitive)
+      const existingRefValueType = getRefValueType(prop as Record<string, unknown>)
+      if (isList && existingRefValueType) {
+        normalized = { ...normalized, refValueType: normalizeDataType(existingRefValueType) }
+        const items = prop.items as { model?: string } | undefined
+        if (items?.model && !normalized.ref) normalized.ref = items.model
       }
+      propertiesWithIds[propertyName] = normalized
     }
     
     modelsWithIds[modelName] = {
@@ -226,9 +348,10 @@ export const parseJsonImportContent = (
     }
 
     // Return normalized JsonImportSchema format
+    const models = normalizeSchemaModels(data.models) as JsonImportSchema['models']
     return {
       name: schemaName,
-      models: data.models,
+      models,
     }
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -364,6 +487,10 @@ export async function importJsonSchema(
   let schemaFile: SchemaFileFormat
   if (originalSchemaFile) {
     schemaFile = originalSchemaFile
+    // Normalize models if provided as array (some tools output array format)
+    if (schemaFile.models) {
+      schemaFile.models = normalizeSchemaModels(schemaFile.models)
+    }
     // Use provided version if different, otherwise use version from schema
     if (version !== undefined && version !== schemaFile.version) {
       schemaFile = { ...schemaFile, version }
@@ -406,7 +533,81 @@ export async function importJsonSchema(
     if (!importData) {
       throw new Error('Failed to parse import data: neither complete schema nor import format could be determined')
     }
-    schemaFile = transformImportToSchemaFile(importData, version)
+    // For minimal imports: check DB for existing schema before creating new file
+    const db = BaseDb.getAppDb()
+    if (db) {
+      const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
+      const { schemas: schemasTable } = schemaSchemaMod
+      const drizzleMod = await import('drizzle-orm')
+      const { eq, and, desc } = drizzleMod
+
+      const existingByName = await db
+        .select()
+        .from(schemasTable)
+        .where(and(eq(schemasTable.name, importData.name), eq(schemasTable.version, version)))
+        .orderBy(desc(schemasTable.isDraft))
+        .limit(1)
+
+      if (existingByName.length > 0) {
+        const existing = existingByName[0]
+        const schemaFileForCompare = transformImportToSchemaFile(importData, version)
+        if (existing.schemaData) {
+          try {
+            const existingSchema = JSON.parse(existing.schemaData) as SchemaFileFormat
+            if (compareSchemaContent(schemaFileForCompare, existingSchema)) {
+              // Same content - use existing schema
+              if (existing.schemaFileId) {
+                const workingDir = BaseFileManager.getWorkingDir()
+                const existingFilePath = getSchemaFilePath(workingDir, importData.name, version, existing.schemaFileId)
+                if (await BaseFileManager.pathExists(existingFilePath)) {
+                  logger(`Schema ${importData.name} v${version} already exists with same content, loading existing file`)
+                  return await loadSchemaFromFile(existingFilePath)
+                }
+                // File missing but schemaData exists - restore file from schemaData
+                await BaseFileManager.createDirIfNotExists(workingDir)
+                await BaseFileManager.saveFile(existingFilePath, existing.schemaData)
+                await BaseFileManager.waitForFileWithContent(existingFilePath, 100, 5000)
+                logger(`Restored schema file from schemaData for ${importData.name} v${version}`)
+                return await loadSchemaFromFile(existingFilePath)
+              }
+              // No schemaFileId - restore file from schemaData using id from parsed schema
+              const schemaIdForPath = existingSchema.id || existing.schemaFileId
+              if (schemaIdForPath) {
+                const workingDir = BaseFileManager.getWorkingDir()
+                const existingFilePath = getSchemaFilePath(workingDir, importData.name, version, schemaIdForPath)
+                await BaseFileManager.createDirIfNotExists(workingDir)
+                await BaseFileManager.saveFile(existingFilePath, existing.schemaData)
+                await BaseFileManager.waitForFileWithContent(existingFilePath, 100, 5000)
+                logger(`Restored schema file from schemaData for ${importData.name} v${version}`)
+                return await loadSchemaFromFile(existingFilePath)
+              }
+              logger(`Schema ${importData.name} v${version} already exists with same content (no id), using DB`)
+              return ''
+            }
+            // Content differs - create new version
+            const latestVersionRows = await db
+              .select({ version: schemasTable.version })
+              .from(schemasTable)
+              .where(eq(schemasTable.name, importData.name))
+              .orderBy(desc(schemasTable.version))
+              .limit(1)
+            const newVersion = latestVersionRows.length > 0 ? latestVersionRows[0].version + 1 : version
+            logger(`Schema ${importData.name} content changed, creating new version v${newVersion}`)
+            schemaFile = transformImportToSchemaFile(importData, newVersion)
+            version = newVersion
+          } catch {
+            // Parse error - proceed with normal import
+            schemaFile = schemaFileForCompare
+          }
+        } else {
+          schemaFile = schemaFileForCompare
+        }
+      } else {
+        schemaFile = transformImportToSchemaFile(importData, version)
+      }
+    } else {
+      schemaFile = transformImportToSchemaFile(importData, version)
+    }
   }
 
   // Check if this is an internal SDK schema (should not create files in app directory)
@@ -445,15 +646,18 @@ export async function importJsonSchema(
                 }
                 
                 // Handle Relation type - convert ref to model (not for List)
-                if ((schemaProp.dataType !== 'List' && schemaProp.type !== 'List') && (schemaProp.ref || schemaProp.refModelName)) {
+                const rawDataType = (schemaProp.dataType ?? schemaProp.type ?? '').toString().toLowerCase()
+                if (rawDataType !== 'list' && (schemaProp.ref || schemaProp.refModelName)) {
                   jsonProp.model = schemaProp.refModelName || schemaProp.ref
                 }
                 
-                // Handle List type
-                if ((schemaProp.dataType === 'List' || schemaProp.type === 'List') && schemaProp.refValueType) {
-                  jsonProp.items = { type: schemaProp.refValueType }
-                  if (schemaProp.ref || schemaProp.refModelName) {
-                    jsonProp.items.model = schemaProp.refModelName || schemaProp.ref
+                // Handle List type (support both refValueType and legacy items, case-insensitive dataType)
+                if (rawDataType === 'list') {
+                  const refValueType = getRefValueType(schemaProp as Record<string, unknown>)
+                  if (refValueType) {
+                    jsonProp.refValueType = refValueType
+                    const ref = schemaProp.ref ?? schemaProp.refModelName ?? schemaProp.items?.model
+                    if (ref) jsonProp.ref = ref
                   }
                 }
                 
@@ -923,6 +1127,11 @@ export const loadSchemaFromFile = async (
     const content = await BaseFileManager.readFileAsString(schemaFilePath)
     const schemaFile = JSON.parse(content) as SchemaFileFormat
 
+    // Normalize models if provided as array (some tools output array format)
+    if (schemaFile.models) {
+      schemaFile.models = normalizeSchemaModels(schemaFile.models)
+    }
+
     // Verify it's a complete schema file
     if (!schemaFile.$schema) {
       throw new Error(
@@ -959,15 +1168,18 @@ export const loadSchemaFromFile = async (
                 }
                 
                 // Handle Relation type - convert ref to model (not for List)
-                if ((schemaProp.dataType !== 'List' && schemaProp.type !== 'List') && (schemaProp.ref || schemaProp.refModelName)) {
+                const rawDataType = (schemaProp.dataType ?? schemaProp.type ?? '').toString().toLowerCase()
+                if (rawDataType !== 'list' && (schemaProp.ref || schemaProp.refModelName)) {
                   jsonProp.model = schemaProp.refModelName || schemaProp.ref
                 }
                 
-                // Handle List type
-                if ((schemaProp.dataType === 'List' || schemaProp.type === 'List') && schemaProp.refValueType) {
-                  jsonProp.items = { type: schemaProp.refValueType }
-                  if (schemaProp.ref || schemaProp.refModelName) {
-                    jsonProp.items.model = schemaProp.refModelName || schemaProp.ref
+                // Handle List type (support both refValueType and legacy items, case-insensitive dataType)
+                if (rawDataType === 'list') {
+                  const refValueType = getRefValueType(schemaProp as Record<string, unknown>)
+                  if (refValueType) {
+                    jsonProp.refValueType = refValueType
+                    const ref = schemaProp.ref ?? schemaProp.refModelName ?? schemaProp.items?.model
+                    if (ref) jsonProp.ref = ref
                   }
                 }
                 
@@ -1258,17 +1470,22 @@ export const createModelFromJson = async (
         schemaProp.refModelName = jsonProp.model
       }
 
-      // Handle List type (case-insensitive): requires items with type; ref only when items.model present
+      // Handle List type (case-insensitive): requires refValueType (or legacy items.type); ref when Relation
       if ((rawType || '').toLowerCase() === 'list') {
-        if (!jsonProp.items || !jsonProp.items.type) {
+        const elementType = getRefValueType(jsonProp)
+        if (!elementType || String(elementType).trim() === '') {
+          const propKeys = Object.keys(jsonProp).join(', ')
+          const propPreview = JSON.stringify(jsonProp).slice(0, 200)
           throw new Error(
-            `List property "${propName}" in model "${modelName}" requires "items" with "type" (e.g. items: { type: "Text" } or items: { type: "Relation", model: "Tag" })`,
+            `List property "${propName}" in model "${modelName}" requires "refValueType" (e.g. refValueType: "Text" or refValueType: "Relation" with ref: "Tag"). ` +
+              `Property has keys: [${propKeys}]. Raw property: ${propPreview}${propPreview.length >= 200 ? '...' : ''}`,
           )
         }
-        schemaProp.refValueType = normalizeDataType(jsonProp.items.type)
-        if (jsonProp.items.model || jsonProp.model) {
-          schemaProp.ref = jsonProp.items.model || jsonProp.model
-          schemaProp.refModelName = jsonProp.items.model || jsonProp.model
+        schemaProp.refValueType = normalizeDataType(elementType)
+        const modelRef = jsonProp.ref ?? jsonProp.items?.model ?? jsonProp.model
+        if (modelRef) {
+          schemaProp.ref = modelRef
+          schemaProp.refModelName = modelRef
         }
       }
 
@@ -1277,6 +1494,16 @@ export const createModelFromJson = async (
         schemaProp.storageType = jsonProp.storage.type === 'ItemStorage' ? 'ItemStorage' : 'PropertyStorage'
         schemaProp.localStorageDir = jsonProp.storage.path
         schemaProp.filenameSuffix = jsonProp.storage.extension
+      }
+
+      // Handle required (for Relation/Image properties)
+      if (jsonProp.required !== undefined) {
+        schemaProp.required = !!jsonProp.required
+      }
+
+      // Preserve validation rules (enum, pattern, minLength, maxLength)
+      if (jsonProp.validation && typeof jsonProp.validation === 'object') {
+        schemaProp.validation = jsonProp.validation
       }
 
       convertedProperties[propName] = schemaProp

@@ -17,6 +17,8 @@ import { eq, and } from 'drizzle-orm'
 import { models as modelsTable, modelUids, metadata } from '@/seedSchema'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
+const SCHEMA_NAME_OPTIONAL_AUTHOR = 'Test Schema getPublishPayload Optional Author'
+const SCHEMA_NAME_ENUM_VALIDATION = 'Test Schema getPublishPayload Enum'
 
 function waitForItemIdle(item: ItemClass<any>, timeout = 10000): Promise<void> {
   const service = item.getService()
@@ -107,9 +109,9 @@ export function getGetPublishPayloadTestSchema(): SchemaFileFormat {
           publishedOn: { id: generateId(), type: 'Date' },
           bodyHtml: { id: generateId(), type: 'Html' },
           attachment: { id: generateId(), type: 'File' },
-          author: { id: generateId(), type: 'Relation', model: 'Author' },
+          author: { id: generateId(), type: 'Relation', model: 'Author', required: true },
           coverImage: { id: generateId(), type: 'Image' },
-          tagIds: { id: generateId(), type: 'List', items: { type: 'Relation', model: 'Tag' } },
+          tagIds: { id: generateId(), type: 'List', refValueType: 'Relation', ref: 'Tag' },
         },
       },
     },
@@ -128,10 +130,9 @@ function testModelPlaceholderUid(index: number): string {
   return '0x' + (index + 1).toString(16).padStart(64, '0')
 }
 
-async function ensureModelUidsForGetPublishPayloadTest(): Promise<void> {
+async function ensureModelUidsForGetPublishPayloadTest(modelNames: string[] = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html']): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) return
-  const modelNames = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html']
   for (let i = 0; i < modelNames.length; i++) {
     const name = modelNames[i]
     const rows = await db.select({ id: modelsTable.id }).from(modelsTable).where(eq(modelsTable.name, name)).limit(1)
@@ -140,6 +141,84 @@ async function ensureModelUidsForGetPublishPayloadTest(): Promise<void> {
     const existing = await db.select().from(modelUids).where(eq(modelUids.modelId, modelId)).limit(1)
     if (existing.length > 0) continue
     await db.insert(modelUids).values({ modelId, uid: testModelPlaceholderUid(i) })
+  }
+}
+
+/**
+ * Schema with optional author relation (required: false).
+ * Used for testing that optional relations skip (no throw) when related item not found.
+ */
+export function getGetPublishPayloadTestSchemaOptionalAuthor(): SchemaFileFormat {
+  const authorId = generateId()
+  const tagId = generateId()
+  const postId = generateId()
+  return {
+    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    version: 1,
+    id: generateId(),
+    metadata: {
+      name: SCHEMA_NAME_OPTIONAL_AUTHOR,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    models: {
+      Author: {
+        id: authorId,
+        properties: {
+          name: { id: generateId(), type: 'Text' },
+          bio: { id: generateId(), type: 'Text' },
+        },
+      },
+      Tag: {
+        id: tagId,
+        properties: {
+          label: { id: generateId(), type: 'Text' },
+        },
+      },
+      Post: {
+        id: postId,
+        properties: {
+          title: { id: generateId(), type: 'Text' },
+          author: { id: generateId(), type: 'Relation', model: 'Author', required: false },
+          tagIds: { id: generateId(), type: 'List', refValueType: 'Relation', ref: 'Tag' },
+        },
+      },
+    },
+    enums: {},
+    migrations: [],
+  }
+}
+
+/**
+ * Schema with Article model that has status Text property with enum validation.
+ * Used for testing that getPublishPayload rejects invalid enum values.
+ */
+export function getGetPublishPayloadTestSchemaWithEnum(): SchemaFileFormat {
+  const articleId = generateId()
+  return {
+    $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+    version: 1,
+    id: generateId(),
+    metadata: {
+      name: SCHEMA_NAME_ENUM_VALIDATION,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    models: {
+      Article: {
+        id: articleId,
+        properties: {
+          title: { id: generateId(), type: 'Text' },
+          status: {
+            id: generateId(),
+            type: 'Text',
+            validation: { enum: ['draft', 'published', 'archived'] },
+          },
+        },
+      },
+    },
+    enums: {},
+    migrations: [],
   }
 }
 
@@ -159,6 +238,47 @@ export async function createGetPublishPayloadTestSchema(): Promise<GetPublishPay
   return {
     schemaName: SCHEMA_NAME,
     models: { Author: authorModel, Tag: tagModel, Post: postModel },
+  }
+}
+
+/**
+ * Import schema with optional author and create models. For testing optional relation behavior.
+ */
+export async function createGetPublishPayloadTestSchemaOptionalAuthor(): Promise<{
+  schemaName: string
+  models: { Author: Model; Tag: Model; Post: Model }
+}> {
+  const schema = getGetPublishPayloadTestSchemaOptionalAuthor()
+  await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
+  await ensureModelUidsForGetPublishPayloadTest()
+  const authorModel = Model.create('Author', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
+  const tagModel = Model.create('Tag', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
+  const postModel = Model.create('Post', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
+  await waitForModelIdle(authorModel)
+  await waitForModelIdle(tagModel)
+  await waitForModelIdle(postModel)
+  return {
+    schemaName: SCHEMA_NAME_OPTIONAL_AUTHOR,
+    models: { Author: authorModel, Tag: tagModel, Post: postModel },
+  }
+}
+
+/**
+ * Import schema with Article model that has status enum validation.
+ * Used for testing getPublishPayload rejects invalid enum values.
+ */
+export async function createGetPublishPayloadTestSchemaWithEnum(): Promise<{
+  schemaName: string
+  models: { Article: Model }
+}> {
+  const schema = getGetPublishPayloadTestSchemaWithEnum()
+  await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
+  await ensureModelUidsForGetPublishPayloadTest(['Article'])
+  const articleModel = Model.create('Article', SCHEMA_NAME_ENUM_VALIDATION, { waitForReady: false })
+  await waitForModelIdle(articleModel)
+  return {
+    schemaName: SCHEMA_NAME_ENUM_VALIDATION,
+    models: { Article: articleModel },
   }
 }
 

@@ -9,9 +9,10 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   getService(): ActorRefFrom<any>
   getEditedProperties(): Promise<PropertyData[]>
   publish(): Promise<void>
+  unpublish(): Promise<void>
   getPublishUploads(): Promise<any>
   getPublishPayload(uploadedTransactions: any[]): Promise<any>
-  persistSeedUid(): Promise<void>
+  persistSeedUid(publisher?: string): Promise<void>
   unload(): void
   destroy(): Promise<void>
 
@@ -25,7 +26,10 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   readonly internalProperties: Record<string, IItemProperty<any>>
   readonly allProperties: Record<string, IItemProperty<any>>
   readonly attestationCreatedAt: number
+  readonly revokedAt?: number
+  readonly isRevoked: boolean
   readonly versionsCount: number
   readonly lastVersionPublishedAt: number
   readonly createdAt?: number
+  readonly publisher?: string
 } 

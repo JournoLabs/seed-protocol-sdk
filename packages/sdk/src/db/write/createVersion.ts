@@ -1,6 +1,7 @@
 import { generateId } from '@/helpers'
 import { versions } from '@/seedSchema'
 import { BaseDb } from '../Db/BaseDb'
+import { getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
 
 type CreateVersionProps = {
   seedLocalId?: string
@@ -20,6 +21,16 @@ export const createVersion: CreateVersion = async ({
 
   const newVersionLocalId = generateId()
 
+  let publisher: string | undefined
+  const getPublisher = getGetPublisherForNewSeeds()
+  if (getPublisher) {
+    try {
+      publisher = await getPublisher()
+    } catch {
+      // User not connected or getter failed - leave publisher null
+    }
+  }
+
   await appDb.insert(versions).values({
     localId: newVersionLocalId,
     createdAt: Date.now(),
@@ -27,6 +38,7 @@ export const createVersion: CreateVersion = async ({
     seedUid: seedUid ?? 'NULL',
     seedType,
     uid: uid || 'NULL',
+    ...(publisher != null && publisher !== '' && { publisher }),
   })
 
   return newVersionLocalId

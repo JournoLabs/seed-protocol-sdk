@@ -1,7 +1,25 @@
+import { setAdditionalSyncAddresses, setGetPublisherForNewSeeds, setRevokeExecutor } from '@seedprotocol/sdk'
 import {
   THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
   EAS_CONTRACT_ADDRESS,
 } from './helpers/constants'
+import { getConnectedManagedAccountAddress } from './helpers/thirdweb'
+import { optimismSepolia } from 'thirdweb/chains'
+import { revokeAttestations } from './services/revoke/revokeAttestations'
+
+/** Serialized upload item for Arweave signing (input to callback or used internally with JWK) */
+export interface SerializedPublishUpload {
+  versionLocalId: string
+  itemPropertyName: string
+  transactionJson: Record<string, unknown>
+}
+
+/** Result from Arweave signing (signed transaction + metadata) */
+export interface ArweaveTransactionInfoResult {
+  transaction: Record<string, unknown> & { chunks?: unknown }
+  versionId: string
+  modelName: string
+}
 
 export interface PublishConfig {
   thirdwebClientId: string
@@ -30,6 +48,18 @@ export interface PublishConfig {
    * Default: false (uses the smart wallet executor).
    */
   useModularExecutor?: boolean
+  /**
+   * Sign Arweave upload transactions. Use for backend API, ArConnect, or custom flows.
+   * Takes serialized uploads, returns signed transactions with chunks.
+   */
+  signArweaveTransactions?: (
+    uploads: SerializedPublishUpload[]
+  ) => Promise<ArweaveTransactionInfoResult[]>
+  /**
+   * Arweave JWK for in-process signing. App loads from env, secure storage, etc.
+   * Prefer signArweaveTransactions for web apps (avoids exposing key in browser).
+   */
+  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
 }
 
 /** Use window (renderer) or globalThis so config survives across module instances (e.g. Vite chunks). */
@@ -56,6 +86,21 @@ function setConfig(c: PublishConfig | null): void {
 
 export function initPublish(c: PublishConfig): void {
   setConfig(c)
+  setGetPublisherForNewSeeds(async () => {
+    try {
+      return await getConnectedManagedAccountAddress(optimismSepolia)
+    } catch {
+      return undefined
+    }
+  })
+  setRevokeExecutor(revokeAttestations)
+  setAdditionalSyncAddresses(async () => {
+    const config = getConfig()
+    if (config?.useModularExecutor && config?.modularAccountModuleContract) {
+      return [config.modularAccountModuleContract]
+    }
+    return []
+  })
 }
 
 export interface ResolvedPublishConfig extends PublishConfig {

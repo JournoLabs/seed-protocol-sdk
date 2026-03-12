@@ -132,4 +132,43 @@ export function getAttestationUidFromReceipt(
   return undefined
 }
 
+export type MultiRevocationRequest = {
+  schema: `0x${string}`
+  data: Array<{
+    uid: `0x${string}`
+    value?: bigint
+  }>
+}
+
+/**
+ * Prepares an EAS multiRevoke call for batch revocation.
+ */
+export function prepareEasMultiRevoke(
+  client: ThirdwebClient,
+  chain: Chain,
+  requests: MultiRevocationRequest[],
+) {
+  const { easContractAddress } = getPublishConfig()
+  const contract = getContract({
+    client,
+    chain,
+    address: easContractAddress as `0x${string}`,
+  })
+
+  return prepareContractCall({
+    contract,
+    method:
+      'function multiRevoke((bytes32 schema,(bytes32 uid,uint256 value)[] data)[] multiRequests) payable' as const,
+    params: [
+      requests.map((r) => ({
+        schema: r.schema,
+        data: r.data.map((d) => ({
+          uid: d.uid,
+          value: d.value ?? 0n,
+        })),
+      })),
+    ],
+  } as Parameters<typeof prepareContractCall>[0])
+}
+
 export { ZERO_ADDRESS, ZERO_BYTES32 }

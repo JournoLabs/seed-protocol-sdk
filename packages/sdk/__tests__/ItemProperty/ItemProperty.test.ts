@@ -451,6 +451,95 @@ testDescribe('ItemProperty Integration Tests', () => {
       expect(result).toBeUndefined()
     })
 
+    it('should populate saveValidationErrors when setting invalid enum value', async () => {
+      const schemaName = 'Test Schema Property Validation'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            status: {
+              dataType: 'Text',
+              validation: { enum: ['draft', 'published', 'archived'] },
+            },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const item = await Item.create({
+        modelName: 'TestPost',
+        status: 'draft',
+      })
+
+      await waitForItemIdle(item)
+
+      await new Promise<void>((resolve) => {
+        const subscription = item.getService().subscribe((snapshot) => {
+          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
+          if (propertyInstances && propertyInstances.size > 0) {
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        const currentSnapshot = item.getService().getSnapshot()
+        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
+        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
+          subscription.unsubscribe()
+          resolve()
+          return
+        }
+        setTimeout(() => {
+          subscription.unsubscribe()
+          resolve()
+        }, 5000)
+      })
+
+      const statusProperty = item.properties.find(
+        (p) => p.propertyName === 'status' || p.propertyName === 'Status'
+      )
+      expect(statusProperty).toBeDefined()
+
+      if (statusProperty) {
+        await waitForItemPropertyIdle(statusProperty)
+
+        // Set invalid value - should fail validation (value is not persisted, stays as 'draft')
+        statusProperty.value = 'invalid'
+
+        // Wait for save to complete (will fail validation, transition to idle)
+        await waitFor(
+          statusProperty.getService(),
+          (snapshot) => !snapshot.context.isSaving,
+          { timeout: 5000 }
+        )
+
+        const errors = statusProperty.saveValidationErrors
+        expect(errors.length).toBeGreaterThan(0)
+        expect(errors[0].code).toBe('enum_violation')
+        expect(errors[0].message).toContain('Expected one of')
+        expect(errors[0].message).toContain('draft')
+        expect(errors[0].message).toContain('published')
+        expect(errors[0].message).toContain('archived')
+        expect(errors[0].message).toContain('invalid')
+
+        // Setting valid value should clear errors
+        statusProperty.value = 'published'
+        await waitFor(
+          statusProperty.getService(),
+          (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
+          { timeout: 5000 }
+        )
+        expect(statusProperty.saveValidationErrors).toHaveLength(0)
+      }
+    })
+
     it('should create property with propertyRecordSchema', async () => {
       const schemaName = 'Test Schema Property Schema'
       const testSchema = createTestSchema(schemaName, {
@@ -1346,7 +1435,7 @@ testDescribe('ItemProperty Integration Tests', () => {
           id: postModelId,
           properties: {
             title: { dataType: 'Text' },
-            tags: { dataType: 'List', items: { type: 'Relation', model: 'Tag' } },
+            tags: { dataType: 'List', refValueType: 'Relation', ref: 'Tag' },
           },
         },
       })

@@ -2,7 +2,6 @@ import { eventEmitter } from '@/eventBus'
 import debug from 'debug'
 
 export * from './db/Db'
-export * from './react'
 
 // Initialize PathResolver for browser
 import './helpers/PathResolver'

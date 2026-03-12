@@ -52,7 +52,31 @@ export const loadOrCreateProperty = fromCallback<
       .limit(1)
 
     if (metadataRecords.length === 0) {
-      // Metadata not found - this is a new property, will be created elsewhere
+      // Metadata not found - this is a new property, will be created elsewhere.
+      // Still resolve propertyRecordSchema from Model so getSegmentedItemProperties and
+      // getPublishPayload can route and attest the property (e.g. title, description).
+      let propertyRecordSchema: any = undefined
+      const modelNameForNew = context.modelName
+      if (modelNameForNew) {
+        try {
+          const { Model } = await import('../../../Model/Model')
+          const { modelPropertiesToObject } = await import('../../../helpers/model')
+          const normalizedModelName = upperFirst(camelCase(modelNameForNew))
+          let model = Model.getByName(normalizedModelName)
+          if (!model?.properties?.length) {
+            model = Model.findByModelType(toSnakeCase(modelNameForNew))
+          }
+          if (model?.properties?.length) {
+            const schemas = modelPropertiesToObject(model.properties)
+            propertyRecordSchema = schemas[propertyName]
+            if (propertyRecordSchema) {
+              logger(`Metadata not found: loaded propertyRecordSchema from Model for propertyName "${propertyName}"`)
+            }
+          }
+        } catch (error) {
+          logger(`Metadata not found: Model fallback failed for propertyName "${propertyName}": ${error}`)
+        }
+      }
       logger(`Metadata not found in database for propertyName: ${propertyName}, seedLocalId: ${seedLocalId}`)
       sendBack({
         type: 'loadOrCreatePropertySuccess',
@@ -67,6 +91,8 @@ export const loadOrCreateProperty = fromCallback<
           schemaUid: context.schemaUid,
           localId: undefined,
           uid: undefined,
+          modelName: modelNameForNew || context.modelName,
+          propertyRecordSchema,
         },
       })
       return
@@ -119,6 +145,41 @@ export const loadOrCreateProperty = fromCallback<
               storageType: propRecord.storageType || undefined,
               localStorageDir: propRecord.localStorageDir || undefined,
               filenameSuffix: propRecord.filenameSuffix || undefined,
+              required: (propRecord as { required?: boolean }).required ?? undefined,
+            }
+            // Merge with schema from file/DB to get validation rules (enum, pattern, etc.) - properties table doesn't store these
+            try {
+              const { getPropertySchema } = await import('../../../helpers/property')
+              let schemaFromFile = await getPropertySchema(normalizedModelName, propertyName)
+              if (!schemaFromFile?.validation) {
+                // Fallback: get validation from schemaData in database (Schema context may not be loaded yet)
+                const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
+                const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
+                const modelSchemaRows = await db
+                  .select({ schemaId: modelSchemas.schemaId })
+                  .from(modelSchemas)
+                  .where(eq(modelSchemas.modelId, modelRecords[0].id))
+                  .limit(1)
+                if (modelSchemaRows.length > 0 && modelSchemaRows[0].schemaId) {
+                  const schemaRows = await db
+                    .select({ schemaData: schemasTable.schemaData })
+                    .from(schemasTable)
+                    .where(eq(schemasTable.id, modelSchemaRows[0].schemaId))
+                    .limit(1)
+                  if (schemaRows.length > 0 && schemaRows[0].schemaData) {
+                    const parsed = JSON.parse(schemaRows[0].schemaData) as { models?: Record<string, { properties?: Record<string, { validation?: unknown }> }> }
+                    const modelDef = parsed?.models?.[normalizedModelName]
+                    const propDef = modelDef?.properties?.[propertyName]
+                    if (propDef?.validation) {
+                      propertyRecordSchema = { ...propertyRecordSchema, validation: propDef.validation }
+                    }
+                  }
+                }
+              } else {
+                propertyRecordSchema = { ...propertyRecordSchema, validation: schemaFromFile.validation }
+              }
+            } catch {
+              // Schema not loaded or lookup failed - continue with DB schema only
             }
           }
         }

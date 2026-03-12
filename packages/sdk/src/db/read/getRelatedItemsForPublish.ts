@@ -19,7 +19,7 @@ export async function getRelatedItemsForPublish(
 
   const result: IItem<any>[] = []
   const { itemRelationProperties, itemImageProperties, itemListProperties } =
-    getSegmentedItemProperties(item)
+    await getSegmentedItemProperties(item)
 
   const getItemMod = await import('./getItem')
   const { getItem } = getItemMod

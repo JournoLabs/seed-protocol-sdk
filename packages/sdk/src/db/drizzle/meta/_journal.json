@@ -36,6 +36,34 @@
       "when": 1768500000000,
       "tag": "0004_add_publisher_to_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1772489937031,
+      "tag": "0005_bright_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772600000000,
+      "tag": "0006_add_publisher_to_versions_and_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1772700000000,
+      "tag": "0007_add_required_to_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772800000000,
+      "tag": "0008_add_revoked_at_to_seeds",
+      "breakpoints": true
     }
   ]
 }

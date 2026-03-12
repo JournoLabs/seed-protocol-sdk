@@ -13,6 +13,8 @@ import {
   getOwnedAddressesFromDb,
   getWatchedAddressesFromDb,
 } from '@/helpers/db'
+import { runSyncFromEas } from '@/events/item/syncDbWithEas'
+import type { SyncFromEasOptions } from '@/events/item/syncDbWithEas'
 
 const logger               = debug('seedSdk:client')
 
@@ -151,6 +153,14 @@ const clientInstance = {
   getWatchedAddresses: async () => {
     ensureInitialized();
     return getWatchedAddressesFromDb();
+  },
+  /**
+   * Syncs item attestations from EAS for the configured models and given addresses.
+   * Uses owned + watched addresses from DB when addresses are not provided.
+   */
+  syncFromEas: async (options?: SyncFromEasOptions) => {
+    ensureInitialized();
+    await runSyncFromEas(options);
   },
   addModel: async (modelDef: ModelDefObj) => {
     const db = await BaseDb.getAppDb();

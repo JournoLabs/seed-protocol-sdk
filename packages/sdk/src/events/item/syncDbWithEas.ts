@@ -30,6 +30,7 @@ import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import { getItemPropertiesFromEas, getItemVersionsFromEas, getModelSchemasFromEas, getSeedsFromSchemaUids } from '@/eas'
+import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 
 
 const relationValuesToExclude = [
@@ -167,7 +168,7 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
 
   let insertVersionsQuery = `INSERT INTO versions (local_id, uid, seed_uid, seed_local_id, seed_type, created_at,
                                                    attestation_created_at,
-                                                   attestation_raw)
+                                                   attestation_raw, publisher)
   VALUES `
 
   for (let i = 0; i < newVersions.length; i++) {
@@ -180,8 +181,9 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
     const seedLocalId = seedUidToLocalId.get(seedUid!)
     const seedType = seedUidToModelType.get(seedUid!)
     const attestationRaw = escapeSqliteString(JSON.stringify(version))
+    const publisher = escapeSqliteString(version.attester ?? '')
 
-    const valuesString = `('${versionLocalId}', '${version.id}', '${seedUid}', '${seedLocalId}', '${seedType}', ${Date.now()}, ${version.timeCreated * 1000}, '${attestationRaw}')`
+    const valuesString = `('${versionLocalId}', '${version.id}', '${seedUid}', '${seedLocalId}', '${seedType}', ${Date.now()}, ${version.timeCreated * 1000}, '${attestationRaw}', '${publisher}')`
 
     if (i < newVersions.length - 1) {
       insertVersionsQuery += valuesString + ', '
@@ -367,7 +369,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
                                                      seed_local_id, model_type, ref_value_type, ref_seed_type,
                                                      ref_schema_uid,
                                                      created_at, attestation_created_at, attestation_raw,
-                                                     local_storage_dir, ref_resolved_value)
+                                                     local_storage_dir, ref_resolved_value, publisher)
   VALUES `
 
   for (let i = 0; i < newProperties.length; i++) {
@@ -506,6 +508,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
       await createMetadataRecordsForStorageTransactionId(property, modelSchema)
     }
 
+    const publisher = escapeSqliteString(property.attester ?? '')
     const valuesString = `('${propertyLocalId}', '${property.id}', 
                          '${property.schemaId}', '${propertyName}', 
                          '${propertyValue}', '${easDataType}', '${versionUid}', 
@@ -515,7 +518,8 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
                          ${refSchemaUid ? `'${refSchemaUid}'` : 'NULL'},
                          ${Date.now()}, ${attestationCreatedAt}, '${attestationRaw}',
                          ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
-                         ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'})`
+                         ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
+                         '${publisher}')`
 
     if (i < newProperties.length - 1) {
       insertPropertiesQuery += valuesString + ', '
@@ -583,91 +587,117 @@ const getRelatedSeedsAndVersions = async () => {
   })
 }
 
-const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
-  async (_) => {
-    const addresses = await getAllAddressesFromDb()
-    if (!addresses || addresses.length === 0) {
-      return
+export type SyncFromEasOptions = {
+  /** Override addresses to sync. Default: owned + watched from DB. */
+  addresses?: string[]
+}
+
+/**
+ * Core sync logic: fetches item attestations from EAS for configured models and given addresses,
+ * then saves seeds, versions, and properties to the local DB.
+ * Uses owned + watched addresses from DB when addresses are not provided.
+ */
+export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void> => {
+  let addresses = options?.addresses ?? (await getAllAddressesFromDb())
+  const additionalGetter = getGetAdditionalSyncAddresses()
+  if (additionalGetter) {
+    const additional = await additionalGetter()
+    if (additional?.length) {
+      const seen = new Set(addresses.map((a) => a.toLowerCase()))
+      for (const addr of additional) {
+        if (addr && !seen.has(addr.toLowerCase())) {
+          seen.add(addr.toLowerCase())
+          addresses = [...addresses, addr]
+        }
+      }
+    }
+  }
+  if (!addresses || addresses.length === 0) {
+    return
+  }
+
+  const appDb = BaseDb.getAppDb()
+
+  const { schemaStringToModelRecord } = await getModelSchemas()
+
+  const modelSchemas = await getModelSchemasFromEas()
+
+  const schemaUids: string[] = []
+
+  for (const modelSchema of modelSchemas) {
+    const foundModel = schemaStringToModelRecord.get(modelSchema.schema)
+
+    if (!foundModel) {
+      // Skip schemas that don't have a corresponding model in the user's config
+      // This can happen with "bytes32 image" if there's no Image model defined
+      console.warn(
+        `[item/events] [syncDbWithEas] Model not found for schema ${modelSchema.schema}, skipping`
+      )
+      continue
     }
 
-    const appDb = BaseDb.getAppDb()
-
-    const { schemaStringToModelRecord } = await getModelSchemas()
-
-    const modelSchemas = await getModelSchemasFromEas()
-
-    const schemaUids: string[] = []
-
-    for (const modelSchema of modelSchemas) {
-      const foundModel = schemaStringToModelRecord.get(modelSchema.schema)
-
-      if (!foundModel) {
-        // Skip schemas that don't have a corresponding model in the user's config
-        // This can happen with "bytes32 image" if there's no Image model defined
-        console.warn(
-          `[item/events] [syncDbWithEas] Model not found for schema ${modelSchema.schema}, skipping`
-        )
+    try {
+      await appDb
+        .insert(modelUids)
+        .values({
+          modelId: foundModel.id,
+          uid: modelSchema.id,
+        })
+        .onConflictDoNothing()
+    } catch (err: unknown) {
+      // Model may have been deleted by test teardown or another process; skip to avoid unhandled rejection
+      const e = err as { code?: string; rawCode?: number; cause?: { code?: string; rawCode?: number } }
+      const code = e?.code ?? e?.rawCode ?? e?.cause?.code ?? e?.cause?.rawCode
+      if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 787) {
         continue
       }
-
-      try {
-        await appDb
-          .insert(modelUids)
-          .values({
-            modelId: foundModel.id,
-            uid: modelSchema.id,
-          })
-          .onConflictDoNothing()
-      } catch (err: unknown) {
-        // Model may have been deleted by test teardown or another process; skip to avoid unhandled rejection
-        const e = err as { code?: string; rawCode?: number; cause?: { code?: string; rawCode?: number } }
-        const code = e?.code ?? e?.rawCode ?? e?.cause?.code ?? e?.cause?.rawCode
-        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 787) {
-          continue
-        }
-        throw err
-      }
-
-      schemaUids.push(modelSchema.id)
+      throw err
     }
 
-    // If no schemas were found, skip the rest of the sync process
-    // This can happen when models exist but don't have schemas registered in EAS yet
-    if (schemaUids.length === 0) {
-      return
-    }
+    schemaUids.push(modelSchema.id)
+  }
 
-    const itemSeeds = await getSeedsFromSchemaUids({
-      schemaUids,
-      addresses,
-    })
+  // If no schemas were found, skip the rest of the sync process
+  // This can happen when models exist but don't have schemas registered in EAS yet
+  if (schemaUids.length === 0) {
+    return
+  }
 
-    // const seedDbRecords = new Map<string, Record<string, unknown>>()
+  const itemSeeds = await getSeedsFromSchemaUids({
+    schemaUids,
+    addresses,
+    excludeRevoked: false,
+  })
 
-    const { seedUids } = await saveEasSeedsToDb({
-      itemSeeds,
-    })
+  const { seedUids } = await saveEasSeedsToDb({
+    itemSeeds,
+  })
 
-    const itemVersions = await getItemVersionsFromEas({
-      seedUids
-    })
+  const itemVersions = await getItemVersionsFromEas({
+    seedUids,
+    excludeRevoked: false,
+  })
 
-    const { versionUids } = await saveEasVersionsToDb({
-      itemVersions,
-    })
+  const { versionUids } = await saveEasVersionsToDb({
+    itemVersions,
+  })
 
-    const itemProperties = await getItemPropertiesFromEas({
-      versionUids,
-    })
+  const itemProperties = await getItemPropertiesFromEas({
+    versionUids,
+    excludeRevoked: false,
+  })
 
-    const { propertyUids } = await saveEasPropertiesToDb({
-      itemProperties,
-      itemSeeds,
-    })
+  await saveEasPropertiesToDb({
+    itemProperties,
+    itemSeeds,
+  })
 
-    await getRelatedSeedsAndVersions()
+  await getRelatedSeedsAndVersions()
+}
 
-    // Note: Removed item.requestAll emission - no listeners registered
+const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
+  async (_) => {
+    await runSyncFromEas()
   },
   30000,
   {

@@ -255,15 +255,6 @@ describe('LiveQuery Integration Tests', () => {
     }, 15000)
   })
 
-  describe('useLiveQuery React Hook', () => {
-    it('should be exported from react hooks', async () => {
-      const { useLiveQuery } = await import('@/browser/react')
-      
-      expect(useLiveQuery).toBeDefined()
-      expect(typeof useLiveQuery).toBe('function')
-    })
-  })
-
   describe('Error Handling', () => {
     it('should throw error if database is not initialized', () => {
       // Temporarily clear the database

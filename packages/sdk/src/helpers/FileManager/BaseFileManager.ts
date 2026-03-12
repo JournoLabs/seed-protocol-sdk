@@ -70,11 +70,18 @@ export abstract class BaseFileManager {
   }
 
   /**
+   * Returns a list of filenames in the given directory (e.g. 'images', 'files').
+   */
+  static listFiles(dir: string): Promise<string[]> {
+    return this.PlatformClass.listFiles(dir)
+  }
+
+  /**
    * Returns a list of image filenames in the images folder (originals only, excludes size subdirs).
    * Use this to get all stored images without traversing 480/760/1024/1440/1920 subdirectories.
    */
   static listImageFiles(): Promise<string[]> {
-    return this.PlatformClass.listImageFiles()
+    return this.listFiles('images')
   }
 
   static createDirIfNotExists(filePath: string): Promise<void> {

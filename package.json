@@ -17,6 +17,8 @@
     "build:cli": "node scripts/build-with-tests.js \"cd packages/cli && bun run build\"",
     "build:publish": "node scripts/build-with-tests.js \"cd packages/publish && bun run build\"",
     "build:feed": "node scripts/build-with-tests.js \"cd packages/feed && bun run build\"",
+    "build:ghost": "node scripts/build-with-tests.js \"cd packages/ghost && bun run build\"",
+    "build:react": "node scripts/build-with-tests.js \"bun run --filter @seedprotocol/react build\"",
     "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:feed && bun run build:sdk && bun run build:cli && bun run build:publish\"",
     "clean": "rimraf coverage build tmp",
     "lint": "eslint .",
@@ -38,9 +40,11 @@
     "check:dist:fragile": "node scripts/check-dist-fragile-dynamic-imports.js",
     "publish:all": "node scripts/publish-package.js",
     "publish:sdk": "node scripts/publish-package.js sdk",
+    "publish:react": "node scripts/publish-package.js react",
     "publish:feed": "node scripts/publish-package.js feed",
     "publish:publish": "node scripts/publish-package.js publish",
-    "publish:cli": "node scripts/publish-package.js cli"
+    "publish:cli": "node scripts/publish-package.js cli",
+    "publish:ghost": "node scripts/publish-package.js ghost"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

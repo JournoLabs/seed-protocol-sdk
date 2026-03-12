@@ -1,5 +1,5 @@
 // This file embeds the drizzle migration files as strings for browser runtime
-// These files are copied from src/db/drizzle at build time
+// These files are copied from packages/sdk/src/db/drizzle at build time
 
 // Individual migration SQL files
 export const migrationSql_0000_married_malice = `CREATE TABLE \`appState\` (
@@ -137,6 +137,46 @@ ALTER TABLE \`schemas\` ADD \`is_edited\` integer;`
 
 export const migrationSql_0004_add_publisher_to_seeds = `ALTER TABLE \`seeds\` ADD \`publisher\` text;`
 
+export const migrationSql_0005_bright_lily_hollister = `CREATE TABLE \`publish_processes\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`seed_local_id\` text NOT NULL,
+	\`model_name\` text NOT NULL,
+	\`schema_id\` text,
+	\`status\` text NOT NULL,
+	\`started_at\` integer NOT NULL,
+	\`completed_at\` integer,
+	\`error_message\` text,
+	\`error_step\` text,
+	\`error_details\` text,
+	\`persisted_snapshot\` text NOT NULL,
+	\`seed_id\` text,
+	\`existing_seed_uid\` text,
+	\`created_at\` integer,
+	\`updated_at\` integer
+);
+--> statement-breakpoint
+CREATE TABLE \`upload_processes\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`reimbursement_confirmed\` integer NOT NULL,
+	\`reimbursement_transaction_id\` text,
+	\`transaction_keys\` text,
+	\`persisted_snapshot\` text NOT NULL,
+	\`created_at\` integer,
+	\`updated_at\` integer
+);
+`
+
+export const migrationSql_0006_add_publisher_to_versions_and_metadata = `ALTER TABLE \`versions\` ADD \`publisher\` text;
+--> statement-breakpoint
+ALTER TABLE \`metadata\` ADD \`publisher\` text;
+`
+
+export const migrationSql_0007_add_required_to_properties = `ALTER TABLE \`properties\` ADD \`required\` integer DEFAULT 0;
+`
+
+export const migrationSql_0008_add_revoked_at_to_seeds = `ALTER TABLE \`seeds\` ADD \`revoked_at\` integer;
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -176,6 +216,34 @@ export const journalJson = `{
       "when": 1768500000000,
       "tag": "0004_add_publisher_to_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1772489937031,
+      "tag": "0005_bright_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772600000000,
+      "tag": "0006_add_publisher_to_versions_and_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1772700000000,
+      "tag": "0007_add_required_to_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772800000000,
+      "tag": "0008_add_revoked_at_to_seeds",
+      "breakpoints": true
     }
   ]
 }`
@@ -185,8 +253,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "6450cc9b-cbee-45c0-92ff-794e832eb2ea",
-  "prevId": "0e6a6a99-2eb1-4b1d-815b-3d45dcae04a1",
+  "id": "c8d9e0f1-a2b3-4c8d-9e0f-123456789012",
+  "prevId": "b7c8d9e0-f1a2-4b89-0c1d-ef2345678901",
   "tables": {
     "appState": {
       "name": "appState",
@@ -435,6 +503,13 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "publisher": {
+          "name": "publisher",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -551,6 +626,13 @@ export const snapshotJson = `{
         },
         "is_edited": {
           "name": "is_edited",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "required": {
+          "name": "required",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -770,6 +852,121 @@ export const snapshotJson = `{
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "publish_processes": {
+      "name": "publish_processes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_name": {
+          "name": "model_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_id": {
+          "name": "schema_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_step": {
+          "name": "error_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_details": {
+          "name": "error_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "persisted_snapshot": {
+          "name": "persisted_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seed_id": {
+          "name": "seed_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "existing_seed_uid": {
+          "name": "existing_seed_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "schemas": {
       "name": "schemas",
       "columns": {
@@ -923,6 +1120,13 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -934,6 +1138,65 @@ export const snapshotJson = `{
           "isUnique": true
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "upload_processes": {
+      "name": "upload_processes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "reimbursement_confirmed": {
+          "name": "reimbursement_confirmed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reimbursement_transaction_id": {
+          "name": "reimbursement_transaction_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "transaction_keys": {
+          "name": "transaction_keys",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "persisted_snapshot": {
+          "name": "persisted_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -1011,6 +1274,13 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "publisher": {
+          "name": "publisher",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1038,4 +1308,5 @@ export const snapshotJson = `{
   "internal": {
     "indexes": {}
   }
-}`
+}
+`

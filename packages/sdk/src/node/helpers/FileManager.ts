@@ -46,12 +46,16 @@ class FileManager extends BaseFileManager {
   }
 
   static async listImageFiles(): Promise<string[]> {
-    const imageDir = BaseFileManager.getFilesPath('images')
-    const exists = await this.pathExists(imageDir)
+    return this.listFiles('images')
+  }
+
+  static async listFiles(dir: string): Promise<string[]> {
+    const targetDir = BaseFileManager.getFilesPath(dir)
+    const exists = await this.pathExists(targetDir)
     if (!exists) {
       return []
     }
-    const entries = await fsAsync.readdir(imageDir, { withFileTypes: true })
+    const entries = await fsAsync.readdir(targetDir, { withFileTypes: true })
     return entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
   }
 

@@ -100,6 +100,7 @@ export const createModelProperties = fromCallback<
         storageType: propData.storageType,
         localStorageDir: propData.localStorageDir,
         filenameSuffix: propData.filenameSuffix,
+        required: propData.required,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
       } as any) // Use 'as any' because _propertyFileId is not in TProperty type
     }

@@ -4,6 +4,7 @@ import {
   getItemPropertiesFromEas,
   EasClient,
   setSchemaUidForSchemaDefinition,
+  withExcludeRevokedFilter,
 } from '@seedprotocol/sdk';
 import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { gql } from 'graphql-request';
@@ -445,11 +446,11 @@ export const getFeedItemsBySchemaName = async (schemaName: string): Promise<Reco
 
   const relatedSeedUidsArray = Array.from(relatedSeedUids);
   const { itemSeeds: relatedSeeds } = await easClient.request(GET_SEEDS, {
-    where: {
+    where: withExcludeRevokedFilter({
       id: {
         in: relatedSeedUidsArray,
       },
-    },
+    }),
   });
 
   await processSeeds((relatedSeeds ?? []) as AttestationLike[]);

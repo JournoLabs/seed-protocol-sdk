@@ -81,6 +81,7 @@ export const saveHtml = fromCallback<
 
     try {
       await BaseFileManager.saveFile(filePath, htmlContent)
+      eventEmitter.emit('file-saved', filePath)
     } catch (e) {
       const fs = await BaseFileManager.getFs()
       fs.writeFileSync(filePath, htmlContent)
@@ -120,7 +121,7 @@ export const saveHtml = fromCallback<
     if (localId) {
       await updateItemPropertyValue({
         localId,
-        propertyName: propertyNameRaw,
+        propertyName,
         newValue: newHtmlSeedLocalId,
         seedLocalId,
         versionLocalId,
@@ -150,7 +151,11 @@ export const saveHtml = fromCallback<
     })
   }
 
-  _saveHtml().then(() => {
-    sendBack({ type: 'saveHtmlSuccess' })
-  })
+  _saveHtml()
+    .then(() => {
+      sendBack({ type: 'saveHtmlSuccess' })
+    })
+    .catch((error) => {
+      sendBack({ type: 'saveHtmlError', error })
+    })
 })

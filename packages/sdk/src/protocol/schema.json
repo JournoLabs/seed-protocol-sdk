@@ -303,7 +303,7 @@
     },
     "ListProperty": {
       "type": "object",
-      "required": ["type", "items"],
+      "required": ["type", "refValueType"],
       "properties": {
         "id": {
           "type": "string",
@@ -312,15 +312,14 @@
         "type": {
           "const": "List"
         },
-        "items": {
-          "description": "Element type. RelationProperty requires model; Text/Number/Boolean/Date have no model.",
-          "oneOf": [
-            {"$ref": "#/$defs/RelationProperty"},
-            {"$ref": "#/$defs/TextProperty"},
-            {"$ref": "#/$defs/NumberProperty"},
-            {"$ref": "#/$defs/BooleanProperty"},
-            {"$ref": "#/$defs/DateProperty"}
-          ]
+        "refValueType": {
+          "type": "string",
+          "description": "Element type: Text, Number, Boolean, Date, or Relation. Required for all List properties.",
+          "enum": ["Text", "Number", "Boolean", "Date", "Relation"]
+        },
+        "ref": {
+          "type": "string",
+          "description": "Model name when refValueType is Relation. Required for list of relations."
         },
         "description": {
           "type": "string"

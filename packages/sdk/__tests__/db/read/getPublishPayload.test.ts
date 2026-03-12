@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { getPublishPayload } from '@/db/read/getPublishPayload'
+import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
 import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
+  createGetPublishPayloadTestSchemaOptionalAuthor,
+  createGetPublishPayloadTestSchemaWithEnum,
   createItemWithBasicPropertiesOnly,
   createItemWithRelation,
   createItemWithList,
@@ -24,6 +26,7 @@ testDescribe('getPublishPayload integration', () => {
       timeout: 90000,
     })
     await createGetPublishPayloadTestSchema()
+    await createGetPublishPayloadTestSchemaWithEnum()
   }, 90000)
 
   afterAll(async () => {
@@ -97,7 +100,7 @@ testDescribe('getPublishPayload integration', () => {
     expect(mainPayload!.listOfAttestations.length).toBeGreaterThanOrEqual(1)
   }, 30000)
 
-  it('throws when related item is not found', async () => {
+  it('throws when related item is not found (required relation)', async () => {
     const { postItem } = await createItemWithRelation({ postTitle: 'Post with bad author' })
     const authorProp = postItem.properties.find(
       (p) => p.propertyName === 'author' || p.propertyName === 'authorId' || p.alias === 'author'
@@ -107,7 +110,27 @@ testDescribe('getPublishPayload integration', () => {
       authorProp.value = '0000000000'
       await authorProp.save()
     }
-    await expect(getPublishPayload(postItem, [])).rejects.toThrow('Related item not found')
+    await expect(getPublishPayload(postItem, [])).rejects.toThrow('No related item found for required relation')
+  }, 30000)
+
+  it('skips (no throw) when related item not found for optional relation', async () => {
+    const { schemaName } = await createGetPublishPayloadTestSchemaOptionalAuthor()
+    const postItem = await Item.create({
+      modelName: 'Post',
+      schemaName,
+      title: 'Post with optional author',
+      author: '0000000000', // Non-existent author - optional so should skip
+    })
+    await waitForPropertyInstances(postItem)
+    const authorProp = postItem.properties.find(
+      (p) => p.propertyName === 'author' || p.propertyName === 'authorId' || p.alias === 'author'
+    )
+    if (authorProp) {
+      authorProp.value = '0000000000'
+      await authorProp.save()
+    }
+    const result = await getPublishPayload(postItem, [])
+    expect(result.length).toBeGreaterThanOrEqual(1)
   }, 30000)
 
   it('with image and uploadedTransactions: includes storageTransactionId attestation when Image has placeholder property', async () => {
@@ -155,5 +178,25 @@ testDescribe('getPublishPayload integration', () => {
     expect(imagePayload).toBeDefined()
     expect(imagePayload!.listOfAttestations).toBeDefined()
     expect(imagePayload!.listOfAttestations.length).toBeGreaterThanOrEqual(1)
+  }, 30000)
+
+  it('rejects publish when Text property has invalid enum value', async () => {
+    // Schema already created in beforeAll via createGetPublishPayloadTestSchemaWithEnum
+    // Item.create uses createNewItem with skipValidation: true, so invalid enum is persisted
+    const item = await Item.create({
+      modelName: 'Article',
+      schemaName: 'Test Schema getPublishPayload Enum',
+      title: 'Test article',
+      status: 'invalid',
+    })
+    await waitForPropertyInstances(item)
+    let err: unknown
+    try {
+      await getPublishPayload(item, [])
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(PublishValidationFailedError)
+    expect((err as PublishValidationFailedError).validationErrors.some((e) => e.code === 'enum_violation')).toBe(true)
   }, 30000)
 })

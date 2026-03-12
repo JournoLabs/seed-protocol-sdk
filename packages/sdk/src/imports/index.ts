@@ -5,6 +5,7 @@ export {
 } from './markdown'
 
 export {
+  getRefValueType,
   importJsonSchema,
   loadSchemaFromFile,
   readJsonImportFile,

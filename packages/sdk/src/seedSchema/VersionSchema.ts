@@ -12,6 +12,7 @@ export const versions = sqliteTable('versions', {
   updatedAt: int('updated_at'),
   attestationCreatedAt: int('attestation_created_at'),
   attestationRaw: text('attestation_raw'),
+  publisher: text('publisher'),
 })
 
 export type VersionsType = InferSelectModel<typeof versions>

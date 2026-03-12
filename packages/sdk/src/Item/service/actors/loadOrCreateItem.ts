@@ -178,6 +178,8 @@ export const loadOrCreateItem = fromCallback<
           lastVersionPublishedAt: undefined,
           attestationCreatedAt: undefined,
           createdAt: Date.now(),
+          publisher: undefined,
+          revokedAt: undefined,
         },
       })
       return
@@ -220,6 +222,8 @@ export const loadOrCreateItem = fromCallback<
           lastVersionPublishedAt: undefined,
           attestationCreatedAt: seedRecord.attestationCreatedAt || undefined,
           createdAt: seedRecord.createdAt || Date.now(),
+          publisher: seedRecord.publisher ?? undefined,
+          revokedAt: seedRecord.revokedAt ?? undefined,
         },
       })
       return
@@ -244,6 +248,8 @@ export const loadOrCreateItem = fromCallback<
           lastVersionPublishedAt: versionRecord.lastVersionPublishedAt || undefined,
           attestationCreatedAt: seedRecord.attestationCreatedAt || undefined,
           createdAt: seedRecord.createdAt || Date.now(),
+          publisher: seedRecord.publisher ?? undefined,
+          revokedAt: seedRecord.revokedAt ?? undefined,
         },
       })
       return
@@ -287,6 +293,8 @@ export const loadOrCreateItem = fromCallback<
         lastVersionPublishedAt: versionRecord.lastVersionPublishedAt || undefined,
         attestationCreatedAt: seedRecord.attestationCreatedAt || undefined,
         createdAt: seedRecord.createdAt || Date.now(),
+        publisher: seedRecord.publisher ?? undefined,
+        revokedAt: seedRecord.revokedAt ?? undefined,
         _metadataIds: metadataRecords.map((r: any) => r.localId || r.uid).filter(Boolean),
         propertyInstances,
       },

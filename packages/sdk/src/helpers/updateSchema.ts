@@ -25,11 +25,8 @@ export type SchemaPropertyUpdate = {
   updates: {
     type?: string
     model?: string
-    items?: {
-      type: string
-      model?: string
-      [key: string]: any
-    }
+    refValueType?: string
+    ref?: string
     storage?: {
       type: string
       path?: string
@@ -325,19 +322,22 @@ export async function convertPropertyToSchemaUpdate(
   // Handle List type
   if (property.dataType === ModelPropertyDataTypes.List) {
     if (property.refValueType) {
-      updates.items = {
-        type: property.refValueType,
-      }
+      updates.refValueType = property.refValueType
       if (property.ref) {
-        updates.items.model = property.ref
+        updates.ref = property.ref
       } else if (property.refModelId) {
         // If ref is not set but refModelId is, get the model name from the database
         const refModelName = await getModelNameFromId(property.refModelId)
         if (refModelName) {
-          updates.items.model = refModelName
+          updates.ref = refModelName
         }
       }
     }
+  }
+
+  // Handle required (validation constraint)
+  if (property.required !== undefined) {
+    updates.required = property.required
   }
 
   // Handle storage configuration (for Text properties with storage)
@@ -461,6 +461,10 @@ export async function updateModelProperties(
             if (property.model === modelUpdate.oldName) {
               property.model = modelUpdate.newName
             }
+            if (property.ref === modelUpdate.oldName && (property.type === 'List' || property.dataType === 'List')) {
+              property.ref = modelUpdate.newName
+            }
+            // Legacy: items.model
             if (property.items?.model === modelUpdate.oldName) {
               property.items.model = modelUpdate.newName
             }
@@ -864,7 +868,7 @@ export async function deleteModelFromSchema(
   for (const [otherModelName, model] of Object.entries(updatedSchema.models)) {
     for (const [propertyName, property] of Object.entries(model.properties)) {
       // Check if property references the deleted model
-      if (property.model === modelName || property.items?.model === modelName) {
+      if (property.model === modelName || property.ref === modelName || property.items?.model === modelName) {
         if (removeReferencingProperties) {
           // Mark for removal
           propertiesToRemove.push({ modelName: otherModelName, propertyName })
@@ -873,10 +877,11 @@ export async function deleteModelFromSchema(
           if (property.model === modelName) {
             delete property.model
           }
+          if (property.ref === modelName && (property.type === 'List' || property.dataType === 'List')) {
+            delete property.ref
+          }
           if (property.items?.model === modelName) {
             delete property.items.model
-            // If items only had model, we might want to remove items entirely
-            // But for now, just remove the model reference
           }
         }
       }
@@ -899,7 +904,7 @@ export async function deleteModelFromSchema(
     const updatedProperties: Array<{ modelName: string; propertyName: string }> = []
     for (const [otherModelName, model] of Object.entries(updatedSchema.models)) {
       for (const [propertyName, property] of Object.entries(model.properties)) {
-        if (property.model === modelName || property.items?.model === modelName) {
+        if (property.model === modelName || property.ref === modelName || property.items?.model === modelName) {
           updatedProperties.push({ modelName: otherModelName, propertyName })
         }
       }

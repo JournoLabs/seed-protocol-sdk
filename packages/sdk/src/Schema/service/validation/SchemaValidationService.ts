@@ -1,7 +1,7 @@
 import { Value } from '@sinclair/typebox/value'
 import { TProperty } from '@/Schema'
-import { ModelPropertyDataTypes, TPropertyDataType } from '@/helpers/property'
-import { ValidationResult, ValidationError, ValidationRules } from '@/Schema/validation'
+import { ModelPropertyDataTypes, TPropertyDataType, normalizeDataType } from '@/helpers/property'
+import { ValidationResult, ValidationError, ValidationRules, DEFAULT_TEXT_MAX_LENGTH } from '@/Schema/validation'
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { ModelMachineContext } from '@/Model/service/modelMachine'
@@ -181,12 +181,20 @@ export class SchemaValidationService {
     property: ModelPropertyMachineContext
   ): ValidationResult {
     try {
-      const isValid = Value.Check(TProperty, property)
+      // Normalize dataType and refValueType for case-insensitive schema support (e.g. "relation" -> "Relation")
+      const normalized = { ...property }
+      if (typeof normalized.dataType === 'string') {
+        normalized.dataType = normalizeDataType(normalized.dataType) as any
+      }
+      if (typeof normalized.refValueType === 'string') {
+        normalized.refValueType = normalizeDataType(normalized.refValueType) as any
+      }
+      const isValid = Value.Check(TProperty, normalized)
       
       const errors: ValidationError[] = []
       
       if (!isValid) {
-        const typeBoxErrors = [...Value.Errors(TProperty, property)]
+        const typeBoxErrors = [...Value.Errors(TProperty, normalized)]
         errors.push(...typeBoxErrors.map(err => {
           const fieldPath = err.path || 'unknown'
           const fieldSchema = this.getSchemaForField(TProperty, fieldPath)
@@ -213,16 +221,16 @@ export class SchemaValidationService {
         ModelPropertyDataTypes.Html,
         ModelPropertyDataTypes.Relation,
       ]
-      if (nonListTypes.includes(property.dataType as ModelPropertyDataTypes)) {
-        const hasRefValueType = property.refValueType != null && String(property.refValueType).trim() !== ''
+      if (nonListTypes.includes(normalized.dataType as ModelPropertyDataTypes)) {
+        const hasRefValueType = normalized.refValueType != null && String(normalized.refValueType).trim() !== ''
         if (hasRefValueType) {
           // Relation may keep refValueType only for Image (relation to Image entity)
-          if (property.dataType === ModelPropertyDataTypes.Relation && property.refValueType === ModelPropertyDataTypes.Image) {
+          if (normalized.dataType === ModelPropertyDataTypes.Relation && normalized.refValueType === ModelPropertyDataTypes.Image) {
             // Allowed: Relation to Image
           } else {
             errors.push({
               field: 'refValueType',
-              message: `refValueType is only valid for List properties. Use dataType 'List' with refValueType '${property.refValueType}' for lists of ${property.refValueType}.`,
+              message: `refValueType is only valid for List properties. Use dataType 'List' with refValueType '${normalized.refValueType}' for lists of ${normalized.refValueType}.`,
               code: 'invalid_ref_value_type',
               severity: 'error' as const,
             })
@@ -231,8 +239,8 @@ export class SchemaValidationService {
       }
 
       // List: refValueType is required
-      if (property.dataType === ModelPropertyDataTypes.List) {
-        const hasRefValueType = property.refValueType != null && String(property.refValueType).trim() !== ''
+      if (normalized.dataType === ModelPropertyDataTypes.List) {
+        const hasRefValueType = normalized.refValueType != null && String(normalized.refValueType).trim() !== ''
         if (!hasRefValueType) {
           errors.push({
             field: 'refValueType',
@@ -242,10 +250,10 @@ export class SchemaValidationService {
           })
         }
         // List of relations: ref is required
-        if (hasRefValueType && property.refValueType === ModelPropertyDataTypes.Relation) {
-          const hasRef = property.ref && property.ref.trim() !== ''
-          const hasRefModelName = property.refModelName && property.refModelName.trim() !== ''
-          const hasRefModelId = property.refModelId !== undefined && property.refModelId !== null
+        if (hasRefValueType && normalized.refValueType === ModelPropertyDataTypes.Relation) {
+          const hasRef = normalized.ref && normalized.ref.trim() !== ''
+          const hasRefModelName = normalized.refModelName && normalized.refModelName.trim() !== ''
+          const hasRefModelId = normalized.refModelId !== undefined && normalized.refModelId !== null
           if (!hasRef && !hasRefModelName && !hasRefModelId) {
             errors.push({
               field: 'ref',
@@ -258,10 +266,10 @@ export class SchemaValidationService {
       }
 
       // Relation (single): ref is required
-      if (property.dataType === ModelPropertyDataTypes.Relation) {
-        const hasRef = property.ref && property.ref.trim() !== ''
-        const hasRefModelName = property.refModelName && property.refModelName.trim() !== ''
-        const hasRefModelId = property.refModelId !== undefined && property.refModelId !== null
+      if (normalized.dataType === ModelPropertyDataTypes.Relation) {
+        const hasRef = normalized.ref && normalized.ref.trim() !== ''
+        const hasRefModelName = normalized.refModelName && normalized.refModelName.trim() !== ''
+        const hasRefModelId = normalized.refModelId !== undefined && normalized.refModelId !== null
         if (!hasRef && !hasRefModelName && !hasRefModelId) {
           errors.push({
             field: 'ref',
@@ -271,7 +279,7 @@ export class SchemaValidationService {
           })
         }
         if ((hasRef || hasRefModelName) && !hasRefModelId) {
-          logger(`Property "${property.name}" has ref/refModelName but no refModelId - will be resolved asynchronously`)
+          logger(`Property "${normalized.name}" has ref/refModelName but no refModelId - will be resolved asynchronously`)
         }
       }
       
@@ -295,11 +303,16 @@ export class SchemaValidationService {
 
   /**
    * Validate a property value against its validation rules
+   * @param value - The value to validate
+   * @param dataType - The property's data type
+   * @param validationRules - Optional validation rules (enum, pattern, minLength, maxLength)
+   * @param refValueType - For List properties: the element type (Text, Number, etc.). When set, each array element is validated against this type + validationRules.
    */
   validatePropertyValue(
     value: any,
     dataType: ModelPropertyDataTypes,
-    validationRules?: ValidationRules
+    validationRules?: ValidationRules,
+    refValueType?: ModelPropertyDataTypes | string
   ): ValidationResult {
     const errors: ValidationError[] = []
     const warnings: ValidationError[] = []
@@ -315,12 +328,66 @@ export class SchemaValidationService {
         })
       }
 
+      // List with refValueType: validate each element against element schema + validation rules
+      if (dataType === ModelPropertyDataTypes.List && refValueType && Array.isArray(value)) {
+        const elementDataType = normalizeDataType(String(refValueType)) as ModelPropertyDataTypes
+        // Apply default maxLength for Text/Html elements in List
+        const elementEffectiveRules = validationRules ? { ...validationRules } : {}
+        if ((elementDataType === ModelPropertyDataTypes.Text || elementDataType === ModelPropertyDataTypes.Html) && elementEffectiveRules.maxLength === undefined) {
+          elementEffectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
+        }
+        for (let i = 0; i < value.length; i++) {
+          const elementResult = this.validatePropertyValue(
+            value[i],
+            elementDataType,
+            elementEffectiveRules
+          )
+          if (!elementResult.isValid && elementResult.errors.length > 0) {
+          for (const err of elementResult.errors) {
+            errors.push({
+              field: `value[${i}]`,
+              message: `Element at index ${i}: ${err.message}`,
+              code: validationRules?.enum && Array.isArray(validationRules.enum) && validationRules.enum.length > 0 ? 'enum_violation' : err.code,
+              severity: err.severity,
+            })
+          }
+          }
+        }
+        if (validationRules) {
+          const customErrors = this.validateCustomRules(value, validationRules)
+          errors.push(...customErrors)
+        }
+        return {
+          isValid: errors.length === 0,
+          errors,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        }
+      }
+
+      // List without refValueType or non-array: validate as scalar/array
+      if (dataType === ModelPropertyDataTypes.List && !Array.isArray(value) && value != null) {
+        errors.push({
+          field: 'value',
+          message: 'List properties require an array value.',
+          code: 'array_required',
+          severity: 'error' as const,
+        })
+        return { isValid: false, errors }
+      }
+
       // Build base TypeBox schema from dataType
       let schema: TSchema = this.getBaseSchemaForDataType(dataType)
 
+      // Apply default maxLength for Text/Html when not explicitly set (Option A)
+      const effectiveRules = validationRules ? { ...validationRules } : {}
+      if ((dataType === ModelPropertyDataTypes.Text || dataType === ModelPropertyDataTypes.Html) && effectiveRules.maxLength === undefined) {
+        effectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
+      }
+
       // Apply validation rules
-      if (validationRules) {
-        schema = this.applyValidationRules(schema, dataType, validationRules)
+      const hasEnumRules = !!(validationRules?.enum && Array.isArray(validationRules.enum) && validationRules.enum.length > 0)
+      if (Object.keys(effectiveRules).length > 0) {
+        schema = this.applyValidationRules(schema, dataType, effectiveRules)
       }
 
       // Validate using TypeBox
@@ -328,14 +395,22 @@ export class SchemaValidationService {
       
       if (!isValid) {
         const typeBoxErrors = [...Value.Errors(schema, value)]
+        const effectiveMaxLength = effectiveRules.maxLength
         errors.push(...typeBoxErrors.map(err => {
           const fieldPath = err.path || 'value'
-          const enhancedMessage = this.enhanceErrorMessage(err, schema, fieldPath)
+          const originalMessage = (err.message || '').toLowerCase()
+          // TypeBox maxLength errors have message like "Expected string length less or equal to X"
+          const isMaxLengthError = originalMessage.includes('length') && (originalMessage.includes('less') || originalMessage.includes('equal') || originalMessage.includes('max'))
+          const enhancedMessage = isMaxLengthError && effectiveMaxLength !== undefined
+            ? `Text must be ${effectiveMaxLength} characters or less. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
+            : this.enhanceErrorMessage(err, schema, fieldPath)
+          // Use enum_violation when validation failed and we had enum rules (TypeBox may return various error types)
+          const code = hasEnumRules ? 'enum_violation' : String(err.type || 'value_validation_error')
           
           return {
             field: fieldPath,
             message: enhancedMessage,
-            code: String(err.type || 'value_validation_error'),
+            code,
             severity: 'error' as const,
           }
         }))
@@ -450,28 +525,29 @@ export class SchemaValidationService {
       }
     }
 
-    // Validate List: requires items with type; model required only when items.type === 'Relation'
-    if (propertyDefinition.type === 'List') {
-      const items = (propertyDefinition as any).items
-      if (!items || !items.type) {
+    // Validate List: requires refValueType; ref (model) required only when refValueType === 'Relation' (case-insensitive)
+    if (propertyDefinition.type === 'List' || (propertyDefinition as any).dataType === 'List') {
+      const rawRefValueType = (propertyDefinition as any).refValueType ?? (propertyDefinition as any).items?.type ?? (propertyDefinition as any).refvaluetype
+      const refValueType = rawRefValueType ? normalizeDataType(String(rawRefValueType)) : undefined
+      if (!refValueType || String(refValueType).trim() === '') {
         errors.push({
-          field: 'property.items',
-          message: 'List properties require "items" with "type" (e.g. items: { type: "Text" } or items: { type: "Relation", model: "Tag" })',
-          code: 'missing_items',
+          field: 'property.refValueType',
+          message: 'List properties require "refValueType" (e.g. refValueType: "Text" or refValueType: "Relation" with ref: "Tag")',
+          code: 'missing_ref_value_type',
           severity: 'error' as const,
         })
-      } else if (items.type === 'Relation' || items.type === 'RelationProperty') {
-        const model = items.model || propertyDefinition.model
+      } else if (refValueType === 'Relation' || refValueType === 'RelationProperty') {
+        const model = (propertyDefinition as any).ref ?? (propertyDefinition as any).model ?? (propertyDefinition as any).items?.model
         if (!model || String(model).trim() === '') {
           errors.push({
-            field: 'property.items.model',
-            message: 'List of relations requires "items.model" to specify the related model',
+            field: 'property.ref',
+            message: 'List of relations requires "ref" to specify the related model',
             code: 'missing_ref',
             severity: 'error' as const,
           })
         } else if (schema.models && !schema.models[model]) {
           errors.push({
-            field: 'property.items.model',
+            field: 'property.ref',
             message: `Referenced model "${model}" not found in schema`,
             code: 'invalid_reference',
             severity: 'error' as const,

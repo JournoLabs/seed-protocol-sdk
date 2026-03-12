@@ -170,6 +170,7 @@ export const saveImage = fromCallback<
     if (fileData instanceof ArrayBuffer) {
       try {
         await BaseFileManager.saveFile(filePath, fileData)
+        eventEmitter.emit('file-saved', filePath)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, new Uint8Array(fileData))
@@ -180,6 +181,7 @@ export const saveImage = fromCallback<
     if (typeof fileData === 'string') {
       try {
         await BaseFileManager.saveFile(filePath, fileData)
+        eventEmitter.emit('file-saved', filePath)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, fileData)
@@ -229,7 +231,7 @@ export const saveImage = fromCallback<
     if (localId) {
       await updateItemPropertyValue({
         localId: localId,
-        propertyName: propertyNameRaw,
+        propertyName,
         newValue: newImageSeedLocalId,
         seedLocalId,
         versionLocalId,
@@ -259,7 +261,11 @@ export const saveImage = fromCallback<
     })
   }
 
-  _saveImage().then(() => {
-    sendBack({ type: 'saveImageSuccess' })
-  })
+  _saveImage()
+    .then(() => {
+      sendBack({ type: 'saveImageSuccess' })
+    })
+    .catch((error) => {
+      sendBack({ type: 'saveImageError', error })
+    })
 })

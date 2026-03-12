@@ -94,6 +94,8 @@ const TRACKED_PROPERTIES = [
   'schemaUid',
   'latestVersionLocalId',
   'latestVersionUid',
+  'publisher',
+  'revokedAt',
 ] as const
 
 // WeakMap to store mutable state per Item instance
@@ -120,6 +122,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       latestVersionLocalId,
       latestVersionUid,
       modelInstance,
+      publisher,
     } = initialValues
 
     // Store modelInstance if provided (for backward compatibility)
@@ -136,6 +139,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         modelName,
         latestVersionLocalId,
         latestVersionUid,
+        publisher,
         storageTransactionId: this._storageTransactionId,
         // ModelClass is no longer needed - Item loads properties from database independently
       },
@@ -250,11 +254,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (INTERNAL_PROPERTY_NAMES.includes(key)) {
         continue
       }
+      const propSchema = propertySchemas[key] ?? undefined
       this._createPropertyInstance({
         ...itemPropertyBase,
         propertyName: key,
         propertyValue: (initialValues as Record<string, unknown>)[key] ?? undefined,
-        propertyRecordSchema: propertySchemas[key] ?? undefined,
+        propertyRecordSchema: propSchema,
       })
     }
   }
@@ -331,6 +336,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             // Handle special properties
             if (prop === '_service') {
               return Reflect.set(target, prop, value)
+            }
+            
+            if (typeof prop === 'string' && prop === 'publisher') {
+              throw new Error('Cannot set item.publisher: publisher is read-only.')
             }
             
             // Handle tracked properties
@@ -535,6 +544,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // Handle special properties
         if (prop === '_service') {
           return Reflect.set(target, prop, value)
+        }
+        
+        if (typeof prop === 'string' && prop === 'publisher') {
+          throw new Error('Cannot set item.publisher: publisher is read-only.')
         }
         
         // Handle tracked properties
@@ -816,6 +829,33 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     })
   }
 
+  unpublish = async (): Promise<void> => {
+    const { assertItemOwned } = await import('@/helpers/ownership')
+    const { getRevokeExecutor } = await import('@/helpers/publishConfig')
+    await assertItemOwned(this)
+    const seedUid = this.seedUid
+    if (!seedUid) {
+      throw new Error('Item is not published. Cannot unpublish.')
+    }
+    const seedSchemaUid = this.schemaUid
+    if (!seedSchemaUid) {
+      throw new Error('Item has no schema UID. Cannot unpublish.')
+    }
+    const revoke = getRevokeExecutor()
+    if (!revoke) {
+      throw new Error(
+        'Revocation is not configured. Call initPublish() from @seedprotocol/publish before using unpublish().'
+      )
+    }
+    await revoke({
+      seedLocalId: this.seedLocalId,
+      seedUid,
+      seedSchemaUid,
+    })
+    const revokedAt = Math.floor(Date.now() / 1000)
+    this._service.send({ type: 'updateContext', revokedAt })
+  }
+
   publish = async (): Promise<void> => {
     const { assertItemOwned } = await import('@/helpers/ownership')
     await assertItemOwned(this)
@@ -864,12 +904,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return await getPublishPayload(this, uploadedTransactions)
   }
 
-  persistSeedUid = async (): Promise<void> => {
+  persistSeedUid = async (publisher?: string): Promise<void> => {
     const ctx = this._getSnapshotContext()
     const seedLocalId = ctx.seedLocalId
     const seedUid = ctx.seedUid
     if (seedLocalId && seedUid && typeof seedUid === 'string' && seedUid.length > 0) {
-      await updateSeedUid({ seedLocalId, seedUid })
+      await updateSeedUid({ seedLocalId, seedUid, publisher })
     }
   }
 
@@ -911,6 +951,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   get modelName(): string {
     return this.serviceContext.modelName as string
+  }
+
+  get publisher(): string | undefined {
+    return this.serviceContext.publisher
+  }
+
+  get revokedAt(): number | undefined {
+    return this.serviceContext.revokedAt
+  }
+
+  get isRevoked(): boolean {
+    const revokedAt = this.serviceContext.revokedAt
+    return typeof revokedAt === 'number' && revokedAt > 0
   }
 
   /**

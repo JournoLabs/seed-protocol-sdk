@@ -215,6 +215,7 @@ export const getPropertySchema = async (
             modelName,
             refModelId: propertyRecord.refModelId || undefined,
             refValueType: (propertyRecord.refValueType as any) || undefined,
+            required: (propertyRecord as { required?: boolean }).required ?? undefined,
             // Include schemaFileId from database as _propertyFileId for ModelProperty.create()
             _propertyFileId: propertyRecord.schemaFileId || undefined,
           }

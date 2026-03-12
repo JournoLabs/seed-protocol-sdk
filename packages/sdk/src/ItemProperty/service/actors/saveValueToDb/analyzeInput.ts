@@ -58,10 +58,24 @@ export const analyzeInput = fromCallback<
     // Use dynamic import to break circular dependency
     const schemaMod = await import('../../../../Schema')
     const { ModelPropertyDataTypes } = schemaMod
-    
+    const { SchemaValidationService } = await import('../../../../Schema/service/validation/SchemaValidationService')
+
     let propertyName = propertyNameRaw
     if (!propertyName) {
       throw new Error('propertyName is required')
+    }
+
+    // Validate value against property validation rules (enum, pattern, minLength, maxLength) before any save
+    const validationService = new SchemaValidationService()
+    const validationResult = validationService.validatePropertyValue(
+      newValue,
+      propertyRecordSchema.dataType as any,
+      propertyRecordSchema.validation,
+      propertyRecordSchema.refValueType as string | undefined
+    )
+    if (!validationResult.isValid) {
+      sendBack({ type: 'saveValueValidationError', errors: validationResult.errors })
+      return false
     }
 
     if (

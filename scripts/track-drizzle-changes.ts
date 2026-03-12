@@ -1,13 +1,24 @@
 #!/usr/bin/env tsx
 /**
  * Script to track Drizzle schema changes in src/seedSchema
- * 
+ *
  * This script:
  * 1. Creates .seed directory if it doesn't exist
  * 2. Checks if migrations have been generated before
  * 3. Runs drizzle-kit generate to detect/create migrations
  * 4. If new migrations are detected, copies them to src/db/drizzle
  * 5. Updates src/browser/db/drizzleFiles.ts with the new migration files
+ *
+ * MANUAL MIGRATIONS:
+ * When adding a migration file manually (e.g. 0006_add_publisher.sql), you MUST also add
+ * a matching snapshot file (meta/0006_snapshot.json). Drizzle-kit uses the snapshot chain
+ * to detect schema drift—without it, the next `drizzle:track` run will generate a
+ * duplicate migration for the same schema changes.
+ *
+ * To create the snapshot: copy the previous snapshot (e.g. 0005_snapshot.json), apply
+ * your migration's schema changes to the JSON, set prevId to the previous snapshot's id,
+ * and give it a new unique id. Or use `drizzle-kit generate --custom --name=your_migration`
+ * to create an empty migration, then edit the SQL.
  */
 
 import { execSync } from 'child_process'
@@ -311,7 +322,7 @@ async function main() {
   let generateSucceeded = false
   try {
     execSync(
-      `npx drizzle-kit generate --config=${DRIZZLE_CONFIG_PATH}`,
+      `bunx drizzle-kit generate --config=${DRIZZLE_CONFIG_PATH}`,
       { stdio: 'inherit', cwd: PROJECT_ROOT }
     )
     generateSucceeded = true

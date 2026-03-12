@@ -48,6 +48,7 @@ export const propertyMachine = setup({
     save: {
       actions: assign({
         isSaving: true,
+        _saveError: undefined,
       }),
       target: '.saving',
     },
@@ -85,6 +86,16 @@ export const propertyMachine = setup({
     },
     clearDestroyError: {
       actions: assign({ _destroyError: null }),
+    },
+    saveValueValidationError: {
+      target: '.idle',
+      actions: assign({
+        isSaving: false,
+        _saveValidationErrors: ({ event }) => (event as { type: 'saveValueValidationError'; errors: any[] }).errors,
+      }),
+    },
+    clearSaveError: {
+      actions: assign({ _saveError: null }),
     },
   },
   states: {
@@ -221,6 +232,18 @@ export const propertyMachine = setup({
         savingImage: {
           on: {
             saveImageSuccess: 'doneSaving',
+            saveImageError: {
+              target: 'doneSaving',
+              actions: assign({
+                _saveError: ({ event }) =>
+                  (event as { type: 'saveImageError'; error: unknown }).error instanceof Error
+                    ? {
+                        message: (event as { type: 'saveImageError'; error: Error }).error.message,
+                        name: (event as { type: 'saveImageError'; error: Error }).error.name,
+                      }
+                    : { message: String((event as { type: 'saveImageError'; error: unknown }).error) },
+              }),
+            },
           },
           invoke: {
             src: 'saveImage',
@@ -233,6 +256,18 @@ export const propertyMachine = setup({
         savingFile: {
           on: {
             saveFileSuccess: 'doneSaving',
+            saveFileError: {
+              target: 'doneSaving',
+              actions: assign({
+                _saveError: ({ event }) =>
+                  (event as { type: 'saveFileError'; error: unknown }).error instanceof Error
+                    ? {
+                        message: (event as { type: 'saveFileError'; error: Error }).error.message,
+                        name: (event as { type: 'saveFileError'; error: Error }).error.name,
+                      }
+                    : { message: String((event as { type: 'saveFileError'; error: unknown }).error) },
+              }),
+            },
           },
           invoke: {
             src: 'saveFile',
@@ -244,6 +279,18 @@ export const propertyMachine = setup({
         savingHtml: {
           on: {
             saveHtmlSuccess: 'doneSaving',
+            saveHtmlError: {
+              target: 'doneSaving',
+              actions: assign({
+                _saveError: ({ event }) =>
+                  (event as { type: 'saveHtmlError'; error: unknown }).error instanceof Error
+                    ? {
+                        message: (event as { type: 'saveHtmlError'; error: Error }).error.message,
+                        name: (event as { type: 'saveHtmlError'; error: Error }).error.name,
+                      }
+                    : { message: String((event as { type: 'saveHtmlError'; error: unknown }).error) },
+              }),
+            },
           },
           invoke: {
             src: 'saveHtml',
@@ -255,6 +302,18 @@ export const propertyMachine = setup({
         savingRelation: {
           on: {
             saveRelationSuccess: 'doneSaving',
+            saveRelationError: {
+              target: 'doneSaving',
+              actions: assign({
+                _saveError: ({ event }) =>
+                  (event as { type: 'saveRelationError'; error: unknown }).error instanceof Error
+                    ? {
+                        message: (event as { type: 'saveRelationError'; error: Error }).error.message,
+                        name: (event as { type: 'saveRelationError'; error: Error }).error.name,
+                      }
+                    : { message: String((event as { type: 'saveRelationError'; error: unknown }).error) },
+              }),
+            },
           },
           invoke: {
             src: 'saveRelation',
@@ -267,6 +326,18 @@ export const propertyMachine = setup({
         savingItemStorage: {
           on: {
             saveItemStorageSuccess: 'doneSaving',
+            saveItemStorageError: {
+              target: 'doneSaving',
+              actions: assign({
+                _saveError: ({ event }) =>
+                  (event as { type: 'saveItemStorageError'; error: unknown }).error instanceof Error
+                    ? {
+                        message: (event as { type: 'saveItemStorageError'; error: Error }).error.message,
+                        name: (event as { type: 'saveItemStorageError'; error: Error }).error.name,
+                      }
+                    : { message: String((event as { type: 'saveItemStorageError'; error: unknown }).error) },
+              }),
+            },
           },
           invoke: {
             src: 'saveItemStorage',
@@ -282,10 +353,9 @@ export const propertyMachine = setup({
       },
       onDone: {
         target: 'idle',
-        actions: assign(({ context }) => {
-          return {
-            isSaving: false,
-          }
+        actions: assign({
+          isSaving: false,
+          _saveValidationErrors: undefined,
         }),
       },
     },

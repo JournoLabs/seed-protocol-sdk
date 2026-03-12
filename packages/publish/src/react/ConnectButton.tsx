@@ -1,7 +1,7 @@
 import React, { FC } from "react"
 import { ConnectButton as ConnectButtonThirdweb, darkTheme } from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
-import { getClient, getWalletsForConnectButton } from "../helpers/thirdweb"
+import { getClient, getConnectedManagedAccountAddress, getWalletsForConnectButton } from "../helpers/thirdweb"
 import { getPublishConfig } from "../config"
 import { optimismSepolia } from "thirdweb/chains"
 import { getContract, sendTransaction, waitForReceipt } from "thirdweb"
@@ -58,6 +58,20 @@ const ConnectButton: FC = () => {
     const account = activeWallet.getAccount()
     if (!account) return
     console.log('[ConnectButton] Connected', account.address)
+    const owned = new Set<string>([account.address.toLowerCase()])
+    if (getPublishConfig().useModularExecutor) {
+      try {
+        const managedAddr = await getConnectedManagedAccountAddress(optimismSepolia)
+        if (managedAddr) owned.add(managedAddr.toLowerCase())
+      } catch {
+        /* managed account may not exist yet */
+      }
+    }
+    try {
+      await seedClient.setAddresses({ owned: [...owned] })
+    } catch (err) {
+      console.warn('[ConnectButton] Failed to set seed client addresses:', err)
+    }
     try {
       await ensureModularAccountModule(account)
     } catch (err) {

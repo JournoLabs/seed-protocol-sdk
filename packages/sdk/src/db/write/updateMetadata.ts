@@ -22,6 +22,18 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
   if (!localId) {
     throw new Error('No localId provided to updateMetadata')
   }
+
+  // Publisher is immutable once set: do not overwrite existing publisher
+  if (rest.publisher != null && rest.publisher !== '') {
+    const [row] = await appDb
+      .select({ publisher: metadata.publisher })
+      .from(metadata)
+      .where(eq(metadata.localId, localId))
+      .limit(1)
+    if (row?.publisher != null && row.publisher !== '') {
+      delete rest.publisher
+    }
+  }
   
   const isItemStorage = propertyRecordSchema && propertyRecordSchema.storageType === 'ItemStorage'
 

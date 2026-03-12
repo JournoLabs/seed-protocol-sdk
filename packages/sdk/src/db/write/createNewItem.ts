@@ -60,6 +60,7 @@ export const createNewItem = async ({
         modelName,
       } as Parameters<typeof createMetadata>[0],
       propertyRecordSchema,
+      { skipValidation: true },
     )
   }
 

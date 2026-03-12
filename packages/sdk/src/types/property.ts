@@ -63,6 +63,10 @@ export type PropertyMachineContext = Partial<MetadataType> & {
   /** Destroy lifecycle (for destroy hooks). */
   _destroyInProgress?: boolean
   _destroyError?: { message: string; name?: string } | null
+  /** Validation errors from last failed save (enum, pattern, etc.). Cleared on successful save. */
+  _saveValidationErrors?: import('@/Schema/validation').ValidationError[]
+  /** Error from last failed save (e.g. file save, metadata creation). Cleared on successful save. */
+  _saveError?: { message: string; name?: string } | null
 }
 
 export type ItemPropertyValueType =

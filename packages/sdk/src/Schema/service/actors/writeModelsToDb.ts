@@ -112,9 +112,9 @@ export const writeModelsToDb = fromCallback<
                     
                     // Handle List type
                     if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
-                      jsonProp.items = { type: schemaProp.refValueType }
+                      jsonProp.refValueType = schemaProp.refValueType
                       if (schemaProp.ref || schemaProp.refModelName) {
-                        jsonProp.items.model = schemaProp.refModelName || schemaProp.ref
+                        jsonProp.ref = schemaProp.refModelName || schemaProp.ref
                       }
                     }
                     

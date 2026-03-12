@@ -4,9 +4,9 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: sdk, feed, publish, cli
+ * Packages: sdk, react, feed, publish, cli, ghost
  *
- * - If publishing 'feed', 'publish', or 'cli', checks that @seedprotocol/sdk@<version> is published
+ * - If publishing 'react', 'feed', 'publish', or 'cli', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
  * - If user declines, script exits
  * - If user accepts (or SDK already published), publishes the requested package
@@ -23,7 +23,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['sdk', 'feed', 'publish', 'cli']
+const VALID_PACKAGES = ['sdk', 'react', 'feed', 'publish', 'cli', 'ghost']
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')
@@ -140,7 +140,7 @@ async function main() {
 
     if (!sdkPublished) {
       console.log(`\n⚠️  @seedprotocol/sdk@${sdkVersion} is not published on npm.`)
-      console.log('   The feed, publish, and cli packages depend on it, so it must be published first.\n')
+      console.log('   The feed, publish, cli, and ghost packages depend on it, so it must be published first.\n')
 
       const answer = await prompt('Do you want to publish the SDK now? (y/n): ')
 

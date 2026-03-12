@@ -2,6 +2,10 @@
 
 ## Configuration
 
+### Revoked attestations
+
+Revoked attestations are excluded from feed queries by default. Items that have been unpublished (`item.unpublish()`) will not appear in feeds or discovery.
+
 ### Caching (dev mode)
 
 In development (`NODE_ENV=development`), feed caching is **disabled by default** so you always see fresh content. Set `CACHE_ENABLED=true` to enable caching in dev. See `packages/feed/src/cache/README.md` for full cache configuration.

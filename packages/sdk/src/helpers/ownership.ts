@@ -3,6 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
 import { eq, or } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
+import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 
 const READ_ONLY_ERROR = 'Item is read-only: you do not own this item'
 
@@ -49,6 +50,8 @@ function getPublisherFromRow(row: SeedRow): string | null {
 /**
  * Checks if the current user owns the item (publisher is in owned addresses).
  * Locally created items (no publisher, no attestationRaw) are considered owned.
+ * Includes getAdditionalSyncAddresses (e.g. modular executor contract) so ownership
+ * aligns with EAS sync - items attested by the executor are considered owned.
  */
 export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean> {
   const row = await getSeedRowForItem(item)
@@ -62,8 +65,23 @@ export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean>
     return false
   }
 
-  const ownedAddresses = await getOwnedAddressesFromDb()
-  return ownedAddresses.includes(publisher)
+  let addressesToCheck = await getOwnedAddressesFromDb()
+  const additionalGetter = getGetAdditionalSyncAddresses()
+  if (additionalGetter) {
+    const additional = await additionalGetter()
+    if (additional?.length) {
+      const seen = new Set(addressesToCheck.map((a) => a.toLowerCase()))
+      for (const addr of additional) {
+        if (addr && !seen.has(addr.toLowerCase())) {
+          seen.add(addr.toLowerCase())
+          addressesToCheck = [...addressesToCheck, addr]
+        }
+      }
+    }
+  }
+
+  const ownedSet = new Set(addressesToCheck.map((a) => a.toLowerCase()))
+  return ownedSet.has(publisher.toLowerCase())
 }
 
 /**
