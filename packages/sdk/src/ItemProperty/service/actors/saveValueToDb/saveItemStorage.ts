@@ -37,10 +37,8 @@ export const saveItemStorage = fromCallback<
     newValue = event.newValue
   }
 
-  if (existingValue === newValue) {
-    sendBack({ type: 'saveValueToDbSuccess' })
-    return
-  }
+  // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
+  // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
 
   const _saveItemStorage = async (): Promise<boolean> => {
     // Save value to file

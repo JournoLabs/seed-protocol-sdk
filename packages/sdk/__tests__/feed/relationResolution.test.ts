@@ -5,8 +5,8 @@
  * and legacy naming convention (image_id).
  */
 
-import { describe, it, expect } from 'vitest'
-import { createFeed } from '@seedprotocol/feed'
+import { describe, it, expect, afterEach } from 'vitest'
+import { createFeed, loadFeedConfig } from '@seedprotocol/feed'
 
 describe('Feed relation resolution', () => {
   describe('RSS output with resolved image relation', () => {
@@ -67,6 +67,94 @@ describe('Feed relation resolution', () => {
       expect(rss).toContain('https://arweave.net/url2')
       const imageTags = rss.match(/<image>[\s\S]*?<\/image>/g) || []
       expect(imageTags.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
+  describe('RSS output with expanded author relation', () => {
+    it('serializes expanded author object as nested XML in <author>', async () => {
+      const items = [
+        {
+          seedUid: '0xpost123',
+          title: 'Getting Started',
+          text: 'Content',
+          author: {
+            name: 'Test User',
+            seedUid: '0xf8a7e27935e0da0203e53f6bf2a698149adb3fdb3212e2145c19946f4c7ffdda',
+            link: 'https://optimism-sepolia.easscan.org/attestation/view/0xf8a7e27935e0da0203e53f6bf2a698149adb3fdb3212e2145c19946f4c7ffdda',
+            timeCreated: 1773361995,
+          },
+          timeCreated: Math.floor(Date.now() / 1000),
+        },
+      ]
+
+      const rss = await createFeed(items, 'post', 'rss')
+
+      expect(rss).toContain('<author>')
+      expect(rss).toContain('<name>Test User</name>')
+      expect(rss).toContain('<seedUid>0xf8a7e27935e0da0203e53f6bf2a698149adb3fdb3212e2145c19946f4c7ffdda</seedUid>')
+      expect(rss).toContain('dc:creator')
+    })
+
+    it('serializes authors array with expanded objects as nested XML', async () => {
+      const items = [
+        {
+          seedUid: '0xpost456',
+          title: 'Co-authored post',
+          text: 'Content',
+          authors: [
+            {
+              name: 'Alice',
+              seedUid: '0xalice123',
+              link: 'https://example.com/alice',
+              timeCreated: 1773361995,
+            },
+            {
+              name: 'Bob',
+              seedUid: '0xbob456',
+              link: 'https://example.com/bob',
+              timeCreated: 1773361995,
+            },
+          ],
+          timeCreated: Math.floor(Date.now() / 1000),
+        },
+      ]
+
+      const rss = await createFeed(items, 'post', 'rss')
+
+      expect(rss).toContain('<name>Alice</name>')
+      expect(rss).toContain('<name>Bob</name>')
+      expect(rss).toContain('<seedUid>0xalice123</seedUid>')
+      expect(rss).toContain('<seedUid>0xbob456</seedUid>')
+    })
+  })
+
+  describe('expandRelations config', () => {
+    const originalEnv = process.env.FEED_EXPAND_RELATIONS
+
+    afterEach(() => {
+      if (originalEnv !== undefined) {
+        process.env.FEED_EXPAND_RELATIONS = originalEnv
+      } else {
+        delete process.env.FEED_EXPAND_RELATIONS
+      }
+    })
+
+    it('returns expandRelations: true by default', () => {
+      delete process.env.FEED_EXPAND_RELATIONS
+      const config = loadFeedConfig()
+      expect(config.expandRelations).toBe(true)
+    })
+
+    it('returns expandRelations: false when FEED_EXPAND_RELATIONS=false', () => {
+      process.env.FEED_EXPAND_RELATIONS = 'false'
+      const config = loadFeedConfig()
+      expect(config.expandRelations).toBe(false)
+    })
+
+    it('returns expandRelations: true when FEED_EXPAND_RELATIONS=true', () => {
+      process.env.FEED_EXPAND_RELATIONS = 'true'
+      const config = loadFeedConfig()
+      expect(config.expandRelations).toBe(true)
     })
   })
 })

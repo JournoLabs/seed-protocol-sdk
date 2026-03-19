@@ -126,6 +126,24 @@ async function getFileFromOPFS(path: string): Promise<File> {
 
 }
 
+/** Infer MIME from magic bytes. OPFS File may have empty type, causing createImageBitmap to fail. */
+async function getBlobWithInferredMime(file: File): Promise<Blob> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let mime = file.type;
+  if (!mime || mime === '') {
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) mime = 'image/jpeg';
+    else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) mime = 'image/png';
+    else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x52 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mime = 'image/webp';
+    else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) mime = 'image/gif';
+    else if (bytes[0] === 0x42 && bytes[1] === 0x4d) mime = 'image/bmp';
+    else if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 && bytes[8] === 0x61 && bytes[9] === 0x76 && bytes[10] === 0x69 && bytes[11] === 0x66) mime = 'image/avif';
+    else if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 && bytes[8] === 0x68 && bytes[9] === 0x65 && bytes[10] === 0x69 && bytes[11] === 0x63) mime = 'image/heic';
+    else mime = 'image/jpeg';
+  }
+  return new Blob([buf], { type: mime });
+}
+
 const DEFAULT_CONFIG = {
 	argorithm: 'null',
 	processByHalf: true,
@@ -405,7 +423,6 @@ async function saveBlobToOPFS(filePath: string, blob: Blob): Promise<void> {
 
 
 const imageResize = async (filePath: string, width: number, height: number) => {
-
   const config: BrowserImageResizerConfig = {
     ...DEFAULT_CONFIG,
     algorithm: 'hermite_single' as const,
@@ -421,7 +438,8 @@ const imageResize = async (filePath: string, width: number, height: number) => {
 
   const file = await getFileFromOPFS(filePath);
 
-  const imageBitmap = await createImageBitmap(file);
+  const blobWithMime = await getBlobWithInferredMime(file);
+  const imageBitmap = await createImageBitmap(blobWithMime);
 
   let converting: OffscreenCanvas
 
@@ -470,7 +488,6 @@ const imageResize = async (filePath: string, width: number, height: number) => {
   const newDirPath = newSegments.join('/');
   const newFilePath = `${newDirPath}/${newFileName}`;
 
-  // Save resized image to OPFS with new name
   await saveBlobToOPFS(newFilePath, resizedBlob)
   globalThis.postMessage({
     done: true,
@@ -484,7 +501,11 @@ onmessage = async (e) => {
   if (!debug) {
     console.log = () => {}
   }
-  await imageResize(filePath, width, height)
+  try {
+    await imageResize(filePath, width, height)
+  } catch (err) {
+    globalThis.postMessage({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 }.toString()
 }

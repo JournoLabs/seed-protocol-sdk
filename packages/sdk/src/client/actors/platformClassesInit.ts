@@ -104,7 +104,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       return
     }
     
-    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile } = config
+    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile, schema } = config
 
     // Note: Validation already happened above, but we have endpoints here for path normalization
 
@@ -161,6 +161,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       filesDir: normalizedFilesDir,
       dbConfig,
       schemaFile,
+      schema,
     } })
     
     if (arweaveDomain) {

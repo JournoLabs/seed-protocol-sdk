@@ -3,7 +3,11 @@
  * Subscribe actor uses this to call savePublish and onPublishDone.
  */
 export type PublishManagerRef = {
-  savePublish: (seedLocalId: string, publishProcess: { getPersistedSnapshot?: () => unknown; getSnapshot: () => unknown }) => void
+  savePublish: (
+    seedLocalId: string,
+    publishProcess: { getPersistedSnapshot?: () => unknown; getSnapshot: () => unknown },
+    options?: { triggerPublishDone?: boolean }
+  ) => void
   onPublishDone: (seedLocalId: string) => void
   removeSubscription: (seedLocalId: string) => void
 }

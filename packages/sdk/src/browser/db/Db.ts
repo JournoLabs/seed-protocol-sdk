@@ -81,16 +81,25 @@ class Db extends BaseDb implements IDb {
       // Store SQLocalDrizzle instance for reactive queries
       this.sqlocalInstance = sqlocalDrizzle
 
-      this.appDb = drizzle(
-        driver, 
-        batchDriver, 
-        { 
-          schema, 
-        })
+      // Create db instance but do NOT set this.appDb yet. restoreFromDb (and other
+      // callers of getAppDb()) must not see the db until migrations have completed,
+      // otherwise they may query tables (e.g. publish_processes) that don't exist yet.
+      const db = drizzle(
+        driver,
+        batchDriver,
+        {
+          schema,
+        }
+      )
 
       logger('[Db.prepareDb] database prepared')
 
-      await this.migrate()
+      await this.runMigrations(db)
+
+      this.appDb = db
+
+      const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
+      await backfillMetadataPropertyIds()
 
       return this.appDb
     } catch (error) {
@@ -247,46 +256,46 @@ class Db extends BaseDb implements IDb {
     }
   }
 
-  static async migrate(): Promise<void> {
-
-    if (!this.appDb) {
-      throw new Error('Database not prepared')
-    }
-
-    const pathToDbDir = `${this.filesDir}/db`
+  /** Internal migration runner. Used by prepareDb before appDb is set. */
+  private static async runMigrations(
+    db: SqliteRemoteDatabase<Record<string, unknown>>,
+    pathToDbDir?: string
+  ): Promise<void> {
+    const migrationsFolder = pathToDbDir ?? `${this.filesDir}/db`
 
     try {
-
-      logger('[Db.migrate] calling readMigrationFiles')
-      
+      logger('[Db.runMigrations] calling readMigrationFiles')
       const migrations = readMigrationFiles({
-        migrationsFolder: pathToDbDir,
+        migrationsFolder,
       })
+      logger('[Db.runMigrations] migrations', migrations)
 
-      logger('[Db.migrate] migrations', migrations)
-  
       await drizzleMigrate(
-        this.appDb,
+        db,
         async (queriesToRun) => {
           logger('queriesToRun', queriesToRun)
           for (const query of queriesToRun) {
             logger('query', query)
-            await this.appDb?.run(sql.raw(query))
+            await db.run(sql.raw(query))
           }
         },
         {
-          migrationsFolder: pathToDbDir,
+          migrationsFolder,
         },
       )
-
-      logger('[Db.migrate] migrations completed')
-      
+      logger('[Db.runMigrations] migrations completed')
     } catch (error) {
-      logger('[Db.migrate] error', JSON.stringify(error))
+      logger('[Db.runMigrations] error', JSON.stringify(error))
       throw error
     }
-      
+  }
 
+  static async migrate(pathToDbDir: string, _dbName: string, _dbId: string): Promise<void> {
+    const targetDb = this.appDb
+    if (!targetDb) {
+      throw new Error('Database not prepared')
+    }
+    await this.runMigrations(targetDb, pathToDbDir)
   }
 
   // static async migrate(): Promise<void> {

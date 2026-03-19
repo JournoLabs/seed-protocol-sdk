@@ -17,8 +17,10 @@ const toHex32 = (v: unknown): string => {
   return '0x' + '0'.repeat(BYTES32_LEN)
 }
 
-const VERIFY_DELAY_MS = 2000
-const VERIFY_MAX_ATTEMPTS = 3
+/** Delay between verification retries. EAS indexing can lag; longer delay improves success rate. */
+const VERIFY_DELAY_MS = 5000
+/** Max retries before giving up. EAS indexing can take 10–30+ seconds in high load. */
+const VERIFY_MAX_ATTEMPTS = 6
 
 type NormalizedRequest = {
   localId: string

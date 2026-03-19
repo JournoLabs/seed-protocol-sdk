@@ -1,11 +1,12 @@
 import { setAdditionalSyncAddresses, setGetPublisherForNewSeeds, setRevokeExecutor } from '@seedprotocol/sdk'
+import { getConnectedManagedAccountAddress } from './helpers/thirdweb'
+import { optimismSepolia } from 'thirdweb/chains'
+import { revokeAttestations } from './services/revoke/revokeAttestations'
 import {
   THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
   EAS_CONTRACT_ADDRESS,
 } from './helpers/constants'
-import { getConnectedManagedAccountAddress } from './helpers/thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
-import { revokeAttestations } from './services/revoke/revokeAttestations'
+import { ethers } from 'ethers'
 
 /** Serialized upload item for Arweave signing (input to callback or used internally with JWK) */
 export interface SerializedPublishUpload {
@@ -21,9 +22,16 @@ export interface ArweaveTransactionInfoResult {
   modelName: string
 }
 
+/** Result from DataItem signing (compatible shape for createAttestations) */
+export interface ArweaveDataItemInfoResult {
+  transaction: { id: string }
+  versionId?: string
+  modelName?: string
+}
+
 export interface PublishConfig {
   thirdwebClientId: string
-  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL) */
+  /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
   /**
    * Use integer indices instead of string localId/publishLocalId for multiPublish (gas-efficient).
@@ -49,43 +57,73 @@ export interface PublishConfig {
    */
   useModularExecutor?: boolean
   /**
-   * Sign Arweave upload transactions. Use for backend API, ArConnect, or custom flows.
-   * Takes serialized uploads, returns signed transactions with chunks.
+   * EXPERIMENTAL: Use Arweave bundler for instant uploads instead of reimbursement + chunk upload.
+   * When true, skips sendReimbursementRequest, pollForConfirmation, and chunk-by-chunk uploadData.
+   * Uses uploadApiBaseUrl for the bundler endpoint. Not yet validated for production.
+   */
+  useArweaveBundler?: boolean
+  /**
+   * Optional fallback: Sign Arweave upload transactions (non-bundler path). Prefer passing at createPublish time.
    */
   signArweaveTransactions?: (
     uploads: SerializedPublishUpload[]
   ) => Promise<ArweaveTransactionInfoResult[]>
   /**
-   * Arweave JWK for in-process signing. App loads from env, secure storage, etc.
-   * Prefer signArweaveTransactions for web apps (avoids exposing key in browser).
+   * Optional fallback: Arweave JWK for in-process signing (non-bundler path). Prefer passing at createPublish time.
    */
+  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
+  /**
+   * Optional fallback: Signer for DataItem creation when useArweaveBundler is true. Prefer passing at createPublish time.
+   */
+  dataItemSigner?: ethers.Wallet | import('thirdweb/wallets').Account
+  /**
+   * Optional fallback: Sign DataItems when useArweaveBundler is true. Prefer passing at createPublish time.
+   */
+  signDataItems?: (
+    uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
+  ) => Promise<ArweaveDataItemInfoResult[]>
+}
+
+/** Options passed at createPublish time. Signers here override config fallbacks. */
+export interface CreatePublishOptions {
+  /** Required when useArweaveBundler: sign DataItems (wallet flow) */
+  signDataItems?: (
+    uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
+  ) => Promise<ArweaveDataItemInfoResult[]>
+  /** Required when useArweaveBundler: signer for DataItems (backend/script flow) */
+  dataItemSigner?: ethers.Wallet | import('thirdweb/wallets').Account
+  /** Required when NOT useArweaveBundler: sign Arweave transactions */
+  signArweaveTransactions?: (
+    uploads: SerializedPublishUpload[]
+  ) => Promise<ArweaveTransactionInfoResult[]>
+  /** Required when NOT useArweaveBundler: JWK for in-process signing */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
 }
 
-/** Use window (renderer) or globalThis so config survives across module instances (e.g. Vite chunks). */
-function getConfig(): PublishConfig | null {
-  if (typeof window !== 'undefined' && window.__SEED_PUBLISH_CONFIG__ != null) {
-    return window.__SEED_PUBLISH_CONFIG__
-  }
-  if (typeof globalThis !== 'undefined') {
-    const g = globalThis as Record<string, unknown>
-    const v = g['__SEED_PUBLISH_CONFIG__']
-    if (v != null) return v as PublishConfig
-  }
-  return null
+/** Internal: module-level config ref set by PublishProvider on mount. */
+let configRef: PublishConfig | null = null
+
+/**
+ * Internal: Set config ref. Called by PublishProvider on mount or initPublish.
+ */
+export function setConfigRef(c: PublishConfig | null): void {
+  configRef = c
 }
 
-function setConfig(c: PublishConfig | null): void {
-  if (typeof window !== 'undefined') {
-    window.__SEED_PUBLISH_CONFIG__ = c
-  }
-  if (typeof globalThis !== 'undefined') {
-    (globalThis as Record<string, unknown>)['__SEED_PUBLISH_CONFIG__'] = c
-  }
+/**
+ * Internal: Get current config ref. Used by PublishProvider when config is not passed.
+ */
+export function getConfigRef(): PublishConfig | null {
+  return configRef
 }
 
+/**
+ * Initialize the publish package. Call once before using PublishManager or other publish APIs.
+ * Registers the config and SDK hooks (revoke executor, getPublisherForNewSeeds, etc.).
+ * For React apps, you can alternatively pass config to PublishProvider.
+ */
 export function initPublish(c: PublishConfig): void {
-  setConfig(c)
+  setConfigRef(c)
   setGetPublisherForNewSeeds(async () => {
     try {
       return await getConnectedManagedAccountAddress(optimismSepolia)
@@ -95,13 +133,15 @@ export function initPublish(c: PublishConfig): void {
   })
   setRevokeExecutor(revokeAttestations)
   setAdditionalSyncAddresses(async () => {
-    const config = getConfig()
-    if (config?.useModularExecutor && config?.modularAccountModuleContract) {
-      return [config.modularAccountModuleContract]
+    if (c.useModularExecutor && c.modularAccountModuleContract) {
+      return [c.modularAccountModuleContract]
     }
     return []
   })
 }
+
+/** Alias for initPublish. Use initPublish for the primary API. */
+export const configurePublish = initPublish
 
 export interface ResolvedPublishConfig extends PublishConfig {
   thirdwebAccountFactoryAddress: string
@@ -111,15 +151,21 @@ export interface ResolvedPublishConfig extends PublishConfig {
   useDirectEas: boolean
   modularAccountModuleData: string
   useModularExecutor: boolean
+  useArweaveBundler: boolean
 }
 
+/**
+ * Internal: Get resolved config. Reads from ref set by initPublish or PublishProvider.
+ * Throws if neither has been called.
+ */
 export function getPublishConfig(): ResolvedPublishConfig {
-  const config = getConfig()
+  const config = configRef
   if (!config) {
     throw new Error(
-      '@seedprotocol/publish: Call initPublish({ thirdwebClientId, uploadApiBaseUrl }) before using the package'
+      '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
+  const useArweaveBundler = config.useArweaveBundler ?? false
   return {
     ...config,
     thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
@@ -128,5 +174,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     useDirectEas: config.useDirectEas ?? false,
     modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor: config.useModularExecutor ?? false,
+    useArweaveBundler,
   }
 }

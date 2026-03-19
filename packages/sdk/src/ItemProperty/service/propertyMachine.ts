@@ -137,6 +137,7 @@ export const propertyMachine = setup({
               uid: property.uid || context.uid,
               modelName: property.modelName || context.modelName,
               propertyRecordSchema: property.propertyRecordSchema || context.propertyRecordSchema,
+              refSeedType: property.refSeedType !== undefined ? property.refSeedType : context.refSeedType,
               refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
               refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
               localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,

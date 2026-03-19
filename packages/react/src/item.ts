@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { createNewItem, Item } from '@seedprotocol/sdk'
+import { createNewItem, getAddressesForItemsFilter, Item } from '@seedprotocol/sdk'
 import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
@@ -10,7 +10,8 @@ import { useIsClientReady } from './client'
 import { useLiveQuery } from './liveQuery'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
-import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
+import { toSnakeCase } from 'drizzle-orm/casing'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -207,6 +208,21 @@ export const useItems: UseItems = ({
   const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
   const itemsRef = useRef<IItem<any>[]>([])
   const lastFetchedIdsRef = useRef<Set<string>>(new Set())
+  const [addressesForFilter, setAddressesForFilter] = useState<string[] | null>(null)
+
+  useEffect(() => {
+    if (addressFilter !== 'owned' && addressFilter !== 'watched') {
+      setAddressesForFilter(null)
+      return
+    }
+    let cancelled = false
+    getAddressesForItemsFilter(addressFilter).then((addrs) => {
+      if (!cancelled) setAddressesForFilter(addrs)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [addressFilter])
 
   const queryKey = useMemo(
     () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter),
@@ -228,12 +244,31 @@ export const useItems: UseItems = ({
   const db = isClientReady ? BaseDb.getAppDb() : null
   const seedsQuery = useMemo(() => {
     if (!db) return null
+    if (addressFilter === 'owned' || addressFilter === 'watched') {
+      if (addressesForFilter === null) return null
+    }
     const conditions: any[] = []
     if (!includeEas) {
       conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as any)
     }
     if (modelName) {
-      conditions.push(eq(seeds.type, modelName.toLowerCase()))
+      conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+    }
+    if (addressFilter === 'owned') {
+      if (addressesForFilter && addressesForFilter.length > 0) {
+        conditions.push(
+          or(
+            inArray(seeds.publisher, addressesForFilter),
+            isNull(seeds.publisher)
+          ) as any
+        )
+      }
+    } else if (addressFilter === 'watched') {
+      if (addressesForFilter && addressesForFilter.length > 0) {
+        conditions.push(inArray(seeds.publisher, addressesForFilter) as any)
+      } else {
+        conditions.push(sql`1=0` as any)
+      }
     }
     if (deleted) {
       conditions.push(
@@ -248,6 +283,9 @@ export const useItems: UseItems = ({
           isNull(seeds._markedForDeletion),
           eq(seeds._markedForDeletion, 0)
         ) as any
+      )
+      conditions.push(
+        or(isNull(seeds.revokedAt), eq(seeds.revokedAt, 0)) as any
       )
     }
     const versionData = getVersionData()
@@ -266,7 +304,7 @@ export const useItems: UseItems = ({
       .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
       .where(and(gt(versionData.versionsCount, 0), ...conditions))
       .groupBy(seeds.localId)
-  }, [db, isClientReady, modelName, deleted, includeEas])
+  }, [db, isClientReady, modelName, deleted, includeEas, addressFilter, addressesForFilter])
   const seedsTableData = useLiveQuery<SeedType>(seedsQuery)
 
   // Invalidate when table data actually changes so useQuery refetches

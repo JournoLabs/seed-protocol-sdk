@@ -41,9 +41,9 @@ function errorFieldsFromContext(context: { error?: unknown; errorStep?: string }
 }
 
 export const savePublish = fromCallback<
-  EventObject,
-  { persistedSnapshot: unknown; seedLocalId: string }
->(({ sendBack, input: { persistedSnapshot, seedLocalId } }) => {
+  EventObject & { seedLocalId?: string; triggerPublishDone?: boolean },
+  { persistedSnapshot: unknown; seedLocalId: string; triggerPublishDone?: boolean }
+>(({ sendBack, input: { persistedSnapshot, seedLocalId, triggerPublishDone } }) => {
   logger('savePublish seedLocalId', seedLocalId)
   const snapshot = persistedSnapshot as {
     status?: string
@@ -61,7 +61,7 @@ export const savePublish = fromCallback<
     const db = BaseDb.getAppDb()
     if (!db) {
       logger('savePublish: DB not ready, skipping')
-      sendBack({ type: 'SAVE_PUBLISH_DONE' })
+      sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
       return
     }
 
@@ -108,9 +108,9 @@ export const savePublish = fromCallback<
   }
 
   _save().then(() => {
-    sendBack({ type: 'SAVE_PUBLISH_DONE' })
+    sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
   }).catch((err) => {
     logger('savePublish error', err)
-    sendBack({ type: 'SAVE_PUBLISH_DONE' })
+    sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
   })
 })

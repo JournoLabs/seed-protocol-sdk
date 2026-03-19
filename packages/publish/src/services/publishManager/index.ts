@@ -24,9 +24,10 @@ export interface PublishManagerMachineContext {
 
 type PublishManagerEvent =
   | { type: 'RESTORE_FROM_DB_DONE'; publishProcesses: PublishManagerMachineContext['publishProcesses']; subscriptions: PublishManagerMachineContext['subscriptions'] }
-  | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown }
+  | { type: 'CREATE_PUBLISH'; item: import('@seedprotocol/sdk').Item<any>; address: string; account?: unknown; options?: import('../../config').CreatePublishOptions }
   | { type: 'ADD_SUBSCRIPTION'; seedLocalId: string; newSubscription?: import('xstate').ActorRef<any, any> }
-  | { type: 'REQUEST_SAVE_PUBLISH'; seedLocalId: string; publishProcess?: unknown }
+  | { type: 'REQUEST_SAVE_PUBLISH'; seedLocalId: string; publishProcess?: unknown; triggerPublishDone?: boolean }
+  | { type: 'SAVE_PUBLISH_DONE'; seedLocalId: string; triggerPublishDone?: boolean }
   | { type: 'PUBLISH_DONE'; seedLocalId: string }
   | { type: 'REMOVE_SUBSCRIPTION'; seedLocalId: string }
   | { type: 'RETRY_ATTESTATIONS'; seedLocalId: string; account?: unknown }
@@ -86,6 +87,12 @@ export const publishManagerMachine = setup({
         REQUEST_SAVE_PUBLISH: {
           actions: ['requestSavePublish'],
         },
+        SAVE_PUBLISH_DONE: [
+          {
+            guard: ({ event }) => (event as { triggerPublishDone?: boolean }).triggerPublishDone === true,
+            actions: ['publishDone'],
+          },
+        ],
         PUBLISH_DONE: {
           actions: ['publishDone'],
         },
@@ -118,8 +125,13 @@ const publishManager = createActor(publishManagerMachine, {
 
 // Set ref for subscribe actor to call savePublish, onPublishDone, removeSubscription
 setPublishManagerRef({
-  savePublish: (seedLocalId, publishProcess) => {
-    publishManager.send({ type: 'REQUEST_SAVE_PUBLISH', seedLocalId, publishProcess })
+  savePublish: (seedLocalId, publishProcess, options) => {
+    publishManager.send({
+      type: 'REQUEST_SAVE_PUBLISH',
+      seedLocalId,
+      publishProcess,
+      triggerPublishDone: options?.triggerPublishDone,
+    })
   },
   onPublishDone: (seedLocalId) => {
     publishManager.send({ type: 'PUBLISH_DONE', seedLocalId })
@@ -151,8 +163,9 @@ export const PublishManager = {
   createPublish: (
     item: InstanceType<typeof Item>,
     address: string,
-    account?: import('thirdweb/wallets').Account
-  ) => publishManager.send({ type: 'CREATE_PUBLISH', item, address, account }),
+    account?: import('thirdweb/wallets').Account,
+    options?: import('../../config').CreatePublishOptions
+  ) => publishManager.send({ type: 'CREATE_PUBLISH', item, address, account, options }),
   retryAttestations: (seedLocalId: string, account?: import('thirdweb/wallets').Account) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),

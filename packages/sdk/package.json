@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
@@ -13,10 +13,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json\"",
+    "build": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
     "build:watch": "tsc -w -p tsconfig.json",
-    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json\"",
-    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public\"",
+    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js\"",
+    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && npm publish --access public\"",
     "compile": "graphql-codegen --config codegen.ts",
     "watch": "graphql-codegen -w",
     "test": "vitest run --reporter=default",

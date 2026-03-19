@@ -11,6 +11,7 @@ import { models } from "@/seedSchema/ModelSchema"
 import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
+import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
 
@@ -140,11 +141,9 @@ export const getItemData: GetItemData = async ({
 
     let propertyValue = propertyData.propertyValue
 
-    if (propertyName.endsWith('Id') || propertyName.endsWith('Ids')) {
-      if (propertyData.refSeedType) {
-        const propertyNameVariant = propertyName.replace(/Ids?$/, '')
-        itemData[propertyNameVariant] = propertyValue
-      }
+    const schemaBaseName = toSchemaPropertyName(propertyName)
+    if (schemaBaseName && propertyData.refSeedType) {
+      itemData[schemaBaseName] = propertyValue
     }
 
     itemData[propertyName] = propertyValue

@@ -1,7 +1,8 @@
 import { metadata, MetadataType } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
+import { getPropertyIdForModelAndName } from '@/helpers/db'
 import { PropertyType } from '@/types'
-import { getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
+import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
 import { BaseDb } from '../Db/BaseDb'
 import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
@@ -40,15 +41,7 @@ export const createMetadata: CreateMetadata = async (
 
   metadataValues.localId = generateId()
 
-  let publisher: string | undefined
-  const getPublisher = getGetPublisherForNewSeeds()
-  if (getPublisher) {
-    try {
-      publisher = await getPublisher()
-    } catch {
-      // User not connected or getter failed - leave publisher null
-    }
-  }
+  const publisher = await getPublisherForNewSeedsWithTimeout()
   if (publisher != null && publisher !== '') {
     metadataValues.publisher = publisher
   }
@@ -144,6 +137,23 @@ export const createMetadata: CreateMetadata = async (
       if (process.env.NODE_ENV === 'development') {
         console.warn(`Failed to fetch schemaUid for property ${metadataValues.propertyName}:`, error)
       }
+    }
+  }
+
+  // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup
+  if (metadataValues.propertyId == null) {
+    if (propertyRecordSchema?.id != null) {
+      metadataValues.propertyId =
+        typeof propertyRecordSchema.id === 'number'
+          ? propertyRecordSchema.id
+          : Number(propertyRecordSchema.id)
+    } else if (
+      metadataValues.propertyName &&
+      (metadataValues.modelName || metadataValues.modelType)
+    ) {
+      const modelKey = metadataValues.modelName ?? metadataValues.modelType!
+      metadataValues.propertyId =
+        (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName)) ?? undefined
     }
   }
 

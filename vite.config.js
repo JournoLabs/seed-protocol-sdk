@@ -118,7 +118,7 @@ export default defineConfig({
       {
         plugins: [
           react(),
-          tsConfigPaths({ projects: ['./packages/react/tsconfig.json'] }),
+          tsConfigPaths({ projects: ['./packages/react/tsconfig.json', './packages/sdk/tsconfig.json'] }),
           ...seedVitePlugin({ autoInit: false, debug: false }),
           nodePolyfills({
             exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
@@ -134,7 +134,6 @@ export default defineConfig({
         resolve: {
           alias: {
             '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-            '@seedprotocol/react': resolve(__dirname, 'packages/react/src'),
             'fs': '@zenfs/core',
             'fs/promises': '@zenfs/core/promises',
             'node:fs': '@zenfs/core',

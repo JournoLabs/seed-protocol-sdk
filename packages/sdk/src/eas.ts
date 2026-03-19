@@ -231,7 +231,12 @@ export const getSeedsFromSchemaUids = async ({
   return itemSeeds
 }
 
-export const getSeedsBySchemaName = async (schemaName: string, limit: number = 10) => {
+export const getSeedsBySchemaName = async (
+  schemaName: string,
+  limit: number = 10,
+  skip?: number
+) => {
+  const skipVal = skip ?? 0
   const variables = {
     where: withExcludeRevokedFilter({
       schema: {
@@ -247,13 +252,14 @@ export const getSeedsBySchemaName = async (schemaName: string, limit: number = 1
       },
     }),
     take: limit,
+    skip: skipVal,
   }
 
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
   const { itemSeeds } = await queryClient.fetchQuery({
-    queryKey: [`getSeedsBySchemaName`, schemaName, limit],
+    queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal],
     queryFn: async () =>
       easClient.request(GET_SEEDS, variables),
   })

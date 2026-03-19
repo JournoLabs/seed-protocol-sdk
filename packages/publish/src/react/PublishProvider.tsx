@@ -1,9 +1,19 @@
-import React, { FC } from "react"
+import React, { createContext, FC, useContext, useEffect } from "react"
 import type { MutableRefObject } from "react"
 import type { QueryClient } from "@tanstack/react-query"
 import { ThirdwebProvider } from "thirdweb/react"
 import { SeedProvider } from '@seedprotocol/react'
-import { initPublish, type PublishConfig } from "../config"
+import { initPublish, getConfigRef, type PublishConfig } from "../config"
+
+const PublishConfigContext = createContext<PublishConfig | null>(null)
+
+export function usePublishConfig(): PublishConfig {
+  const config = useContext(PublishConfigContext)
+  if (!config) {
+    throw new Error('usePublishConfig must be used within PublishProvider')
+  }
+  return config
+}
 
 export interface PublishProviderProps {
   children: React.ReactNode
@@ -24,16 +34,20 @@ const PublishProvider: FC<PublishProviderProps> = ({
   queryClient,
   queryClientRef,
 }) => {
-  if (config) {
-    initPublish(config)
-  }
+  useEffect(() => {
+    if (config) {
+      initPublish(config)
+    }
+  }, [config])
 
   return (
-    <ThirdwebProvider>
-      <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
-        {children}
-      </SeedProvider>
-    </ThirdwebProvider>
+    <PublishConfigContext.Provider value={config ?? getConfigRef()}>
+      <ThirdwebProvider>
+        <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
+          {children}
+        </SeedProvider>
+      </ThirdwebProvider>
+    </PublishConfigContext.Provider>
   )
 }
 

@@ -1,9 +1,11 @@
-import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { int, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { InferSelectModel } from 'drizzle-orm'
+import { properties } from './ModelSchema'
 
 export const metadata = sqliteTable('metadata', {
   localId: text('local_id').unique(),
   uid: text('uid'),
+  propertyId: integer('property_id').references(() => properties.id),
   propertyName: text('property_name'),
   propertyValue: text('property_value'),
   schemaUid: text('schema_uid'),

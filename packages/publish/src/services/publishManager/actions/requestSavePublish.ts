@@ -30,7 +30,11 @@ function getPersistableSnapshot(actor: PublishProcessActor): unknown {
 
 export const requestSavePublish = assign(({ context, event, spawn }) => {
   const { publishProcesses } = context
-  const { seedLocalId, publishProcess } = event as unknown as { seedLocalId: string; publishProcess?: PublishProcessActor }
+  const { seedLocalId, publishProcess, triggerPublishDone } = event as unknown as {
+    seedLocalId: string
+    publishProcess?: PublishProcessActor
+    triggerPublishDone?: boolean
+  }
 
   if (!publishProcess) {
     return context
@@ -43,7 +47,7 @@ export const requestSavePublish = assign(({ context, event, spawn }) => {
 
   spawn(savePublish, {
     id: `savePublish_${seedLocalId}_${Date.now()}`,
-    input: { persistedSnapshot, seedLocalId },
+    input: { persistedSnapshot, seedLocalId, triggerPublishDone },
   })
 
   return { publishProcesses: newPublishProcesses }

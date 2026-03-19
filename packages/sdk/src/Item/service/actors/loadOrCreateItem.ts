@@ -3,8 +3,10 @@ import { FromCallbackInput } from '@/types'
 import { ItemMachineContext } from '@/types/item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions, metadata } from '@/seedSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, or } from 'drizzle-orm'
 import { getVersionData } from '@/db/read/subqueries/versionData'
+import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { toSchemaPropertyName } from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
@@ -47,6 +49,73 @@ const createItemPropertyInstances = async (
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
     }
+    // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
+    // This fixes persistence when useItem returns items with empty propertyInstances.
+    if (Object.keys(propertySchemas).length === 0) {
+      const schemaNameToTry = model?.schemaName
+      if (schemaNameToTry) {
+        try {
+          const { Schema } = await import('../../../Schema/Schema')
+          const schemaInstance = Schema.create(schemaNameToTry, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+          const schemaContext = schemaInstance.getService().getSnapshot().context
+          if (schemaContext.models?.[modelName]?.properties) {
+            propertySchemas = schemaContext.models[modelName].properties as Record<string, any>
+            logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from Schema context for ${modelName}`)
+          }
+        } catch (err) {
+          logger(`Fallback Schema context failed for ${modelName}: ${err}`)
+        }
+      }
+      if (Object.keys(propertySchemas).length === 0) {
+        try {
+          const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
+          const allSchemas = await loadAllSchemasFromDb()
+          for (const { schema: schemaFile } of allSchemas) {
+            const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
+            if (models?.[modelName]?.properties) {
+              propertySchemas = models[modelName].properties as Record<string, any>
+              logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from loadAllSchemasFromDb for ${modelName}`)
+              break
+            }
+          }
+        } catch (err) {
+          logger(`Fallback loadAllSchemasFromDb failed for ${modelName}: ${err}`)
+        }
+      }
+      if (Object.keys(propertySchemas).length === 0) {
+        try {
+          const { listCompleteSchemaFiles } = await import('../../../helpers/schema')
+          const { BaseFileManager } = await import('../../../helpers/FileManager/BaseFileManager')
+          const schemaFiles = await listCompleteSchemaFiles()
+          for (const { filePath } of schemaFiles) {
+            const content = await BaseFileManager.readFileAsString(filePath)
+            const schemaFile = JSON.parse(content) as { models?: Record<string, { properties?: Record<string, any> }> }
+            if (schemaFile.models?.[modelName]?.properties) {
+              propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
+              logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)
+              break
+            }
+          }
+        } catch (err) {
+          logger(`Fallback schema file scan failed for ${modelName}: ${err}`)
+        }
+      }
+      if (Object.keys(propertySchemas).length === 0) {
+        const schemaMod = await import('../../../Schema')
+        const { ModelPropertyDataTypes } = schemaMod
+        const KNOWN_MODEL_FALLBACKS: Record<string, Record<string, { dataType: string }>> = {
+          Post: {
+            html: { dataType: ModelPropertyDataTypes.Html },
+            summary: { dataType: ModelPropertyDataTypes.Text },
+            title: { dataType: ModelPropertyDataTypes.Text },
+          },
+        }
+        if (KNOWN_MODEL_FALLBACKS[modelName]) {
+          propertySchemas = KNOWN_MODEL_FALLBACKS[modelName] as Record<string, any>
+          logger(`Fallback: using known model schema for ${modelName} (${Object.keys(propertySchemas).length} properties)`)
+        }
+      }
+    }
 
     // Build map of metadata by propertyName for lookup
     const metadataByProperty = new Map<string, any>()
@@ -57,14 +126,38 @@ const createItemPropertyInstances = async (
     }
 
     // Create instances for all metadata records
+    // For File/Image/Relation, metadata is stored with Id suffix (e.g. "textId") but schema defines base name ("text").
+    // Normalize to schema name so we don't create duplicate properties (text + textId).
     for (const metaRow of metadataRows) {
       try {
-        const propertyName = metaRow.propertyName
+        let propertyName = metaRow.propertyName
         if (!propertyName) {
           logger(`Metadata row missing propertyName, skipping`)
           continue
         }
 
+        const baseName = toSchemaPropertyName(propertyName)
+        const refSeedType = metaRow.refSeedType as string | undefined
+        const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
+        const hadSchemaMatch = !!(baseName && propertySchemas[baseName])
+        const hadRefTypeMatch = !!(baseName && isRefTypeFromMeta)
+        if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+          propertyName = baseName
+        }
+
+        // Infer propertyRecordSchema from metadata when schema is missing (enables persistence)
+        let propSchema = propertySchemas[propertyName]
+        if (!propSchema && isRefTypeFromMeta) {
+          const schemaMod = await import('../../../Schema')
+          const { ModelPropertyDataTypes } = schemaMod
+          propSchema = {
+            dataType: refSeedType === 'html' ? ModelPropertyDataTypes.Html
+              : refSeedType === 'image' ? ModelPropertyDataTypes.Image
+              : refSeedType === 'file' ? ModelPropertyDataTypes.File
+              : refSeedType === 'relation' ? ModelPropertyDataTypes.Relation
+              : ModelPropertyDataTypes.Text,
+          }
+        }
         const createProps = {
           propertyName,
           seedLocalId,
@@ -74,7 +167,11 @@ const createItemPropertyInstances = async (
           versionLocalId: metaRow.versionLocalId ?? undefined,
           versionUid: metaRow.versionUid ?? undefined,
           schemaUid: metaRow.schemaUid ?? undefined,
-          propertyRecordSchema: propertySchemas[propertyName] ?? undefined,
+          propertyRecordSchema: propSchema,
+          refSeedType: metaRow.refSeedType ?? undefined,
+          refResolvedValue: metaRow.refResolvedValue ?? undefined,
+          refResolvedDisplayValue: metaRow.refResolvedDisplayValue ?? undefined,
+          localStorageDir: metaRow.localStorageDir ?? undefined,
         }
 
         const property = ItemProperty.create(createProps, { waitForReady: false })
@@ -148,12 +245,19 @@ export const loadOrCreateItem = fromCallback<
     }
 
     // Step 1: Query seeds table FIRST by seedLocalId or seedUid
+    // When both are provided, use OR so local seeds (uid=null) are still found
     const whereClauses = []
-    if (seedUid) {
-      whereClauses.push(eq(seeds.uid, seedUid))
-    }
-    if (seedLocalId && !seedUid) {
+    if (seedLocalId && seedUid) {
+      whereClauses.push(
+        or(
+          eq(seeds.localId, seedLocalId),
+          eq(seeds.uid, seedUid),
+        ),
+      )
+    } else if (seedLocalId) {
       whereClauses.push(eq(seeds.localId, seedLocalId))
+    } else if (seedUid) {
+      whereClauses.push(eq(seeds.uid, seedUid))
     }
 
     const seedRecords = await db
@@ -277,6 +381,14 @@ export const loadOrCreateItem = fromCallback<
       modelName,
       latestVersionLocalId,
       latestVersionUid
+    )
+
+    // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
+    // Without this, post.html returns seed ID on first render because loadOrCreateProperty hasn't finished.
+    await Promise.all(
+      Array.from(propertyInstances.values()).map((prop) =>
+        waitForEntityIdle(prop, { timeout: 5000, throwOnError: false })
+      )
     )
 
     // Step 5: Return loaded item data with property instances

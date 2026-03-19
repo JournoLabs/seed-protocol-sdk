@@ -11,6 +11,7 @@ import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
 import { and, eq, isNull, SQL } from 'drizzle-orm'
+import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas, ModelSchemaType } from '@/seedSchema/ModelSchemaSchema'
@@ -21,6 +22,51 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:db')
+
+/**
+ * Resolve property_id from model name/type and property name.
+ * Handles property name variants (e.g. htmlId -> html, avatarImageIds -> avatarImages).
+ * @param modelNameOrType - Model name (PascalCase) or model type (snake_case)
+ * @param propertyName - Property name as stored in metadata (may have Id/Ids suffix)
+ * @returns properties.id or null if not found
+ */
+export async function getPropertyIdForModelAndName(
+  modelNameOrType: string,
+  propertyName: string,
+): Promise<number | null> {
+  const db = BaseDb.getAppDb()
+  if (!db) return null
+  if (!modelNameOrType || !propertyName) return null
+
+  const normalizedModelName = upperFirst(camelCase(modelNameOrType))
+
+  const propertyNamesToTry = [propertyName]
+  if (propertyName.endsWith('Ids')) {
+    propertyNamesToTry.push(propertyName.slice(0, -3))
+  }
+  if (propertyName.endsWith('Id')) {
+    propertyNamesToTry.push(propertyName.slice(0, -2))
+  }
+
+  for (const pName of propertyNamesToTry) {
+    const rows = await db
+      .select({ id: properties.id })
+      .from(properties)
+      .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+      .where(
+        and(
+          eq(modelsTable.name, normalizedModelName),
+          eq(properties.name, pName),
+        ),
+      )
+      .limit(1)
+
+    if (rows.length > 0 && rows[0].id != null) {
+      return rows[0].id
+    }
+  }
+  return null
+}
 
 export const escapeSqliteString = (value: string): string => {
   if (typeof value !== 'string') {
@@ -580,34 +626,9 @@ async function checkIfPropertyIsEdited(
   schemaFileValue?: { dataType?: string; ref?: string; refValueType?: string; required?: boolean },
 ): Promise<boolean> {
   try {
-    const cacheKey = `${modelName}:${propertyName}`
-    
-    // First, check the in-memory cache (for current session edits)
-    // Robust dynamic import for consumer re-bundling (named or default export)
-    const mod = await import('../ModelProperty/ModelProperty')
-    const ModelProperty = mod?.ModelProperty ?? (mod as { default?: unknown })?.default
-    if (!ModelProperty) {
-      logger('ModelProperty not available from dynamic import')
-      return false
-    }
-    type ModelPropertyInstance = InstanceType<typeof ModelProperty>
-    const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
-      instanceCache: Map<string, { instance: ModelPropertyInstance; refCount: number }>
-    }
-    
-    const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
-    
-    if (cachedInstance) {
-      const modelProperty = cachedInstance.instance
-      const context = modelProperty.getService().getSnapshot().context
-      
-      // Check if the property is marked as edited in memory
-      if (context._isEdited === true) {
-        return true
-      }
-    }
-    
-    // If not in cache, check the database by comparing with schema file value
+    // When schemaFileValue is provided (schema sync path), do database check FIRST.
+    // This avoids the ModelProperty dynamic import which can hang due to circular
+    // dependency (ModelProperty -> helpers/db) when called from addModelsToDb during init.
     if (schemaFileValue) {
       const db = BaseDb.getAppDb()
       if (db) {
@@ -620,7 +641,6 @@ async function checkIfPropertyIsEdited(
         
         if (modelRecords.length > 0) {
           const modelRecord = modelRecords[0]
-          
           // Find the property in the database
           const propertyRecords = await db
             .select()
@@ -635,7 +655,6 @@ async function checkIfPropertyIsEdited(
           
           if (propertyRecords.length > 0) {
             const dbProperty = propertyRecords[0]
-            
             // Compare database value with schema file value
             // If they differ, the property has been edited
             if (dbProperty.dataType !== schemaFileValue.dataType) {
@@ -650,7 +669,6 @@ async function checkIfPropertyIsEdited(
                 .from(modelsTable)
                 .where(eq(modelsTable.name, schemaFileValue.ref))
                 .limit(1)
-              
               if (refModelRecords.length > 0) {
                 const expectedRefModelId = refModelRecords[0].id
                 if (dbProperty.refModelId !== expectedRefModelId) {
@@ -882,7 +900,6 @@ export const addModelsToDb = async (
     const schemaEntries = Object.entries(schema)
     for (let index = 0; index < schemaEntries.length; index++) {
       const [propertyName, propertyValues] = schemaEntries[index]
-      
       if (!propertyValues) {
         throw new Error(`Property values not found for ${propertyName}`)
       }
@@ -928,13 +945,11 @@ export const addModelsToDb = async (
       let expectedRefModelId: number | null = null
       const refModelName = propertyValues.ref || propertyValues.refModelName
       if (refModelName) {
-        const refModel = await createOrUpdate<NewModelRecord>(
-          db,
-          modelsTable,
-          {
-            name: refModelName,
-          },
-        )
+        // When ref model was already processed in this batch, use it (avoids db round-trip)
+        const cachedRef = modelRecords.get(refModelName)
+        const refModel = cachedRef
+          ? cachedRef
+          : await createOrUpdate<NewModelRecord>(db, modelsTable, { name: refModelName })
         propertyData.refModelId = refModel.id ?? null
         expectedRefModelId = refModel.id ?? null
       } else {
@@ -980,18 +995,22 @@ export const addModelsToDb = async (
         // Mark this DB property as matched
         matchedDbPropertyIds.add(existingProperty.id!)
         
-        // Property exists - check if it's been locally edited before updating
-        // Pass the schema file value for comparison
-        const isPropertyEdited = await checkIfPropertyIsEdited(
-          modelName,
-          existingProperty.name, // Use the DB property name for checking
-          {
-            dataType: propertyValues.dataType,
-            ref: propertyValues.ref,
-            refValueType: propertyValues.refValueType,
-            required: propertyValues.required,
-          },
-        )
+        // When syncing from schema (schemaFileData present), skip the expensive checkIfPropertyIsEdited.
+        // It can hang for minutes in browser due to circular deps / SQLite contention during init.
+        // Use DB isEdited column as a fast check: if already marked edited, preserve.
+        const skipEditCheck = !!schemaFileData
+        const isPropertyEdited = skipEditCheck
+          ? existingProperty.isEdited === true
+          : await checkIfPropertyIsEdited(
+              modelName,
+              existingProperty.name,
+              {
+                dataType: propertyValues.dataType,
+                ref: propertyValues.ref,
+                refValueType: propertyValues.refValueType,
+                required: propertyValues.required,
+              },
+            )
         
         if (isPropertyEdited) {
           // Property has been locally edited - skip update to preserve local changes
@@ -1008,16 +1027,25 @@ export const addModelsToDb = async (
         const updateData = { ...propertyData }
         if (existingProperty.isEdited === true) {
           // Preserve isEdited = true if property was locally edited
-          // Don't overwrite it with false from schema file
           delete updateData.isEdited
         } else {
-          // Set isEdited = false when loading from schema file
           updateData.isEdited = false
         }
-        await db
-          .update(properties)
-          .set(updateData)
-          .where(eq(properties.id, existingProperty.id!))
+        // Skip db.update when data unchanged (avoids slow OPFS writes in browser)
+        const unchanged =
+          existingProperty.name === updateData.name &&
+          existingProperty.dataType === updateData.dataType &&
+          existingProperty.schemaFileId === (updateData.schemaFileId ?? null) &&
+          existingProperty.required === (updateData.required ?? false) &&
+          existingProperty.refModelId === (updateData.refModelId ?? null) &&
+          existingProperty.refValueType === (updateData.refValueType ?? null) &&
+          existingProperty.isEdited === (updateData.isEdited ?? false)
+        if (!unchanged) {
+          await db
+            .update(properties)
+            .set(updateData)
+            .where(eq(properties.id, existingProperty.id!))
+        }
       } else {
         // Property doesn't exist, create it with schemaFileId
         // Set isEdited = false when loading from schema file
@@ -1050,57 +1078,33 @@ export const addModelsToDb = async (
     console.warn(`[addModelsToDb] Errors occurred while processing ${modelProcessingErrors.length} model(s):`, modelProcessingErrors.map(e => `${e.modelName}: ${e.error}`).join('; '))
     logger(`Errors processing models: ${modelProcessingErrors.map(e => e.modelName).join(', ')}`)
   }
-  
 
   // If schema was provided, create modelSchema join records to connect models to the schema
   if (schemaRecord && schemaRecord.id) {
-    // Check for existing records first since there's no unique constraint
-    const createdJoinEntries: string[] = []
-    const existingJoinEntries: string[] = []
-    
-    for (const [modelName, modelRecord] of modelRecords.entries()) {
-      if (!modelRecord.id) {
-        logger(`Skipping join table entry for ${modelName}: model record has no id`)
-        continue
-      }
-      
-      const existingJoinRecords = await db
-        .select()
+    const modelIds = [...modelRecords.entries()]
+      .filter(([, r]) => r.id)
+      .map(([name, r]) => ({ modelName: name, modelId: r.id! }))
+    if (modelIds.length === 0) {
+      logger('No model IDs to link, skipping schema linking')
+    } else {
+      // Single batch query: get all existing joins for this schema
+      const existingJoins = await db
+        .select({ modelId: modelSchemas.modelId })
         .from(modelSchemas)
-        .where(
-          and(
-            eq(modelSchemas.modelId, modelRecord.id),
-            eq(modelSchemas.schemaId, schemaRecord.id),
-          ),
-        )
-        .limit(1)
+        .where(eq(modelSchemas.schemaId, schemaRecord.id))
+      const existingSet = new Set(existingJoins.map((r: { modelId: number }) => r.modelId))
 
-      if (existingJoinRecords.length === 0) {
-        // Only provide modelId and schemaId - id is auto-increment and should not be included
-        // Don't use type cast - let Drizzle infer the correct type without id
-        await db.insert(modelSchemas).values({
-          modelId: modelRecord.id,
-          schemaId: schemaRecord.id,
-        })
-        logger(`Created join table entry for model ${modelName} (id: ${modelRecord.id}) to schema (id: ${schemaRecord.id})`)
-        createdJoinEntries.push(modelName)
-      } else {
-        logger(`Join table entry already exists for model ${modelName} to schema (id: ${schemaRecord.id})`)
-        existingJoinEntries.push(modelName)
+      const toInsert = modelIds.filter(({ modelId }) => !existingSet.has(modelId))
+      if (toInsert.length > 0) {
+        for (const { modelName, modelId } of toInsert) {
+          await db.insert(modelSchemas).values({
+            modelId,
+            schemaId: schemaRecord.id,
+          })
+          logger(`Created join table entry for model ${modelName} (id: ${modelId}) to schema (id: ${schemaRecord.id})`)
+        }
       }
     }
-    
-    // Verify all models are linked (important for debugging)
-    const allLinkedModels = await db
-      .select({
-        modelId: modelSchemas.modelId,
-        modelName: modelsTable.name,
-      })
-      .from(modelSchemas)
-      .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-      .where(eq(modelSchemas.schemaId, schemaRecord.id))
-    
-    const linkedModelNames = allLinkedModels.map((m: any) => m.modelName).filter(Boolean)
   } else if (schemaRecord && !schemaRecord.id) {
     logger(`Warning: schemaRecord provided but has no id, cannot create join table entries`)
   }
@@ -1422,11 +1426,20 @@ export const savePropertyToDb = async (
   } else {
     // Property doesn't exist, create it
     // Set isEdited = true for runtime-created properties
-    await db.insert(properties).values({
-      ...propertyData,
-      isEdited: true, // Runtime-created properties are edited
-    })
-    logger(`Created property ${property.modelName}:${property.name} in database`)
+    try {
+      await db.insert(properties).values({
+        ...propertyData,
+        isEdited: true, // Runtime-created properties are edited
+      })
+      logger(`Created property ${property.modelName}:${property.name} in database`)
+    } catch (insertError: any) {
+      // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb or race)
+      if (insertError?.code === 'SQLITE_CONSTRAINT_UNIQUE' || insertError?.message?.includes('UNIQUE constraint')) {
+        logger(`Property ${property.modelName}:${property.name} already exists (UNIQUE constraint), treating as success`)
+      } else {
+        throw insertError
+      }
+    }
   }
 }
 
@@ -1459,6 +1472,34 @@ export const getOwnedAddressesFromDb = async (): Promise<string[]> => {
 export const getWatchedAddressesFromDb = async (): Promise<string[]> => {
   const config = await getAddressConfigFromDb()
   return config?.watched ?? []
+}
+
+/**
+ * Returns addresses for useItems/getItemsData addressFilter.
+ * Encapsulates owned (with additional sync addresses) and watched logic.
+ */
+export const getAddressesForItemsFilter = async (
+  addressFilter: 'owned' | 'watched',
+): Promise<string[]> => {
+  if (addressFilter === 'owned') {
+    const { getGetAdditionalSyncAddresses } = await import('@/helpers/publishConfig')
+    let ownedAddresses = await getOwnedAddressesFromDb()
+    const additionalGetter = getGetAdditionalSyncAddresses()
+    if (additionalGetter) {
+      const additional = await additionalGetter()
+      if (additional?.length) {
+        const seen = new Set(ownedAddresses.map((a) => a.toLowerCase()))
+        for (const addr of additional) {
+          if (addr && !seen.has(addr.toLowerCase())) {
+            seen.add(addr.toLowerCase())
+            ownedAddresses = [...ownedAddresses, addr]
+          }
+        }
+      }
+    }
+    return ownedAddresses
+  }
+  return getWatchedAddressesFromDb()
 }
 
 /**

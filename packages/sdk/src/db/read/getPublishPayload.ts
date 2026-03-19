@@ -3,6 +3,7 @@
 import {
   defaultAttestationData,
   INTERNAL_DATA_TYPES,
+  INTERNAL_PROPERTY_NAMES,
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
   ZERO_BYTES32,
 } from '@/helpers/constants'
@@ -24,8 +25,8 @@ import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
 import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models, properties } from '@/seedSchema'
-import { eq, and } from 'drizzle-orm'
+import { models, properties, versions } from '@/seedSchema'
+import { eq, and, desc } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import debug from 'debug'
@@ -56,6 +57,40 @@ const getVersionUid = (item: IItem<any>): string => {
   }
   if (latestVersion && typeof latestVersion === 'string') {
     return latestVersion
+  }
+  return ZERO_BYTES32
+}
+
+/**
+ * Resolve versionUid when item.latestVersionUid is empty but item has been published (has seedUid).
+ * Tries DB first, then EAS. The contract path never calls updateVersionUid, so the versions table
+ * may have uid=NULL. EAS fallback queries attestations where refUID=seedUid (Version attestations).
+ */
+async function resolveVersionUid(
+  seedLocalId: string,
+  seedUid: string | undefined,
+): Promise<string> {
+  if (!seedLocalId || !seedUid || seedUid === ZERO_BYTES32) return ZERO_BYTES32
+
+  const appDb = BaseDb.getAppDb()
+  if (appDb) {
+    const rows = await appDb
+      .select({ uid: versions.uid })
+      .from(versions)
+      .where(eq(versions.seedLocalId, seedLocalId))
+      .orderBy(desc(versions.createdAt))
+      .limit(1)
+    const uid = rows[0]?.uid
+    if (uid && uid !== '' && uid !== 'NULL') return uid
+  }
+
+  try {
+    const { getItemVersionsFromEas } = await import('@/eas')
+    const attestations = await getItemVersionsFromEas({ seedUids: [seedUid] })
+    const latest = attestations?.[0]
+    if (latest?.id) return latest.id
+  } catch {
+    // EAS client may not be initialized or network error
   }
   return ZERO_BYTES32
 }
@@ -219,13 +254,25 @@ const processBasicProperties = async (
   ctx: PublishValidationContext,
 ): Promise<PublishPayload> => {
   for (const basicProperty of itemBasicProperties) {
+    // Skip SDK-internal properties (e.g. publisher) - never attest to EAS
+    if (INTERNAL_PROPERTY_NAMES.includes(basicProperty.propertyName)) {
+      continue
+    }
     const snapshot = basicProperty.getService().getSnapshot()
     const context = 'context' in snapshot ? snapshot.context : null
-    // Use basicProperty.value (canonical getter: renderValue || propertyValue, or refResolvedValue for Image)
-    // so we pick up values regardless of which context field they're stored in
+    const propertyDef =
+      basicProperty.propertyDef ?? (context ? (context as any).propertyRecordSchema : undefined)
+    const isFileImageHtml =
+      propertyDef?.dataType === ModelPropertyDataTypes.File ||
+      propertyDef?.dataType === ModelPropertyDataTypes.Image ||
+      propertyDef?.dataType === ModelPropertyDataTypes.Html
+    // File/Image/Html must use propertyValue (seed ID), not basicProperty.value which returns
+    // renderValue (file content) for File—bytes32 can only hold 31 bytes.
     let value =
-      (basicProperty as IItemProperty<any>).value ??
-      (context ? (context as any).propertyValue : undefined)
+      isFileImageHtml && context
+        ? (context as any).propertyValue
+        : ((basicProperty as IItemProperty<any>).value ??
+          (context ? (context as any).propertyValue : undefined))
     const hasContext = !!context
     const hasValue = value != null && value !== ''
     const hasUid = !!basicProperty.uid
@@ -261,8 +308,6 @@ const processBasicProperties = async (
     }
 
     // Validate against property validation rules (enum, pattern, minLength, maxLength) before encoding
-    const propertyDef =
-      basicProperty.propertyDef ?? (context ? (context as any).propertyRecordSchema : undefined)
     if (propertyDef?.validation) {
       const { SchemaValidationService } = await import(
         '@/Schema/service/validation/SchemaValidationService'
@@ -399,7 +444,31 @@ const processRelationOrImageProperty = async (
   if (!context) {
     return multiPublishPayload
   }
-  const value = (context as any).propertyValue
+  let value = (context as any).propertyValue
+  // File/Image/Html/Json metadata is stored with Id suffix (e.g. "textId"); context may not have propertyValue
+  // if the property was created from schema before metadata loaded. Fallback to metadata lookup.
+  const isStorageSeed =
+    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.File ||
+    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image ||
+    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Html ||
+    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Json ||
+    (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Relation &&
+      (relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.File ||
+        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Image ||
+        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Html ||
+        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Json))
+  if (!value && isStorageSeed && ((context as any).seedLocalId || (context as any).seedUid)) {
+    const { getPropertyData: getPropertyDataFromDb } = await import('@/db/read/getPropertyData')
+    const metaRow = await getPropertyDataFromDb({
+      propertyName: relationOrImageProperty.propertyName,
+      seedLocalId: (context as any).seedLocalId,
+      seedUid: (context as any).seedUid,
+    })
+    const fromMeta = metaRow?.propertyValue
+    if (fromMeta && typeof fromMeta === 'string' && fromMeta.trim() !== '') {
+      value = fromMeta
+    }
+  }
   const propertyDef = relationOrImageProperty.propertyDef
   let isRequired = propertyDef?.required === true
   // Resolve required from schema/DB when propertyDef lacks it
@@ -440,12 +509,27 @@ const processRelationOrImageProperty = async (
     }
   }
 
-  // Required relation with no value: cannot publish
+  // Required relation/image/file/html/json with no value: cannot publish
   if (isRequired && !value) {
+    const typeLabel =
+      propertyDef?.dataType === ModelPropertyDataTypes.File ||
+      propertyDef?.refValueType === ModelPropertyDataTypes.File
+        ? 'file'
+        : propertyDef?.dataType === ModelPropertyDataTypes.Image ||
+            propertyDef?.refValueType === ModelPropertyDataTypes.Image
+          ? 'image'
+          : propertyDef?.dataType === ModelPropertyDataTypes.Html ||
+              propertyDef?.refValueType === ModelPropertyDataTypes.Html
+            ? 'html'
+            : propertyDef?.dataType === ModelPropertyDataTypes.Json ||
+                propertyDef?.refValueType === ModelPropertyDataTypes.Json
+              ? 'json'
+              : 'relation'
+    const refLabel = propertyDef?.ref ?? propertyDef?.refModelName ?? 'related'
     addValidationError(
       ctx,
-      `Required relation ${relationOrImageProperty.propertyName} has no value. ` +
-        `A value pointing to a valid ${propertyDef?.ref ?? propertyDef?.refModelName ?? 'related'} item is required to publish.`,
+      `Required ${typeLabel} ${relationOrImageProperty.propertyName} has no value. ` +
+        `A value pointing to a valid ${refLabel} item is required to publish.`,
       relationOrImageProperty.propertyName,
     )
     return multiPublishPayload
@@ -809,13 +893,18 @@ export const getPublishPayload = async (
     }
   }
 
+  let versionUid = getVersionUid(item)
+  if (versionUid === ZERO_BYTES32 && item.seedUid && item.seedUid !== ZERO_BYTES32) {
+    versionUid = await resolveVersionUid(item.seedLocalId, item.seedUid)
+  }
+
   let itemPublishData: PublishPayload = {
     localId: item.seedLocalId,
     seedUid: item.seedUid || ZERO_BYTES32,
     seedIsRevocable: true,
     seedSchemaUid: itemSchemaUid,
     versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
-    versionUid: getVersionUid(item),
+    versionUid,
     listOfAttestations: [],
     propertiesToUpdate: [],
   }
@@ -933,11 +1022,6 @@ export const getPublishPayload = async (
       validationCtx.errors,
     )
   }
-
-  // #region agent log
-  const versionUidFromItem = getVersionUid(item)
-  fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'getPublishPayload.ts:return',message:'getPublishPayload result',data:{itemSeedLocalId:item.seedLocalId,itemSeedUid:item.seedUid??null,itemLatestVersionUidRaw:item.latestVersionUid,versionUidFromItem,payloadCount:multiPublishPayload.length,payloads:multiPublishPayload.map((p,i)=>({idx:i,localId:p.localId,seedUid:p.seedUid,versionUid:p.versionUid,listOfAttestationsCount:p.listOfAttestations?.length??0,propertiesToUpdateCount:p.propertiesToUpdate?.length??0}))},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-  // #endregion
 
   return multiPublishPayload
 }

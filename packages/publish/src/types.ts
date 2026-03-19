@@ -1,5 +1,7 @@
+
 import type { Item } from '@seedprotocol/sdk'
 import type { Account } from 'thirdweb/wallets'
+import type { ethers } from 'ethers'
 
 export type ReimbursementResponse = { transactionId: string }
 
@@ -38,11 +40,29 @@ export interface PublishMachineContext {
   transactionKeys?: string
   requestResponse?: unknown
   completionPercentage?: number
+  /** Serialized uploader state for resume (from uploader.toJSON()). */
+  uploaderState?: { chunkIndex: number; transaction: unknown; txPosted: boolean; [key: string]: unknown }
+  /** Index of current transaction being uploaded when resuming. */
+  currentTransactionIndex?: number
   /** Set when machine transitions to failure (from onError or uploadError). */
   error?: unknown
   /** Which state failed (e.g. creatingArweaveTransactions, sendingReimbursementRequest). */
   errorStep?: string
   /** Raw EAS attestation payload from getPublishPayload, stored for later retrieval. */
   easPayload?: unknown
+  /** Signed DataItems for uploadViaBundler (dataItemSigner path only - signed FileDataItem instances for upload). */
+  signedDataItems?: { id: string; raw: Uint8Array }[]
+  /** Per-publish: sign DataItems when useArweaveBundler (from createPublish options). */
+  signDataItems?: (
+    uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
+  ) => Promise<import('./config').ArweaveDataItemInfoResult[]>
+  /** Per-publish: signer for DataItems when useArweaveBundler (from createPublish options). */
+  dataItemSigner?: ethers.Wallet | Account
+  /** Per-publish: sign Arweave transactions when NOT useArweaveBundler (from createPublish options). */
+  signArweaveTransactions?: (
+    uploads: import('./config').SerializedPublishUpload[]
+  ) => Promise<import('./config').ArweaveTransactionInfoResult[]>
+  /** Per-publish: JWK for in-process signing when NOT useArweaveBundler (from createPublish options). */
+  arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   [key: string]: unknown
 }

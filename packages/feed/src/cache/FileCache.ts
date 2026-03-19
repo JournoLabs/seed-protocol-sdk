@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import type { CachedFeedData, CachedFeedContent, CacheConfig, CachedImageMetadata } from './types';
+import type { CachedFeedData, CachedFeedContent, CacheConfig, CacheContentKeyOptions, CachedImageMetadata } from './types';
+import { buildContentKey } from './types';
 import type { GraphQLItem, ImageMetadata } from '../types';
 
 /**
@@ -43,8 +44,14 @@ export class FileCache {
   /**
    * Get file path for feed content
    */
-  private getFeedContentPath(schemaName: string, format: string): string {
-    return join(this.cacheDir, `${schemaName}-${format}.json`);
+  private getFeedContentPath(
+    schemaName: string,
+    format: string,
+    contentKeyOptions?: CacheContentKeyOptions
+  ): string {
+    const key = buildContentKey(schemaName, format, contentKeyOptions);
+    const filePart = key.replace(/:/g, '-');
+    return join(this.cacheDir, `${filePart}.json`);
   }
 
   /**
@@ -117,10 +124,11 @@ export class FileCache {
    */
   async getFeedContent(
     schemaName: string,
-    format: string
+    format: string,
+    contentKeyOptions?: CacheContentKeyOptions
   ): Promise<CachedFeedContent | null> {
     try {
-      const filePath = this.getFeedContentPath(schemaName, format);
+      const filePath = this.getFeedContentPath(schemaName, format, contentKeyOptions);
       const data = await fs.readFile(filePath, 'utf-8');
       const cached: CachedFeedContent = JSON.parse(data);
 
@@ -128,7 +136,7 @@ export class FileCache {
       const now = Math.floor(Date.now() / 1000);
       if (now > cached.expiresAt) {
         // Cache expired, delete file
-        await this.clearFeedContent(schemaName, format);
+        await this.clearFeedContent(schemaName, format, contentKeyOptions);
         return null;
       }
 
@@ -152,11 +160,12 @@ export class FileCache {
   async setFeedContent(
     schemaName: string,
     format: string,
-    content: CachedFeedContent
+    content: CachedFeedContent,
+    contentKeyOptions?: CacheContentKeyOptions
   ): Promise<void> {
     try {
       await this.ensureCacheDir();
-      const filePath = this.getFeedContentPath(schemaName, format);
+      const filePath = this.getFeedContentPath(schemaName, format, contentKeyOptions);
       await fs.writeFile(filePath, JSON.stringify(content, null, 2), 'utf-8');
     } catch (error) {
       console.error(
@@ -185,9 +194,13 @@ export class FileCache {
   /**
    * Clear content cache for a schema and format
    */
-  async clearFeedContent(schemaName: string, format: string): Promise<void> {
+  async clearFeedContent(
+    schemaName: string,
+    format: string,
+    contentKeyOptions?: CacheContentKeyOptions
+  ): Promise<void> {
     try {
-      const filePath = this.getFeedContentPath(schemaName, format);
+      const filePath = this.getFeedContentPath(schemaName, format, contentKeyOptions);
       await fs.unlink(filePath);
     } catch (error) {
       // File might not exist, which is fine

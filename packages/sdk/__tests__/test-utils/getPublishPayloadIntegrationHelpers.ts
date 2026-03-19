@@ -14,7 +14,7 @@ import type { SchemaFileFormat } from '@/types/import'
 import type { Item as ItemClass } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq, and } from 'drizzle-orm'
-import { models as modelsTable, modelUids, metadata } from '@/seedSchema'
+import { models as modelsTable, modelUids, metadata, seeds } from '@/seedSchema'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
 const SCHEMA_NAME_OPTIONAL_AUTHOR = 'Test Schema getPublishPayload Optional Author'
@@ -514,4 +514,62 @@ export async function createItemWithAllPropertyTypes(
   await waitForItemIdle(item)
   await waitForPropertyInstances(item)
   return { authorItem, tagItems, postItem: item }
+}
+
+export type CreatePublishedItemForUnpublishOptions = {
+  title?: string
+  /** Publisher address - must be in client config addresses for assertItemOwned to pass */
+  publisher?: string
+}
+
+/** Default publisher for unpublish tests. Include in client config addresses. */
+export const UNPUBLISH_TEST_PUBLISHER = '0x' + 'd'.repeat(40)
+
+/** Default seed UID for simulating published state. */
+export const UNPUBLISH_TEST_SEED_UID = '0x' + 'e'.repeat(64)
+
+/**
+ * Create a Post item in "published" state (seedUid, publisher, schemaUid set).
+ * Use for unpublish integration tests. Client config must include publisher in addresses.
+ */
+export async function createPublishedItemForUnpublish(
+  options: CreatePublishedItemForUnpublishOptions = {}
+): Promise<{
+  item: ItemClass<any>
+  seedLocalId: string
+  seedUid: string
+  publisher: string
+}> {
+  const { title = 'Unpublish test post', publisher = UNPUBLISH_TEST_PUBLISHER } = options
+  const { item } = await createItemWithBasicPropertiesOnly({ title })
+  const seedLocalId = item.seedLocalId!
+  const seedUid = UNPUBLISH_TEST_SEED_UID
+
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('Database not available')
+
+  // Get schema UID for Post model from modelUids
+  const postModelRows = await db
+    .select({ uid: modelUids.uid })
+    .from(modelsTable)
+    .innerJoin(modelUids, eq(modelsTable.id, modelUids.modelId))
+    .where(eq(modelsTable.name, 'Post'))
+    .limit(1)
+  const schemaUid = postModelRows[0]?.uid ?? testModelPlaceholderUid(2)
+
+  // Update seeds row with published state
+  await db
+    .update(seeds)
+    .set({
+      uid: seedUid,
+      publisher,
+      schemaUid,
+      updatedAt: Date.now(),
+    })
+    .where(eq(seeds.localId, seedLocalId))
+
+  // Update item context so unpublish can read seedUid and schemaUid
+  item.getService().send({ type: 'updateContext', seedUid, schemaUid })
+
+  return { item, seedLocalId, seedUid, publisher }
 }

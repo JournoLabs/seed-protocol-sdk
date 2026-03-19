@@ -4,6 +4,7 @@ import type {
   CachedFeedData,
   CachedFeedContent,
   CacheConfig,
+  CacheContentKeyOptions,
   CacheStats,
 } from './types';
 import type { GraphQLItem, ImageMetadata } from '../types';
@@ -94,7 +95,8 @@ export class CacheManager {
    */
   async getFeedContent(
     schemaName: string,
-    format: FeedFormat
+    format: FeedFormat,
+    contentKeyOptions?: CacheContentKeyOptions
   ): Promise<CachedFeedContent | null> {
     if (!this.config.enabled) {
       return null;
@@ -102,21 +104,22 @@ export class CacheManager {
 
     try {
       // Check memory cache first
-      let cached = this.memoryCache.getFeedContent(schemaName, format);
+      let cached = this.memoryCache.getFeedContent(schemaName, format, contentKeyOptions);
       if (cached) {
         this.stats.hits++;
         return cached;
       }
 
       // Check file cache
-      cached = await this.fileCache.getFeedContent(schemaName, format);
+      cached = await this.fileCache.getFeedContent(schemaName, format, contentKeyOptions);
       if (cached) {
         // Restore to memory cache
         this.memoryCache.setFeedContent(
           schemaName,
           format,
           cached.content,
-          cached.contentType
+          cached.contentType,
+          contentKeyOptions
         );
         this.stats.hits++;
         return cached;
@@ -142,20 +145,35 @@ export class CacheManager {
     schemaName: string,
     format: FeedFormat,
     content: string,
-    contentType: string
+    contentType: string,
+    contentKeyOptions?: CacheContentKeyOptions
   ): Promise<void> {
     if (!this.config.enabled) {
       return;
     }
 
     try {
+      let ttlOverride: number | undefined;
+      if (contentKeyOptions?.archive) {
+        ttlOverride = this.config.archiveTtl ?? 86400;
+      } else if (contentKeyOptions?.page != null && contentKeyOptions.page > 1) {
+        ttlOverride = this.config.pageTtl ?? 300;
+      }
+
       // Update memory cache
-      this.memoryCache.setFeedContent(schemaName, format, content, contentType);
+      this.memoryCache.setFeedContent(
+        schemaName,
+        format,
+        content,
+        contentType,
+        contentKeyOptions,
+        ttlOverride
+      );
 
       // Get the cached content to save to file
-      const cached = this.memoryCache.getFeedContent(schemaName, format);
+      const cached = this.memoryCache.getFeedContent(schemaName, format, contentKeyOptions);
       if (cached) {
-        await this.fileCache.setFeedContent(schemaName, format, cached);
+        await this.fileCache.setFeedContent(schemaName, format, cached, contentKeyOptions);
       }
     } catch (error) {
       console.error(

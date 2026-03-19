@@ -48,6 +48,15 @@ export interface SeedConfig {
   dbConfig?: DbConfig
   /** Path to schema JSON file (e.g. 'schema.json'). Node: relative to process.cwd(); Browser: relative to working dir */
   schemaFile?: string
+  /**
+   * Single canonical schema for the app. When provided:
+   * - Loaded automatically at init (no separate import needed)
+   * - Always applied on each app start (add/update models & properties)
+   * - No "already exists with different content" errors
+   * - string: path to schema file (Node: relative to process.cwd(); Browser: relative to working dir)
+   * - object: complete SchemaFileFormat inlined
+   */
+  schema?: string | import('./import').SchemaFileFormat
 }
 
 /**

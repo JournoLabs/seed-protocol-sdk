@@ -27,8 +27,8 @@ export const GET_SCHEMA_BY_NAME = graphql(/* GraphQL */ `
 `) as TypedDocumentNode<{ schemas: EASSchema[] }>
 
 export const GET_SEEDS = graphql(/* GraphQL */ `
-  query GetSeeds($where: AttestationWhereInput!, $take: Int) {
-    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take) {
+  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {
+    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {
       id
       decodedDataJson
       attester
@@ -39,6 +39,7 @@ export const GET_SEEDS = graphql(/* GraphQL */ `
       }
       refUID
       revoked
+      revocationTime
       schemaId
       timeCreated
       isOffchain

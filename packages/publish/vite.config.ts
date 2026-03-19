@@ -16,20 +16,14 @@ export default defineConfig({
       formats: ['es'],
       fileName: () => 'index.js',
     },
+    target: 'node20',
     rollupOptions: {
-      external: [
-        'react',
-        'react-dom',
-        'thirdweb',
-        'thirdweb/chains',
-        'thirdweb/contract',
-        'thirdweb/react',
-        'thirdweb/utils',
-        'thirdweb/wallets',
-        'viem',
-        '@seedprotocol/sdk',
-        '@ethereum-attestation-service/eas-sdk',
-      ],
+      external: (id) =>
+        id === '@seedprotocol/sdk' ||
+        (!id.startsWith('.') &&
+          !id.startsWith('/') &&
+          !id.startsWith('\0') &&
+          !id.startsWith('~/')),
     },
     sourcemap: true,
   },

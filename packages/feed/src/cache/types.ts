@@ -51,6 +51,30 @@ export interface CacheConfig {
   backgroundRefresh: boolean;     // Enable background refresh job
   refreshInterval: number;        // Background refresh interval in seconds
   imageMetadata?: ImageMetadataConfig // Image metadata cache configuration
+  pageTtl?: number;                // TTL for page > 1 (default: 300)
+  archiveTtl?: number;            // TTL for archives (default: 86400)
+}
+
+/**
+ * Options for cache content key (pagination or archive)
+ */
+export interface CacheContentKeyOptions {
+  page?: number;
+  archive?: { year: number; month: number };
+}
+
+export function buildContentKey(
+  schemaName: string,
+  format: string,
+  options?: CacheContentKeyOptions
+): string {
+  if (options?.archive) {
+    return `${schemaName}:${format}:archive-${options.archive.year}-${options.archive.month}`;
+  }
+  if (options?.page != null && options.page > 1) {
+    return `${schemaName}:${format}:page-${options.page}`;
+  }
+  return `${schemaName}:${format}`;
 }
 
 /**

@@ -328,12 +328,29 @@ export class SchemaValidationService {
         })
       }
 
+      // File/Image: accept File objects from OS picker (TypeBox schema only allows string|null)
+      if (
+        (dataType === ModelPropertyDataTypes.File || dataType === ModelPropertyDataTypes.Image) &&
+        typeof File !== 'undefined' &&
+        value instanceof File
+      ) {
+        if (validationRules) {
+          const customErrors = this.validateCustomRules(value, validationRules)
+          errors.push(...customErrors)
+        }
+        return {
+          isValid: errors.length === 0,
+          errors,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        }
+      }
+
       // List with refValueType: validate each element against element schema + validation rules
       if (dataType === ModelPropertyDataTypes.List && refValueType && Array.isArray(value)) {
         const elementDataType = normalizeDataType(String(refValueType)) as ModelPropertyDataTypes
-        // Apply default maxLength for Text/Html elements in List
+        // Apply default maxLength for Text elements in List. Html elements hold arbitrary-length content.
         const elementEffectiveRules = validationRules ? { ...validationRules } : {}
-        if ((elementDataType === ModelPropertyDataTypes.Text || elementDataType === ModelPropertyDataTypes.Html) && elementEffectiveRules.maxLength === undefined) {
+        if (elementDataType === ModelPropertyDataTypes.Text && elementEffectiveRules.maxLength === undefined) {
           elementEffectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
         }
         for (let i = 0; i < value.length; i++) {
@@ -378,9 +395,9 @@ export class SchemaValidationService {
       // Build base TypeBox schema from dataType
       let schema: TSchema = this.getBaseSchemaForDataType(dataType)
 
-      // Apply default maxLength for Text/Html when not explicitly set (Option A)
+      // Apply default maxLength for Text when not explicitly set. Html holds arbitrary-length content (e.g. article body) and must not default to 255.
       const effectiveRules = validationRules ? { ...validationRules } : {}
-      if ((dataType === ModelPropertyDataTypes.Text || dataType === ModelPropertyDataTypes.Html) && effectiveRules.maxLength === undefined) {
+      if (dataType === ModelPropertyDataTypes.Text && effectiveRules.maxLength === undefined) {
         effectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
       }
 
@@ -396,17 +413,33 @@ export class SchemaValidationService {
       if (!isValid) {
         const typeBoxErrors = [...Value.Errors(schema, value)]
         const effectiveMaxLength = effectiveRules.maxLength
+        const isDefaultTextLimit =
+          dataType === ModelPropertyDataTypes.Text &&
+          effectiveMaxLength === DEFAULT_TEXT_MAX_LENGTH &&
+          validationRules?.maxLength === undefined
         errors.push(...typeBoxErrors.map(err => {
           const fieldPath = err.path || 'value'
           const originalMessage = (err.message || '').toLowerCase()
           // TypeBox maxLength errors have message like "Expected string length less or equal to X"
           const isMaxLengthError = originalMessage.includes('length') && (originalMessage.includes('less') || originalMessage.includes('equal') || originalMessage.includes('max'))
-          const enhancedMessage = isMaxLengthError && effectiveMaxLength !== undefined
-            ? `Text must be ${effectiveMaxLength} characters or less. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
-            : this.enhanceErrorMessage(err, schema, fieldPath)
-          // Use enum_violation when validation failed and we had enum rules (TypeBox may return various error types)
-          const code = hasEnumRules ? 'enum_violation' : String(err.type || 'value_validation_error')
-          
+          let enhancedMessage: string
+          if (isMaxLengthError && effectiveMaxLength !== undefined) {
+            const typeLabel = dataType === ModelPropertyDataTypes.Html ? 'Html' : 'Text'
+            if (isDefaultTextLimit) {
+              enhancedMessage = `Text properties have a default limit of 255 characters. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
+            } else {
+              enhancedMessage = `${typeLabel} must be ${effectiveMaxLength} characters or less. For longer content, use a File property instead, which can hold arbitrary amounts of text or data.`
+            }
+          } else {
+            enhancedMessage = this.enhanceErrorMessage(err, schema, fieldPath)
+          }
+          // Use max_length_exceeded when failure is due to maxLength; enum_violation when enum rules; else generic
+          const code = isMaxLengthError
+            ? 'max_length_exceeded'
+            : hasEnumRules
+              ? 'enum_violation'
+              : String(err.type || 'value_validation_error')
+
           return {
             field: fieldPath,
             message: enhancedMessage,

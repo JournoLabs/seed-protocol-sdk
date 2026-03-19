@@ -10,6 +10,7 @@ import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
+import { toMetadataPropertyName } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { eventEmitter } from '@/eventBus'
 
@@ -39,26 +40,25 @@ export const saveHtml = fromCallback<
     newValue = event.newValue
   }
 
-  if (existingValue === newValue) {
-    sendBack({ type: 'saveValueToDbSuccess' })
-    return
-  }
+  // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
+  // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
+  // (Same rationale as analyzeInput.ts)
 
   const _saveHtml = async (): Promise<void> => {
     if (!propertyNameRaw) {
       throw new Error('propertyName is required')
     }
-    let propertyName = propertyNameRaw
-
-    if (!propertyNameRaw.endsWith('Id')) {
-      propertyName = `${propertyName}Id`
-    }
+    const propertyName = toMetadataPropertyName(propertyNameRaw, 'Html')
 
     const htmlContent = typeof newValue === 'string' ? newValue : String(newValue ?? '')
 
     if (!htmlContent) {
       throw new Error('No HTML content found')
     }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:entry',message:'Html save started',data:{propertyName,htmlContentLength:htmlContent.length,existingValue:typeof existingValue,newValueType:typeof newValue},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
+    // #endregion
 
     if (!htmlSchemaUid) {
       const fetchedSchemaUid = await getEasSchemaUidForModel('Html')
@@ -89,6 +89,14 @@ export const saveHtml = fromCallback<
     }
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
+
+    // For HTML, renderValue must be the raw HTML content (for editing/display), not the blob URL.
+    // The blob URL (refResolvedDisplayValue) is stored in metadata for iframe display when needed.
+    const renderValueForContext = htmlContent
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:beforeDb',message:'Html save before DB write',data:{newHtmlSeedLocalId,fileName,refResolvedValue:fileName,localStorageDir:'/html',renderValueLength:renderValueForContext.length,filePath},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
+    // #endregion
 
     let newLocalId
 
@@ -133,8 +141,13 @@ export const saveHtml = fromCallback<
         refModelUid: htmlSchemaUid,
         localStorageDir: '/html',
         easDataType: 'bytes32',
+        dataType: 'Html',
       } as any)
     }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:sendBack',message:'Html save sendBack updateContext',data:{propertyValue:newHtmlSeedLocalId,refResolvedValue:fileName,localStorageDir:'/html',renderValueLength:renderValueForContext.length},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
+    // #endregion
 
     sendBack({
       type: 'updateContext',
@@ -142,7 +155,7 @@ export const saveHtml = fromCallback<
       propertyValue: newHtmlSeedLocalId,
       refSeedType: 'html',
       refSchemaUid: htmlSchemaUid,
-      renderValue: refResolvedDisplayValue,
+      renderValue: renderValueForContext,
       refResolvedDisplayValue,
       refResolvedValue: fileName,
       localStorageDir: '/html',

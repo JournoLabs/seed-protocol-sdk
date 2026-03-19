@@ -11,5 +11,7 @@ export {
   clearAllPublishProcesses,
   clearAllUploadProcesses,
   deletePublishProcessesForSeed,
+  deletePublishProcessById,
+  deletePublishProcessesByIds,
 } from './clearCompletedPublishProcesses'
 export { getArweaveTransactionIds, getEasPayload } from './publishProcessHelpers'

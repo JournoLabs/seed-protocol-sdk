@@ -12,6 +12,7 @@ export * from './FileManager/BaseFileManager'
 export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
 export * from './easRevokedFilter'
+export * from './metadataPropertyNames'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary
@@ -98,6 +99,11 @@ export const getDataTypeFromString = (
 
   if (imageBase64Regex.test(data)) {
     return 'imageBase64'
+  }
+
+  // Blob URLs are fetchable but session-scoped; recognize them as url type
+  if (data.startsWith('blob:')) {
+    return 'url'
   }
 
   // Regular expression for URL (simple version, checking for common URL format)

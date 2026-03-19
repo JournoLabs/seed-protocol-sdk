@@ -71,6 +71,9 @@ export function loadCacheConfig(): CacheConfig {
     timeout: imageMetadataTimeout,
   };
 
+  const pageTtl = parseInt(process.env.CACHE_PAGE_TTL || '300', 10);
+  const archiveTtl = parseInt(process.env.CACHE_ARCHIVE_TTL || '86400', 10);
+
   return {
     ttl,
     cacheDir,
@@ -78,5 +81,7 @@ export function loadCacheConfig(): CacheConfig {
     backgroundRefresh,
     refreshInterval,
     imageMetadata,
+    pageTtl,
+    archiveTtl,
   };
 }

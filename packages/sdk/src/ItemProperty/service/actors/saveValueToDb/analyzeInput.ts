@@ -8,6 +8,7 @@ import {
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
+import { normalizeDataType } from '@/helpers/property'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 // Dynamic import to break circular dependency: schema/index -> ... -> analyzeInput -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
@@ -45,10 +46,9 @@ export const analyzeInput = fromCallback<
     newValue = event.newValue
   }
 
-  if (existingValue === newValue) {
-    sendBack({ type: 'saveValueToDbSuccess' })
-    return
-  }
+  // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
+  // so context is already updated by the time we run. Skipping would prevent the first persist.
+  // updateItemPropertyValue deduplicates by checking DB; saveFile/saveImage have their own logic.
 
   if (!propertyRecordSchema) {
     throw new Error('Missing propertyRecordSchema')
@@ -78,10 +78,13 @@ export const analyzeInput = fromCallback<
       return false
     }
 
+    const normalizedDataType = normalizeDataType(propertyRecordSchema.dataType)
+    const normalizedRefValueType = normalizeDataType(propertyRecordSchema.refValueType)
+
     if (
       propertyRecordSchema.refValueType &&
-      propertyRecordSchema.refValueType !== ModelPropertyDataTypes.Image &&
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation
+      normalizedRefValueType !== ModelPropertyDataTypes.Image &&
+      normalizedDataType === ModelPropertyDataTypes.Relation
     ) {
       sendBack({
         type: 'saveRelation',
@@ -91,8 +94,8 @@ export const analyzeInput = fromCallback<
     }
 
     if (
-      propertyRecordSchema.refValueType === ModelPropertyDataTypes.Image ||
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
+      normalizedRefValueType === ModelPropertyDataTypes.Image ||
+      normalizedDataType === ModelPropertyDataTypes.Image
     ) {
       sendBack({
         type: 'saveImage',
@@ -101,7 +104,7 @@ export const analyzeInput = fromCallback<
       return false
     }
 
-    if (propertyRecordSchema.dataType === ModelPropertyDataTypes.File) {
+    if (normalizedDataType === ModelPropertyDataTypes.File) {
       sendBack({
         type: 'saveFile',
         newValue,
@@ -109,7 +112,7 @@ export const analyzeInput = fromCallback<
       return false
     }
 
-    if (propertyRecordSchema.dataType === ModelPropertyDataTypes.Html) {
+    if (normalizedDataType === ModelPropertyDataTypes.Html) {
       sendBack({
         type: 'saveHtml',
         newValue,
@@ -133,8 +136,8 @@ export const analyzeInput = fromCallback<
         let easDataType
 
         if (propertyRecordSchema.dataType) {
-          easDataType = INTERNAL_DATA_TYPES[propertyRecordSchema.dataType]
-            .eas as TypedData['type']
+          const normalizedType = normalizeDataType(propertyRecordSchema.dataType)
+          easDataType = INTERNAL_DATA_TYPES[normalizedType as keyof typeof INTERNAL_DATA_TYPES]?.eas as TypedData['type']
         }
 
         const schemaFromEas = await getEasSchemaForItemProperty({
@@ -167,6 +170,8 @@ export const analyzeInput = fromCallback<
       versionUid,
       modelName,
       schemaUid,
+      dataType: propertyRecordSchema.dataType,
+      refValueType: propertyRecordSchema.refValueType,
     } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
 
     const stringValueForContext =

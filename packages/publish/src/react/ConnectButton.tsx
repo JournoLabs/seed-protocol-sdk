@@ -2,17 +2,17 @@ import React, { FC } from "react"
 import { ConnectButton as ConnectButtonThirdweb, darkTheme } from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
 import { getClient, getConnectedManagedAccountAddress, getWalletsForConnectButton } from "../helpers/thirdweb"
-import { getPublishConfig } from "../config"
+import { usePublishConfig } from "./PublishProvider"
 import { optimismSepolia } from "thirdweb/chains"
 import { getContract, sendTransaction, waitForReceipt } from "thirdweb"
 import { getInstalledModules, installModule } from "thirdweb/modules"
 import type { Account, Wallet } from "thirdweb/wallets"
 import { encodeAbiParameters } from "viem"
 import { EAS_CONTRACT_ADDRESS } from "../helpers/constants"
+import type { PublishConfig } from "../config"
 
-async function ensureModularAccountModule(account: Account): Promise<void> {
-  const config = getPublishConfig()
-  const { modularAccountModuleContract, modularAccountModuleData } = config
+async function ensureModularAccountModule(account: Account, config: PublishConfig): Promise<void> {
+  const { modularAccountModuleContract } = config
   if (!modularAccountModuleContract) return
 
   const accountContract = getContract({
@@ -45,6 +45,8 @@ async function ensureModularAccountModule(account: Account): Promise<void> {
 }
 
 const ConnectButton: FC = () => {
+  const config = usePublishConfig()
+
   const handleDisconnect = async () => {
     console.log('[ConnectButton] Disconnected')
     try {
@@ -59,7 +61,7 @@ const ConnectButton: FC = () => {
     if (!account) return
     console.log('[ConnectButton] Connected', account.address)
     const owned = new Set<string>([account.address.toLowerCase()])
-    if (getPublishConfig().useModularExecutor) {
+    if (config.useModularExecutor) {
       try {
         const managedAddr = await getConnectedManagedAccountAddress(optimismSepolia)
         if (managedAddr) owned.add(managedAddr.toLowerCase())
@@ -73,7 +75,7 @@ const ConnectButton: FC = () => {
       console.warn('[ConnectButton] Failed to set seed client addresses:', err)
     }
     try {
-      await ensureModularAccountModule(account)
+      await ensureModularAccountModule(account, config)
     } catch (err) {
       console.warn('[ConnectButton] Module check/install failed:', err)
     }

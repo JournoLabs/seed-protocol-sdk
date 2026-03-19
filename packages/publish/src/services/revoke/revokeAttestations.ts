@@ -2,11 +2,12 @@ import { getClient } from '~/helpers/thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { sendTransaction, waitForReceipt } from 'thirdweb'
 import { getConnectedAccount } from '~/helpers/thirdweb'
-import { getPublishConfig } from '~/config'
 import { prepareEasMultiRevoke } from '~/helpers/easDirect'
+import { resolveRevokeAccount } from '~/helpers/resolveRevokeAccount'
 import {
   getVersionsForSeedUid,
   getMetadataAttestationUidsForSeedUid,
+  getAttesterForSeed,
   updateSeedRevokedAt,
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
 } from '@seedprotocol/sdk'
@@ -29,6 +30,9 @@ export async function revokeAttestations(params: {
     throw new Error('No wallet connected. Connect a wallet to revoke attestations.')
   }
 
+  const attester = await getAttesterForSeed({ seedLocalId, seedUid })
+  const revokeAccount = await resolveRevokeAccount({ account, attester })
+
   const client = getClient()
 
   // Collect attestation UIDs to revoke
@@ -37,7 +41,7 @@ export async function revokeAttestations(params: {
     getMetadataAttestationUidsForSeedUid(seedUid),
   ])
 
-  const versionUids = versionRows.map((r) => r.uid)
+  const versionUids = versionRows.map((r: { uid: string }) => r.uid)
   const metadataBySchema = new Map<string, string[]>()
   for (const { uid, schemaUid } of metadataRows) {
     const list = metadataBySchema.get(schemaUid) ?? []
@@ -55,7 +59,7 @@ export async function revokeAttestations(params: {
     if (uids.length > 0) {
       requests.push({
         schema: schemaUid as `0x${string}`,
-        data: uids.map((uid) => ({ uid: uid as `0x${string}` })),
+        data: uids.map((uid: string) => ({ uid: uid as `0x${string}` })),
       })
     }
   }
@@ -64,7 +68,7 @@ export async function revokeAttestations(params: {
   if (versionUids.length > 0) {
     requests.push({
       schema: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA as `0x${string}`,
-      data: versionUids.map((uid) => ({ uid: uid as `0x${string}` })),
+      data: versionUids.map((uid: string) => ({ uid: uid as `0x${string}` })),
     })
   }
 
@@ -78,12 +82,27 @@ export async function revokeAttestations(params: {
   for (const req of requests) {
     if (req.data.length === 0) continue
     const multiRevokeTx = prepareEasMultiRevoke(client, optimismSepolia, [req])
-    const result = await sendTransaction({ account, transaction: multiRevokeTx })
-    await waitForReceipt({
-      client,
-      chain: optimismSepolia,
-      transactionHash: result.transactionHash,
-    })
+    try {
+      const result = await sendTransaction({ account: revokeAccount, transaction: multiRevokeTx })
+      await waitForReceipt({
+        client,
+        chain: optimismSepolia,
+        transactionHash: result.transactionHash,
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // EAS AccessDenied: only the original attester can revoke (selector 0x4ca88867)
+      if (msg.includes('AccessDenied') || msg.includes('0x4ca88867')) {
+        throw new Error(
+          'Only the original attester can revoke attestations. Connect the wallet that published this item.',
+        )
+      }
+      // AlreadyRevoked: attestation was already revoked (e.g. double-click, stale UI)
+      if (msg.includes('AlreadyRevoked')) {
+        continue
+      }
+      throw err
+    }
   }
 
   const revokedAt = Math.floor(Date.now() / 1000)

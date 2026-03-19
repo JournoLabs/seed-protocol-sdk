@@ -2,11 +2,17 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, models, properties } from '@/seedSchema'
-import { eq, and } from 'drizzle-orm'
+import { metadata, models, properties, type MetadataType } from '@/seedSchema'
+import { eq, and, or } from 'drizzle-orm'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
+import {
+  BaseFileManager,
+  getMetadataPropertyNamesForQuery,
+  resolveMetadataRecord,
+} from '@/helpers'
+import { normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
 
 const logger = debug('seedSdk:itemProperty:actors:loadOrCreateProperty')
@@ -39,17 +45,19 @@ export const loadOrCreateProperty = fromCallback<
       seedUid: seedUid ?? undefined 
     })
     
+    // Html/Image/File/Relation store metadata with Id suffix (e.g. htmlId); query both variants
+    const propertyNames = getMetadataPropertyNamesForQuery(propertyName)
+    const propertyNameWhere =
+      propertyNames.length > 1
+        ? or(...propertyNames.map((n) => eq(metadataLatest.propertyName, n)))
+        : eq(metadataLatest.propertyName, propertyNames[0])
+
     const metadataRecords = await db
       .with(metadataLatest)
       .select()
       .from(metadataLatest)
-      .where(
-        and(
-          eq(metadataLatest.propertyName, propertyName),
-          eq(metadataLatest.rowNum, 1)
-        )
-      )
-      .limit(1)
+      .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
+      .limit(5)
 
     if (metadataRecords.length === 0) {
       // Metadata not found - this is a new property, will be created elsewhere.
@@ -93,12 +101,17 @@ export const loadOrCreateProperty = fromCallback<
           uid: undefined,
           modelName: modelNameForNew || context.modelName,
           propertyRecordSchema,
+          refSeedType: context.refSeedType,
         },
       })
       return
     }
 
-    const metadataRecord = metadataRecords[0]
+    // Resolve best metadata record when multiple variants exist (base + Id)
+    const metadataRecord = resolveMetadataRecord(
+      metadataRecords as (MetadataType & { refResolvedValue?: string | null; refSeedType?: string })[],
+      propertyName
+    )
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
@@ -139,6 +152,7 @@ export const loadOrCreateProperty = fromCallback<
               refModelName = refModelRows[0]?.name ?? undefined
             }
             propertyRecordSchema = {
+              id: propRecord.id,
               dataType: propRecord.dataType,
               ref: refModelName ?? undefined,
               refValueType: propRecord.refValueType || undefined,
@@ -213,13 +227,85 @@ export const loadOrCreateProperty = fromCallback<
       }
     }
 
-    // Return loaded property data
+    // For Html: read file content for renderValue (propertyValue is seed ID; blob URLs in DB are invalid after reload)
+    let renderValue: string | undefined = metadataRecord.propertyValue || undefined
+    const refSeedType = (metadataRecord as { refSeedType?: string }).refSeedType
+    const isHtml = refSeedType === 'html' || propertyRecordSchema?.dataType === 'Html'
+    // Fallback: derive refResolvedValue/localStorageDir from propertyValue when missing (e.g. EAS sync, legacy data)
+    if (isHtml && !metadataRecord.refResolvedValue && metadataRecord.propertyValue) {
+      metadataRecord.refResolvedValue = `${metadataRecord.propertyValue}.html`
+      metadataRecord.localStorageDir = '/html'
+    }
+    // Fallback: when Html has refResolvedValue but localStorageDir is null (e.g. EAS sync, legacy records)
+    if (isHtml && metadataRecord.refResolvedValue && !metadataRecord.localStorageDir) {
+      metadataRecord.localStorageDir = '/html'
+    }
+    // #region agent log
+    if (isHtml) {
+      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:html',message:'Html load from DB',data:{propertyName,propertyValue:metadataRecord.propertyValue,refResolvedValue:metadataRecord.refResolvedValue,localStorageDir:metadataRecord.localStorageDir,refSeedType},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
+    }
+    // #endregion
+    if (isHtml && metadataRecord.refResolvedValue && metadataRecord.localStorageDir) {
+      try {
+        const dir = metadataRecord.localStorageDir.replace(/^\//, '')
+        const filePath = BaseFileManager.getFilesPath(dir, metadataRecord.refResolvedValue)
+        const exists = await BaseFileManager.pathExists(filePath)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:htmlFile',message:'Html file read attempt',data:{filePath,exists},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
+        // #endregion
+        if (exists) {
+          renderValue = await BaseFileManager.readFileAsString(filePath)
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:htmlFileRead',message:'Html file read success',data:{renderValueLength:renderValue?.length},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
+          // #endregion
+        }
+      } catch (e) {
+        logger(`Failed to read Html file for ${propertyName}: ${e}`)
+      }
+    }
+
+    // Image: always resolve display value from file (blob URLs in DB are invalid after reload)
+    let refResolvedDisplayValue: string | undefined =
+      (metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue) ?? undefined
+    const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
+    const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
+    const isImage =
+      refSeedType === 'image' ||
+      normalizedDataType === 'Image' ||
+      normalizedRefValueType === 'Image'
+    if (isImage && metadataRecord.refResolvedValue) {
+      try {
+        const dir = (metadataRecord.localStorageDir ?? '/images').replace(/^\//, '')
+        const dirPath = BaseFileManager.getFilesPath(dir)
+        const dirExists = await BaseFileManager.pathExists(dirPath)
+        if (dirExists) {
+          const fs = await BaseFileManager.getFs()
+          const path = BaseFileManager.getPathModule()
+          const files = await fs.promises.readdir(dirPath)
+          const matchingFiles = files.filter((file: string) =>
+            path.basename(file).includes(metadataRecord.refResolvedValue!)
+          )
+          if (matchingFiles?.length > 0) {
+            const filename = matchingFiles[0]
+            const filePath = BaseFileManager.getFilesPath(dir, filename)
+            const file = await BaseFileManager.readFile(filePath)
+            const freshBlobUrl = URL.createObjectURL(file)
+            renderValue = freshBlobUrl
+            refResolvedDisplayValue = freshBlobUrl
+          }
+        }
+      } catch (e) {
+        logger(`Failed to resolve Image file for ${propertyName}: ${e}`)
+      }
+    }
+
+    // Return loaded property data (use propertyName from context to match schema key, e.g. "html" not "htmlId")
     sendBack({
       type: 'loadOrCreatePropertySuccess',
       property: {
-        propertyName: metadataRecord.propertyName || propertyName,
+        propertyName,
         propertyValue: metadataRecord.propertyValue || undefined,
-        renderValue: metadataRecord.propertyValue || undefined,
+        renderValue,
         seedLocalId: metadataRecord.seedLocalId || seedLocalId,
         seedUid: metadataRecord.seedUid || seedUid,
         versionLocalId: metadataRecord.versionLocalId || versionLocalId,
@@ -229,9 +315,10 @@ export const loadOrCreateProperty = fromCallback<
         uid: metadataRecord.uid || undefined,
         modelName: modelName || context.modelName,
         propertyRecordSchema,
+        refSeedType: refSeedType ?? context.refSeedType,
         refResolvedValue: metadataRecord.refResolvedValue ?? context.refResolvedValue,
-        refResolvedDisplayValue: metadataRecord.refResolvedDisplayValue ?? context.refResolvedDisplayValue,
-        localStorageDir: metadataRecord.localStorageDir ?? context.localStorageDir ?? (propertyRecordSchema?.dataType === 'Image' ? '/images' : undefined),
+        refResolvedDisplayValue,
+        localStorageDir: metadataRecord.localStorageDir ?? context.localStorageDir ?? (normalizedDataType === 'Image' ? '/images' : undefined),
       },
     })
   }

@@ -5,7 +5,7 @@ import {
   PropertyMachineContext,
   SaveValueToDbEvent,
 } from '@/types/property'
-import { getDataTypeFromString } from '@/helpers'
+import { getDataTypeFromString, toMetadataPropertyName } from '@/helpers'
 // Dynamic import to break circular dependency: schema/index -> ... -> saveRelation -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
 
@@ -43,14 +43,10 @@ export const saveRelation = fromCallback<
     if (!propertyNameRaw) {
       throw new Error('propertyName is required')
     }
-    let propertyName = propertyNameRaw
+    const propertyName = toMetadataPropertyName(propertyNameRaw, 'Relation')
     let versionLocalIdToSave = versionLocalId
 
     const refResolvedValue = newValue
-
-    if (!propertyName.endsWith('Id')) {
-      propertyName = `${propertyName}Id`
-    }
 
     let newValueType
 

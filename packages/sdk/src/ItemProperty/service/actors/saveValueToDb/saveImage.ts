@@ -6,7 +6,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { createSeed } from '@/db/write/createSeed'
-import { getDataTypeFromString, getMimeType } from '@/helpers'
+import { getDataTypeFromString, getMimeType, toMetadataPropertyName } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
@@ -32,24 +32,12 @@ const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
   })
 }
 
-const fetchImage = async (url: string) => {
+/** Fetch image from URL (including blob:) and return { buffer, mimeType } for saving as binary. */
+const fetchImageAsBuffer = async (url: string): Promise<{ buffer: ArrayBuffer; mimeType?: string }> => {
   const response = await fetch(url)
-  const mimeType = response.headers.get('Content-Type')
+  const mimeType = response.headers.get('Content-Type')?.split(';')[0]?.trim()
   const imageBuffer = await response.arrayBuffer()
-  const bytes = new Uint8Array(imageBuffer)
-
-  const binaryString = bytes.reduce(
-    (acc, byte) => acc + String.fromCharCode(byte),
-    '',
-  )
-
-  let base64 = btoa(binaryString)
-
-  if (mimeType) {
-    base64 = `data:${mimeType};base64,${base64}`
-  }
-
-  return base64
+  return { buffer: imageBuffer, mimeType: mimeType || undefined }
 }
 
 let imageSchemaUid: string | undefined
@@ -78,20 +66,14 @@ export const saveImage = fromCallback<
     newValue = event.newValue
   }
 
-  if (existingValue === newValue) {
-    sendBack({ type: 'saveValueToDbSuccess' })
-    return
-  }
+  // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
+  // so context.propertyValue is already updated by the time we run. Skipping would prevent the first persist.
 
   const _saveImage = async (): Promise<void> => {
     if (!propertyNameRaw) {
       throw new Error('propertyName is required')
     }
-    let propertyName = propertyNameRaw
-
-    if (!propertyNameRaw.endsWith('Id')) {
-      propertyName = `${propertyName}Id`
-    }
+    const propertyName = toMetadataPropertyName(propertyNameRaw, 'Image')
 
     let newValueType
     let fileData: string | ArrayBuffer | undefined
@@ -121,13 +103,20 @@ export const saveImage = fromCallback<
     }
 
     if (newValueType === 'url') {
-      fileData = await fetchImage(newValue as string)
+      const { buffer, mimeType: fetchedMime } = await fetchImageAsBuffer(newValue as string)
+      fileData = buffer
+      if (fetchedMime) mimeType = fetchedMime
     }
 
     if (newValue instanceof File) {
       fileName = newValue.name
       mimeType = newValue.type
       fileData = await readFileAsArrayBuffer(newValue)
+    }
+
+    if (newValue instanceof Blob) {
+      mimeType = newValue.type || 'image/png'
+      fileData = await newValue.arrayBuffer()
     }
 
     // Handle existing file reference: filename from listImageFiles() that exists in images folder
@@ -162,7 +151,7 @@ export const saveImage = fromCallback<
 
     await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
 
-    const imageVersionLocalId = await createVersion({
+    await createVersion({
       seedLocalId: newImageSeedLocalId,
       seedType: 'image',
     })
@@ -190,12 +179,25 @@ export const saveImage = fromCallback<
     }
 
     // Resize image (skip for existing file reference - file may already have sized versions)
+    // Resize may not be implemented in all environments (e.g. Node); continue save if it fails
     if (!isExistingFileReference) {
-      await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_SMALL, height: ImageSize.EXTRA_SMALL })
-      await BaseFileManager.resizeImage({ filePath, width: ImageSize.SMALL, height: ImageSize.SMALL })
-      await BaseFileManager.resizeImage({ filePath, width: ImageSize.MEDIUM, height: ImageSize.MEDIUM })
-      await BaseFileManager.resizeImage({ filePath, width: ImageSize.LARGE, height: ImageSize.LARGE })
-      await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_LARGE, height: ImageSize.EXTRA_LARGE })
+      try {
+        // Resize can hang (e.g. browser workers); timeout so we don't block metadata update.
+        // File is already saved - sized versions are optional for display optimization.
+        const RESIZE_TIMEOUT_MS = 8000
+        await Promise.race([
+          (async () => {
+            await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_SMALL, height: ImageSize.EXTRA_SMALL })
+            await BaseFileManager.resizeImage({ filePath, width: ImageSize.SMALL, height: ImageSize.SMALL })
+            await BaseFileManager.resizeImage({ filePath, width: ImageSize.MEDIUM, height: ImageSize.MEDIUM })
+            await BaseFileManager.resizeImage({ filePath, width: ImageSize.LARGE, height: ImageSize.LARGE })
+            await BaseFileManager.resizeImage({ filePath, width: ImageSize.EXTRA_LARGE, height: ImageSize.EXTRA_LARGE })
+          })(),
+          new Promise<void>((resolve) => setTimeout(resolve, RESIZE_TIMEOUT_MS)),
+        ])
+      } catch (e) {
+        // Resize not implemented in this environment (e.g. Node); file is already saved
+      }
     }
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
@@ -215,7 +217,6 @@ export const saveImage = fromCallback<
           schemaUid: imageSchemaUid,
           refSeedType: 'image',
           refModelUid: imageSchemaUid,
-          refResolvedDisplayValue,
           refResolvedValue: fileName,
           localStorageDir: '/images',
           easDataType: 'bytes32',
@@ -238,11 +239,11 @@ export const saveImage = fromCallback<
         modelName,
         schemaUid,
         refSeedType: 'image',
-        refResolvedDisplayValue,
         refResolvedValue: fileName,
         refModelUid: imageSchemaUid,
         localStorageDir: '/images',
         easDataType: 'bytes32',
+        dataType: 'Image',
       } as any) // Type assertion needed because newValue is not in MetadataType but is accepted by the function
     }
 
@@ -262,10 +263,6 @@ export const saveImage = fromCallback<
   }
 
   _saveImage()
-    .then(() => {
-      sendBack({ type: 'saveImageSuccess' })
-    })
-    .catch((error) => {
-      sendBack({ type: 'saveImageError', error })
-    })
+    .then(() => sendBack({ type: 'saveImageSuccess' }))
+    .catch((error) => sendBack({ type: 'saveImageError', error }))
 })

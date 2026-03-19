@@ -19,6 +19,7 @@ const RSS_ITEM_ORDER = [
   'description',
   'guid',
   'pubDate',
+  'author',
   'authors',
   'categories',
   'comments',
@@ -70,6 +71,42 @@ function addTextOrCdata(parent: XMLBuilder, value: string): void {
     }
   } else {
     parent.txt(str)
+  }
+}
+
+function isExpandedRelationObject(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  )
+}
+
+function serializeExpandedRelation(
+  parent: XMLBuilder,
+  obj: Record<string, unknown>,
+  tagName: string,
+  addDcCreator?: boolean
+): void {
+  const ele = parent.ele(tagName)
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null || k.startsWith('_') || k === 'items') continue
+    const child = ele.ele(k)
+    if (
+      typeof v === 'object' &&
+      v !== null &&
+      !(v instanceof Date) &&
+      !Array.isArray(v)
+    ) {
+      addTextOrCdata(child, JSON.stringify(v))
+    } else {
+      addTextOrCdata(child, String(v))
+    }
+  }
+  if (addDcCreator) {
+    const name = obj.name ?? obj.seedUid
+    if (name) parent.ele(DC_NS, 'creator').txt(String(name))
   }
 }
 
@@ -225,16 +262,25 @@ function serializeItemProperty(
     return
   }
 
+  if (key === 'author' && isExpandedRelationObject(value)) {
+    serializeExpandedRelation(itemParent, value, 'author', true)
+    return
+  }
+
   if (key === 'authors' && Array.isArray(value)) {
     for (const a of value) {
-      const authorStr =
-        typeof a === 'string'
-          ? a
-          : a && typeof a === 'object' && 'name' in a
-            ? `${(a as { email?: string }).email ?? ''} (${(a as { name?: string }).name ?? ''})`.trim() ||
-              (a as { name?: string }).name
-            : String(a)
-      if (authorStr) itemParent.ele('author').txt(authorStr)
+      if (a && isExpandedRelationObject(a)) {
+        serializeExpandedRelation(itemParent, a, 'author', true)
+      } else {
+        const authorStr =
+          typeof a === 'string'
+            ? a
+            : a && typeof a === 'object' && 'name' in a
+              ? `${(a as { email?: string }).email ?? ''} (${(a as { name?: string }).name ?? ''})`.trim() ||
+                (a as { name?: string }).name
+              : String(a)
+        if (authorStr) itemParent.ele('author').txt(authorStr)
+      }
     }
     return
   }
@@ -253,6 +299,15 @@ function serializeItemProperty(
     return
   }
 
+  // Array of expanded relation objects (e.g. coAuthors as list)
+  if (Array.isArray(value) && value.length > 0 && value.every((v) => isExpandedRelationObject(v))) {
+    const tagName = key.endsWith('s') ? key.slice(0, -1) : key
+    for (const v of value) {
+      if (v) serializeExpandedRelation(itemParent, v, tagName, false)
+    }
+    return
+  }
+
   // Array of strings (e.g. resolved relation URLs for list relations like images)
   if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
     const tagName = key.endsWith('s') ? key.slice(0, -1) : key
@@ -265,8 +320,23 @@ function serializeItemProperty(
     return
   }
 
+  // Generic expanded relation object (e.g. coAuthor, other relation properties)
+  if (isExpandedRelationObject(value)) {
+    serializeExpandedRelation(itemParent, value, key, false)
+    return
+  }
+
   const ele = itemParent.ele(key)
   addTextOrCdata(ele, String(value))
+}
+
+const ATOM_NS = 'http://www.w3.org/2005/Atom'
+const FH_NS = 'http://purl.org/syndication/history/1.0'
+
+export interface RssFeedLink {
+  rel: string
+  href: string
+  type?: string
 }
 
 export interface RssFeedInput {
@@ -279,11 +349,24 @@ export interface RssFeedInput {
   pubDate?: Date
   lastBuildDate?: Date
   items: Record<string, unknown>[]
+  /** RFC 5005 pagination/archive links (atom:link in channel) */
+  links?: RssFeedLink[]
+  /** RFC 5005 archive document marker */
+  isArchive?: boolean
 }
 
 export function generateRssXml(rssFeed: RssFeedInput): string {
   const doc = create({ version: '1.0', encoding: 'UTF-8' })
-  const rss = doc.ele('rss', { version: '2.0' })
+  const rssAttrs: Record<string, string> = {
+    'xmlns:dc': DC_NS,
+    'xmlns:content': CONTENT_NS,
+    'xmlns:media': MEDIA_NS,
+    'xmlns:atom': ATOM_NS,
+  }
+  if (rssFeed.isArchive) {
+    rssAttrs['xmlns:fh'] = FH_NS
+  }
+  const rss = doc.ele('rss', { version: '2.0', ...rssAttrs })
   const channel = rss.ele('channel', {
     'xmlns:dc': DC_NS,
     'xmlns:content': CONTENT_NS,
@@ -298,6 +381,17 @@ export function generateRssXml(rssFeed: RssFeedInput): string {
   if (rssFeed.webMaster) channel.ele('webMaster').txt(rssFeed.webMaster)
   if (rssFeed.pubDate) channel.ele('pubDate').txt(formatRfc822Date(rssFeed.pubDate))
   if (rssFeed.lastBuildDate) channel.ele('lastBuildDate').txt(formatRfc822Date(rssFeed.lastBuildDate))
+
+  if (rssFeed.links?.length) {
+    for (const link of rssFeed.links) {
+      const attrs: Record<string, string> = { rel: link.rel, href: link.href }
+      if (link.type) attrs.type = link.type
+      channel.ele(ATOM_NS, 'link', attrs)
+    }
+  }
+  if (rssFeed.isArchive) {
+    channel.ele(FH_NS, 'archive')
+  }
 
   const orderedSet = new Set(RSS_ITEM_ORDER)
 

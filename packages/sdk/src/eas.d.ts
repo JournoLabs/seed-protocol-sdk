@@ -20,7 +20,7 @@ export declare const getSeedsFromSchemaUids: ({ schemaUids, addresses }: {
     schemaUids: string[];
     addresses: string[];
 }) => Promise<any>;
-export declare const getSeedsBySchemaName: (schemaName: string, limit?: number) => Promise<any>;
+export declare const getSeedsBySchemaName: (schemaName: string, limit?: number, skip?: number) => Promise<any>;
 export declare const getSeedUidsBySchemaName: (schemaName: string, limit?: number) => Promise<any>;
 export {};
 //# sourceMappingURL=eas.d.ts.map

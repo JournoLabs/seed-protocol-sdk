@@ -25,6 +25,8 @@ export const createArweaveTransactions = fromPromise(
     const publishUploads = await item.getPublishUploads()
 
     const config = getPublishConfig()
+    const signArweaveTransactions = context.signArweaveTransactions ?? config.signArweaveTransactions
+    const arweaveJwk = context.arweaveJwk ?? config.arweaveJwk
     const uploads = publishUploads.map((u: PublishUpload) => ({
       versionLocalId: u.versionLocalId,
       itemPropertyName: u.itemPropertyName,
@@ -32,11 +34,11 @@ export const createArweaveTransactions = fromPromise(
     }))
 
     let results: Array<{ transaction: Record<string, unknown>; versionId?: string; modelName?: string }>
-    if (config.signArweaveTransactions) {
-      results = await config.signArweaveTransactions(uploads)
-    } else if (config.arweaveJwk) {
+    if (signArweaveTransactions) {
+      results = await signArweaveTransactions(uploads)
+    } else if (arweaveJwk) {
       const arweave = getArweave()
-      const jwk = config.arweaveJwk
+      const jwk = arweaveJwk
       results = []
       for (const upload of uploads) {
         const tx = arweave.transactions.fromRaw(upload.transactionJson)
@@ -56,7 +58,7 @@ export const createArweaveTransactions = fromPromise(
       }
     } else {
       throw new Error(
-        'Arweave signing not configured. Provide signArweaveTransactions or arweaveJwk in initPublish().'
+        'Arweave signing not configured. Provide signArweaveTransactions or arweaveJwk at createPublish or in PublishProvider config.'
       )
     }
 

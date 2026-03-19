@@ -1,6 +1,10 @@
 import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
+import {
+  getAlternatePropertyNameForInstanceLookup,
+  toSchemaPropertyName,
+} from '@/helpers/metadataPropertyNames'
 import { VersionsType } from '@/seedSchema'
 // Dynamic import to break circular dependency: Model -> Item -> Model
 // import { Model } from '@/Model/Model'
@@ -156,6 +160,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return
       }
 
+      const state = itemInstanceState.get(this)
       const propertiesObj: Record<string, IItemProperty> = {}
 
       for (const [key, propertyInstance] of context.propertyInstances) {
@@ -183,7 +188,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
 
       // Define accessors for any property instances we don't have yet (e.g. from loadOrCreateItem)
-      const state = itemInstanceState.get(this)
       const definedSet = state?.definedPropertyNames
       if (definedSet) {
         for (const key of context.propertyInstances.keys()) {
@@ -192,6 +196,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
           if (!definedSet.has(key)) {
             this._definePropertyAccessor(key)
+          }
+        }
+        // Html/Image/File/Relation store as e.g. htmlId; ensure schema name (html) has accessor when htmlId exists
+        for (const key of context.propertyInstances.keys()) {
+          if (typeof key !== 'string' || INTERNAL_PROPERTY_NAMES.includes(key)) continue
+          const schemaBaseName = toSchemaPropertyName(key)
+          if (
+            schemaBaseName &&
+            (schemaKeys.includes(schemaBaseName) || schemaKeys.length === 0) &&
+            !definedSet.has(schemaBaseName)
+          ) {
+            this._definePropertyAccessor(schemaBaseName)
           }
         }
       }
@@ -236,8 +252,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       (key) => !metadataKeys.includes(key as any),
     )
     const schemaNameForModel = (initialValues as Record<string, unknown>).schemaName as string | undefined
-    const modelPropertyNames = this._getModelPropertyNames(schemaNameForModel)
-    const allKeys = new Set<string>([...keysFromInitial, ...modelPropertyNames])
 
     let model: import('@/Model/Model').Model | undefined
     try {
@@ -249,16 +263,31 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const propertySchemas = model?.properties?.length
       ? modelPropertiesToObject(model.properties)
       : {}
+    const modelPropertyNames = this._getModelPropertyNames(schemaNameForModel)
+    const schemaKeys = modelPropertyNames.length > 0 ? modelPropertyNames : Object.keys(propertySchemas)
+    // Normalize Id-suffix keys from initialValues: metadata stores textId but schema defines text
+    const ID_SUFFIX_NO_NORMALIZE = new Set(['storageTransactionId'])
+    const normalizedKeysFromInitial = keysFromInitial.map((key) => {
+      if (key.endsWith('Id') && !ID_SUFFIX_NO_NORMALIZE.has(key)) {
+        const baseName = key.slice(0, -2)
+        if (schemaKeys.length > 0 && schemaKeys.includes(baseName)) return baseName
+        if (schemaKeys.length === 0) return baseName
+      }
+      return key
+    })
+    const allKeys = new Set<string>([...normalizedKeysFromInitial, ...modelPropertyNames])
 
+    const initialRecord = initialValues as Record<string, unknown>
     for (const key of allKeys) {
       if (INTERNAL_PROPERTY_NAMES.includes(key)) {
         continue
       }
       const propSchema = propertySchemas[key] ?? undefined
+      const propertyValue = initialRecord[key] ?? initialRecord[`${key}Id`] ?? undefined
       this._createPropertyInstance({
         ...itemPropertyBase,
         propertyName: key,
-        propertyValue: (initialValues as Record<string, unknown>)[key] ?? undefined,
+        propertyValue,
         propertyRecordSchema: propSchema,
       })
     }
@@ -540,35 +569,35 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return Reflect.get(target, prop)
       },
       
-      set(target, prop: string | symbol, value: any) {
-        // Handle special properties
-        if (prop === '_service') {
-          return Reflect.set(target, prop, value)
-        }
-        
-        if (typeof prop === 'string' && prop === 'publisher') {
-          throw new Error('Cannot set item.publisher: publisher is read-only.')
-        }
-        
-        // Handle tracked properties
-        if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
-          if (prop === 'properties') {
-            // Properties are read-only computed values from propertyInstances
-            // Cannot be set directly - properties are managed via ItemProperty instances
-            throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
-          } else {
-            // Standard property update
-            target._service.send({
-              type: 'updateContext',
-              [prop]: value,
-            })
+        set(target, prop: string | symbol, value: any) {
+          // Handle special properties
+          if (prop === '_service') {
+            return Reflect.set(target, prop, value)
           }
-          return true
-        }
-        
-        // For non-tracked properties, use Reflect
-        return Reflect.set(target, prop, value)
-      },
+          
+          if (typeof prop === 'string' && prop === 'publisher') {
+            throw new Error('Cannot set item.publisher: publisher is read-only.')
+          }
+          
+          // Handle tracked properties
+          if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
+            if (prop === 'properties') {
+              // Properties are read-only computed values from propertyInstances
+              // Cannot be set directly - properties are managed via ItemProperty instances
+              throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
+            } else {
+              // Standard property update
+              target._service.send({
+                type: 'updateContext',
+                [prop]: value,
+              })
+            }
+            return true
+          }
+          
+          // For non-tracked properties, use Reflect
+          return Reflect.set(target, prop, value)
+        },
       
       has(target, prop: string | symbol) {
         // Check tracked properties
@@ -792,13 +821,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (state.definedPropertyNames.has(propertyName)) {
       return
     }
+    const altKey = getAlternatePropertyNameForInstanceLookup(propertyName)
     Object.defineProperty(this, propertyName, {
       get: () => {
-        const inst = this._service.getSnapshot().context.propertyInstances?.get(propertyName)
-        return inst?.value
+        const instances = this._service.getSnapshot().context.propertyInstances
+        const inst = instances?.get(propertyName) ?? (altKey ? instances?.get(altKey) : undefined)
+        const val = inst?.value
+        return val
       },
       set: (value: any) => {
-        const inst = this._service.getSnapshot().context.propertyInstances?.get(propertyName)
+        const instances = this._service.getSnapshot().context.propertyInstances
+        const inst = instances?.get(propertyName) ?? (altKey ? instances?.get(altKey) : undefined)
         if (inst) {
           inst.value = value
         }
@@ -844,7 +877,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const revoke = getRevokeExecutor()
     if (!revoke) {
       throw new Error(
-        'Revocation is not configured. Call initPublish() from @seedprotocol/publish before using unpublish().'
+        'Revocation is not configured. Call initPublish() from @seedprotocol/publish or ensure PublishProvider is mounted with config.'
       )
     }
     await revoke({
@@ -1425,22 +1458,44 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   const itemPropertyMod = await import('../ItemProperty/ItemProperty')
                   const { ItemProperty } = itemPropertyMod
                   const itemModelName = this._service.getSnapshot().context.modelName
+                  const schemaNameForModel = this._service.getSnapshot().context.schemaName
+                  let propertySchemas: Record<string, any> = {}
+                  try {
+                    if (itemModelName) {
+                      const M = getModel()
+                      const model =
+                        schemaNameForModel !== undefined
+                          ? M?.getByName(itemModelName, schemaNameForModel)
+                          : M?.getByName(itemModelName)
+                      if (model?.properties?.length) {
+                        propertySchemas = modelPropertiesToObject(model.properties)
+                      }
+                    }
+                  } catch {
+                    // Model not loaded
+                  }
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {
+                      let propertyName = metaRow.propertyName
+                      const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
+                      const refSeedType = metaRow.refSeedType as string | undefined
+                      const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
+                      if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+                        propertyName = baseName
+                      }
                       const property = await ItemProperty.find({
-                        propertyName: metaRow.propertyName,
+                        propertyName,
                         seedLocalId,
                         seedUid,
                         modelName: itemModelName,
                       })
                       if (property) {
-                        // Add property instance to context
                         this._service.send({
                           type: 'addPropertyInstance',
-                          propertyName: metaRow.propertyName,
+                          propertyName,
                           propertyInstance: property,
                         })
-                        logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}" from liveQuery`)
+                        logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${propertyName}" from liveQuery`)
                       }
                     } catch (error) {
                       logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)

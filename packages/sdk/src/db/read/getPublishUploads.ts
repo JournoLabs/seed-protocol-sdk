@@ -66,6 +66,8 @@ const getStorageDirForDataType = (dataType: string): string => {
       return BaseFileManager.getFilesPath('files')
     case 'Html':
       return BaseFileManager.getFilesPath('html')
+    case 'Json':
+      return BaseFileManager.getFilesPath('json')
     default:
       return BaseFileManager.getFilesPath('images')
   }
@@ -94,7 +96,10 @@ const getStorageSeedUploads = async (
       continue
     }
 
-    const dataType = itemProperty.propertyDef?.dataType ?? 'Image'
+    const dataType =
+      itemProperty.propertyDef?.refValueType ??
+      itemProperty.propertyDef?.dataType ??
+      'Image'
     const baseDir = getStorageDirForDataType(dataType)
     const filePath = `${baseDir}/${refResolvedValue}`
 

@@ -1,4 +1,5 @@
-import type { CachedFeedData, CachedFeedContent, CacheConfig, CachedImageMetadata } from './types';
+import type { CachedFeedData, CachedFeedContent, CacheConfig, CacheContentKeyOptions, CachedImageMetadata } from './types';
+import { buildContentKey } from './types';
 import type { GraphQLItem, ImageMetadata } from '../types';
 import { generateFeedETag, generateContentETag } from '../utils/etag';
 
@@ -77,8 +78,12 @@ export class MemoryCache {
   /**
    * Get cached feed content for a schema and format
    */
-  getFeedContent(schemaName: string, format: string): CachedFeedContent | null {
-    const key = `${schemaName}:${format}`;
+  getFeedContent(
+    schemaName: string,
+    format: string,
+    contentKeyOptions?: CacheContentKeyOptions
+  ): CachedFeedContent | null {
+    const key = buildContentKey(schemaName, format, contentKeyOptions);
     const cached = this.feedContentCache.get(key);
     if (!cached) {
       return null;
@@ -101,11 +106,14 @@ export class MemoryCache {
     schemaName: string,
     format: string,
     content: string,
-    contentType: string
+    contentType: string,
+    contentKeyOptions?: CacheContentKeyOptions,
+    ttlOverride?: number
   ): void {
-    const key = `${schemaName}:${format}`;
+    const key = buildContentKey(schemaName, format, contentKeyOptions);
     const now = Math.floor(Date.now() / 1000);
-    const expiresAt = now + this.config.ttl;
+    const ttl = ttlOverride ?? this.config.ttl;
+    const expiresAt = now + ttl;
 
     const etag = generateContentETag(schemaName, format, now, content.length);
 

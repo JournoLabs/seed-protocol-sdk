@@ -20,7 +20,6 @@ FromCallbackInput<ClientManagerContext>
     // Prepare databases - this handles all initialization, migration, and file setup
     await BaseDb.prepareDb(filesDir)
 
-    
     // Verify database is ready
     const appDb = BaseDb.getAppDb()
     if (!appDb) {

@@ -1,4 +1,4 @@
-import React, { FC, HTMLAttributes, useState, useEffect, DetailedHTMLProps, ImgHTMLAttributes } from 'react'
+import React, { useState, useEffect, DetailedHTMLProps, ImgHTMLAttributes } from 'react'
 import debug                                                                                    from 'debug'
 import { BaseFileManager } from '@seedprotocol/sdk'
 import { useItemProperty } from "./itemProperty"
@@ -49,92 +49,157 @@ type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTM
   alt?: string
   width?: number
   height?: number
+  /** Optional filename override when property hasn't resolved yet (e.g. in tests) */
+  filename?: string
 }
 
-const SeedImage: FC<SeedImageProps> = ({ imageProperty, width, ...props }) => {
-
+const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...props }: SeedImageProps): React.ReactNode => {
   const [sizedContentUrl, setSizedContentUrl] = useState<string | undefined>()
+  const [originalContentUrl, setOriginalContentUrl] = useState<string | undefined>()
 
-  const {property} = useItemProperty({
+  const { property: propertyFromHook } = useItemProperty({
     propertyName: imageProperty.propertyName,
     seedLocalId: imageProperty.seedLocalId,
     seedUid: imageProperty.seedUid
   })
 
-  // Get the value from the property
-  const srcUrl = property?.value as string | undefined
+  // Use passed imageProperty when parent provides it (e.g. direct pass from Item.properties); else use hook for reactive lookup
+  const property = imageProperty ?? propertyFromHook
+
+  // Resolved filename: explicit override, or from property
+  const resolvedFilename = filenameOverride ?? (property?.refResolvedValue ?? property?.value) as string | undefined
+
+  // Get display URL: value (blob URL or filename from ItemProperty.value getter), or resolvedFilename
+  const rawValue = property?.value
+  const srcUrl = (typeof rawValue === 'string' ? rawValue : resolvedFilename) as string | undefined
+  const isFileOrBlob = rawValue != null && (rawValue instanceof File || rawValue instanceof Blob)
+  const [blobPreviewUrl, setBlobPreviewUrl] = useState<string | null>(null)
+  const blobPreviewRef = React.useRef<string | null>(null)
+  useEffect(() => {
+    if (isFileOrBlob && (rawValue instanceof File || rawValue instanceof Blob)) {
+      if (!blobPreviewRef.current) {
+        blobPreviewRef.current = URL.createObjectURL(rawValue)
+        setBlobPreviewUrl(blobPreviewRef.current)
+      }
+      return () => {
+        if (blobPreviewRef.current) {
+          URL.revokeObjectURL(blobPreviewRef.current)
+          blobPreviewRef.current = null
+        }
+        setBlobPreviewUrl(null)
+      }
+    }
+    blobPreviewRef.current = null
+    setBlobPreviewUrl(null)
+  }, [isFileOrBlob, rawValue])
+
+  // Fallback: when we have filename but no blob URL (e.g. after reload, or sized versions missing), load original file
+  useEffect(() => {
+    if (!resolvedFilename) return
+    const isBlob = (s: unknown) => typeof s === 'string' && s.startsWith('blob:')
+    if (rawValue && isBlob(rawValue)) return // Already have blob URL
+    if (blobPreviewUrl) return // Have blob preview
+
+    const _getOriginalContentUrl = async () => {
+      try {
+        const filePath = property?.localStoragePath
+          ? property.localStoragePath
+          : `${BaseFileManager.getFilesPath('images')}/${resolvedFilename}`
+        const exists = await BaseFileManager.pathExists(filePath)
+        if (exists) {
+          const url = await BaseFileManager.getContentUrlFromPath(filePath)
+          if (url) setOriginalContentUrl(url)
+        }
+      } catch (err) {
+        logger('_getOriginalContentUrl error', err)
+      }
+    }
+    _getOriginalContentUrl()
+    return () => setOriginalContentUrl(undefined)
+  }, [resolvedFilename, rawValue, blobPreviewUrl, property?.localStoragePath])
 
   useEffect(() => {
-    if (!property || !width || !property.localStoragePath) {
+    if (!width || !resolvedFilename) {
       return
     }
 
     const _getSizedContentUrl = async () => {
-      const fs = await BaseFileManager.getFs()
-      const baseDir = property.localStoragePath
-        ? property.localStoragePath.split('/').slice(0, -1).join('/')
-        : BaseFileManager.getFilesPath('images')
-      const itemsInDir = fs.readdirSync(baseDir, {withFileTypes: true})
-      const widthDirs = itemsInDir.filter((item: { isDirectory: () => boolean }) => item.isDirectory())
-      const availableWidths = widthDirs.map((dir: { name: string }) => parseInt(dir.name))
-      const closestWidth = availableWidths.reduce((prev: number, curr: number) => {
-        return (Math.abs(curr - width) < Math.abs(prev - width) ? curr : prev)
-      }, availableWidths[0])
-      if (!property.refResolvedValue) {
-        return
-      }
-      const filenameWithoutExtension = getFileNameWithoutExtension(property.refResolvedValue)
+      try {
+        const fs = await BaseFileManager.getFs()
+        const baseDir = property?.localStoragePath
+          ? property.localStoragePath.split('/').slice(0, -1).join('/')
+          : BaseFileManager.getFilesPath('images')
+        const itemsInDir = fs.readdirSync(baseDir, {withFileTypes: true})
+        const widthDirs = itemsInDir.filter((item: { isDirectory: () => boolean }) => item.isDirectory())
+        const availableWidths = widthDirs.map((dir: { name: string }) => parseInt(dir.name))
+        const closestWidth = availableWidths.reduce((prev: number, curr: number) => {
+          return (Math.abs(curr - width) < Math.abs(prev - width) ? curr : prev)
+        }, availableWidths[0])
+        const filenameWithoutExtension = getFileNameWithoutExtension(resolvedFilename)
 
-      // Check cache first
-      const cacheKey = `${filenameWithoutExtension}-${closestWidth}`
-      if (contentUrlCache.has(cacheKey)) {
-        try {
-          const contentUrl = contentUrlCache.get(cacheKey)
-          if (contentUrl) {
-            const response = await fetch(contentUrl)
-            if (response.ok) {
-              setSizedContentUrl(contentUrl)
-              return
+        // Check cache first
+        const cacheKey = `${filenameWithoutExtension}-${closestWidth}`
+        if (contentUrlCache.has(cacheKey)) {
+          try {
+            const contentUrl = contentUrlCache.get(cacheKey)
+            if (contentUrl) {
+              const response = await fetch(contentUrl)
+              if (response.ok) {
+                setSizedContentUrl(contentUrl)
+                return
+              }
             }
+          } catch (error) {
+            logger('error', error)
+            contentUrlCache.delete(cacheKey)
           }
-        } catch (error) {
-          logger('error', error)
-          contentUrlCache.delete(cacheKey)
         }
-      }
 
-      const itemsInSizedDir = fs.readdirSync(`${baseDir}/${closestWidth}`, {withFileTypes: true})
+        const itemsInSizedDir = fs.readdirSync(`${baseDir}/${closestWidth}`, {withFileTypes: true})
 
-      const matchingFile = itemsInSizedDir.find((item: { name?: string }) => {
-        if (!item.name) {
-          return false
+        const matchingFile = itemsInSizedDir.find((item: { name?: string }) => {
+          if (!item.name) {
+            return false
+          }
+          return matchFileNameWithoutExtension(item.name, filenameWithoutExtension)
+        })
+        if (!matchingFile) {
+          return
         }
-        return matchFileNameWithoutExtension(item.name, filenameWithoutExtension)
-      })
-      if (!matchingFile) {
-        return
-      }
-      const newPath = `${baseDir}/${closestWidth}/${matchingFile?.name}`
-      const exists = await BaseFileManager.pathExists(newPath)
-      if (exists) {
-        const contentUrl = await BaseFileManager.getContentUrlFromPath(newPath)
-        if (contentUrl) {
-          contentUrlCache.set(cacheKey, contentUrl)
-          setSizedContentUrl(contentUrl)
+        const newPath = `${baseDir}/${closestWidth}/${matchingFile?.name}`
+        const exists = await BaseFileManager.pathExists(newPath)
+        if (exists) {
+          const contentUrl = await BaseFileManager.getContentUrlFromPath(newPath)
+          if (contentUrl) {
+            contentUrlCache.set(cacheKey, contentUrl)
+            setSizedContentUrl(contentUrl)
+          }
         }
+      } catch (err) {
+        logger('_getSizedContentUrl error', err)
       }
     }
 
     _getSizedContentUrl()
-  }, [property, width, srcUrl])
+  }, [property, width, srcUrl, resolvedFilename])
 
-  if (!sizedContentUrl && (!srcUrl || !srcUrl.startsWith('blob:'))) {
+  // Render img when we have a content URL, or when we have filename (show placeholder while loading)
+  const isBlobUrl = (s: unknown) => typeof s === 'string' && s.startsWith('blob:')
+  const hasContentUrl = !!sizedContentUrl || !!originalContentUrl || !!blobPreviewUrl || (!!srcUrl && isBlobUrl(srcUrl))
+  if (!hasContentUrl && !resolvedFilename) {
     return null
   }
 
+  // Placeholder 1x1 transparent GIF while loading (ensures img exists for a11y and tests)
+  const imgSrc = sizedContentUrl || originalContentUrl || blobPreviewUrl || (isBlobUrl(srcUrl) ? srcUrl : undefined) || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+
   return (
-    <img src={sizedContentUrl || srcUrl} alt={props.alt || imageProperty.propertyName || 'Image'} {...props} />
+    <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...props} />
   )
 }
 
-export default SeedImage
+export const SeedImage = React.memo(SeedImageInner, (prev, next) =>
+  prev.imageProperty === next.imageProperty &&
+  prev.width === next.width &&
+  prev.filename === next.filename
+)

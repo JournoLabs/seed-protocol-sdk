@@ -15,8 +15,8 @@ const relationValuesToExclude = [
 ];
 
 const GET_SEEDS = gql`
-  query GetSeeds($where: AttestationWhereInput!, $take: Int) {
-    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take) {
+  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {
+    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {
       id
       decodedDataJson
       attester
@@ -204,6 +204,15 @@ const versionUidToSeedUid = new Map<string, string>();
 const assembledFeedItems = new Map<string, Record<string, unknown>>();
 const versionsBySeedUid = new Map<string, AttestationLike[]>();
 const latestVersionUidsBySeedUid = new Map<string, string>();
+
+function resetProcessingMaps(): void {
+  seedUidToModelType.clear();
+  relatedSeedUids.clear();
+  versionUidToSeedUid.clear();
+  assembledFeedItems.clear();
+  versionsBySeedUid.clear();
+  latestVersionUidsBySeedUid.clear();
+}
 
 const processItemProperty = async (
   property: AttestationLike,
@@ -437,13 +446,87 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
   }
 }
 
-export const getFeedItemsBySchemaName = async (schemaName: string): Promise<Record<string, unknown>[]> => {
-  const feedConfig = loadFeedConfig();
-  const easClient = EasClient.getEasClient();
+/**
+ * Expands relation properties to full nested objects when the related item has no
+ * storageTransactionId (e.g. Identity seeds). Replaces UIDs with cloned objects
+ * from assembledFeedItems, with setFeedItemDefaults applied.
+ */
+function expandRelationProperties(
+  schemaName: string,
+  options: SetFeedItemDefaultsOptions,
+  expandRelations: boolean
+): void {
+  if (!expandRelations) return;
 
-  const seeds = (await getSeedsBySchemaName(schemaName)) as AttestationLike[];
+  const itemsToProcess = Array.from(assembledFeedItems.entries()).filter(
+    ([seedUid]) => seedUidToModelType.get(seedUid) === schemaName
+  );
+
+  for (const [, item] of itemsToProcess) {
+    const keysToProcess = Object.keys(item).filter(
+      (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k)
+    );
+
+    for (const key of keysToProcess) {
+      const value = item[key];
+      const isList = Array.isArray(value);
+      const uids = isList ? (value as unknown[]) : [value];
+
+      const expanded: unknown[] = [];
+      let didExpand = false;
+
+      for (const uid of uids) {
+        if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
+          expanded.push(uid);
+          continue;
+        }
+        const related = assembledFeedItems.get(uid);
+        if (!related) {
+          expanded.push(uid);
+          continue;
+        }
+        // Skip if already resolved to URL (related has storage)
+        const txId =
+          (related?.storageTransactionId ?? related?.storage_transaction_id) as string | undefined;
+        if (txId && typeof txId === 'string' && txId.trim()) {
+          expanded.push(uid);
+          continue;
+        }
+        // Expand: clone related item and apply defaults
+        const relatedSchema = seedUidToModelType.get(uid) ?? 'unknown';
+        const clone = { ...related } as Record<string, unknown>;
+        setFeedItemDefaults(clone, uid, relatedSchema, options);
+        expanded.push(clone);
+        didExpand = true;
+      }
+
+      if (didExpand) {
+        const outputKey = key.endsWith('_id')
+          ? key.replace(/_id$/, '')
+          : key.endsWith('_ids')
+            ? key.replace(/_ids$/, '')
+            : key;
+        item[outputKey] = isList ? expanded : expanded[0];
+        if (outputKey !== key) {
+          delete item[key];
+          const camelKey = toCamelCase(key);
+          if (camelKey !== key) delete item[camelKey];
+        }
+      }
+    }
+  }
+}
+
+async function processSeedsToFeedItems(
+  schemaName: string,
+  seeds: AttestationLike[],
+  expandRelations: boolean
+): Promise<Record<string, unknown>[]> {
+  resetProcessingMaps();
+
   await processSeeds(seeds);
 
+  const easClient = EasClient.getEasClient();
   const relatedSeedUidsArray = Array.from(relatedSeedUids);
   const { itemSeeds: relatedSeeds } = await easClient.request(GET_SEEDS, {
     where: withExcludeRevokedFilter({
@@ -451,25 +534,85 @@ export const getFeedItemsBySchemaName = async (schemaName: string): Promise<Reco
         in: relatedSeedUidsArray,
       },
     }),
+    take: relatedSeedUidsArray.length || 1,
+    skip: 0,
   });
 
   await processSeeds((relatedSeeds ?? []) as AttestationLike[]);
 
   resolveRelationPropertiesToUrls(schemaName);
 
+  const feedConfig = loadFeedConfig();
   const setFeedItemDefaultsOptions: SetFeedItemDefaultsOptions = {
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
     siteUrl: feedConfig.siteUrl,
   };
 
-  const feedItems = Array.from(assembledFeedItems.entries())
+  expandRelationProperties(
+    schemaName,
+    setFeedItemDefaultsOptions,
+    expandRelations
+  );
+
+  return Array.from(assembledFeedItems.entries())
     .filter(([seedUid]) => seedUidToModelType.get(seedUid) === schemaName)
     .map(([, item]) => {
       const seedUid = (item.seedUid || item.SeedUid) as string;
       setFeedItemDefaults(item, seedUid, schemaName, setFeedItemDefaultsOptions);
       return item;
     });
+}
 
-  return feedItems;
+export const getFeedItemsBySchemaName = async (
+  schemaName: string,
+  options?: { limit?: number; skip?: number }
+): Promise<Record<string, unknown>[]> => {
+  const feedConfig = loadFeedConfig();
+  const limit = options?.limit ?? 100;
+  const skip = options?.skip ?? 0;
+
+  const seeds = (await getSeedsBySchemaName(schemaName, limit, skip)) as AttestationLike[];
+  return processSeedsToFeedItems(schemaName, seeds, feedConfig.expandRelations !== false);
+};
+
+export const getFeedItemsBySchemaNameForMonth = async (
+  schemaName: string,
+  year: number,
+  month: number
+): Promise<Record<string, unknown>[]> => {
+  const feedConfig = loadFeedConfig();
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
+  const startTs = Math.floor(startDate.getTime() / 1000);
+  const endTs = Math.floor(endDate.getTime() / 1000) + 1;
+
+  const where = withExcludeRevokedFilter({
+    AND: [
+      {
+        schema: {
+          is: {
+            schemaNames: {
+              some: {
+                name: { equals: schemaName },
+              },
+            },
+          },
+        },
+      },
+      {
+        timeCreated: { gte: startTs, lt: endTs },
+      },
+    ],
+  });
+
+  const easClient = EasClient.getEasClient();
+  const { itemSeeds } = await easClient.request(GET_SEEDS, {
+    where,
+    take: 1000,
+    skip: 0,
+  });
+
+  const seeds = (itemSeeds ?? []) as AttestationLike[];
+  return processSeedsToFeedItems(schemaName, seeds, feedConfig.expandRelations !== false);
 };

@@ -5,8 +5,13 @@ import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
 
 export const createPublish = enqueueActions(({ event, enqueue }) => {
-  const ev = event as unknown as { item: Item<any>; address?: string; account?: unknown }
-  const { item, address, account } = ev
+  const ev = event as unknown as {
+    item: Item<any>
+    address?: string
+    account?: unknown
+    options?: import('~/config').CreatePublishOptions
+  }
+  const { item, address, account, options } = ev
 
   const hasAddress = address != null && typeof address === 'string' && address.trim().length > 0
   if (!hasAddress) {
@@ -27,6 +32,10 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         account: account as Account | undefined,
         modelName: item.modelName,
         schemaId: item.schemaUid,
+        signDataItems: options?.signDataItems,
+        dataItemSigner: options?.dataItemSigner,
+        signArweaveTransactions: options?.signArweaveTransactions,
+        arweaveJwk: options?.arweaveJwk,
       },
     })
 

@@ -1,14 +1,17 @@
 export {
   initPublish,
-  getPublishConfig,
+  configurePublish,
   type PublishConfig,
   type ResolvedPublishConfig,
+  type CreatePublishOptions,
   type SerializedPublishUpload,
   type ArweaveTransactionInfoResult,
+  type ArweaveDataItemInfoResult,
 } from './config'
+export type { PublishUploadData } from './services/publish/helpers/getPublishUploadData'
 export { AttestationVerificationError } from './errors'
 export { default as ConnectButton } from './react/ConnectButton'
-export { default as PublishProvider } from './react/PublishProvider'
+export { default as PublishProvider, usePublishConfig } from './react/PublishProvider'
 export type { PublishProviderProps } from './react/PublishProvider'
 export { SeedProvider } from '@seedprotocol/react'
 export * from './helpers/thirdweb'
@@ -29,11 +32,15 @@ export {
   clearAllPublishProcesses,
   clearAllUploadProcesses,
   deletePublishProcessesForSeed,
+  deletePublishProcessById,
+  deletePublishProcessesByIds,
   getArweaveTransactionIds,
   getEasPayload,
 } from './hooks'
 export type { PublishProcessRecord, PublishProcessStatus } from './hooks/useItemPublishStatus'
 export { getArweave } from './helpers/blockchain'
+export { verifyDataItem } from './helpers/arweave'
+export { getDisplayStepId } from './helpers/publishDisplayHelpers'
 export {
   transformPayloadToIntegerIds,
   type RequestWithStringIds,

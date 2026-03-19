@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { sql } from 'drizzle-orm'
-import { escapeSqliteString } from '@/helpers/db'
+import { escapeSqliteString, getPropertyIdForModelAndName } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { FromCallbackInput, ItemMachineContext } from '@/types'
@@ -111,10 +111,20 @@ export const saveDataToDb = fromCallback<
 
           let attestationCreatedAt = property.timeCreated * 1000
 
+          const propertyId =
+            modelTableName != null
+              ? await getPropertyIdForModelAndName(
+                  modelTableName,
+                  camelCasePropertyName,
+                )
+              : null
+          const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
+
           await appDb.run(
             sql.raw(
               `INSERT INTO metadata (uid,
                                      local_id,
+                                     property_id,
                                      property_name,
                                      property_value,
                                      model_type,
@@ -123,11 +133,11 @@ export const saveDataToDb = fromCallback<
                                      eas_data_type,
                                      created_at,
                                      attestation_created_at)
-               VALUES ('${property.id}', '${generateId()}', '${attestationValue.name}', '${propertyValue}',
+               VALUES ('${property.id}', '${generateId()}', ${propertyIdSql}, '${attestationValue.name}', '${propertyValue}',
                        '${modelTableName}', '${schemaUid}',
                        '${versionUid}',
                        '${attestationValue.type}',
-                       ${new Date().getTime()}, ${attestationCreatedAt}, ${itemDbId})
+                       ${new Date().getTime()}, ${attestationCreatedAt})
                ON CONFLICT DO NOTHING;`,
             ),
           )

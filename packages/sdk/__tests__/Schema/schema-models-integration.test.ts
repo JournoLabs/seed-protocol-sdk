@@ -5,10 +5,12 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { eq } from 'drizzle-orm'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 import { SchemaFileFormat } from '@/types/import'
-import { importJsonSchema } from '@/imports/json'
+import { importJsonSchema, syncSchemaFromSource } from '@/imports/json'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 
 // This test should only run in Node.js environment
@@ -356,6 +358,55 @@ testDescribe('Schema Models Integration Tests', () => {
         expect(model.modelName).toBeDefined()
         expect(model.schemaName).toBe(schemaName)
       }
+    })
+  })
+
+  describe('syncSchemaFromSource idempotency', () => {
+    const testSchemaName = 'Test Schema Idempotency'
+    const testSchema: SchemaFileFormat = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      metadata: {
+        name: testSchemaName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      models: {
+        Foo: {
+          properties: { title: { dataType: 'text' } },
+        },
+        Bar: {
+          properties: { name: { dataType: 'text' } },
+        },
+      },
+      enums: {},
+      migrations: [],
+    }
+
+    it('should not create duplicate schemas or models when called twice with same schema', async () => {
+      await syncSchemaFromSource(testSchema)
+      await syncSchemaFromSource(testSchema)
+
+      const db = BaseDb.getAppDb()
+      expect(db).toBeDefined()
+
+      const schemaRows = await db!.select().from(schemas).where(eq(schemas.name, testSchemaName))
+      expect(schemaRows.length).toBe(1)
+
+      const schemaId = schemaRows[0].id
+      const modelSchemaRows = await db!
+        .select()
+        .from(modelSchemas)
+        .where(eq(modelSchemas.schemaId, schemaId!))
+      const modelIds = modelSchemaRows.map((r) => r.modelId).filter((id): id is number => id != null)
+
+      const modelRows = await db!.select().from(modelsTable).where(eq(modelsTable.name, 'Foo'))
+      expect(modelRows.length).toBe(1)
+
+      const barRows = await db!.select().from(modelsTable).where(eq(modelsTable.name, 'Bar'))
+      expect(barRows.length).toBe(1)
+
+      expect(modelIds.length).toBe(2)
     })
   })
 })

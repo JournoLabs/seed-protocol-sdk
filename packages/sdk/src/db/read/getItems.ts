@@ -4,8 +4,7 @@ import { toSnakeCase } from 'drizzle-orm/casing'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
-import { getOwnedAddressesFromDb, getWatchedAddressesFromDb } from '@/helpers/db'
-import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
+import { getAddressesForItemsFilter } from '@/helpers/db'
 
 type GetItemsDataProps = {
   modelName?: string
@@ -35,20 +34,7 @@ export const getItemsData: GetItemsData = async ({
   }
 
   if (addressFilter === 'owned') {
-    let ownedAddresses = await getOwnedAddressesFromDb()
-    const additionalGetter = getGetAdditionalSyncAddresses()
-    if (additionalGetter) {
-      const additional = await additionalGetter()
-      if (additional?.length) {
-        const seen = new Set(ownedAddresses.map((a) => a.toLowerCase()))
-        for (const addr of additional) {
-          if (addr && !seen.has(addr.toLowerCase())) {
-            seen.add(addr.toLowerCase())
-            ownedAddresses = [...ownedAddresses, addr]
-          }
-        }
-      }
-    }
+    const ownedAddresses = await getAddressesForItemsFilter('owned')
     if (ownedAddresses.length > 0) {
       conditions.push(
         or(
@@ -58,7 +44,7 @@ export const getItemsData: GetItemsData = async ({
       )
     }
   } else if (addressFilter === 'watched') {
-    const watchedAddresses = await getWatchedAddressesFromDb()
+    const watchedAddresses = await getAddressesForItemsFilter('watched')
     if (watchedAddresses.length === 0) {
       return []
     }
@@ -80,6 +66,9 @@ export const getItemsData: GetItemsData = async ({
         isNull(seeds._markedForDeletion),
         eq(seeds._markedForDeletion, 0),
       ) as SQL,
+    )
+    conditions.push(
+      or(isNull(seeds.revokedAt), eq(seeds.revokedAt, 0)) as SQL,
     )
   }
 

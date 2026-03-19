@@ -2,8 +2,12 @@ import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from "xstate";
+import { optimismSepolia } from 'thirdweb/chains'
+import { getClient } from '~/helpers/thirdweb'
 import { itemNeedsArweaveUpload } from "../helpers/itemNeedsArweave";
+import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
+import { getPublishConfig } from '~/config'
 
 const activePublishProcesses = new Set<string>()
 
@@ -11,7 +15,7 @@ export const checking = fromCallback<
   EventObject, 
   FromCallbackInput<PublishMachineContext>
 >(( {sendBack, input: {context, }, }, ) => {
-  const { item } = context
+  const { item, account } = context
 
   const _check = async () => {
     // Ownership: use isItemOwned so we align with EAS sync (includes getAdditionalSyncAddresses
@@ -32,6 +36,12 @@ export const checking = fromCallback<
     activePublishProcesses.add(item.seedLocalId)
 
     try {
+      // Ensure EAS schemas exist (register if missing) before validation. getPublishPayload
+      // requires schema UIDs; without this, new models like "Signal" fail validation.
+      if (account) {
+        await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
+      }
+
       // Validate item before any Arweave or EAS work (pass empty array - no uploads yet)
       const validation = await validateItemForPublish(item, [])
       if (!validation.isValid) {
@@ -41,11 +51,9 @@ export const checking = fromCallback<
       }
 
       const needsArweave = await itemNeedsArweaveUpload(item)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'checking.ts:needsArweave',message:'checking result',data:{needsArweave,outcome:needsArweave?'validPublishProcess':'skipArweave',seedLocalId:item.seedLocalId},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       if (needsArweave) {
-        sendBack({ type: 'validPublishProcess' })
+        const useBundler = getPublishConfig().useArweaveBundler
+        sendBack({ type: useBundler ? 'validPublishProcessBundler' : 'validPublishProcess' })
       } else {
         sendBack({ type: 'skipArweave' })
       }

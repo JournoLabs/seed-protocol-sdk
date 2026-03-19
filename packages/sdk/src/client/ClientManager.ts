@@ -124,7 +124,7 @@ const clientInstance = {
           throw error
         }
         return snapshot.context.isInitialized
-      }, { timeout: 30000 });
+      }, { timeout: 120000 });
     } catch (error: any) {
       // Ensure we never throw undefined
       if (error === undefined || error === null) {

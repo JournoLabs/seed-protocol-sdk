@@ -4,6 +4,23 @@ import type { Chain } from 'thirdweb/chains'
 import { encodeAbiParameters } from 'viem'
 import { getPublishConfig } from '~/config'
 
+/**
+ * EAS contract custom errors. Included so viem can decode revert data instead of
+ * throwing AbiErrorSignatureNotFoundError (e.g. for AccessDenied 0x4ca88867).
+ */
+const EAS_ERRORS_ABI = [
+  { type: 'error' as const, name: 'AccessDenied', inputs: [] },
+  { type: 'error' as const, name: 'AlreadyRevoked', inputs: [] },
+  { type: 'error' as const, name: 'InvalidRevocation', inputs: [] },
+  { type: 'error' as const, name: 'InvalidRevocations', inputs: [] },
+  { type: 'error' as const, name: 'InvalidSchema', inputs: [] },
+  { type: 'error' as const, name: 'Irrevocable', inputs: [] },
+  { type: 'error' as const, name: 'NotFound', inputs: [] },
+  { type: 'error' as const, name: 'NotPayable', inputs: [] },
+  { type: 'error' as const, name: 'InsufficientValue', inputs: [] },
+  { type: 'error' as const, name: 'InvalidLength', inputs: [] },
+] as const
+
 const attestedEvent = () =>
   prepareEvent({
     signature:
@@ -153,6 +170,7 @@ export function prepareEasMultiRevoke(
     client,
     chain,
     address: easContractAddress as `0x${string}`,
+    abi: [...EAS_ERRORS_ABI],
   })
 
   return prepareContractCall({

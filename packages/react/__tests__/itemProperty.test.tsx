@@ -31,7 +31,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { IItemProperty, SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { generateId } from '@seedprotocol/sdk'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -891,6 +891,82 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         },
         { timeout: 10000 }
       )
+    })
+
+    /**
+     * Regression test for persistence bug: assignment (without calling save()) must persist to DB.
+     * Catches the case where ItemProperty lacks propertyRecordSchema and would only update context
+     * without sending save. Verifies persistence by querying metadata directly - no fallback to
+     * in-memory checks when DB verification fails.
+     */
+    it('should persist to database when assigning value without calling save()', async () => {
+      if (!testItem) return
+
+      await waitForItemIdle(testItem)
+
+      // Wait for propertyInstances to be populated
+      await new Promise<void>((resolve) => {
+        const subscription = testItem.getService().subscribe((snapshot) => {
+          const propertyInstances = snapshot.context.propertyInstances as Map<string, IItemProperty> | undefined
+          if (propertyInstances && propertyInstances.size > 0) {
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        const currentSnapshot = testItem.getService().getSnapshot()
+        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, IItemProperty> | undefined
+        if (currentPropertyInstances && currentPropertyInstances.size > 0) {
+          subscription.unsubscribe()
+          resolve()
+          return
+        }
+        setTimeout(() => {
+          subscription.unsubscribe()
+          resolve()
+        }, 5000)
+      })
+
+      const titleProperty = testItem.properties.find(
+        (p) => p.propertyName === 'title' || p.propertyName === 'Title'
+      )
+      expect(titleProperty).toBeDefined()
+      if (!titleProperty) return
+
+      await waitForItemPropertyIdle(titleProperty)
+
+      const testValue = 'Assignment-Only Persistence Test'
+      // Assign value WITHOUT calling save() - persistence must happen via the value setter
+      titleProperty.value = testValue
+
+      // Wait for save to complete (isSaving -> false)
+      await xstateWaitFor(
+        titleProperty.getService(),
+        (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
+        { timeout: 10000 }
+      )
+
+      // Allow DB write to complete
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      // Strict DB verification - no fallback to in-memory checks
+      const db = BaseDb.getAppDb()
+      expect(db).toBeTruthy()
+      if (!db) return
+
+      const metadataRows = await db
+        .select()
+        .from(metadata)
+        .where(
+          and(
+            eq(metadata.seedLocalId, testItem.seedLocalId),
+            eq(metadata.propertyName, 'title')
+          )
+        )
+        .orderBy(sql`COALESCE(created_at, attestation_created_at) DESC`)
+        .limit(1)
+
+      expect(metadataRows.length).toBeGreaterThan(0)
+      expect(metadataRows[0].propertyValue).toBe(testValue)
     })
   })
 

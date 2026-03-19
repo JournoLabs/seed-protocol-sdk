@@ -21,6 +21,7 @@ export enum ModelPropertyDataTypes {
 /** Known data types in lowercase for normalization */
 const DATA_TYPE_LOWER_MAP: Record<string, string> = {
   text: 'Text',
+  string: 'Text', // JSON Schema convention
   number: 'Number',
   list: 'List',
   relation: 'Relation',

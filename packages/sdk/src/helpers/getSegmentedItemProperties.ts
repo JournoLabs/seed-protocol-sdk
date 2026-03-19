@@ -100,11 +100,20 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
     const isStorageSeedType =
       propertyDef.dataType === ModelPropertyDataTypes.Image ||
       propertyDef.dataType === ModelPropertyDataTypes.File ||
-      propertyDef.dataType === ModelPropertyDataTypes.Html
+      propertyDef.dataType === ModelPropertyDataTypes.Html ||
+      propertyDef.dataType === ModelPropertyDataTypes.Json ||
+      (propertyDef.dataType === ModelPropertyDataTypes.Relation &&
+        (propertyDef.refValueType === ModelPropertyDataTypes.Image ||
+          propertyDef.refValueType === ModelPropertyDataTypes.File ||
+          propertyDef.refValueType === ModelPropertyDataTypes.Html ||
+          propertyDef.refValueType === ModelPropertyDataTypes.Json))
 
     let routedTo = 'basic'
     if (isStorageSeedType) {
       itemImageProperties.push(itemProperty)
+      if (propertyDef.dataType === ModelPropertyDataTypes.Relation) {
+        itemRelationProperties.push(itemProperty)
+      }
       routedTo = 'image'
       continue
     }

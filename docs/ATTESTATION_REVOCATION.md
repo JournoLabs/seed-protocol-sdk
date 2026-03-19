@@ -28,14 +28,22 @@ await item.unpublish()
 
 - The item must be published (`item.seedUid` must be set)
 - The caller must own the item (ownership is asserted before revocation)
-- `initPublish()` from `@seedprotocol/publish` must have been called (revocation uses the same wallet config)
+- `initPublish()` from `@seedprotocol/publish` must have been called, or `PublishProvider` must be mounted with config (revocation uses the same wallet config)
 
 **Throws:**
 
 - `"Item is not published. Cannot unpublish."` if `!item.seedUid`
 - `"Item has no schema UID. Cannot unpublish."` if `!item.schemaUid`
-- `"Revocation is not configured. Call initPublish() from @seedprotocol/publish before using unpublish()."` if the revoke executor is not set
+- `"Revocation is not configured. Call initPublish() from @seedprotocol/publish or ensure PublishProvider is mounted with config."` if the revoke executor is not set
 - `"No wallet connected. Connect a wallet to revoke attestations."` if no wallet is connected
+- `"Only the original attester can revoke attestations. Connect the wallet that published this item."` if the connected wallet is not the attester who created the attestation (EAS `AccessDenied`)
+- `"Revocation not supported for items published via the modular executor."` if the attestation's attester is the modular executor contract (revoke would require contract changes)
+
+## Wallet and Attester
+
+When attestations were created by the ManagedAccount (in-app wallet, EIP4337), the SDK will attempt to use that wallet for revoke if the user is connected with a different wallet (e.g. EOA or modular account) that controls the same ManagedAccount. If the ManagedAccount wallet can be auto-connected, the revoke will succeed without the user switching wallets.
+
+Items published via the **modular executor** (when `useModularExecutor` is enabled) have the executor contract as the attester. Revocation is not supported for these items; the executor contract would need a `multiRevoke` function to enable it.
 
 ## Local State
 

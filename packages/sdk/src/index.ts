@@ -61,9 +61,11 @@ export { isItemOwned } from './helpers/ownership'
 export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS } from './helpers/constants'
 export { getVersionsForSeedUid } from './db/read/getVersionsForSeedUid'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
+export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
+export { getAddressesForItemsFilter } from './helpers/db'
 
 export { BaseArweaveClient, getArweaveUrlForTransaction } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
@@ -109,11 +111,13 @@ export {
 // SchemaPropertyUpdate and SchemaModelUpdate types are available from './helpers/updateSchema'
 // Import directly if needed: import type { SchemaPropertyUpdate, SchemaModelUpdate } from '@seedprotocol/sdk/helpers/updateSchema'
 
-export { 
-  importJsonSchema, 
-  readJsonImportFile, 
-  transformImportToSchemaFile, 
+export {
+  importJsonSchema,
+  readJsonImportFile,
+  syncSchemaFromSource,
+  transformImportToSchemaFile,
 } from './imports'
+export type { SchemaFileFormat } from './imports'
 
 
 export { client } from './client'

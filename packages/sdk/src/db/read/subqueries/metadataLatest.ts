@@ -7,11 +7,15 @@ export const getMetadataLatest = ({seedLocalId, seedUid}: {seedLocalId?: string,
 
   const whereClauses: SQL[] = []
 
-  if (seedLocalId) {
+  if (seedLocalId && seedUid) {
+    const orClause = or(
+      eq(metadata.seedLocalId, seedLocalId),
+      eq(metadata.seedUid, seedUid),
+    )
+    if (orClause) whereClauses.push(orClause)
+  } else if (seedLocalId) {
     whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
-  }
-
-  if (seedUid) {
+  } else if (seedUid) {
     whereClauses.push(eq(metadata.seedUid, seedUid))
   }
 

@@ -177,6 +177,21 @@ export const migrationSql_0007_add_required_to_properties = `ALTER TABLE \`prope
 export const migrationSql_0008_add_revoked_at_to_seeds = `ALTER TABLE \`seeds\` ADD \`revoked_at\` integer;
 `
 
+export const migrationSql_0009_happy_namor = `PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE \`__new_property_uids\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`uid\` text NOT NULL,
+	\`property_id\` integer NOT NULL,
+	FOREIGN KEY (\`property_id\`) REFERENCES \`properties\`(\`id\`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+INSERT INTO \`__new_property_uids\`("id", "uid", "property_id") SELECT "id", "uid", "property_id" FROM \`property_uids\`;--> statement-breakpoint
+DROP TABLE \`property_uids\`;--> statement-breakpoint
+ALTER TABLE \`__new_property_uids\` RENAME TO \`property_uids\`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
+CREATE UNIQUE INDEX \`property_uids_property_id_unique\` ON \`property_uids\` (\`property_id\`);--> statement-breakpoint
+ALTER TABLE \`metadata\` ADD \`property_id\` integer REFERENCES properties(id);`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -244,6 +259,13 @@ export const journalJson = `{
       "when": 1772800000000,
       "tag": "0008_add_revoked_at_to_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1773924021107,
+      "tag": "0009_happy_namor",
+      "breakpoints": true
     }
   ]
 }`
@@ -253,8 +275,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "c8d9e0f1-a2b3-4c8d-9e0f-123456789012",
-  "prevId": "b7c8d9e0-f1a2-4b89-0c1d-ef2345678901",
+  "id": "ff040f54-6cfc-4d32-a572-2f08870c5b85",
+  "prevId": "c8d9e0f1-a2b3-4c8d-9e0f-123456789012",
   "tables": {
     "appState": {
       "name": "appState",
@@ -360,6 +382,13 @@ export const snapshotJson = `{
         "uid": {
           "name": "uid",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "property_id": {
+          "name": "property_id",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -521,7 +550,21 @@ export const snapshotJson = `{
           "isUnique": true
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "metadata_property_id_properties_id_fk": {
+          "name": "metadata_property_id_properties_id_fk",
+          "tableFrom": "metadata",
+          "tableTo": "properties",
+          "columnsFrom": [
+            "property_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -834,10 +877,10 @@ export const snapshotJson = `{
         }
       },
       "foreignKeys": {
-        "property_uids_property_id_models_id_fk": {
-          "name": "property_uids_property_id_models_id_fk",
+        "property_uids_property_id_properties_id_fk": {
+          "name": "property_uids_property_id_properties_id_fk",
           "tableFrom": "property_uids",
-          "tableTo": "models",
+          "tableTo": "properties",
           "columnsFrom": [
             "property_id"
           ],
@@ -1308,5 +1351,4 @@ export const snapshotJson = `{
   "internal": {
     "indexes": {}
   }
-}
-`
+}`

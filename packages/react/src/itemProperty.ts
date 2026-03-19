@@ -11,7 +11,7 @@ import { seeds } from '@seedprotocol/sdk'
 import { and, eq, isNotNull } from 'drizzle-orm'
 import { getMetadataLatest } from '@seedprotocol/sdk'
 import { propertyMachine } from '@seedprotocol/sdk'
-import { startCase } from 'lodash-es'
+import { debounce, startCase } from 'lodash-es'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const logger = debug('seedSdk:react:property')
@@ -210,14 +210,28 @@ export function useItemProperty(
     // Subscribe to service changes. Only set isLoading to false when idle; never set to true
     // here so we never overwrite the loaded state when the machine emits any non-idle state
     // (e.g. loading, initializing, resolvingRelatedValue) after the initial fetch.
+    let lastVersionAt = 0
+    let wasIdle = false
+    const THROTTLE_MS = 50
     const subscription = property.getService().subscribe((snapshot: any) => {
-      if (snapshot && typeof snapshot === 'object' && 'value' in snapshot && snapshot.value === 'idle') {
+      const isIdle = snapshot && typeof snapshot === 'object' && 'value' in snapshot && snapshot.value === 'idle'
+      if (isIdle) {
         setIsLoading(false)
         setError(null)
+        // Only update when transitioning TO idle (not on every idle snapshot - machine emits many)
+        if (!wasIdle) {
+          wasIdle = true
+          setVersion(prev => prev + 1)
+        }
+        return
       }
-      
-      // Force re-render by incrementing version counter
-      setVersion(prev => prev + 1)
+      wasIdle = false
+      // Throttle re-renders during transitions: property machine emits many snapshots
+      const now = Date.now()
+      if (now - lastVersionAt >= THROTTLE_MS) {
+        lastVersionAt = now
+        setVersion(prev => prev + 1)
+      }
     })
     
     subscriptionRef.current = subscription
@@ -234,6 +248,82 @@ export function useItemProperty(
     error,
   }
 }
+
+type UseDebouncedItemPropertyParams =
+  | { seedLocalId?: string; seedUid?: string; propertyName: string }
+  | { itemId: string; propertyName: string }
+
+type UseDebouncedItemPropertyReturn = {
+  property: IItemProperty | undefined
+  setValue: (value: string) => void
+  isLoading: boolean
+  error: Error | null
+}
+
+/**
+ * Hook for real-time ItemProperty updates with debounced persistence.
+ * Updates the display immediately on each change while debouncing writes to the database.
+ * Use this for text inputs and other high-frequency updates.
+ *
+ * @param params - Same as useItemProperty: { seedLocalId, propertyName }, { seedUid, propertyName }, or { itemId, propertyName }
+ * @param debounceMs - Debounce delay for persistence (default: 300)
+ */
+export function useDebouncedItemProperty(
+  params: UseDebouncedItemPropertyParams,
+  debounceMs = 300
+): UseDebouncedItemPropertyReturn {
+  const itemId = 'itemId' in params ? params.itemId : undefined
+  const seedLocalId = 'seedLocalId' in params ? params.seedLocalId : undefined
+  const seedUid = 'seedUid' in params ? params.seedUid : undefined
+  const propertyName = params.propertyName
+
+  const normalizedParams = useMemo(() => {
+    if (itemId) {
+      return { seedLocalId: itemId, propertyName }
+    }
+    return { seedLocalId, seedUid, propertyName }
+  }, [itemId, seedLocalId, seedUid, propertyName])
+
+  const { property, isLoading, error } = useItemProperty(normalizedParams)
+  const latestValueRef = useRef<string>('')
+
+  const debouncedPersist = useMemo(
+    () =>
+      debounce((prop: IItemProperty) => {
+        prop.getService().send({
+          type: 'save',
+          newValue: latestValueRef.current,
+        })
+      }, debounceMs),
+    [debounceMs]
+  )
+
+  useEffect(() => {
+    return () => debouncedPersist.cancel()
+  }, [debouncedPersist])
+
+  const setValue = useCallback(
+    (value: string) => {
+      if (!property) return
+      latestValueRef.current = value
+      property.getService().send({
+        type: 'updateContext',
+        propertyValue: value,
+        renderValue: value,
+      })
+      debouncedPersist(property)
+    },
+    [property, debouncedPersist]
+  )
+
+  return {
+    property,
+    setValue,
+    isLoading,
+    error,
+  }
+}
+
 type UseItemPropertiesReturn = {
   properties: IItemProperty[]
   isLoading: boolean

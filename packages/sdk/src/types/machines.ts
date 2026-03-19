@@ -51,5 +51,6 @@ export type ClientManagerContext = {
   filesDir?: string
   dbConfig?: import('@/types').DbConfig
   schemaFile?: string
+  schema?: string | SchemaFileFormat
   initError?: Error | string
 }

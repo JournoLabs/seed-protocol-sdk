@@ -24,11 +24,36 @@ export async function getRelatedItemsForPublish(
   const getItemMod = await import('./getItem')
   const { getItem } = getItemMod
 
-  const processRelationOrImage = async (prop: { getService: () => { getSnapshot: () => unknown } }) => {
+  const processRelationOrImage = async (
+    prop: { getService: () => { getSnapshot: () => unknown }; propertyName?: string; propertyDef?: { dataType?: string; refValueType?: string } },
+  ) => {
     const snapshot = prop.getService().getSnapshot() as { context?: unknown }
     const context = snapshot.context ?? null
     if (!context) return
-    const value = (context as { propertyValue?: unknown }).propertyValue
+    let value = (context as { propertyValue?: unknown }).propertyValue
+    // File/Image/Html/Json: fallback to metadata when propertyValue is empty (e.g. schema-loaded before metadata)
+    const isStorageSeed =
+      prop.propertyDef?.dataType === 'File' ||
+      prop.propertyDef?.dataType === 'Image' ||
+      prop.propertyDef?.dataType === 'Html' ||
+      prop.propertyDef?.dataType === 'Json' ||
+      (prop.propertyDef?.dataType === 'Relation' &&
+        (prop.propertyDef?.refValueType === 'File' ||
+          prop.propertyDef?.refValueType === 'Image' ||
+          prop.propertyDef?.refValueType === 'Html' ||
+          prop.propertyDef?.refValueType === 'Json'))
+    if (!value && prop.propertyName && isStorageSeed) {
+      const ctx = context as { seedLocalId?: string; seedUid?: string }
+      if (ctx.seedLocalId || ctx.seedUid) {
+        const { getPropertyData } = await import('./getPropertyData')
+        const meta = await getPropertyData({
+          propertyName: prop.propertyName,
+          seedLocalId: ctx.seedLocalId,
+          seedUid: ctx.seedUid,
+        })
+        value = meta?.propertyValue
+      }
+    }
     if (!value) return
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(value as string)
     const relatedItem = await getItem({ seedLocalId, seedUid })

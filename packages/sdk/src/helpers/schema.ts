@@ -4,6 +4,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
+import { isInternalSchema } from '@/helpers/constants'
 import { desc, eq, sql } from 'drizzle-orm'
 import debug from 'debug'
 
@@ -430,7 +431,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   }> = []
 
   // STEP 1: Query all schemas from database
-  // Also do a direct SQL query to verify what's actually in the database
   const directQuery = await db.run(sql.raw(`SELECT name, version, schema_file_id, id FROM schemas ORDER BY name, version DESC`))
   
   const dbSchemas = await db
@@ -454,22 +454,17 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
       try {
         let schemaFile = JSON.parse(dbSchema.schemaData) as SchemaFileFormat
         
-          // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
-          // This ensures models added to the database are included even if they're not in schemaData
-          // Build merged models without mutating schemaFile (read-only approach)
+          // Merge models from DB only when schemaData is incomplete. When schemaData has models (e.g. init),
+          // skip the expensive loadModelsFromDbForSchema - it can return 1000s of orphaned model_schemas rows
+          // and cause init to hang. The merge is for drafts where schemaData may be missing models.
+          const schemaModelCount = Object.keys(schemaFile.models || {}).length
           let mergedModels = { ...(schemaFile.models || {}) }
-          if (dbSchema.id) {
+          if (dbSchema.id && schemaModelCount === 0) {
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
-              // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-              mergedModels = {
-                ...mergedModels,
-                ...dbModels,
-              }
-              // For models that exist in both, merge properties (database properties override)
+              mergedModels = { ...mergedModels, ...dbModels }
               for (const [modelName, dbModel] of Object.entries(dbModels)) {
                 if (mergedModels[modelName]) {
-                  // Merge properties, with database properties taking precedence
                   mergedModels[modelName] = {
                     ...mergedModels[modelName],
                     properties: {
@@ -482,7 +477,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
             }
           }
           
-          // Create new schemaFile object with merged models (read-only approach)
           schemaFile = {
             ...schemaFile,
             models: mergedModels,
@@ -565,19 +559,14 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
           // CRITICAL: Merge models from database (model_schemas join table) with models from schemaData
           // This ensures models added to the database are included even if they're not in schemaData
           // Build merged models without mutating schemaFile (read-only approach)
+          const schemaModelCount = Object.keys(schemaFile.models || {}).length
           let mergedModels = { ...(schemaFile.models || {}) }
-          if (dbSchema.id) {
+          if (dbSchema.id && schemaModelCount === 0) {
             const dbModels = await loadModelsFromDbForSchema(dbSchema.id)
             if (Object.keys(dbModels).length > 0) {
-              // Merge: database models take precedence for properties, but preserve schemaData models for full structure
-              mergedModels = {
-                ...mergedModels,
-                ...dbModels,
-              }
-              // For models that exist in both, merge properties (database properties override)
+              mergedModels = { ...mergedModels, ...dbModels }
               for (const [modelName, dbModel] of Object.entries(dbModels)) {
                 if (mergedModels[modelName]) {
-                  // Merge properties, with database properties taking precedence
                   mergedModels[modelName] = {
                     ...mergedModels[modelName],
                     properties: {
@@ -590,7 +579,6 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
             }
           }
           
-          // Create new schemaFile object with merged models (read-only approach)
           schemaFile = {
             ...schemaFile,
             models: mergedModels,
@@ -617,7 +605,12 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   for (const schemaFileInfo of completeSchemas) {
     // Only process if not already in result
     if (!processedSchemaNames.has(schemaFileInfo.name)) {
+      if (isInternalSchema(schemaFileInfo.name, schemaFileInfo.schemaFileId)) {
+        logger(`STEP 3: skipping internal schema file: ${schemaFileInfo.filePath}`)
+        continue
+      }
       try {
+        logger(`STEP 3: processing schema file: ${schemaFileInfo.name} from ${schemaFileInfo.filePath}`)
         const content = await BaseFileManager.readFileAsString(schemaFileInfo.filePath)
         const schemaFile = JSON.parse(content) as SchemaFileFormat
 

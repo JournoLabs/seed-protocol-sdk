@@ -9,6 +9,7 @@ export {
   importJsonSchema,
   loadSchemaFromFile,
   readJsonImportFile,
+  syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './json'
 

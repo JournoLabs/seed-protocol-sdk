@@ -19,7 +19,6 @@ export class ImageResizer {
   }
 
     public async resize({filePath, width, height}: ResizeImageParams) {
-      
     if (this.workersArchive.has(filePath)) {
       const savedWorker = this.workersArchive.get(filePath)
       savedWorker?.terminate()
@@ -45,6 +44,10 @@ export class ImageResizer {
         if (e.data.error) {
           reject(e.data.error)
         }
+      }
+
+      worker.onerror = (err) => {
+        reject(err)
       }
   
       worker.postMessage({

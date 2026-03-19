@@ -4,32 +4,18 @@ Publish UI components and helpers for Seed Protocol.
 
 The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `getPublishPayload`, which registers EAS schemas and adds naming attestations so EASSCAN displays them. If you build a custom publish flow that calls `item.getPublishPayload()` directly, you must run schema setup first or use this package's flow.
 
-`initPublish()` also registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
+`initPublish()` or `PublishProvider` registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
 
 ## Setup
 
-Wrap your app with `PublishProvider` so that `ConnectButton` and other publish components work correctly. The provider includes:
+Wrap your app with `PublishProvider`. The provider includes:
 
 - Thirdweb's required context (React Query, connection manager)
 - SeedProvider (React Query for Seed SDK hooks like `useItems`, `useModels`, `useSchemas`)
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
-`thirdwebClientId` and `uploadApiBaseUrl` are required. Other values (account factory, EAS contract) are defined as constants in the package.
-
-### useIntegerLocalIds
-
-When using the new contract that expects `uint256` localIdIndex/publishLocalIdIndex instead of string localId/publishLocalId (gas-efficient), set `useIntegerLocalIds: true`:
-
-```tsx
-initPublish({
-  thirdwebClientId: '...',
-  uploadApiBaseUrl: '...',
-  useIntegerLocalIds: true,  // Use integer-based payload for new contract
-})
-```
-
-To revert to the old contract (string-based), set `useIntegerLocalIds: false` or omit the flag. No code changes required beyond config.
+`thirdwebClientId` and `uploadApiBaseUrl` are required in config. Other values (account factory, EAS contract) are defined as constants in the package.
 
 ### Option A: Config via provider
 
@@ -68,6 +54,61 @@ function App() {
   )
 }
 ```
+
+### useIntegerLocalIds
+
+When using the new contract that expects `uint256` localIdIndex/publishLocalIdIndex instead of string localId/publishLocalId (gas-efficient), set `useIntegerLocalIds: true`:
+
+```tsx
+<PublishProvider
+  config={{
+    thirdwebClientId: '...',
+    uploadApiBaseUrl: '...',
+    useIntegerLocalIds: true,  // Use integer-based payload for new contract
+  }}
+>
+  <App />
+</PublishProvider>
+```
+
+To revert to the old contract (string-based), set `useIntegerLocalIds: false` or omit the flag. No code changes required beyond config.
+
+### Experimental: Arweave bundler (instant uploads)
+
+When using your own gateway with an Arweave bundler, you can enable instant uploads instead of the default reimbursement + chunk upload flow. **This is experimental and not yet validated for production.**
+
+Set `useArweaveBundler: true`. The bundler uses the same `uploadApiBaseUrl` (e.g. `${uploadApiBaseUrl}/upload/batch`).
+
+```tsx
+<PublishProvider
+  config={{
+    thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
+    uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
+    useArweaveBundler: true,
+  }}
+>
+  <App />
+</PublishProvider>
+```
+
+When using the bundler, you must provide a signer at publish time via `PublishManager.createPublish` options:
+
+```tsx
+// Signer passed at publish time (recommended for apps where signer isn't available at startup)
+PublishManager.createPublish(item, address, account, {
+  signDataItems: async (uploads) => {
+    // Sign with wallet (ArConnect, MetaMask, etc.)
+    return uploads.map((u) => ({ transaction: { id: '...' }, versionId: u.versionLocalId, modelName: u.itemPropertyName }))
+  },
+})
+
+// Or for backend/scripts with a private key:
+PublishManager.createPublish(item, address, account, {
+  dataItemSigner: myArweaveSigner,
+})
+```
+
+You can also provide `signDataItems` or `dataItemSigner` in the PublishProvider config as a fallback when the signer is available at startup.
 
 ## Development
 

@@ -41,8 +41,11 @@ async function getModelNamesForItem(item: ItemInstance): Promise<Set<string>> {
     if (ref) modelNames.add(ref)
   }
 
-  for (const _prop of itemImageProperties) {
-    modelNames.add('Image')
+  for (const prop of itemImageProperties) {
+    const dataType = prop.propertyDef?.dataType
+    if (dataType === 'File') modelNames.add('File')
+    else if (dataType === 'Html') modelNames.add('Html')
+    else modelNames.add('Image')
   }
 
   for (const prop of itemListProperties) {

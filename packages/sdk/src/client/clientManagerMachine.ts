@@ -114,6 +114,15 @@ export const clientManagerMachine = setup({
         [FILE_SYSTEM_READY]: {
           target: DB_INIT,
         },
+        error: {
+          target: IDLE,
+          actions: assign(({ event }) => {
+            const error = (event as { error?: Error }).error instanceof Error
+              ? (event as { error?: Error }).error
+              : new Error(String((event as { error?: unknown }).error ?? 'File system initialization failed'))
+            return { initError: error }
+          }),
+        },
       },
       invoke: {
         src: 'fileSystemInit',
@@ -146,6 +155,15 @@ export const clientManagerMachine = setup({
       on: {
         [PROCESS_SCHEMA_FILES_SUCCESS]: {
           target: ADD_MODELS_TO_STORE,
+        },
+        error: {
+          target: IDLE,
+          actions: assign(({ event }) => {
+            const error = (event as any).error instanceof Error
+              ? (event as any).error
+              : new Error(String((event as any).error || 'Schema processing failed'))
+            return { initError: error }
+          }),
         },
       },
       invoke: {

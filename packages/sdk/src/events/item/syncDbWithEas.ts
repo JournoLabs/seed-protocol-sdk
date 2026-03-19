@@ -19,13 +19,14 @@ import {
   GET_SEEDS,
   GET_VERSIONS,
 } from '@/Item/queries'
-import { escapeSqliteString, getAllAddressesFromDb } from '@/helpers/db'
+import { escapeSqliteString, getAllAddressesFromDb, getPropertyIdForModelAndName } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema, PropertyType } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
+import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
@@ -87,6 +88,20 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
 
   const newSeeds = itemSeeds.filter((seed) => !existingSeedUids.has(seed.id))
 
+  // Update existing seeds when attestations are revoked on EAS
+  const seedByUid = new Map(itemSeeds.map((s) => [s.id, s]))
+  for (const row of existingSeedRecordsRows) {
+    if (!row.uid || !row.localId) continue
+    const attestation = seedByUid.get(row.uid)
+    if (!attestation?.revoked) continue
+    if (row.revokedAt != null) continue
+    const revokedAt =
+      attestation.revocationTime > 0
+        ? attestation.revocationTime
+        : Math.floor(Date.now() / 1000)
+    await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
+  }
+
   if (newSeeds.length === 0) {
     return { seedUidToLocalId, seedUids }
   }
@@ -100,6 +115,12 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
     seedUidToLocalId.set(seed.id, seedLocalId)
 
     const attestationRaw = escapeSqliteString(JSON.stringify(seed))
+    const revokedAt =
+      seed.revoked && seed.revocationTime != null && seed.revocationTime > 0
+        ? seed.revocationTime
+        : seed.revoked
+          ? Math.floor(Date.now() / 1000)
+          : undefined
 
     newSeedsData.push({
       localId: seedLocalId,
@@ -110,6 +131,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
       createdAt: Date.now(),
       attestationCreatedAt: seed.timeCreated * 1000,
       attestationRaw,
+      ...(revokedAt !== undefined && { revokedAt }),
     })
 
     seedUidToLocalId.set(seed.id, seedLocalId)
@@ -283,10 +305,16 @@ const createMetadataRecordsForStorageTransactionId = async (
     const seedLocalId = seedUidToLocalId.get(seedUid)
     const versionUid = storageTransactionIdProperty.refUID
     const versionLocalId = versionUidToLocalId.get(versionUid)
+    const modelType = seedUidToModelType.get(seedUid)
+    const propertyId =
+      modelType != null
+        ? await getPropertyIdForModelAndName(modelType, _propertyName)
+        : null
 
     const propertyLocalId = generateId()
     await appDb.insert(metadata).values({
       localId: propertyLocalId,
+      propertyId: propertyId ?? undefined,
       propertyName: _propertyName,
       propertyValue,
       localStorageDir: propertyDef.localStorageDir,
@@ -364,7 +392,7 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
     return { propertyUidToLocalId, propertyUids }
   }
 
-  let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_name, property_value,
+  let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_id, property_name, property_value,
                                                      eas_data_type, version_uid, version_local_id, seed_uid,
                                                      seed_local_id, model_type, ref_value_type, ref_seed_type,
                                                      ref_schema_uid,
@@ -508,9 +536,15 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
       await createMetadataRecordsForStorageTransactionId(property, modelSchema)
     }
 
+    const propertyId =
+      modelType != null
+        ? await getPropertyIdForModelAndName(modelType, propertyName)
+        : null
+    const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
+
     const publisher = escapeSqliteString(property.attester ?? '')
     const valuesString = `('${propertyLocalId}', '${property.id}', 
-                         '${property.schemaId}', '${propertyName}', 
+                         '${property.schemaId}', ${propertyIdSql}, '${propertyName}', 
                          '${propertyValue}', '${easDataType}', '${versionUid}', 
                          '${versionLocalId}', '${seedUid}', '${seedLocalId}', 
                          '${modelType}', ${refValueType ? `'${refValueType}'` : 'NULL'}, 

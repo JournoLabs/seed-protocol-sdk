@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { models as modelsTable, modelUids } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
@@ -31,8 +31,12 @@ export const addModelsToDb = fromCallback<
     // Internal models (Seed, Version, Metadata) are now loaded via SEEDPROTOCOL_Seed_Protocol_v1.json schema
     // They should already be in context.models from processSchemaFiles
     const allModels = { ...models }
+    const modelNames = Object.keys(allModels)
 
-    let hasModelsInDb = true // Start as true - we'll set to false if we can't process any model
+    if (modelNames.length === 0) {
+      return
+    }
+
     const schemaDefsByModelName = new Map<
       string,
       {
@@ -41,50 +45,45 @@ export const addModelsToDb = fromCallback<
       }
     >()
 
-    for (const [modelName, _] of Object.entries(allModels)) {
-      logger(
-        '[client/actors] [addModelsToDb] starting modelName:',
-        modelName,
-      )
+    // Batch fetch all existing models in one query (avoids N sequential queries)
+    type ModelRow = { id: number; name: string }
+    const existingModels = await appDb
+      .select({ id: modelsTable.id, name: modelsTable.name })
+      .from(modelsTable)
+      .where(inArray(modelsTable.name, modelNames))
 
-      let foundModel
+    const existingByName = new Map<string, ModelRow>(
+      (existingModels as ModelRow[]).map((m) => [m.name, m])
+    )
+    const modelsToInsert = modelNames.filter((name) => !existingByName.has(name))
 
-      const foundModelsQuery = await appDb
-        .select()
+    // Batch insert missing models
+    if (modelsToInsert.length > 0) {
+      await appDb
+        .insert(modelsTable)
+        .values(modelsToInsert.map((name) => ({ name })))
+
+      const newlyInserted = await appDb
+        .select({ id: modelsTable.id, name: modelsTable.name })
         .from(modelsTable)
-        .where(eq(modelsTable.name, modelName))
+        .where(inArray(modelsTable.name, modelsToInsert))
 
-      if (!foundModelsQuery || foundModelsQuery.length === 0) {
-        await appDb.insert(modelsTable).values({
-          name: modelName,
-        })
-
-        logger('[client/actors] [addModelsToDb] inserted model:', modelName)
-        const foundModels = await appDb
-          .select({
-            id: modelsTable.id,
-            name: modelsTable.name,
-            uid: modelUids.uid,
-          })
-          .from(modelsTable)
-          .leftJoin(modelUids, eq(modelsTable.id, modelUids.modelId))
-          .where(eq(modelsTable.name, modelName))
-          .limit(1)
-
-        foundModel = foundModels[0]
+      for (const m of newlyInserted) {
+        existingByName.set(m.name, m)
       }
-
-      if (foundModelsQuery && foundModelsQuery.length > 0) {
-        foundModel = foundModelsQuery[0]
+      for (const name of modelsToInsert) {
+        logger('[client/actors] [addModelsToDb] inserted model:', name)
       }
+    }
 
+    let hasModelsInDb = true
+    for (const modelName of modelNames) {
+      const foundModel = existingByName.get(modelName)
       if (!foundModel) {
         logger('[client/actors] [addModelsToDb] Warning: Could not find or create model:', modelName)
         hasModelsInDb = false
-        // Don't break - continue processing other models
         continue
       }
-
       schemaDefsByModelName.set(modelName, {
         dbId: foundModel.id,
         schemaDef: `bytes32 ${toSnakeCase(modelName)}`,
@@ -102,66 +101,71 @@ export const addModelsToDb = fromCallback<
       ({ schemaDef }) => schemaDef,
     )
 
-    // Try to fetch schemas from EAS, but don't fail if unavailable (e.g., in test environments)
-    try {
-      const queryClient = BaseQueryClient.getQueryClient()
-      const easClient = BaseEasClient.getEasClient()
+    // Fetch schemas from EAS in background - do not block init. EAS can be slow (10s+);
+    // modelUids will be populated async and syncDbWithEas will run when done.
+    const fetchEasAndPopulateModelUids = async () => {
+      try {
+        const queryClient = BaseQueryClient.getQueryClient()
+        const easClient = BaseEasClient.getEasClient()
 
-      // Wrap fetchQuery in a timeout to prevent hanging in test environments
-      const queryPromise = queryClient.fetchQuery({
-        queryKey: [`getSchemasVersion`],
-        queryFn: async () =>
-          easClient.request(GET_SCHEMAS, {
-            where: {
-              schema: {
-                in: schemaDefs,
+        const queryPromise = queryClient.fetchQuery({
+          queryKey: [`getSchemasVersion`],
+          queryFn: async () =>
+            easClient.request(GET_SCHEMAS, {
+              where: {
+                schema: {
+                  in: schemaDefs,
+                },
               },
-            },
-          }),
-      })
-      
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('EAS query timeout after 10 seconds')), 10000)
-      )
-      
-      const { schemas } = await Promise.race([queryPromise, timeoutPromise])
+            }),
+        })
 
-      if (schemas && schemas.length > 0) {
-        for (const schema of schemas) {
-          const modelId = Array.from(schemaDefsByModelName.values()).find(
-            ({ schemaDef }) => schemaDef === schema.schema,
-          )?.dbId
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('EAS query timeout after 10 seconds')), 10000)
+        )
 
-          if (modelId) {
-            await appDb
-              .insert(modelUids)
-              .values({
-                modelId,
-                uid: schema.id,
-              })
-              .onConflictDoNothing()
+        const { schemas } = await Promise.race([queryPromise, timeoutPromise])
+
+        if (schemas && schemas.length > 0) {
+          const db = BaseDb.getAppDb()
+          if (db) {
+            for (const schema of schemas) {
+              const modelId = Array.from(schemaDefsByModelName.values()).find(
+                ({ schemaDef }) => schemaDef === schema.schema,
+              )?.dbId
+
+              if (modelId) {
+                await db
+                  .insert(modelUids)
+                  .values({
+                    modelId,
+                    uid: schema.id,
+                  })
+                  .onConflictDoNothing()
+              }
+            }
           }
+          eventEmitter.emit('syncDbWithEas')
+        } else {
+          logger('[client/actors] [addModelsToDb] No schemas found from EAS, but continuing')
         }
-      } else {
-        logger('[client/actors] [addModelsToDb] No schemas found from EAS, but continuing')
-      }
-    } catch (error: any) {
-      // In test environments, EAS might not be available - log but don't fail
-      if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
-        logger('[client/actors] [addModelsToDb] Warning: Could not fetch schemas from EAS, but continuing in test environment:', error.message)
-      } else {
-        logger('[client/actors] [addModelsToDb] Error fetching schemas:', error.message)
-        throw error
+      } catch (error: any) {
+        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+          logger('[client/actors] [addModelsToDb] Warning: Could not fetch schemas from EAS (background):', error.message)
+        } else {
+          logger('[client/actors] [addModelsToDb] Error fetching schemas (background):', error.message)
+        }
       }
     }
-    
+
+    fetchEasAndPopulateModelUids()
+
     return hasModelsInDb
   }
 
   _addModelsToDb()
-    .then((hasModelsInDb) => {
+    .then(() => {
       sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
-      eventEmitter.emit('syncDbWithEas')
     })
     .catch((error) => {
       logger('[client/actors] [addModelsToDb] Error:', error)

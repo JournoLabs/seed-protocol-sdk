@@ -9,11 +9,13 @@ import {
 }                                                                                            from '../../types'
 import {
   createArweaveTransactions,
+  createArweaveDataItems,
   createAttestations,
   createAttestationsDirectToEas,
   sendReimbursementRequest,
   pollForConfirmation,
   uploadData,
+  uploadViaBundler,
   checking,
 } from './actors'
 import {
@@ -40,9 +42,11 @@ export const publishMachine = setup({
   },
   actors : {
     createArweaveTransactions,
+    createArweaveDataItems,
     sendReimbursementRequest,
     pollForConfirmation,
     uploadData,
+    uploadViaBundler,
     createAttestations,
     createAttestationsDirectToEas,
     checking,
@@ -61,6 +65,10 @@ export const publishMachine = setup({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'creatingArweaveTransactions',
     },),
+    assignErrorCreatingArweaveDataItems : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'creatingArweaveDataItems',
+    },),
     assignErrorSendingReimbursementRequest : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'sendingReimbursementRequest',
@@ -72,6 +80,10 @@ export const publishMachine = setup({
     assignErrorUploadingData : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'uploadingData',
+    },),
+    assignErrorUploadingViaBundler : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'uploadingViaBundler',
     },),
     assignErrorCreatingAttestations : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -124,6 +136,9 @@ export const publishMachine = setup({
         validPublishProcess: {
           target: 'creatingArweaveTransactions',
         },
+        validPublishProcessBundler: {
+          target: 'creatingArweaveDataItems',
+        },
         skipArweave: [
           {
             guard: () => getPublishConfig().useDirectEas,
@@ -165,6 +180,25 @@ export const publishMachine = setup({
         },
       },
     },
+    creatingArweaveDataItems : {
+      invoke : {
+        src    : 'createArweaveDataItems',
+        input  : ( { context, event } ) => ({ context, event } as { context: PublishMachineContext; event: unknown }),
+        onDone : {
+          target  : 'uploadingViaBundler',
+          actions : assign({
+            arweaveTransactions : ( { event, }, ) => event.output.arweaveTransactions as ArweaveTransactionInfo[],
+            publishUploads : ( { event, }, ) => event.output.publishUploads as PublishUpload[],
+            arweaveUploadData : ( { event, }, ) => (event.output as { arweaveUploadData?: unknown }).arweaveUploadData,
+            signedDataItems : ( { event, }, ) => (event.output as { signedDataItems?: { id: string; raw: Uint8Array }[] }).signedDataItems,
+          },),
+        },
+        onError : {
+          target  : 'failure',
+          actions : [ 'assignErrorCreatingArweaveDataItems', 'handleError', ],
+        },
+      },
+    },
     sendingReimbursementRequest : {
       invoke : {
         src    : 'sendReimbursementRequest',
@@ -198,15 +232,46 @@ export const publishMachine = setup({
         },
       }
     },
+    uploadingViaBundler : {
+      on : {
+        uploadComplete : [
+          {
+            guard: () => getPublishConfig().useDirectEas,
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
+            }),
+          },
+          {
+            guard: () => !getPublishConfig().useDirectEas,
+            target: 'creatingAttestations',
+            actions: assign({
+              completionPercentage: 100,
+            }),
+          },
+        ],
+        uploadError : {
+          target  : 'failure',
+          actions : [ 'assignErrorUploadingViaBundler', 'handleError', ],
+        },
+      },
+      invoke : {
+        src   : 'uploadViaBundler',
+        input : ( { context } ) => ({ context }) as { context: PublishMachineContext },
+      },
+    },
     uploadingData : {
       on : {
         updatePercentage : {
           actions : assign({
             completionPercentage : ( { event, }, ) => {
-              console.log('updatePercentage', event,)
-              return event.percentage as number
-
+              const ev = event as { completionPercentage?: number }
+              return ev.completionPercentage as number
             },
+            uploaderState : ( { event, }, ) =>
+              (event as { uploaderState?: PublishMachineContext['uploaderState'] }).uploaderState,
+            currentTransactionIndex : ( { event, }, ) =>
+              (event as { currentTransactionIndex?: number }).currentTransactionIndex,
           },),
         },
         uploadComplete : [

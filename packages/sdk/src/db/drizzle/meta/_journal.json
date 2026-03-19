@@ -64,6 +64,13 @@
       "when": 1772800000000,
       "tag": "0008_add_revoked_at_to_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1773924021107,
+      "tag": "0009_happy_namor",
+      "breakpoints": true
     }
   ]
 }

@@ -112,3 +112,24 @@ export async function postUploadArweaveStart(
   const body = await res.json().catch(() => ({}))
   return { status: res.status, body }
 }
+
+/**
+ * POST to Arweave bundler for instant uploads. Same FormData format as upload API.
+ * Uses main-process proxy in Electron to avoid CORS.
+ */
+export async function postUploadBundler(
+  url: string,
+  formData: FormData
+): Promise<PostUploadResult> {
+  const api = typeof window !== 'undefined' ? (window as Window & { Main?: { uploadArweaveStart?: (url: string, parts: UploadFormPart[]) => Promise<PostUploadResult> } }).Main : undefined
+  if (api?.uploadArweaveStart) {
+    const parts = await formDataToSerializableParts(formData)
+    return api.uploadArweaveStart(url, parts)
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  })
+  const body = await res.json().catch(() => ({}))
+  return { status: res.status, body }
+}

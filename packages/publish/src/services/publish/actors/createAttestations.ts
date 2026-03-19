@@ -7,8 +7,9 @@ import { getContract, sendTransaction, waitForReceipt } from 'thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { getClient, getConnectedManagedAccountAddress, getModularAccountWallet } from '~/helpers/thirdweb'
 import { multiPublish } from '~/helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
-import { persistSeedUidFromPublishResult } from './persistSeedUid'
+import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
+import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
@@ -115,6 +116,8 @@ export const createAttestations = fromPromise(
       }
     )
 
+    await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
+
     let requestData: unknown
     try {
       requestData = await item.getPublishPayload(uploadDataWithTxIds)
@@ -180,11 +183,6 @@ export const createAttestations = fromPromise(
     }
 
     const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-
-    // #region agent log
-    const firstPayload = payloadForContract[0]
-    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'356af5'},body:JSON.stringify({sessionId:'356af5',location:'createAttestations.ts:payloadForContract',message:'contract path payload (multiPublish)',data:{path:'createAttestations',firstReqSeedUid:firstPayload?.seedUid,firstReqVersionUid:firstPayload?.versionUid,listOfAttestationsCount:firstPayload?.listOfAttestations?.length??0,payloadCount:payloadForContract.length},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
 
     let managedAccountAddress: string | undefined
     let activeAccount = account
@@ -256,8 +254,8 @@ export const createAttestations = fromPromise(
         : normalizedRequests
     persistSeedUidFromPublishResult(item as { seedUid?: string }, effectiveRequests)
     const itemWithPersist = item as { persistSeedUid?: (publisher?: string) => Promise<void> }
-    if (effectiveRequests[0]?.seedUid && typeof itemWithPersist.persistSeedUid === 'function') {
-      await itemWithPersist.persistSeedUid(address)
+    if (effectiveRequests[0]?.seedUid) {
+      await persistSeedUidSafely(itemWithPersist, address)
     }
 
     logger('result', result)

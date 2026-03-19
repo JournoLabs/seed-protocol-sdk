@@ -6,7 +6,8 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
-import { BaseFileManager } from '@/helpers'
+import { BaseFileManager, getMetadataPropertyNamesForQuery } from '@/helpers'
+import { normalizeDataType } from '@/helpers/property'
 // Dynamic import to break circular dependency: schema/index -> ... -> hydrateFromDb -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
 
@@ -42,41 +43,39 @@ export const hydrateFromDb = fromCallback<
     const whereClauses = []
 
     // Re-check types with dynamically imported ModelPropertyDataTypes
+    // Use normalizeDataType for case-insensitive comparison (schema may use "image" vs "Image")
+    const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
+    const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
+
     const isRelationDynamic =
       propertyRecordSchema &&
       propertyRecordSchema.ref &&
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation
+      normalizedDataType === ModelPropertyDataTypes.Relation
 
     const isImageDynamic =
       propertyRecordSchema &&
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
+      (normalizedDataType === ModelPropertyDataTypes.Image ||
+        normalizedRefValueType === ModelPropertyDataTypes.Image)
 
     const isFileDynamic =
       propertyRecordSchema &&
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.File
+      normalizedDataType === ModelPropertyDataTypes.File
 
-    if (isRelationDynamic || isImageDynamic || isFileDynamic) {
-      let missingPropertyNameVariant
-      if (propertyName.endsWith('Id')) {
-        missingPropertyNameVariant = propertyName.slice(0, -2)
-      }
-      if (!propertyName.endsWith('Id')) {
-        missingPropertyNameVariant = propertyName + 'Id'
-      }
-      if (missingPropertyNameVariant) {
-        whereClauses.push(
-          or(
-            eq(metadata.propertyName, propertyName),
-            eq(metadata.propertyName, missingPropertyNameVariant),
-          ),
-        )
-      }
-      if (!missingPropertyNameVariant) {
-        whereClauses.push(eq(metadata.propertyName, propertyName))
-      }
-    } else {
-      whereClauses.push(eq(metadata.propertyName, propertyName))
-    }
+    const isHtmlDynamic =
+      propertyRecordSchema &&
+      normalizedDataType === ModelPropertyDataTypes.Html
+
+    // Html/Image/File/Relation store metadata with Id suffix (e.g. htmlId); query both variants
+    const propertyNames = getMetadataPropertyNamesForQuery(
+      propertyName,
+      normalizedDataType,
+      normalizedRefValueType
+    )
+    whereClauses.push(
+      propertyNames.length > 1
+        ? or(...propertyNames.map((n) => eq(metadata.propertyName, n)))
+        : eq(metadata.propertyName, propertyNames[0])
+    )
 
     if (seedUid) {
       whereClauses.push(eq(metadata.seedUid, seedUid))
@@ -117,105 +116,75 @@ export const hydrateFromDb = fromCallback<
       propertyValueFromDb
 
 
+    // Image: always resolve display value from file (blob URLs in DB are invalid after reload)
     if (isImageDynamic) {
-      let shouldReadFromFile = true
+      let dir = localStorageDir
+      if (!dir && isImageDynamic) {
+        dir = 'images'
+      }
+      dir = dir!.replace(/^\//, '')
 
       if (
-        refResolvedValue &&
-        refResolvedDisplayValue &&
-        refResolvedDisplayValue.includes('http')
+        propertyValueFromDb &&
+        propertyValueFromDb.length === 66
       ) {
-        try {
-          const response = await fetch(refResolvedDisplayValue, {
-            method: 'HEAD',
-          }).catch((error) => {
-            // No-op
-            shouldReadFromFile = true
+        // Here the storageTransactionId is stored on a different record and
+        // we want to add it as the refResolvedValue
+        const storageTransactionQuery = await appDb
+          .select({
+            propertyValue: metadata.propertyValue,
           })
+          .from(metadata)
+          .where(
+            and(
+              eq(metadata.seedUid, propertyValueFromDb),
+              or(
+                eq(metadata.propertyName, 'storageTransactionId'),
+                eq(metadata.propertyName, 'transactionId'),
+              ),
+            ),
+          )
 
-          if (!response || !response.ok) {
-            shouldReadFromFile = true
-          }
-
-          // Check if the status is in the 200-299 range
-          if (response && response.ok) {
-            shouldReadFromFile = false
-          }
-        } catch (error) {
-          shouldReadFromFile = true
+        if (storageTransactionQuery && storageTransactionQuery.length > 0) {
+          const row = storageTransactionQuery[0]
+          refResolvedValue = row.propertyValue
+          await updateMetadata({
+            localId,
+            refResolvedValue,
+            localStorageDir: '/images',
+          })
         }
       }
 
-      if (shouldReadFromFile) {
-        let dir = localStorageDir
-        if (
-          !dir &&
-          isImageDynamic
-        ) {
-          dir = 'images'
-        }
-
-        dir = dir!.replace(/^\//, '')
-
-        if (
-          propertyValueFromDb &&
-          propertyValueFromDb.length === 66
-        ) {
-          // Here the storageTransactionId is stored on a different record and
-          // we want to add it as the refResolvedValue
-          const storageTransactionQuery = await appDb
-            .select({
-              propertyValue: metadata.propertyValue,
+      if (refResolvedValue) {
+        try {
+          const dirPath = BaseFileManager.getFilesPath(dir)
+          const dirExists = await BaseFileManager.pathExists(dirPath)
+          if (dirExists) {
+            const fs = await BaseFileManager.getFs()
+            const path = BaseFileManager.getPathModule()
+            const files = await fs.promises.readdir(dirPath)
+            const matchingFiles = files.filter((file: string) => {
+              return path.basename(file).includes(refResolvedValue!)
             })
-            .from(metadata)
-            .where(
-              and(
-                eq(metadata.seedUid, propertyValueFromDb),
-                or(
-                  eq(metadata.propertyName, 'storageTransactionId'),
-                  eq(metadata.propertyName, 'transactionId'),
-                ),
-              ),
-            )
-
-          if (storageTransactionQuery && storageTransactionQuery.length > 0) {
-            const row = storageTransactionQuery[0]
-            refResolvedValue = row.propertyValue
-            await updateMetadata({
-              localId,
-              refResolvedValue,
-              localStorageDir: '/images',
-            })
+            let fileExists = false
+            let filename
+            let filePath
+            if (matchingFiles && matchingFiles.length > 0) {
+              fileExists = true
+              filename = matchingFiles[0]
+              filePath = BaseFileManager.getFilesPath(dir, filename)
+            }
+            localStorageDir = `/${dir}`
+            if (fileExists && filename && filePath) {
+              const file = await BaseFileManager.readFile(filePath)
+              refResolvedDisplayValue = URL.createObjectURL(file)
+              // Do not persist blob URL - it is session-scoped
+            }
           }
+        } catch (e) {
+          logger('[hydrateFromDb] Image file resolution error', e)
         }
-
-        const dirPath = BaseFileManager.getFilesPath(dir)
-        const fs = await BaseFileManager.getFs()
-        const path = BaseFileManager.getPathModule()
-        const files = await fs.promises.readdir(dirPath)
-        const matchingFiles = files.filter((file: string) => {
-          return path.basename(file).includes(refResolvedValue!)
-        })
-        let fileExists = false
-        let filename
-        let filePath
-        if (matchingFiles && matchingFiles.length > 0) {
-          fileExists = true
-          filename = matchingFiles[0]
-          filePath = BaseFileManager.getFilesPath(dir, filename)
-        }
-        localStorageDir = `/${dir}`
-        if (fileExists && filename && filePath) {
-          const file = await BaseFileManager.readFile(filePath)
-          refResolvedDisplayValue = URL.createObjectURL(file)
-          await updateMetadata({
-            localId,
-            refResolvedValue: filename,
-            refResolvedDisplayValue: refResolvedDisplayValue,
-            localStorageDir,
-          })
-        }
-
       }
     }
 
@@ -271,6 +240,44 @@ export const hydrateFromDb = fromCallback<
         if (property) {
           property.getService().send({ type: 'updateContext', renderValue })
         }
+        return
+      }
+    }
+
+    // Html: read file content for renderValue (blob URLs from DB are invalid after reload)
+    // Fallback: when localStorageDir is null (e.g. EAS sync, legacy records) use '/html'
+    const htmlLocalStorageDir = isHtmlDynamic && refResolvedValue && !localStorageDir ? '/html' : localStorageDir
+    // #region agent log
+    if (isHtmlDynamic) {
+      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'hydrateFromDb.ts:htmlCheck',message:'Html hydrate path check',data:{refResolvedValue,localStorageDir,htmlLocalStorageDir,willReadFile:!!(refResolvedValue&&htmlLocalStorageDir)},timestamp:Date.now(),hypothesisId:'hydrate'})}).catch(()=>{});
+    }
+    // #endregion
+    if (isHtmlDynamic && refResolvedValue && htmlLocalStorageDir) {
+      const dir = htmlLocalStorageDir.replace(/^\//, '')
+      const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
+      const exists = await BaseFileManager.pathExists(filePath)
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'hydrateFromDb.ts:html',message:'Html hydrate file read',data:{refResolvedValue,localStorageDir,filePath,exists,propertyValueFromDb},timestamp:Date.now(),hypothesisId:'hydrate'})}).catch(()=>{});
+      // #endregion
+      if (exists) {
+        const htmlContent = await BaseFileManager.readFileAsString(filePath)
+        sendBack({
+          type: 'updateContext',
+          localId,
+          uid,
+          propertyValue: propertyValueProcessed,
+          seedLocalId: seedLocalIdFromDb,
+          seedUid: seedUidFromDb,
+          versionLocalId: versionLocalIdFromDb,
+          versionUid: versionUidFromDb,
+          schemaUid: schemaUidFromDb,
+          refValueType,
+          localStorageDir: htmlLocalStorageDir,
+          refResolvedValue,
+          refResolvedDisplayValue,
+          renderValue: htmlContent,
+          populatedFromDb: true,
+        })
         return
       }
     }

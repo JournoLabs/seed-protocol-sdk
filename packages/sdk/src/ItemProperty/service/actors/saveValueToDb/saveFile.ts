@@ -6,7 +6,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { createSeed } from '@/db/write/createSeed'
-import { getDataTypeFromString } from '@/helpers'
+import { getDataTypeFromString, toMetadataPropertyName } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
@@ -53,19 +53,33 @@ export const saveFile = fromCallback<
     newValue = event.newValue
   }
 
-  if (existingValue === newValue) {
-    sendBack({ type: 'saveValueToDbSuccess' })
-    return
-  }
+  // Do NOT skip when existingValue === newValue: the value setter sends updateContext before save,
+  // so context is already updated. Skipping would prevent persisting existing file references (string filename).
 
   const _saveFile = async (): Promise<void> => {
     if (!propertyNameRaw) {
       throw new Error('propertyName is required')
     }
-    let propertyName = propertyNameRaw
+    const propertyName = toMetadataPropertyName(propertyNameRaw, 'File')
 
-    if (!propertyNameRaw.endsWith('Id')) {
-      propertyName = `${propertyName}Id`
+    // Wait for file system to be initialized (client may still be loading)
+    const fsTimeoutMs = 10000
+    const fsPollMs = 100
+    const fsStart = Date.now()
+    while (Date.now() - fsStart < fsTimeoutMs) {
+      try {
+        BaseFileManager.getWorkingDir()
+        break
+      } catch {
+        await new Promise((r) => setTimeout(r, fsPollMs))
+      }
+    }
+    try {
+      BaseFileManager.getWorkingDir()
+    } catch (e) {
+      throw new Error(
+        `File system not initialized. Ensure the client has finished loading before saving files. (${(e as Error)?.message})`,
+      )
     }
 
     let fileData: string | ArrayBuffer | undefined
@@ -101,7 +115,22 @@ export const saveFile = fromCallback<
       fileData = await readFileAsArrayBuffer(newValue)
     }
 
-    if (!fileData) {
+    // Handle existing file reference: filename from listFiles() that exists in files folder
+    let isExistingFileReference = false
+    if (
+      typeof newValue === 'string' &&
+      getDataTypeFromString(newValue) === null
+    ) {
+      const existingFilePath = BaseFileManager.getFilesPath('files', newValue)
+      const pathExistsResult = await BaseFileManager.pathExists(existingFilePath)
+      if (pathExistsResult) {
+        isExistingFileReference = true
+        fileName = newValue
+        fileData = undefined
+      }
+    }
+
+    if (!fileData && !isExistingFileReference) {
       throw new Error('No file data found')
     }
 
@@ -122,23 +151,25 @@ export const saveFile = fromCallback<
       seedType: 'file',
     })
 
-    if (fileData instanceof ArrayBuffer) {
-      try {
-        await BaseFileManager.saveFile(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
-      } catch (e) {
-        const fs = await BaseFileManager.getFs()
-        fs.writeFileSync(filePath, new Uint8Array(fileData))
-        eventEmitter.emit('file-saved', filePath)
-      }
-    } else if (typeof fileData === 'string') {
-      try {
-        await BaseFileManager.saveFile(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
-      } catch (e) {
-        const fs = await BaseFileManager.getFs()
-        fs.writeFileSync(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
+    if (!isExistingFileReference) {
+      if (fileData instanceof ArrayBuffer) {
+        try {
+          await BaseFileManager.saveFile(filePath, fileData)
+          eventEmitter.emit('file-saved', filePath)
+        } catch (e) {
+          const fs = await BaseFileManager.getFs()
+          fs.writeFileSync(filePath, new Uint8Array(fileData))
+          eventEmitter.emit('file-saved', filePath)
+        }
+      } else if (typeof fileData === 'string') {
+        try {
+          await BaseFileManager.saveFile(filePath, fileData)
+          eventEmitter.emit('file-saved', filePath)
+        } catch (e) {
+          const fs = await BaseFileManager.getFs()
+          fs.writeFileSync(filePath, fileData)
+          eventEmitter.emit('file-saved', filePath)
+        }
       }
     }
 
@@ -187,6 +218,7 @@ export const saveFile = fromCallback<
         refModelUid: fileSchemaUid,
         localStorageDir: '/files',
         easDataType: 'bytes32',
+        dataType: 'File',
       } as any)
     }
 
@@ -206,10 +238,6 @@ export const saveFile = fromCallback<
   }
 
   _saveFile()
-    .then(() => {
-      sendBack({ type: 'saveFileSuccess' })
-    })
-    .catch((error) => {
-      sendBack({ type: 'saveFileError', error })
-    })
+    .then(() => sendBack({ type: 'saveFileSuccess' }))
+    .catch((error) => sendBack({ type: 'saveFileError', error }))
 })

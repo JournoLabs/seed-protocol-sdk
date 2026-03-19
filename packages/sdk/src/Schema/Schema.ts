@@ -99,6 +99,8 @@ export class Schema {
     string,
     { instance: Schema; refCount: number }
   > = new Map()
+  // Deduplicate concurrent Schema.create(schemaName) calls - prevents many parallel loads for same schema
+  private static pendingSchemaByName: Map<string, Promise<Schema>> = new Map()
   // Track which schemas are currently being saved to prevent concurrent saves
   protected static savingSchemas: Set<string> = new Set()
   protected readonly _service: SchemaService
@@ -175,7 +177,7 @@ export class Schema {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? 15000
 
     // First, check if we have an instance cached by name
     if (this.instanceCacheByName.has(schemaName)) {
@@ -188,6 +190,14 @@ export class Schema {
       return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
         () => instance,
       )
+    }
+
+    // Deduplicate concurrent creates for same schema (prevents many parallel checkExistingSchema loads)
+    if (waitForReady) {
+      const pending = this.pendingSchemaByName.get(schemaName)
+      if (pending) {
+        return pending
+      }
     }
 
     // Create new instance
@@ -556,9 +566,12 @@ export class Schema {
     })
     const schema = proxiedInstance as Schema
     if (!waitForReady) return schema
-    return waitForEntityIdle(schema, { timeout: readyTimeout }).then(
+    const readyPromise = waitForEntityIdle(schema, { timeout: readyTimeout }).then(
       () => schema,
     )
+    this.pendingSchemaByName.set(schemaName, readyPromise)
+    readyPromise.finally(() => this.pendingSchemaByName.delete(schemaName))
+    return readyPromise
   }
 
   /**
@@ -629,9 +642,10 @@ export class Schema {
       }
     }
     
-    // Clear both caches explicitly
+    // Clear both caches and pending map
     this.instanceCacheById.clear()
     this.instanceCacheByName.clear()
+    this.pendingSchemaByName.clear()
   }
 
   /**

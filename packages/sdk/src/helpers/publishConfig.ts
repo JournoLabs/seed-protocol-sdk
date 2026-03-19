@@ -18,6 +18,28 @@ export function getGetPublisherForNewSeeds(): GetPublisherForNewSeeds | null {
   return getPublisherForNewSeeds
 }
 
+/** Timeout in ms for getPublisher - prevents wallet autoConnect from hanging seed/version creation */
+const PUBLISHER_TIMEOUT_MS = 3000
+
+/**
+ * Safely get publisher address with timeout. When user hasn't connected a wallet,
+ * getPublisher (e.g. wallet autoConnect) cannot hang - we proceed without publisher.
+ */
+export async function getPublisherForNewSeedsWithTimeout(): Promise<string | undefined> {
+  const getPublisher = getPublisherForNewSeeds
+  if (!getPublisher) return undefined
+  try {
+    return await Promise.race([
+      getPublisher(),
+      new Promise<undefined>((resolve) =>
+        setTimeout(() => resolve(undefined), PUBLISHER_TIMEOUT_MS),
+      ),
+    ])
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Optional executor for Arweave uploads during publish.
  * When provided, runPublish will call this for each upload, sign/post the transaction,

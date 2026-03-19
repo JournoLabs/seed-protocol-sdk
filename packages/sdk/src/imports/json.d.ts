@@ -56,6 +56,14 @@ export declare function importJsonSchema(importFileContents: {
  */
 export declare const loadSchemaFromFile: (schemaFilePath: string) => Promise<string>;
 /**
+ * Sync a canonical schema from a file path or inlined object to the database.
+ * Uses add/update semantics: no "already exists with different content" errors, no ID-based file copy.
+ * Called automatically at init when config.schema is provided.
+ *
+ * @param source - File path (string) or complete SchemaFileFormat object
+ */
+export declare function syncSchemaFromSource(source: string | SchemaFileFormat): Promise<void>;
+/**
  * Create a Model class from a JSON model definition
  * @param modelName - The name of the model
  * @param modelDef - The JSON model definition

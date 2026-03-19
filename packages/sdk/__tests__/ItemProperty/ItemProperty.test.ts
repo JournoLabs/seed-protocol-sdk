@@ -2044,6 +2044,77 @@ testDescribe('ItemProperty Integration Tests', () => {
     })
   })
 
+  describe('Html property persistence', () => {
+    it('Html property returns HTML content (not seedLocalId) after load from DB', async () => {
+      const schemaName = 'Test Schema Html Persistence'
+      const testSchema = createTestSchema(schemaName, {
+        Post: {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+            html: { dataType: 'Html' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('Post', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const htmlContent = '<p>Hello World</p>'
+      const item = await Item.create({
+        modelName: 'Post',
+        title: 'Test Post',
+        html: htmlContent,
+      })
+
+      await waitForItemIdle(item)
+
+      const htmlProperty = item.properties.find(
+        (p) => p.propertyName === 'html' || p.propertyName === 'htmlId'
+      )
+      expect(htmlProperty).toBeDefined()
+      if (htmlProperty) {
+        await waitForItemPropertyIdle(htmlProperty)
+      }
+
+      const seedLocalId = item.seedLocalId
+      expect(seedLocalId).toBeDefined()
+
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      ItemProperty.clearInstanceCacheForItem(seedLocalId!)
+      item.unload()
+
+      const reloadedItem = await Item.find({
+        modelName: 'Post',
+        seedLocalId: seedLocalId!,
+      })
+      expect(reloadedItem).toBeDefined()
+      if (!reloadedItem) return
+
+      await waitForItemIdle(reloadedItem)
+
+      const reloadedHtmlProperty = reloadedItem.properties.find(
+        (p) => p.propertyName === 'html' || p.propertyName === 'htmlId'
+      )
+      expect(reloadedHtmlProperty).toBeDefined()
+      if (reloadedHtmlProperty) {
+        await waitForItemPropertyIdle(reloadedHtmlProperty)
+        const value = reloadedHtmlProperty.value
+        expect(typeof value).toBe('string')
+        expect(value).toBe(htmlContent)
+      }
+
+      reloadedItem.unload()
+    })
+  })
+
   describe('ItemProperty cacheKey()', () => {
     it('should generate correct cache key', () => {
       // Use proper format: 10-character localId or 66-character uid starting with 0x

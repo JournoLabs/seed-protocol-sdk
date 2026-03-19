@@ -11,8 +11,15 @@ export { useModels, useModel, useCreateModel, useDestroyModel } from './model'
 export { useLiveQuery } from './liveQuery'
 export { SeedProvider, invalidateItemPropertiesForItem } from './SeedProvider'
 export type { SeedProviderProps } from './SeedProvider'
+export { SeedClientGate } from './SeedClientGate'
+export type { SeedClientGateProps } from './SeedClientGate'
+export { OPFSFilesManager } from './OPFSFilesManager'
+export type { OPFSFilesManagerProps, OPFSFilesManagerTheme } from './OPFSFilesManager'
+export { useOPFSFiles } from './useOPFSFiles'
+export type { OPFSFile, UseOPFSFilesOptions } from './useOPFSFiles'
 export {
   createSeedQueryClient,
   getSeedQueryDefaultOptions,
   mergeSeedQueryDefaults,
 } from './queryClient'
+export { SeedImage } from './SeedImage'

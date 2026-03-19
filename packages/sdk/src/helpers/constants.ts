@@ -81,6 +81,8 @@ export const INTERNAL_PROPERTY_NAMES = [
   'versionsCount',
   'versionUid',
   '_markedForDeletion',
+  // SDK-internal: wallet address of attester; never publish as property attestation
+  'publisher',
 ]
 
 export const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA =

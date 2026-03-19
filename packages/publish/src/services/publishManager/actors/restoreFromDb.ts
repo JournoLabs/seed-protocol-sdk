@@ -4,14 +4,54 @@ import { eq } from 'drizzle-orm'
 import { publishMachine } from '../../publish'
 import { subscribe } from './subscribe'
 
+const RESTORE_DB_WAIT_MS = 60_000
+const RESTORE_DB_POLL_MS = 2_000
+
+async function waitForDb(maxWaitMs: number): Promise<boolean> {
+  const deadline = Date.now() + maxWaitMs
+  while (Date.now() < deadline) {
+    if (BaseDb.PlatformClass && BaseDb.getAppDb()) return true
+    await new Promise((r) => setTimeout(r, RESTORE_DB_POLL_MS))
+  }
+  return false
+}
+
 /** Minimal snapshot shape for restore; avoids excessive type recursion from SnapshotFrom<typeof publishMachine>. */
 interface PersistedSnapshot {
   status?: string
+  value?: string | Record<string, unknown>
   context?: {
     item?: { seedLocalId?: string; modelName?: string; schemaId?: string }
     modelName?: string
     schemaId?: string
+    reimbursementTransactionId?: string
+    requestResponse?: unknown
+    arweaveTransactions?: unknown[]
+    publishUploads?: unknown[]
   }
+}
+
+function getStateValue(parsed: PersistedSnapshot): string {
+  const v = parsed.value
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object') {
+    const keys = Object.keys(v)
+    return (keys[0] ?? '') as string
+  }
+  return ''
+}
+
+function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
+  const stateValue = getStateValue(parsed)
+  if (stateValue === 'pollingForConfirmation') {
+    if (!parsed.context?.reimbursementTransactionId || !parsed.context?.requestResponse) return false
+  }
+  if (stateValue === 'uploadingData') {
+    const txs = parsed.context?.arweaveTransactions
+    const uploads = parsed.context?.publishUploads
+    if (!Array.isArray(txs) || txs.length === 0 || !Array.isArray(uploads)) return false
+  }
+  return true
 }
 
 export interface RestoreFromDbInput {
@@ -29,8 +69,9 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
 
       // BaseDb.PlatformClass is set by platformClassesInit when client.init() runs.
       // PublishManager starts on module load, which can happen before client.init().
-      // Guard: skip restore if platform not yet initialized.
-      if (!BaseDb.PlatformClass) {
+      // Wait for DB to be ready before attempting restore (poll every 2s, up to 60s).
+      const dbReady = await waitForDb(RESTORE_DB_WAIT_MS)
+      if (!dbReady) {
         sendBack({ type: 'RESTORE_FROM_DB_DONE', publishProcesses: newPublishProcesses, subscriptions: newSubscriptions })
         return { newPublishProcesses, newSubscriptions }
       }
@@ -66,6 +107,7 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
         if (parsed.status === 'done') continue
         const seedLocalId = parsed.context?.item?.seedLocalId ?? publishProcessRecord.seedLocalId
         if (!seedLocalId) continue
+        if (!isRestorableSnapshot(parsed)) continue
 
         // Item is an SDK class instance; JSON.stringify loses getters (e.g. seedLocalId).
         // Patch context.item so createAttestations has the data it needs for retry.

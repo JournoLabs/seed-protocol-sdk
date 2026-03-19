@@ -1,5 +1,5 @@
 import { BaseDb, publishProcesses, uploadProcesses } from '@seedprotocol/sdk'
-import { notInArray, eq } from 'drizzle-orm'
+import { notInArray, eq, inArray } from 'drizzle-orm'
 
 export async function clearCompletedPublishProcesses(): Promise<void> {
   const db = BaseDb.getAppDb()
@@ -29,4 +29,19 @@ export async function deletePublishProcessesForSeed(seedLocalId: string): Promis
   if (!db) return
 
   await db.delete(publishProcesses).where(eq(publishProcesses.seedLocalId, seedLocalId))
+}
+
+/** Delete a single publish process record by id. */
+export async function deletePublishProcessById(id: number): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  await db.delete(publishProcesses).where(eq(publishProcesses.id, id))
+}
+
+/** Delete multiple publish process records by ids. */
+export async function deletePublishProcessesByIds(ids: number[]): Promise<void> {
+  if (ids.length === 0) return
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  await db.delete(publishProcesses).where(inArray(publishProcesses.id, ids))
 }

@@ -25,6 +25,7 @@ export type ItemMachineContext<T> = {
   modelTableName?: string
   modelNamePlural?: string
   modelName?: string
+  schemaName?: string
   existingItem?: Record<string, unknown>
   propertiesUpdatedAt?: number
   hasRemoteBackup?: boolean
@@ -90,4 +91,12 @@ export type CreatePropertyInstanceProps = {
   propertyValue: any
   schemaUid?: string
   propertyRecordSchema?: PropertySchemaType
+  /** For File/Image/Relation: filename or path used for display and OPFS lookup */
+  refResolvedValue?: string
+  /** For File/Image: blob URL or content URL for display */
+  refResolvedDisplayValue?: string
+  /** For File/Image: e.g. '/files' or '/images' */
+  localStorageDir?: string
+  /** For Html/Image/File/Relation: ref type from metadata (e.g. 'html', 'image') */
+  refSeedType?: string
 }
