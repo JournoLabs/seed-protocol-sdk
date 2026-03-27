@@ -8,14 +8,23 @@ import {
   schemas,
   metadata,
   seeds,
+  versions,
+  propertyUids,
+  modelUids,
+  models as modelsTable,
+  modelSchemas,
+  properties,
+  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
   Item,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
+
+const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -23,7 +32,7 @@ const testSchemaWithItems: SchemaFileFormat = {
   version: 1,
   id: 'test-schema-items-hooks',
   metadata: {
-    name: 'Test Schema Items Hooks',
+    name: TEST_SCHEMA_ITEMS_HOOKS_NAME,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -61,6 +70,70 @@ const testSchemaWithItems: SchemaFileFormat = {
   },
   enums: {},
   migrations: [],
+}
+
+/** Remove test schema + rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
+async function deleteTestSchemaItemsHooksRows(): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+
+  const schemaRow = await db
+    .select()
+    .from(schemas)
+    .where(eq(schemas.name, TEST_SCHEMA_ITEMS_HOOKS_NAME))
+    .limit(1)
+  if (!schemaRow.length || schemaRow[0].id == null) return
+
+  const schemaId = schemaRow[0].id
+
+  const links = await db
+    .select({ modelId: modelSchemas.modelId })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.schemaId, schemaId))
+
+  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
+  if (mids.length === 0) {
+    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+    await db.delete(schemas).where(eq(schemas.id, schemaId))
+    return
+  }
+
+  const modelRows = await db
+    .select({ name: modelsTable.name })
+    .from(modelsTable)
+    .where(inArray(modelsTable.id, mids))
+  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
+
+  const seedRows = await db
+    .select({ localId: seeds.localId })
+    .from(seeds)
+    .where(inArray(seeds.type, modelNames))
+  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
+
+  if (seedLocalIds.length) {
+    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
+    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
+    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
+  }
+
+  const propRows = await db
+    .select({ id: properties.id })
+    .from(properties)
+    .where(inArray(properties.modelId, mids))
+  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
+
+  if (pids.length) {
+    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
+    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
+  }
+
+  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
+  await db.update(properties).set({ refModelId: null }).where(inArray(properties.modelId, mids))
+  await db.delete(properties).where(inArray(properties.modelId, mids))
+  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
+  await db.delete(schemas).where(eq(schemas.id, schemaId))
 }
 
 // Helper function to wait for item to be in idle state
@@ -365,13 +438,7 @@ describe('React Item Hooks Integration Tests', () => {
   })
 
   afterAll(async () => {
-    // Clean up schema from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items Hooks'))
-    }
-
-    // Clear schema cache
+    await deleteTestSchemaItemsHooksRows()
     Schema.clearCache()
   })
 
@@ -380,11 +447,7 @@ describe('React Item Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    // Clean up any existing test schema
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items Hooks'))
-    }
+    await deleteTestSchemaItemsHooksRows()
     Schema.clearCache()
 
     // Import test schema
@@ -403,13 +466,13 @@ describe('React Item Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Items Hooks')
+        return allSchemas.some(s => s.schema.metadata?.name === TEST_SCHEMA_ITEMS_HOOKS_NAME)
       },
       { timeout: 10000 }
     )
 
     // Create test items
-    const postModel = Model.create('Post', 'Test Schema Items Hooks', { waitForReady: false })
+    const postModel = Model.create('Post', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
     await xstateWaitFor(
       postModel.getService(),
       (snapshot) => snapshot.value === 'idle',
@@ -449,7 +512,7 @@ describe('React Item Hooks Integration Tests', () => {
     // Wait for properties to be saved to database
     await new Promise(resolve => setTimeout(resolve, 1000))
 
-    const articleModel = Model.create('Article', 'Test Schema Items Hooks', { waitForReady: false })
+    const articleModel = Model.create('Article', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
     await xstateWaitFor(
       articleModel.getService(),
       (snapshot) => snapshot.value === 'idle',

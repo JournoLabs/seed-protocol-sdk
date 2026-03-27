@@ -38,18 +38,19 @@ export const getArweave = (): Arweave | undefined => {
   }
 
   const hostToUse = BaseArweaveClient.getHost()
+  const protocol = BaseArweaveClient.getProtocol()
 
   // Check if Arweave has a default export (ES modules) or is the class itself (CommonJS)
   if ('default' in Arweave && typeof (Arweave as any).default?.init === 'function') {
     return (Arweave as any).default.init({
       host: hostToUse,
-      protocol: 'https',
+      protocol,
     })
   }
 
   return Arweave.init({
     host: hostToUse,
-    protocol: 'https',
+    protocol,
   })
 }
 

@@ -30,7 +30,10 @@ export type PropertyData = {
     createdAt: number;
     updatedAt: number;
 };
-export type PropertyMachineContext = Partial<MetadataType> & {
+export type ItemPropertyValueType = string | number | Record<string, unknown> | null | undefined | any[];
+/** DB metadata uses string `property_value`; machine context also holds parsed List values as arrays. */
+export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'> & {
+    propertyValue?: ItemPropertyValueType;
     populatedFromDb?: boolean;
     isSaving: boolean;
     propertyRecordSchema?: PropertyType;
@@ -47,7 +50,6 @@ export type PropertyMachineContext = Partial<MetadataType> & {
         name?: string;
     } | null;
 };
-export type ItemPropertyValueType = string | number | Record<string, unknown> | null | undefined | any[];
 export type SaveValueToDbEvent = {
     type: 'saveValueToDb';
     newValue: ItemPropertyValueType;

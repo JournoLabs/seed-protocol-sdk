@@ -28,7 +28,7 @@ export { getModelSchemasFromEas, getItemVersionsFromEas, getItemPropertiesFromEa
 export { getCorrectId, generateId } from './helpers';
 export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS } from './helpers/constants';
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties';
-export { BaseArweaveClient, getArweaveUrlForTransaction } from './helpers';
+export { BaseArweaveClient, getArweaveUrlForTransaction, normalizeUploadApiBaseUrl, getUploadApiArweaveDataUrl, getUploadPipelineTransactionStatus, } from './helpers';
 export { waitForEntityIdle } from './helpers/waitForEntityIdle';
 export { setUploadExecutor, getUploadExecutor } from './helpers/publishConfig';
 export type { UploadExecutor } from './helpers/publishConfig';

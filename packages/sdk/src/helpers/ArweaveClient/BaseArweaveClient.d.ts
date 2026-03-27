@@ -3,14 +3,20 @@ import type { TransactionStatus, TransactionTag, GetDataOptions, DownloadFilesPa
 export declare abstract class BaseArweaveClient {
     static PlatformClass: typeof BaseArweaveClient;
     static setPlatformClass(platformClass: typeof BaseArweaveClient): void;
+    static resolveGateway(): {
+        protocol: 'http' | 'https';
+        host: string;
+    };
     /**
-     * Get the current Arweave host
-     * @returns The Arweave host (e.g., 'arweave.net')
+     * Get the current Arweave host (hostname, optionally with port — no URL scheme)
+     * @returns The Arweave host (e.g. 'arweave.net' or 'localhost:1984')
      */
     static getHost(): string;
+    static getProtocol(): 'http' | 'https';
+    static getBaseUrl(): string;
     /**
-     * Set the Arweave host
-     * @param host - The new host to use (e.g., 'arweave.net')
+     * Set the Arweave gateway. Plain host defaults to https; prefix with http:// for local HTTP gateways.
+     * @param host - e.g. 'arweave.net', 'https://arweave.net', or 'http://localhost:1984'
      */
     static setHost(host: string): void;
     /**
@@ -25,9 +31,8 @@ export declare abstract class BaseArweaveClient {
      */
     static getRawUrl(transactionId: string): string;
     /**
-     * Get the transaction status URL
+     * URL used to verify that a transaction is available on the gateway (HTTP 200 = present).
      * @param transactionId - The Arweave transaction ID
-     * @returns The full URL to check transaction status
      */
     static getStatusUrl(transactionId: string): string;
     /**
@@ -36,9 +41,9 @@ export declare abstract class BaseArweaveClient {
      */
     static getArweaveClient(): GraphQLClient;
     /**
-     * Get the status of a transaction
+     * Check gateway presence for a transaction (HTTP 200). Does not parse confirmation JSON.
      * @param transactionId - The Arweave transaction ID
-     * @returns Transaction status including confirmation details
+     * @returns Transaction status; `confirmed` is null for real gateway responses
      */
     static getTransactionStatus(transactionId: string): Promise<TransactionStatus>;
     /**

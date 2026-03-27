@@ -5,17 +5,40 @@ import { or, eq, and, sql } from "drizzle-orm"
 import { GetPropertyDataOptions } from "@/types/db"
 import {
   getMetadataPropertyNamesForQuery,
+  listRelationStoragePropertyName,
   resolveMetadataRecord,
 } from "@/helpers/metadataPropertyNames"
+import { modelPropertiesToObject } from "@/helpers/model"
 
 export const getPropertyData = async ({
   propertyName,
   seedLocalId,
   seedUid,
+  modelName,
 }: GetPropertyDataOptions): Promise<PropertyData | undefined> => {
   const appDb = BaseDb.getAppDb()
 
-  const names = getMetadataPropertyNamesForQuery(propertyName)
+  let names = [...getMetadataPropertyNamesForQuery(propertyName)]
+  if (modelName) {
+    try {
+      const { Model } = await import("@/Model/Model")
+      const normalizedModelName = modelName
+      let model = Model.getByName(normalizedModelName)
+      if (!model?.properties?.length) {
+        model = await Model.getByNameAsync(normalizedModelName)
+      }
+      if (model?.properties?.length) {
+        const schemas = modelPropertiesToObject(model.properties)
+        const storage = listRelationStoragePropertyName(schemas, propertyName)
+        if (storage) {
+          names.push(storage)
+          names = [...new Set(names)]
+        }
+      }
+    } catch {
+      // Model not loaded — keep default name variants only
+    }
+  }
   const propertyNameWhere =
     names.length > 1 ? or(...names.map((n) => eq(metadata.propertyName, n))) : eq(metadata.propertyName, names[0])
 

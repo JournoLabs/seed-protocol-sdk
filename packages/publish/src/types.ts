@@ -1,5 +1,5 @@
 
-import type { Item } from '@seedprotocol/sdk'
+import type { IItem } from '@seedprotocol/sdk'
 import type { Account } from 'thirdweb/wallets'
 import type { ethers } from 'ethers'
 
@@ -24,7 +24,7 @@ export interface ArweaveTransactionInfo {
 
 /** Context for the publish state machine. */
 export interface PublishMachineContext {
-  item: Item<any>
+  item: IItem<any>
   address: string
   /** Plain model name so it survives XState snapshot persistence (Item.modelName is a getter). */
   modelName?: string

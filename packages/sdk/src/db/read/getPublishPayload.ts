@@ -19,6 +19,7 @@ import pluralize from 'pluralize'
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { getPropertySchema } from '@/helpers/property'
 import { modelPropertiesToObject } from '@/helpers/model'
@@ -28,7 +29,6 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models, properties, versions } from '@/seedSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
-import { Item } from '@/Item/Item'
 import debug from 'debug'
 import {ethers} from 'ethers'
 import { ModelPropertyDataTypes } from '@/Schema'
@@ -122,7 +122,12 @@ const getPropertyData = async (
 
   let schemaUid: string | undefined = itemProperty.schemaUid
 
-  const propertyNameForSchema = toSnakeCase(itemProperty.propertyName)
+  const ip = itemProperty as IItemProperty<any> & { storagePropertyName?: string }
+  const nameForEas =
+    ip.storagePropertyName && ip.storagePropertyName.length > 0
+      ? ip.storagePropertyName
+      : itemProperty.propertyName
+  const propertyNameForSchema = toSnakeCase(nameForEas)
 
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
@@ -296,6 +301,19 @@ const processBasicProperties = async (
       } catch {
         // fall through to array check
       }
+    }
+
+    // Legacy comma-separated ids (pre-JSON List storage)
+    if (
+      schemaDef.startsWith('bytes32[]') &&
+      typeof value === 'string' &&
+      !value.trim().startsWith('[') &&
+      value.includes(',')
+    ) {
+      value = value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
     }
 
     if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
@@ -708,15 +726,8 @@ const processListProperty = async (
 
   const singularPropertyName = pluralize.singular(listProperty.propertyName)
   const propertyNameForSchema = `${singularPropertyName}${listProperty.propertyDef!.ref}Ids`
-  if (typeof value === 'string' && value.length === 66) {
-    value = [value]
-  }
-  if (typeof value === 'string' && value.length > 66) {
-    try {
-      value = JSON.parse(value)
-    } catch (error) {
-      value = value.split(',')
-    }
+  if (typeof value === 'string') {
+    value = parseListPropertyValueFromStorage(value)
   }
 
   const iterableValue = Array.isArray(value)
@@ -868,7 +879,7 @@ export class PublishValidationFailedError extends Error {
 }
 
 export const getPublishPayload = async (
-  item: Item<any>,
+  item: IItem<any>,
   uploadedTransactions: UploadedTransaction[],
 ): Promise<MultiPublishPayload> => {
   const validationCtx: PublishValidationContext = { errors: [] }
@@ -1037,7 +1048,7 @@ export type ValidateItemForPublishResult = {
  * Pass empty array for uploadedTransactions when validating before Arweave upload.
  */
 export const validateItemForPublish = async (
-  item: Item<any>,
+  item: IItem<any>,
   uploadedTransactions: UploadedTransaction[] = [],
 ): Promise<ValidateItemForPublishResult> => {
   try {

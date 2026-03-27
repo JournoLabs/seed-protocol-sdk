@@ -24,9 +24,9 @@
   ],
   "scripts": {
     "build": "rimraf dist && vite build",
-    "test": "vitest run --reporter=default",
-    "test:watch": "vitest",
-    "test:browser": "vitest --project=browser"
+    "test": "cd ../.. && vitest run --reporter=default --config vite.config.js --project=browser-react",
+    "test:watch": "cd ../.. && vitest --config vite.config.js --project=browser-react",
+    "test:browser": "cd ../.. && vitest --config vite.config.js --project=browser"
   },
   "peerDependencies": {
     "@seedprotocol/sdk": "^0.4.0",

@@ -26,12 +26,12 @@
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
-    "ethers": "^6.13.0",
     "@seedprotocol/react": "workspace:*",
-    "@seedprotocol/sdk": "workspace:*",
+    "@seedprotocol/sdk": "0.4.15",
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
+    "ethers": "^6.13.0",
     "isows": "^1.0.7",
     "viem": "^2.46.2",
     "xstate": "^5.28.0"

@@ -111,7 +111,9 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     // Normalize filesDir for Node.js environment
     // In Node.js, filesDir should be resolved relative to .seed directory at project root
     let normalizedFilesDir = filesDir || endpoints?.files
-    if (isNode() && normalizedFilesDir) {
+    // jsdom (and any env with both Node + window) is "browser" for SDK: PathResolver is OPFS/virtual.
+    // Do not run real fs against those paths (e.g. mkdir '/.seed').
+    if (isNode() && !isBrowser() && normalizedFilesDir) {
       const path = (await import('node:path')).default
       const fs = (await import('node:fs')).default
       const pathResolver = BasePathResolver.getInstance()

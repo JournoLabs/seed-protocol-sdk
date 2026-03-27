@@ -18,6 +18,7 @@ import {
   schemas,
   seeds,
   metadata,
+  modelSchemas,
   properties as propertiesTable,
   models as modelsTable,
   importJsonSchema,
@@ -553,8 +554,9 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await db.delete(seeds).where(eq(seeds.localId, testItem2.seedLocalId))
     }
 
-    // Clean up schemas from database
+    // Clean up schemas from database (model_schemas.schema_id FK must be cleared first)
     if (db) {
+      await db.delete(modelSchemas)
       await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
       await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))
@@ -609,6 +611,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await db.delete(metadata)
       await db.delete(seeds).where(eq(seeds.type, 'post'))
       await db.delete(seeds).where(eq(seeds.type, 'article'))
+      await db.delete(modelSchemas)
       await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
       await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))

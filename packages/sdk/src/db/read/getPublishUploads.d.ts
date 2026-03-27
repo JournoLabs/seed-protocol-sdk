@@ -7,4 +7,5 @@ export type UploadProperty = {
     childProperties: IItemProperty<any>[];
 };
 export declare const getPublishUploads: (item: IItem<any>, uploads?: PublishUpload[], relatedItemProperty?: IItemProperty<any>) => Promise<PublishUpload[]>;
+export declare function itemHasPublishUploadCandidates(item: IItem<any>, relatedItemProperty?: IItemProperty<any>): Promise<boolean>;
 //# sourceMappingURL=getPublishUploads.d.ts.map

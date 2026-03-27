@@ -17,6 +17,13 @@ import {
   schemas,
   properties as propertiesTable,
   models as modelsTable,
+  modelSchemas,
+  metadata,
+  seeds,
+  versions,
+  propertyUids,
+  modelUids,
+  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
@@ -26,7 +33,77 @@ import {
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
+
+/** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
+async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+
+  const schemaRow = await db
+    .select()
+    .from(schemas)
+    .where(eq(schemas.name, schemaName))
+    .limit(1)
+  if (!schemaRow.length || schemaRow[0].id == null) return
+
+  const schemaId = schemaRow[0].id
+
+  const links = await db
+    .select({ modelId: modelSchemas.modelId })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.schemaId, schemaId))
+
+  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
+  if (mids.length === 0) {
+    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+    await db.delete(schemas).where(eq(schemas.id, schemaId))
+    return
+  }
+
+  const modelRows = await db
+    .select({ name: modelsTable.name })
+    .from(modelsTable)
+    .where(inArray(modelsTable.id, mids))
+  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
+
+  const seedRows = await db
+    .select({ localId: seeds.localId })
+    .from(seeds)
+    .where(inArray(seeds.type, modelNames))
+  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
+
+  if (seedLocalIds.length) {
+    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
+    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
+    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
+  }
+
+  const propRows = await db
+    .select({ id: propertiesTable.id })
+    .from(propertiesTable)
+    .where(inArray(propertiesTable.modelId, mids))
+  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
+
+  if (pids.length) {
+    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
+    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
+  }
+
+  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
+  await db.update(propertiesTable).set({ refModelId: null }).where(inArray(propertiesTable.modelId, mids))
+  await db.delete(propertiesTable).where(inArray(propertiesTable.modelId, mids))
+  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
+  await db.delete(schemas).where(eq(schemas.id, schemaId))
+}
+
+async function deleteModelPropertyTestSchemasFromDb(): Promise<void> {
+  await deleteTestSchemaRowsByName('Test Schema Properties')
+  await deleteTestSchemaRowsByName('Empty Test Schema Properties')
+  await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
+}
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
@@ -347,13 +424,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       }
     }
 
-    // Clean up schemas from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Properties'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Properties'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
-    }
+    await deleteModelPropertyTestSchemasFromDb()
 
     // Clean up schema files from file system
     if (testSchemaWithProperties.id) {
@@ -397,13 +468,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       }
     }
 
-    // Clean up any existing test schemas from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Properties'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Properties'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
-    }
+    await deleteModelPropertyTestSchemasFromDb()
     
     // Clean up schema files from file system
     if (testSchemaWithProperties.id) {
@@ -632,25 +697,14 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should set isLoading to true initially and false when loaded', async () => {
       render(<UseModelPropertiesTest schemaIdOrModelId="Test Schema Properties" modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
-      // Initially, isLoading might be true or false depending on cache
-      // We'll check that it becomes false when loaded
+      // Require both in one waitFor so we retry through refetch windows (React Query can flip isLoading after success)
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('properties-status')
-          // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          expect(screen.getByTestId('properties-status').textContent).toBe('loaded')
+          expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
-
-      // Verify isLoading is false after loading
-      const isLoading = screen.getByTestId('is-loading')
-      expect(isLoading.textContent).toBe('false')
     })
 
     it('should set isLoading to false when schemaId/modelId is null', async () => {
@@ -691,22 +745,14 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         migrations: [],
       }
 
-      // Clean up any existing schema
-      const db = BaseDb.getAppDb()
-      if (db) {
-        await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
-      }
+      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
       Schema.clearCache()
 
       // Import schema
       try {
         await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
       } catch (error) {
-        // Schema might already exist, clean it up first
-        const appDb = BaseDb.getAppDb()
-        if (appDb) {
-          await appDb.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
-        }
+        await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
         await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
       }
 
@@ -764,10 +810,8 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // Wait for liveQuery to detect the change (if any)
       await new Promise(resolve => setTimeout(resolve, 2000))
 
-      // Cleanup
-      if (db) {
-        await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Properties'))
-      }
+      model.unload()
+      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
       Schema.clearCache()
     })
   })
@@ -1095,51 +1139,55 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
     it('should destroy a model property and set loading state during destroy', async () => {
       const model = Model.create('Post', 'Test Schema Properties', { waitForReady: false })
-      await waitFor(
-        () => {
-          const snapshot = model.getService().getSnapshot()
-          return snapshot.value === 'idle'
-        },
-        { timeout: 10000 }
-      )
-      const props = await ModelProperty.all(model.id!, { waitForReady: true })
-      const propertyToDestroy = props[0]
-      if (!propertyToDestroy) {
-        return
+      try {
+        await waitFor(
+          () => {
+            const snapshot = model.getService().getSnapshot()
+            return snapshot.value === 'idle'
+          },
+          { timeout: 10000 }
+        )
+        const props = await ModelProperty.all(model.id!, { waitForReady: true })
+        const propertyToDestroy = props[0]
+        if (!propertyToDestroy) {
+          return
+        }
+
+        render(<UseDestroyModelPropertyTest modelProperty={propertyToDestroy} />, { container })
+
+        await waitFor(
+          () => {
+            const btn = screen.getByTestId('destroy-property-button')
+            expect(btn).toBeTruthy()
+            expect(btn.hasAttribute('disabled')).toBe(false)
+          },
+          { timeout: 5000 }
+        )
+
+        screen.getByTestId('destroy-property-button').click()
+
+        await waitFor(
+          () => {
+            const isLoading = screen.getByTestId('destroy-property-is-loading')
+            return isLoading.textContent === 'true'
+          },
+          { timeout: 2000 }
+        )
+
+        await waitFor(
+          () => {
+            const isLoading = screen.getByTestId('destroy-property-is-loading')
+            const status = screen.getByTestId('destroy-property-status')
+            return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
+          },
+          { timeout: 5000 }
+        )
+
+        const status = screen.getByTestId('destroy-property-status')
+        expect(['destroyed', 'error']).toContain(status.textContent)
+      } finally {
+        model.unload()
       }
-
-      render(<UseDestroyModelPropertyTest modelProperty={propertyToDestroy} />, { container })
-
-      await waitFor(
-        () => {
-          const btn = screen.getByTestId('destroy-property-button')
-          expect(btn).toBeTruthy()
-          expect(btn.hasAttribute('disabled')).toBe(false)
-        },
-        { timeout: 5000 }
-      )
-
-      screen.getByTestId('destroy-property-button').click()
-
-      await waitFor(
-        () => {
-          const isLoading = screen.getByTestId('destroy-property-is-loading')
-          return isLoading.textContent === 'true'
-        },
-        { timeout: 2000 }
-      )
-
-      await waitFor(
-        () => {
-          const isLoading = screen.getByTestId('destroy-property-is-loading')
-          const status = screen.getByTestId('destroy-property-status')
-          return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
-        },
-        { timeout: 5000 }
-      )
-
-      const status = screen.getByTestId('destroy-property-status')
-      expect(['destroyed', 'error']).toContain(status.textContent)
     })
   })
 })

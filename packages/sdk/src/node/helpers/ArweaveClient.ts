@@ -14,29 +14,34 @@ import debug from 'debug';
 
 const logger = debug('seedSdk:node:ArweaveClient');
 
-// Cached Arweave instance
+// Cached Arweave instance (keyed by gateway so setHost / protocol changes apply)
 let _arweaveInstance: Arweave | null = null;
+let _arweaveGatewayKey: string | null = null;
 
 /**
  * Get or create the Arweave instance for Node.js
  */
 const getArweaveInstance = (): Arweave => {
-  if (_arweaveInstance) {
+  const gatewayKey = `${BaseArweaveClient.getProtocol()}://${BaseArweaveClient.getHost()}`;
+  if (_arweaveInstance && _arweaveGatewayKey === gatewayKey) {
     return _arweaveInstance;
   }
 
+  _arweaveGatewayKey = gatewayKey;
+
   const host = BaseArweaveClient.getHost();
+  const protocol = BaseArweaveClient.getProtocol();
 
   // Handle both ES modules and CommonJS exports from arweave package
   if ('default' in Arweave && typeof (Arweave as any).default?.init === 'function') {
     _arweaveInstance = (Arweave as any).default.init({
       host,
-      protocol: 'https',
+      protocol,
     });
   } else {
     _arweaveInstance = Arweave.init({
       host,
-      protocol: 'https',
+      protocol,
     });
   }
 
@@ -56,10 +61,10 @@ class ArweaveClient extends BaseArweaveClient {
    */
   static async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
     const url = BaseArweaveClient.getStatusUrl(transactionId);
-    
+
     try {
       const response = await fetch(url);
-      
+
       if (response.status === 404) {
         return {
           status: 404,
@@ -74,14 +79,13 @@ class ArweaveClient extends BaseArweaveClient {
         };
       }
 
-      const data = await response.json();
+      if (response.body) {
+        await response.body.cancel();
+      }
+
       return {
         status: 200,
-        confirmed: {
-          block_height: data.block_height,
-          block_indep_hash: data.block_indep_hash,
-          number_of_confirmations: data.number_of_confirmations,
-        },
+        confirmed: null,
       };
     } catch (error) {
       logger('Error fetching transaction status:', error);
@@ -180,7 +184,7 @@ class ArweaveClient extends BaseArweaveClient {
   static async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
     const { transactionIds, excludedTransactions } = params;
     const results: DownloadResult[] = [];
-    const host = BaseArweaveClient.getHost();
+    const baseUrl = BaseArweaveClient.getBaseUrl();
 
     for (const transactionId of transactionIds) {
       // Skip excluded transactions
@@ -189,7 +193,7 @@ class ArweaveClient extends BaseArweaveClient {
       }
 
       try {
-        const url = `https://${host}/raw/${transactionId}`;
+        const url = `${baseUrl}/raw/${transactionId}`;
         const response = await fetch(url);
 
         if (!response.ok) {

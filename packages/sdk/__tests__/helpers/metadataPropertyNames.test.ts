@@ -6,6 +6,8 @@ import {
   toSchemaPropertyName,
   getAlternatePropertyNameForInstanceLookup,
   resolveMetadataRecord,
+  resolveStorageNameToSchemaName,
+  listRelationStoragePropertyName,
 } from '@/helpers/metadataPropertyNames'
 
 describe('metadataPropertyNames', () => {
@@ -125,6 +127,37 @@ describe('metadataPropertyNames', () => {
     it('returns undefined for excluded names', () => {
       expect(getAlternatePropertyNameForInstanceLookup('storageTransactionId')).toBeUndefined()
       expect(getAlternatePropertyNameForInstanceLookup('transactionId')).toBeUndefined()
+    })
+  })
+
+  describe('listRelationStoragePropertyName / resolveStorageNameToSchemaName', () => {
+    const postSchemas = {
+      authors: { dataType: 'List', ref: 'Identity' },
+      title: { dataType: 'Text' },
+    }
+
+    it('maps schema key to storage name (singular + ref + Ids)', () => {
+      expect(listRelationStoragePropertyName(postSchemas, 'authors')).toBe('authorIdentityIds')
+    })
+
+    it('returns undefined for non-List properties', () => {
+      expect(listRelationStoragePropertyName(postSchemas, 'title')).toBeUndefined()
+    })
+
+    it('maps storage name back to schema key', () => {
+      expect(resolveStorageNameToSchemaName(postSchemas, 'authorIdentityIds')).toBe('authors')
+    })
+
+    it('returns undefined when no List matches storage name', () => {
+      expect(resolveStorageNameToSchemaName(postSchemas, 'tagTagIds')).toBeUndefined()
+    })
+
+    it('supports refModelName on schema def', () => {
+      const schemas = {
+        contributors: { dataType: 'List', refModelName: 'Identity' },
+      }
+      expect(listRelationStoragePropertyName(schemas, 'contributors')).toBe('contributorIdentityIds')
+      expect(resolveStorageNameToSchemaName(schemas, 'contributorIdentityIds')).toBe('contributors')
     })
   })
 

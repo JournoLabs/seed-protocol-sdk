@@ -9,8 +9,20 @@ import type {
 } from '@/types/arweave'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 
+function parseGateway(input: string): { protocol: 'http' | 'https'; host: string } {
+  const t = input.trim()
+  if (t.startsWith('http://')) {
+    return { protocol: 'http', host: t.slice(7).replace(/\/$/, '') }
+  }
+  if (t.startsWith('https://')) {
+    return { protocol: 'https', host: t.slice(8).replace(/\/$/, '') }
+  }
+  return { protocol: 'https', host: t.replace(/\/$/, '') }
+}
+
 // Internal state
 let _host = DEFAULT_ARWEAVE_HOST
+let _protocol: 'http' | 'https' = 'https'
 let _hostExplicitlySet = false
 
 export abstract class BaseArweaveClient {
@@ -20,33 +32,57 @@ export abstract class BaseArweaveClient {
     this.PlatformClass = platformClass
   }
 
+  /**
+   * Resolved gateway host (no scheme) and protocol from env override or setHost().
+   */
+  static resolveGateway(): { protocol: 'http' | 'https'; host: string } {
+    if (process.env.NODE_ENV === 'production') {
+      const envHost =
+        typeof process !== 'undefined' && process.env
+          ? process.env.NEXT_PUBLIC_ARWEAVE_HOST || process.env.ARWEAVE_HOST
+          : undefined
+      if (envHost && !_hostExplicitlySet) {
+        return parseGateway(envHost)
+      }
+    }
+    return { protocol: _protocol, host: _host }
+  }
+
   // ============================================
   // Configuration Methods
   // ============================================
 
   /**
-   * Get the current Arweave host
-   * @returns The Arweave host (e.g., 'arweave.net')
+   * Get the current Arweave host (hostname, optionally with port — no URL scheme)
+   * @returns The Arweave host (e.g. 'arweave.net' or 'localhost:1984')
    */
   static getHost(): string {
-    // Check for environment variable override in production
-    if (process.env.NODE_ENV === 'production') {
-      const envHost = typeof process !== 'undefined' && process.env
-        ? process.env.NEXT_PUBLIC_ARWEAVE_HOST || process.env.ARWEAVE_HOST
-        : undefined
-      if (envHost && !_hostExplicitlySet) {
-        return envHost
-      }
-    }
-    return _host
+    return this.resolveGateway().host
   }
 
   /**
-   * Set the Arweave host
-   * @param host - The new host to use (e.g., 'arweave.net')
+   * Get whether requests use http or https
+   */
+  static getProtocol(): 'http' | 'https' {
+    return this.resolveGateway().protocol
+  }
+
+  /**
+   * Base URL for the configured gateway (e.g. https://arweave.net or http://localhost:1984)
+   */
+  static getBaseUrl(): string {
+    const { protocol, host } = this.resolveGateway()
+    return `${protocol}://${host}`
+  }
+
+  /**
+   * Set the Arweave gateway. Plain host defaults to https; prefix with http:// for local HTTP gateways.
+   * @param host - e.g. 'arweave.net', 'https://arweave.net', or 'http://localhost:1984'
    */
   static setHost(host: string): void {
-    _host = host
+    const parsed = parseGateway(host)
+    _host = parsed.host
+    _protocol = parsed.protocol
     _hostExplicitlySet = true
   }
 
@@ -55,7 +91,7 @@ export abstract class BaseArweaveClient {
    * @returns The full GraphQL endpoint URL
    */
   static getEndpoint(): string {
-    return `https://${this.getHost()}/graphql`
+    return `${this.getBaseUrl()}/graphql`
   }
 
   /**
@@ -64,16 +100,15 @@ export abstract class BaseArweaveClient {
    * @returns The full URL to access raw transaction data
    */
   static getRawUrl(transactionId: string): string {
-    return `https://${this.getHost()}/raw/${transactionId}`
+    return `${this.getBaseUrl()}/raw/${transactionId}`
   }
 
   /**
-   * Get the transaction status URL
+   * URL used to verify that a transaction is available on the gateway (HTTP 200 = present).
    * @param transactionId - The Arweave transaction ID
-   * @returns The full URL to check transaction status
    */
   static getStatusUrl(transactionId: string): string {
-    return `https://${this.getHost()}/tx/${transactionId}/status`
+    return `${this.getBaseUrl()}/${transactionId}`
   }
 
   // ============================================
@@ -93,9 +128,9 @@ export abstract class BaseArweaveClient {
   // ============================================
 
   /**
-   * Get the status of a transaction
+   * Check gateway presence for a transaction (HTTP 200). Does not parse confirmation JSON.
    * @param transactionId - The Arweave transaction ID
-   * @returns Transaction status including confirmation details
+   * @returns Transaction status; `confirmed` is null for real gateway responses
    */
   static getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
     return this.PlatformClass.getTransactionStatus(transactionId)

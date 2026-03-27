@@ -17,6 +17,11 @@ function statusFromSnapshot(snapshot: { status?: string; value?: unknown }): 'in
 const MAX_ERROR_MESSAGE_LENGTH = 500
 const MAX_ERROR_DETAILS_LENGTH = 2000
 
+/** JSON.stringify cannot serialize BigInt; publish context (e.g. gas, tx fields) may contain bigint. */
+function jsonStringifyPersistedSnapshot(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
+}
+
 function errorFieldsFromContext(context: { error?: unknown; errorStep?: string } | undefined, status: 'in_progress' | 'completed' | 'failed' | 'interrupted') {
   if (!context?.error) return {}
   if (status !== 'failed' && status !== 'in_progress') return {}
@@ -72,7 +77,8 @@ export const savePublish = fromCallback<
       .orderBy(desc(publishProcesses.updatedAt))
       .limit(1)
 
-    const snapshotStr = typeof persistedSnapshot === 'string' ? persistedSnapshot : JSON.stringify(persistedSnapshot)
+    const snapshotStr =
+      typeof persistedSnapshot === 'string' ? persistedSnapshot : jsonStringifyPersistedSnapshot(persistedSnapshot)
     const status = statusFromSnapshot(snapshot)
     const now = Date.now()
     const errorFields = errorFieldsFromContext(snapshot.context, status)

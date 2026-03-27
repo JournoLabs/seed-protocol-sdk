@@ -26,7 +26,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import type { SnapshotFrom } from 'xstate'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, inArray } from 'drizzle-orm'
 
 // Test schema data
 const testSchema1: SchemaFileFormat = {
@@ -398,6 +398,37 @@ describe(
   let container: HTMLElement
   let isClientInitialized = false
 
+  const TEST_SCHEMA_NAMES = [
+    'Test Schema 1',
+    'Test Schema 2',
+    'New Test Schema',
+    'Empty Test Schema',
+    'LiveQuery Test Schema',
+    'Destroy Test Schema',
+  ] as const
+
+  /** model_schemas.schema_id FKs to schemas — must clear join rows before deleting schemas */
+  async function deleteTestSchemasFromDb(db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>) {
+    const rows = await db
+      .select({ id: schemas.id })
+      .from(schemas)
+      .where(inArray(schemas.name, [...TEST_SCHEMA_NAMES]))
+    const ids = rows.map((r: { id: number | null }) => r.id).filter((id: number | null): id is number => id != null)
+    if (ids.length) {
+      await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, ids))
+    }
+    await db.delete(schemas).where(inArray(schemas.name, [...TEST_SCHEMA_NAMES]))
+  }
+
+  async function deleteSchemaByName(db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>, name: string) {
+    const rows = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, name))
+    const ids = rows.map((r: { id: number | null }) => r.id).filter((id: number | null): id is number => id != null)
+    if (ids.length) {
+      await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, ids))
+    }
+    await db.delete(schemas).where(eq(schemas.name, name))
+  }
+
   beforeAll(async () => {
     // Initialize client if not already initialized
     if (!client.isInitialized()) {
@@ -451,12 +482,7 @@ describe(
     // Clean up schemas from database
     const db = BaseDb.getAppDb()
     if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema 1'))
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema 2'))
-      await db.delete(schemas).where(eq(schemas.name, 'New Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'Destroy Test Schema'))
+      await deleteTestSchemasFromDb(db)
     }
 
     // Clean up schema files from file system
@@ -508,12 +534,7 @@ describe(
     // Clean up any existing test schemas from database
     const db = BaseDb.getAppDb()
     if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema 1'))
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema 2'))
-      await db.delete(schemas).where(eq(schemas.name, 'New Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema'))
-      await db.delete(schemas).where(eq(schemas.name, 'Destroy Test Schema'))
+      await deleteTestSchemasFromDb(db)
     }
     
     // Clean up schema files from file system
@@ -1064,7 +1085,7 @@ describe(
         // Schema might already exist, clean it up first
         const appDb = BaseDb.getAppDb()
         if (appDb) {
-          await appDb.delete(schemas).where(eq(schemas.name, newSchemaName))
+          await deleteSchemaByName(appDb, newSchemaName)
         }
         await importJsonSchema({ contents: JSON.stringify(newTestSchema) }, newTestSchema.version)
       }
@@ -1123,7 +1144,7 @@ describe(
       // Cleanup
       const db = BaseDb.getAppDb()
       if (db) {
-        await db.delete(schemas).where(eq(schemas.name, newSchemaName))
+        await deleteSchemaByName(db, newSchemaName)
       }
     })
 

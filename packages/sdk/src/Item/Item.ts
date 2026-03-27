@@ -3,6 +3,7 @@ import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
 import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
 import {
   getAlternatePropertyNameForInstanceLookup,
+  resolveStorageNameToSchemaName,
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
 import { VersionsType } from '@/seedSchema'
@@ -1477,11 +1478,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                   const createPromises = metadataRows.map(async (metaRow: any) => {
                     try {
                       let propertyName = metaRow.propertyName
-                      const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
-                      const refSeedType = metaRow.refSeedType as string | undefined
-                      const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
-                      if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-                        propertyName = baseName
+                      const listSchemaKey =
+                        propertyName &&
+                        Object.keys(propertySchemas).length > 0 &&
+                        resolveStorageNameToSchemaName(propertySchemas, propertyName)
+                      if (listSchemaKey) {
+                        propertyName = listSchemaKey
+                      } else {
+                        const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
+                        const refSeedType = metaRow.refSeedType as string | undefined
+                        const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
+                        if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+                          propertyName = baseName
+                        }
                       }
                       const property = await ItemProperty.find({
                         propertyName,

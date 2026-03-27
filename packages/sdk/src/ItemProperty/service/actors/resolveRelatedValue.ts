@@ -37,16 +37,29 @@ export const resolveRelatedValue = fromCallback<
       return
     }
 
+    if (Array.isArray(propertyValue)) {
+      // TODO: Handle array of seedUids
+      logger(`${propertyName} value is an array of seedUids`)
+      return
+    }
+
+    if (typeof propertyValue === 'object') {
+      return
+    }
+
+    const relationKey =
+      typeof propertyValue === 'string' ? propertyValue : String(propertyValue)
+
     let parsedValue
 
     try {
-      parsedValue = JSON.parse(propertyValue)
+      parsedValue = JSON.parse(relationKey)
     } catch (error) {
       logger(`${propertyName} value is not a JSON string.`)
     }
 
-    if (!parsedValue && seedUidToContentUrl.has(propertyValue)) {
-      const contentUrl = seedUidToContentUrl.get(propertyValue)
+    if (!parsedValue && seedUidToContentUrl.has(relationKey)) {
+      const contentUrl = seedUidToContentUrl.get(relationKey)
       sendBack({
         type: 'updateContext',
         renderValue: contentUrl,
@@ -58,19 +71,13 @@ export const resolveRelatedValue = fromCallback<
       return true
     }
 
-    if (Array.isArray(propertyValue)) {
-      // TODO: Handle array of seedUids
-      logger(`${propertyName} value is an array of seedUids`)
-      return
-    }
-
     if (Array.isArray(parsedValue)) {
       logger(`${propertyName} value is a stringified array of seedUids`)
       return
     }
 
     const storageTransactionId =
-      await getStorageTransactionIdForSeedUid(propertyValue)
+      await getStorageTransactionIdForSeedUid(relationKey)
 
     if (storageTransactionId) {
       if (storageTransactionIdToContentUrl.has(storageTransactionId)) {
@@ -90,7 +97,7 @@ export const resolveRelatedValue = fromCallback<
 
       const contentUrl = await convertTxIdToImage(storageTransactionId)
       if (contentUrl) {
-        seedUidToContentUrl.set(propertyValue, contentUrl)
+        seedUidToContentUrl.set(relationKey, contentUrl)
       }
       sendBack({
         type: 'updateContext',
@@ -104,7 +111,7 @@ export const resolveRelatedValue = fromCallback<
       return true
     }
 
-    const relationValueData = await getRelationValueData(propertyValue)
+    const relationValueData = await getRelationValueData(relationKey)
 
     if (relationValueData) {
       const { refResolvedValue } = relationValueData
@@ -166,11 +173,11 @@ export const resolveRelatedValue = fromCallback<
 
           if (!contentUrl) {
             const imageFileExists = await BaseFileManager.pathExists(
-              `/images/${propertyValue}`,
+              `/images/${relationKey}`,
             )
             if (imageFileExists) {
               const file = await BaseFileManager.readFile(
-                `/images/${propertyValue}`,
+                `/images/${relationKey}`,
               )
               contentUrl = URL.createObjectURL(file)
               storageTransactionIdToContentUrl.set(

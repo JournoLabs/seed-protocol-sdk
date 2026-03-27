@@ -12,6 +12,8 @@ export interface IItemProperty<PropertyType = any> {
   readonly seedUid: string;
   readonly schemaUid?: string;
   readonly propertyName: string;
+  /** Internal DB/EAS metadata name (e.g. authorIdentityIds); use for storage lookups. */
+  readonly storagePropertyName: string;
   readonly modelName: string;
   readonly propertyDef: Static<typeof TProperty> | undefined;
   readonly localStoragePath: string | void;

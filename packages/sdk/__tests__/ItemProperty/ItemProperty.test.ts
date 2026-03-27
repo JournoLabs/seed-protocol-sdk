@@ -357,6 +357,23 @@ testDescribe('ItemProperty Integration Tests', () => {
       }
     })
 
+    it('List of Relation exposes schema propertyName and storagePropertyName for EAS/DB', () => {
+      const seedLocalId = generateId()
+      const prop = ItemProperty.create(
+        {
+          modelName: 'Post',
+          propertyName: 'authors',
+          seedLocalId,
+          propertyRecordSchema: { dataType: 'List', ref: 'Identity' },
+        },
+        { waitForReady: false },
+      )
+      expect(prop).toBeDefined()
+      if (!prop) return
+      expect(prop.propertyName).toBe('authors')
+      expect(prop.storagePropertyName).toBe('authorIdentityIds')
+    })
+
     it('should return the same instance when called multiple times (caching)', async () => {
       const schemaName = 'Test Schema Property Cache'
       const testSchema = createTestSchema(schemaName, {

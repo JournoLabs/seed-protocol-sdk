@@ -4,7 +4,7 @@ import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import { sendTransaction, waitForReceipt } from 'thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { getClient } from '~/helpers/thirdweb'
-import { Item, updateVersionUid } from '@seedprotocol/sdk'
+import { Item, updateVersionUid, type IItem } from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyAttestations } from '../helpers/verifyAttestations'
@@ -54,19 +54,19 @@ const toBytesHex = (v: unknown): string => {
   return '0x'
 }
 
-const waitForItem = async (seedLocalId: string): Promise<InstanceType<typeof Item>> => {
-  let item: InstanceType<typeof Item> | undefined
+const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
+  let item: IItem<any> | undefined
   try {
     item = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
   } catch {
     // No-op
   }
   if (item) return item
-  return new Promise<InstanceType<typeof Item>>((resolve) => {
+  return new Promise<IItem<any>>((resolve) => {
     const interval = setInterval(() => {
       try {
         Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-          .then((found: InstanceType<typeof Item> | undefined) => {
+          .then((found: IItem<any> | undefined) => {
             if (found) {
               clearInterval(interval)
               resolve(found)

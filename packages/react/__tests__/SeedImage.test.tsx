@@ -9,6 +9,13 @@ import {
   schemas,
   metadata,
   seeds,
+  versions,
+  propertyUids,
+  modelUids,
+  models as modelsTable,
+  modelSchemas,
+  properties,
+  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
@@ -18,7 +25,7 @@ import {
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 
 const testSchemaWithImage: SchemaFileFormat = {
@@ -94,6 +101,72 @@ async function waitForItemPropertyIdle(
   }
 }
 
+const TEST_SCHEMA_SEED_IMAGE_NAME = 'Test Schema Seed Image'
+
+/** Remove test schema + rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
+async function deleteTestSchemaSeedImageRows(): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+
+  const schemaRow = await db
+    .select()
+    .from(schemas)
+    .where(eq(schemas.name, TEST_SCHEMA_SEED_IMAGE_NAME))
+    .limit(1)
+  if (!schemaRow.length || schemaRow[0].id == null) return
+
+  const schemaId = schemaRow[0].id
+
+  const links = await db
+    .select({ modelId: modelSchemas.modelId })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.schemaId, schemaId))
+
+  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
+  if (mids.length === 0) {
+    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+    await db.delete(schemas).where(eq(schemas.id, schemaId))
+    return
+  }
+
+  const modelRows = await db
+    .select({ name: modelsTable.name })
+    .from(modelsTable)
+    .where(inArray(modelsTable.id, mids))
+  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
+
+  const seedRows = await db
+    .select({ localId: seeds.localId })
+    .from(seeds)
+    .where(inArray(seeds.type, modelNames))
+  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
+
+  if (seedLocalIds.length) {
+    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
+    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
+    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
+  }
+
+  const propRows = await db
+    .select({ id: properties.id })
+    .from(properties)
+    .where(inArray(properties.modelId, mids))
+  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
+
+  if (pids.length) {
+    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
+    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
+  }
+
+  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
+  await db.update(properties).set({ refModelId: null }).where(inArray(properties.modelId, mids))
+  await db.delete(properties).where(inArray(properties.modelId, mids))
+  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
+  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
+  await db.delete(schemas).where(eq(schemas.id, schemaId))
+}
+
 async function deleteSchemaFileIfExists(
   schemaName: string,
   version: number,
@@ -154,16 +227,9 @@ describe('SeedImage integration tests', () => {
   }, 30000)
 
   afterAll(async () => {
-    const db = BaseDb.getAppDb()
-    if (db && testItem) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem.seedLocalId))
-    }
-    if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Seed Image'))
-    }
+    await deleteTestSchemaSeedImageRows()
     await deleteSchemaFileIfExists(
-      'Test Schema Seed Image',
+      TEST_SCHEMA_SEED_IMAGE_NAME,
       testSchemaWithImage.version,
       testSchemaWithImage.id
     )
@@ -176,16 +242,11 @@ describe('SeedImage integration tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(metadata)
-      await db.delete(seeds).where(eq(seeds.type, 'post'))
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Seed Image'))
-    }
+    await deleteTestSchemaSeedImageRows()
 
     if (testSchemaWithImage.id) {
       await deleteSchemaFileIfExists(
-        'Test Schema Seed Image',
+        TEST_SCHEMA_SEED_IMAGE_NAME,
         testSchemaWithImage.version,
         testSchemaWithImage.id
       )
@@ -203,14 +264,14 @@ describe('SeedImage integration tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some((s) => s.schema.metadata?.name === 'Test Schema Seed Image')
+        return allSchemas.some((s) => s.schema.metadata?.name === TEST_SCHEMA_SEED_IMAGE_NAME)
       },
       { timeout: 15000 }
     )
 
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    const model = Model.create('Post', 'Test Schema Seed Image', { waitForReady: false })
+    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, { waitForReady: false })
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',

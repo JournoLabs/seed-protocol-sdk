@@ -50,6 +50,14 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
         // Reset for other tests
         BaseArweaveClient.setHost('arweave.net')
       })
+
+      it('parses http:// prefix for local gateways', () => {
+        BaseArweaveClient.setHost('http://localhost:1984')
+        expect(BaseArweaveClient.getHost()).toBe('localhost:1984')
+        expect(BaseArweaveClient.getProtocol()).toBe('http')
+        expect(BaseArweaveClient.getBaseUrl()).toBe('http://localhost:1984')
+        BaseArweaveClient.setHost('arweave.net')
+      })
     })
 
     describe('getEndpoint()', () => {
@@ -91,9 +99,9 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
     })
 
     describe('getStatusUrl()', () => {
-      it('constructs correct status URL for transaction ID', () => {
+      it('constructs gateway presence URL for transaction ID', () => {
         const url = BaseArweaveClient.getStatusUrl('abc123')
-        expect(url).toBe('https://arweave.net/tx/abc123/status')
+        expect(url).toBe('https://arweave.net/abc123')
       })
     })
   })

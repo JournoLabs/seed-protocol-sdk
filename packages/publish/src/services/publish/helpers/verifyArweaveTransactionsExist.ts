@@ -1,18 +1,23 @@
-import { BaseArweaveClient } from '@seedprotocol/sdk'
+import { getUploadPipelineTransactionStatus } from '@seedprotocol/sdk'
+import { getPublishConfig } from '~/config'
 
 /**
- * Verifies that each Arweave transaction exists and is confirmed on-chain before
- * creating storageTransactionId attestations. Prevents attestations from being
- * created when Arweave publishing has failed.
+ * Verifies each id is available via the upload API (`/api/upload/arweave/data/:id`)
+ * before creating storageTransactionId attestations. Prevents attestations when
+ * the upload pipeline has not indexed the transaction or data item yet.
  *
- * @param txIds - Array of Arweave transaction IDs to verify
- * @throws Error if any transaction is not found (404) or not confirmed
+ * @param txIds - Arweave L1 transaction ids and/or bundler data item ids
+ * @throws Error if any id is not found (404) or not yet available
  */
 export async function verifyArweaveTransactionsExist(txIds: string[]): Promise<void> {
   if (txIds.length === 0) return
 
+  const { arweaveUploadVerificationBaseUrl } = getPublishConfig()
+
   const results = await Promise.all(
-    txIds.map((txId) => BaseArweaveClient.getTransactionStatus(txId))
+    txIds.map((txId) =>
+      getUploadPipelineTransactionStatus(arweaveUploadVerificationBaseUrl, txId),
+    ),
   )
 
   for (let i = 0; i < txIds.length; i++) {
@@ -26,9 +31,9 @@ export async function verifyArweaveTransactionsExist(txIds: string[]): Promise<v
       )
     }
 
-    if (status.status !== 200 || !status.confirmed) {
+    if (status.status !== 200) {
       throw new Error(
-        `Arweave transaction ${txId} is not yet confirmed (status: ${status.status}). Wait and retry.`
+        `Arweave transaction ${txId} is not yet available from the upload service (status: ${status.status}). Wait and retry.`
       )
     }
   }

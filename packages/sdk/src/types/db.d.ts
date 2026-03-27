@@ -11,6 +11,7 @@ export type GetPropertyDataOptions = {
     propertyName: string;
     seedLocalId?: string;
     seedUid?: string;
+    modelName?: string;
 };
 export type GetPropertiesForSeedProps = {
     seedLocalId?: string;

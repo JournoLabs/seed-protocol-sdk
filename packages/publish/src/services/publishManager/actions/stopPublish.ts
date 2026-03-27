@@ -1,7 +1,7 @@
-import { enqueueActions, stop } from 'xstate'
+import { enqueueActions } from 'xstate'
 
 export const stopPublish = enqueueActions(({ context, event, enqueue }) => {
-  const { publishProcesses } = context
+  const { publishProcesses, subscriptions } = context
   const { seedLocalId } = event as unknown as { seedLocalId: string }
 
   const publishProcess = publishProcesses.get(seedLocalId)
@@ -10,11 +10,20 @@ export const stopPublish = enqueueActions(({ context, event, enqueue }) => {
     return
   }
 
-  enqueue(stop(publishProcess))
+  publishProcess.stop()
+
+  const subscriptionProcess = subscriptions.get(seedLocalId)
+  if (subscriptionProcess) {
+    subscriptionProcess.stop()
+  }
 
   const newPublishProcesses = new Map(publishProcesses)
   newPublishProcesses.delete(seedLocalId)
+  const newSubscriptions = new Map(subscriptions)
+  newSubscriptions.delete(seedLocalId)
+
   enqueue.assign({
     publishProcesses: newPublishProcesses,
+    subscriptions: newSubscriptions,
   })
 })

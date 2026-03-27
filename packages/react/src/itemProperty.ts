@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Subscription, SnapshotFrom } from 'xstate'
 import debug from 'debug'
 import { ItemProperty } from '@seedprotocol/sdk'
@@ -122,6 +122,13 @@ export function useItemProperty(
     )
   }, [isClientReady, lookupMode])
 
+  // Avoid one frame where isLoading is false while a fetch is about to start (default useState(false)).
+  useLayoutEffect(() => {
+    if (shouldLoad) {
+      setIsLoading(true)
+    }
+  }, [shouldLoad])
+
   const updateItemProperty = useCallback(async () => {
     if (!isClientReady || !lookupMode) {
       setProperty(undefined)
@@ -212,20 +219,26 @@ export function useItemProperty(
     // (e.g. loading, initializing, resolvingRelatedValue) after the initial fetch.
     let lastVersionAt = 0
     let wasIdle = false
+    /** Idle snapshots repeat often; only re-render when context values actually change (e.g. liveQuery/updateContext after idle). */
+    let lastIdleValueSig: string | undefined
     const THROTTLE_MS = 50
     const subscription = property.getService().subscribe((snapshot: any) => {
       const isIdle = snapshot && typeof snapshot === 'object' && 'value' in snapshot && snapshot.value === 'idle'
       if (isIdle) {
         setIsLoading(false)
         setError(null)
-        // Only update when transitioning TO idle (not on every idle snapshot - machine emits many)
-        if (!wasIdle) {
+        const ctx = snapshot.context
+        const sig = JSON.stringify([ctx.renderValue, ctx.propertyValue])
+        const shouldBump = !wasIdle || sig !== lastIdleValueSig
+        if (shouldBump) {
           wasIdle = true
-          setVersion(prev => prev + 1)
+          lastIdleValueSig = sig
+          setVersion((prev) => prev + 1)
         }
         return
       }
       wasIdle = false
+      lastIdleValueSig = undefined
       // Throttle re-renders during transitions: property machine emits many snapshots
       const now = Date.now()
       if (now - lastVersionAt >= THROTTLE_MS) {

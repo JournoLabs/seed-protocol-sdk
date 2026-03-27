@@ -1,4 +1,4 @@
-import { enqueueActions, stop } from 'xstate'
+import { enqueueActions } from 'xstate'
 
 export const query = enqueueActions(({ context, event, enqueue }) => {
   const { seedLocalId } = event as unknown as { seedLocalId: string }
@@ -8,11 +8,11 @@ export const query = enqueueActions(({ context, event, enqueue }) => {
     return
   }
 
-  enqueue(stop(publishProcess))
+  publishProcess.stop()
 
   const subscriptionProcess = context.subscriptions.get(seedLocalId)
   if (subscriptionProcess) {
-    enqueue(stop(subscriptionProcess))
+    subscriptionProcess.stop()
   }
 
   const newPublishProcesses = new Map(context.publishProcesses)

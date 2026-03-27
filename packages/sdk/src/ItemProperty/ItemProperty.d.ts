@@ -101,6 +101,7 @@ export declare class ItemProperty<PropertyType> implements IItemProperty<Propert
     get seedUid(): any;
     get schemaUid(): string | undefined;
     get propertyName(): string;
+    get storagePropertyName(): string;
     get modelName(): any;
     get propertyDef(): Static<typeof TProperty> | undefined;
     get localStorageDir(): string | void;

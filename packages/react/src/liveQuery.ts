@@ -35,7 +35,6 @@ export function useLiveQuery<T>(
 ): T[] | undefined {
   const [data, setData] = useState<T[] | undefined>(undefined)
   const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
-  const previousDataRef = useRef<T[] | undefined>(undefined)
   const isClientReady = useIsClientReady()
 
   // Create Observable outside useEffect so it's stable and distinctUntilChanged can work
@@ -66,20 +65,9 @@ export function useLiveQuery<T>(
 
     const subscription = observable.subscribe({
       next: (results) => {
-        const prev = previousDataRef.current
-        const prevJson = prev ? JSON.stringify(prev) : 'undefined'
-        const currJson = results ? JSON.stringify(results) : 'undefined'
-        const isSameValue = prevJson === currJson
-
-        // Defensive check: don't update state if values are the same
-        // This should be handled by distinctUntilChanged, but adding as safety
-        // (especially important for Drizzle query builders which may not work with distinctUntilChanged)
-        if (isSameValue && prev !== undefined) {
-          return
-        }
-
-        previousDataRef.current = results
-        setData(results)
+        // New array reference so React re-renders when SQLocal mutates row objects in place
+        // on the same backing array (Object.is would otherwise bail out of useState).
+        setData(results !== undefined ? [...results] : undefined)
       },
       error: (err) => {
         console.error('[useLiveQuery] Error:', err)

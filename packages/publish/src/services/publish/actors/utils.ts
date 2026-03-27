@@ -1,10 +1,10 @@
-import { Item } from '@seedprotocol/sdk'
+import { Item, type IItem } from '@seedprotocol/sdk'
 
 export const ZERO_BYTES32 = '0x' + '0'.repeat(64)
 export const BYTES32_LEN = 64
 
-export const waitForItem = async (seedLocalId: string): Promise<InstanceType<typeof Item>> => {
-  let item: InstanceType<typeof Item> | undefined
+export const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
+  let item: IItem<any> | undefined
 
   try {
     item = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
@@ -16,11 +16,11 @@ export const waitForItem = async (seedLocalId: string): Promise<InstanceType<typ
     return item
   }
 
-  return new Promise<InstanceType<typeof Item>>((resolve) => {
+  return new Promise<IItem<any>>((resolve) => {
     const interval = setInterval(() => {
       try {
         Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
-          .then((found: InstanceType<typeof Item> | undefined) => {
+          .then((found: IItem<any> | undefined) => {
             if (found) {
               clearInterval(interval)
               resolve(found)

@@ -6,7 +6,10 @@ import { seeds, versions, metadata } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
 import { getVersionData } from '@/db/read/subqueries/versionData'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { toSchemaPropertyName } from '@/helpers/metadataPropertyNames'
+import {
+  resolveStorageNameToSchemaName,
+  toSchemaPropertyName,
+} from '@/helpers/metadataPropertyNames'
 import debug from 'debug'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
@@ -136,14 +139,20 @@ const createItemPropertyInstances = async (
           continue
         }
 
-        const baseName = toSchemaPropertyName(propertyName)
+        const listSchemaKey = resolveStorageNameToSchemaName(propertySchemas, propertyName)
+        if (listSchemaKey) {
+          propertyName = listSchemaKey
+        } else {
+          const baseName = toSchemaPropertyName(propertyName)
+          const refSeedType = metaRow.refSeedType as string | undefined
+          const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
+          if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+            propertyName = baseName
+          }
+        }
+
         const refSeedType = metaRow.refSeedType as string | undefined
         const isRefTypeFromMeta = refSeedType === 'file' || refSeedType === 'image' || refSeedType === 'relation' || refSeedType === 'html'
-        const hadSchemaMatch = !!(baseName && propertySchemas[baseName])
-        const hadRefTypeMatch = !!(baseName && isRefTypeFromMeta)
-        if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
-          propertyName = baseName
-        }
 
         // Infer propertyRecordSchema from metadata when schema is missing (enables persistence)
         let propSchema = propertySchemas[propertyName]

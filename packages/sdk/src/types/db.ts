@@ -17,6 +17,8 @@ export type GetPropertyDataOptions = {
   propertyName: string
   seedLocalId?: string
   seedUid?: string
+  /** When set, List-of-relation metadata rows (e.g. authorIdentityIds) are included when querying by schema key (authors). */
+  modelName?: string
 }
 
 export type GetPropertiesForSeedProps = {

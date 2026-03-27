@@ -6,6 +6,7 @@ import {
   BaseDb,
   schemas,
   metadata,
+  modelSchemas,
   importJsonSchema,
   Schema,
   Model,
@@ -77,6 +78,8 @@ describe('LiveQuery Timing Investigation', () => {
     const db = BaseDb.getAppDb()
     if (db) {
       await db.delete(metadata)
+      // model_schemas.schema_id FK — clear join rows before schemas (same order as liveQuery.test.tsx)
+      await db.delete(modelSchemas)
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Timing Test Schema'))
     }
 
@@ -92,6 +95,7 @@ describe('LiveQuery Timing Investigation', () => {
     const db = BaseDb.getAppDb()
     if (db) {
       await db.delete(metadata)
+      await db.delete(modelSchemas)
       await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Timing Test Schema'))
     }
 
@@ -129,7 +133,7 @@ describe('LiveQuery Timing Investigation', () => {
       }
 
       // Create item
-      const model = Model.create('TestModel', 'LiveQuery Timing Test Schema')
+      const model = await Model.create('TestModel', 'LiveQuery Timing Test Schema')
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -254,7 +258,7 @@ describe('LiveQuery Timing Investigation', () => {
       }
 
       // Create item and wait for it to be fully saved
-      const model = Model.create('TestModel', 'LiveQuery Timing Test Schema')
+      const model = await Model.create('TestModel', 'LiveQuery Timing Test Schema')
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -372,7 +376,7 @@ describe('LiveQuery Timing Investigation', () => {
       }
 
       // Create item
-      const model = Model.create('TestModel', 'LiveQuery Timing Test Schema')
+      const model = await Model.create('TestModel', 'LiveQuery Timing Test Schema')
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -491,7 +495,7 @@ describe('LiveQuery Timing Investigation', () => {
       }
 
       // Create item
-      const model = Model.create('TestModel', 'LiveQuery Timing Test Schema')
+      const model = await Model.create('TestModel', 'LiveQuery Timing Test Schema')
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',

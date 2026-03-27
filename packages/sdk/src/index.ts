@@ -19,6 +19,9 @@ export { BaseFileManager } from './helpers'
 export {
   seeds,
   metadata,
+  versions,
+  propertyUids,
+  modelUids,
   appState,
   schemas,
   models,
@@ -67,7 +70,13 @@ export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
 
-export { BaseArweaveClient, getArweaveUrlForTransaction } from './helpers'
+export {
+  BaseArweaveClient,
+  getArweaveUrlForTransaction,
+  normalizeUploadApiBaseUrl,
+  getUploadApiArweaveDataUrl,
+  getUploadPipelineTransactionStatus,
+} from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
   setUploadExecutor,
@@ -100,6 +109,7 @@ export {
 } from './db/read/getPublishPayload'
 
 export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
+export { itemHasPublishUploadCandidates } from './db/read/getPublishUploads'
 
 export {
   updateModelProperties,

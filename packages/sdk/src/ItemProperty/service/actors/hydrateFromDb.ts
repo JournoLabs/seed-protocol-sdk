@@ -7,6 +7,7 @@ import { updateMetadata } from '@/db/write/updateMetadata'
 import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { BaseFileManager, getMetadataPropertyNamesForQuery } from '@/helpers'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 // Dynamic import to break circular dependency: schema/index -> ... -> hydrateFromDb -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
@@ -190,11 +191,10 @@ export const hydrateFromDb = fromCallback<
 
     if (
       propertyRecordSchema &&
-      propertyRecordSchema.dataType === ModelPropertyDataTypes.List &&
-      propertyRecordSchema.ref &&
+      normalizedDataType === ModelPropertyDataTypes.List &&
       typeof propertyValueFromDb === 'string'
     ) {
-      propertyValueProcessed = propertyValueFromDb.split(',')
+      propertyValueProcessed = parseListPropertyValueFromStorage(propertyValueFromDb)
     }
 
     sendBack({
@@ -247,18 +247,10 @@ export const hydrateFromDb = fromCallback<
     // Html: read file content for renderValue (blob URLs from DB are invalid after reload)
     // Fallback: when localStorageDir is null (e.g. EAS sync, legacy records) use '/html'
     const htmlLocalStorageDir = isHtmlDynamic && refResolvedValue && !localStorageDir ? '/html' : localStorageDir
-    // #region agent log
-    if (isHtmlDynamic) {
-      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'hydrateFromDb.ts:htmlCheck',message:'Html hydrate path check',data:{refResolvedValue,localStorageDir,htmlLocalStorageDir,willReadFile:!!(refResolvedValue&&htmlLocalStorageDir)},timestamp:Date.now(),hypothesisId:'hydrate'})}).catch(()=>{});
-    }
-    // #endregion
     if (isHtmlDynamic && refResolvedValue && htmlLocalStorageDir) {
       const dir = htmlLocalStorageDir.replace(/^\//, '')
       const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
       const exists = await BaseFileManager.pathExists(filePath)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'hydrateFromDb.ts:html',message:'Html hydrate file read',data:{refResolvedValue,localStorageDir,filePath,exists,propertyValueFromDb},timestamp:Date.now(),hypothesisId:'hydrate'})}).catch(()=>{});
-      // #endregion
       if (exists) {
         const htmlContent = await BaseFileManager.readFileAsString(filePath)
         sendBack({

@@ -10,6 +10,7 @@ export interface IItemProperty<PropertyType = any> {
     readonly seedUid: string;
     readonly schemaUid?: string;
     readonly propertyName: string;
+    readonly storagePropertyName: string;
     readonly modelName: string;
     readonly propertyDef: Static<typeof TProperty> | undefined;
     readonly localStoragePath: string | void;

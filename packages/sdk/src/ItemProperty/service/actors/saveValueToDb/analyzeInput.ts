@@ -65,6 +65,14 @@ export const analyzeInput = fromCallback<
       throw new Error('propertyName is required')
     }
 
+    if (
+      normalizeDataType(propertyRecordSchema.dataType) === ModelPropertyDataTypes.List &&
+      typeof newValue === 'string' &&
+      newValue.trim() !== ''
+    ) {
+      newValue = [newValue.trim()] as ItemPropertyValueType
+    }
+
     // Validate value against property validation rules (enum, pattern, minLength, maxLength) before any save
     const validationService = new SchemaValidationService()
     const validationResult = validationService.validatePropertyValue(
@@ -154,6 +162,35 @@ export const analyzeInput = fromCallback<
           console.warn(`Failed to fetch schemaUid for property ${propertyName}:`, error)
         }
       }
+    }
+
+    // List (including list of relations / primitives): JSON in DB, array in context for publish (bytes32[])
+    if (normalizedDataType === ModelPropertyDataTypes.List && Array.isArray(newValue)) {
+      const stringValue = JSON.stringify(newValue)
+      const result = await updateItemPropertyValue({
+        localId,
+        propertyName: propertyName!,
+        newValue: stringValue,
+        seedLocalId,
+        versionLocalId,
+        versionUid,
+        modelName,
+        schemaUid,
+        dataType: propertyRecordSchema.dataType,
+        refValueType: propertyRecordSchema.refValueType,
+      } as any)
+
+      const updatedContext: Partial<PropertyMachineContext> = {
+        propertyValue: newValue,
+        renderValue: newValue,
+      }
+      if (localId) updatedContext.localId = localId
+      if (schemaUid) updatedContext.schemaUid = schemaUid
+      if (!localId && result?.localId) updatedContext.localId = result.localId
+      if (!schemaUid && result?.schemaUid) updatedContext.schemaUid = result.schemaUid
+
+      sendBack({ type: 'updateContext', ...updatedContext })
+      return true
     }
 
     // Convert newValue to string for database storage

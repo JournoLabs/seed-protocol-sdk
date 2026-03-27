@@ -100,6 +100,7 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
     if (rawValue && isBlob(rawValue)) return // Already have blob URL
     if (blobPreviewUrl) return // Have blob preview
 
+    let cancelled = false
     const _getOriginalContentUrl = async () => {
       try {
         const filePath = property?.localStoragePath
@@ -108,14 +109,16 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
         const exists = await BaseFileManager.pathExists(filePath)
         if (exists) {
           const url = await BaseFileManager.getContentUrlFromPath(filePath)
-          if (url) setOriginalContentUrl(url)
+          if (!cancelled && url) setOriginalContentUrl(url)
         }
       } catch (err) {
         logger('_getOriginalContentUrl error', err)
       }
     }
     _getOriginalContentUrl()
-    return () => setOriginalContentUrl(undefined)
+    return () => {
+      cancelled = true
+    }
   }, [resolvedFilename, rawValue, blobPreviewUrl, property?.localStoragePath])
 
   useEffect(() => {

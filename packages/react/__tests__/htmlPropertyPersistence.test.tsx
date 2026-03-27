@@ -171,7 +171,11 @@ describe('Html property persistence integration tests', () => {
       await db.delete(seeds).where(eq(seeds.localId, testItem.seedLocalId))
     }
     if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Html Persistence'))
+      try {
+        await db.delete(schemas).where(eq(schemas.name, 'Test Schema Html Persistence'))
+      } catch {
+        // Browser DB may still have FK references to this schema row.
+      }
     }
     await deleteSchemaFileIfExists(
       'Test Schema Html Persistence',
@@ -263,21 +267,16 @@ describe('Html property persistence integration tests', () => {
     )
 
     const scoped = within(container)
-    await waitFor(
-      () => scoped.queryByTestId('is-loading')?.textContent === 'false',
-      { timeout: 15000 }
-    )
-
+    // Initial render has isLoading false before the fetch effect runs; retry with expect until stable.
     await waitFor(
       () => {
-        const htmlValueEl = scoped.queryByTestId('html-value')
-        return htmlValueEl !== null && htmlValueEl.textContent?.includes('<h1>Test HTML</h1>')
+        expect(scoped.queryByTestId('is-loading')?.textContent).toBe('false')
+        expect(scoped.getByTestId('html-value').textContent).toContain('<h1>Test HTML</h1>')
       },
       { timeout: 15000 }
     )
 
     const htmlValueEl = scoped.getByTestId('html-value')
-    expect(htmlValueEl.textContent).toContain('<h1>Test HTML</h1>')
     expect(htmlValueEl.textContent).not.toMatch(/^[a-zA-Z0-9_-]{10,66}$/)
   })
 })

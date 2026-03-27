@@ -1,4 +1,5 @@
 import { getCorrectId } from '@/helpers'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItem } from '@/interfaces'
 
@@ -67,19 +68,17 @@ export async function getRelatedItemsForPublish(
   }
 
   for (const listProperty of itemListProperties) {
-    if (!listProperty.propertyDef?.ref) continue
+    const listRef =
+      listProperty.propertyDef?.ref ||
+      (listProperty.propertyDef as { refModelName?: string } | undefined)?.refModelName
+    if (!listRef) continue
     const snapshot = listProperty.getService().getSnapshot() as { context?: unknown }
     const context = snapshot.context ?? null
     if (!context) continue
     let value = (context as { propertyValue?: unknown }).propertyValue
     if (!value || (listProperty as { uid?: string }).uid) continue
-    if (typeof value === 'string' && value.length === 66) value = [value]
-    if (typeof value === 'string' && value.length > 66) {
-      try {
-        value = JSON.parse(value)
-      } catch {
-        value = (value as string).split(',')
-      }
+    if (typeof value === 'string') {
+      value = parseListPropertyValueFromStorage(value)
     }
     const arr = Array.isArray(value) ? value : []
     for (const seedId of arr) {

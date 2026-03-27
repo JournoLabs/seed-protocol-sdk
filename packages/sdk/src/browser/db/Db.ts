@@ -567,49 +567,31 @@ class Db extends BaseDb implements IDb {
     }
 
     const baseObservable = new Observable<T[]>((subscriber) => {
-      // Call SQLocal's reactiveQuery
       const reactiveQueryResult = this.sqlocalInstance!.reactiveQuery(query)
-      
-      // Subscribe to SQLocal's subscription API
+
       const subscription = reactiveQueryResult.subscribe(
         (data: Record<string, any>[]) => {
-          // Emit data through RxJS Observable (cast to T[] since SQLocal returns Record<string, any>[])
           subscriber.next(data as T[])
         },
         (err: Error) => {
           console.error('[BaseDb.liveQuery] SQLocal reactiveQuery error:', err)
-          // Emit error through RxJS Observable
           subscriber.error(err)
         }
       )
-      
-      // Cleanup: unsubscribe when Observable is unsubscribed
+
       return () => {
         subscription.unsubscribe()
       }
     })
-    
-    // Use distinctUntilChanged with JSON.stringify comparison
-    // The comparator returns true if values are the same (skip emission)
+
+    // Compare stable JSON snapshots via keySelector. SQLocal may reuse one array reference
+    // and mutate rows in place; comparing (prev, curr) on the same reference makes
+    // JSON.stringify(prev) === JSON.stringify(curr) after mutation and suppresses emissions.
     return baseObservable.pipe(
-      distinctUntilChanged((prev, curr) => {
-        // On first emission, prev will be undefined, so we always emit
-        if (prev === undefined) {
-          return false // false = different, so emit
-        }
-        
-        // Compare using JSON.stringify
-        try {
-          const prevJson = JSON.stringify(prev)
-          const currJson = JSON.stringify(curr)
-          // Return true if same (skip), false if different (emit)
-          return prevJson === currJson
-        } catch (error) {
-          // If JSON.stringify fails, fall back to reference equality
-          console.warn('[BaseDb.liveQuery] distinctUntilChanged: JSON.stringify failed, using reference equality', error)
-          return prev === curr
-        }
-      })
+      distinctUntilChanged(
+        (a, b) => a === b,
+        (x: T[]) => JSON.stringify(x)
+      )
     )
   }
 }

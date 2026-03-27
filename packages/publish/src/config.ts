@@ -34,6 +34,11 @@ export interface PublishConfig {
   /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
   /**
+   * Optional origin for verifying uploads via `GET /api/upload/arweave/data/:id`.
+   * Defaults to {@link uploadApiBaseUrl} (e.g. set `ARWEAVE_UPLOAD_API_BASE_URL` as `uploadApiBaseUrl`).
+   */
+  arweaveUploadVerificationBaseUrl?: string
+  /**
    * Use integer indices instead of string localId/publishLocalId for multiPublish (gas-efficient).
    * Set to true when using the new contract that expects uint256 localIdIndex/publishLocalIdIndex.
    * Default: false (uses string-based payload for backward compatibility).
@@ -146,6 +151,8 @@ export const configurePublish = initPublish
 export interface ResolvedPublishConfig extends PublishConfig {
   thirdwebAccountFactoryAddress: string
   uploadApiBaseUrl: string
+  /** Resolved verification origin (defaults to uploadApiBaseUrl). */
+  arweaveUploadVerificationBaseUrl: string
   easContractAddress: string
   useIntegerLocalIds: boolean
   useDirectEas: boolean
@@ -166,6 +173,8 @@ export function getPublishConfig(): ResolvedPublishConfig {
     )
   }
   const useArweaveBundler = config.useArweaveBundler ?? false
+  const arweaveUploadVerificationBaseUrl =
+    config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   return {
     ...config,
     thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
@@ -175,5 +184,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor: config.useModularExecutor ?? false,
     useArweaveBundler,
+    arweaveUploadVerificationBaseUrl,
   }
 }

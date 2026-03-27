@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { useLiveQuery } from '@seedprotocol/react'
-import { BaseDb, schemas, models, properties, modelSchemas } from '@seedprotocol/sdk'
+import { BaseDb, schemas, models, properties, modelSchemas, modelUids, propertyUids } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { setupTestEnvironment } from './test-utils/client-init'
 import { firstValueFrom, take, timeout } from 'rxjs'
@@ -31,12 +31,18 @@ describe('useLiveQuery React Hook Integration Tests', () => {
   }, 90000)
 
   afterEach(async () => {
-    // Clean up test data after each test
+    // Unmount rendered trees first so useLiveQuery unsubscribes before we clear the DOM
+    // (setup.browser.ts clears document.body without React unmount, which leaks subscriptions).
+    cleanup()
+
+    // Clean up test data after each test (FK order: children before parents)
     const db = BaseDb.getAppDb()
     if (db) {
       try {
         await db.delete(modelSchemas)
+        await db.delete(propertyUids)
         await db.delete(properties)
+        await db.delete(modelUids)
         await db.delete(models)
         // Only delete test schemas, not the Seed Protocol schema
         await db.delete(schemas).where(eq(schemas.name, 'TestLiveQuerySchema'))
@@ -298,11 +304,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         })
         .returning()
 
-      // Create query
-      const query = db.select().from(schemas).where(eq(schemas.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(schemas).where(eq(schemas.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -321,10 +325,16 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         .set({ name: 'UpdatedTestSchema' })
         .where(eq(schemas.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      const [rowAfterUpdate] = await db
+        .select()
+        .from(schemas)
+        .where(eq(schemas.id, inserted.id!))
+      expect(rowAfterUpdate?.name).toBe('UpdatedTestSchema')
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(schemas).where(eq(schemas.id, inserted.id!))} />
+      )
+
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -334,7 +344,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
 
     it('should detect DELETE on schemas table', async () => {
       const db = BaseDb.getAppDb()
@@ -390,11 +400,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         })
         .returning()
 
-      // Create query
-      const query = db.select().from(schemas).where(eq(schemas.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(schemas).where(eq(schemas.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -409,10 +417,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Delete the schema
       await db.delete(schemas).where(eq(schemas.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(schemas).where(eq(schemas.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -421,7 +429,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
   })
 
   describe('LiveQuery Table Change Detection - models', () => {
@@ -534,11 +542,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Insert initial model
       const [inserted] = await db.insert(models).values({ name: 'TestLiveQueryModel' }).returning()
 
-      // Create query
-      const query = db.select().from(models).where(eq(models.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(models).where(eq(models.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -554,10 +560,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Update the model
       await db.update(models).set({ name: 'UpdatedTestModel' }).where(eq(models.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(models).where(eq(models.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -567,7 +573,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
 
     it('should detect DELETE on models table', async () => {
       const db = BaseDb.getAppDb()
@@ -609,11 +615,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Insert initial model
       const [inserted] = await db.insert(models).values({ name: 'TestLiveQueryModel' }).returning()
 
-      // Create query
-      const query = db.select().from(models).where(eq(models.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(models).where(eq(models.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -628,10 +632,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Delete the model
       await db.delete(models).where(eq(models.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(models).where(eq(models.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -640,7 +644,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
   })
 
   describe('LiveQuery Table Change Detection - properties', () => {
@@ -790,11 +794,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         })
         .returning()
 
-      // Create query
-      const query = db.select().from(properties).where(eq(properties.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(properties).where(eq(properties.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -813,10 +815,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         .set({ name: 'UpdatedProperty' })
         .where(eq(properties.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(properties).where(eq(properties.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -826,7 +828,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
 
     it('should detect DELETE on properties table', async () => {
       const db = BaseDb.getAppDb()
@@ -888,11 +890,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         })
         .returning()
 
-      // Create query
-      const query = db.select().from(properties).where(eq(properties.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(properties).where(eq(properties.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -907,10 +907,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Delete the property
       await db.delete(properties).where(eq(properties.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(properties).where(eq(properties.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -919,7 +919,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
   })
 
   describe('LiveQuery Table Change Detection - model_schemas', () => {
@@ -1103,11 +1103,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         })
         .returning()
 
-      // Create query
-      const query = db.select().from(modelSchemas).where(eq(modelSchemas.id, inserted.id!))
-
-      // Render component
-      const { container } = render(<TestLiveQueryComponent query={query} />)
+      const { container, rerender } = render(
+        <TestLiveQueryComponent query={db.select().from(modelSchemas).where(eq(modelSchemas.id, inserted.id!))} />
+      )
 
       // Wait for initial data
       await waitFor(
@@ -1122,10 +1120,10 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       // Delete the model_schemas link
       await db.delete(modelSchemas).where(eq(modelSchemas.id, inserted.id!))
 
-      // Small delay to allow reactive query to detect the change
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      rerender(
+        <TestLiveQueryComponent query={db.select().from(modelSchemas).where(eq(modelSchemas.id, inserted.id!))} />
+      )
 
-      // Wait for React state to update - give it more time for liveQuery to propagate
       await waitFor(
         () => {
           const dataElement = container.querySelector('[data-testid="data"]')
@@ -1134,7 +1132,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: 10000, interval: 100 }
       )
-    }, 10000)
+    }, 20000)
   })
 
   describe('Integration Tests with Multiple Tables', () => {

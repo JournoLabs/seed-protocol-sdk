@@ -84,7 +84,6 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
         propertyDef = fallbackDef as Static<typeof TProperty>
       }
     }
-    const dataType = propertyDef?.dataType
     if (!propertyDef) {
       continue
     }
@@ -108,49 +107,43 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
           propertyDef.refValueType === ModelPropertyDataTypes.Html ||
           propertyDef.refValueType === ModelPropertyDataTypes.Json))
 
-    let routedTo = 'basic'
     if (isStorageSeedType) {
       itemImageProperties.push(itemProperty)
       if (propertyDef.dataType === ModelPropertyDataTypes.Relation) {
         itemRelationProperties.push(itemProperty)
       }
-      routedTo = 'image'
       continue
     }
 
     if (propertyDef.dataType === ModelPropertyDataTypes.Relation) {
       itemRelationProperties.push(itemProperty)
-      routedTo = 'relation'
       continue
     }
 
     if (propertyDef.dataType === ModelPropertyDataTypes.List) {
       // List-of-relations: ref present, goes to processListProperty
       // List-of-primitives: ref absent, treat as basic property
-      if (propertyDef.ref) {
+      const listRef =
+        propertyDef.ref || (propertyDef as { refModelName?: string }).refModelName
+      if (listRef) {
         itemListProperties.push(itemProperty)
-        routedTo = 'list'
       } else {
         itemBasicProperties.push(itemProperty)
-        routedTo = 'basic'
       }
       continue
     }
 
     if (isItemStorage) {
       itemStorageProperties.push(itemProperty)
-      routedTo = 'storage'
       continue
     }
 
     if (isStorageTransaction) {
       itemStorageTransactionProperty = { itemProperty, childProperties: [] }
-      routedTo = 'upload'
       continue
     }
 
     itemBasicProperties.push(itemProperty)
-    routedTo = 'basic'
   }
 
   if (itemStorageTransactionProperty && itemStorageProperties.length > 0) {

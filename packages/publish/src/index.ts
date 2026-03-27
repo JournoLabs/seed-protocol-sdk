@@ -46,3 +46,7 @@ export {
   type RequestWithStringIds,
   type RequestWithIntegerIds,
 } from './helpers/transformPayloadToIntegerIds'
+export {
+  ensureSmartWalletThenPublish,
+  type EnsureSmartWalletResult,
+} from './helpers/ensureSmartWalletThenPublish'

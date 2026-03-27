@@ -1,4 +1,47 @@
+import pluralize from 'pluralize'
 import { normalizeDataType } from './property/index'
+
+/** Minimal property def shape for List-of-relation storage name resolution */
+export type PropertySchemaEntry = {
+  dataType?: string
+  ref?: string
+  refModelName?: string
+}
+
+/**
+ * For a schema property key like `authors` (List of Relation to Identity), returns the
+ * internal storage/EAS name: `authorIdentityIds` (singular + ref + Ids).
+ */
+export function listRelationStoragePropertyName(
+  propertySchemas: Record<string, PropertySchemaEntry>,
+  schemaPropertyKey: string,
+): string | undefined {
+  const propDef = propertySchemas[schemaPropertyKey]
+  if (!propDef) return undefined
+  if (normalizeDataType(propDef.dataType) !== 'List') return undefined
+  const ref = propDef.ref || propDef.refModelName
+  if (!ref) return undefined
+  return `${pluralize(schemaPropertyKey, 1)}${ref}Ids`
+}
+
+/**
+ * Reverse of listRelationStoragePropertyName: maps DB/EAS name `authorIdentityIds` to schema key `authors`.
+ */
+export function resolveStorageNameToSchemaName(
+  propertySchemas: Record<string, PropertySchemaEntry>,
+  storagePropertyName: string,
+): string | undefined {
+  for (const [schemaKey, propDef] of Object.entries(propertySchemas)) {
+    if (normalizeDataType(propDef?.dataType) !== 'List') continue
+    const ref = propDef.ref || propDef.refModelName
+    if (!ref) continue
+    const internalName = `${pluralize(schemaKey, 1)}${ref}Ids`
+    if (internalName === storagePropertyName) {
+      return schemaKey
+    }
+  }
+  return undefined
+}
 
 /** Internal property names that never use Id-suffix metadata convention */
 const ID_SUFFIX_EXCLUDE = new Set(['storageTransactionId', 'transactionId'])

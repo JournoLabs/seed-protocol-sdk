@@ -50,7 +50,6 @@ export async function verifyAttestations({
     const expectedSchemas = request.listOfAttestations.map((a) =>
       toHex32(a.schema).toLowerCase(),
     )
-    const expectedSet = new Set(expectedSchemas)
 
     let easProperties: { schemaId?: string }[] = []
     let lastError: unknown

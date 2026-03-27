@@ -132,7 +132,6 @@ const getStorageSeedUploads = async (
   return uploads
 }
 
-
 export type UploadProperty = {
   itemProperty: IItemProperty<any>
   childProperties: IItemProperty<any>[]
@@ -141,6 +140,138 @@ type ChildUploadData = {
   propertyName: string
   localStoragePath: string
 }
+
+/**
+ * True if publish would include at least one Arweave upload (local file / storage seed present).
+ * Does not create Arweave transactions or hit the network — use for routing (e.g. skip EAS-only)
+ * when {@link getPublishUploads} would fail early (e.g. gateway unreachable during tx creation).
+ */
+async function storageSeedHasUploadCandidates(
+  itemStorageSeedProperties: IItemProperty<any>[],
+): Promise<boolean> {
+  for (const itemProperty of itemStorageSeedProperties) {
+    const snapshot = itemProperty.getService().getSnapshot()
+    const context = 'context' in snapshot ? snapshot.context : null
+    if (!context) {
+      continue
+    }
+    const propertyValue = (context as any).propertyValue
+    const refResolvedValue = (context as any).refResolvedValue
+    if (!refResolvedValue) {
+      continue
+    }
+
+    const { localId: seedLocalId } = getCorrectId(propertyValue)
+    if (!seedLocalId) {
+      continue
+    }
+
+    const dataType =
+      itemProperty.propertyDef?.refValueType ??
+      itemProperty.propertyDef?.dataType ??
+      'Image'
+    const baseDir = getStorageDirForDataType(dataType)
+    const filePath = `${baseDir}/${refResolvedValue}`
+
+    if (await BaseFileManager.pathExists(filePath)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+async function uploadPropertyWouldUpload(
+  uploadProperty: UploadProperty,
+  relatedItemProperty?: IItemProperty<any>,
+): Promise<boolean> {
+  const childUploads: ChildUploadData[] = []
+
+  for (const childProperty of uploadProperty.childProperties) {
+    const filePath = childProperty.localStoragePath
+
+    if (!filePath || filePath.endsWith('undefined')) {
+      continue
+    }
+
+    const exists = await BaseFileManager.pathExists(filePath)
+    if (!exists) {
+      continue
+    }
+
+    childUploads.push({
+      propertyName: childProperty.propertyName,
+      localStoragePath: filePath,
+    })
+  }
+
+  if (childUploads.length > 0) {
+    return true
+  }
+
+  if (relatedItemProperty && relatedItemProperty.localStoragePath) {
+    const filePath = relatedItemProperty.localStoragePath
+
+    if (!filePath || filePath.endsWith('undefined')) {
+      return false
+    }
+
+    return await BaseFileManager.pathExists(filePath)
+  }
+
+  return false
+}
+
+export async function itemHasPublishUploadCandidates(
+  item: IItem<any>,
+  relatedItemProperty?: IItemProperty<any>,
+): Promise<boolean> {
+  const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
+    await getSegmentedItemProperties(item)
+
+  for (const uploadProperty of itemUploadProperties) {
+    if (await uploadPropertyWouldUpload(uploadProperty, relatedItemProperty)) {
+      return true
+    }
+  }
+
+  if (await storageSeedHasUploadCandidates(itemImageProperties)) {
+    return true
+  }
+
+  for (const relationProperty of itemRelationProperties) {
+    const snapshot = relationProperty.getService().getSnapshot()
+    const context = 'context' in snapshot ? snapshot.context : null
+    if (!context) {
+      continue
+    }
+    const propertyValue = (context as any).propertyValue
+
+    if (!propertyValue || relationProperty.uid) {
+      continue
+    }
+
+    const { localId: seedLocalId, uid: seedUid } = getCorrectId(propertyValue)
+
+    const relatedItem = await Item.find({
+      seedLocalId,
+      seedUid,
+    })
+
+    if (!relatedItem) {
+      throw new Error(
+        `No relatedItem found for ${relationProperty.propertyName}`,
+      )
+    }
+
+    if (await itemHasPublishUploadCandidates(relatedItem, relationProperty)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 const processUploadProperty = async (
   uploadProperty: UploadProperty,
   uploads: PublishUpload[],

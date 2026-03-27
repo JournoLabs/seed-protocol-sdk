@@ -56,10 +56,6 @@ export const saveHtml = fromCallback<
       throw new Error('No HTML content found')
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:entry',message:'Html save started',data:{propertyName,htmlContentLength:htmlContent.length,existingValue:typeof existingValue,newValueType:typeof newValue},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
-    // #endregion
-
     if (!htmlSchemaUid) {
       const fetchedSchemaUid = await getEasSchemaUidForModel('Html')
       htmlSchemaUid = fetchedSchemaUid ?? undefined
@@ -93,10 +89,6 @@ export const saveHtml = fromCallback<
     // For HTML, renderValue must be the raw HTML content (for editing/display), not the blob URL.
     // The blob URL (refResolvedDisplayValue) is stored in metadata for iframe display when needed.
     const renderValueForContext = htmlContent
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:beforeDb',message:'Html save before DB write',data:{newHtmlSeedLocalId,fileName,refResolvedValue:fileName,localStorageDir:'/html',renderValueLength:renderValueForContext.length,filePath},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
-    // #endregion
 
     let newLocalId
 
@@ -144,10 +136,6 @@ export const saveHtml = fromCallback<
         dataType: 'Html',
       } as any)
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'saveHtml.ts:sendBack',message:'Html save sendBack updateContext',data:{propertyValue:newHtmlSeedLocalId,refResolvedValue:fileName,localStorageDir:'/html',renderValueLength:renderValueForContext.length},timestamp:Date.now(),hypothesisId:'save'})}).catch(()=>{});
-    // #endregion
 
     sendBack({
       type: 'updateContext',

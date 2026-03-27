@@ -12,6 +12,7 @@ import {
   getMetadataPropertyNamesForQuery,
   resolveMetadataRecord,
 } from '@/helpers'
+import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
 
@@ -228,7 +229,7 @@ export const loadOrCreateProperty = fromCallback<
     }
 
     // For Html: read file content for renderValue (propertyValue is seed ID; blob URLs in DB are invalid after reload)
-    let renderValue: string | undefined = metadataRecord.propertyValue || undefined
+    let renderValue: string | string[] | undefined = metadataRecord.propertyValue || undefined
     const refSeedType = (metadataRecord as { refSeedType?: string }).refSeedType
     const isHtml = refSeedType === 'html' || propertyRecordSchema?.dataType === 'Html'
     // Fallback: derive refResolvedValue/localStorageDir from propertyValue when missing (e.g. EAS sync, legacy data)
@@ -240,24 +241,13 @@ export const loadOrCreateProperty = fromCallback<
     if (isHtml && metadataRecord.refResolvedValue && !metadataRecord.localStorageDir) {
       metadataRecord.localStorageDir = '/html'
     }
-    // #region agent log
-    if (isHtml) {
-      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:html',message:'Html load from DB',data:{propertyName,propertyValue:metadataRecord.propertyValue,refResolvedValue:metadataRecord.refResolvedValue,localStorageDir:metadataRecord.localStorageDir,refSeedType},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
-    }
-    // #endregion
     if (isHtml && metadataRecord.refResolvedValue && metadataRecord.localStorageDir) {
       try {
         const dir = metadataRecord.localStorageDir.replace(/^\//, '')
         const filePath = BaseFileManager.getFilesPath(dir, metadataRecord.refResolvedValue)
         const exists = await BaseFileManager.pathExists(filePath)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:htmlFile',message:'Html file read attempt',data:{filePath,exists},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
-        // #endregion
         if (exists) {
           renderValue = await BaseFileManager.readFileAsString(filePath)
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'loadOrCreateProperty.ts:htmlFileRead',message:'Html file read success',data:{renderValueLength:renderValue?.length},timestamp:Date.now(),hypothesisId:'load'})}).catch(()=>{});
-          // #endregion
         }
       } catch (e) {
         logger(`Failed to read Html file for ${propertyName}: ${e}`)
@@ -299,12 +289,19 @@ export const loadOrCreateProperty = fromCallback<
       }
     }
 
+    let propertyValueOut: string | string[] | undefined =
+      metadataRecord.propertyValue || undefined
+    if (normalizedDataType === 'List' && typeof propertyValueOut === 'string') {
+      propertyValueOut = parseListPropertyValueFromStorage(propertyValueOut)
+      renderValue = propertyValueOut
+    }
+
     // Return loaded property data (use propertyName from context to match schema key, e.g. "html" not "htmlId")
     sendBack({
       type: 'loadOrCreatePropertySuccess',
       property: {
         propertyName,
-        propertyValue: metadataRecord.propertyValue || undefined,
+        propertyValue: propertyValueOut,
         renderValue,
         seedLocalId: metadataRecord.seedLocalId || seedLocalId,
         seedUid: metadataRecord.seedUid || seedUid,

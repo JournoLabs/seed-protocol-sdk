@@ -1,5 +1,6 @@
 import {
   appState,
+  metadata,
   models as modelsTable,
   NewModelRecord,
   NewPropertyRecord,
@@ -10,6 +11,7 @@ import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
+import { toSnakeCase } from 'drizzle-orm/casing'
 import { and, eq, isNull, SQL } from 'drizzle-orm'
 import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -66,6 +68,112 @@ export async function getPropertyIdForModelAndName(
     }
   }
   return null
+}
+
+/**
+ * Migrate metadata rows when a property is renamed.
+ * Updates metadata.propertyName from old to new for all rows that reference the renamed property.
+ * Called from renameModelProperty to prevent duplicate ItemProperties.
+ * @param modelName - Model name (PascalCase)
+ * @param oldPropertyName - Current property name before rename
+ * @param newPropertyName - New property name after rename
+ * @param propertySchemaFileId - Optional schema file ID for the property (most reliable lookup)
+ * @returns Count of metadata rows updated
+ */
+export async function migrateMetadataForPropertyRename(
+  modelName: string,
+  oldPropertyName: string,
+  newPropertyName: string,
+  propertySchemaFileId?: string,
+): Promise<number> {
+  const db = BaseDb.getAppDb()
+  if (!db) {
+    logger('[migrateMetadataForPropertyRename] Database not available, skipping')
+    return 0
+  }
+
+  const normalizedModelName = upperFirst(camelCase(modelName))
+
+  // Find the property row by schemaFileId (preferred) or by name
+  let propertyId: number | null = null
+  if (propertySchemaFileId) {
+    const rows = await db
+      .select({ id: properties.id })
+      .from(properties)
+      .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+      .where(
+        and(
+          eq(modelsTable.name, normalizedModelName),
+          eq(properties.schemaFileId, propertySchemaFileId),
+        ),
+      )
+      .limit(1)
+    if (rows.length > 0 && rows[0].id != null) {
+      propertyId = rows[0].id
+    }
+  }
+  if (propertyId == null) {
+    propertyId = await getPropertyIdForModelAndName(modelName, oldPropertyName)
+  }
+  if (propertyId == null) {
+    logger(
+      `[migrateMetadataForPropertyRename] Property not found: ${modelName}.${oldPropertyName}, skipping`,
+    )
+    return 0
+  }
+
+  // Primary path: update metadata by propertyId
+  const toUpdateByPropertyId = await db
+    .select({ localId: metadata.localId })
+    .from(metadata)
+    .where(eq(metadata.propertyId, propertyId))
+  const updatedByPropertyId = toUpdateByPropertyId.length
+  if (updatedByPropertyId > 0) {
+    await db
+      .update(metadata)
+      .set({ propertyName: newPropertyName })
+      .where(eq(metadata.propertyId, propertyId))
+  }
+
+  // Fallback: update metadata with null propertyId (legacy rows) by propertyName + modelType
+  const modelType = toSnakeCase(modelName)
+  const toUpdateByFallback = await db
+    .select({ localId: metadata.localId })
+    .from(metadata)
+    .where(
+      and(
+        eq(metadata.propertyName, oldPropertyName),
+        eq(metadata.modelType, modelType),
+        isNull(metadata.propertyId),
+      ),
+    )
+  const updatedByFallback = toUpdateByFallback.length
+  if (updatedByFallback > 0) {
+    await db
+      .update(metadata)
+      .set({ propertyName: newPropertyName })
+      .where(
+        and(
+          eq(metadata.propertyName, oldPropertyName),
+          eq(metadata.modelType, modelType),
+          isNull(metadata.propertyId),
+        ),
+      )
+  }
+
+  if (updatedByFallback > 0) {
+    logger(
+      `[migrateMetadataForPropertyRename] Fallback updated ${updatedByFallback} rows (propertyId was null)`,
+    )
+  }
+
+  const total = updatedByPropertyId + updatedByFallback
+  if (total > 0) {
+    logger(
+      `[migrateMetadataForPropertyRename] Migrated ${total} metadata rows for ${modelName}.${oldPropertyName} -> ${newPropertyName}`,
+    )
+  }
+  return total
 }
 
 export const escapeSqliteString = (value: string): string => {
@@ -1132,6 +1240,7 @@ export const loadModelsFromDbForSchema = async (
       .select({
         modelId: modelSchemas.modelId,
         modelName: modelsTable.name,
+        schemaFileId: modelsTable.schemaFileId,
       })
       .from(modelSchemas)
       .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
@@ -1140,7 +1249,7 @@ export const loadModelsFromDbForSchema = async (
     const models: { [modelName: string]: any } = {}
 
     // For each model, load its properties
-    for (const { modelId, modelName } of modelSchemaRecords) {
+    for (const { modelId, modelName, schemaFileId } of modelSchemaRecords) {
       if (!modelId || !modelName) continue
 
       // Get all properties for this model
@@ -1185,9 +1294,12 @@ export const loadModelsFromDbForSchema = async (
         modelProperties[prop.name] = propertyData
       }
 
-      // Create model structure
+      // Create model structure. Include id (schemaFileId) so processSchemaFiles can populate
+      // modelFileIds and Model.create can skip duplicate-name logic, preventing model
+      // duplication on reload (Post 1 1, Post 2 1, etc.).
       models[modelName] = {
         properties: modelProperties,
+        ...(schemaFileId ? { id: schemaFileId } : {}),
         // Note: description would need to be stored separately
         // or reconstructed from schemaData if available
       }

@@ -6,12 +6,13 @@ import {
   client,
   BaseDb,
   schemas,
+  modelSchemas,
   importJsonSchema,
   Schema,
   setRevokeExecutor,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions } from '@seedprotocol/sdk'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import {
   createGetPublishPayloadTestSchema,
@@ -100,7 +101,15 @@ describe('Unpublish React Integration Tests', () => {
     setRevokeExecutor(null)
     const db = BaseDb.getAppDb()
     if (db) {
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema getPublishPayload'))
+      const name = 'Test Schema getPublishPayload'
+      const rows = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, name))
+      const ids = rows
+        .map((r: { id: number | null }) => r.id)
+        .filter((id: number | null): id is number => id != null)
+      if (ids.length) {
+        await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, ids))
+      }
+      await db.delete(schemas).where(eq(schemas.name, name))
     }
     Schema.clearCache()
   })

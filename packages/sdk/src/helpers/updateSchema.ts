@@ -764,6 +764,18 @@ export async function renameModelProperty(
 
   logger(`Renamed property ${oldPropertyName} to ${newPropertyName} in schema ${schemaName} v${newVersion}`)
 
+  // Migrate metadata rows so ItemProperty values follow the new name (prevents duplicate ItemProperties)
+  const { migrateMetadataForPropertyRename } = await import('./db')
+  const migratedCount = await migrateMetadataForPropertyRename(
+    modelName,
+    oldPropertyName,
+    newPropertyName,
+    oldProperty.id,
+  )
+  if (migratedCount > 0) {
+    logger(`Migrated ${migratedCount} metadata rows for property rename`)
+  }
+
   // Defer loadSchemaFromFile to avoid sync cascade: it triggers addSchemaToDb/addModelsToDb,
   // which post to BroadcastChannel and cause React invalidates. Running that synchronously
   // can interrupt the save flow and cause freezes (e.g. updateContext/refetch loops).

@@ -6,9 +6,7 @@ import {
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
 } from '@seedprotocol/sdk'
-import type { Item } from '@seedprotocol/sdk'
-
-type ItemInstance = InstanceType<typeof Item>
+import type { IItem } from '@seedprotocol/sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import type { ThirdwebClient } from 'thirdweb'
 import type { Chain } from 'thirdweb/chains'
@@ -27,7 +25,7 @@ function toSnakeCase(str: string): string {
 /**
  * Collects all model names used by the item (item's model + relation refs + list refs + Image).
  */
-async function getModelNamesForItem(item: ItemInstance): Promise<Set<string>> {
+async function getModelNamesForItem(item: IItem<any>): Promise<Set<string>> {
   const { itemRelationProperties, itemImageProperties, itemListProperties } =
     await getSegmentedItemProperties(item)
   const modelNames = new Set<string>()
@@ -63,7 +61,7 @@ async function getModelNamesForItem(item: ItemInstance): Promise<Set<string>> {
  * Populates the SDK's schema map so getPublishPayload can resolve schema UIDs.
  */
 export async function ensureEasSchemasForItem(
-  item: ItemInstance,
+  item: IItem<any>,
   account: Account,
   client: ThirdwebClient,
   chain: Chain,
@@ -192,7 +190,12 @@ export async function ensureEasSchemasForItem(
 
     const easDataTypeRaw =
       (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[property.propertyDef.dataType]?.eas ?? 'string'
-    const propertyNameSnakeCase = toSnakeCase(property.propertyName)
+    const prop = property as { storagePropertyName?: string; propertyName: string }
+    const nameForEas =
+      prop.storagePropertyName && prop.storagePropertyName.length > 0
+        ? prop.storagePropertyName
+        : property.propertyName
+    const propertyNameSnakeCase = toSnakeCase(nameForEas)
     const schemaDef = `${easDataTypeRaw} ${propertyNameSnakeCase}`
 
     // getEasSchemaForItemProperty expects TypedData['type'] which excludes 'bytes32[]'
@@ -207,7 +210,7 @@ export async function ensureEasSchemasForItem(
 
     let schema = await getEasSchemaForItemProperty({
       schemaUid: property.schemaUid,
-      propertyName: property.propertyName,
+      propertyName: nameForEas,
       easDataType: easDataTypeForLookup,
     })
 
@@ -290,6 +293,6 @@ export async function ensureEasSchemasForItem(
   // causing EAS multiAttest to revert with InvalidSchema.
   const relatedItems = await getRelatedItemsForPublish(item)
   for (const relatedItem of relatedItems) {
-    await ensureEasSchemasForItem(relatedItem as ItemInstance, account, client, chain)
+    await ensureEasSchemasForItem(relatedItem as IItem<any>, account, client, chain)
   }
 }

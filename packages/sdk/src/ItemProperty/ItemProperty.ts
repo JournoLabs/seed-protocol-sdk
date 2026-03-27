@@ -14,7 +14,14 @@ import { camelCase, startCase, upperFirst } from 'lodash-es'
 import { getPropertyData } from '@/db/read/getPropertyData'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager, getCorrectId, getMetadataPropertyNamesForQuery } from '@/helpers'
+import {
+  BaseFileManager,
+  getCorrectId,
+  getMetadataPropertyNamesForQuery,
+  resolveMetadataRecord,
+  resolveStorageNameToSchemaName,
+} from '@/helpers'
+import type { PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
@@ -74,7 +81,14 @@ const resolvePropertyRecordSchemaFromSchemaData = async (
       if (!models) continue
       const model = models[modelName] ?? (modelNameAlt ? models[modelNameAlt] : undefined)
       if (!model?.properties) continue
-      const prop = model.properties[propertyName]
+      let prop = model.properties[propertyName]
+      if (!prop) {
+        const resolvedKey = resolveStorageNameToSchemaName(
+          model.properties as Record<string, PropertySchemaEntry>,
+          propertyName,
+        )
+        if (resolvedKey) prop = model.properties[resolvedKey]
+      }
       if (!prop) continue
       const p = prop as Record<string, unknown>
       const dataType = (p.dataType ?? p.type) as string
@@ -130,7 +144,12 @@ const resolvePropertyRecordSchemaFromModel = async (
       return undefined
     }
     const schemas = modelPropertiesToObject(model.properties)
-    const schema = schemas[propertyName]
+    let schemaKey = propertyName
+    if (!schemas[schemaKey]) {
+      const resolved = resolveStorageNameToSchemaName(schemas, propertyName)
+      if (resolved) schemaKey = resolved
+    }
+    const schema = schemas[schemaKey]
     return schema as SchemaPropertyType | undefined
   } catch (e) {
     return undefined
@@ -149,7 +168,7 @@ type ItemPropertySnapshot = SnapshotFrom<typeof propertyMachine>
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
 const TRACKED_PROPERTIES = [
-  'propertyName',
+  // propertyName omitted: must use class getter so List-of-relation exposes schema key (_alias) while context keeps storage name
   'propertyValue',
   'renderValue',
   'seedLocalId',
@@ -245,13 +264,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         this._isRelation = true
       }
 
-      if (propertyRecordSchema.dataType === 'List') {
+        if (propertyRecordSchema.dataType === 'List') {
         this._isList = true
-        if (propertyRecordSchema.ref) {
+        const listRef =
+          propertyRecordSchema.ref ||
+          (propertyRecordSchema as { refModelName?: string }).refModelName
+        if (listRef) {
           this._isRelation = true
           const propertyNameSingular = pluralize(propertyName!, 1)
           this._alias = propertyName
-          serviceInput.propertyName = `${propertyNameSingular}${propertyRecordSchema.ref}Ids`
+          serviceInput.propertyName = `${propertyNameSingular}${listRef}Ids`
         }
         if (propertyValue) {
           try {
@@ -362,11 +384,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
           try {
             const exists = await BaseFileManager.pathExists(filePath)
-            // #region agent log
-            if (isHtml) {
-              fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'ItemProperty.ts:subscription',message:'Html subscription file read',data:{filePath,exists,refResolvedValue:context.refResolvedValue,localStorageDir:context.localStorageDir},timestamp:Date.now(),hypothesisId:'access'})}).catch(()=>{});
-            }
-            // #endregion
             if (exists && (isItemStorage || isHtml)) {
               renderValue = await BaseFileManager.readFileAsString(filePath,)
             }
@@ -383,10 +400,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             }
             if (!exists) {
               // Keep filename for display when File object is present but not yet saved to disk
-              renderValue =
-                isFile && isFileValue
-                  ? (pv as unknown as File).name
-                  : 'No file found'
+              if (isFile && isFileValue) {
+                renderValue = (pv as unknown as File).name
+              } else if (isImage) {
+                // FS race / path not visible yet: do not clobber a hydrated blob URL with "No file found"
+                renderValue = undefined
+              } else {
+                renderValue = 'No file found'
+              }
             }
           } catch (e) {
             logger(
@@ -399,12 +420,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
         if (!renderValue) {
           renderValue = context.renderValue || context.propertyValue
-          // #region agent log
-          const isHtmlSchema = context.refSeedType === 'html' || (propertyRecordSchema?.dataType === ModelPropertyDataTypes.Html)
-          if (isHtmlSchema) {
-            fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'ItemProperty.ts:fallback',message:'Html subscription fallback to renderValue|propertyValue',data:{refResolvedValue:context.refResolvedValue,localStorageDir:context.localStorageDir,propertyValue:context.propertyValue,renderValueFromContext:context.renderValue},timestamp:Date.now(),hypothesisId:'access'})}).catch(()=>{});
-          }
-          // #endregion
         }
 
         let transformedPropertyName = propertyName
@@ -525,10 +540,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           .select()
           .from(metadataLatest)
           .where(and(propertyNameWhere, eq(metadataLatest.rowNum, 1)))
-          .limit(1)
+          .limit(15)
 
         if (initialMetadata.length > 0) {
-          const metaRow = initialMetadata[0]
+          const normalizedDataType = normalizeDataType(propertyRecordSchema?.dataType)
+          const normalizedRefValueType = normalizeDataType(propertyRecordSchema?.refValueType)
+          const metaRow = resolveMetadataRecord(
+            initialMetadata as (import('@/seedSchema').MetadataType & {
+              refResolvedValue?: string | null
+              refSeedType?: string
+            })[],
+            propertyName,
+            normalizedDataType,
+            normalizedRefValueType,
+          )
           logger(`[ItemProperty._setupLiveQuerySubscription] Initial query returned metadata record`)
           
           // Update context with initial metadata
@@ -567,7 +592,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -577,7 +602,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -587,7 +612,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
               } else if (resolvedSeedLocalId) {
@@ -598,7 +623,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -608,7 +633,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -618,7 +643,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(created_at, attestation_created_at) DESC LIMIT 1
+                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
                   `
                 }
               }
@@ -1005,6 +1030,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         propertyName,
         seedLocalId,
         seedUid,
+        modelName: modelNameOption,
       })
       if (!propertyData) {
         return undefined
@@ -1076,6 +1102,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           if (model?.properties) {
             const schemas = modelPropertiesToObject(model.properties)
             if (schemas[baseName]) propertyName = baseName
+          }
+        } catch {
+          // Model not loaded, keep original
+        }
+      }
+      if (modelName && propertyName) {
+        try {
+          const { Model } = await import('../Model/Model')
+          const { modelPropertiesToObject } = await import('../helpers/model')
+          const model = await Model.getByNameAsync(modelName)
+          if (model?.properties?.length) {
+            const schemas = modelPropertiesToObject(model.properties)
+            const listKey = resolveStorageNameToSchemaName(schemas, propertyName)
+            if (listKey) propertyName = listKey
           }
         } catch {
           // Model not loaded, keep original
@@ -1167,6 +1207,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return this._getSnapshotContext().propertyName || ''
   }
 
+  /** DB / EAS / metadata column name (e.g. authorIdentityIds). Use for storage; prefer `propertyName` for public API. */
+  get storagePropertyName(): string {
+    return this._getSnapshotContext().propertyName || ''
+  }
+
   get modelName() {
     return this._getSnapshotContext().modelName
   }
@@ -1227,11 +1272,6 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       return context.refResolvedValue
     }
     const result = context.renderValue || context.propertyValue
-    // #region agent log
-    if (normalizedDataType === 'Html') {
-      fetch('http://127.0.0.1:7242/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'413b74'},body:JSON.stringify({sessionId:'413b74',location:'ItemProperty.ts:value',message:'Html value getter',data:{propertyName:context.propertyName,hasRenderValue:!!context.renderValue,renderValueType:typeof context.renderValue,renderValueLength:typeof context.renderValue==='string'?context.renderValue.length:0,propertyValue:context.propertyValue,resultIsContent:typeof result==='string'&&result.length>20&&!result.match(/^[a-zA-Z0-9_-]{10,}$/)},timestamp:Date.now(),hypothesisId:'access'})}).catch(()=>{});
-    }
-    // #endregion
     // Read from context via proxy (renderValue or propertyValue)
     return result
   }

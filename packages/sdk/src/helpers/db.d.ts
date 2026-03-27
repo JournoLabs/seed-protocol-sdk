@@ -64,6 +64,21 @@ export declare function getPropertyModelNameAndDataType(schemaFileId: string): P
     dataType: string;
 } | undefined>;
 /**
+ * Migrate metadata rows when a property is renamed.
+ * Updates metadata.propertyName from old to new for all rows that reference the renamed property.
+ * @param modelName - Model name (PascalCase)
+ * @param oldPropertyName - Current property name before rename
+ * @param newPropertyName - New property name after rename
+ * @param propertySchemaFileId - Optional schema file ID for the property (most reliable lookup)
+ * @returns Count of metadata rows updated
+ */
+export declare function migrateMetadataForPropertyRename(
+  modelName: string,
+  oldPropertyName: string,
+  newPropertyName: string,
+  propertySchemaFileId?: string,
+): Promise<number>;
+/**
  * Saves a property's changes to the database without updating the JSON schema file.
  * This is used when properties are edited but the schema hasn't been saved as a new version yet.
  * @param property - The ModelPropertyMachineContext with updated values

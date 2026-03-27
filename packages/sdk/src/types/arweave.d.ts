@@ -1,6 +1,7 @@
 import type { CreateTransactionInterface } from 'arweave/web';
 /**
- * Status response from Arweave transaction status endpoint
+ * Transaction presence / status from BaseArweaveClient.getTransactionStatus.
+ * confirmed is only set by mocks; gateway checks use HTTP status only.
  */
 export type TransactionStatus = {
     status: number;

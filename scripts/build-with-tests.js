@@ -17,6 +17,14 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
+// Ensure bun is in PATH when spawning (shell may not inherit user's profile)
+const bunPaths = [
+  process.env.BUN_INSTALL,
+  join(process.env.HOME || '', '.bun', 'bin'),
+  '/Users/admin/.bun/bin',
+].filter(Boolean)
+const pathWithBun = [...new Set(bunPaths)].join(':') + (process.env.PATH ? ':' + process.env.PATH : '')
+
 // Parse arguments
 const args = process.argv.slice(2)
 const forceFlagIndex = args.findIndex(arg => arg === '--force' || arg === '-f')
@@ -45,6 +53,7 @@ function runCommand(command, options = {}) {
       stdio: 'inherit',
       shell: true,
       cwd: rootDir,
+      env: { ...process.env, PATH: pathWithBun },
       ...options,
     })
 
