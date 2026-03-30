@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * Publish a package to npm with SDK dependency validation
+ * Publish a package to npm with SDK (and publish→React) dependency validation
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
  * Packages: sdk, react, feed, publish, cli, ghost
  *
- * - If publishing 'react', 'feed', 'publish', or 'cli', checks that @seedprotocol/sdk@<version> is published
+ * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
+ * - If publishing 'publish', also checks that @seedprotocol/react@<same version> is published
+ * - If React version is not published, prompts to publish it first
  * - If user declines, script exits
- * - If user accepts (or SDK already published), publishes the requested package
+ * - If user accepts (or dependencies already published), publishes the requested package
  * - Use -f or --force to skip running tests before build
  */
 
@@ -36,12 +38,33 @@ function getSdkVersion() {
   return sdkPackage.version
 }
 
+function getReactVersion() {
+  const reactPackagePath = join(rootDir, 'packages', 'react', 'package.json')
+  const reactPackage = readPackageJson(reactPackagePath)
+  return reactPackage.version
+}
+
 /**
  * Check if a specific version of @seedprotocol/sdk is published on npm
  */
 function isSdkVersionPublished(version) {
   try {
     execSync(`npm view @seedprotocol/sdk@${version} version`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if a specific version of @seedprotocol/react is published on npm
+ */
+function isReactVersionPublished(version) {
+  try {
+    execSync(`npm view @seedprotocol/react@${version} version`, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -106,6 +129,20 @@ async function publishSdk(skipTests = false) {
   console.log('\n✅ SDK published successfully!\n')
 }
 
+async function publishReact(skipTests = false) {
+  console.log('\n📦 Publishing @seedprotocol/react...\n')
+  const reactDir = join(rootDir, 'packages', 'react')
+  if (skipTests) {
+    await runCommand('npm publish --access public', { cwd: reactDir })
+  } else {
+    await runCommand(
+      'node scripts/build-with-tests.js "cd packages/react && npm publish --access public"',
+      { cwd: rootDir }
+    )
+  }
+  console.log('\n✅ @seedprotocol/react published successfully!\n')
+}
+
 async function publishPackage(packageName) {
   const packageDir = join(rootDir, 'packages', packageName)
   console.log(`\n📦 Publishing @seedprotocol/${packageName}...\n`)
@@ -157,6 +194,34 @@ async function main() {
       }
     } else {
       console.log(`✅ @seedprotocol/sdk@${sdkVersion} is already published.\n`)
+    }
+  }
+
+  if (packageArg === 'publish') {
+    const reactVersion = getReactVersion()
+    console.log(`[Publish] React version in monorepo: ${reactVersion}`)
+    console.log('\n[Publish] Checking if @seedprotocol/react is published on npm...')
+    const reactPublished = await isReactVersionPublished(reactVersion)
+
+    if (!reactPublished) {
+      console.log(`\n⚠️  @seedprotocol/react@${reactVersion} is not published on npm.`)
+      console.log('   @seedprotocol/publish depends on it, so it must be published first.\n')
+
+      const answer = await prompt('Do you want to publish @seedprotocol/react now? (y/n): ')
+
+      if (answer !== 'y' && answer !== 'yes') {
+        console.log('\nAborted. Publish @seedprotocol/react first, then run this script again.')
+        process.exit(1)
+      }
+
+      try {
+        await publishReact(skipTests)
+      } catch (error) {
+        console.error('\n❌ @seedprotocol/react publish failed:', error.message)
+        process.exit(1)
+      }
+    } else {
+      console.log(`✅ @seedprotocol/react@${reactVersion} is already published.\n`)
     }
   }
 
