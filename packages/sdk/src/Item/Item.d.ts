@@ -56,8 +56,13 @@ export declare class Item<T extends ModelValues<ModelSchema>> implements IItem<T
     getEditedProperties: () => Promise<PropertyData[]>;
     publish: () => Promise<void>;
     unpublish: () => Promise<void>;
-    getPublishUploads: () => Promise<PublishUpload[]>;
-    getPublishPayload: (uploadedTransactions: any[]) => Promise<{
+    getPublishUploads: (
+        options?: import("../db/read/getPublishUploads").GetPublishUploadsOptions,
+    ) => Promise<PublishUpload[]>;
+    getPublishPayload: (
+        uploadedTransactions: any[],
+        options?: import("../db/read/getPublishPayload").GetPublishPayloadOptions,
+    ) => Promise<{
         localId: string;
         seedIsRevocable: boolean;
         seedSchemaUid: string;

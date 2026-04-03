@@ -9,7 +9,24 @@ import {
   getSegmentedItemProperties,
   Item,
 } from '@seedprotocol/sdk'
-import type { IItem, IItemProperty } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty, TransactionTag } from '@seedprotocol/sdk'
+
+/** Optional extra tags appended after Content-SHA-256 / Content-Type (mirrors SDK getPublishUploads). */
+export type GetPublishUploadDataOptions = {
+  arweaveUploadTags?: TransactionTag[]
+}
+
+const buildPublishUploadDataTags = (
+  contentHash: string | undefined,
+  contentType: string | undefined,
+  extra?: TransactionTag[],
+): TransactionTag[] => {
+  const tags: TransactionTag[] = []
+  if (contentHash) tags.push({ name: 'Content-SHA-256', value: contentHash })
+  if (contentType) tags.push({ name: 'Content-Type', value: contentType })
+  if (extra?.length) tags.push(...extra)
+  return tags
+}
 
 const getContentHash = async (data: Uint8Array | ArrayBuffer): Promise<string> => {
   const bytes = data instanceof Uint8Array ? new Uint8Array(data) : new Uint8Array(data)
@@ -63,6 +80,8 @@ export type PublishUploadData = {
   data: Uint8Array
   contentHash?: string
   contentType?: string
+  /** Full tag list for DataItem / bundler: content tags then configured arweaveUploadTags. */
+  tags: TransactionTag[]
   itemPropertyName: string
   itemPropertyLocalId: string
   seedLocalId: string
@@ -82,8 +101,10 @@ type ChildUploadData = {
 const processUploadPropertyData = async (
   uploadProperty: UploadProperty,
   uploads: PublishUploadData[],
-  relatedItemProperty?: IItemProperty<any>
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadDataOptions,
 ): Promise<PublishUploadData[]> => {
+  const extra = options?.arweaveUploadTags
   const itemProperty = uploadProperty.itemProperty
   const childUploads: ChildUploadData[] = []
 
@@ -155,6 +176,7 @@ const processUploadPropertyData = async (
     data: uint8Array,
     contentHash,
     contentType,
+    tags: buildPublishUploadDataTags(contentHash, contentType, extra),
     itemPropertyName,
     itemPropertyLocalId,
     seedLocalId: itemProperty.seedLocalId!,
@@ -164,9 +186,11 @@ const processUploadPropertyData = async (
 }
 
 const getStorageSeedUploadData = async (
-  itemStorageSeedProperties: IItemProperty<any>[]
+  itemStorageSeedProperties: IItemProperty<any>[],
+  options?: GetPublishUploadDataOptions,
 ): Promise<PublishUploadData[]> => {
   const uploads: PublishUploadData[] = []
+  const extra = options?.arweaveUploadTags
 
   for (const itemProperty of itemStorageSeedProperties) {
     const snapshot = itemProperty.getService().getSnapshot()
@@ -199,6 +223,7 @@ const getStorageSeedUploadData = async (
       data: fileContents,
       contentHash,
       contentType,
+      tags: buildPublishUploadDataTags(contentHash, contentType, extra),
       itemPropertyName: itemProperty.propertyName,
       itemPropertyLocalId: itemProperty.localId,
       seedLocalId,
@@ -211,16 +236,22 @@ const getStorageSeedUploadData = async (
 export const getPublishUploadData = async (
   item: IItem<any>,
   uploads: PublishUploadData[] = [],
-  relatedItemProperty?: IItemProperty<any>
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadDataOptions,
 ): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
 
   for (const uploadProperty of itemUploadProperties) {
-    uploads = await processUploadPropertyData(uploadProperty, uploads, relatedItemProperty)
+    uploads = await processUploadPropertyData(
+      uploadProperty,
+      uploads,
+      relatedItemProperty,
+      options,
+    )
   }
 
-  const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties)
+  const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
   uploads.push(...storageSeedUploads)
 
   for (const relationProperty of itemRelationProperties) {
@@ -236,7 +267,7 @@ export const getPublishUploadData = async (
     if (!relatedItem) {
       throw new Error(`No relatedItem found for ${relationProperty.propertyName}`)
     }
-    uploads = await getPublishUploadData(relatedItem, uploads, relationProperty)
+    uploads = await getPublishUploadData(relatedItem, uploads, relationProperty, options)
   }
 
   return uploads

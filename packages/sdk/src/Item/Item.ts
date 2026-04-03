@@ -924,18 +924,22 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     })
   }
 
-  getPublishUploads = async () => {
+  getPublishUploads = async (
+    options?: import('../db/read/getPublishUploads').GetPublishUploadsOptions,
+  ) => {
     // Use dynamic import to break circular dependency
     const getPublishUploadsMod = await import('../db/read/getPublishUploads')
     const { getPublishUploads } = getPublishUploadsMod
-    return await getPublishUploads(this)
+    return await getPublishUploads(this, [], undefined, options)
   }
 
-  getPublishPayload = async (uploadedTransactions: any[]) => {
-    // Use dynamic import to break circular dependency
+  getPublishPayload = async (
+    uploadedTransactions: any[],
+    options?: import('../db/read/getPublishPayload').GetPublishPayloadOptions,
+  ) => {
     const getPublishPayloadMod = await import('../db/read/getPublishPayload')
     const { getPublishPayload } = getPublishPayloadMod
-    return await getPublishPayload(this, uploadedTransactions)
+    return await getPublishPayload(this, uploadedTransactions, options)
   }
 
   persistSeedUid = async (publisher?: string): Promise<void> => {

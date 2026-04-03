@@ -1,5 +1,8 @@
-import { getCorrectId } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
+import {
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+} from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItem } from '@/interfaces'
 
@@ -55,8 +58,10 @@ export async function getRelatedItemsForPublish(
         value = meta?.propertyValue
       }
     }
-    if (!value) return
-    const { localId: seedLocalId, uid: seedUid } = getCorrectId(value as string)
+    const normalized = normalizeRelationPropertyValue(value)
+    if (!normalized) return
+    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
+    if (!seedLocalId && !seedUid) return
     const relatedItem = await getItem({ seedLocalId, seedUid })
     if (!relatedItem || relatedItem.seedUid) return
     const nested = await getRelatedItemsForPublish(relatedItem, visited)
@@ -82,7 +87,10 @@ export async function getRelatedItemsForPublish(
     }
     const arr = Array.isArray(value) ? value : []
     for (const seedId of arr) {
-      const { localId: seedLocalId, uid: seedUid } = getCorrectId(seedId as string)
+      const normalized = normalizeRelationPropertyValue(seedId)
+      if (!normalized) continue
+      const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalized)
+      if (!seedLocalId && !seedUid) continue
       const relatedItem = await getItem({ seedLocalId, seedUid })
       if (!relatedItem || relatedItem.seedUid) continue
       const nested = await getRelatedItemsForPublish(relatedItem, visited)

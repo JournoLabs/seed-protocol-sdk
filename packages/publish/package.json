@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.17",
+  "version": "0.4.20",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,12 +22,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")"
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
+    "test": "bun test src/helpers/*.test.ts"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
     "@seedprotocol/react": "workspace:*",
-    "@seedprotocol/sdk": "0.4.15",
+    "@seedprotocol/sdk": "workspace:*",
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",

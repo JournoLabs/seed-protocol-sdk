@@ -17,6 +17,14 @@ export const THIRDWEB_ACCOUNT_FACTORY_ADDRESS =
 export const EAS_CONTRACT_ADDRESS =
   '0x4200000000000000000000000000000000000021' as const
 
+/**
+ * SeedProtocol contract on Optimism Sepolia — same deployment as
+ * `helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148` (multiPublish ABI).
+ * The Thirdweb managed smart account address is not this contract; `multiPublish` must target this `to`.
+ */
+export const SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA =
+  '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const
+
 export const PublishMachineStates = {
   SUCCESS: 'success',
   FAILURE: 'failure',

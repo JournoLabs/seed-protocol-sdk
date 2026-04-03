@@ -122,6 +122,9 @@ export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
 /** Default Arweave gateway host used across all packages */
 export const DEFAULT_ARWEAVE_HOST = 'arweave.net'
 
+/** Default Arweave gateway GraphQL endpoint (transaction / block queries). */
+export const DEFAULT_ARWEAVE_GRAPHQL_URL = 'https://arweave.net/graphql'
+
 /** Default Arweave gateways for fallback / metadata fetching (ordered by preference) */
 export const DEFAULT_ARWEAVE_GATEWAYS = ['arweave.net', 'ar-io.net'] as const
 

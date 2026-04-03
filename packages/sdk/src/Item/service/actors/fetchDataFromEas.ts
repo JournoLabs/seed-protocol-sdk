@@ -7,7 +7,7 @@ import { BaseEasClient, BaseQueryClient } from '@/helpers'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> fetchDataFromEas -> Model
 // import { Model } from '@/Model/Model'
 import { modelPropertiesToObject } from '@/helpers/model'
-
+import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 
 import { FromCallbackInput, ItemMachineContext } from '@/types'
 
@@ -75,31 +75,14 @@ export const fetchDataFromEas = fromCallback<
           }),
       })
 
-      // Filter properties by schemaId
-      const selectedPropertiesMap: {
-        [schemaId: string]: Attestation[]
-      } = {}
-      itemProperties.forEach((property: Attestation) => {
-        const existingProperties = selectedPropertiesMap[property.schemaId] || []
-        existingProperties.push(property)
-        selectedPropertiesMap[property.schemaId] = existingProperties
-      })
+      const latest = pickLatestPropertyAttestationsByRefAndSchema(itemProperties as Attestation[])
+      const selectedPropertiesMap: { [schemaId: string]: Attestation[] } = {}
+      for (const property of latest) {
+        const sid = property.schemaId
+        if (!sid) continue
+        selectedPropertiesMap[sid] = [property]
+      }
 
-      // For each schemaId, sort property Attestations by timeCreated DESC
-      Object.keys(selectedPropertiesMap).forEach((schemaId) => {
-        const sorted = selectedPropertiesMap[schemaId].sort((a, b) => {
-          return a.timeCreated - b.timeCreated
-        })
-        selectedPropertiesMap[schemaId] = sorted
-      })
-
-      Object.keys(selectedPropertiesMap).forEach((schemaId) => {
-        // TODO: Finish this logic
-        // console.log('[singleItemActors] [fetchDataFromEas] schemaId', schemaId)
-        // sendBack({ type: 'addPropertyAttestation', schemaId })
-      })
-
-      // Attach processed properties to the itemService/itemMachine context
       sendBack({
         type: 'updatedPropertiesBySchemaUid',
         propertiesBySchemaUid: selectedPropertiesMap,

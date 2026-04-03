@@ -20,6 +20,7 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { spawn, execSync } from 'child_process'
 import * as readline from 'readline'
+import { withPublishableWorkspaceManifest } from './workspace-publish-manifest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -113,40 +114,42 @@ function runCommand(command, options = {}) {
   })
 }
 
-const SDK_BUILD_PUBLISH_CMD =
-  'bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && npm publish --access public'
+/** Build only (no npm publish); must stay in sync with packages/sdk build:publish inner command */
+const SDK_BUILD_ONLY_CMD =
+  'bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js'
 
 async function publishSdk(skipTests = false) {
+  const sdkDir = join(rootDir, 'packages', 'sdk')
   console.log('\n📦 Publishing @seedprotocol/sdk...\n')
   if (skipTests) {
-    await runCommand(
-      `node scripts/build-with-tests.js -f "${SDK_BUILD_PUBLISH_CMD}"`,
-      { cwd: rootDir }
-    )
+    await runCommand(`node scripts/build-with-tests.js -f "${SDK_BUILD_ONLY_CMD}"`, { cwd: rootDir })
   } else {
-    await runCommand('bun run build:publish', { cwd: join(rootDir, 'packages', 'sdk') })
+    await runCommand('bun run build:publish', { cwd: sdkDir })
   }
+  await withPublishableWorkspaceManifest(rootDir, 'packages/sdk', async () => {
+    await runCommand('npm publish --access public', { cwd: sdkDir })
+  })
   console.log('\n✅ SDK published successfully!\n')
 }
 
 async function publishReact(skipTests = false) {
-  console.log('\n📦 Publishing @seedprotocol/react...\n')
   const reactDir = join(rootDir, 'packages', 'react')
-  if (skipTests) {
-    await runCommand('npm publish --access public', { cwd: reactDir })
-  } else {
-    await runCommand(
-      'node scripts/build-with-tests.js "cd packages/react && npm publish --access public"',
-      { cwd: rootDir }
-    )
+  console.log('\n📦 Publishing @seedprotocol/react...\n')
+  if (!skipTests) {
+    await runCommand('node scripts/build-with-tests.js "true"', { cwd: rootDir })
   }
+  await withPublishableWorkspaceManifest(rootDir, 'packages/react', async () => {
+    await runCommand('npm publish --access public', { cwd: reactDir })
+  })
   console.log('\n✅ @seedprotocol/react published successfully!\n')
 }
 
 async function publishPackage(packageName) {
   const packageDir = join(rootDir, 'packages', packageName)
   console.log(`\n📦 Publishing @seedprotocol/${packageName}...\n`)
-  await runCommand('npm publish', { cwd: packageDir })
+  await withPublishableWorkspaceManifest(rootDir, `packages/${packageName}`, async () => {
+    await runCommand('npm publish', { cwd: packageDir })
+  })
   console.log(`\n✅ @seedprotocol/${packageName} published successfully!\n`)
 }
 

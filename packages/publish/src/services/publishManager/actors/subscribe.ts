@@ -43,6 +43,23 @@ export const subscribe = fromCallback<EventObject, SubscribeInput>(
       const stateValue = getStateValue(snapshot)
       if (isLongRunningState(stateValue) && periodicSaveIntervalId == null && managerRef) {
         periodicSaveIntervalId = setInterval(() => {
+          // Timer callbacks can run after transition to a non-long-running state or after
+          // completion (clearInterval does not remove an already-queued task). Never persist
+          // in that case — matches ~30s regressions seen as "Creating attestations" again.
+          try {
+            const live = publishProcess.getSnapshot() as { status?: string; value?: unknown }
+            if (live.status === 'done') {
+              clearPeriodicSave()
+              return
+            }
+            const liveValue = getStateValue(live)
+            if (!isLongRunningState(liveValue)) {
+              clearPeriodicSave()
+              return
+            }
+          } catch {
+            return
+          }
           managerRef?.savePublish(seedLocalId, publishProcess)
         }, PERIODIC_SAVE_INTERVAL_MS)
       } else if (!isLongRunningState(stateValue)) {

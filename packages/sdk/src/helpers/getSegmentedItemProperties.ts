@@ -94,7 +94,8 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
 
 
     const isStorageTransaction =
-      itemProperty.propertyName === 'storageTransactionId'
+      itemProperty.propertyName === 'storageTransactionId' ||
+      itemProperty.propertyName === 'storage_transaction_id'
 
     const isStorageSeedType =
       propertyDef.dataType === ModelPropertyDataTypes.Image ||

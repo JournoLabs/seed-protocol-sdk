@@ -11,6 +11,7 @@ type GetItemPropertiesFromEasProps = {
 };
 type GetItemPropertiesFromEas = (props: GetItemPropertiesFromEasProps) => Promise<Attestation[]>;
 export declare const getItemPropertiesFromEas: GetItemPropertiesFromEas;
+export declare const getCanonicalItemPropertiesFromEas: GetItemPropertiesFromEas;
 type GetSchemaUidBySchemaNameProps = {
     schemaName: string;
 };

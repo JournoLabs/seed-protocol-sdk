@@ -7,6 +7,7 @@ import { BaseFileManager } from './FileManager/BaseFileManager'
 import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './ArweaveClient/uploadApiVerification'
+export * from './ArweaveClient/arweaveL1UploadApi'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'
@@ -14,6 +15,8 @@ export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
 export * from './easRevokedFilter'
 export * from './metadataPropertyNames'
+export * from './relationSeedRef'
+export * from './easPropertyCanonical'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary

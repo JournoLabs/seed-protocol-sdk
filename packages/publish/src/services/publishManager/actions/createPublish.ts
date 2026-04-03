@@ -1,6 +1,7 @@
 import type { Item } from '@seedprotocol/sdk'
 import type { Account } from 'thirdweb/wallets'
 import { enqueueActions } from 'xstate'
+import { getPublishConfig } from '~/config'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
 
@@ -25,6 +26,17 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
       console.warn(`Publish process with seedLocalId "${item.seedLocalId}" already exists.`)
       return context
     }
+    const publishRunId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `run_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+
+    const publishCfg = getPublishConfig()
+    const arweaveUploadTags = [
+      ...(publishCfg.arweaveUploadTags ?? []),
+      ...(options?.arweaveUploadTags ?? []),
+    ]
+
     const publishProcess = spawn(publishMachine, {
       input: {
         item,
@@ -36,6 +48,9 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         dataItemSigner: options?.dataItemSigner,
         signArweaveTransactions: options?.signArweaveTransactions,
         arweaveJwk: options?.arweaveJwk,
+        publishMode: options?.publishMode ?? 'patch',
+        publishRunId,
+        arweaveUploadTags: arweaveUploadTags.length ? arweaveUploadTags : undefined,
       },
     })
 

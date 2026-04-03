@@ -29,6 +29,7 @@ export {
   properties,
   publishProcesses,
   uploadProcesses,
+  arweaveL1FinalizeJobs,
 } from './seedSchema'
 export type { SchemaType } from './seedSchema/SchemaSchema'
 export type { SeedType } from './seedSchema/SeedSchema'
@@ -50,22 +51,43 @@ export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
 export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas'
 
 export {
-  getModelSchemasFromEas, 
-  getItemVersionsFromEas, 
-  getItemPropertiesFromEas, 
+  getModelSchemasFromEas,
+  getItemVersionsFromEas,
+  getItemPropertiesFromEas,
+  getCanonicalItemPropertiesFromEas,
   getEasSchemaUidBySchemaName,
   getSeedsFromSchemaUids,
   getSeedsBySchemaName,
 } from './eas'
 
 export { getCorrectId, generateId, withExcludeRevokedFilter } from './helpers'
+export {
+  pickLatestPropertyAttestationsByRefAndSchema,
+} from './helpers/easPropertyCanonical'
+export type { AttestationLikeForCanonical } from './helpers/easPropertyCanonical'
 export { isItemOwned } from './helpers/ownership'
 
-export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS } from './helpers/constants'
+export {
+  SeedModels,
+  INTERNAL_DATA_TYPES,
+  VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+  DEFAULT_ARWEAVE_HOST,
+  DEFAULT_ARWEAVE_GATEWAYS,
+  DEFAULT_ARWEAVE_GRAPHQL_URL,
+} from './helpers/constants'
 export { getVersionsForSeedUid } from './db/read/getVersionsForSeedUid'
+export {
+  getPublishPendingDiff,
+} from './db/read/getPublishPendingDiff'
+export type {
+  PublishPendingPropertyDiff,
+  GetPublishPendingDiffResult,
+} from './db/read/getPublishPendingDiff'
+export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublishPayload'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
 export { updateSeedRevokedAt } from './db/write/updateSeedRevokedAt'
+export { applyArweaveL1TransactionIdLocal } from './db/write/applyArweaveL1TransactionIdLocal'
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
@@ -76,7 +98,12 @@ export {
   normalizeUploadApiBaseUrl,
   getUploadApiArweaveDataUrl,
   getUploadPipelineTransactionStatus,
+  getUploadApiArweaveStatusUrl,
+  getArweaveUploadStatus,
+  isArweaveL1AnchoringComplete,
+  queryArweaveGatewayTransaction,
 } from './helpers'
+export type { ArweaveUploadStatusResponse, ArweaveGatewayTransactionQueryResult } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
   setUploadExecutor,
@@ -109,7 +136,10 @@ export {
 } from './db/read/getPublishPayload'
 
 export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
-export { itemHasPublishUploadCandidates } from './db/read/getPublishUploads'
+export {
+  itemHasPublishUploadCandidates,
+  type GetPublishUploadsOptions,
+} from './db/read/getPublishUploads'
 
 export {
   updateModelProperties,

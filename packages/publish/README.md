@@ -110,6 +110,12 @@ PublishManager.createPublish(item, address, account, {
 
 You can also provide `signDataItems` or `dataItemSigner` in the PublishProvider config as a fallback when the signer is available at startup.
 
+### Arweave upload tags
+
+Add optional tags (e.g. `App-Name`) on **`PublishProvider` / `initPublish` config** as **`arweaveUploadTags`**, and/or per publish via **`createPublish` options**. Resolved order: **`[...configTags, ...perPublishTags]`**, appended after `Content-SHA-256` / `Content-Type` on each upload.
+
+When implementing **`signDataItems`**, use **`upload.tags`** as the tag list for each DataItem. Avoid rebuilding tags from `contentHash` / `contentType` only, or you will drop configured tags.
+
 ## Development
 
 ```bash

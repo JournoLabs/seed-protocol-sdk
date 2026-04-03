@@ -1,14 +1,23 @@
-import { BaseFileManager, getCorrectId } from '@/helpers'
+import { BaseFileManager } from '@/helpers'
+import {
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+} from '@/helpers/relationSeedRef'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
 import { getContentHash } from '@/helpers/crypto'
 import { Item } from '@/Item/Item'
-import type { ArweaveTransaction } from '@/types/arweave'
+import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
 import { PublishUpload } from '@/types/publish'
 
 const logger = debug('seedSdk:item:getPublishUploads')
+
+/** Optional tags merged into each Arweave tx after Content-SHA-256 / Content-Type. */
+export type GetPublishUploadsOptions = {
+  arweaveUploadTags?: TransactionTag[]
+}
 
 const EXTENSION_TO_MIME: Record<string, string> = {
   png: 'image/png',
@@ -39,8 +48,9 @@ export const prepareArweaveTransaction = async (
   data: string | Uint8Array,
   contentHash: string | undefined,
   contentType?: string,
+  additionalTags?: TransactionTag[],
 ): Promise<ArweaveTransaction> => {
-  const tags: { name: string; value: string }[] = []
+  const tags: TransactionTag[] = []
   if (contentHash) {
     tags.push({ name: 'Content-SHA-256', value: contentHash })
     logger('contentHash', contentHash)
@@ -48,6 +58,9 @@ export const prepareArweaveTransaction = async (
   }
   if (contentType) {
     tags.push({ name: 'Content-Type', value: contentType })
+  }
+  if (additionalTags?.length) {
+    tags.push(...additionalTags)
   }
 
   const tx = await BaseArweaveClient.createTransaction(data, {
@@ -75,8 +88,10 @@ const getStorageDirForDataType = (dataType: string): string => {
 
 const getStorageSeedUploads = async (
   itemStorageSeedProperties: IItemProperty<any>[],
+  options?: GetPublishUploadsOptions,
 ) => {
   const uploads: PublishUpload[] = []
+  const extra = options?.arweaveUploadTags
 
   for (const itemProperty of itemStorageSeedProperties) {
     const snapshot = itemProperty.getService().getSnapshot()
@@ -91,7 +106,9 @@ const getStorageSeedUploads = async (
     }
 
     // propertyValue is the storage seed's seedLocalId; use it for the upload so processRelationOrImageProperty can match
-    const { localId: seedLocalId } = getCorrectId(propertyValue)
+    const { seedLocalId } = resolveSeedIdsFromRefString(
+      normalizeRelationPropertyValue(propertyValue) ?? '',
+    )
     if (!seedLocalId) {
       continue
     }
@@ -118,6 +135,7 @@ const getStorageSeedUploads = async (
       fileContents,
       contentHash,
       contentType,
+      extra,
     )
 
     uploads.push({
@@ -161,7 +179,9 @@ async function storageSeedHasUploadCandidates(
       continue
     }
 
-    const { localId: seedLocalId } = getCorrectId(propertyValue)
+    const { seedLocalId } = resolveSeedIdsFromRefString(
+      normalizeRelationPropertyValue(propertyValue) ?? '',
+    )
     if (!seedLocalId) {
       continue
     }
@@ -251,7 +271,14 @@ export async function itemHasPublishUploadCandidates(
       continue
     }
 
-    const { localId: seedLocalId, uid: seedUid } = getCorrectId(propertyValue)
+    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(
+      normalizeRelationPropertyValue(propertyValue) ?? '',
+    )
+    if (!seedLocalId && !seedUid) {
+      throw new Error(
+        `Invalid relation value for ${relationProperty.propertyName}: expected local seed id or 0x uid`,
+      )
+    }
 
     const relatedItem = await Item.find({
       seedLocalId,
@@ -276,7 +303,9 @@ const processUploadProperty = async (
   uploadProperty: UploadProperty,
   uploads: PublishUpload[],
   relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadsOptions,
 ): Promise<PublishUpload[]> => {
+  const extra = options?.arweaveUploadTags
   const itemProperty = uploadProperty.itemProperty
 
   const childUploads: ChildUploadData[] = []
@@ -375,6 +404,7 @@ const processUploadProperty = async (
     uint8Array,
     contentHash,
     contentType,
+    extra,
   )
 
   let itemPropertyLocalId = relatedItemProperty
@@ -399,6 +429,7 @@ export const getPublishUploads = async (
   item: IItem<any>,
   uploads: PublishUpload[] = [],
   relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadsOptions,
 ) => {
   // if (item.modelName === 'Post') {
   //   if (!item.authors) {
@@ -417,10 +448,11 @@ export const getPublishUploads = async (
       uploadProperty,
       uploads,
       relatedItemProperty,
+      options,
     )
   }
 
-  const storageSeedUploads = await getStorageSeedUploads(itemImageProperties)
+  const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
   uploads.push(...storageSeedUploads)
 
   for (const relationProperty of itemRelationProperties) {
@@ -435,7 +467,14 @@ export const getPublishUploads = async (
       continue
     }
 
-    const { localId: seedLocalId, uid: seedUid } = getCorrectId(propertyValue)
+    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(
+      normalizeRelationPropertyValue(propertyValue) ?? '',
+    )
+    if (!seedLocalId && !seedUid) {
+      throw new Error(
+        `Invalid relation value for ${relationProperty.propertyName}: expected local seed id or 0x uid`,
+      )
+    }
 
     const relatedItem = await Item.find({
       seedLocalId,
@@ -448,7 +487,7 @@ export const getPublishUploads = async (
       )
     }
 
-    uploads = await getPublishUploads(relatedItem, uploads, relationProperty)
+    uploads = await getPublishUploads(relatedItem, uploads, relationProperty, options)
   }
 
   return uploads

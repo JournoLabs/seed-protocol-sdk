@@ -1,5 +1,7 @@
+import type { IItem, TransactionTag } from '@seedprotocol/sdk'
 
-import type { IItem } from '@seedprotocol/sdk'
+/** Aligns with `@seedprotocol/sdk` `PublishMode`. */
+export type PublishMode = 'patch' | 'new_version'
 import type { Account } from 'thirdweb/wallets'
 import type { ethers } from 'ethers'
 
@@ -52,7 +54,10 @@ export interface PublishMachineContext {
   easPayload?: unknown
   /** Signed DataItems for uploadViaBundler (dataItemSigner path only - signed FileDataItem instances for upload). */
   signedDataItems?: { id: string; raw: Uint8Array }[]
-  /** Per-publish: sign DataItems when useArweaveBundler (from createPublish options). */
+  /**
+   * Per-publish: sign DataItems when useArweaveBundler (from createPublish options).
+   * Each upload has `tags` (content + arweaveUploadTags); use when building DataItems.
+   */
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<import('./config').ArweaveDataItemInfoResult[]>
@@ -64,5 +69,17 @@ export interface PublishMachineContext {
   ) => Promise<import('./config').ArweaveTransactionInfoResult[]>
   /** Per-publish: JWK for in-process signing when NOT useArweaveBundler (from createPublish options). */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
+  /**
+   * Resolved Arweave tags for this run: initPublish defaults then createPublish extras.
+   * Appended after Content-SHA-256 / Content-Type on each upload.
+   */
+  arweaveUploadTags?: TransactionTag[]
+  /** `patch` (default): attest only pending properties on current Version. `new_version`: new Version + full snapshot. */
+  publishMode?: PublishMode
+  /**
+   * Unique id for this publish actor run. Used to ignore async stale DB writes that would
+   * INSERT a duplicate row after the same run already completed.
+   */
+  publishRunId?: string
   [key: string]: unknown
 }

@@ -192,6 +192,24 @@ PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE UNIQUE INDEX \`property_uids_property_id_unique\` ON \`property_uids\` (\`property_id\`);--> statement-breakpoint
 ALTER TABLE \`metadata\` ADD \`property_id\` integer REFERENCES properties(id);`
 
+export const migrationSql_0010_add_arweave_l1_finalize_jobs = `CREATE TABLE \`arweave_l1_finalize_jobs\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`seed_local_id\` text NOT NULL,
+	\`data_item_id\` text NOT NULL,
+	\`l1_transaction_id\` text,
+	\`bundle_id\` text,
+	\`version_local_id\` text,
+	\`item_property_name\` text,
+	\`phase\` text NOT NULL,
+	\`status_json\` text,
+	\`error_message\` text,
+	\`created_at\` integer NOT NULL,
+	\`updated_at\` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX \`arweave_l1_finalize_jobs_data_item_id_unique\` ON \`arweave_l1_finalize_jobs\` (\`data_item_id\`);
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -266,6 +284,13 @@ export const journalJson = `{
       "when": 1773924021107,
       "tag": "0009_happy_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1774000000000,
+      "tag": "0010_add_arweave_l1_finalize_jobs",
+      "breakpoints": true
     }
   ]
 }`
@@ -275,8 +300,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff040f54-6cfc-4d32-a572-2f08870c5b85",
-  "prevId": "c8d9e0f1-a2b3-4c8d-9e0f-123456789012",
+  "id": "ff2318d5-236f-4157-82ae-10ccb44c0e0c",
+  "prevId": "ff040f54-6cfc-4d32-a572-2f08870c5b85",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1331,6 +1356,108 @@ export const snapshotJson = `{
           "name": "versions_local_id_unique",
           "columns": [
             "local_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "arweave_l1_finalize_jobs": {
+      "name": "arweave_l1_finalize_jobs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "data_item_id": {
+          "name": "data_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "l1_transaction_id": {
+          "name": "l1_transaction_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bundle_id": {
+          "name": "bundle_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version_local_id": {
+          "name": "version_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_property_name": {
+          "name": "item_property_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status_json": {
+          "name": "status_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "arweave_l1_finalize_jobs_data_item_id_unique": {
+          "name": "arweave_l1_finalize_jobs_data_item_id_unique",
+          "columns": [
+            "data_item_id"
           ],
           "isUnique": true
         }

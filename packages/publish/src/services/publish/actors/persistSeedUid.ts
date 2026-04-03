@@ -7,19 +7,26 @@ const ZERO_BYTES32 = '0x' + '0'.repeat(64)
 /** Timeout for persistSeedUid. Attestations are already on-chain; DB write is best-effort. */
 const PERSIST_SEED_UID_TIMEOUT_MS = 15_000
 
-export type RequestWithSeedUid = { seedUid?: string }
+export type RequestWithSeedUid = { seedUid?: string; localId?: string }
 
 /**
- * Assigns the first request's non-zero seedUid to the item so the SDK's
- * in-memory context is updated after a successful publish.
+ * Assigns the published item's seedUid from the matching request (by item.seedLocalId).
+ * Multi-publish payloads are ordered so the first request is not always the root item (e.g. Image before Post).
  */
 export function persistSeedUidFromPublishResult(
-  item: { seedUid?: string },
+  item: { seedUid?: string; seedLocalId?: string },
   normalizedRequests: RequestWithSeedUid[],
 ): void {
-  const firstRequestSeedUid = normalizedRequests[0]?.seedUid
-  if (firstRequestSeedUid && firstRequestSeedUid !== ZERO_BYTES32) {
-    ;(item as { seedUid?: string }).seedUid = firstRequestSeedUid
+  const seedLocalId = item.seedLocalId
+  const match = seedLocalId
+    ? normalizedRequests.find((r) => r?.localId === seedLocalId)
+    : undefined
+  const uid =
+    match?.seedUid && match.seedUid !== ZERO_BYTES32
+      ? match.seedUid
+      : normalizedRequests[0]?.seedUid
+  if (uid && uid !== ZERO_BYTES32) {
+    item.seedUid = uid
   }
 }
 

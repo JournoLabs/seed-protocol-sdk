@@ -5,6 +5,22 @@ import debug from 'debug'
 
 const logger = debug('seedProtocol:services:PublishManager:actors:savePublish')
 
+/**
+ * Multiple savePublish actors can be in flight per seed (subscribe + periodic + final).
+ * SQLite writes complete in completion order, not invocation order — a slower stale write
+ * can finish after the terminal save, miss the in_progress row (already completed), and
+ * INSERT a new row with an intermediate snapshot. That makes UIs jump back to e.g.
+ * creatingAttestations seconds after success. Serialize the actual DB work per seedLocalId.
+ */
+const saveWriteTailBySeed = new Map<string, Promise<void>>()
+
+function enqueueSaveWrite(seedLocalId: string, write: () => Promise<void>): Promise<void> {
+  const prev = saveWriteTailBySeed.get(seedLocalId) ?? Promise.resolve()
+  const next = prev.then(write)
+  saveWriteTailBySeed.set(seedLocalId, next.catch(() => {}))
+  return next
+}
+
 function statusFromSnapshot(snapshot: { status?: string; value?: unknown }): 'in_progress' | 'completed' | 'failed' | 'interrupted' {
   if (snapshot.status === 'done') {
     if (snapshot.value === 'success') return 'completed'
@@ -20,6 +36,17 @@ const MAX_ERROR_DETAILS_LENGTH = 2000
 /** JSON.stringify cannot serialize BigInt; publish context (e.g. gas, tx fields) may contain bigint. */
 function jsonStringifyPersistedSnapshot(value: unknown): string {
   return JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
+}
+
+/** XState persisted snapshots usually have `context` at the root; some shapes nest it. */
+function publishRunIdFromSnapshot(snapshot: unknown): string | undefined {
+  if (snapshot == null || typeof snapshot !== 'object') return undefined
+  const s = snapshot as Record<string, unknown>
+  const nested = s.snapshot as { context?: { publishRunId?: string } } | undefined
+  const ctx =
+    (s.context as { publishRunId?: string } | undefined) ?? nested?.context
+  const id = ctx?.publishRunId
+  return typeof id === 'string' && id.length > 0 ? id : undefined
 }
 
 function errorFieldsFromContext(context: { error?: unknown; errorStep?: string } | undefined, status: 'in_progress' | 'completed' | 'failed' | 'interrupted') {
@@ -54,6 +81,7 @@ export const savePublish = fromCallback<
     status?: string
     value?: unknown
     context?: {
+      publishRunId?: string
       modelName?: string
       schemaId?: string
       item?: { seedLocalId: string; seedUid?: string; modelName?: string; schemaId?: string }
@@ -96,6 +124,35 @@ export const savePublish = fromCallback<
         })
         .where(eq(publishProcesses.id, rec.id!))
     } else {
+      // No in_progress row: either first save of a new run, or a stale async save after the row
+      // was already moved to completed (INSERT would create a duplicate with a newer startedAt).
+      const incomingRunId = publishRunIdFromSnapshot(snapshot)
+      if (incomingRunId != null && status === 'in_progress' && snapshot.status !== 'done') {
+        const latestAny = await db
+          .select()
+          .from(publishProcesses)
+          .where(eq(publishProcesses.seedLocalId, seedLocalId))
+          .orderBy(desc(publishProcesses.startedAt))
+          .limit(1)
+        const latest = latestAny[0]
+        if (latest && (latest.status === 'completed' || latest.status === 'failed')) {
+          try {
+            const prevParsed = JSON.parse(latest.persistedSnapshot) as unknown
+            const terminalRunId = publishRunIdFromSnapshot(prevParsed)
+            if (terminalRunId === incomingRunId) {
+              logger(
+                'savePublish: skip stale insert — same publishRunId as latest terminal row',
+                seedLocalId,
+                incomingRunId,
+              )
+              return
+            }
+          } catch {
+            /* ignore parse errors; proceed with insert */
+          }
+        }
+      }
+
       const item = snapshot.context?.item
       const modelName = snapshot.context?.modelName ?? item?.modelName ?? ''
       const schemaId = snapshot.context?.schemaId ?? item?.schemaId
@@ -113,10 +170,12 @@ export const savePublish = fromCallback<
     }
   }
 
-  _save().then(() => {
-    sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
-  }).catch((err) => {
-    logger('savePublish error', err)
-    sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
-  })
+  enqueueSaveWrite(seedLocalId, _save)
+    .then(() => {
+      sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
+    })
+    .catch((err) => {
+      logger('savePublish error', err)
+      sendBack({ type: 'SAVE_PUBLISH_DONE', seedLocalId, triggerPublishDone })
+    })
 })

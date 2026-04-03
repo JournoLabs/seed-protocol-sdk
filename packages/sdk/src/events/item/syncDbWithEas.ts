@@ -30,7 +30,13 @@ import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { getItemPropertiesFromEas, getItemVersionsFromEas, getModelSchemasFromEas, getSeedsFromSchemaUids } from '@/eas'
+import {
+  getItemPropertiesFromEas,
+  getItemVersionsFromEas,
+  getModelSchemasFromEas,
+  getSeedsFromSchemaUids,
+} from '@/eas'
+import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 
 
@@ -716,10 +722,11 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     itemVersions,
   })
 
-  const itemProperties = await getItemPropertiesFromEas({
+  const rawProperties = await getItemPropertiesFromEas({
     versionUids,
     excludeRevoked: false,
   })
+  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
   await saveEasPropertiesToDb({
     itemProperties,

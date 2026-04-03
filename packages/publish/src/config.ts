@@ -1,4 +1,10 @@
-import { setAdditionalSyncAddresses, setGetPublisherForNewSeeds, setRevokeExecutor } from '@seedprotocol/sdk'
+import {
+  DEFAULT_ARWEAVE_GRAPHQL_URL,
+  setAdditionalSyncAddresses,
+  setGetPublisherForNewSeeds,
+  setRevokeExecutor,
+  type TransactionTag,
+} from '@seedprotocol/sdk'
 import { getConnectedManagedAccountAddress } from './helpers/thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
@@ -39,6 +45,11 @@ export interface PublishConfig {
    */
   arweaveUploadVerificationBaseUrl?: string
   /**
+   * Arweave gateway GraphQL URL for resolving L1 bundle tx ids after bundler upload.
+   * Defaults to {@link DEFAULT_ARWEAVE_GRAPHQL_URL}.
+   */
+  arweaveGraphqlUrl?: string
+  /**
    * Use integer indices instead of string localId/publishLocalId for multiPublish (gas-efficient).
    * Set to true when using the new contract that expects uint256 localIdIndex/publishLocalIdIndex.
    * Default: false (uses string-based payload for backward compatibility).
@@ -50,8 +61,9 @@ export interface PublishConfig {
    */
   useDirectEas?: boolean
   /**
-   * Optional IModularCore module to ensure is installed on the connected account contract.
-   * When set, onConnect will check getInstalledModules and install if missing.
+   * Optional IModularCore module to ensure is installed on the **ModularCore** account contract.
+   * When set, onConnect / publish prep will check getInstalledModules and install if missing.
+   * If the smart account is not ModularCore (no Router), install is skipped — typical for default EIP-4337 accounts.
    */
   modularAccountModuleContract?: string
   /** Optional module install data (default "0x"). Used with modularAccountModuleContract. */
@@ -62,11 +74,26 @@ export interface PublishConfig {
    */
   useModularExecutor?: boolean
   /**
+   * When true (and `useModularExecutor`), attempts to deploy the ManagedAccount via the factory
+   * if it is not yet deployed on Optimism Sepolia. Default: false (surface `managed_not_ready` instead).
+   */
+  autoDeployManagedAccount?: boolean
+  /**
+   * Called when optional wallet setup steps fail after connect (e.g. executor module install).
+   */
+  onWalletSetupWarning?: (error: unknown) => void
+  /**
    * EXPERIMENTAL: Use Arweave bundler for instant uploads instead of reimbursement + chunk upload.
    * When true, skips sendReimbursementRequest, pollForConfirmation, and chunk-by-chunk uploadData.
    * Uses uploadApiBaseUrl for the bundler endpoint. Not yet validated for production.
    */
   useArweaveBundler?: boolean
+  /**
+   * Tags appended to every Arweave upload after Content-SHA-256 / Content-Type (e.g. App-Name).
+   * Merged at publish time with {@link CreatePublishOptions.arweaveUploadTags} as
+   * `[...config, ...options]`.
+   */
+  arweaveUploadTags?: TransactionTag[]
   /**
    * Optional fallback: Sign Arweave upload transactions (non-bundler path). Prefer passing at createPublish time.
    */
@@ -83,6 +110,7 @@ export interface PublishConfig {
   dataItemSigner?: ethers.Wallet | import('thirdweb/wallets').Account
   /**
    * Optional fallback: Sign DataItems when useArweaveBundler is true. Prefer passing at createPublish time.
+   * Each upload includes `tags` (content + configured {@link arweaveUploadTags}); forward them into the DataItem.
    */
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
@@ -91,7 +119,12 @@ export interface PublishConfig {
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
 export interface CreatePublishOptions {
-  /** Required when useArweaveBundler: sign DataItems (wallet flow) */
+  /** `patch` (default): pending properties only. `new_version`: new Version attestation + all properties. */
+  publishMode?: import('./types').PublishMode
+  /**
+   * Required when useArweaveBundler: sign DataItems (wallet flow).
+   * Use each upload's `tags` when building the signed DataItem.
+   */
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<ArweaveDataItemInfoResult[]>
@@ -103,6 +136,11 @@ export interface CreatePublishOptions {
   ) => Promise<ArweaveTransactionInfoResult[]>
   /** Required when NOT useArweaveBundler: JWK for in-process signing */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
+  /**
+   * Extra tags for this publish only, appended after {@link PublishConfig.arweaveUploadTags}.
+   * Resolved order: `[...initPublishTags, ...theseTags]`.
+   */
+  arweaveUploadTags?: TransactionTag[]
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */
@@ -137,6 +175,9 @@ export function initPublish(c: PublishConfig): void {
     }
   })
   setRevokeExecutor(revokeAttestations)
+  void import('./services/arweaveL1Finalize/worker').then((m) => {
+    m.startArweaveL1FinalizeWorker()
+  })
   setAdditionalSyncAddresses(async () => {
     if (c.useModularExecutor && c.modularAccountModuleContract) {
       return [c.modularAccountModuleContract]
@@ -153,12 +194,16 @@ export interface ResolvedPublishConfig extends PublishConfig {
   uploadApiBaseUrl: string
   /** Resolved verification origin (defaults to uploadApiBaseUrl). */
   arweaveUploadVerificationBaseUrl: string
+  /** Resolved GraphQL endpoint for L1 tx resolution (defaults to DEFAULT_ARWEAVE_GRAPHQL_URL). */
+  arweaveGraphqlUrl: string
   easContractAddress: string
   useIntegerLocalIds: boolean
   useDirectEas: boolean
   modularAccountModuleData: string
   useModularExecutor: boolean
   useArweaveBundler: boolean
+  /** Resolved: defaults to false. */
+  autoDeployManagedAccount: boolean
 }
 
 /**
@@ -175,6 +220,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
   const useArweaveBundler = config.useArweaveBundler ?? false
   const arweaveUploadVerificationBaseUrl =
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
+  const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
   return {
     ...config,
     thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
@@ -185,5 +231,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
     useModularExecutor: config.useModularExecutor ?? false,
     useArweaveBundler,
     arweaveUploadVerificationBaseUrl,
+    arweaveGraphqlUrl,
+    autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,
   }
 }

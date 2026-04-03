@@ -8,11 +8,11 @@ export const query = enqueueActions(({ context, event, enqueue }) => {
     return
   }
 
-  publishProcess.stop()
+  enqueue.stopChild(publishProcess)
 
   const subscriptionProcess = context.subscriptions.get(seedLocalId)
   if (subscriptionProcess) {
-    subscriptionProcess.stop()
+    enqueue.stopChild(subscriptionProcess)
   }
 
   const newPublishProcesses = new Map(context.publishProcesses)

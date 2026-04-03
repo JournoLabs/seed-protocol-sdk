@@ -1,6 +1,7 @@
 // Dynamic import to break circular dependency: syncDbWithEas -> stores/eas -> eas -> Model
 import { getAddress } from "ethers"
 import { toSnakeCase, withExcludeRevokedFilter } from "@/helpers"
+import { pickLatestPropertyAttestationsByRefAndSchema } from "@/helpers/easPropertyCanonical"
 import { BaseEasClient } from "@/helpers/EasClient/BaseEasClient"
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient"
 import { GET_PROPERTIES, GET_SCHEMAS, GET_SEEDS, GET_VERSIONS } from "@/Item/queries"
@@ -121,6 +122,11 @@ type GetItemPropertiesFromEas = (
   props: GetItemPropertiesFromEasProps,
 ) => Promise<Attestation[]>
 
+/**
+ * Returns all property attestations for the given Version UIDs. May include multiple
+ * rows per schema (patch updates). Use `pickLatestPropertyAttestationsByRefAndSchema`
+ * from `@seedprotocol/sdk` to resolve canonical values per `(refUID, schemaId)`.
+ */
 export const getItemPropertiesFromEas: GetItemPropertiesFromEas = async ({
   versionUids,
   excludeRevoked = true,
@@ -141,6 +147,16 @@ export const getItemPropertiesFromEas: GetItemPropertiesFromEas = async ({
   })
 
   return itemProperties
+}
+
+/**
+ * Same query as {@link getItemPropertiesFromEas}, then keeps the **canonical** attestation per
+ * `(refUID, schemaId)` (newest `timeCreated`). Recommended for display and app logic; use
+ * {@link getItemPropertiesFromEas} when you need every row (e.g. auditing).
+ */
+export const getCanonicalItemPropertiesFromEas: GetItemPropertiesFromEas = async (props) => {
+  const itemProperties = await getItemPropertiesFromEas(props)
+  return pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
 }
 
 type GetSchemaUidBySchemaNameProps = {

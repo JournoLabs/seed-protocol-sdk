@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/ghost",
-  "version": "0.4.17",
+  "version": "0.4.20",
   "description": "Ghost CMS integration for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,10 +22,10 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")"
+    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
-    "@seedprotocol/sdk": "0.4.14",
+    "@seedprotocol/sdk": "workspace:*",
     "@tryghost/admin-api": "^1.14.6"
   },
   "devDependencies": {

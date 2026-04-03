@@ -1,3 +1,4 @@
+import type { GetPublishUploadsOptions } from '@seedprotocol/sdk'
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
@@ -22,7 +23,11 @@ export const createArweaveTransactions = fromPromise(
       item = await waitForItem(item.seedLocalId)
     }
 
-    const publishUploads = await item.getPublishUploads()
+    let publishOpts: GetPublishUploadsOptions | undefined
+    if (context.arweaveUploadTags?.length) {
+      publishOpts = { arweaveUploadTags: context.arweaveUploadTags }
+    }
+    const publishUploads = await item.getPublishUploads(publishOpts)
 
     const config = getPublishConfig()
     const signArweaveTransactions = context.signArweaveTransactions ?? config.signArweaveTransactions

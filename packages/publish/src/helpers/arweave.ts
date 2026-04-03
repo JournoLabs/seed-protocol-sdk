@@ -26,6 +26,37 @@ interface Tag {
   value: string
 }
 
+const ANCHOR_LENGTH = 32
+
+/**
+ * 32-byte ANS-104 anchor for publish uniqueness (timestamp + signer + nonce).
+ * Matches arbundles: presence flag + exactly 32 bytes when set.
+ */
+const UINT64_MASK = 0xffffffffffffffffn
+
+export function buildPublishAnchorBytes(
+  walletAddress: string,
+  timestampMs: number,
+  uniqueness: bigint,
+): Uint8Array {
+  const hash = ethers.solidityPackedKeccak256(
+    ['uint256', 'address', 'uint64'],
+    [BigInt(timestampMs), walletAddress, uniqueness & UINT64_MASK],
+  )
+  return ethers.getBytes(hash)
+}
+
+function encodeTargetOrAnchorSection(raw: Uint8Array): Uint8Array {
+  if (raw.length === 0) return new Uint8Array([0])
+  if (raw.length !== ANCHOR_LENGTH) {
+    throw new Error(`ANS-104 target/anchor must be empty or ${ANCHOR_LENGTH} bytes, got ${raw.length}`)
+  }
+  const out = new Uint8Array(1 + ANCHOR_LENGTH)
+  out[0] = 1
+  out.set(raw, 1)
+  return out
+}
+
 /**
  * Type guard: true if signer is ethers.Wallet (has privateKey). Thirdweb Account does not.
  */
@@ -165,16 +196,22 @@ async function getSignatureData(
 /**
  * Build the ANS-104 message bytes (everything from owner onward) for the raw DataItem.
  */
-function buildMessageBytes(ownerBytes: Uint8Array, tags: Tag[], data: Uint8Array): Uint8Array {
+function buildMessageBytes(
+  ownerBytes: Uint8Array,
+  tags: Tag[],
+  data: Uint8Array,
+  rawTarget: Uint8Array,
+  rawAnchor: Uint8Array,
+): Uint8Array {
   const serializedTags = serializeTags(tags)
   const numTagsBytes = writeUint64LE(tags.length)
   const numTagBytesBytes = writeUint64LE(serializedTags.length)
-  const targetFlag = new Uint8Array([0])
-  const anchorFlag = new Uint8Array([0])
+  const targetSection = encodeTargetOrAnchorSection(rawTarget)
+  const anchorSection = encodeTargetOrAnchorSection(rawAnchor)
   const messageparts = [
     ownerBytes,
-    targetFlag,
-    anchorFlag,
+    targetSection,
+    anchorSection,
     numTagsBytes,
     numTagBytesBytes,
     serializedTags,
@@ -217,12 +254,12 @@ export const createSignedDataItem = async (
   data: Uint8Array,
   signer: ethers.Wallet,
   tags: Tag[],
+  rawAnchor: Uint8Array = new Uint8Array(0),
 ): Promise<{ id: string; raw: Uint8Array }> => {
   const pubKeyHex = ethers.SigningKey.computePublicKey(signer.privateKey, false)
   const ownerBytes = ethers.getBytes(pubKeyHex)
   const serializedTags = serializeTags(tags)
   const rawTarget = new Uint8Array(0)
-  const rawAnchor = new Uint8Array(0)
 
   const signatureData = await getSignatureData(
     ownerBytes,
@@ -233,7 +270,7 @@ export const createSignedDataItem = async (
   )
   const signature = ethers.getBytes(await signer.signMessage(signatureData))
 
-  const message = buildMessageBytes(ownerBytes, tags, data)
+  const message = buildMessageBytes(ownerBytes, tags, data, rawTarget, rawAnchor)
   return assembleDataItemAndId(signature, message)
 }
 
@@ -245,6 +282,7 @@ export const createSignedDataItemWithAccount = async (
   data: Uint8Array,
   account: Account,
   tags: Tag[],
+  rawAnchor: Uint8Array = new Uint8Array(0),
 ): Promise<{ id: string; raw: Uint8Array }> => {
   // 1. Recover public key via placeholder sign (Account has no privateKey)
   const placeholderHex = ethers.hexlify(PLACEHOLDER_MESSAGE) as `0x${string}`
@@ -258,7 +296,6 @@ export const createSignedDataItemWithAccount = async (
   // 2. Build signature data (deep-hash) and sign it
   const serializedTags = serializeTags(tags)
   const rawTarget = new Uint8Array(0)
-  const rawAnchor = new Uint8Array(0)
   const signatureData = await getSignatureData(
     ownerBytes,
     rawTarget,
@@ -273,8 +310,44 @@ export const createSignedDataItemWithAccount = async (
   const signature = ethers.getBytes(sigHex)
 
   // 3. Assemble and return
-  const message = buildMessageBytes(ownerBytes, tags, data)
+  const message = buildMessageBytes(ownerBytes, tags, data, rawTarget, rawAnchor)
   return assembleDataItemAndId(signature, message)
+}
+
+const OWNER_LENGTH_ETHEREUM = 65
+
+/**
+ * Byte offset of the tags section (8-byte tag count + 8-byte tag bytes length + tags + data).
+ * Mirrors arbundles DataItem.getTagsStart / getAnchorStart.
+ */
+function getTagsStartOffset(raw: Uint8Array): number | null {
+  const targetStart = 2 + SIG_LENGTH + OWNER_LENGTH_ETHEREUM
+  if (raw.length < targetStart + 1) return null
+  const targetFlag = raw[targetStart]!
+  if (targetFlag !== 0 && targetFlag !== 1) return null
+  const targetPresent = targetFlag === 1
+  if (targetPresent && raw.length < targetStart + 33) return null
+  let pos = targetStart + (targetPresent ? 33 : 1)
+  if (raw.length < pos + 1) return null
+  const anchorFlag = raw[pos]!
+  if (anchorFlag !== 0 && anchorFlag !== 1) return null
+  const anchorPresent = anchorFlag === 1
+  if (anchorPresent && raw.length < pos + 33) return null
+  return pos + (anchorPresent ? 33 : 1)
+}
+
+function sliceTargetAndAnchor(
+  raw: Uint8Array,
+): { rawTarget: Uint8Array; rawAnchor: Uint8Array; tagsStart: number } | null {
+  const tagsStart = getTagsStartOffset(raw)
+  if (tagsStart == null) return null
+  const targetStart = 2 + SIG_LENGTH + OWNER_LENGTH_ETHEREUM
+  const targetPresent = raw[targetStart] === 1
+  const rawTarget = targetPresent ? raw.slice(targetStart + 1, targetStart + 33) : new Uint8Array(0)
+  const anchorStart = targetStart + (targetPresent ? 33 : 1)
+  const anchorPresent = raw[anchorStart] === 1
+  const rawAnchor = anchorPresent ? raw.slice(anchorStart + 1, anchorStart + 33) : new Uint8Array(0)
+  return { rawTarget, rawAnchor, tagsStart }
 }
 
 /**
@@ -282,7 +355,9 @@ export const createSignedDataItemWithAccount = async (
  * Uses deep-hash for the expected message (per arbundles/Irys).
  */
 export async function verifyDataItem(raw: Uint8Array): Promise<boolean> {
-  const tagsStart = 2 + SIG_LENGTH + 65 + 1 + 1 // after owner, target flag, anchor flag
+  const parsed = sliceTargetAndAnchor(raw)
+  if (parsed == null) return false
+  const { rawTarget, rawAnchor, tagsStart } = parsed
   const minLength = tagsStart + 16
   if (raw.length < minLength) return false
 
@@ -291,9 +366,7 @@ export async function verifyDataItem(raw: Uint8Array): Promise<boolean> {
   if (sigType !== SIG_TYPE_ETHEREUM) return false
 
   const signature = raw.slice(2, 2 + SIG_LENGTH)
-  const ownerBytes = raw.slice(2 + SIG_LENGTH, 2 + SIG_LENGTH + 65)
-  const rawTarget = new Uint8Array(0)
-  const rawAnchor = new Uint8Array(0)
+  const ownerBytes = raw.slice(2 + SIG_LENGTH, 2 + SIG_LENGTH + OWNER_LENGTH_ETHEREUM)
 
   const numTagBytes = Number(
     view.getUint32(tagsStart + 8, true) + view.getUint32(tagsStart + 12, true) * 0x100000000

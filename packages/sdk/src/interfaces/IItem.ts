@@ -10,8 +10,13 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   getEditedProperties(): Promise<PropertyData[]>
   publish(): Promise<void>
   unpublish(): Promise<void>
-  getPublishUploads(): Promise<any>
-  getPublishPayload(uploadedTransactions: any[]): Promise<any>
+  getPublishUploads(
+    options?: import('@/db/read/getPublishUploads').GetPublishUploadsOptions,
+  ): Promise<any>
+  getPublishPayload(
+    uploadedTransactions: any[],
+    options?: { publishMode?: 'patch' | 'new_version' },
+  ): Promise<any>
   persistSeedUid(publisher?: string): Promise<void>
   unload(): void
   destroy(): Promise<void>

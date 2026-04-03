@@ -182,6 +182,19 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
       
       expect(allCreated).toHaveLength(3)
     })
+
+    it('prepareArweaveTransaction merges additional tags after content tags', async () => {
+      const { prepareArweaveTransaction } = await import('@/db/read/getPublishUploads')
+      await prepareArweaveTransaction('data', 'abc', 'text/plain', [
+        { name: 'App-Name', value: 'SeedProtocol' },
+      ])
+      const created = MockArweaveClient.getLastCreatedTransaction()
+      expect(created?.tags).toEqual([
+        { name: 'Content-SHA-256', value: 'abc' },
+        { name: 'Content-Type', value: 'text/plain' },
+        { name: 'App-Name', value: 'SeedProtocol' },
+      ])
+    })
   })
 
   describe('Tag Retrieval Flow', () => {

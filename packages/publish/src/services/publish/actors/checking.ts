@@ -15,7 +15,7 @@ export const checking = fromCallback<
   EventObject, 
   FromCallbackInput<PublishMachineContext>
 >(( {sendBack, input: {context, }, }, ) => {
-  const { item, account } = context
+  const { item, account, publishMode } = context
 
   const _check = async () => {
     // Ownership: use isItemOwned so we align with EAS sync (includes getAdditionalSyncAddresses
@@ -43,7 +43,9 @@ export const checking = fromCallback<
       }
 
       // Validate item before any Arweave or EAS work (pass empty array - no uploads yet)
-      const validation = await validateItemForPublish(item, [])
+      const validation = await (validateItemForPublish as any)(item, [], {
+        publishMode: publishMode ?? 'patch',
+      })
       if (!validation.isValid) {
         activePublishProcesses.delete(item.seedLocalId)
         sendBack({ type: 'validationFailed', errors: validation.errors })

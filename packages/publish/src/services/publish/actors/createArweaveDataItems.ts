@@ -1,3 +1,4 @@
+import type { GetPublishUploadDataOptions } from '../helpers/getPublishUploadData'
 import debug from 'debug'
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
@@ -7,6 +8,7 @@ import { waitForItem } from './utils'
 import { getPublishUploadData, type PublishUploadData } from '../helpers/getPublishUploadData'
 import { getPublishConfig } from '~/config'
 import {
+  buildPublishAnchorBytes,
   createSignedDataItem,
   createSignedDataItemWithAccount,
   isEthersWallet,
@@ -40,7 +42,11 @@ export const createArweaveDataItems = fromPromise(
       item = await waitForItem(item.seedLocalId)
     }
 
-    const uploadDataList = await getPublishUploadData(item)
+    let uploadDataOpts: GetPublishUploadDataOptions | undefined
+    if (context.arweaveUploadTags?.length) {
+      uploadDataOpts = { arweaveUploadTags: context.arweaveUploadTags }
+    }
+    const uploadDataList = await getPublishUploadData(item, [], undefined, uploadDataOpts)
     const config = getPublishConfig()
     const signDataItems = context.signDataItems ?? config.signDataItems
     const dataItemSigner = context.dataItemSigner ?? config.dataItemSigner
@@ -58,17 +64,20 @@ export const createArweaveDataItems = fromPromise(
     } else if (dataItemSigner) {
       const signer = dataItemSigner
       const items: Awaited<ReturnType<typeof createSignedDataItem>>[] = []
-      for (const upload of uploadDataList) {
-        const tags: { name: string; value: string }[] = []
-        if (upload.contentHash) {
-          tags.push({ name: 'Content-SHA-256', value: upload.contentHash })
-        }
-        if (upload.contentType) {
-          tags.push({ name: 'Content-Type', value: upload.contentType })
-        }
+      const timestampMs = Date.now()
+      const walletAddress = signer.address
+      for (let i = 0; i < uploadDataList.length; i++) {
+        const upload = uploadDataList[i]!
+        const tags = upload.tags
+        const randomUniq = new Uint8Array(8)
+        crypto.getRandomValues(randomUniq)
+        const uniqueness =
+          (new DataView(randomUniq.buffer).getBigUint64(0, false) ^ BigInt(i)) &
+          0xffffffffffffffffn
+        const rawAnchor = buildPublishAnchorBytes(walletAddress, timestampMs, uniqueness)
         const dataItem = isEthersWallet(signer)
-          ? await createSignedDataItem(upload.data, signer, tags)
-          : await createSignedDataItemWithAccount(upload.data, signer, tags)
+          ? await createSignedDataItem(upload.data, signer, tags, rawAnchor)
+          : await createSignedDataItemWithAccount(upload.data, signer, tags, rawAnchor)
 
         const isValid = await verifyDataItem(dataItem.raw)
         if (!isValid) {

@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/cli",
-  "version": "0.4.17",
+  "version": "0.4.20",
   "description": "CLI tool for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "tsc && rollup -c",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js && npm pkg set dependencies.@seedprotocol/sdk=$(node -e \"console.log(require('../../packages/sdk/package.json').version)\")",
+    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
     "dev": "tsx src/bin.ts",
     "dev:init": "tsx src/bin.ts init",
     "dev:export-sql": "tsx src/bin.ts export-sql",

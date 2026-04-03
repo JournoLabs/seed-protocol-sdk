@@ -2,6 +2,7 @@ import { useLiveQuery } from '@seedprotocol/react'
 import { BaseDb, publishProcesses } from '@seedprotocol/sdk'
 import { eq, desc } from 'drizzle-orm'
 import { usePublishProcess } from './usePublishProcess'
+import { useArweaveL1Finalize } from './useArweaveL1Finalize'
 
 export type PublishProcessStatus = 'in_progress' | 'completed' | 'failed' | 'interrupted'
 
@@ -23,6 +24,7 @@ export interface PublishProcessRecord {
 
 export function useItemPublishStatus(seedLocalId: string | undefined) {
   const { publishProcess, value } = usePublishProcess(seedLocalId ?? '')
+  const arweaveL1 = useArweaveL1Finalize(seedLocalId)
 
   const db = BaseDb.getAppDb()
   const latestRecords = useLiveQuery(
@@ -44,5 +46,8 @@ export function useItemPublishStatus(seedLocalId: string | undefined) {
     publishProcess,
     isActive,
     publishValue: value,
+    arweaveL1Pending: arweaveL1.hasPendingL1,
+    arweaveL1Jobs: arweaveL1.jobs,
+    arweaveL1Summary: arweaveL1,
   }
 }

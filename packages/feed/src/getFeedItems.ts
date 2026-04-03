@@ -5,6 +5,7 @@ import {
   EasClient,
   setSchemaUidForSchemaDefinition,
   withExcludeRevokedFilter,
+  pickLatestPropertyAttestationsByRefAndSchema,
 } from '@seedprotocol/sdk';
 import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { gql } from 'graphql-request';
@@ -342,7 +343,8 @@ const processSeeds = async (seeds: AttestationLike[]): Promise<void> => {
     }
   }
 
-  const itemProperties = await getItemPropertiesFromEas({ versionUids: latestVersionUids });
+  const rawProperties = await getItemPropertiesFromEas({ versionUids: latestVersionUids });
+  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties);
 
   for (let i = 0; i < itemProperties.length; i++) {
     await processItemProperty(itemProperties[i] as AttestationLike, seeds);

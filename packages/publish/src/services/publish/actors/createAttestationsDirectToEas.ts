@@ -11,6 +11,7 @@ import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError } from '../../../errors'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
+import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { getPublishConfig } from '~/config'
 import {
   prepareEasAttest,
@@ -154,7 +155,12 @@ export const createAttestationsDirectToEas = fromPromise(
 
     await verifyArweaveTransactionsExist(uploadDataWithTxIds.map((u) => u.txId))
 
-    const requestData = await item.getPublishPayload(uploadDataWithTxIds)
+    const requestData = await (
+      item.getPublishPayload as (
+        uploads: typeof uploadDataWithTxIds,
+        opts?: { publishMode?: 'patch' | 'new_version' },
+      ) => ReturnType<typeof item.getPublishPayload>
+    )(uploadDataWithTxIds, { publishMode: context.publishMode ?? 'patch' })
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
 
     const normalizedRequests: NormalizedRequest[] = reqs.map((req: any) => {
@@ -333,6 +339,9 @@ export const createAttestationsDirectToEas = fromPromise(
     }
 
     logger('direct EAS publish complete')
+
+    void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
+
     return { easPayload: requestData }
   },
 )
