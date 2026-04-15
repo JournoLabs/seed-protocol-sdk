@@ -23,11 +23,17 @@ export const createArweaveTransactions = fromPromise(
       item = await waitForItem(item.seedLocalId)
     }
 
-    let publishOpts: GetPublishUploadsOptions | undefined
+    const publishOpts: GetPublishUploadsOptions = {}
     if (context.arweaveUploadTags?.length) {
-      publishOpts = { arweaveUploadTags: context.arweaveUploadTags }
+      publishOpts.arweaveUploadTags = context.arweaveUploadTags
     }
-    const publishUploads = await item.getPublishUploads(publishOpts)
+    const def = context.htmlEmbeddedDeferredHtmlSeedLocalIds
+    if (def?.length) {
+      publishOpts.deferHtmlStorageSeedLocalIds = def
+    }
+    const publishUploads = await item.getPublishUploads(
+      Object.keys(publishOpts).length ? publishOpts : undefined,
+    )
 
     const config = getPublishConfig()
     const signArweaveTransactions = context.signArweaveTransactions ?? config.signArweaveTransactions

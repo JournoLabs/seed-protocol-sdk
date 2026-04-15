@@ -210,6 +210,29 @@ export const migrationSql_0010_add_arweave_l1_finalize_jobs = `CREATE TABLE \`ar
 CREATE UNIQUE INDEX \`arweave_l1_finalize_jobs_data_item_id_unique\` ON \`arweave_l1_finalize_jobs\` (\`data_item_id\`);
 `
 
+export const migrationSql_0011_normalize_placeholder_uids = `UPDATE \`versions\` SET \`uid\` = NULL WHERE \`uid\` = 'NULL';
+--> statement-breakpoint
+UPDATE \`versions\` SET \`seed_uid\` = NULL WHERE \`seed_uid\` = 'NULL';
+--> statement-breakpoint
+UPDATE \`metadata\` SET \`uid\` = NULL WHERE \`uid\` = 'NULL';
+--> statement-breakpoint
+UPDATE \`metadata\` SET \`version_uid\` = NULL WHERE \`version_uid\` = 'NULL';
+--> statement-breakpoint
+UPDATE \`seeds\` SET \`uid\` = NULL WHERE \`uid\` = 'NULL';
+`
+
+export const migrationSql_0012_html_embedded_image_co_publish = `CREATE TABLE \`html_embedded_image_co_publish\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`parent_seed_local_id\` text NOT NULL,
+	\`html_seed_local_id\` text NOT NULL,
+	\`image_seed_local_id\` text NOT NULL,
+	\`stable_key\` text NOT NULL,
+	\`created_at\` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX \`html_embed_co_pub_parent_html_stable\` ON \`html_embedded_image_co_publish\` (\`parent_seed_local_id\`,\`html_seed_local_id\`,\`stable_key\`);
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -290,6 +313,20 @@ export const journalJson = `{
       "version": "6",
       "when": 1774000000000,
       "tag": "0010_add_arweave_l1_finalize_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1774100000000,
+      "tag": "0011_normalize_placeholder_uids",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1774200000000,
+      "tag": "0012_html_embedded_image_co_publish",
       "breakpoints": true
     }
   ]

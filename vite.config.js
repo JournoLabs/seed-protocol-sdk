@@ -186,11 +186,20 @@ export default defineConfig({
       },
       {
         plugins: [
-          tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
+          tsConfigPaths({
+            projects: [
+              './packages/sdk/tsconfig.json',
+              './packages/feed/tsconfig.json',
+              './packages/publish/tsconfig.json',
+              './packages/react/tsconfig.json',
+            ],
+          }),
         ],
         resolve: {
           alias: {
             '~': resolve(__dirname, 'packages/publish/src'),
+            '@seedprotocol/feed': resolve(__dirname, 'packages/feed/src/index.ts'),
+            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
           },
         },
         optimizeDeps: {
@@ -201,13 +210,16 @@ export default defineConfig({
         test: {
           name: 'NodeJS',
           environment: 'node',
-          dir: './packages/sdk/__tests__',
+          dir: '.',
           env: {
             DEBUG: '*',
           },
           setupFiles: [],
           include: [
-            '**/*.test.ts',
+            'packages/sdk/__tests__/**/*.test.ts',
+            'packages/feed/__tests__/**/*.test.ts',
+            'packages/publish/src/**/*.test.ts',
+            'packages/react/__tests__/**/*.node.test.tsx',
           ],
           exclude: [
             ...configDefaults.exclude,

@@ -10,6 +10,7 @@ import {
   getAttesterForSeed,
   updateSeedRevokedAt,
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+  isValidEasAttestationUid,
 } from '@seedprotocol/sdk'
 
 /**
@@ -41,9 +42,12 @@ export async function revokeAttestations(params: {
     getMetadataAttestationUidsForSeedUid(seedUid),
   ])
 
-  const versionUids = versionRows.map((r: { uid: string }) => r.uid)
+  const versionUids = versionRows
+    .map((r: { uid: string }) => r.uid)
+    .filter((uid: string) => isValidEasAttestationUid(uid))
   const metadataBySchema = new Map<string, string[]>()
   for (const { uid, schemaUid } of metadataRows) {
+    if (!isValidEasAttestationUid(uid)) continue
     const list = metadataBySchema.get(schemaUid) ?? []
     list.push(uid)
     metadataBySchema.set(schemaUid, list)

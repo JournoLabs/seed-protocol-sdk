@@ -21,6 +21,11 @@ export interface TransformOptions {
   itemUrlBase?: string
   /** Path for attestation links when itemUrlBase is set (default: attestation/view) */
   itemUrlPath?: string
+  /**
+   * `omit_items` (default): drop feed entries whose rich-text fields contain `data:image/` URIs (large RSS payloads).
+   * `include_items`: keep those entries (opt-in).
+   */
+  richTextDataUriImages?: 'omit_items' | 'include_items'
 }
 
 export interface FeedConfig {
@@ -41,7 +46,19 @@ export interface GraphQLItem {
   id: string
   title: string
   summary?: string
+  /** Full HTML body; often the same logical field as `body` for `dataType: 'Html'`. */
   html?: string
+  Html?: string
+  /** Common property name for `Html` fields (e.g. article `body`). */
+  body?: string
+  Body?: string
+  /** Alternate rich body / plain body string. */
+  content?: string
+  Content?: string
+  description?: string
+  Description?: string
+  text?: string
+  Text?: string
   createdAt?: string
   updatedAt?: string
   publishedAt?: string

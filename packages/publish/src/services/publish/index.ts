@@ -9,7 +9,9 @@ import {
 }                                                                                            from '../../types'
 import {
   createArweaveTransactions,
+  createArweaveTransactionsPhase2,
   createArweaveDataItems,
+  createArweaveDataItemsPhase2,
   createAttestations,
   createAttestationsDirectToEas,
   sendReimbursementRequest,
@@ -17,6 +19,8 @@ import {
   uploadData,
   uploadViaBundler,
   checking,
+  preparingHtmlEmbedded,
+  rewritingHtmlEmbedded,
 } from './actors'
 import {
   PublishMachineStates,
@@ -28,6 +32,21 @@ const {
   SUCCESS,
   FAILURE,
 } = PublishMachineStates
+
+/** Prefer context from `checking`; fall back to `useDirectEas` for restored snapshots without `attestationStrategy`. */
+function attestationUsesDirectEas(context: Partial<PublishMachineContext>): boolean {
+  const s = context.attestationStrategy
+  if (s === 'directEas') return true
+  if (s === 'multiPublish') return false
+  return getPublishConfig().useDirectEas
+}
+
+function attestationUsesMultiPublish(context: Partial<PublishMachineContext>): boolean {
+  const s = context.attestationStrategy
+  if (s === 'multiPublish') return true
+  if (s === 'directEas') return false
+  return !getPublishConfig().useDirectEas
+}
 
 /** Extract error from event. Supports event.error (custom events like uploadError) and event.data (XState fromPromise invoke errors). */
 function getErrorFromEvent(event: unknown): unknown {
@@ -42,7 +61,9 @@ export const publishMachine = setup({
   },
   actors : {
     createArweaveTransactions,
+    createArweaveTransactionsPhase2,
     createArweaveDataItems,
+    createArweaveDataItemsPhase2,
     sendReimbursementRequest,
     pollForConfirmation,
     uploadData,
@@ -50,6 +71,8 @@ export const publishMachine = setup({
     createAttestations,
     createAttestationsDirectToEas,
     checking,
+    preparingHtmlEmbedded,
+    rewritingHtmlEmbedded,
   },
   actions : {
     /** Log error; error/errorStep are assigned per transition. Supports both event.error (custom events) and event.data (XState fromPromise invoke errors). */
@@ -81,9 +104,33 @@ export const publishMachine = setup({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'uploadingData',
     },),
+    assignErrorPreparingHtmlEmbedded : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'preparingHtmlEmbedded',
+    },),
+    assignErrorRewritingHtmlEmbedded : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'rewritingHtmlEmbedded',
+    },),
+    assignErrorCreatingArweaveTransactionsPhase2 : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'creatingArweaveTransactionsPhase2',
+    },),
+    assignErrorUploadingDataPhase2 : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'uploadingDataPhase2',
+    },),
     assignErrorUploadingViaBundler : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
       errorStep : () => 'uploadingViaBundler',
+    },),
+    assignErrorCreatingArweaveDataItemsPhase2 : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'creatingArweaveDataItemsPhase2',
+    },),
+    assignErrorUploadingViaBundlerPhase2 : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'uploadingViaBundlerPhase2',
     },),
     assignErrorCreatingAttestations : assign({
       error     : ( { event, }, ) => getErrorFromEvent(event,),
@@ -113,6 +160,14 @@ export const publishMachine = setup({
       },
       errorStep : () => 'checking',
     },),
+    assignErrorCheckingFailed : assign({
+      error : ({ event }) => {
+        const ev = event as { error?: unknown }
+        const e = ev.error
+        return e instanceof Error ? e : new Error(String(e ?? 'Publish check failed'))
+      },
+      errorStep : () => 'checking',
+    },),
   },
 
 },).createMachine({
@@ -133,27 +188,47 @@ export const publishMachine = setup({
         redundantPublishProcess: {
           target: 'stopping',
         },
+        checkingFailed: {
+          target: FAILURE,
+          actions: ['assignErrorCheckingFailed', 'handleError'],
+        },
         validPublishProcess: {
-          target: 'creatingArweaveTransactions',
+          target: 'preparingHtmlEmbedded',
+          actions: assign({
+            attestationStrategy: ({ event }) =>
+              (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
+                .attestationStrategy,
+          }),
         },
         validPublishProcessBundler: {
-          target: 'creatingArweaveDataItems',
+          target: 'preparingHtmlEmbedded',
+          actions: assign({
+            attestationStrategy: ({ event }) =>
+              (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
+                .attestationStrategy,
+          }),
         },
         skipArweave: [
           {
-            guard: () => getPublishConfig().useDirectEas,
+            guard: ({ context }) => attestationUsesDirectEas(context),
             target: 'creatingAttestationsDirectToEas',
             actions: assign({
               arweaveTransactions: () => [],
               publishUploads: () => [],
+              attestationStrategy: ({ event }) =>
+                (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
+                  .attestationStrategy,
             }),
           },
           {
-            guard: () => !getPublishConfig().useDirectEas,
+            guard: ({ context }) => attestationUsesMultiPublish(context),
             target: 'creatingAttestations',
             actions: assign({
               arweaveTransactions: () => [],
               publishUploads: () => [],
+              attestationStrategy: ({ event }) =>
+                (event as { attestationStrategy?: PublishMachineContext['attestationStrategy'] })
+                  .attestationStrategy,
             }),
           },
         ],
@@ -161,6 +236,33 @@ export const publishMachine = setup({
       invoke : {
         src    : 'checking',
         input  : ( { context } ) => ({ context } as { context: PublishMachineContext }),
+      },
+    },
+    preparingHtmlEmbedded: {
+      invoke: {
+        src: 'preparingHtmlEmbedded',
+        input: ({ context }) => ({ context } as { context: PublishMachineContext }),
+        onDone: [
+          {
+            guard: () => getPublishConfig().useArweaveBundler,
+            target: 'creatingArweaveDataItems',
+            actions: assign({
+              htmlEmbeddedDeferredHtmlSeedLocalIds: ({ event }) =>
+                (event.output as { deferredHtmlSeedLocalIds: string[] }).deferredHtmlSeedLocalIds,
+            }),
+          },
+          {
+            target: 'creatingArweaveTransactions',
+            actions: assign({
+              htmlEmbeddedDeferredHtmlSeedLocalIds: ({ event }) =>
+                (event.output as { deferredHtmlSeedLocalIds: string[] }).deferredHtmlSeedLocalIds,
+            }),
+          },
+        ],
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorPreparingHtmlEmbedded', 'handleError'],
+        },
       },
     },
     creatingArweaveTransactions : {
@@ -189,7 +291,6 @@ export const publishMachine = setup({
           actions : assign({
             arweaveTransactions : ( { event, }, ) => event.output.arweaveTransactions as ArweaveTransactionInfo[],
             publishUploads : ( { event, }, ) => event.output.publishUploads as PublishUpload[],
-            arweaveUploadData : ( { event, }, ) => (event.output as { arweaveUploadData?: unknown }).arweaveUploadData,
             signedDataItems : ( { event, }, ) => (event.output as { signedDataItems?: { id: string; raw: Uint8Array }[] }).signedDataItems,
           },),
         },
@@ -236,17 +337,34 @@ export const publishMachine = setup({
       on : {
         uploadComplete : [
           {
-            guard: () => getPublishConfig().useDirectEas,
+            guard: ({ context }) => attestationUsesDirectEas(context),
             target: 'creatingAttestationsDirectToEas',
             actions: assign({
               completionPercentage: 100,
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
             }),
           },
           {
-            guard: () => !getPublishConfig().useDirectEas,
+            guard: (args) =>
+              ((args.context?.htmlEmbeddedDeferredHtmlSeedLocalIds?.length ?? 0) > 0),
+            target: 'rewritingHtmlEmbedded',
+            actions: assign({
+              htmlEmbeddedPhase1PublishUploads: ({ context }) =>
+                (context.publishUploads ?? []) as PublishUpload[],
+              htmlEmbeddedPhase1ArweaveTransactions: ({ context }) =>
+                (context.arweaveTransactions ?? []) as ArweaveTransactionInfo[],
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesMultiPublish(context),
             target: 'creatingAttestations',
             actions: assign({
               completionPercentage: 100,
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
             }),
           },
         ],
@@ -258,6 +376,73 @@ export const publishMachine = setup({
       invoke : {
         src   : 'uploadViaBundler',
         input : ( { context } ) => ({ context }) as { context: PublishMachineContext },
+      },
+    },
+    creatingArweaveDataItemsPhase2: {
+      invoke: {
+        src: 'createArweaveDataItemsPhase2',
+        input: ({ context, event }) =>
+          ({ context, event }) as { context: PublishMachineContext; event: unknown },
+        onDone: {
+          target: 'uploadingViaBundlerPhase2',
+          actions: assign({
+            arweaveTransactions: ({ event }) =>
+              (event.output as { arweaveTransactions: ArweaveTransactionInfo[] }).arweaveTransactions,
+            publishUploads: ({ event }) =>
+              (event.output as { publishUploads: PublishUpload[] }).publishUploads,
+            signedDataItems: ({ event }) =>
+              (event.output as { signedDataItems?: PublishMachineContext['signedDataItems'] })
+                .signedDataItems,
+            uploaderState: () => undefined,
+            currentTransactionIndex: () => undefined,
+          }),
+        },
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorCreatingArweaveDataItemsPhase2', 'handleError'],
+        },
+      },
+    },
+    uploadingViaBundlerPhase2: {
+      on: {
+        uploadComplete: [
+          {
+            guard: ({ context }) => attestationUsesDirectEas(context),
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesMultiPublish(context),
+            target: 'creatingAttestations',
+            actions: assign({
+              completionPercentage: 100,
+              signedDataItems: () => undefined,
+              arweaveUploadData: () => undefined,
+              publishUploads: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
+                  ...((context.publishUploads ?? []) as PublishUpload[]),
+                ],
+              arweaveTransactions: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                ],
+            }),
+          },
+        ],
+        uploadError: {
+          target: FAILURE,
+          actions: ['assignErrorUploadingViaBundlerPhase2', 'handleError'],
+        },
+      },
+      invoke: {
+        src: 'uploadViaBundler',
+        input: ({ context }) => ({ context }) as { context: PublishMachineContext },
       },
     },
     uploadingData : {
@@ -276,14 +461,25 @@ export const publishMachine = setup({
         },
         uploadComplete : [
           {
-            guard: () => getPublishConfig().useDirectEas,
+            guard: ({ context }) => attestationUsesDirectEas(context),
             target: 'creatingAttestationsDirectToEas',
             actions: assign({
               completionPercentage: 100,
             }),
           },
           {
-            guard: () => !getPublishConfig().useDirectEas,
+            guard: (args) =>
+              ((args.context?.htmlEmbeddedDeferredHtmlSeedLocalIds?.length ?? 0) > 0),
+            target: 'rewritingHtmlEmbedded',
+            actions: assign({
+              htmlEmbeddedPhase1PublishUploads: ({ context }) =>
+                (context.publishUploads ?? []) as PublishUpload[],
+              htmlEmbeddedPhase1ArweaveTransactions: ({ context }) =>
+                (context.arweaveTransactions ?? []) as ArweaveTransactionInfo[],
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesMultiPublish(context),
             target: 'creatingAttestations',
             actions: assign({
               completionPercentage: 100,
@@ -298,6 +494,98 @@ export const publishMachine = setup({
       invoke : {
         src   : 'uploadData',
         input : ( { context } ) => ({ context }) as { context: PublishMachineContext },
+      },
+    },
+    rewritingHtmlEmbedded: {
+      invoke: {
+        src: 'rewritingHtmlEmbedded',
+        input: ({ context }) => ({ context }) as { context: PublishMachineContext },
+        onDone: [
+          {
+            guard: () => !getPublishConfig().useArweaveBundler,
+            target: 'creatingArweaveTransactionsPhase2',
+          },
+          {
+            guard: () => getPublishConfig().useArweaveBundler,
+            target: 'creatingArweaveDataItemsPhase2',
+          },
+        ],
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorRewritingHtmlEmbedded', 'handleError'],
+        },
+      },
+    },
+    creatingArweaveTransactionsPhase2: {
+      invoke: {
+        src: 'createArweaveTransactionsPhase2',
+        input: ({ context, event }) =>
+          ({ context, event }) as { context: PublishMachineContext; event: unknown },
+        onDone: {
+          target: 'uploadingDataPhase2',
+          actions: assign({
+            arweaveTransactions: ({ event }) =>
+              (event.output as { arweaveTransactions: ArweaveTransactionInfo[] }).arweaveTransactions,
+            publishUploads: ({ event }) =>
+              (event.output as { publishUploads: PublishUpload[] }).publishUploads,
+            uploaderState: () => undefined,
+            currentTransactionIndex: () => undefined,
+          }),
+        },
+        onError: {
+          target: FAILURE,
+          actions: ['assignErrorCreatingArweaveTransactionsPhase2', 'handleError'],
+        },
+      },
+    },
+    uploadingDataPhase2: {
+      on: {
+        updatePercentage: {
+          actions: assign({
+            completionPercentage: ({ event }) => {
+              const ev = event as { completionPercentage?: number }
+              return ev.completionPercentage as number
+            },
+            uploaderState: ({ event }) =>
+              (event as { uploaderState?: PublishMachineContext['uploaderState'] }).uploaderState,
+            currentTransactionIndex: ({ event }) =>
+              (event as { currentTransactionIndex?: number }).currentTransactionIndex,
+          }),
+        },
+        uploadComplete: [
+          {
+            guard: ({ context }) => attestationUsesDirectEas(context),
+            target: 'creatingAttestationsDirectToEas',
+            actions: assign({
+              completionPercentage: 100,
+            }),
+          },
+          {
+            guard: ({ context }) => attestationUsesMultiPublish(context),
+            target: 'creatingAttestations',
+            actions: assign({
+              completionPercentage: 100,
+              publishUploads: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1PublishUploads ?? []) as PublishUpload[]),
+                  ...((context.publishUploads ?? []) as PublishUpload[]),
+                ],
+              arweaveTransactions: ({ context }) =>
+                [
+                  ...((context.htmlEmbeddedPhase1ArweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                  ...((context.arweaveTransactions ?? []) as ArweaveTransactionInfo[]),
+                ],
+            }),
+          },
+        ],
+        uploadError: {
+          target: FAILURE,
+          actions: ['assignErrorUploadingDataPhase2', 'handleError'],
+        },
+      },
+      invoke: {
+        src: 'uploadData',
+        input: ({ context }) => ({ context }) as { context: PublishMachineContext },
       },
     },
     creatingAttestations : {

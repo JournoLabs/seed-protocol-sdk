@@ -36,8 +36,11 @@ export function persistSeedUidFromPublishResult(
  * flow from hanging when DB write is slow or fails.
  */
 export async function persistSeedUidSafely(
-  item: { persistSeedUid?: (publisher?: string) => Promise<void> },
+  item: {
+    persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
+  },
   address: string,
+  attestationCreatedAtMs?: number,
 ): Promise<void> {
   const persist = item.persistSeedUid
   if (typeof persist !== 'function') return
@@ -47,7 +50,7 @@ export async function persistSeedUidSafely(
   )
 
   try {
-    await Promise.race([persist.call(item, address), timeout])
+    await Promise.race([persist.call(item, address, attestationCreatedAtMs), timeout])
   } catch (err) {
     logger('persistSeedUid failed (attestations already on-chain):', err)
     // Don't throw - attestations are confirmed; DB write is best-effort

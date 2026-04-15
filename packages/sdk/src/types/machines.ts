@@ -41,6 +41,8 @@ export type ClientManagerContext = {
   isInitialized: boolean
   addressesSet: boolean
   isSaving: boolean
+  /** When true, successful save of app_state key `addresses` triggers immediate `runSyncFromEas`. */
+  syncFromEasOnAddressChange?: boolean
   endpoints?: Endpoints
   addresses?: string[]
   ownedAddresses?: string[]

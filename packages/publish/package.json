@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,12 +18,13 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build",
     "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
-    "test": "bun test src/helpers/*.test.ts"
+    "test": "bun test src/helpers/arweave.test.ts src/helpers/defaultApprovedTargetsForModularPublish.test.ts src/helpers/ensureManagedAccountReady.test.ts src/helpers/ensureEip7702ModularAccountReady.test.ts src/helpers/publishDisplayHelpers.test.ts src/services/publish/actors/createAttestationsRouting.test.ts src/config.autoDeployEip7702.test.ts && bun test src/helpers/ensureSmartWalletThenPublish.test.ts && bun test src/helpers/ensureManagedAccountEasConfigured.test.ts"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",

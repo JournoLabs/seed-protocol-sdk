@@ -1,6 +1,8 @@
 import { ClientManagerContext, SeedConstructorOptions } from "@/types"
 import { assign, setup } from "xstate"
+import debug from "debug"
 import { normalizeAddressConfig } from "@/helpers/addresses"
+import { runSyncFromEas } from "@/events/item/syncDbWithEas"
 import { platformClassesInit } from "./actors/platformClassesInit"
 import { saveAppState } from "./actors/saveAppState"
 import { fileSystemInit } from "./actors/fileSystemInit"
@@ -10,6 +12,11 @@ import { addModelsToStore } from "./actors/addModelsToStore"
 import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
+import { eventEmitter } from "@/eventBus"
+import {
+  ADDRESSES_PERSISTED_EVENT,
+  parseAddressesPersistedPayload,
+} from "@/client/events"
 
 const {
   UNINITIALIZED,
@@ -39,6 +46,56 @@ const {
 type InitEvent = {
   type: 'init'
   options: SeedConstructorOptions
+}
+
+const logSyncAfterAddressSave = debug(
+  "seedSdk:client:clientManagerMachine:syncAfterAddressSave",
+)
+
+function addressesFromPersistedAddressValue(value: unknown): string[] {
+  if (!value || typeof value !== "object") return []
+  const v = value as { owned?: unknown; watched?: unknown }
+  const owned = Array.isArray(v.owned)
+    ? v.owned.filter((a): a is string => typeof a === "string")
+    : []
+  const watched = Array.isArray(v.watched)
+    ? v.watched.filter((a): a is string => typeof a === "string")
+    : []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const a of [...owned, ...watched]) {
+    const k = a.toLowerCase()
+    if (!seen.has(k)) {
+      seen.add(k)
+      out.push(a)
+    }
+  }
+  return out
+}
+
+function maybeRunSyncFromEasAfterAddressSave({
+  context,
+  event,
+}: {
+  context: ClientManagerContext
+  event: { key?: string; value?: unknown }
+}) {
+  if (!context.syncFromEasOnAddressChange) return
+  if (event.key !== "addresses") return
+  const merged = addressesFromPersistedAddressValue(event.value)
+  if (merged.length === 0) return
+  void runSyncFromEas({ addresses: merged }).catch((err: unknown) => {
+    logSyncAfterAddressSave("runSyncFromEas after address save failed", err)
+  })
+}
+
+function emitAddressesPersistedIfAddressesKey(event: {
+  key?: string
+  value?: unknown
+}) {
+  if (event.key !== "addresses") return
+  const payload = parseAddressesPersistedPayload(event.value)
+  eventEmitter.emit(ADDRESSES_PERSISTED_EVENT, payload)
 }
 
 export const clientManagerMachine = setup({
@@ -199,12 +256,22 @@ export const clientManagerMachine = setup({
       }),
       on: {
         [SAVE_APP_STATE_SUCCESS]: {
-          actions: assign(({ event }) => {
-            const { key, value } = event
-            return {
-              isSaving: false
-            }
-          }),
+          actions: [
+            assign(({ event }) => {
+              return {
+                isSaving: false,
+              }
+            }),
+            ({ context, event }) =>
+              maybeRunSyncFromEasAfterAddressSave({
+                context,
+                event: event as { key?: string; value?: unknown },
+              }),
+            ({ event }) =>
+              emitAddressesPersistedIfAddressesKey(
+                event as { key?: string; value?: unknown },
+              ),
+          ],
         },
         [SET_ADDRESSES]: {
           actions: [

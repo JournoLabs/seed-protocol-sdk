@@ -62,6 +62,13 @@ export const TStorageType = Type.Union([
   Type.Literal('PropertyStorage'), // Looks for a storageTransactionId value on the property
 ])
 
+/** How publish handles `data:image/*` URIs inside Html storage. Only applies when `dataType === 'Html'`. */
+export const THtmlEmbeddedDataUriPolicy = Type.Union([
+  Type.Literal('materialize'),
+  Type.Literal('preserve'),
+])
+export type HtmlEmbeddedDataUriPolicy = Static<typeof THtmlEmbeddedDataUriPolicy>
+
 export const TProperty = Type.Object({
   id: Type.Optional(Type.String()), // schemaFileId (string) - public ID
   _dbId: Type.Optional(Type.Number()), // Database integer ID - internal only
@@ -79,6 +86,8 @@ export const TProperty = Type.Object({
   filenameSuffix: Type.Optional(Type.String()),
   validation: Type.Optional(TValidationRules),
   required: Type.Optional(Type.Boolean()),
+  /** When set on an Html property: `materialize` uploads embedded images as Image seeds and rewrites src; `preserve` leaves data URIs. */
+  htmlEmbeddedDataUriPolicy: Type.Optional(THtmlEmbeddedDataUriPolicy),
 })
 
 export const TPropertyConstructor = Type.Function(
@@ -94,6 +103,15 @@ export const TPropertyDefs = Type.Record(
   TPropertyDataType,
   TPropertyConstructor,
 )
+
+function htmlPropertyFactory(opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy }) {
+  return {
+    dataType: ModelPropertyDataTypes.Html,
+    ...(opts?.htmlEmbeddedDataUriPolicy
+      ? { htmlEmbeddedDataUriPolicy: opts.htmlEmbeddedDataUriPolicy }
+      : {}),
+  } satisfies Static<typeof TProperty>
+}
 
 export const Property = {
   Text: (
@@ -131,8 +149,9 @@ export const Property = {
   Image: () => ({ dataType: ModelPropertyDataTypes.Image }),
   Boolean: () => ({ dataType: ModelPropertyDataTypes.Boolean }),
   Date: () => ({ dataType: ModelPropertyDataTypes.Date }),
-  Html: () => ({ dataType: ModelPropertyDataTypes.Html }),
-} as PropertyDefs
+  Html: htmlPropertyFactory,
+  /** `Html` opts are not representable in `TPropertyConstructor`; keep runtime shape via double assert. */
+} as unknown as PropertyDefs
 
 export const PropertyMetadataKey = Symbol('property')
 
@@ -165,3 +184,5 @@ export const List = (refValueType: PropertyDataType, ref?: string) =>
   PropertyConstructor(Property.List(refValueType, ref))
 export const Boolean = () => PropertyConstructor(Property.Boolean())
 export const Date = () => PropertyConstructor(Property.Date())
+export const Html = (opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy }) =>
+  PropertyConstructor(htmlPropertyFactory(opts))

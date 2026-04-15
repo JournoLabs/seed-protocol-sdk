@@ -21,6 +21,12 @@ function enqueueSaveWrite(seedLocalId: string, write: () => Promise<void>): Prom
   return next
 }
 
+export function isTerminalPublishRowStatus(
+  status: string | null | undefined,
+): status is 'completed' | 'failed' | 'interrupted' {
+  return status === 'completed' || status === 'failed' || status === 'interrupted'
+}
+
 function statusFromSnapshot(snapshot: { status?: string; value?: unknown }): 'in_progress' | 'completed' | 'failed' | 'interrupted' {
   if (snapshot.status === 'done') {
     if (snapshot.value === 'success') return 'completed'
@@ -70,6 +76,40 @@ function errorFieldsFromContext(context: { error?: unknown; errorStep?: string }
     errorDetails = String(err).slice(0, MAX_ERROR_DETAILS_LENGTH)
   }
   return { errorMessage: errorMessage ?? undefined, errorStep, errorDetails }
+}
+
+export function markInProgressPublishInterrupted(seedLocalId: string): Promise<void> {
+  return enqueueSaveWrite(seedLocalId, async () => {
+    const db = BaseDb.getAppDb()
+    if (!db) {
+      logger('markInProgressPublishInterrupted: DB not ready, skipping')
+      return
+    }
+
+    const existing = await db
+      .select()
+      .from(publishProcesses)
+      .where(and(eq(publishProcesses.seedLocalId, seedLocalId), eq(publishProcesses.status, 'in_progress')))
+      .orderBy(desc(publishProcesses.updatedAt))
+      .limit(1)
+
+    if (existing.length === 0) {
+      return
+    }
+
+    const now = Date.now()
+    await db
+      .update(publishProcesses)
+      .set({
+        status: 'interrupted',
+        completedAt: now,
+        updatedAt: now,
+        errorMessage: null,
+        errorStep: null,
+        errorDetails: null,
+      })
+      .where(eq(publishProcesses.id, existing[0].id!))
+  })
 }
 
 export const savePublish = fromCallback<
@@ -135,7 +175,7 @@ export const savePublish = fromCallback<
           .orderBy(desc(publishProcesses.startedAt))
           .limit(1)
         const latest = latestAny[0]
-        if (latest && (latest.status === 'completed' || latest.status === 'failed')) {
+        if (latest && isTerminalPublishRowStatus(latest.status)) {
           try {
             const prevParsed = JSON.parse(latest.persistedSnapshot) as unknown
             const terminalRunId = publishRunIdFromSnapshot(prevParsed)

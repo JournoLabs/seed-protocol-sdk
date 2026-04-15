@@ -32,8 +32,12 @@ export async function verifyArweaveTransactionsExist(txIds: string[]): Promise<v
     }
 
     if (status.status !== 200) {
+      const detail =
+        status.status === 504
+          ? 'request timed out (upload service did not respond in time)'
+          : `status: ${status.status}`
       throw new Error(
-        `Arweave transaction ${txId} is not yet available from the upload service (status: ${status.status}). Wait and retry.`
+        `Arweave transaction ${txId} is not yet available from the upload service (${detail}). Wait and retry.`
       )
     }
   }

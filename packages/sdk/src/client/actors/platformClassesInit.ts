@@ -164,6 +164,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       dbConfig,
       schemaFile,
       schema,
+      syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? false,
     } })
     
     if (arweaveDomain) {

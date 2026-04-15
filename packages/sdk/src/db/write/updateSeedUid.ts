@@ -6,6 +6,8 @@ type UpdateSeedUidProps = {
   seedLocalId: string
   seedUid: string
   publisher?: string
+  /** Unix ms when the seed attestation was created (EAS / chain time). */
+  attestationCreatedAt?: number
 }
 
 /**
@@ -16,6 +18,7 @@ export const updateSeedUid = async ({
   seedLocalId,
   seedUid,
   publisher,
+  attestationCreatedAt,
 }: UpdateSeedUidProps): Promise<void> => {
   if (!seedLocalId || !seedUid) {
     return
@@ -40,6 +43,7 @@ export const updateSeedUid = async ({
     .set({
       uid: seedUid,
       ...(shouldSetPublisher && { publisher }),
+      ...(attestationCreatedAt != null && { attestationCreatedAt }),
       updatedAt: Date.now(),
     })
     .where(eq(seeds.localId, seedLocalId))

@@ -31,6 +31,7 @@ export const clientManager = createActor(clientManagerMachine, {
     isInitialized: false,
     addressesSet: false,
     isSaving: false,
+    syncFromEasOnAddressChange: false,
   }
 })
 
@@ -84,6 +85,7 @@ const clientInstance = {
           isInitialized: false,
           addressesSet: false,
           isSaving: false,
+          syncFromEasOnAddressChange: false,
           endpoints: undefined,
           addresses: undefined,
           ownedAddresses: undefined,

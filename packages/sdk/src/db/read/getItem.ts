@@ -28,5 +28,7 @@ export const getItem: GetItem = async ({ modelName, seedLocalId, seedUid }) => {
     itemInitObj.modelName = startCase(itemInitObj.type)
   }
 
-  return Item.create(itemInitObj)
+  // DB + loadOrCreateItem + concurrent property saves (e.g. during publish) can exceed the default 5s idle wait.
+  const getItemReadyTimeoutMs = 120_000
+  return Item.create(itemInitObj, { readyTimeout: getItemReadyTimeoutMs })
 }

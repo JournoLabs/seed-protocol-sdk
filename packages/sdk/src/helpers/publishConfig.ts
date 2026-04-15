@@ -88,10 +88,9 @@ export function getRevokeExecutor(): RevokeExecutor | null {
 }
 
 /**
- * Optional getter for additional addresses to include when syncing from EAS.
- * When using modular executor, attestations may have the executor contract as attester
- * rather than the EOA/managed account. The publish package sets this when
- * useModularExecutor and modularAccountModuleContract are configured.
+ * Optional getter for additional addresses to include when syncing from EAS and ownership checks.
+ * When using the modular executor with `modularAccountModuleContract`, the publish package registers
+ * that module address so sync/ownership align if the on-chain attester matches the module.
  */
 export type GetAdditionalSyncAddresses = () => Promise<string[]>
 

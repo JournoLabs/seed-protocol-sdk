@@ -74,6 +74,13 @@ export interface PublishConfig {
    */
   useModularExecutor?: boolean
   /**
+   * When true (and `useModularExecutor`), attempts to deploy / bootstrap the modular in-app wallet’s
+   * EIP-7702 smart account on Optimism Sepolia via Thirdweb’s `deploySmartAccount` when bytecode is still empty.
+   * When **undefined** and `useModularExecutor` is true, defaults to **true**. Set explicitly to **false** to surface
+   * an error instead of auto-deploying.
+   */
+  autoDeployEip7702ModularAccount?: boolean
+  /**
    * When true (and `useModularExecutor`), attempts to deploy the ManagedAccount via the factory
    * if it is not yet deployed on Optimism Sepolia. Default: false (surface `managed_not_ready` instead).
    */
@@ -94,6 +101,11 @@ export interface PublishConfig {
    * `[...config, ...options]`.
    */
   arweaveUploadTags?: TransactionTag[]
+  /**
+   * Default Html embedded data-URI policy for publishes when not overridden per {@link CreatePublishOptions}.
+   * Default behavior when unset: `materialize`.
+   */
+  htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
   /**
    * Optional fallback: Sign Arweave upload transactions (non-bundler path). Prefer passing at createPublish time.
    */
@@ -141,6 +153,11 @@ export interface CreatePublishOptions {
    * Resolved order: `[...initPublishTags, ...theseTags]`.
    */
   arweaveUploadTags?: TransactionTag[]
+  /**
+   * Default for Html embedded data-URI handling when a property does not set `htmlEmbeddedDataUriPolicy`.
+   * Default: `materialize`.
+   */
+  htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */
@@ -204,11 +221,18 @@ export interface ResolvedPublishConfig extends PublishConfig {
   useArweaveBundler: boolean
   /** Resolved: defaults to false. */
   autoDeployManagedAccount: boolean
+  /**
+   * Resolved: when `useModularExecutor` is true, defaults to true unless explicitly false.
+   */
+  autoDeployEip7702ModularAccount: boolean
 }
 
 /**
- * Internal: Get resolved config. Reads from ref set by initPublish or PublishProvider.
- * Throws if neither has been called.
+ * Returns the resolved publish config: defaults, env-driven fields, and
+ * {@link ResolvedPublishConfig.autoDeployEip7702ModularAccount}.
+ *
+ * Reads the ref set by {@link initPublish} or {@link PublishProvider} with a `config` prop.
+ * **Throws** if publish has not been initialized (same error as other publish APIs).
  */
 export function getPublishConfig(): ResolvedPublishConfig {
   const config = configRef
@@ -221,6 +245,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
   const arweaveUploadVerificationBaseUrl =
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
+  const useModularExecutor = config.useModularExecutor ?? false
   return {
     ...config,
     thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
@@ -228,10 +253,21 @@ export function getPublishConfig(): ResolvedPublishConfig {
     useIntegerLocalIds: config.useIntegerLocalIds ?? false,
     useDirectEas: config.useDirectEas ?? false,
     modularAccountModuleData: config.modularAccountModuleData ?? '0x',
-    useModularExecutor: config.useModularExecutor ?? false,
+    useModularExecutor,
     useArweaveBundler,
     arweaveUploadVerificationBaseUrl,
     arweaveGraphqlUrl,
     autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,
+    autoDeployEip7702ModularAccount: resolveAutoDeployEip7702ModularAccount(config, useModularExecutor),
   }
+}
+
+/** @internal Exported for unit tests. */
+export function resolveAutoDeployEip7702ModularAccount(
+  config: PublishConfig,
+  useModularExecutor: boolean,
+): boolean {
+  if (config.autoDeployEip7702ModularAccount === true) return true
+  if (config.autoDeployEip7702ModularAccount === false) return false
+  return useModularExecutor
 }

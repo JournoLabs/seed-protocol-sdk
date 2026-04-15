@@ -435,6 +435,9 @@ export function createTestConfig(overrides: Partial<SeedConstructorOptions> = {}
   return {
     config: mergedConfig,
     ...(overrides.addresses ? { addresses: overrides.addresses } : {}),
+    ...(overrides.syncFromEasOnAddressChange !== undefined
+      ? { syncFromEasOnAddressChange: overrides.syncFromEasOnAddressChange }
+      : {}),
   }
 }
 

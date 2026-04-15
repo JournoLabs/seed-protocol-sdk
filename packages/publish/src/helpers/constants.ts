@@ -18,12 +18,22 @@ export const EAS_CONTRACT_ADDRESS =
   '0x4200000000000000000000000000000000000021' as const
 
 /**
- * SeedProtocol contract on Optimism Sepolia — same deployment as
- * `helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148` (multiPublish ABI).
- * The Thirdweb managed smart account address is not this contract; `multiPublish` must target this `to`.
+ * Optimism Sepolia address of the deployment the **`multiPublish` Thirdweb ABI** was generated from
+ * (`helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148`).
+ *
+ * **Do not use as the transaction `to` for user publishes.** Runtime `multiPublish` targets the
+ * publisher’s deployed ManagedAccount (non-modular), `managedAddress` (modular), or is not used
+ * when attesting via direct EAS (EOA path).
+ */
+export const MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA =
+  '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const
+
+/**
+ * @deprecated Misleading name: this is the ABI reference deployment, not a shared on-chain router.
+ *   Use {@link MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA}.
  */
 export const SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA =
-  '0xcd8c945872df8e664e55cf8885c85ea3ea8f2148' as const
+  MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA
 
 export const PublishMachineStates = {
   SUCCESS: 'success',
@@ -35,6 +45,7 @@ export const LONG_RUNNING_PUBLISH_STATES = [
   'pollingForConfirmation',
   'uploadingData',
   'uploadingViaBundler',
+  'uploadingViaBundlerPhase2',
 ] as const
 
 export const PERIODIC_SAVE_INTERVAL_MS = 30_000

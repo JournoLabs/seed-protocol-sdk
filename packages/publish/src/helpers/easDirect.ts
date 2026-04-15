@@ -130,23 +130,42 @@ export function getAttestationUidFromReceipt(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   easContractAddress: string,
 ): string | undefined {
-  if (!receipt.logs?.length) return undefined
+  const all = getAttestedUidsFromReceipt(receipt, easContractAddress)
+  return all[0]?.uid
+}
+
+export type EasAttestedPair = { schemaUid: string; uid: string }
+
+/**
+ * All `Attested` events from the EAS contract in this receipt, in log order.
+ * Used after `multiAttest` to persist per-property attestation UIDs to SQLite.
+ */
+export function getAttestedUidsFromReceipt(
+  receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
+  easContractAddress: string,
+): EasAttestedPair[] {
+  if (!receipt.logs?.length) return []
   const want = easContractAddress.toLowerCase()
   const logs = receipt.logs.filter((l) => l.address && l.address.toLowerCase() === want)
-  if (!logs.length) return undefined
+  if (!logs.length) return []
   try {
     const parsed = parseEventLogs({
       logs: logs as import('viem').Log[],
       events: [attestedEvent()],
       strict: false,
     })
-    const first = parsed[0]
-    const uid = first?.args?.uid as string | undefined
-    if (uid && uid !== ZERO_BYTES32) return uid
+    const out: EasAttestedPair[] = []
+    for (const ev of parsed) {
+      const uid = ev?.args?.uid as string | undefined
+      const schemaUid = ev?.args?.schemaUID as string | undefined
+      if (!uid || uid === ZERO_BYTES32) continue
+      if (!schemaUid) continue
+      out.push({ schemaUid, uid })
+    }
+    return out
   } catch {
-    // ignore
+    return []
   }
-  return undefined
 }
 
 export type MultiRevocationRequest = {

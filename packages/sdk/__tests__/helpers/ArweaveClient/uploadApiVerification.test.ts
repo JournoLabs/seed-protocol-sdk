@@ -45,6 +45,7 @@ describe('uploadApiVerification', () => {
       await getUploadPipelineTransactionStatus('https://upload.example.com', 'tx1')
       expect(fetchMock).toHaveBeenCalledWith(
         'https://upload.example.com/api/upload/arweave/data/tx1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       )
     })
 
@@ -80,6 +81,27 @@ describe('uploadApiVerification', () => {
       )
       const status = await getUploadPipelineTransactionStatus('https://upload.example.com', 'x')
       expect(status.status).toBe(500)
+    })
+
+    it('returns 504 when the request is aborted (timeout)', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((_url: string, init?: RequestInit) => {
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              const e = new Error('The operation was aborted')
+              e.name = 'AbortError'
+              reject(e)
+            })
+          })
+        }) as typeof fetch,
+      )
+      const status = await getUploadPipelineTransactionStatus(
+        'https://upload.example.com',
+        'slow',
+        { timeoutMs: 5 },
+      )
+      expect(status.status).toBe(504)
     })
   })
 })

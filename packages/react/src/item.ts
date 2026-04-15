@@ -7,6 +7,7 @@ import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
 import type { IItem } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
+import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
@@ -40,6 +41,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const hasSeenIdleRef = useRef(false)
 
   const isClientReady = useIsClientReady()
+  const addressRevision = useSeedAddressRevision()
 
   const modelNameRef = useRef<string>(modelName)
   const seedLocalIdRef = useRef<string | undefined>(seedLocalId)
@@ -120,7 +122,7 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       return
     }
     loadItem()
-  }, [shouldLoad, loadItem, seedLocalId, seedUid])
+  }, [shouldLoad, loadItem, seedLocalId, seedUid, addressRevision])
 
   // Subscribe to service changes when item is available
   useEffect(() => {
@@ -194,9 +196,29 @@ const getItemsQueryKey = (
   modelName?: string,
   deleted?: boolean,
   includeEas?: boolean,
-  addressFilter?: 'owned' | 'watched' | 'all'
-) => ['seed', 'items', modelName ?? null, deleted ?? false, includeEas ?? false, addressFilter ?? null] as const
+  addressFilter?: 'owned' | 'watched' | 'all',
+  addressRevision?: number,
+) =>
+  [
+    'seed',
+    'items',
+    modelName ?? null,
+    deleted ?? false,
+    includeEas ?? false,
+    addressFilter ?? null,
+    addressRevision ?? 0,
+  ] as const
 
+/**
+ * Lists items for an optional model (and filters) with TanStack Query plus a SQLite live query.
+ *
+ * - This hook uses `staleTime: 0` on its query so the list does not inherit Seed’s default
+ *   long freshness window; local data is kept in sync via live-query invalidation, and remounts
+ *   can refetch when the cache is stale.
+ * - Schema-backed fields on each `IItem` (e.g. list relation properties) read from the item
+ *   machine and may be `undefined` until that property is loaded; normalize for forms
+ *   (e.g. `Array.isArray(x) ? x : []`).
+ */
 export const useItems: UseItems = ({
   modelName,
   deleted = false,
@@ -204,10 +226,11 @@ export const useItems: UseItems = ({
   addressFilter,
 }) => {
   const isClientReady = useIsClientReady()
+  const addressRevision = useSeedAddressRevision()
   const queryClient = useQueryClient()
-  const previousSeedsTableDataRef = useRef<SeedType[] | undefined>(undefined)
   const itemsRef = useRef<IItem<any>[]>([])
   const lastFetchedIdsRef = useRef<Set<string>>(new Set())
+  const hasSeenLiveSeedsSnapshotRef = useRef(false)
   const [addressesForFilter, setAddressesForFilter] = useState<string[] | null>(null)
 
   useEffect(() => {
@@ -222,12 +245,16 @@ export const useItems: UseItems = ({
     return () => {
       cancelled = true
     }
-  }, [addressFilter])
+  }, [addressFilter, addressRevision])
 
   const queryKey = useMemo(
-    () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter),
-    [modelName, deleted, includeEas, addressFilter],
+    () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter, addressRevision),
+    [modelName, deleted, includeEas, addressFilter, addressRevision],
   )
+
+  useEffect(() => {
+    hasSeenLiveSeedsSnapshotRef.current = false
+  }, [queryKey])
 
   const {
     data: items = [],
@@ -237,6 +264,9 @@ export const useItems: UseItems = ({
     queryKey,
     queryFn: () => Item.all(modelName, deleted, { waitForReady: true, includeEas, addressFilter }),
     enabled: isClientReady,
+    // Local SQLite + live invalidation drive freshness; Seed’s default staleTime would keep a
+    // mistaken initial [] “fresh” and block refetch when another subscriber mounts.
+    staleTime: 0,
   })
   itemsRef.current = items
 
@@ -325,6 +355,15 @@ export const useItems: UseItems = ({
 
     if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) return
 
+    if (!hasSeenLiveSeedsSnapshotRef.current) {
+      hasSeenLiveSeedsSnapshotRef.current = true
+      if (tableDataItemsSet.size > 0 && currentItemsSet.size === 0) {
+        lastFetchedIdsRef.current = new Set(tableDataItemsSet)
+        queryClient.invalidateQueries({ queryKey })
+        return
+      }
+    }
+
     const lastFetched = lastFetchedIdsRef.current
     if (
       lastFetched.size === tableDataItemsSet.size &&
@@ -332,8 +371,6 @@ export const useItems: UseItems = ({
     ) {
       return
     }
-
-    previousSeedsTableDataRef.current = seedsTableData
 
     const setsAreEqual =
       currentItemsSet.size === tableDataItemsSet.size &&

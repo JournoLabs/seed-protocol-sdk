@@ -17,7 +17,7 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
     uploadedTransactions: any[],
     options?: { publishMode?: 'patch' | 'new_version' },
   ): Promise<any>
-  persistSeedUid(publisher?: string): Promise<void>
+  persistSeedUid(publisher?: string, attestationCreatedAtMs?: number): Promise<void>
   unload(): void
   destroy(): Promise<void>
 

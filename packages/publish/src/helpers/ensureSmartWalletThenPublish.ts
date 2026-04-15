@@ -1,11 +1,12 @@
 import type { Account } from 'thirdweb/wallets'
 import type { Item } from '@seedprotocol/sdk'
-import { resolveSmartWalletForPublish } from './thirdweb'
+import { getConnectedModularAccount, resolveSmartWalletForPublish } from './thirdweb'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { runModularExecutorPublishPrep } from './ensureManagedAccountReady'
 import { ManagedAccountPublishError } from '../errors'
+import { ensureEip7702ModularAccountReady } from './ensureEip7702ModularAccountReady'
 
 export type EnsureSmartWalletResult =
   | { outcome: 'started' }
@@ -20,8 +21,11 @@ const MSG_NO_ACCOUNT_MODULAR =
  * Resolves the smart wallet for the current account; if deployed, starts publish.
  * If the user has no deployed ManagedAccount (non-modular path), returns needs_deploy so the caller can open the deploy modal.
  *
- * When `useModularExecutor` is true, runs {@link runModularExecutorPublishPrep} first and uses the **managed** account
- * address as the publish `address` (context for `multiPublish`).
+ * When **`useModularExecutor`** is true:
+ * - Runs {@link runModularExecutorPublishPrep} first and uses the **ManagedAccount** address as the publish `address` (context for `multiPublish`).
+ * - Resolves the signing account from the **modular EIP-7702** in-app wallet ({@link getConnectedModularAccount}), not from `activeAccount` or {@link resolveSmartWalletForPublish}.
+ * - Runs {@link ensureEip7702ModularAccountReady} before spawning the publish machine (idempotent with `createAttestations`).
+ * The **`activeAccount`** argument is ignored on this path (kept for API compatibility with call sites).
  *
  * Pass `options.publishMode`: `patch` (default) publishes only pending properties on the current Version;
  * `new_version` creates a new Version attestation and re-attests all properties (requires an existing Seed UID).
@@ -39,26 +43,24 @@ export async function ensureSmartWalletThenPublish(
   }
 
   if (config.useModularExecutor) {
-    if (!activeAccount) {
+    const prep = await runModularExecutorPublishPrep()
+    if (!prep.ok) {
+      return { outcome: 'managed_not_ready', error: prep.error }
+    }
+
+    const modularAccount = await getConnectedModularAccount()
+    if (!modularAccount) {
       return {
         outcome: 'managed_not_ready',
         error: new ManagedAccountPublishError(MSG_NO_ACCOUNT_MODULAR, 'MANAGED_ACCOUNT_UNAVAILABLE'),
       }
     }
 
-    const prep = await runModularExecutorPublishPrep()
-    if (!prep.ok) {
-      return { outcome: 'managed_not_ready', error: prep.error }
-    }
+    await ensureEip7702ModularAccountReady()
 
     const managedAddress = prep.managedAddress
-    const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
-    if ('needsDeploy' in resolved) {
-      return { outcome: 'needs_deploy' }
-    }
-
-    PublishManager.createPublish(item, managedAddress, resolved.account, {
-      dataItemSigner: resolved.account,
+    PublishManager.createPublish(item, managedAddress, modularAccount, {
+      dataItemSigner: modularAccount,
       ...options,
     })
     return { outcome: 'started' }

@@ -1,6 +1,11 @@
 export {
+  MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA,
+  SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA,
+} from './helpers/constants'
+export {
   initPublish,
   configurePublish,
+  getPublishConfig,
   type PublishConfig,
   type ResolvedPublishConfig,
   type CreatePublishOptions,
@@ -15,9 +20,12 @@ export type {
 export {
   AttestationVerificationError,
   isManagedAccountPublishError,
+  isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
+  type Eip7702ModularAccountPublishErrorCode,
   stringifyUnderlyingCause,
 } from './errors'
 export { default as ConnectButton } from './react/ConnectButton'
@@ -39,9 +47,14 @@ export {
   useCanPublishItem,
   useItemPublishStatus,
   usePublishProcesses,
+  usePublishProcessesForSeed,
   usePublishProcessesNonActiveCount,
+  usePublishProcessesNonActiveCountForSeed,
+  usePublishProcessesState,
+  usePublishProcessesStateForSeed,
   usePublishProcessById,
   clearCompletedPublishProcesses,
+  clearCompletedPublishProcessesForSeed,
   clearAllPublishProcesses,
   clearAllUploadProcesses,
   deletePublishProcessesForSeed,
@@ -78,3 +91,6 @@ export {
   type EnsureManagedAccountReadyResult,
   type ModularExecutorPublishPrepResult,
 } from './helpers/ensureManagedAccountReady'
+export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702ModularAccountReady'
+export { ensureManagedAccountEasConfigured } from './helpers/ensureManagedAccountEasConfigured'
+export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'

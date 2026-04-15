@@ -4,8 +4,30 @@ import { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './ge
 
 export { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
 export { loadFeedConfig } from './config';
+export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
+export {
+  classifyMediaRef,
+  resolveMediaRef,
+  normalizeFeedItemFields,
+  getFeedItemStringField,
+} from '@seedprotocol/sdk';
+export type {
+  FeedFieldManifest,
+  FeedFieldDescriptor,
+  FeedFieldRole,
+  ClassifyMediaRefOptions,
+  MediaRefClassification,
+  ResolveMediaRefResult,
+  ResolveMediaRefOptions,
+  NormalizedMediaField,
+  NormalizedHtmlField,
+  NormalizedTextField,
+  NormalizedFeedFieldValue,
+} from '@seedprotocol/sdk';
 import pluralize from 'pluralize';
 import type { FeedFormat, GraphQLItem, TransformOptions, FeedConfig, ImageMetadata } from './types';
+
+export type { TransformOptions } from './types';
 import { generateAtomFeed, generateJsonFeed } from 'feedsmith';
 import { generateRssXml } from './rss/generateRssXml';
 import { CacheManager } from './cache/CacheManager';
@@ -13,6 +35,50 @@ import { loadCacheConfig } from './cache/config';
 import { loadFeedConfig } from './config';
 import { checkIfNoneMatch } from './utils/etag';
 import { ArweaveImageService } from './services/arweaveImageService';
+import {
+  pickFeedItemContent,
+  pickFeedItemDescription,
+  filterItemsByRichTextDataUriImagePolicy,
+} from './pickFeedItemRichText';
+
+export { enrichImageSeedCloneForFeed } from './imageRelationEnrichment';
+export {
+  pickFeedItemContent,
+  pickFeedItemDescription,
+  feedItemRichTextContainsDataUriImage,
+  filterItemsByRichTextDataUriImagePolicy,
+} from './pickFeedItemRichText';
+export {
+  FEED_RICH_BODY_STORAGE_SCHEMAS,
+  isFeedRichBodyStorageSchema,
+} from './feedFieldStorageModel';
+
+/** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
+function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
+  if (value == null) return undefined
+  if (typeof value === 'string') {
+    if (value.startsWith('http://') || value.startsWith('https://')) return value
+    try {
+      return getArweaveUrlForTransaction(value)
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const o = value as Record<string, unknown>
+    const direct = o.arweaveUrl
+    if (typeof direct === 'string' && direct.trim()) return direct.trim()
+    const tx = (o.storageTransactionId ?? o.storage_transaction_id) as string | undefined
+    if (tx && typeof tx === 'string' && tx.trim()) {
+      try {
+        return getArweaveUrlForTransaction(tx.trim())
+      } catch {
+        return undefined
+      }
+    }
+  }
+  return undefined
+}
 
 let client: any;
 let initializationPromise: Promise<void> | null = null;
@@ -226,9 +292,14 @@ function transformToFeedItems(
   items: GraphQLItem[],
   options: TransformOptions
 ): any[] {
-  const { schemaName, siteUrl, itemUrlBase, itemUrlPath } = options
+  const { schemaName, siteUrl, itemUrlBase, itemUrlPath, richTextDataUriImages = 'omit_items' } = options
 
-  return items.map((item: any) => {
+  const filtered = filterItemsByRichTextDataUriImagePolicy(
+    items as Record<string, unknown>[],
+    richTextDataUriImages,
+  ) as GraphQLItem[]
+
+  return filtered.map((item: any) => {
     // Determine item ID - try multiple possible fields
     const itemId = item.id || item.seedUid || item.SeedUid || item.storageTransactionId || item.storage_transaction_id
 
@@ -257,6 +328,9 @@ function transformToFeedItems(
       date = new Date()
     }
 
+    const description = pickFeedItemDescription(item)
+    const content = pickFeedItemContent(item)
+
     // Start with all properties from the item to preserve dynamic schema
     const feedItem: any = {
       ...item, // Preserve all dynamic properties first
@@ -264,12 +338,25 @@ function transformToFeedItems(
       id: itemId,
       title: item.title || item.Title || 'Untitled',
       link: itemUrl,
-      description: item.summary || item.description || item.text || '',
-      content: item.html || item.content || item.summary || item.text || '',
+      description,
+      content,
       pubDate: date,
       date: date,
       // Map guid - use full URL when available for proper permalink
       guid: item.guid || item.Guid || item.link || item.Link || itemUrl,
+    }
+
+    if (typeof feedItem.html === 'string' && feedItem.Html === undefined) {
+      feedItem.Html = feedItem.html
+    }
+    if (typeof feedItem.Html === 'string' && feedItem.html === undefined) {
+      feedItem.html = feedItem.Html
+    }
+    if (typeof feedItem.body === 'string' && feedItem.Body === undefined) {
+      feedItem.Body = feedItem.body
+    }
+    if (typeof feedItem.Body === 'string' && feedItem.body === undefined) {
+      feedItem.body = feedItem.Body
     }
 
     // Add image metadata if available from enrichment
@@ -317,7 +404,8 @@ export const createFeed = (
   cacheBust?: string,
   pagination?: FeedPaginationOptions,
   archiveLinks?: FeedArchiveLink[],
-  isArchive?: boolean
+  isArchive?: boolean,
+  transformOverrides?: Partial<TransformOptions>,
 ): Promise<string> => {
   const collectionName = pluralize(schemaName)
   // Add cache busting parameter to feed URL if provided
@@ -353,6 +441,8 @@ export const createFeed = (
     siteUrl: SITE_CONFIG.siteUrl,
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
+    richTextDataUriImages:
+      transformOverrides?.richTextDataUriImages ?? feedConfig.richTextDataUriImages,
   })
 
   // Generate feed based on format using FeedSmith
@@ -614,19 +704,25 @@ export const createFeed = (
               rssItem['content:encoded'] = `${imageHtml}\n${item.content}`
             }
           }
+
+          if (
+            typeof item.content === 'string' &&
+            item.content.trim() !== '' &&
+            rssItem['content:encoded'] === undefined
+          ) {
+            rssItem['content:encoded'] = item.content
+          }
           
-          // Map feature_image to enclosure for RSS (media attachments) - fallback
-          if (!rssItem.enclosures && (item.feature_image || item.featureImage)) {
-            const imageUrl = item.feature_image || item.featureImage
-            // If it's a URL, use it directly; if it's an Arweave transaction ID, construct URL
-            const enclosureUrl = typeof imageUrl === 'string' && imageUrl.startsWith('http')
-              ? imageUrl
-              : getArweaveUrlForTransaction(imageUrl)
-            
-            rssItem.enclosures = [{
-              url: enclosureUrl,
-              type: 'image/jpeg', // Default, could be determined from URL or metadata
-            }]
+          // Map feature_image / image to enclosure for RSS (media attachments) - fallback
+          if (!rssItem.enclosures && (item.feature_image || item.featureImage || item.image)) {
+            const imageField = item.feature_image || item.featureImage || item.image
+            const enclosureUrl = getEnclosureUrlFromImageRelationField(imageField)
+            if (enclosureUrl) {
+              rssItem.enclosures = [{
+                url: enclosureUrl,
+                type: 'image/jpeg',
+              }]
+            }
           }
           
           // Use Dublin Core namespace for additional metadata

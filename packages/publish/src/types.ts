@@ -2,6 +2,9 @@ import type { IItem, TransactionTag } from '@seedprotocol/sdk'
 
 /** Aligns with `@seedprotocol/sdk` `PublishMode`. */
 export type PublishMode = 'patch' | 'new_version'
+
+/** Aligns with `@seedprotocol/sdk` `HtmlEmbeddedDataUriPolicy`. */
+export type HtmlEmbeddedDataUriPolicy = import('@seedprotocol/sdk').HtmlEmbeddedDataUriPolicy
 import type { Account } from 'thirdweb/wallets'
 import type { ethers } from 'ethers'
 
@@ -52,7 +55,11 @@ export interface PublishMachineContext {
   errorStep?: string
   /** Raw EAS attestation payload from getPublishPayload, stored for later retrieval. */
   easPayload?: unknown
-  /** Signed DataItems for uploadViaBundler (dataItemSigner path only - signed FileDataItem instances for upload). */
+  /**
+   * Ephemeral: full signed DataItem bytes for `uploadingViaBundler` only (dataItemSigner path).
+   * Cleared from context after a successful batch upload; do not rely on this after that state.
+   * Not included in DB snapshots.
+   */
   signedDataItems?: { id: string; raw: Uint8Array }[]
   /**
    * Per-publish: sign DataItems when useArweaveBundler (from createPublish options).
@@ -74,8 +81,23 @@ export interface PublishMachineContext {
    * Appended after Content-SHA-256 / Content-Type on each upload.
    */
   arweaveUploadTags?: TransactionTag[]
+  /**
+   * Set when leaving `checking`: whether attestations use Seed `multiPublish` on the publisher/managed
+   * contract or direct EAS (`createAttestationsDirectToEas`). Omitted on restored snapshots: guards
+   * fall back to `getPublishConfig().useDirectEas`.
+   */
+  attestationStrategy?: 'multiPublish' | 'directEas'
   /** `patch` (default): attest only pending properties on current Version. `new_version`: new Version + full snapshot. */
   publishMode?: PublishMode
+  /**
+   * How to handle `data:image/*` inside Html storage at publish time.
+   * Per-property `htmlEmbeddedDataUriPolicy` on the schema overrides this. Default: `materialize`.
+   */
+  htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy
+  /** Set during publish after embedded-image prep (non-bundler two-phase L1). */
+  htmlEmbeddedDeferredHtmlSeedLocalIds?: string[]
+  htmlEmbeddedPhase1PublishUploads?: PublishUpload[]
+  htmlEmbeddedPhase1ArweaveTransactions?: ArweaveTransactionInfo[]
   /**
    * Unique id for this publish actor run. Used to ignore async stale DB writes that would
    * INSERT a duplicate row after the same run already completed.

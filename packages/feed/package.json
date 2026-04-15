@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,6 +31,7 @@
     "graphql-request": "^7.3.5",
     "image-size": "^1.1.1",
     "pluralize": "^8.0.0",
+    "rss-parser": "^3.13.0",
     "xmlbuilder2": "^4.0.3"
   },
   "devDependencies": {

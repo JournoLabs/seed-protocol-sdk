@@ -19,6 +19,8 @@ import pluralize from 'pluralize'
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
+import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import {
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
@@ -30,8 +32,9 @@ import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
 import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models, properties, versions } from '@/seedSchema'
-import { eq, and, desc } from 'drizzle-orm'
+import { models, properties } from '@/seedSchema'
+import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
+import { eq, and } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import debug from 'debug'
 import {ethers} from 'ethers'
@@ -124,18 +127,19 @@ function mergeChildPublishPayloadIfDuplicateInBatch(
 const getVersionUid = (item: IItem<any>): string => {
   const latestVersion = item.latestVersionUid
   if (latestVersion && typeof latestVersion === 'object' && latestVersion.uid) {
-    return latestVersion.uid
+    const u = latestVersion.uid
+    return isValidEasAttestationUid(u) ? u : ZERO_BYTES32
   }
   if (latestVersion && typeof latestVersion === 'string') {
-    return latestVersion
+    return isValidEasAttestationUid(latestVersion) ? latestVersion : ZERO_BYTES32
   }
   return ZERO_BYTES32
 }
 
 /**
  * Resolve versionUid when item.latestVersionUid is empty but item has been published (has seedUid).
- * Tries DB first, then EAS. The contract path never calls updateVersionUid, so the versions table
- * may have uid=NULL. EAS fallback queries attestations where refUID=seedUid (Version attestations).
+ * Tries DB first, then EAS. If the local versions row still has a placeholder uid after publish,
+ * EAS fallback queries attestations where refUID=seedUid (Version attestations).
  */
 async function resolveVersionUid(
   seedLocalId: string,
@@ -143,17 +147,8 @@ async function resolveVersionUid(
 ): Promise<string> {
   if (!seedLocalId || !seedUid || seedUid === ZERO_BYTES32) return ZERO_BYTES32
 
-  const appDb = BaseDb.getAppDb()
-  if (appDb) {
-    const rows = await appDb
-      .select({ uid: versions.uid })
-      .from(versions)
-      .where(eq(versions.seedLocalId, seedLocalId))
-      .orderBy(desc(versions.createdAt))
-      .limit(1)
-    const uid = rows[0]?.uid
-    if (uid && uid !== '' && uid !== 'NULL') return uid
-  }
+  const published = await getLatestPublishedVersionRow(seedLocalId)
+  if (published?.uid) return published.uid
 
   try {
     const { getItemVersionsFromEas } = await import('@/eas')
@@ -889,6 +884,161 @@ const processRelationOrImageProperty = async (
   return multiPublishPayload
 }
 
+async function resolveHtmlPropertySchemaUidByHtmlSeed(
+  item: IItem<any>,
+  htmlSeedLocalId: string,
+  ctx: PublishValidationContext,
+): Promise<string | undefined> {
+  const want = htmlSeedLocalId.trim()
+  for (const p of item.properties) {
+    if (p.propertyDef?.dataType !== ModelPropertyDataTypes.Html) continue
+    const snap = p.getService().getSnapshot()
+    const c = 'context' in snap ? snap.context : null
+    const pv = typeof (c as any)?.propertyValue === 'string' ? (c as any).propertyValue.trim() : ''
+    if (pv !== want) continue
+    let uid = p.schemaUid
+    if (!uid) {
+      const pd = await getPropertyData(p, ctx)
+      uid = pd?.schemaUid
+    }
+    return uid
+  }
+  addValidationError(
+    ctx,
+    `Could not find Html property for embedded image rewrite (html seed ${want}).`,
+    'html',
+    'html_embed_schema',
+  )
+  return undefined
+}
+
+async function processHtmlEmbeddedCoPublishImagePayloads(
+  item: IItem<any>,
+  multiPublishPayload: MultiPublishPayload,
+  uploadedTransactions: UploadedTransaction[],
+  originalSeedLocalId: string,
+  ctx: PublishValidationContext,
+  buildOpts?: PublishBuildOpts,
+): Promise<MultiPublishPayload> {
+  const appDb = BaseDb.getAppDb()
+  if (!appDb) return multiPublishPayload
+
+  const rows = await appDb
+    .select()
+    .from(htmlEmbeddedImageCoPublish)
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
+
+  if (rows.length === 0) return multiPublishPayload
+
+  const forceFullSnapshot = buildOpts?.forceFullSnapshot === true
+  const getItemMod = await import('../../db/read/getItem')
+  const { getItem } = getItemMod
+  const doneImages = new Set<string>()
+
+  for (const row of rows) {
+    if (doneImages.has(row.imageSeedLocalId)) continue
+    doneImages.add(row.imageSeedLocalId)
+
+    const htmlSchemaUid = await resolveHtmlPropertySchemaUidByHtmlSeed(item, row.htmlSeedLocalId, ctx)
+    if (!htmlSchemaUid) continue
+
+    const relatedItem = await getItem({ seedLocalId: row.imageSeedLocalId })
+    if (!relatedItem) {
+      addValidationError(
+        ctx,
+        `Embedded Image item not found for seed ${row.imageSeedLocalId}.`,
+        'html',
+        'html_embed_image_missing',
+      )
+      continue
+    }
+    if (relatedItem.seedUid && relatedItem.seedUid !== ZERO_BYTES32) {
+      continue
+    }
+
+    const seedSchemaUid = await getEasSchemaUidForModel('Image')
+    if (!seedSchemaUid) {
+      addValidationError(ctx, `Schema UID not found for model: Image`, 'html')
+      continue
+    }
+
+    if (
+      mergeChildPublishPayloadIfDuplicateInBatch(
+        multiPublishPayload,
+        relatedItem.seedLocalId,
+        originalSeedLocalId,
+        htmlSchemaUid,
+      )
+    ) {
+      continue
+    }
+
+    const versionUid = getVersionUid(relatedItem)
+
+    let publishPayload: PublishPayload = {
+      localId: relatedItem.seedLocalId,
+      seedIsRevocable: true,
+      versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+      seedUid: relatedItem.seedUid || ZERO_BYTES32,
+      seedSchemaUid,
+      versionUid,
+      listOfAttestations: [],
+      propertiesToUpdate: [
+        {
+          publishLocalId: originalSeedLocalId,
+          propertySchemaUid: htmlSchemaUid,
+        },
+      ],
+    }
+
+    await ensurePropertyDefs(relatedItem)
+    const { itemBasicProperties, itemUploadProperties } =
+      await getSegmentedItemProperties(relatedItem)
+
+    const relatedStorageUpload = resolveStorageTransactionUploadSlot(
+      relatedItem,
+      itemUploadProperties,
+    )
+    if (relatedStorageUpload) {
+      const transactionData = findUploadedTxForSeedLocalId(
+        uploadedTransactions,
+        relatedItem.seedLocalId,
+      )
+      if (transactionData) {
+        const itemProperty = relatedStorageUpload.itemProperty
+        itemProperty.getService().send({
+          type: 'updateContext',
+          propertyValue: transactionData.txId,
+          renderValue: transactionData.txId,
+        })
+        replaceStorageTransactionInBasicProperties(itemBasicProperties, itemProperty)
+      }
+    }
+
+    for (const p of itemBasicProperties) {
+      if (
+        isStorageTransactionPropertyName(p.propertyName) &&
+        !p.propertyDef &&
+        relatedItem.modelName
+      ) {
+        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId')
+        if (schema) {
+          p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
+        }
+      }
+    }
+
+    dedupeOneStorageTransactionPropertyInList(itemBasicProperties)
+    publishPayload = await processBasicProperties(itemBasicProperties, publishPayload, ctx, {
+      forceFullSnapshot,
+    })
+
+    multiPublishPayload.push(publishPayload)
+  }
+
+  return multiPublishPayload
+}
+
 const processListProperty = async (
   listProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
@@ -1399,6 +1549,15 @@ export const getPublishPayload = async (
     )
     itemBasicProperties.push(relationProperty)
   }
+
+  multiPublishPayload = await processHtmlEmbeddedCoPublishImagePayloads(
+    item,
+    multiPublishPayload,
+    uploadedTransactions,
+    item.seedLocalId,
+    validationCtx,
+    { forceFullSnapshot },
+  )
 
   for (const listProperty of itemListProperties) {
     multiPublishPayload = await processListProperty(

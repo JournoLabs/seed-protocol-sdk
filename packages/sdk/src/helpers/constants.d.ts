@@ -41,6 +41,7 @@ export declare const INTERNAL_DATA_TYPES: {
         eas: string;
     };
 };
+export declare const PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP: Set<string>;
 export declare const INTERNAL_PROPERTY_NAMES: string[];
 export declare const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA = "0x13c0fd59d69dbce40501a41f8b37768d26dd2e2bb0cad64615334d84f7b9bdf6";
 export declare const defaultAttestationData: AttestationRequestData;

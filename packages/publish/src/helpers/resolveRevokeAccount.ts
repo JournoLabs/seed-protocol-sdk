@@ -17,7 +17,9 @@ import {
  * @param account - The currently connected account
  * @param attester - The attester address from the seed (publisher or attestationRaw.attester)
  * @returns The account to use for revoke
- * @throws If attester is the modular executor contract (revoke not supported)
+ * @throws If `attester` equals any address from {@link getGetAdditionalSyncAddresses}
+ *   (e.g. `modularAccountModuleContract` when `initPublish` registers it). Those addresses
+ *   cannot revoke via the app wallet’s EAS `multiRevoke` path today.
  */
 export async function resolveRevokeAccount(params: {
   account: Account

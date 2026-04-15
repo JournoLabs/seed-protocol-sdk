@@ -1,15 +1,15 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { eq, desc } from 'drizzle-orm'
+import { isPlaceholderUid } from '@/helpers/easUid'
 
 type UpdateVersionUidProps = {
   seedLocalId: string
   versionUid: string
   publisher?: string
+  /** Unix ms when the version attestation was created (EAS / chain time). */
+  attestationCreatedAt?: number
 }
-
-const isEmptyUid = (uid: string | null | undefined): boolean =>
-  uid == null || uid === '' || uid === 'NULL'
 
 /**
  * Updates the version record with the attestation UID after a Version attestation is created.
@@ -20,6 +20,7 @@ export const updateVersionUid = async ({
   seedLocalId,
   versionUid,
   publisher,
+  attestationCreatedAt,
 }: UpdateVersionUidProps): Promise<void> => {
   if (!seedLocalId || !versionUid) {
     return
@@ -34,7 +35,9 @@ export const updateVersionUid = async ({
     .where(eq(versions.seedLocalId, seedLocalId))
     .orderBy(desc(versions.createdAt))
 
-  const toUpdate = rows.find((r: { localId: string | null; uid: string | null }) => r.localId && isEmptyUid(r.uid))
+  const toUpdate = rows.find(
+    (r: { localId: string | null; uid: string | null }) => r.localId && isPlaceholderUid(r.uid),
+  )
   if (!toUpdate?.localId) return
 
   let shouldSetPublisher = publisher != null && publisher !== ''
@@ -47,6 +50,7 @@ export const updateVersionUid = async ({
     .set({
       uid: versionUid,
       ...(shouldSetPublisher && { publisher }),
+      ...(attestationCreatedAt != null && { attestationCreatedAt }),
       updatedAt: Date.now(),
     })
     .where(eq(versions.localId, toUpdate.localId))

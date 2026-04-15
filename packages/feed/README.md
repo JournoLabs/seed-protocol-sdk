@@ -1,5 +1,7 @@
 # @seedprotocol/feed
 
+Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. For EAS-assembled feeds, `getFeedItemsBySchemaName` marks relation fields with `_feedFieldStorageModels` / `_feedListElementStorageModels` so `pickFeedItemContent` prefers **html** / **file** / **json** storage relations before the legacy `html` / `body` / `content` chain; feed output is **not** sanitized—see [FEED_RICH_FIELDS.md](../../docs/FEED_RICH_FIELDS.md) (including **Publishing feeds** and trust boundaries).
+
 ## Configuration
 
 ### Revoked attestations

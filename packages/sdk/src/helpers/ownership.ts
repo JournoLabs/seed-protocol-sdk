@@ -50,8 +50,8 @@ function getPublisherFromRow(row: SeedRow): string | null {
 /**
  * Checks if the current user owns the item (publisher is in owned addresses).
  * Locally created items (no publisher, no attestationRaw) are considered owned.
- * Includes getAdditionalSyncAddresses (e.g. modular executor contract) so ownership
- * aligns with EAS sync - items attested by the executor are considered owned.
+ * Includes getAdditionalSyncAddresses (e.g. `modularAccountModuleContract` when configured)
+ * so ownership aligns with EAS sync when the publisher/attester matches those addresses.
  */
 export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean> {
   const row = await getSeedRowForItem(item)

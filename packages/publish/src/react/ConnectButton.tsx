@@ -1,17 +1,33 @@
-import React, { FC } from "react"
+import React, { FC, useEffect } from "react"
 import { ConnectButton as ConnectButtonThirdweb, darkTheme } from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
-import { getClient, getConnectedManagedAccountAddress, getManagedAccountWallet, getWalletsForConnectButton } from "../helpers/thirdweb"
+import {
+  disconnectAllInAppPublishWallets,
+  getClient,
+  getConnectedManagedAccountAddress,
+  getManagedAccountWallet,
+  getWalletsForConnectButton,
+  debugLogWalletPersistenceSnapshot,
+} from "../helpers/thirdweb"
 import { usePublishConfig } from "./PublishProvider"
 import { getPublishConfig } from "../config"
 import { optimismSepolia } from "thirdweb/chains"
 import type { Account, Wallet } from "thirdweb/wallets"
 import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
+import { PublishManager } from "../services/publishManager"
 
 function reportWalletSetupWarning(err: unknown) {
   console.error("[ConnectButton] Wallet setup / module install failed:", err)
   getPublishConfig().onWalletSetupWarning?.(err)
+}
+
+/** Resolves after `ClientManager.init()` has finished; `setAddresses` requires this. */
+function waitUntilSeedInitialized(): Promise<void> {
+  if (seedClient.isInitialized()) return Promise.resolve()
+  return new Promise((resolve) => {
+    seedClient.onReady(() => resolve())
+  })
 }
 
 /**
@@ -62,10 +78,40 @@ async function ensureExecutorModulesForConnect(
 const ConnectButton: FC = () => {
   const config = usePublishConfig()
 
+  // #region agent log
+  useEffect(() => {
+    debugLogWalletPersistenceSnapshot(
+      'ConnectButton.tsx:mount',
+      'H1',
+      'ConnectButton mounted (initial persistence snapshot)',
+    )
+  }, [])
+  // #endregion
+
   const handleDisconnect = async () => {
+    // #region agent log
+    debugLogWalletPersistenceSnapshot(
+      'ConnectButton.tsx:handleDisconnect:pre',
+      'H2',
+      'handleDisconnect before stopAll/setAddresses/disconnectAll',
+    )
+    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af71b7' },
+      body: JSON.stringify({
+        sessionId: 'af71b7',
+        location: 'ConnectButton.tsx:handleDisconnect',
+        message: 'onDisconnect fired',
+        data: { hypothesisId: 'H2', timestamp: Date.now() },
+      }),
+    }).catch(() => {})
+    // #endregion
     console.log('[ConnectButton] Disconnected')
+    PublishManager.stopAll()
     try {
+      await waitUntilSeedInitialized()
       await seedClient.setAddresses([])
+      await disconnectAllInAppPublishWallets()
     } catch (err) {
       console.warn('[ConnectButton] Failed to clear seed client addresses:', err)
     }
@@ -74,7 +120,30 @@ const ConnectButton: FC = () => {
   const handleConnect = async (activeWallet: Wallet, _allConnectedWallets: Wallet[]) => {
     const account = activeWallet.getAccount()
     if (!account) return
+    // #region agent log
+    debugLogWalletPersistenceSnapshot(
+      'ConnectButton.tsx:handleConnect',
+      'H4',
+      'handleConnect after account resolved',
+    )
+    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af71b7' },
+      body: JSON.stringify({
+        sessionId: 'af71b7',
+        location: 'ConnectButton.tsx:handleConnect',
+        message: 'onConnect',
+        data: {
+          hypothesisId: 'H4',
+          addressSample: account.address.slice(0, 10),
+          timestamp: Date.now(),
+        },
+      }),
+    }).catch(() => {})
+    // #endregion
     console.log('[ConnectButton] Connected', account.address)
+    PublishManager.stopAll()
+    await waitUntilSeedInitialized()
     const owned = new Set<string>([account.address.toLowerCase()])
     let managedAddress: string | undefined
     if (config.useModularExecutor) {

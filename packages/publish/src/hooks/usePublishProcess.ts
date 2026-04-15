@@ -36,16 +36,19 @@ export function usePublishProcess(seedLocalId: string) {
   const [terminalLatch, setTerminalLatch] = useState<'success' | 'failure' | null>(null)
 
   const db = BaseDb.getAppDb()
-  const latestRecords = useLiveQuery(
-    seedLocalId && db
-      ? db
-          .select()
-          .from(publishProcesses)
-          .where(eq(publishProcesses.seedLocalId, seedLocalId))
-          .orderBy(desc(publishProcesses.startedAt))
-          .limit(1)
-      : null
+  const latestProcessRowQuery = useMemo(
+    () =>
+      seedLocalId && db
+        ? db
+            .select()
+            .from(publishProcesses)
+            .where(eq(publishProcesses.seedLocalId, seedLocalId))
+            .orderBy(desc(publishProcesses.startedAt))
+            .limit(1)
+        : null,
+    [db, seedLocalId]
   )
+  const latestRecords = useLiveQuery(latestProcessRowQuery)
   const latestRecord = latestRecords?.[0] as
     | { status: string; persistedSnapshot: string; completedAt?: number | null }
     | undefined

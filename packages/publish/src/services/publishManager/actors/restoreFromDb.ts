@@ -16,7 +16,8 @@ async function waitForDb(maxWaitMs: number): Promise<boolean> {
   return false
 }
 
-/** Minimal snapshot shape for restore; avoids excessive type recursion from SnapshotFrom<typeof publishMachine>. */
+/** Minimal snapshot shape for restore; avoids excessive type recursion from SnapshotFrom<typeof publishMachine>.
+ * Older rows may omit `context.attestationStrategy`; publish guards then fall back to `useDirectEas`. */
 interface PersistedSnapshot {
   status?: string
   value?: string | Record<string, unknown>
@@ -52,6 +53,54 @@ function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
     if (!Array.isArray(txs) || txs.length === 0 || !Array.isArray(uploads)) return false
   }
   return true
+}
+
+/**
+ * XState `persistContext` serializes actor refs as `{ xstate$$type: 1, id }`. `restoreSnapshot` swaps those
+ * for live child actors; if the id is not in `snapshot.children`, `context.item` becomes `undefined` and
+ * restored publishes throw on resume (e.g. createAttestations). Real item data is always a plain object.
+ */
+function isPersistedActorRef(value: unknown): value is { xstate$$type: number; id: string } {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'xstate$$type' in value &&
+    (value as { xstate$$type: number }).xstate$$type === 1 &&
+    typeof (value as { id?: unknown }).id === 'string'
+  )
+}
+
+function patchPublishContextItemForRestore(
+  parsed: PersistedSnapshot,
+  seedLocalId: string,
+  record: { modelName?: string | null; schemaId?: string | null },
+) {
+  parsed.context = parsed.context ?? {}
+  const raw = parsed.context.item
+  if (isPersistedActorRef(raw)) {
+    parsed.context.item = {
+      seedLocalId,
+      modelName: parsed.context.modelName ?? record.modelName ?? '',
+      schemaId: parsed.context.schemaId ?? record.schemaId ?? undefined,
+    }
+    return
+  }
+  parsed.context.item = {
+    ...(typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {}),
+    seedLocalId,
+    modelName:
+      (raw as { modelName?: string } | undefined)?.modelName ??
+      parsed.context.modelName ??
+      record.modelName ??
+      '',
+    schemaId:
+      (raw as { schemaId?: string } | undefined)?.schemaId ??
+      parsed.context.schemaId ??
+      record.schemaId ??
+      undefined,
+  }
 }
 
 export interface RestoreFromDbInput {
@@ -109,16 +158,8 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
         if (!seedLocalId) continue
         if (!isRestorableSnapshot(parsed)) continue
 
-        // Item is an SDK class instance; JSON.stringify loses getters (e.g. seedLocalId).
-        // Patch context.item so createAttestations has the data it needs for retry.
-        parsed.context = parsed.context ?? {}
-        parsed.context.item = {
-          ...parsed.context.item,
-          seedLocalId,
-          modelName:
-            parsed.context.item?.modelName ?? parsed.context.modelName ?? publishProcessRecord.modelName ?? '',
-          schemaId: parsed.context.item?.schemaId ?? parsed.context.schemaId ?? publishProcessRecord.schemaId ?? undefined,
-        }
+        // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
+        patchPublishContextItemForRestore(parsed, seedLocalId, publishProcessRecord)
 
         const publishProcess = createActor(publishMachine as unknown as import('xstate').AnyActorLogic, {
           snapshot: parsed as any,

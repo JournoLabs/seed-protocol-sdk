@@ -1096,6 +1096,71 @@ testDescribe('Item Integration Tests', () => {
       // Note: This test verifies the liveQuery subscription is set up correctly
       expect(item.latestVersionLocalId).toBeDefined()
     })
+
+    it('hydrates metadata tied to a non-latest version_local_id when that row is latest per property_name', async () => {
+      const schemaName = 'Test Schema Metadata Version Local Drift'
+      const testSchema = createTestSchema(schemaName, {
+        TestPost: {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+            driftNote: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 },
+      )
+
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'Drift Test',
+      })
+      await waitForItemIdle(item)
+
+      const db = BaseDb.getAppDb()
+      expect(db).toBeTruthy()
+
+      const seedLocalId = item.seedLocalId
+      const latestVersionLocalId = item.latestVersionLocalId
+      expect(latestVersionLocalId).toBeDefined()
+
+      const legacyVersionId = 'legacy-version-not-matching-latest'
+      expect(legacyVersionId).not.toBe(latestVersionLocalId)
+
+      await db!.insert(metadata).values({
+        localId: generateId(),
+        seedLocalId,
+        versionLocalId: legacyVersionId,
+        propertyName: 'driftNote',
+        propertyValue: 'drift-from-legacy-version-row',
+        modelType: 'test_post',
+        createdAt: Date.now() + 2_000_000,
+        updatedAt: Date.now() + 2_000_000,
+      })
+
+      item.unload()
+      // Simulate cold reload: ItemProperty cache survives item.unload(); a full page load clears it.
+      ItemProperty.clearInstanceCacheForItem(seedLocalId)
+
+      const reloaded = await Item.create({
+        modelName: 'TestPost',
+        seedLocalId,
+      })
+      await waitForItemIdle(reloaded)
+
+      const driftProp = reloaded.properties.find(
+        (p: any) => String(p.propertyName).toLowerCase() === 'driftnote',
+      )
+      expect(driftProp).toBeDefined()
+      expect(driftProp?.value).toBe('drift-from-legacy-version-row')
+    })
   })
 
   describe('Item independence from Model', () => {

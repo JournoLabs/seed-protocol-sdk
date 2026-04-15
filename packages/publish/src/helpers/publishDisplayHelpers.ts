@@ -28,6 +28,7 @@ export function resolvePublishDisplayValue(
   if (publishProcess != null) return machineValue
   if (record?.status === 'completed') return PublishMachineStates.SUCCESS
   if (record?.status === 'failed') return PublishMachineStates.FAILURE
+  if (record?.status === 'interrupted') return undefined
   return machineValue
 }
 
@@ -48,6 +49,7 @@ export function getPublishMachineValueForUi(record: PublishRowForDisplay | undef
 
   if (record.status === 'failed') return PublishMachineStates.FAILURE
   if (record.status === 'completed') return PublishMachineStates.SUCCESS
+  if (record.status === 'interrupted') return undefined
 
   if (record.completedAt != null) {
     try {

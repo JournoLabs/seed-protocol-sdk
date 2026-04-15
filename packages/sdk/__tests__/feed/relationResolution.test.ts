@@ -68,6 +68,52 @@ describe('Feed relation resolution', () => {
       const imageTags = rss.match(/<image>[\s\S]*?<\/image>/g) || []
       expect(imageTags.length).toBeGreaterThanOrEqual(2)
     })
+
+    it('nested featureImage object sets RSS enclosure from arweaveUrl (not object string)', async () => {
+      const url = 'https://arweave.net/JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
+      const items = [
+        {
+          seedUid: '0xpostNestedImg',
+          title: 'Post',
+          text: 'Body',
+          timeCreated: Math.floor(Date.now() / 1000),
+          featureImage: {
+            seedUid: '0ximg1',
+            storageTransactionId: 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY',
+            arweaveUrl: url,
+          },
+        },
+      ]
+
+      const rss = await createFeed(items, 'post', 'rss')
+
+      expect(rss).toContain(`enclosure url="${url}"`)
+      expect(rss).not.toContain('arweave.net/[object Object]')
+      expect(rss).toContain('<arweaveUrl>')
+      expect(rss).toContain(url)
+    })
+
+    it('nested featureImage without arweaveUrl still gets enclosure from storageTransactionId', async () => {
+      const tx = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
+      const items = [
+        {
+          seedUid: '0xpostNestedImg2',
+          title: 'Post',
+          text: 'Body',
+          timeCreated: Math.floor(Date.now() / 1000),
+          featureImage: {
+            seedUid: '0ximg2',
+            storageTransactionId: tx,
+          },
+        },
+      ]
+
+      const rss = await createFeed(items, 'post', 'rss')
+
+      expect(rss).toContain('enclosure url="https://')
+      expect(rss).toContain(tx)
+      expect(rss).not.toContain('[object Object]')
+    })
   })
 
   describe('RSS output with expanded author relation', () => {

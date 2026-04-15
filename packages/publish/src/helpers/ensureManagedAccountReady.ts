@@ -80,7 +80,9 @@ export type ModularExecutorPublishPrepResult =
   | { ok: false; error: ManagedAccountPublishError }
 
 /**
- * Full gate for modular executor publish: deployment check, optional factory deploy, optional executor module on the managed contract.
+ * Full gate for modular executor publish: managed-account deployment check, optional factory deploy,
+ * optional executor module on the managed contract. EIP-7702 modular wallet readiness is handled separately
+ * in {@link ensureEip7702ModularAccountReady}.
  * Call only when `useModularExecutor` is true.
  */
 export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPublishPrepResult> {
@@ -148,6 +150,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
         }
       }
     }
+
     return { ok: true, managedAddress: state.managedAddress }
   }
 

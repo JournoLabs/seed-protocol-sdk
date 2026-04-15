@@ -11,12 +11,26 @@ import { getContentHash } from '@/helpers/crypto'
 import { Item } from '@/Item/Item'
 import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
 import { PublishUpload } from '@/types/publish'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
+import { eq } from 'drizzle-orm'
+import { ModelPropertyDataTypes } from '@/helpers/property'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
 /** Optional tags merged into each Arweave tx after Content-SHA-256 / Content-Type. */
 export type GetPublishUploadsOptions = {
   arweaveUploadTags?: TransactionTag[]
+  /**
+   * Html storage seed local ids to skip (phase 1 of two-phase embedded-image publish).
+   */
+  deferHtmlStorageSeedLocalIds?: string[]
+  /**
+   * When set, only Html storage seeds in this list are included (phase 2). Non-Html storage uploads are omitted.
+   */
+  onlyHtmlStorageSeedLocalIds?: string[]
+  /** When true, do not recurse into relation properties (phase 2 must not re-upload related items). */
+  skipRelationRecursion?: boolean
 }
 
 const EXTENSION_TO_MIME: Record<string, string> = {
@@ -117,6 +131,21 @@ const getStorageSeedUploads = async (
       itemProperty.propertyDef?.refValueType ??
       itemProperty.propertyDef?.dataType ??
       'Image'
+
+    if (dataType === ModelPropertyDataTypes.Html) {
+      if (options?.deferHtmlStorageSeedLocalIds?.includes(seedLocalId)) {
+        continue
+      }
+      if (
+        options?.onlyHtmlStorageSeedLocalIds?.length &&
+        !options.onlyHtmlStorageSeedLocalIds.includes(seedLocalId)
+      ) {
+        continue
+      }
+    } else if (options?.onlyHtmlStorageSeedLocalIds?.length) {
+      continue
+    }
+
     const baseDir = getStorageDirForDataType(dataType)
     const filePath = `${baseDir}/${refResolvedValue}`
 
@@ -147,6 +176,37 @@ const getStorageSeedUploads = async (
     })
   }
 
+  return uploads
+}
+
+async function appendCoPublishedImageUploads(
+  item: IItem<any>,
+  uploads: PublishUpload[],
+  options?: GetPublishUploadsOptions,
+): Promise<PublishUpload[]> {
+  const appDb = BaseDb.getAppDb()
+  if (!appDb || options?.onlyHtmlStorageSeedLocalIds?.length) return uploads
+
+  const rows = await appDb
+    .select()
+    .from(htmlEmbeddedImageCoPublish)
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
+
+  const seen = new Set(uploads.map((u) => u.seedLocalId))
+
+  for (const row of rows) {
+    if (seen.has(row.imageSeedLocalId)) continue
+    const imageItem = await Item.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
+    if (!imageItem) continue
+    const { itemImageProperties } = await getSegmentedItemProperties(imageItem)
+    const more = await getStorageSeedUploads(itemImageProperties, options)
+    for (const u of more) {
+      if (!seen.has(u.seedLocalId)) {
+        uploads.push(u)
+        seen.add(u.seedLocalId)
+      }
+    }
+  }
   return uploads
 }
 
@@ -431,17 +491,14 @@ export const getPublishUploads = async (
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
 ) => {
-  // if (item.modelName === 'Post') {
-  //   if (!item.authors) {
-  //     item.authors = [
-  //       'Sr0bIx9Fwj',
-  //       '0xc2879650e9503a303ceb46f966e55baab480b267dc20cede23ef503622eee6d7',
-  //     ]
-  //   }
-  // }
-
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
+
+  if (!relatedItemProperty && options?.onlyHtmlStorageSeedLocalIds?.length) {
+    const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
+    uploads.push(...storageSeedUploads)
+    return uploads
+  }
 
   for (const uploadProperty of itemUploadProperties) {
     uploads = await processUploadProperty(
@@ -454,6 +511,14 @@ export const getPublishUploads = async (
 
   const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
   uploads.push(...storageSeedUploads)
+
+  if (!relatedItemProperty && !options?.onlyHtmlStorageSeedLocalIds?.length) {
+    uploads = await appendCoPublishedImageUploads(item, uploads, options)
+  }
+
+  if (options?.skipRelationRecursion) {
+    return uploads
+  }
 
   for (const relationProperty of itemRelationProperties) {
     const snapshot = relationProperty.getService().getSnapshot()

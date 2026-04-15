@@ -37,13 +37,13 @@ await item.unpublish()
 - `"Revocation is not configured. Call initPublish() from @seedprotocol/publish or ensure PublishProvider is mounted with config."` if the revoke executor is not set
 - `"No wallet connected. Connect a wallet to revoke attestations."` if no wallet is connected
 - `"Only the original attester can revoke attestations. Connect the wallet that published this item."` if the connected wallet is not the attester who created the attestation (EAS `AccessDenied`)
-- `"Revocation not supported for items published via the modular executor."` if the attestation's attester is the modular executor contract (revoke would require contract changes)
+- `"Revocation not supported for items published via the modular executor."` if the resolved attester address matches `modularAccountModuleContract` from `initPublish`’s `getAdditionalSyncAddresses` hook (the executor module cannot call EAS `multiRevoke` from the app wallet today)
 
 ## Wallet and Attester
 
 When attestations were created by the ManagedAccount (in-app wallet, EIP4337), the SDK will attempt to use that wallet for revoke if the user is connected with a different wallet (e.g. EOA or modular account) that controls the same ManagedAccount. If the ManagedAccount wallet can be auto-connected, the revoke will succeed without the user switching wallets.
 
-Items published via the **modular executor** (when `useModularExecutor` is enabled) have the executor contract as the attester. Revocation is not supported for these items; the executor contract would need a `multiRevoke` function to enable it.
+With **`useModularExecutor`**, publish sends `multiPublish` to the user’s **ManagedAccount** contract (the modular account signs the transaction). EAS records whatever address actually invoked `attest` / `multiAttest` on-chain (typically the ManagedAccount or its delegate path), not the standalone SeedProtocol deployment used only as the **ABI** for encoding `multiPublish`. Unpublish uses the same attester resolution as other ManagedAccount flows when the on-chain attester matches the managed account. If your deployment instead surfaces the **executor module** contract as the EAS attester and that address is listed in `getAdditionalSyncAddresses`, revocation remains unsupported until the module can perform `multiRevoke` or attester resolution is adjusted.
 
 ## Local State
 

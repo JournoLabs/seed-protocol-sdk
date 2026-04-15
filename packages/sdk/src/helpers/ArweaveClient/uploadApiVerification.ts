@@ -20,6 +20,13 @@ export function getUploadApiArweaveDataUrl(baseUrl: string, txOrDataItemId: stri
   return `${base}/api/upload/arweave/data/${id}`
 }
 
+const DEFAULT_UPLOAD_STATUS_TIMEOUT_MS = 45_000
+
+export type GetUploadPipelineTransactionStatusOptions = {
+  /** Abort the request after this many ms (upload API hung / unreachable). Default 45s. */
+  timeoutMs?: number
+}
+
 /**
  * Presence check against the upload API data route (same semantics as
  * {@link BaseArweaveClient.getTransactionStatus} for gateways: 200 = present, 404 = missing).
@@ -27,11 +34,16 @@ export function getUploadApiArweaveDataUrl(baseUrl: string, txOrDataItemId: stri
 export async function getUploadPipelineTransactionStatus(
   uploadApiBaseUrl: string,
   txOrDataItemId: string,
+  options?: GetUploadPipelineTransactionStatusOptions,
 ): Promise<TransactionStatus> {
   const url = getUploadApiArweaveDataUrl(uploadApiBaseUrl, txOrDataItemId)
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_UPLOAD_STATUS_TIMEOUT_MS
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(url)
+    const response = await fetch(url, { signal: controller.signal })
+    clearTimeout(timeoutId)
 
     if (response.status === 404) {
       return { status: 404, confirmed: null }
@@ -46,7 +58,11 @@ export async function getUploadPipelineTransactionStatus(
     }
 
     return { status: 200, confirmed: null }
-  } catch {
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { status: 504, confirmed: null }
+    }
     return { status: 500, confirmed: null }
   }
 }

@@ -4,7 +4,12 @@ import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
 import { sendTransaction, waitForReceipt } from 'thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
 import { getClient } from '~/helpers/thirdweb'
-import { Item, updateVersionUid, type IItem } from '@seedprotocol/sdk'
+import {
+  Item,
+  updateVersionUid,
+  applyPropertyAttestationUidsFromPublish,
+  type IItem,
+} from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { verifyAttestations } from '../helpers/verifyAttestations'
@@ -13,12 +18,14 @@ import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { getPublishConfig } from '~/config'
+import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import {
   prepareEasAttest,
   prepareEasMultiAttest,
   encodeBytes32,
   ZERO_BYTES32,
   getAttestationUidFromReceipt,
+  getAttestedUidsFromReceipt,
   type MultiAttestationRequest,
 } from '~/helpers/easDirect'
 import type { ArweaveTransactionInfo } from '../../../types'
@@ -99,6 +106,8 @@ type NormalizedRequest = {
       data: string
       value: bigint
     }>
+    _propertyName?: string
+    _propertyNameForSchema?: string
   }>
   propertiesToUpdate: Array<{ publishLocalId: string; propertySchemaUid: string }>
 }
@@ -173,6 +182,12 @@ export const createAttestationsDirectToEas = fromPromise(
             refUID: toHex32(d?.refUID),
             data: toBytesHex(d?.data),
           })),
+          ...(typeof att?._propertyName === 'string' && att._propertyName !== ''
+            ? { _propertyName: att._propertyName }
+            : {}),
+          ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
+            ? { _propertyNameForSchema: att._propertyNameForSchema }
+            : {}),
         }
       })
       const propertiesToUpdate = (req?.propertiesToUpdate ?? []).map((p: any) => ({
@@ -217,6 +232,7 @@ export const createAttestationsDirectToEas = fromPromise(
     }
 
     const client = getClient()
+    let lastAttestationMs = Date.now()
 
     for (let i = 0; i < normalizedRequests.length; i++) {
       const request = normalizedRequests[i] as NormalizedRequest
@@ -239,6 +255,7 @@ export const createAttestationsDirectToEas = fromPromise(
           transactionHash: result.transactionHash,
         })
         if (!receipt) throw new Error('Failed to create Seed attestation')
+        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
         const { easContractAddress } = getPublishConfig()
         const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
         if (!seedUidFromReceipt || seedUidFromReceipt === ZERO_BYTES32) {
@@ -265,6 +282,7 @@ export const createAttestationsDirectToEas = fromPromise(
           transactionHash: result.transactionHash,
         })
         if (!receipt) throw new Error('Failed to create Version attestation')
+        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
         const { easContractAddress } = getPublishConfig()
         const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
         if (!versionUidFromReceipt || versionUidFromReceipt === ZERO_BYTES32) {
@@ -276,6 +294,7 @@ export const createAttestationsDirectToEas = fromPromise(
           seedLocalId: request.localId,
           versionUid: versionUidFromReceipt,
           publisher: address,
+          attestationCreatedAt: lastAttestationMs,
         })
         logger('created Version attestation', newVersionUid)
       }
@@ -318,14 +337,34 @@ export const createAttestationsDirectToEas = fromPromise(
           transactionHash: result.transactionHash,
         })
         if (!receipt) throw new Error('Failed to create property attestations')
+        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
         logger('created property attestations for request', i)
+        const { easContractAddress } = getPublishConfig()
+        const attested = getAttestedUidsFromReceipt(receipt, easContractAddress)
+        const list = request.listOfAttestations
+        const sameLen = attested.length === list.length
+        await applyPropertyAttestationUidsFromPublish({
+          seedLocalId: request.localId,
+          attestationCreatedAtMs: lastAttestationMs ?? null,
+          versionUid: newVersionUid !== ZERO_BYTES32 ? newVersionUid : null,
+          pairs: attested.map((a, j) => ({
+            schemaUid: a.schemaUid,
+            attestationUid: a.uid,
+            propertyName:
+              sameLen && typeof list[j]?._propertyName === 'string' && list[j]!._propertyName !== ''
+                ? list[j]!._propertyName
+                : undefined,
+          })),
+        })
       }
     }
 
     persistSeedUidFromPublishResult(item as { seedUid?: string }, normalizedRequests)
-    const itemWithPersist = item as { persistSeedUid?: (publisher?: string) => Promise<void> }
+    const itemWithPersist = item as {
+      persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
+    }
     if (normalizedRequests[0]?.seedUid && normalizedRequests[0].seedUid !== ZERO_BYTES32) {
-      await persistSeedUidSafely(itemWithPersist, address)
+      await persistSeedUidSafely(itemWithPersist, address, lastAttestationMs)
     }
 
     try {
@@ -341,6 +380,13 @@ export const createAttestationsDirectToEas = fromPromise(
     logger('direct EAS publish complete')
 
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
+
+    try {
+      const { clearHtmlEmbeddedImageCoPublishRows } = await import('@seedprotocol/sdk')
+      await clearHtmlEmbeddedImageCoPublishRows(item.seedLocalId)
+    } catch {
+      /* best-effort cleanup */
+    }
 
     return { easPayload: requestData }
   },

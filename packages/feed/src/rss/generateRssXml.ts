@@ -83,26 +83,42 @@ function isExpandedRelationObject(value: unknown): value is Record<string, unkno
   )
 }
 
+const MAX_EXPANDED_RELATION_DEPTH = 4
+
 function serializeExpandedRelation(
   parent: XMLBuilder,
   obj: Record<string, unknown>,
   tagName: string,
-  addDcCreator?: boolean
+  addDcCreator?: boolean,
+  depth = 0
 ): void {
   const ele = parent.ele(tagName)
   for (const [k, v] of Object.entries(obj)) {
     if (v == null || k.startsWith('_') || k === 'items') continue
-    const child = ele.ele(k)
-    if (
-      typeof v === 'object' &&
-      v !== null &&
-      !(v instanceof Date) &&
-      !Array.isArray(v)
-    ) {
-      addTextOrCdata(child, JSON.stringify(v))
-    } else {
-      addTextOrCdata(child, String(v))
+    if (depth >= MAX_EXPANDED_RELATION_DEPTH) {
+      const child = ele.ele(k)
+      addTextOrCdata(child, typeof v === 'object' ? JSON.stringify(v) : String(v))
+      continue
     }
+    if (Array.isArray(v)) {
+      const itemTag = k.endsWith('s') && k.length > 1 ? k.slice(0, -1) : k
+      for (const entry of v) {
+        if (entry === undefined || entry === null) continue
+        if (isExpandedRelationObject(entry)) {
+          serializeExpandedRelation(ele, entry, itemTag, false, depth + 1)
+        } else {
+          const leaf = ele.ele(itemTag)
+          addTextOrCdata(leaf, String(entry))
+        }
+      }
+      continue
+    }
+    if (isExpandedRelationObject(v)) {
+      serializeExpandedRelation(ele, v as Record<string, unknown>, k, false, depth + 1)
+      continue
+    }
+    const child = ele.ele(k)
+    addTextOrCdata(child, String(v))
   }
   if (addDcCreator) {
     const name = obj.name ?? obj.seedUid

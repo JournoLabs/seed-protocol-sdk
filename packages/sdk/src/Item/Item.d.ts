@@ -77,7 +77,7 @@ export declare class Item<T extends ModelValues<ModelSchema>> implements IItem<T
         })[];
         propertiesToUpdate: any[];
     }[]>;
-    persistSeedUid: (publisher?: string) => Promise<void>;
+    persistSeedUid: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>;
     get serviceContext(): any;
     /**
      * Get snapshot context from the service

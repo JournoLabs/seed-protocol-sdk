@@ -53,6 +53,12 @@ export type AddressConfiguration = {
 export interface SeedConstructorOptions {
     config: SeedConfig;
     readonly addresses?: AddressConfiguration;
+    /**
+     * When true, after `setAddresses` persists to app_state, the SDK runs `runSyncFromEas`
+     * immediately (not via the throttled `syncDbWithEas` listener). Default false preserves
+     * prior behavior; apps that already call `syncFromEas` can omit this.
+     */
+    readonly syncFromEasOnAddressChange?: boolean;
 }
 /**
  * Options for Entity.create() when default behavior is to wait until idle.

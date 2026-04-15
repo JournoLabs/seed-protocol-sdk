@@ -27,9 +27,9 @@ export const createVersion: CreateVersion = async ({
     localId: newVersionLocalId,
     createdAt: Date.now(),
     seedLocalId,
-    seedUid: seedUid ?? 'NULL',
+    seedUid: seedUid ?? null,
     seedType,
-    uid: uid || 'NULL',
+    uid: uid ?? null,
     ...(publisher != null && publisher !== '' && { publisher }),
   })
 

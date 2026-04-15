@@ -6,6 +6,23 @@ import path                    from 'path-browserify'
 
 const logger = debug('seedSdk:browser:helpers:FileManager')
 
+/** OPFS / ZenFS can throw NotReadableError while a file is still settling after write. */
+function isTransientOpfsReadError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'NotReadableError') {
+    return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  // Chromium wording when getFile/read races a writer or stale handle
+  if (message.includes('permission problems') && message.includes('reference')) {
+    return true
+  }
+  return false
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 class FileManager extends BaseFileManager {
   private static zenfsCache: any = null
 
@@ -254,10 +271,11 @@ class FileManager extends BaseFileManager {
           // If error is about file being 0 bytes, not readable, or I/O error, continue waiting
           const errorMessage = error?.message || String(error)
           if (
-            errorMessage.includes('0 bytes') || 
-            errorMessage.includes('ENOENT') || 
+            errorMessage.includes('0 bytes') ||
+            errorMessage.includes('ENOENT') ||
             errorMessage.includes('EIO') ||
-            errorMessage.includes('Input/output error')
+            errorMessage.includes('Input/output error') ||
+            isTransientOpfsReadError(error)
           ) {
             // Continue waiting - file write may still be in progress
           } else {
@@ -362,8 +380,20 @@ class FileManager extends BaseFileManager {
 
   static async readFile(filePath: string): Promise<File> {
     const zenfs = await this.getFs()
-    const file = await zenfs.promises.readFile(filePath)
-    return new File([new Uint8Array(file)], filePath)
+    const maxAttempts = 3
+    const baseDelayMs = 50
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const data = await zenfs.promises.readFile(filePath)
+        return new File([new Uint8Array(data)], filePath)
+      } catch (error) {
+        if (!isTransientOpfsReadError(error) || attempt === maxAttempts - 1) {
+          throw error
+        }
+        await sleep(baseDelayMs * (attempt + 1))
+      }
+    }
+    throw new Error('readFile: exhausted retries')
     // try {
     //   // Get a handle to the OPFS root directory
     //   const root = await navigator.storage.getDirectory();
@@ -403,7 +433,6 @@ class FileManager extends BaseFileManager {
 
   static async readFileAsBuffer(filePath: string): Promise<Blob> {
     try {
-
       // Get the file and read it as an ArrayBuffer
       const file = await this.readFile(filePath)
       const arrayBuffer = await file.arrayBuffer();

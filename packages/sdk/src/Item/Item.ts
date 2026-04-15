@@ -1,6 +1,9 @@
 import { IItem, IItemProperty } from '@/interfaces'
 import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
-import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
+import {
+  INTERNAL_PROPERTY_NAMES,
+  PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
+} from '@/helpers/constants'
 import {
   getAlternatePropertyNameForInstanceLookup,
   resolveStorageNameToSchemaName,
@@ -181,7 +184,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           transformedKey = pluralize(transformedKey)
         }
 
-        if (!propertyInstance.alias && key.endsWith('Id')) {
+        if (
+          !propertyInstance.alias &&
+          key.endsWith('Id') &&
+          !PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP.has(key)
+        ) {
           transformedKey = key.slice(0, -2) // Remove 'Id'
         }
 
@@ -267,9 +274,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const modelPropertyNames = this._getModelPropertyNames(schemaNameForModel)
     const schemaKeys = modelPropertyNames.length > 0 ? modelPropertyNames : Object.keys(propertySchemas)
     // Normalize Id-suffix keys from initialValues: metadata stores textId but schema defines text
-    const ID_SUFFIX_NO_NORMALIZE = new Set(['storageTransactionId'])
     const normalizedKeysFromInitial = keysFromInitial.map((key) => {
-      if (key.endsWith('Id') && !ID_SUFFIX_NO_NORMALIZE.has(key)) {
+      if (key.endsWith('Id') && !PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP.has(key)) {
         const baseName = key.slice(0, -2)
         if (schemaKeys.length > 0 && schemaKeys.includes(baseName)) return baseName
         if (schemaKeys.length === 0) return baseName
@@ -328,7 +334,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           })
         }
         if (!waitForReady) return instance
-        await waitForEntityIdle(instance, { timeout: readyTimeout })
+        try {
+          await waitForEntityIdle(instance, { timeout: readyTimeout })
+        } catch (err) {
+          try {
+            instance.unload()
+          } catch {
+            /* best-effort cache cleanup */
+          }
+          throw err
+        }
         return instance
       }
       if (!this.instanceCache.has(seedId)) {
@@ -438,7 +453,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           refCount: 1,
         })
         if (!waitForReady) return proxiedInstance
-        await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+        try {
+          await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+        } catch (err) {
+          try {
+            proxiedInstance.unload()
+          } catch {
+            /* best-effort cache cleanup */
+          }
+          throw err
+        }
         return proxiedInstance
       }
     }
@@ -636,7 +660,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       refCount: 1,
     })
     if (!waitForReady) return proxiedInstance
-    await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+    try {
+      await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+    } catch (err) {
+      try {
+        proxiedInstance.unload()
+      } catch {
+        /* best-effort cache cleanup */
+      }
+      throw err
+    }
     return proxiedInstance
   }
 
@@ -942,12 +975,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     return await getPublishPayload(this, uploadedTransactions, options)
   }
 
-  persistSeedUid = async (publisher?: string): Promise<void> => {
+  persistSeedUid = async (publisher?: string, attestationCreatedAtMs?: number): Promise<void> => {
     const ctx = this._getSnapshotContext()
     const seedLocalId = ctx.seedLocalId
     const seedUid = ctx.seedUid
     if (seedLocalId && seedUid && typeof seedUid === 'string' && seedUid.length > 0) {
-      await updateSeedUid({ seedLocalId, seedUid, publisher })
+      await updateSeedUid({
+        seedLocalId,
+        seedUid,
+        publisher,
+        ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
+      })
     }
   }
 
@@ -1269,7 +1307,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
       setupState.subscriptionSetUp = true
       logger(`[Item._setupLiveQuerySubscription] Setting up liveQuery for seedLocalId: ${seedLocalId}`)
-      
+
+      const itemActor = this._service
+      const sendToItemMachine = (event: Parameters<typeof itemActor.send>[0]) => {
+        const status = itemActor.getSnapshot().status
+        if (status === 'stopped' || status === 'done') {
+          return
+        }
+        itemActor.send(event)
+      }
+
       try {
         const seedSchemaMod = await import('../seedSchema')
         const { seeds, versions, metadata } = seedSchemaMod
@@ -1360,7 +1407,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
 
         // Update context with latest version info
-        this._service.send({
+        sendToItemMachine({
           type: 'updateContext',
           latestVersionLocalId: currentVersionLocalId,
           latestVersionUid: seedRecord.latestVersionUid,
@@ -1423,7 +1470,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               logger(`[Item._setupLiveQuerySubscription] Seed updated in database`)
               
               // Update context with seed data
-              this._service.send({
+              sendToItemMachine({
                 type: 'updateContext',
                 seedLocalId: seedRow.localId,
                 seedUid: seedRow.uid || undefined,
@@ -1503,7 +1550,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                         modelName: itemModelName,
                       })
                       if (property) {
-                        this._service.send({
+                        sendToItemMachine({
                           type: 'addPropertyInstance',
                           propertyName,
                           propertyInstance: property,
@@ -1521,7 +1568,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               }
               
               // Update context with latest version info
-              this._service.send({
+              sendToItemMachine({
                 type: 'updateContext',
                 latestVersionLocalId,
                 latestVersionUid: latestVersion.uid || undefined,

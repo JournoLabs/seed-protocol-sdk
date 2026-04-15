@@ -18,13 +18,13 @@ export const hydrateNewItem = fromCallback<
 
     newSeedLocalId = await createSeed({
       type: modelName.toLowerCase(),
-      seedUid: seedUid ?? 'NULL',
+      ...(seedUid && seedUid !== 'NULL' ? { seedUid } : {}),
     })
 
     await createVersion({
       seedLocalId: newSeedLocalId,
       seedType: modelName.toLowerCase(),
-      uid: versionUid ?? 'NULL',
+      ...(versionUid && versionUid !== 'NULL' ? { uid: versionUid } : {}),
     })
   }
 

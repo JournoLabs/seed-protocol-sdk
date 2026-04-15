@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "The SDK for Seed Protocol",
   "type": "module",
   "main": "./dist/main.cjs",
@@ -64,6 +64,7 @@
     "nanoid": "^5.1.5",
     "nanoid-dictionary": "^5.0.0",
     "nunjucks": "^3.2.4",
+    "parse5": "^8.0.0",
     "path-browserify": "^1.0.1",
     "pluralize": "^8.0.0",
     "protobufjs": "^7.4.0",

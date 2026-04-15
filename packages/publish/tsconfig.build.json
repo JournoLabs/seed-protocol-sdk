@@ -1,1 +1,1 @@
-{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"declaration":true,"declarationMap":true,"outDir":"./dist","rootDir":"./src","emitDeclarationOnly":true},"include":["src/**/*.ts","src/**/*.tsx"]}
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"declaration":true,"declarationMap":true,"outDir":"./dist","rootDir":"./src","emitDeclarationOnly":true},"include":["src/**/*.ts","src/**/*.tsx"],"exclude":["src/**/*.test.ts"]}

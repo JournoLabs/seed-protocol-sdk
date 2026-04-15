@@ -2,9 +2,10 @@ import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types'
 import { ItemMachineContext } from '@/types/item'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds, versions, metadata } from '@/seedSchema'
+import { seeds } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
 import { getVersionData } from '@/db/read/subqueries/versionData'
+import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import {
   resolveStorageNameToSchemaName,
@@ -13,6 +14,65 @@ import {
 import debug from 'debug'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
+
+/**
+ * Maps metadata.property_name to the ItemProperty Map key (same rules as the instance loop below).
+ */
+function normalizeMetadataRowToInstanceKey(
+  metaRow: { propertyName?: string | null; refSeedType?: string | null },
+  propertySchemas: Record<string, any>,
+): string | undefined {
+  let propertyName = metaRow.propertyName
+  if (!propertyName) return undefined
+  const listSchemaKey = resolveStorageNameToSchemaName(propertySchemas, propertyName)
+  if (listSchemaKey) {
+    propertyName = listSchemaKey
+  } else {
+    const baseName = toSchemaPropertyName(propertyName)
+    const refSeedType = metaRow.refSeedType as string | undefined
+    const isRefTypeFromMeta =
+      refSeedType === 'file' ||
+      refSeedType === 'image' ||
+      refSeedType === 'relation' ||
+      refSeedType === 'html'
+    if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+      propertyName = baseName
+    }
+  }
+  return propertyName
+}
+
+function metadataValueStrength(row: any): number {
+  const v = row?.propertyValue
+  if (v == null || v === '') return 0
+  return String(v).trim().length
+}
+
+/** When storage + schema names map to the same key, prefer non-empty, then richer payload, then newer row. */
+function pickBetterMetadataRowForSameInstance(a: any, b: any): any {
+  const sa = metadataValueStrength(a)
+  const sb = metadataValueStrength(b)
+  if (sa > 0 && sb === 0) return a
+  if (sb > 0 && sa === 0) return b
+  if (sa !== sb) return sa > sb ? a : b
+  const ta = a.attestationCreatedAt ?? a.createdAt ?? 0
+  const tb = b.attestationCreatedAt ?? b.createdAt ?? 0
+  return ta >= tb ? a : b
+}
+
+function dedupeMetadataRowsByInstanceKey(
+  metadataRows: any[],
+  propertySchemas: Record<string, any>,
+): any[] {
+  const byKey = new Map<string, any>()
+  for (const metaRow of metadataRows) {
+    const key = normalizeMetadataRowToInstanceKey(metaRow, propertySchemas)
+    if (!key) continue
+    const existing = byKey.get(key)
+    byKey.set(key, existing ? pickBetterMetadataRowForSameInstance(existing, metaRow) : metaRow)
+  }
+  return Array.from(byKey.values())
+}
 
 /**
  * Create ItemProperty instances for all metadata records plus placeholder instances
@@ -106,11 +166,15 @@ const createItemPropertyInstances = async (
       if (Object.keys(propertySchemas).length === 0) {
         const schemaMod = await import('../../../Schema')
         const { ModelPropertyDataTypes } = schemaMod
-        const KNOWN_MODEL_FALLBACKS: Record<string, Record<string, { dataType: string }>> = {
+        const KNOWN_MODEL_FALLBACKS: Record<
+          string,
+          Record<string, { dataType: string; ref?: string }>
+        > = {
           Post: {
             html: { dataType: ModelPropertyDataTypes.Html },
             summary: { dataType: ModelPropertyDataTypes.Text },
             title: { dataType: ModelPropertyDataTypes.Text },
+            authors: { dataType: ModelPropertyDataTypes.List, ref: 'Identity' },
           },
         }
         if (KNOWN_MODEL_FALLBACKS[modelName]) {
@@ -120,18 +184,15 @@ const createItemPropertyInstances = async (
       }
     }
 
-    // Build map of metadata by propertyName for lookup
-    const metadataByProperty = new Map<string, any>()
-    for (const metaRow of metadataRows) {
-      if (metaRow.propertyName) {
-        metadataByProperty.set(metaRow.propertyName, metaRow)
-      }
-    }
+    // Collapse rows that map to the same instance key (e.g. authorIdentityIds + authors -> authors).
+    // ItemProperty.create cache does not sync propertyValue on hit; processing order would otherwise
+    // let an empty "authors" row overwrite a populated storage row.
+    const dedupedMetadataRows = dedupeMetadataRowsByInstanceKey(metadataRows, propertySchemas)
 
     // Create instances for all metadata records
     // For File/Image/Relation, metadata is stored with Id suffix (e.g. "textId") but schema defines base name ("text").
     // Normalize to schema name so we don't create duplicate properties (text + textId).
-    for (const metaRow of metadataRows) {
+    for (const metaRow of dedupedMetadataRows) {
       try {
         let propertyName = metaRow.propertyName
         if (!propertyName) {
@@ -368,18 +429,21 @@ export const loadOrCreateItem = fromCallback<
       return
     }
 
-    // Step 3: Query metadata table to find all metadata records that reference that version
+    // Step 3: Latest metadata row per property_name for this seed (matches loadOrCreateProperty /
+    // getItemProperties). Strict version_local_id = latest would drop properties whose rows lag version bumps.
+    const metadataLatest = getMetadataLatest({
+      seedLocalId: resolvedSeedLocalId,
+      seedUid: resolvedSeedUid,
+    })
     const metadataRecords = await db
+      .with(metadataLatest)
       .select()
-      .from(metadata)
-      .where(
-        and(
-          eq(metadata.seedLocalId, resolvedSeedLocalId),
-          eq(metadata.versionLocalId, latestVersionLocalId)
-        )
-      )
+      .from(metadataLatest)
+      .where(eq(metadataLatest.rowNum, 1))
 
-    logger(`Found ${metadataRecords.length} metadata records for version ${latestVersionLocalId}`)
+    logger(
+      `Found ${metadataRecords.length} latest-per-property metadata rows for seed ${resolvedSeedLocalId} (latestVersionLocalId=${latestVersionLocalId} used for placeholders only)`,
+    )
 
     // Step 4: Create ItemProperty instances from metadata records + placeholders for model schema properties
     // Always call when we have a valid version so placeholders are created for properties without metadata
@@ -394,9 +458,11 @@ export const loadOrCreateItem = fromCallback<
 
     // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
     // Without this, post.html returns seed ID on first render because loadOrCreateProperty hasn't finished.
+    // Publish/attestation can keep properties in `saving` for many seconds; 5s caused timeouts during EAS work.
+    const propertyIdleTimeoutMs = 120_000
     await Promise.all(
       Array.from(propertyInstances.values()).map((prop) =>
-        waitForEntityIdle(prop, { timeout: 5000, throwOnError: false })
+        waitForEntityIdle(prop, { timeout: propertyIdleTimeoutMs, throwOnError: false })
       )
     )
 
@@ -416,6 +482,7 @@ export const loadOrCreateItem = fromCallback<
         createdAt: seedRecord.createdAt || Date.now(),
         publisher: seedRecord.publisher ?? undefined,
         revokedAt: seedRecord.revokedAt ?? undefined,
+        // One id per property_name (latest row), not the full set of rows for latest version
         _metadataIds: metadataRecords.map((r: any) => r.localId || r.uid).filter(Boolean),
         propertyInstances,
       },

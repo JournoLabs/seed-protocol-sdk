@@ -4,11 +4,20 @@ export {
 
 // Internal exports for @seedprotocol/react
 export { eventEmitter } from './eventBus'
+export {
+  ADDRESSES_PERSISTED_EVENT,
+  parseAddressesPersistedPayload,
+} from './client/events'
+export type { AddressesPersistedPayload } from './client/events'
 export { getClient } from './client/ClientManager'
 export { ClientManagerState, MachineIds } from './client/constants'
 export { BaseDb } from './db/Db/BaseDb'
 export { createNewItem } from './db/write/createNewItem'
 export { updateVersionUid } from './db/write/updateVersionUid'
+export {
+  applyPropertyAttestationUidsFromPublish,
+} from './db/write/applyPropertyAttestationUidsFromPublish'
+export type { PropertyAttestationApplyPair } from './db/write/applyPropertyAttestationUidsFromPublish'
 export { getVersionData } from './db/read/subqueries/versionData'
 export { getMetadataLatest } from './db/read/subqueries/metadataLatest'
 export { loadAllSchemasFromDb } from './helpers/schema'
@@ -30,6 +39,7 @@ export {
   publishProcesses,
   uploadProcesses,
   arweaveL1FinalizeJobs,
+  htmlEmbeddedImageCoPublish,
 } from './seedSchema'
 export type { SchemaType } from './seedSchema/SchemaSchema'
 export type { SeedType } from './seedSchema/SeedSchema'
@@ -62,10 +72,34 @@ export {
 
 export { getCorrectId, generateId, withExcludeRevokedFilter } from './helpers'
 export {
+  classifyMediaRef,
+  resolveMediaRef,
+  normalizeFeedItemFields,
+  getFeedItemStringField,
+} from './helpers/mediaRef'
+export type {
+  FeedFieldRole,
+  FeedFieldDescriptor,
+  FeedFieldManifest,
+  ClassifyMediaRefOptions,
+  MediaRefClassification,
+  ResolveMediaRefResult,
+  ResolveMediaRefOptions,
+  NormalizedMediaField,
+  NormalizedHtmlField,
+  NormalizedTextField,
+  NormalizedFeedFieldValue,
+} from './helpers/mediaRef'
+export {
   pickLatestPropertyAttestationsByRefAndSchema,
 } from './helpers/easPropertyCanonical'
 export type { AttestationLikeForCanonical } from './helpers/easPropertyCanonical'
 export { isItemOwned } from './helpers/ownership'
+export {
+  isPlaceholderUid,
+  isValidEasAttestationUid,
+  normalizeBytes32Hex,
+} from './helpers/easUid'
 
 export {
   SeedModels,
@@ -83,6 +117,8 @@ export type {
   PublishPendingPropertyDiff,
   GetPublishPendingDiffResult,
 } from './db/read/getPublishPendingDiff'
+export { getSeedPublishState } from './db/read/getSeedPublishState'
+export type { SeedPublishState } from './db/read/getSeedPublishState'
 export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublishPayload'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'
@@ -125,6 +161,7 @@ export {
 } from './helpers/schema'
 
 export { getPropertySchema } from './helpers/property'
+export type { HtmlEmbeddedDataUriPolicy } from './helpers/property'
 
 export {
   resolvePublishPayloadValues,
@@ -140,6 +177,24 @@ export {
   itemHasPublishUploadCandidates,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
+
+export {
+  prepareHtmlEmbeddedImagesForPublish,
+  rewriteHtmlEmbeddedImagesOnDisk,
+  clearHtmlEmbeddedImageCoPublishRows,
+  resolveEffectiveHtmlEmbeddedDataUriPolicy,
+  extractDataUriImagesFromHtml,
+  replaceDataUrisInParsedHtml,
+  HtmlEmbeddedDataUriLimitError,
+  HTML_EMBEDDED_MAX_IMAGES_PER_DOC,
+  HTML_EMBEDDED_MAX_IMAGE_BYTES,
+  HTML_EMBEDDED_MAX_TOTAL_BYTES,
+} from './helpers/htmlEmbeddedDataUriPublish'
+export type {
+  HtmlEmbeddedExtractEntry,
+  PrepareHtmlEmbeddedImagesResult,
+  UploadedTx as HtmlEmbeddedUploadedTx,
+} from './helpers/htmlEmbeddedDataUriPublish'
 
 export {
   updateModelProperties,

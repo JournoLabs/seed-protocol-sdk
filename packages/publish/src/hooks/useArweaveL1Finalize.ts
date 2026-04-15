@@ -22,15 +22,18 @@ export type ArweaveL1FinalizeJobRow = {
  */
 export function useArweaveL1Finalize(seedLocalId: string | undefined) {
   const db = BaseDb.getAppDb()
-  const rows = useLiveQuery(
-    seedLocalId && db
-      ? db
-          .select()
-          .from(arweaveL1FinalizeJobs)
-          .where(eq(arweaveL1FinalizeJobs.seedLocalId, seedLocalId))
-          .orderBy(desc(arweaveL1FinalizeJobs.updatedAt))
-      : null
+  const jobsQuery = useMemo(
+    () =>
+      seedLocalId && db
+        ? db
+            .select()
+            .from(arweaveL1FinalizeJobs)
+            .where(eq(arweaveL1FinalizeJobs.seedLocalId, seedLocalId))
+            .orderBy(desc(arweaveL1FinalizeJobs.updatedAt))
+        : null,
+    [db, seedLocalId]
   )
+  const rows = useLiveQuery(jobsQuery)
 
   const jobs = (rows ?? []) as ArweaveL1FinalizeJobRow[]
 

@@ -1,5 +1,7 @@
 export { ModelPropertyDataTypes, } from './Schema';
 export { eventEmitter } from './eventBus';
+export { ADDRESSES_PERSISTED_EVENT, parseAddressesPersistedPayload, } from './client/events';
+export type { AddressesPersistedPayload } from './client/events';
 export { getClient } from './client/ClientManager';
 export { ClientManagerState, MachineIds } from './client/constants';
 export { BaseDb } from './db/Db/BaseDb';
@@ -27,6 +29,8 @@ export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
 export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas';
 export { getModelSchemasFromEas, getItemVersionsFromEas, getItemPropertiesFromEas, getCanonicalItemPropertiesFromEas, getEasSchemaUidBySchemaName, getSeedsFromSchemaUids, getSeedsBySchemaName, } from './eas';
 export { getCorrectId, generateId } from './helpers';
+export { classifyMediaRef, resolveMediaRef, normalizeFeedItemFields, getFeedItemStringField, } from './helpers/mediaRef';
+export type { FeedFieldRole, FeedFieldDescriptor, FeedFieldManifest, ClassifyMediaRefOptions, MediaRefClassification, ResolveMediaRefResult, ResolveMediaRefOptions, NormalizedMediaField, NormalizedHtmlField, NormalizedTextField, NormalizedFeedFieldValue, } from './helpers/mediaRef';
 export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS, DEFAULT_ARWEAVE_GRAPHQL_URL, } from './helpers/constants';
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties';
 export { BaseArweaveClient, getArweaveUrlForTransaction, normalizeUploadApiBaseUrl, getUploadApiArweaveDataUrl, getUploadPipelineTransactionStatus, getUploadApiArweaveStatusUrl, getArweaveUploadStatus, isArweaveL1AnchoringComplete, queryArweaveGatewayTransaction, } from './helpers';

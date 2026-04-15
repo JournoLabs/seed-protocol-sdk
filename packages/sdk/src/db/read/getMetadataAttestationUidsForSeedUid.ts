@@ -20,6 +20,7 @@ export const getMetadataAttestationUidsForSeedUid = async (
         eq(metadata.seedUid, seedUid),
         isNotNull(metadata.uid),
         ne(metadata.uid, ''),
+        ne(metadata.uid, 'NULL'),
         ne(metadata.uid, '0x' + '0'.repeat(64)),
       ),
     )

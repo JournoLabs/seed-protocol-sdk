@@ -4,16 +4,23 @@
  * TODO: Replace with shared getPublishUploadData on Item/SDK once experimental path is verified.
  */
 import {
+  BaseDb,
   BaseFileManager,
   getCorrectId,
   getSegmentedItemProperties,
+  htmlEmbeddedImageCoPublish,
   Item,
+  ModelPropertyDataTypes,
 } from '@seedprotocol/sdk'
 import type { IItem, IItemProperty, TransactionTag } from '@seedprotocol/sdk'
+import { eq } from 'drizzle-orm'
 
 /** Optional extra tags appended after Content-SHA-256 / Content-Type (mirrors SDK getPublishUploads). */
 export type GetPublishUploadDataOptions = {
   arweaveUploadTags?: TransactionTag[]
+  deferHtmlStorageSeedLocalIds?: string[]
+  onlyHtmlStorageSeedLocalIds?: string[]
+  skipRelationRecursion?: boolean
 }
 
 const buildPublishUploadDataTags = (
@@ -208,6 +215,21 @@ const getStorageSeedUploadData = async (
       itemProperty.propertyDef?.refValueType ??
       itemProperty.propertyDef?.dataType ??
       'Image'
+
+    if (dataType === ModelPropertyDataTypes.Html) {
+      if (options?.deferHtmlStorageSeedLocalIds?.includes(seedLocalId)) {
+        continue
+      }
+      if (
+        options?.onlyHtmlStorageSeedLocalIds?.length &&
+        !options.onlyHtmlStorageSeedLocalIds.includes(seedLocalId)
+      ) {
+        continue
+      }
+    } else if (options?.onlyHtmlStorageSeedLocalIds?.length) {
+      continue
+    }
+
     const baseDir = getStorageDirForDataType(dataType)
     const filePath = `${baseDir}/${refResolvedValue}`
 
@@ -233,6 +255,37 @@ const getStorageSeedUploadData = async (
   return uploads
 }
 
+async function appendCoPublishedImageUploadData(
+  item: IItem<any>,
+  uploads: PublishUploadData[],
+  options?: GetPublishUploadDataOptions,
+): Promise<PublishUploadData[]> {
+  const appDb = BaseDb.getAppDb()
+  if (!appDb || options?.onlyHtmlStorageSeedLocalIds?.length) return uploads
+
+  const rows = await appDb
+    .select()
+    .from(htmlEmbeddedImageCoPublish)
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
+
+  const seen = new Set(uploads.map((u) => u.seedLocalId))
+
+  for (const row of rows) {
+    if (seen.has(row.imageSeedLocalId)) continue
+    const imageItem = await Item.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
+    if (!imageItem) continue
+    const { itemImageProperties } = await getSegmentedItemProperties(imageItem)
+    const more = await getStorageSeedUploadData(itemImageProperties, options)
+    for (const u of more) {
+      if (!seen.has(u.seedLocalId)) {
+        uploads.push(u)
+        seen.add(u.seedLocalId)
+      }
+    }
+  }
+  return uploads
+}
+
 export const getPublishUploadData = async (
   item: IItem<any>,
   uploads: PublishUploadData[] = [],
@@ -241,6 +294,12 @@ export const getPublishUploadData = async (
 ): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
+
+  if (!relatedItemProperty && options?.onlyHtmlStorageSeedLocalIds?.length) {
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
+    uploads.push(...storageSeedUploads)
+    return uploads
+  }
 
   for (const uploadProperty of itemUploadProperties) {
     uploads = await processUploadPropertyData(
@@ -253,6 +312,14 @@ export const getPublishUploadData = async (
 
   const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
   uploads.push(...storageSeedUploads)
+
+  if (!relatedItemProperty && !options?.onlyHtmlStorageSeedLocalIds?.length) {
+    uploads = await appendCoPublishedImageUploadData(item, uploads, options)
+  }
+
+  if (options?.skipRelationRecursion) {
+    return uploads
+  }
 
   for (const relationProperty of itemRelationProperties) {
     const snapshot = relationProperty.getService().getSnapshot()

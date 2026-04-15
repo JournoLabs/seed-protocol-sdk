@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import {
+  Eip7702ModularAccountPublishError,
+  isEip7702ModularAccountPublishError,
   isManagedAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
@@ -19,6 +21,31 @@ describe('ManagedAccountPublishError', () => {
     expect(e.managedAddress).toBe('0xabc')
     expect(e.underlyingCause).toBe(inner)
     expect(e.name).toBe('ManagedAccountPublishError')
+  })
+
+})
+
+describe('Eip7702ModularAccountPublishError', () => {
+  test('stores code and modularAddress', () => {
+    const e = new Eip7702ModularAccountPublishError(
+      'msg',
+      'EIP7702_MODULAR_NOT_UPGRADED',
+      '0xdef',
+      new Error('cause'),
+    )
+    expect(e.code).toBe('EIP7702_MODULAR_NOT_UPGRADED')
+    expect(e.modularAddress).toBe('0xdef')
+    expect(e.name).toBe('Eip7702ModularAccountPublishError')
+  })
+
+  test('isEip7702ModularAccountPublishError duck-types', () => {
+    expect(
+      isEip7702ModularAccountPublishError({
+        name: 'Eip7702ModularAccountPublishError',
+        code: 'EIP7702_MODULAR_DEPLOY_FAILED',
+        message: 'x',
+      }),
+    ).toBe(true)
   })
 })
 

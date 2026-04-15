@@ -1,16 +1,16 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, eq, getTableColumns, SQL, sql, count, max } from "drizzle-orm"
+import { and, eq, getTableColumns, SQL } from "drizzle-orm"
 import { toSnakeCase } from "drizzle-orm/casing"
 import { startCase } from "lodash-es"
 import { getItemProperties } from "./getItemProperties"
-import { getVersionData } from "./subqueries/versionData"
 import { seeds, versions } from "@/seedSchema"
 import { models } from "@/seedSchema/ModelSchema"
 import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
+import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
 import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -93,28 +93,63 @@ export const getItemData: GetItemData = async ({
   }
 
   // Now get version data if it exists - query versions table directly
-  let versionRow = {
+  let versionRow: {
+    versionsCount: number
+    lastVersionPublishedAt: number | null
+    latestVersionUid: string | null
+    latestVersionLocalId: string | null
+    publishedVersionUid: string | null
+    publishedVersionLocalId: string | null
+    lastLocalUpdateAt?: number | null
+  } = {
     versionsCount: 0,
     lastVersionPublishedAt: null,
     latestVersionUid: null,
     latestVersionLocalId: null,
+    publishedVersionUid: null,
+    publishedVersionLocalId: null,
+    lastLocalUpdateAt: null,
   }
   
   try {
-    const versionRows = await appDb
+    const allVersions = await appDb
       .select({
-        versionsCount: count(versions.localId).as('versionsCount'),
-        lastVersionPublishedAt: max(versions.attestationCreatedAt).as('lastVersionPublishedAt'),
-        latestVersionUid: max(versions.uid).as('latestVersionUid'),
-        latestVersionLocalId: max(versions.localId).as('latestVersionLocalId'),
+        localId: versions.localId,
+        uid: versions.uid,
+        createdAt: versions.createdAt,
+        attestationCreatedAt: versions.attestationCreatedAt,
       })
       .from(versions)
       .where(eq(versions.seedLocalId, resolvedSeedLocalId))
-      .groupBy(versions.seedLocalId)
-      .limit(1)
 
-    if (versionRows && versionRows.length > 0) {
-      versionRow = versionRows[0]
+    if (allVersions.length > 0) {
+      const sorted = [...allVersions].sort((a, b) => {
+        const ca = a.createdAt ?? 0
+        const cb = b.createdAt ?? 0
+        if (cb !== ca) return cb - ca
+        return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
+      })
+      const latest = sorted[0]!
+      let lastPub: number | null = null
+      for (const v of allVersions) {
+        const t = v.attestationCreatedAt
+        if (t != null && (lastPub == null || t > lastPub)) lastPub = t
+      }
+      let lastLocal = 0
+      for (const v of allVersions) {
+        const t = v.createdAt ?? 0
+        if (t > lastLocal) lastLocal = t
+      }
+      const published = await getLatestPublishedVersionRow(resolvedSeedLocalId)
+      versionRow = {
+        versionsCount: allVersions.length,
+        lastVersionPublishedAt: lastPub,
+        latestVersionUid: latest.uid ?? null,
+        latestVersionLocalId: latest.localId ?? null,
+        publishedVersionUid: published?.uid ?? null,
+        publishedVersionLocalId: published?.localId ?? null,
+        lastLocalUpdateAt: lastLocal || null,
+      }
     }
   } catch (error) {
     console.error('[getItemData] Error querying versions', error)

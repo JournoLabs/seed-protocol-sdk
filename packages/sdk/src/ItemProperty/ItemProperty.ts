@@ -7,7 +7,10 @@ import type { CreateWaitOptions } from '@/types'
 // Dynamic import to break circular dependency: Model -> Item -> ItemProperty -> Model
 // import { Model } from '@/Model/Model'
 import { propertyMachine } from './service/propertyMachine'
-import { INTERNAL_PROPERTY_NAMES } from '@/helpers/constants'
+import {
+  INTERNAL_PROPERTY_NAMES,
+  PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
+} from '@/helpers/constants'
 import debug from 'debug'
 import pluralize from 'pluralize'
 import { camelCase, startCase, upperFirst } from 'lodash-es'
@@ -284,7 +287,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         }
       }
 
-      if (!this._alias && propertyName.endsWith('Id')) {
+      if (
+        !this._alias &&
+        propertyName.endsWith('Id') &&
+        !PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP.has(propertyName)
+      ) {
         this._alias = propertyName.slice(0, -2)
       } else if (!this._alias && propertyName.endsWith('Ids')) {
         this._alias = pluralize(propertyName.slice(0, -3))

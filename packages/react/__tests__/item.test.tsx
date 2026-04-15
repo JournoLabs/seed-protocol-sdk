@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import type { QueryClient } from '@tanstack/react-query'
 import React, { useEffect, useState } from 'react'
 import { useItem, useItems, useCreateItem, SeedProvider, useDeleteItem } from '@seedprotocol/react'
 import {
@@ -292,11 +293,13 @@ const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
 function UseItemsTest({
   modelName,
   deleted,
+  addressFilter,
 }: {
   modelName?: string
   deleted?: boolean
+  addressFilter?: 'owned' | 'watched' | 'all'
 }) {
-  const { items, isLoading, error } = useItems({ modelName, deleted })
+  const { items, isLoading, error } = useItems({ modelName, deleted, addressFilter })
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
@@ -812,6 +815,28 @@ describe('React Item Hooks Integration Tests', () => {
   })
 
   describe('useItems', () => {
+    it('registers useItems query with staleTime 0', async () => {
+      const queryClientRef = React.createRef<QueryClient>()
+      function SeedWithQueryRef({ children }: { children: React.ReactNode }) {
+        return <SeedProvider queryClientRef={queryClientRef}>{children}</SeedProvider>
+      }
+      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedWithQueryRef })
+
+      await waitFor(
+        () => {
+          const qc = queryClientRef.current
+          if (!qc) return false
+          const query = qc.getQueryCache().find({
+            queryKey: ['seed', 'items', 'Post', false, false, null, 0],
+          })
+          if (!query) return false
+          expect(query.options.staleTime).toBe(0)
+          return true
+        },
+        { timeout: 10000 }
+      )
+    })
+
     it('should return empty array when modelName is not provided', async () => {
       render(<UseItemsTest />, { container, wrapper: SeedProviderWrapper })
 

@@ -226,6 +226,16 @@ async function main() {
 
 ---
 
+## Browser: OPFS and hosting
+
+The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Two integration notes:
+
+1. **Cross-origin isolation** — If you use SQLite WASM, `SharedArrayBuffer`, or similar, serve your app with cross-origin isolation headers (for example `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, or the equivalents your stack supports). Without them, behavior can differ from environments that set those headers (e.g. some Vite/Electron setups).
+
+2. **Concurrent access** — Avoid reading the same OPFS path while another context still has it open for writing, or before a writer has finished closing/flushing. The SDK retries a narrow class of transient read errors (`NotReadableError` / Chromium’s “permission problems … reference” wording) and `waitForFileWithContent` keeps polling until timeout, but coordinating writers and readers in your app still reduces flakes.
+
+---
+
 ## React hooks (browser)
 
 In a React app you can use hooks for schemas, models, items, and item properties. These are exported from the main package:
@@ -237,6 +247,80 @@ In a React app you can use hooks for schemas, models, items, and item properties
 - `useModelProperty`, `useModelProperties`, `useCreateModelProperty`, `useDestroyModelProperty`
 
 List hooks (`useSchemas`, `useItems`, `useModels`, `useItemProperties`, `useModelProperties`) use [TanStack React Query](https://tanstack.com/query/latest) for caching when used inside a React Query provider. Wrap your app (or the subtree that uses these hooks) with a provider so results are cached and shared across components.
+
+- **`useItems`** uses `staleTime: 0` on its query (unlike Seed’s default list `staleTime`) so the item list stays aligned with local SQLite and remounts can refetch when needed; it also reconciles against a live query. Schema-backed fields on each item (e.g. list relations such as `authors`) may be `undefined` until loaded—normalize in forms (e.g. default to `[]`).
+- **`includeEas` (default `false`)** — By default, `useItems` and `getItemsData` only return seeds whose `seeds.uid` is null or empty (local drafts / not yet linked to an on-chain seed attestation in SQLite). To list **both** local-only and already-attested items in one feed, pass **`includeEas: true`**. For “draft vs onchain” badges and EAS explorer links, prefer **`getSeedPublishState({ seedLocalId })`** from `@seedprotocol/sdk` (and `getPublishPendingDiff` for pre-publish change summaries) instead of inferring from `latestVersionUid` alone.
+
+### Displaying Html properties
+
+Models can use `dataType: 'Html'` (see the Article example earlier in this guide). Resolved values are **HTML strings**. The SDK does not sanitize them; use **`SeedHtml`** from `@seedprotocol/react` with a sanitizer you provide (for example [DOMPurify](https://github.com/cure53/DOMPurify)).
+
+Install a sanitizer in your app (optional peer; not bundled with Seed):
+
+```bash
+bun add dompurify
+bun add -d @types/dompurify   # TypeScript projects only
+```
+
+Read an `Html` property with `useItemProperty` and render it safely:
+
+```tsx
+import DOMPurify from 'dompurify'
+import { SeedHtml, useItemProperty } from '@seedprotocol/react'
+
+function ArticleBody({ seedLocalId }: { seedLocalId: string }) {
+  const { property } = useItemProperty({ seedLocalId, propertyName: 'body' })
+  const raw = property?.value != null ? String(property.value) : undefined
+  return (
+    <SeedHtml
+      html={raw}
+      className="prose"
+      sanitize={(html) =>
+        DOMPurify.sanitize(html, {
+          /* tune tags/attributes for your threat model */
+        })
+      }
+    />
+  )
+}
+```
+
+You can also use the **`render`** prop on `SeedHtml` to wrap sanitized HTML in your own element (for example `<article dangerouslySetInnerHTML={{ __html: html }} />` after `SeedHtml` has applied `sanitize`).
+
+To show markup as **plain text** (tags visible, not interpreted), use `{String(property?.value ?? '')}` in a normal element instead of `SeedHtml`.
+
+For HTML from RSS/XML or other feeds, see [FEED_RICH_FIELDS.md](FEED_RICH_FIELDS.md).
+
+If you **publish** a site feed (`@seedprotocol/feed`), the article **`body`** property (or `html` / `content`) is what maps to full HTML in RSS `content:encoded` and JSON Feed `content_html`; keep **`summary`** for short excerpts when you want `description` / `summary` distinct from the full body. Details: [FEED_RICH_FIELDS.md – Publishing feeds](FEED_RICH_FIELDS.md#publishing-feeds-seed--rss--atom--json).
+
+### Images: local item vs feed-style strings
+
+- **Local synced `Image` property** — use **`SeedImage`** with an **`ItemProperty`** instance (local DB, OPFS paths, sized variants). Typical in editors and first-party apps where the item already lives in the Seed client.
+- **Opaque strings** (https URL, Arweave tx id, seed UID, etc. from RSS/XML or imports) — use **`SeedMediaImage`** or **`useResolvedMediaRef`** from `@seedprotocol/react`. These do not require an `ItemProperty`.
+
+See [FEED_RICH_FIELDS.md – SeedImage vs SeedMediaImage](FEED_RICH_FIELDS.md#seedimage-vs-seedmediaimage).
+
+### Files: feed-style links vs local `File` properties
+
+- **Opaque file / enclosure strings** (same ref shapes as images) — use **`SeedMediaFile`** from `@seedprotocol/react` with a `value` string; it resolves like **`SeedMediaImage`** and renders a link by default. For loading and error UI, use **`useResolvedMediaRef`** directly.
+- **Local `File` properties** — storage is ref/path-based; there is no `SeedFile` twin of `SeedImage` in the SDK yet. Build download or open behavior with **`useItemProperty`**, **`useFiles`**, or your own file helpers.
+
+For RSS/file fields, see [FEED_RICH_FIELDS.md](FEED_RICH_FIELDS.md).
+
+### Json properties
+
+`Json` model properties resolve to parsed objects (or values) in the client. For **read-only display**, use **`SeedJson`** or **`formatSeedJson`** from `@seedprotocol/react` — they only stringify; they do **not** execute code. Never **`eval`** user or feed JSON.
+
+```tsx
+import { SeedJson, useItemProperty } from '@seedprotocol/react'
+
+function MetadataView({ seedLocalId }: { seedLocalId: string }) {
+  const { property } = useItemProperty({ seedLocalId, propertyName: 'metadata' })
+  return <SeedJson value={property?.value} className="text-sm overflow-auto" />
+}
+```
+
+Use the **`format`** prop to replace formatting entirely, or **`formatOptions`** (`maxDepth`, `maxStringLength`, `space`) to tune the built-in formatter.
 
 ### SeedProvider and QueryClient options
 

@@ -51,6 +51,10 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
         publishMode: options?.publishMode ?? 'patch',
         publishRunId,
         arweaveUploadTags: arweaveUploadTags.length ? arweaveUploadTags : undefined,
+        htmlEmbeddedDataUriPolicy:
+          options?.htmlEmbeddedDataUriPolicy ??
+          publishCfg.htmlEmbeddedDataUriPolicy ??
+          'materialize',
       },
     })
 

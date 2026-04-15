@@ -22,8 +22,19 @@ export async function waitForEntityIdle(
   const service = entity.getService()
   const currentSnapshot = service.getSnapshot()
 
+  const isSnapshotIdle = (snapshot: { value?: unknown; context?: { isSaving?: boolean } }) => {
+    if (!('value' in snapshot) || snapshot.value !== 'idle') {
+      return false
+    }
+    // ItemProperty: same condition as ItemProperty.save() — nested "saving" uses object state values
+    if (snapshot.context?.isSaving) {
+      return false
+    }
+    return true
+  }
+
   // Check current state first - if already idle, return immediately
-  if ('value' in currentSnapshot && currentSnapshot.value === 'idle') {
+  if (isSnapshotIdle(currentSnapshot as any)) {
     return
   }
 
@@ -44,13 +55,19 @@ export async function waitForEntityIdle(
           }
           return true // Accept error state if not throwing
         }
-        return 'value' in snapshot && snapshot.value === 'idle'
+        return isSnapshotIdle(snapshot as any)
       },
       { timeout }
     )
   } catch (error: any) {
     if (error.message === 'Entity failed to load') {
       throw error
+    }
+    const msg = typeof error?.message === 'string' ? error.message : ''
+    const isWaitForTimeout =
+      msg.includes('Timeout') || msg.toLowerCase().includes('timed out')
+    if (!throwOnError && isWaitForTimeout) {
+      return
     }
     throw new Error(`Entity loading timeout after ${timeout}ms`)
   }

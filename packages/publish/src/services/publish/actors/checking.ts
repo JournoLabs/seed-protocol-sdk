@@ -1,77 +1,115 @@
 import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
-import { EventObject, fromCallback } from "xstate";
+import { EventObject, fromCallback } from 'xstate'
 import { optimismSepolia } from 'thirdweb/chains'
-import { getClient } from '~/helpers/thirdweb'
-import { itemNeedsArweaveUpload } from "../helpers/itemNeedsArweave";
+import { getClient, isSmartWalletDeployed } from '~/helpers/thirdweb'
+import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 
 const activePublishProcesses = new Set<string>()
 
-export const checking = fromCallback<
-  EventObject, 
-  FromCallbackInput<PublishMachineContext>
->(( {sendBack, input: {context, }, }, ) => {
-  const { item, account, publishMode } = context
+async function resolveAttestationStrategy(publisherAddress: string): Promise<'multiPublish' | 'directEas'> {
+  const cfg = getPublishConfig()
+  if (cfg.useDirectEas) return 'directEas'
+  if (cfg.useModularExecutor) return 'multiPublish'
+  const deployed = await isSmartWalletDeployed(publisherAddress)
+  return deployed ? 'multiPublish' : 'directEas'
+}
 
-  const _check = async () => {
-    // Ownership: use isItemOwned so we align with EAS sync (includes getAdditionalSyncAddresses
-    // e.g. modular executor contract). Items attested by the executor are considered owned.
-    const owned = await isItemOwned(item)
-    if (!owned) {
-      sendBack({ type: 'notOwner' })
-      return
-    }
+export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
+  ({ sendBack, input: { context } }) => {
+    const { item, account, publishMode, address } = context
 
-    if (activePublishProcesses.has(item.seedLocalId)) {
-      sendBack({
-        type : 'redundantPublishProcess',
-      },)
-      return
-    }
-
-    activePublishProcesses.add(item.seedLocalId)
-
-    try {
-      // Ensure EAS schemas exist (register if missing) before validation. getPublishPayload
-      // requires schema UIDs; without this, new models like "Signal" fail validation.
-      if (account) {
-        await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
-      }
-
-      // Validate item before any Arweave or EAS work (pass empty array - no uploads yet)
-      const validation = await (validateItemForPublish as any)(item, [], {
-        publishMode: publishMode ?? 'patch',
-      })
-      if (!validation.isValid) {
-        activePublishProcesses.delete(item.seedLocalId)
-        sendBack({ type: 'validationFailed', errors: validation.errors })
+    const _check = async () => {
+      const owned = await isItemOwned(item)
+      if (!owned) {
+        sendBack({ type: 'notOwner' })
         return
       }
 
-      const needsArweave = await itemNeedsArweaveUpload(item)
-      if (needsArweave) {
-        const useBundler = getPublishConfig().useArweaveBundler
-        sendBack({ type: useBundler ? 'validPublishProcessBundler' : 'validPublishProcess' })
-      } else {
-        sendBack({ type: 'skipArweave' })
+      if (activePublishProcesses.has(item.seedLocalId)) {
+        sendBack({
+          type: 'redundantPublishProcess',
+        })
+        return
       }
-    } catch (err) {
-      activePublishProcesses.delete(item.seedLocalId)
-      console.error('[checking] itemNeedsArweaveUpload failed', err)
-      sendBack({ type: 'skipArweave' })
+
+      activePublishProcesses.add(item.seedLocalId)
+
+      try {
+        if (account) {
+          await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
+        }
+
+        const validation = await (validateItemForPublish as any)(item, [], {
+          publishMode: publishMode ?? 'patch',
+        })
+        if (!validation.isValid) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({ type: 'validationFailed', errors: validation.errors })
+          return
+        }
+
+        if (!address || typeof address !== 'string' || !address.trim()) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({
+            type: 'validationFailed',
+            errors: [{ message: 'No publisher address for publish. Connect a wallet and try again.' }],
+          })
+          return
+        }
+
+        let attestationStrategy: 'multiPublish' | 'directEas'
+        try {
+          attestationStrategy = await resolveAttestationStrategy(address.trim())
+        } catch (cause) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({
+            type: 'checkingFailed',
+            error: new Error(
+              'Could not verify whether the publisher is a deployed contract on Optimism Sepolia. Check your RPC connection and retry.',
+              { cause },
+            ),
+          })
+          return
+        }
+
+        const needsArweave = await itemNeedsArweaveUpload(item)
+        const useBundler = getPublishConfig().useArweaveBundler
+        const payload = { attestationStrategy } as const
+        if (needsArweave) {
+          if (useBundler) {
+            sendBack({ type: 'validPublishProcessBundler', ...payload })
+          } else {
+            sendBack({ type: 'validPublishProcess', ...payload })
+          }
+        } else {
+          sendBack({ type: 'skipArweave', ...payload })
+        }
+      } catch (err) {
+        activePublishProcesses.delete(item.seedLocalId)
+        console.error('[checking] failed', err)
+        sendBack({
+          type: 'checkingFailed',
+          error: err instanceof Error ? err : new Error(String(err)),
+        })
+      }
     }
-  }
 
-  _check().catch(() => {
-    activePublishProcesses.delete(item.seedLocalId)
-    sendBack({ type: 'validPublishProcess' })
-  })
+    _check().catch((err) => {
+      activePublishProcesses.delete(item.seedLocalId)
+      console.error('[checking] unhandled rejection', err)
+      sendBack({
+        type: 'checkingFailed',
+        error: err instanceof Error ? err : new Error(String(err)),
+      })
+    })
 
-  return () => {
-    activePublishProcesses.delete(item.seedLocalId)
-  }
-})
+    return () => {
+      activePublishProcesses.delete(item.seedLocalId)
+    }
+  },
+)

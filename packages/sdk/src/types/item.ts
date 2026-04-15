@@ -64,6 +64,9 @@ export interface ItemData {
   attestationCreatedAt?: number & tags.Type<"int64">;
   latestVersionUid?: string;
   latestVersionLocalId?: string;
+  /** Newest version row whose `uid` is a valid EAS attestation id (see getLatestPublishedVersionRow). */
+  publishedVersionUid?: string;
+  publishedVersionLocalId?: string;
   versionsCount?: number & tags.Type<"int32">;
   lastVersionPublishedAt?: number & tags.Type<"int64">;
   lastLocalUpdateAt?: number & tags.Type<"int64">;

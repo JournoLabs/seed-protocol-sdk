@@ -16,6 +16,8 @@ export * from './publishConfig'
 export * from './easRevokedFilter'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'
+export * from './mediaRef'
+export * from './easUid'
 export * from './easPropertyCanonical'
 const logger = debug('seedSdk:shared:helpers')
 

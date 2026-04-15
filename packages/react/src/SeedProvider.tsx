@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { createSeedQueryClient } from './queryClient'
 import { eventEmitter } from '@seedprotocol/sdk'
+import { SeedAddressRevisionProvider } from './SeedSessionContext'
 
 export type SeedProviderProps = {
   children: ReactNode
@@ -90,8 +91,10 @@ export function SeedProvider({ children, queryClient: queryClientProp, queryClie
   }
   return (
     <QueryClientProvider client={queryClient}>
-      <SeedProviderEventSubscriber queryClient={queryClient} />
-      {children}
+      <SeedAddressRevisionProvider queryClient={queryClient}>
+        <SeedProviderEventSubscriber queryClient={queryClient} />
+        {children}
+      </SeedAddressRevisionProvider>
     </QueryClientProvider>
   )
 }

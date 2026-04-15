@@ -10,6 +10,20 @@ import {
 import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { gql } from 'graphql-request';
 import { loadFeedConfig } from './config';
+import {
+  publicListRelationPropertyKey,
+  stripListRelationStorageAliasesForPublicKey,
+  tryCoerceJsonStringArray,
+} from './listRelationKey';
+import { enrichImageSeedCloneForFeed } from './imageRelationEnrichment';
+import { hydrateArweaveRichTextInFeedItems } from './hydrateArweaveRichText';
+import { parseEasPropertyMetadataForFeed } from './parseEasPropertyMetadataForFeed';
+import {
+  setFeedFieldStorageModel,
+  setFeedListElementStorageModels,
+} from './feedFieldStorageModel';
+
+const IMAGE_SCHEMA = 'image';
 
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
@@ -219,13 +233,36 @@ const processItemProperty = async (
   property: AttestationLike,
   itemSeeds: AttestationLike[]
 ): Promise<void> => {
-  let metadata: { name: string; value: string | string[]; type?: string };
-  try {
-    metadata = JSON.parse(property.decodedDataJson)[0]?.value ?? {};
-  } catch (error) {
-    console.error('[feed] [processItemProperty] Error parsing metadata:', error);
+  const parsed = parseEasPropertyMetadataForFeed(property.decodedDataJson);
+  if (!parsed.ok) {
+    const { id, refUID, schemaId } = property;
+    if (parsed.reason === 'empty') {
+      console.warn(
+        '[feed] [processItemProperty] empty decodedDataJson for property:',
+        id,
+        refUID,
+        schemaId,
+      );
+    } else if (parsed.reason === 'parse') {
+      console.warn(
+        '[feed] [processItemProperty] failed to parse decodedDataJson for property:',
+        id,
+        refUID,
+        schemaId,
+        parsed.error,
+      );
+    } else {
+      console.warn(
+        '[feed] [processItemProperty] invalid decodedDataJson structure for property:',
+        id,
+        refUID,
+        schemaId,
+      );
+    }
     return;
   }
+
+  const metadata = parsed.metadata;
 
   let propertyNameSnake = metadata.name;
   if (!propertyNameSnake) {
@@ -269,8 +306,10 @@ const processItemProperty = async (
     }
   }
 
-  let propertyValue = metadata.value;
-  if (typeof propertyValue !== 'string') {
+  let propertyValue: string | string[] = metadata.value as string | string[];
+  if (isRelation && isList && Array.isArray(propertyValue)) {
+    propertyValue = propertyValue.map((v) => String(v));
+  } else if (typeof propertyValue !== 'string') {
     propertyValue = JSON.stringify(propertyValue);
   }
 
@@ -365,9 +404,9 @@ const RESERVED_KEYS = new Set([
 
 /**
  * Resolves relation properties to Arweave URLs when the related item has a
- * storageTransactionId. Detects relations by value-in-assembledFeedItems
- * (value is an attestation UID we fetched). Supports optional _id/_ids key
- * normalization for backward compatibility.
+ * storageTransactionId. Image schema relations are left as UIDs so
+ * expandRelationProperties can emit nested seeds with arweaveUrl.
+ * Supports optional _id/_ids key normalization for backward compatibility.
  */
 function resolveRelationPropertiesToUrls(schemaName: string): void {
   const itemsToProcess = Array.from(assembledFeedItems.entries()).filter(
@@ -380,7 +419,12 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
     );
 
     for (const key of keysToProcess) {
-      const value = item[key];
+      let value = item[key];
+      const coerced = tryCoerceJsonStringArray(value);
+      if (coerced !== value && Array.isArray(coerced)) {
+        item[key] = coerced;
+        value = coerced;
+      }
       const isList = Array.isArray(value);
 
       if (isList) {
@@ -394,10 +438,19 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
         if (!hasRelationUid) continue;
 
         const urls: string[] = [];
+        const models: string[] = [];
         let resolved = false;
         for (const uid of uids) {
           if (typeof uid !== 'string' || relationValuesToExclude.includes(uid)) {
             urls.push(String(uid));
+            models.push('unknown');
+            continue;
+          }
+          const modelForUid = seedUidToModelType.get(uid) ?? 'unknown';
+          // Keep Image seed UIDs for expandRelationProperties (nested seed + arweaveUrl).
+          if (modelForUid === IMAGE_SCHEMA) {
+            urls.push(uid);
+            models.push(IMAGE_SCHEMA);
             continue;
           }
           const related = assembledFeedItems.get(uid);
@@ -406,17 +459,22 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
           if (txId && typeof txId === 'string' && txId.trim()) {
             try {
               urls.push(getArweaveUrlForTransaction(txId));
+              models.push(modelForUid);
               resolved = true;
             } catch {
               urls.push(uid);
+              models.push(modelForUid);
             }
           } else {
             urls.push(uid);
+            models.push(modelForUid);
           }
         }
         if (resolved) {
-          const outputKey = key.endsWith('_ids') ? key.replace(/_ids$/, '') : key;
+          const outputKey = publicListRelationPropertyKey(key);
           item[outputKey] = urls;
+          setFeedListElementStorageModels(item, outputKey, models);
+          stripListRelationStorageAliasesForPublicKey(item, outputKey);
           if (outputKey !== key) {
             delete item[key];
             const camelKey = toCamelCase(key);
@@ -428,12 +486,22 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
         if (!assembledFeedItems.has(value)) continue;
 
         const related = assembledFeedItems.get(value);
+        // Keep Image seed UIDs for expandRelationProperties (nested seed + arweaveUrl).
+        if (seedUidToModelType.get(value) === IMAGE_SCHEMA) {
+          continue;
+        }
         const txId =
           (related?.storageTransactionId ?? related?.storage_transaction_id) as string | undefined;
         if (txId && typeof txId === 'string' && txId.trim()) {
           try {
             const outputKey = key.endsWith('_id') ? key.replace(/_id$/, '') : key;
             item[outputKey] = getArweaveUrlForTransaction(txId);
+            const relatedModel = seedUidToModelType.get(value) ?? 'unknown';
+            setFeedFieldStorageModel(item, outputKey, relatedModel);
+            const camelOut = toCamelCase(outputKey);
+            if (camelOut !== outputKey) {
+              setFeedFieldStorageModel(item, camelOut, relatedModel);
+            }
             if (outputKey !== key) {
               delete item[key];
               const camelKey = toCamelCase(key);
@@ -449,9 +517,9 @@ function resolveRelationPropertiesToUrls(schemaName: string): void {
 }
 
 /**
- * Expands relation properties to full nested objects when the related item has no
- * storageTransactionId (e.g. Identity seeds). Replaces UIDs with cloned objects
- * from assembledFeedItems, with setFeedItemDefaults applied.
+ * Expands relation properties to nested objects from assembledFeedItems.
+ * Image seeds always expand (with arweaveUrl enrichment when storage exists).
+ * Other relations skip expansion when the target has storage (already URL-resolved).
  */
 function expandRelationProperties(
   schemaName: string,
@@ -470,7 +538,12 @@ function expandRelationProperties(
     );
 
     for (const key of keysToProcess) {
-      const value = item[key];
+      let value = item[key];
+      const coerced = tryCoerceJsonStringArray(value);
+      if (coerced !== value && Array.isArray(coerced)) {
+        item[key] = coerced;
+        value = coerced;
+      }
       const isList = Array.isArray(value);
       const uids = isList ? (value as unknown[]) : [value];
 
@@ -487,14 +560,25 @@ function expandRelationProperties(
           expanded.push(uid);
           continue;
         }
-        // Skip if already resolved to URL (related has storage)
         const txId =
           (related?.storageTransactionId ?? related?.storage_transaction_id) as string | undefined;
+        const isImage = seedUidToModelType.get(uid) === IMAGE_SCHEMA;
+
+        if (isImage) {
+          const relatedSchema = seedUidToModelType.get(uid) ?? 'unknown';
+          const clone = { ...related } as Record<string, unknown>;
+          setFeedItemDefaults(clone, uid, relatedSchema, options);
+          enrichImageSeedCloneForFeed(clone);
+          expanded.push(clone);
+          didExpand = true;
+          continue;
+        }
+
+        // Non-image: skip expansion when related has storage (URL resolution already ran for non-images)
         if (txId && typeof txId === 'string' && txId.trim()) {
           expanded.push(uid);
           continue;
         }
-        // Expand: clone related item and apply defaults
         const relatedSchema = seedUidToModelType.get(uid) ?? 'unknown';
         const clone = { ...related } as Record<string, unknown>;
         setFeedItemDefaults(clone, uid, relatedSchema, options);
@@ -503,12 +587,13 @@ function expandRelationProperties(
       }
 
       if (didExpand) {
-        const outputKey = key.endsWith('_id')
-          ? key.replace(/_id$/, '')
-          : key.endsWith('_ids')
-            ? key.replace(/_ids$/, '')
+        const outputKey = isList
+          ? publicListRelationPropertyKey(key)
+          : key.endsWith('_id')
+            ? key.replace(/_id$/, '')
             : key;
         item[outputKey] = isList ? expanded : expanded[0];
+        stripListRelationStorageAliasesForPublicKey(item, outputKey);
         if (outputKey !== key) {
           delete item[key];
           const camelKey = toCamelCase(key);
@@ -557,13 +642,17 @@ async function processSeedsToFeedItems(
     expandRelations
   );
 
-  return Array.from(assembledFeedItems.entries())
+  const items = Array.from(assembledFeedItems.entries())
     .filter(([seedUid]) => seedUidToModelType.get(seedUid) === schemaName)
     .map(([, item]) => {
       const seedUid = (item.seedUid || item.SeedUid) as string;
       setFeedItemDefaults(item, seedUid, schemaName, setFeedItemDefaultsOptions);
       return item;
     });
+
+  await hydrateArweaveRichTextInFeedItems(items);
+
+  return items;
 }
 
 export const getFeedItemsBySchemaName = async (

@@ -15,37 +15,7 @@ export type ManagedAccountPublishErrorCode =
   | 'MANAGED_ACCOUNT_NOT_DEPLOYED'
   | 'MANAGED_ACCOUNT_UNAVAILABLE'
   | 'EXECUTOR_MODULE_NOT_INSTALLED'
-
-/**
- * Thrown or returned when the managed publishing account (Optimism Sepolia) is missing,
- * unreachable, or missing the executor module for the modular executor path.
- */
-export class ManagedAccountPublishError extends Error {
-  /** Original error when connection or deployment failed (avoids shadowing `Error.cause`). */
-  public readonly underlyingCause?: unknown
-
-  constructor(
-    message: string,
-    public readonly code: ManagedAccountPublishErrorCode,
-    public readonly managedAddress?: string,
-    underlyingCause?: unknown,
-  ) {
-    super(message)
-    this.name = 'ManagedAccountPublishError'
-    this.underlyingCause = underlyingCause
-  }
-}
-
-/**
- * True when `e` is a managed-account publish error. Uses `name` + `code` as a fallback
- * when `instanceof` fails across duplicate bundled class identities.
- */
-export function isManagedAccountPublishError(e: unknown): e is ManagedAccountPublishError {
-  if (e instanceof ManagedAccountPublishError) return true
-  if (typeof e !== 'object' || e === null) return false
-  const o = e as { name?: string; code?: unknown }
-  return o.name === 'ManagedAccountPublishError' && typeof o.code === 'string'
-}
+  | 'MANAGED_ACCOUNT_SET_EAS_FAILED'
 
 /**
  * Best-effort string for RPC / thirdweb / viem failures that are not plain `Error`
@@ -72,6 +42,88 @@ export function stringifyUnderlyingCause(u: unknown, maxLen = 700): string {
     }
   }
   return String(u).slice(0, maxLen)
+}
+
+/**
+ * Thrown or returned when the managed publishing account (Optimism Sepolia) is missing,
+ * unreachable, missing the executor module for the modular executor path, or EAS
+ * pointer setup (`getEas` / `setEas`) fails.
+ */
+export class ManagedAccountPublishError extends Error {
+  /** Original error when connection or deployment failed (avoids shadowing `Error.cause`). */
+  public readonly underlyingCause?: unknown
+
+  constructor(
+    message: string,
+    public readonly code: ManagedAccountPublishErrorCode,
+    public readonly managedAddress?: string,
+    underlyingCause?: unknown,
+  ) {
+    const extra =
+      underlyingCause != null && underlyingCause !== ''
+        ? ` (${stringifyUnderlyingCause(underlyingCause)})`
+        : ''
+    super(message + extra)
+    this.name = 'ManagedAccountPublishError'
+    this.underlyingCause = underlyingCause
+  }
+}
+
+/**
+ * True when `e` is a managed-account publish error. Uses `name` + `code` as a fallback
+ * when `instanceof` fails across duplicate bundled class identities.
+ */
+export function isManagedAccountPublishError(e: unknown): e is ManagedAccountPublishError {
+  if (e instanceof ManagedAccountPublishError) return true
+  if (typeof e !== 'object' || e === null) return false
+  const o = e as { name?: string; code?: unknown }
+  return o.name === 'ManagedAccountPublishError' && typeof o.code === 'string'
+}
+
+export type Eip7702ModularAccountPublishErrorCode =
+  | 'EIP7702_MODULAR_ACCOUNT_UNAVAILABLE'
+  | 'EIP7702_MODULAR_NOT_UPGRADED'
+  | 'EIP7702_MODULAR_DEPLOY_FAILED'
+  | 'EIP7702_MODULAR_NOT_CONFIRMED'
+
+/**
+ * Thrown when the in-app modular (EIP-7702) wallet is missing, not upgraded on-chain, or deploy/bootstrap failed.
+ */
+export class Eip7702ModularAccountPublishError extends Error {
+  public readonly underlyingCause?: unknown
+
+  constructor(
+    message: string,
+    public readonly code: Eip7702ModularAccountPublishErrorCode,
+    public readonly modularAddress?: string,
+    underlyingCause?: unknown,
+  ) {
+    const extra =
+      underlyingCause != null && underlyingCause !== ''
+        ? ` (${stringifyUnderlyingCause(underlyingCause)})`
+        : ''
+    super(message + extra)
+    this.name = 'Eip7702ModularAccountPublishError'
+    this.underlyingCause = underlyingCause
+  }
+}
+
+const eip7702ModularCodes: Eip7702ModularAccountPublishErrorCode[] = [
+  'EIP7702_MODULAR_ACCOUNT_UNAVAILABLE',
+  'EIP7702_MODULAR_NOT_UPGRADED',
+  'EIP7702_MODULAR_DEPLOY_FAILED',
+  'EIP7702_MODULAR_NOT_CONFIRMED',
+]
+
+export function isEip7702ModularAccountPublishError(e: unknown): e is Eip7702ModularAccountPublishError {
+  if (e instanceof Eip7702ModularAccountPublishError) return true
+  if (typeof e !== 'object' || e === null) return false
+  const o = e as { name?: string; code?: unknown }
+  return (
+    o.name === 'Eip7702ModularAccountPublishError' &&
+    typeof o.code === 'string' &&
+    (eip7702ModularCodes as string[]).includes(o.code)
+  )
 }
 
 /**

@@ -81,6 +81,12 @@ export function normalizePublishRequest(req: any): any {
         expirationTime: d?.expirationTime != null ? BigInt(d.expirationTime) : BigInt(0),
         value: d?.value != null ? BigInt(d.value) : BigInt(0),
       })),
+      ...(typeof att?._propertyName === 'string' && att._propertyName !== ''
+        ? { _propertyName: att._propertyName }
+        : {}),
+      ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
+        ? { _propertyNameForSchema: att._propertyNameForSchema }
+        : {}),
     }
   })
   const propertiesToUpdate = (req?.propertiesToUpdate ?? []).map((p: any) => ({

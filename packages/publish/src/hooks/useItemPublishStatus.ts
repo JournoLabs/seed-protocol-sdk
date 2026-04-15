@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useLiveQuery } from '@seedprotocol/react'
 import { BaseDb, publishProcesses } from '@seedprotocol/sdk'
 import { eq, desc } from 'drizzle-orm'
@@ -7,7 +8,7 @@ import { useArweaveL1Finalize } from './useArweaveL1Finalize'
 export type PublishProcessStatus = 'in_progress' | 'completed' | 'failed' | 'interrupted'
 
 export interface PublishProcessRecord {
-  id?: number
+  id: number
   seedLocalId: string
   modelName: string
   schemaId?: string
@@ -27,16 +28,19 @@ export function useItemPublishStatus(seedLocalId: string | undefined) {
   const arweaveL1 = useArweaveL1Finalize(seedLocalId)
 
   const db = BaseDb.getAppDb()
-  const latestRecords = useLiveQuery(
-    seedLocalId && db
-      ? db
-          .select()
-          .from(publishProcesses)
-          .where(eq(publishProcesses.seedLocalId, seedLocalId))
-          .orderBy(desc(publishProcesses.startedAt))
-          .limit(1)
-      : null
+  const latestProcessRowQuery = useMemo(
+    () =>
+      seedLocalId && db
+        ? db
+            .select()
+            .from(publishProcesses)
+            .where(eq(publishProcesses.seedLocalId, seedLocalId))
+            .orderBy(desc(publishProcesses.startedAt))
+            .limit(1)
+        : null,
+    [db, seedLocalId]
   )
+  const latestRecords = useLiveQuery(latestProcessRowQuery)
 
   const record = latestRecords?.[0] as PublishProcessRecord | undefined
   const isActive = !!publishProcess || record?.status === 'in_progress'

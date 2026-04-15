@@ -1,8 +1,10 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, versions } from '@/seedSchema'
+import { metadata } from '@/seedSchema'
 import type { MetadataType } from '@/seedSchema/MetadataSchema'
-import { desc, eq, or } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
+import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
 export type PublishPendingPropertyDiff = {
   propertyName: string
@@ -34,9 +36,9 @@ function resolveSeedIds(
 }
 
 /**
- * Lists properties with unpublished local edits (latest metadata row has no `uid`).
- * Compares to the previous row with a `uid` for the same `property_name` when present.
- * Use for pre-publish summaries and “what changed” UI.
+ * Per property: the **latest** metadata row (by `attestationCreatedAt` / `createdAt`) lacks a valid
+ * EAS attestation `uid` — local edit or missing post-publish UID backfill. **Not** equivalent to
+ * draft vs onchain for the whole seed; use `getSeedPublishState` for that.
  */
 export async function getPublishPendingDiff(
   arg: { seedLocalId?: string; seedUid?: string } | IItem<any>,
@@ -81,9 +83,9 @@ export async function getPublishPendingDiff(
   for (const [propertyName, list] of byProp) {
     const latest = list[0]
     if (!latest) continue
-    const hasUid = !!latest.uid && String(latest.uid).trim() !== ''
+    const hasUid = isValidEasAttestationUid(latest.uid)
     if (!hasUid) {
-      const prevWithUid = list.find((r) => r.uid && String(r.uid).trim() !== '')
+      const prevWithUid = list.find((r) => isValidEasAttestationUid(r.uid))
       pendingProperties.push({
         propertyName,
         currentValue: latest.propertyValue ?? null,
@@ -99,21 +101,12 @@ export async function getPublishPendingDiff(
   let lastVersionPublishedAt: number | null = null
 
   if (seedLocalId) {
-    const vRows = await appDb
-      .select({
-        uid: versions.uid,
-        attestationCreatedAt: versions.attestationCreatedAt,
-      })
-      .from(versions)
-      .where(eq(versions.seedLocalId, seedLocalId))
-      .orderBy(desc(versions.createdAt))
-      .limit(1)
-    const vr = vRows[0]
-    if (vr?.uid && String(vr.uid).trim() !== '') {
-      lastPublishedVersionUid = vr.uid
-    }
-    if (vr?.attestationCreatedAt != null) {
-      lastVersionPublishedAt = vr.attestationCreatedAt
+    const published = await getLatestPublishedVersionRow(seedLocalId)
+    if (published) {
+      lastPublishedVersionUid = published.uid
+      if (published.attestationCreatedAt != null) {
+        lastVersionPublishedAt = published.attestationCreatedAt
+      }
     }
   }
 

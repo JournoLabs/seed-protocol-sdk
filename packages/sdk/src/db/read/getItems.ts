@@ -4,7 +4,9 @@ import { toSnakeCase } from 'drizzle-orm/casing'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
+import { batchLatestPublishedVersionBySeedLocalIds } from './batchLatestPublishedVersionBySeedLocalIds'
 import { getAddressesForItemsFilter } from '@/helpers/db'
+import { ZERO_BYTES32 } from '@/helpers/constants'
 
 type GetItemsDataProps = {
   modelName?: string
@@ -15,6 +17,15 @@ type GetItemsDataProps = {
 
 type GetItemsData = (props: GetItemsDataProps) => Promise<ItemData[]>
 
+/**
+ * List item rows for list UIs. Only includes seeds that have at least one version.
+ *
+ * - `includeEas: false` (default): drafts only — `seeds.uid` is null, empty, legacy `'NULL'`, or zero-bytes32.
+ *   On-chain seeds (real EAS seed UID) require `includeEas: true`.
+ * - `latestVersionUid` / `latestVersionLocalId`: head version **row** by `created_at` (may be unattested).
+ * - `publishedVersionUid` / `publishedVersionLocalId`: filled in a second batched read (same rules as
+ *   `getLatestPublishedVersionRow`).
+ */
 export const getItemsData: GetItemsData = async ({
   modelName,
   deleted,
@@ -26,7 +37,14 @@ export const getItemsData: GetItemsData = async ({
   const conditions: SQL[] = []
 
   if (!includeEas) {
-    conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as SQL)
+    conditions.push(
+      or(
+        isNull(seeds.uid),
+        eq(seeds.uid, ''),
+        eq(seeds.uid, 'NULL'),
+        eq(seeds.uid, ZERO_BYTES32),
+      ) as SQL,
+    )
   }
 
   if (modelName) {
@@ -99,9 +117,19 @@ export const getItemsData: GetItemsData = async ({
     .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
     .where(and(gt(versionData.versionsCount, 0), ...conditions))
     .orderBy(sql.raw('COALESCE(attestation_created_at, created_at) DESC'))
-    .groupBy(seeds.localId)
 
   const itemsData = (await query) as ItemData[]
+  const seedIds = itemsData
+    .map((r) => r.seedLocalId)
+    .filter((id): id is string => typeof id === 'string' && id !== '')
+  const publishedBySeed = await batchLatestPublishedVersionBySeedLocalIds(seedIds)
 
-  return itemsData
+  return itemsData.map((row) => {
+    const pub = row.seedLocalId ? publishedBySeed.get(row.seedLocalId) : undefined
+    return {
+      ...row,
+      publishedVersionUid: pub?.uid,
+      publishedVersionLocalId: pub?.localId ?? undefined,
+    }
+  })
 }
