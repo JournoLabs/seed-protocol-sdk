@@ -664,7 +664,8 @@ export const getFeedItemsBySchemaName = async (
   const skip = options?.skip ?? 0;
 
   const seeds = (await getSeedsBySchemaName(schemaName, limit, skip)) as AttestationLike[];
-  return processSeedsToFeedItems(schemaName, seeds, feedConfig.expandRelations !== false);
+  const items = await processSeedsToFeedItems(schemaName, seeds, feedConfig.expandRelations !== false);
+  return items;
 };
 
 export const getFeedItemsBySchemaNameForMonth = async (

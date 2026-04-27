@@ -8,6 +8,13 @@ import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient'
 export * from './ArweaveClient/BaseArweaveClient'
 export * from './ArweaveClient/uploadApiVerification'
 export * from './ArweaveClient/arweaveL1UploadApi'
+export {
+  ensureReadGatewaySelected,
+  invalidateReadGatewayCache,
+  resetArweaveReadGatewayForTests,
+  probeGateway,
+  selectFirstHealthyReadGateway,
+} from './ArweaveClient/selectReadGateway'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'

@@ -11,6 +11,7 @@ import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
+import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { eventEmitter } from '@/eventBus'
 import { ImageSize } from '@/helpers/constants'
@@ -203,6 +204,13 @@ export const saveImage = fromCallback<
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
 
     let newLocalId
+    const resolvedPropertySchemaUid =
+      schemaUid && schemaUid !== imageSchemaUid
+        ? schemaUid
+        : (await getEasSchemaForItemProperty({
+            propertyName,
+            easDataType: 'bytes32',
+          }))?.id
 
     if (!localId) {
       const result = await createMetadata(
@@ -214,7 +222,7 @@ export const saveImage = fromCallback<
           versionLocalId,
           versionUid,
           modelName,
-          schemaUid: imageSchemaUid,
+          schemaUid: resolvedPropertySchemaUid,
           refSeedType: 'image',
           refModelUid: imageSchemaUid,
           refResolvedValue: fileName,
@@ -237,7 +245,7 @@ export const saveImage = fromCallback<
         seedLocalId,
         versionLocalId,
         modelName,
-        schemaUid,
+        schemaUid: resolvedPropertySchemaUid,
         refSeedType: 'image',
         refResolvedValue: fileName,
         refModelUid: imageSchemaUid,

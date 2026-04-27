@@ -9,6 +9,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { invalidateReadGatewayCache } from '@/helpers/ArweaveClient/selectReadGateway'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { MockArweaveClient } from '../../test-utils/MockArweaveClient'
 
 // Skip in browser environment
@@ -21,10 +23,13 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
   beforeEach(() => {
     // Save original platform class
     originalPlatformClass = BaseArweaveClient.PlatformClass
-    
+
     // Set MockArweaveClient as the platform class
     BaseArweaveClient.setPlatformClass(MockArweaveClient)
     MockArweaveClient.reset()
+    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
+    BaseArweaveClient.resetReadGatewaySelectionStateForTests()
+    invalidateReadGatewayCache()
   })
 
   afterEach(() => {
@@ -37,9 +42,9 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
 
   describe('Configuration Methods', () => {
     describe('getHost()', () => {
-      it('returns default arweave.net host', () => {
+      it('returns default gateway host', () => {
         const host = BaseArweaveClient.getHost()
-        expect(host).toBe('arweave.net')
+        expect(host).toBe(DEFAULT_ARWEAVE_HOST)
       })
 
       it('returns custom host when configured via setHost()', () => {
@@ -48,7 +53,7 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
         expect(host).toBe('custom-gateway.example.com')
         
         // Reset for other tests
-        BaseArweaveClient.setHost('arweave.net')
+        BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
       })
 
       it('parses http:// prefix for local gateways', () => {
@@ -56,14 +61,14 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
         expect(BaseArweaveClient.getHost()).toBe('localhost:1984')
         expect(BaseArweaveClient.getProtocol()).toBe('http')
         expect(BaseArweaveClient.getBaseUrl()).toBe('http://localhost:1984')
-        BaseArweaveClient.setHost('arweave.net')
+        BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
       })
     })
 
     describe('getEndpoint()', () => {
       it('returns correct GraphQL endpoint URL', () => {
         const endpoint = BaseArweaveClient.getEndpoint()
-        expect(endpoint).toBe('https://arweave.net/graphql')
+        expect(endpoint).toBe(`https://${DEFAULT_ARWEAVE_HOST}/graphql`)
       })
 
       it('uses configured host in endpoint URL', () => {
@@ -72,14 +77,14 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
         expect(endpoint).toBe('https://custom-gateway.example.com/graphql')
         
         // Reset for other tests
-        BaseArweaveClient.setHost('arweave.net')
+        BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
       })
     })
 
     describe('getRawUrl()', () => {
       it('constructs correct URL for transaction ID', () => {
         const url = BaseArweaveClient.getRawUrl('abc123')
-        expect(url).toBe('https://arweave.net/raw/abc123')
+        expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/abc123`)
       })
 
       it('uses configured host in URL', () => {
@@ -88,20 +93,20 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
         expect(url).toBe('https://custom-gateway.example.com/raw/abc123')
         
         // Reset for other tests
-        BaseArweaveClient.setHost('arweave.net')
+        BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
       })
 
       it('handles long transaction IDs', () => {
         const txId = 'bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U'
         const url = BaseArweaveClient.getRawUrl(txId)
-        expect(url).toBe(`https://arweave.net/raw/${txId}`)
+        expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/${txId}`)
       })
     })
 
     describe('getStatusUrl()', () => {
       it('constructs gateway presence URL for transaction ID', () => {
         const url = BaseArweaveClient.getStatusUrl('abc123')
-        expect(url).toBe('https://arweave.net/abc123')
+        expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/abc123`)
       })
     })
   })

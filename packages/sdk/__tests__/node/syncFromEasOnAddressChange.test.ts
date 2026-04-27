@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
+import { waitFor } from 'xstate'
 import * as syncDbWithEas from '@/events/item/syncDbWithEas'
 import {
   setupTestEnvironment,
@@ -55,10 +56,12 @@ describe.sequential('syncFromEasOnAddressChange', () => {
 
   it('does not call runSyncFromEas after setAddresses when syncFromEasOnAddressChange is false', async () => {
     const { client } = await import('@/client')
-    client.getService().send({
+    const svc = client.getService()
+    svc.send({
       type: 'updateContext',
       context: { syncFromEasOnAddressChange: false },
     })
+    await waitFor(svc, (s) => s.context.syncFromEasOnAddressChange === false)
 
     await client.setAddresses([ownedAddr])
     await new Promise((r) => setTimeout(r, 400))

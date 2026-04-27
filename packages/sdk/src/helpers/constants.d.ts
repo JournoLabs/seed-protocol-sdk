@@ -62,9 +62,14 @@ export declare enum SeedModels {
 export declare const SEED_PROTOCOL_SCHEMA_NAME = "Seed Protocol";
 export declare const INTERNAL_SCHEMA_IDS: readonly ["SEEDPROTOCOL"];
 /** Default Arweave gateway host used across all packages */
-export declare const DEFAULT_ARWEAVE_HOST = "arweave.net";
+export declare const DEFAULT_ARWEAVE_HOST = "ar.seedprotocol.io";
+/** Default Arweave gateway GraphQL endpoint */
+export declare const DEFAULT_ARWEAVE_GRAPHQL_URL = "https://ar.seedprotocol.io/graphql";
 /** Default Arweave gateways for fallback / metadata fetching (ordered by preference) */
-export declare const DEFAULT_ARWEAVE_GATEWAYS: readonly ["arweave.net", "ar-io.net"];
+export declare const DEFAULT_ARWEAVE_GATEWAYS: readonly ["ar.seedprotocol.io", "arweave.net", "g8way.io"];
+export declare function getDefaultArweaveReadGatewayHostsOrdered(): string[];
+export declare function mergePrimaryHostWithDefaults(primary: string, defaults: readonly string[]): string[];
+export declare function isKnownArweaveGatewayHostname(hostname: string): boolean;
 /**
  * Check if a schema is an internal SDK schema that should not be created in app files
  */

@@ -12,6 +12,7 @@ class QueryClient extends BaseQueryClient {
       }: {
         queryKey: unknown[]
         queryFn: () => Promise<T>
+        staleTime?: number
       }): Promise<T> => {
         return await queryFn()
       },
@@ -20,6 +21,7 @@ class QueryClient extends BaseQueryClient {
           reject(new Error('Not implemented'))
         })
       },
+      removeQueries: async () => {},
     }
   }
 }

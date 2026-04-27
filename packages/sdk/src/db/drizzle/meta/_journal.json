@@ -92,6 +92,13 @@
       "when": 1774200000000,
       "tag": "0012_html_embedded_image_co_publish",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1774300000000,
+      "tag": "0013_eas_sync_processes",
+      "breakpoints": true
     }
   ]
 }

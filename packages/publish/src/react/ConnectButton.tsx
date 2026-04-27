@@ -1,13 +1,19 @@
-import React, { FC, useEffect } from "react"
-import { ConnectButton as ConnectButtonThirdweb, darkTheme } from "thirdweb/react"
+import React, { FC, useCallback, useEffect, useRef } from "react"
+import {
+  ConnectButton as ConnectButtonThirdweb,
+  darkTheme,
+  useActiveAccount,
+  useActiveWallet,
+  useActiveWalletConnectionStatus,
+  useIsAutoConnecting,
+} from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
 import {
-  disconnectAllInAppPublishWallets,
   getClient,
   getConnectedManagedAccountAddress,
   getManagedAccountWallet,
+  getModularAccountWallet,
   getWalletsForConnectButton,
-  debugLogWalletPersistenceSnapshot,
 } from "../helpers/thirdweb"
 import { usePublishConfig } from "./PublishProvider"
 import { getPublishConfig } from "../config"
@@ -16,6 +22,9 @@ import type { Account, Wallet } from "thirdweb/wallets"
 import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
 import { PublishManager } from "../services/publishManager"
+
+/** Session flag so we do not force autoConnect after an explicit UI disconnect (survives reload). */
+const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
 
 function reportWalletSetupWarning(err: unknown) {
   console.error("[ConnectButton] Wallet setup / module install failed:", err)
@@ -77,89 +86,159 @@ async function ensureExecutorModulesForConnect(
 
 const ConnectButton: FC = () => {
   const config = usePublishConfig()
+  const wallet = useActiveWallet()
+  const activeAccount = useActiveAccount()
+  const connectionStatus = useActiveWalletConnectionStatus()
+  const isAutoConnecting = useIsAutoConnecting()
+  /** Avoid duplicate setAddresses when onConnect and the reconcile effect both run. */
+  const lastSyncedOwnedKey = useRef<string | null>(null)
+  const prevIsAutoConnecting = useRef(false)
+  const reloadAutoConnectRetried = useRef(false)
 
-  // #region agent log
+  /**
+   * Thirdweb sometimes finishes autoConnect on full reload with `disconnected` and no wallet
+   * (see debug: isAutoConnecting true→false then disconnected). One explicit in-app autoConnect
+   * retry recovers without affecting users who chose Disconnect (sessionStorage gate).
+   */
   useEffect(() => {
-    debugLogWalletPersistenceSnapshot(
-      'ConnectButton.tsx:mount',
-      'H1',
-      'ConnectButton mounted (initial persistence snapshot)',
-    )
-  }, [])
-  // #endregion
+    if (typeof window === "undefined") return
+    const prev = prevIsAutoConnecting.current
+    prevIsAutoConnecting.current = isAutoConnecting
 
-  const handleDisconnect = async () => {
-    // #region agent log
-    debugLogWalletPersistenceSnapshot(
-      'ConnectButton.tsx:handleDisconnect:pre',
-      'H2',
-      'handleDisconnect before stopAll/setAddresses/disconnectAll',
-    )
-    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af71b7' },
-      body: JSON.stringify({
-        sessionId: 'af71b7',
-        location: 'ConnectButton.tsx:handleDisconnect',
-        message: 'onDisconnect fired',
-        data: { hypothesisId: 'H2', timestamp: Date.now() },
-      }),
-    }).catch(() => {})
-    // #endregion
-    console.log('[ConnectButton] Disconnected')
-    PublishManager.stopAll()
+    let navType: string | undefined
     try {
-      await waitUntilSeedInitialized()
-      await seedClient.setAddresses([])
-      await disconnectAllInAppPublishWallets()
-    } catch (err) {
-      console.warn('[ConnectButton] Failed to clear seed client addresses:', err)
+      navType = (
+        performance.getEntriesByType("navigation")[0] as
+          | PerformanceNavigationTiming
+          | undefined
+      )?.type
+    } catch {
+      navType = undefined
     }
+    if (navType !== "reload") return
+
+    let userChoseDisconnect = false
+    try {
+      userChoseDisconnect =
+        sessionStorage.getItem(USER_DISCONNECTED_SESSION_KEY) === "1"
+    } catch {
+      userChoseDisconnect = false
+    }
+    if (userChoseDisconnect) return
+
+    if (!prev || isAutoConnecting || connectionStatus !== "disconnected") return
+    if (reloadAutoConnectRetried.current) return
+    reloadAutoConnectRetried.current = true
+
+    void getModularAccountWallet()
+      .autoConnect({ client: getClient(), chain: optimismSepolia })
+      .catch(() => {
+        /* no session or iframe not ready; Connect UI can still sign in */
+      })
+  }, [connectionStatus, isAutoConnecting])
+
+  const syncActiveWalletToSeed = useCallback(
+    async (activeWallet: Wallet) => {
+      const account = activeWallet.getAccount()
+      if (!account) {
+        return
+      }
+      await waitUntilSeedInitialized()
+      PublishManager.stopAll()
+      const owned = new Set<string>([account.address.toLowerCase()])
+      let managedAddress: string | undefined
+      if (config.useModularExecutor) {
+        const tryManaged = async () => {
+          try {
+            return await getConnectedManagedAccountAddress(optimismSepolia)
+          } catch {
+            return undefined
+          }
+        }
+        managedAddress = await tryManaged()
+        if (!managedAddress) {
+          await new Promise<void>((r) => queueMicrotask(() => r()))
+          managedAddress = await tryManaged()
+        }
+        if (managedAddress) {
+          owned.add(managedAddress.toLowerCase())
+        }
+      }
+      const ownedKey = [...owned].sort().join(",")
+      if (lastSyncedOwnedKey.current === ownedKey) {
+        return
+      }
+      lastSyncedOwnedKey.current = ownedKey
+      try {
+        await seedClient.setAddresses({ owned: [...owned] })
+      } catch (err) {
+        lastSyncedOwnedKey.current = null
+        console.warn("[ConnectButton] Failed to set seed client addresses:", err)
+        throw err
+      }
+      await ensureExecutorModulesForConnect(account, managedAddress, config)
+    },
+    [config],
+  )
+
+  /**
+   * Thirdweb autoConnect restores the wallet without calling onConnect. Seed addresses live in
+   * SQLite (OPFS); after a wipe there is no app_state row until setAddresses runs again.
+   */
+  useEffect(() => {
+    if (isAutoConnecting) {
+      return
+    }
+    if (connectionStatus !== "connected") {
+      lastSyncedOwnedKey.current = null
+      return
+    }
+    if (!wallet) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        if (cancelled) return
+        await syncActiveWalletToSeed(wallet)
+      } catch {
+        /* logged in syncActiveWalletToSeed */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    wallet,
+    activeAccount?.address,
+    connectionStatus,
+    isAutoConnecting,
+    syncActiveWalletToSeed,
+  ])
+
+  const handleDisconnect = () => {
+    try {
+      sessionStorage.setItem(USER_DISCONNECTED_SESSION_KEY, "1")
+    } catch {
+      /* private mode / SSR */
+    }
+    PublishManager.stopAll()
   }
 
   const handleConnect = async (activeWallet: Wallet, _allConnectedWallets: Wallet[]) => {
     const account = activeWallet.getAccount()
     if (!account) return
-    // #region agent log
-    debugLogWalletPersistenceSnapshot(
-      'ConnectButton.tsx:handleConnect',
-      'H4',
-      'handleConnect after account resolved',
-    )
-    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af71b7' },
-      body: JSON.stringify({
-        sessionId: 'af71b7',
-        location: 'ConnectButton.tsx:handleConnect',
-        message: 'onConnect',
-        data: {
-          hypothesisId: 'H4',
-          addressSample: account.address.slice(0, 10),
-          timestamp: Date.now(),
-        },
-      }),
-    }).catch(() => {})
-    // #endregion
-    console.log('[ConnectButton] Connected', account.address)
-    PublishManager.stopAll()
-    await waitUntilSeedInitialized()
-    const owned = new Set<string>([account.address.toLowerCase()])
-    let managedAddress: string | undefined
-    if (config.useModularExecutor) {
-      try {
-        managedAddress = await getConnectedManagedAccountAddress(optimismSepolia)
-        owned.add(managedAddress.toLowerCase())
-      } catch {
-        /* managed account may not exist yet */
-      }
-    }
     try {
-      await seedClient.setAddresses({ owned: [...owned] })
-    } catch (err) {
-      console.warn('[ConnectButton] Failed to set seed client addresses:', err)
+      sessionStorage.removeItem(USER_DISCONNECTED_SESSION_KEY)
+    } catch {
+      /* ignore */
     }
-    await ensureExecutorModulesForConnect(account, managedAddress, config)
+    console.log('[ConnectButton] Connected', account.address)
+    try {
+      await syncActiveWalletToSeed(activeWallet)
+    } catch {
+      /* syncActiveWalletToSeed logs */
+    }
   }
 
   return (

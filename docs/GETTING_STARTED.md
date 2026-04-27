@@ -250,6 +250,7 @@ List hooks (`useSchemas`, `useItems`, `useModels`, `useItemProperties`, `useMode
 
 - **`useItems`** uses `staleTime: 0` on its query (unlike Seed’s default list `staleTime`) so the item list stays aligned with local SQLite and remounts can refetch when needed; it also reconciles against a live query. Schema-backed fields on each item (e.g. list relations such as `authors`) may be `undefined` until loaded—normalize in forms (e.g. default to `[]`).
 - **`includeEas` (default `false`)** — By default, `useItems` and `getItemsData` only return seeds whose `seeds.uid` is null or empty (local drafts / not yet linked to an on-chain seed attestation in SQLite). To list **both** local-only and already-attested items in one feed, pass **`includeEas: true`**. For “draft vs onchain” badges and EAS explorer links, prefer **`getSeedPublishState({ seedLocalId })`** from `@seedprotocol/sdk` (and `getPublishPendingDiff` for pre-publish change summaries) instead of inferring from `latestVersionUid` alone.
+- **EAS File/Image hydration** — In browser apps, after EAS sync the SDK now schedules OPFS asset download automatically and also lazily retries by transaction id when a File/Image property is resolved but the local blob is missing. Expect a short eventual-consistency window where metadata appears before binaries finish hydrating.
 
 ### Displaying Html properties
 

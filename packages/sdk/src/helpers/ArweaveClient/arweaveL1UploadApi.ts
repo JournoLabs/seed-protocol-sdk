@@ -1,4 +1,9 @@
+import {
+  getDefaultArweaveReadGatewayHostsOrdered,
+  mergePrimaryHostWithDefaults,
+} from '@/helpers/constants'
 import { normalizeUploadApiBaseUrl } from './uploadApiVerification'
+import { probeGateway } from './selectReadGateway'
 
 /** Response shape from `GET /api/upload/arweave/status/{dataItemId}`. */
 export interface ArweaveUploadStatusResponse {
@@ -148,4 +153,46 @@ export async function queryArweaveGatewayTransaction(
   } catch {
     return null
   }
+}
+
+/**
+ * Resolves GraphQL against the first healthy gateway (GET /info probe per host), then runs
+ * {@link queryArweaveGatewayTransaction}. Host order: optional `graphqlUrl` hostname first, then
+ * {@link getDefaultArweaveReadGatewayHostsOrdered}.
+ */
+export async function queryArweaveGatewayTransactionWithFallback(
+  graphqlUrl: string | undefined,
+  dataItemId: string,
+  init?: Pick<RequestInit, 'signal'>,
+): Promise<ArweaveGatewayTransactionQueryResult | null> {
+  const defaults = getDefaultArweaveReadGatewayHostsOrdered()
+  const trimmed = graphqlUrl?.trim()
+  let protocol: 'http' | 'https' = 'https'
+  let preferredHost: string | null = null
+  if (trimmed) {
+    try {
+      const u = new URL(trimmed)
+      protocol = u.protocol === 'http:' ? 'http' : 'https'
+      preferredHost = u.hostname || null
+    } catch {
+      preferredHost = null
+    }
+  }
+
+  const ordered =
+    preferredHost && preferredHost.length > 0
+      ? mergePrimaryHostWithDefaults(preferredHost, defaults)
+      : [...defaults]
+
+  const signal = init?.signal
+  for (const host of ordered) {
+    const base = `${protocol}://${host}`
+    if (!(await probeGateway(base, signal ?? undefined))) continue
+    const gqlUrl = `${protocol}://${host}/graphql`
+    const result = await queryArweaveGatewayTransaction(gqlUrl, dataItemId, init)
+    if (result !== null) {
+      return result
+    }
+  }
+  return null
 }

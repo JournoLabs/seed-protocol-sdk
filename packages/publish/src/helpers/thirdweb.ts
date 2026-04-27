@@ -17,67 +17,10 @@ import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
 const logger = debug('permaPress:helpers:thirdweb')
 
 /**
- * Thirdweb `ClientScopedStorage` defaults to `localStorage`, which can retain embedded-wallet
- * material across disconnect when combined with the shared in-app connector (NDJSON showed
- * `localStorageRelevantKeys: []` after disconnect yet the next connect still resolved a prior user).
- * Both managed + modular in-app wallets share this adapter so EIP-4337 and EIP-7702 see one auth space.
+ * Custom storage for publish in-app wallets: same prefix for modular (EIP-7702) and managed (EIP-4337).
+ * Uses `localStorage` so embedded-wallet session material survives app/tab restarts.
  */
 const SEED_IN_APP_SESSION_PREFIX = 'seedProtocol:inAppPublish:'
-
-// #region agent log
-function agentLogThirdwebDebug(
-  location: string,
-  message: string,
-  data: Record<string, unknown>,
-): void {
-  fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'af71b7' },
-    body: JSON.stringify({
-      sessionId: 'af71b7',
-      location,
-      message,
-      data: { ...data, timestamp: Date.now() },
-    }),
-  }).catch(() => {})
-}
-
-/** Debug: snapshot session vs local persistence (no secret values). */
-export function debugLogWalletPersistenceSnapshot(
-  location: string,
-  hypothesisId: string,
-  label: string,
-): void {
-  if (typeof window === 'undefined') return
-  const seedSessionKeySuffixes: string[] = []
-  for (let i = 0; i < sessionStorage.length; i++) {
-    const k = sessionStorage.key(i)
-    if (k?.startsWith(SEED_IN_APP_SESSION_PREFIX)) {
-      seedSessionKeySuffixes.push(k.slice(SEED_IN_APP_SESSION_PREFIX.length))
-    }
-  }
-  const thirdwebLocalKeySamples: string[] = []
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)
-    if (!k) continue
-    if (
-      k.startsWith('thirdweb') ||
-      k.startsWith('tw:') ||
-      k.startsWith('thirdwebEws') ||
-      k.startsWith('walletToken-')
-    ) {
-      thirdwebLocalKeySamples.push(k.length > 48 ? `${k.slice(0, 45)}…` : k)
-    }
-  }
-  agentLogThirdwebDebug(location, label, {
-    hypothesisId,
-    seedSessionKeyCount: seedSessionKeySuffixes.length,
-    seedSessionKeySuffixSamples: seedSessionKeySuffixes.slice(0, 6),
-    thirdwebLocalKeyCount: thirdwebLocalKeySamples.length,
-    thirdwebLocalKeySamples: thirdwebLocalKeySamples.slice(0, 10),
-  })
-}
-// #endregion
 
 let _publishInAppWalletStorage: {
   getItem: (key: string) => Promise<string | null>
@@ -90,35 +33,19 @@ export function getSharedPublishInAppWalletStorage() {
     _publishInAppWalletStorage = {
       getItem: async (key) => {
         if (typeof window === 'undefined') return null
-        return sessionStorage.getItem(SEED_IN_APP_SESSION_PREFIX + key)
+        return localStorage.getItem(SEED_IN_APP_SESSION_PREFIX + key)
       },
       setItem: async (key, value) => {
         if (typeof window === 'undefined') return
-        sessionStorage.setItem(SEED_IN_APP_SESSION_PREFIX + key, value)
+        localStorage.setItem(SEED_IN_APP_SESSION_PREFIX + key, value)
       },
       removeItem: async (key) => {
         if (typeof window === 'undefined') return
-        sessionStorage.removeItem(SEED_IN_APP_SESSION_PREFIX + key)
+        localStorage.removeItem(SEED_IN_APP_SESSION_PREFIX + key)
       },
     }
   }
   return _publishInAppWalletStorage
-}
-
-function clearSeedInAppSessionStorageKeys(): void {
-  if (typeof window === 'undefined') return
-  const rm: string[] = []
-  for (let i = 0; i < sessionStorage.length; i++) {
-    const k = sessionStorage.key(i)
-    if (k?.startsWith(SEED_IN_APP_SESSION_PREFIX)) rm.push(k)
-  }
-  for (const k of rm) {
-    try {
-      sessionStorage.removeItem(k)
-    } catch {
-      /* ignore */
-    }
-  }
 }
 
 let _client: ReturnType<typeof createThirdwebClient> | null = null
@@ -481,92 +408,4 @@ export const getWalletsForConnectButton = () => {
     _walletsForConnectButton = [getModularAccountWallet()]
   }
   return _walletsForConnectButton
-}
-
-/**
- * Removes Thirdweb Connect UI keys that often survive `wallet.disconnect()` (runtime logs showed
- * `thirdweb:last-used-wallet-id` + `thirdweb:connected-wallet-ids` left behind), which can steer the
- * next connect / autoConnect toward a previous in-app profile.
- *
- * Also removes in-app embedded wallet keys from `client-scoped-storage.js` / `settings.js` that
- * `iframe-auth.logout()` does **not** clear (e.g. device-share `a-{clientKey}-*`, `thirdwebEwsWalletUserId-*`).
- * Post-clear localStorage was empty in NDJSON line 11 but the next connect still resolved to a prior user
- * (lines 13–16), so residual EWS keys are the next target.
- *
- * Connect manager keys mirror `node_modules/thirdweb/dist/esm/wallets/manager/index.js` and `walletStorage.js`.
- */
-function clearThirdwebConnectBrowserPersistence(): void {
-  if (typeof window === 'undefined') return
-  // #region agent log
-  debugLogWalletPersistenceSnapshot(
-    'thirdweb.ts:clearThirdwebConnectBrowserPersistence:pre',
-    'H3',
-    'before clearThirdwebConnectBrowserPersistence',
-  )
-  // #endregion
-  const keys = [
-    'thirdweb:last-used-wallet-id',
-    'thirdweb:connected-wallet-ids',
-    'thirdweb:active-wallet-id',
-    'thirdweb:active-chain',
-    'tw:connected-wallet-params',
-  ]
-  for (const k of keys) {
-    try {
-      localStorage.removeItem(k)
-    } catch {
-      /* ignore */
-    }
-  }
-  let clientId = ''
-  try {
-    clientId = getClient().clientId
-  } catch {
-    /* publish not configured yet */
-  }
-  const embeddedPrefixes = [
-    'thirdwebEws',
-    'walletToken-',
-    'passkey-credential-id-',
-    'thirdweb_guest_session_id_',
-    'walletConnectSessions-',
-  ]
-  try {
-    const toRemove: string[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (!k) continue
-      for (const p of embeddedPrefixes) {
-        if (k.startsWith(p)) {
-          toRemove.push(k)
-          break
-        }
-      }
-      if (clientId && k.startsWith(`a-${clientId}`)) {
-        toRemove.push(k)
-      }
-    }
-    for (const k of [...new Set(toRemove)]) {
-      localStorage.removeItem(k)
-    }
-  } catch {
-    /* ignore */
-  }
-  clearSeedInAppSessionStorageKeys()
-}
-
-/**
- * Disconnects both in-app execution modes (EIP-7702 modular + EIP-4337 managed).
- * Call after the Connect UI disconnects so managed sessions do not keep autoConnecting the previous user.
- */
-export async function disconnectAllInAppPublishWallets(): Promise<void> {
-  // #region agent log
-  agentLogThirdwebDebug('thirdweb.ts:disconnectAllInAppPublishWallets', 'disconnectAllInAppPublishWallets entry', {
-    hypothesisId: 'H2',
-    stack: new Error().stack?.split('\n').slice(0, 8).join(' | '),
-  })
-  // #endregion
-  await getModularAccountWallet().disconnect().catch(() => {})
-  await getManagedAccountWallet().disconnect().catch(() => {})
-  clearThirdwebConnectBrowserPersistence()
 }

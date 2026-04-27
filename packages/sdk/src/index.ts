@@ -40,6 +40,7 @@ export {
   uploadProcesses,
   arweaveL1FinalizeJobs,
   htmlEmbeddedImageCoPublish,
+  easSyncProcesses,
 } from './seedSchema'
 export type { SchemaType } from './seedSchema/SchemaSchema'
 export type { SeedType } from './seedSchema/SeedSchema'
@@ -108,6 +109,10 @@ export {
   DEFAULT_ARWEAVE_HOST,
   DEFAULT_ARWEAVE_GATEWAYS,
   DEFAULT_ARWEAVE_GRAPHQL_URL,
+  getDefaultArweaveReadGatewayHostsOrdered,
+  mergePrimaryHostWithDefaults,
+  isKnownArweaveGatewayHostname,
+  EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
 } from './helpers/constants'
 export { getVersionsForSeedUid } from './db/read/getVersionsForSeedUid'
 export {
@@ -138,6 +143,10 @@ export {
   getArweaveUploadStatus,
   isArweaveL1AnchoringComplete,
   queryArweaveGatewayTransaction,
+  queryArweaveGatewayTransactionWithFallback,
+  ensureReadGatewaySelected,
+  invalidateReadGatewayCache,
+  resetArweaveReadGatewayForTests,
 } from './helpers'
 export type { ArweaveUploadStatusResponse, ArweaveGatewayTransactionQueryResult } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
@@ -217,6 +226,21 @@ export type { SchemaFileFormat } from './imports'
 
 export { client } from './client'
 export type { SyncFromEasOptions } from './events/item/syncDbWithEas'
+export type { EasSyncProcessType } from './seedSchema/EasSyncProcessSchema'
+export {
+  easSyncActor,
+  startEasSyncActor,
+  sendEasSyncClientRequest,
+  requestEasSyncFromAddressChange,
+  requestEasSyncFromEventBus,
+  requestEasSyncFromModelsInit,
+} from './events/item/easSyncManager'
+export type {
+  EasSyncMachineContext,
+  EasSyncRequestEvent,
+  EasSyncRequestSource,
+} from './events/item/easSyncManager'
+export { mergeEasSyncRequestIntents } from './events/item/mergeEasSyncOptions'
 
 export * from './types'
 export type { PublishUpload } from './types/publish'

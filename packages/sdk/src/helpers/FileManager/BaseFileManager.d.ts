@@ -15,6 +15,7 @@ export declare abstract class BaseFileManager {
     static getFilesPath(...subpaths: string[]): string;
     static getContentUrlFromPath(path: string): Promise<string | undefined>;
     static downloadAllFiles({ transactionIds, arweaveHost, excludedTransactions, }: DownloadAllFilesParams): Promise<void>;
+    static downloadFileByTransactionId({ transactionId, arweaveHost, excludedTransactions, }: DownloadSingleFileParams): Promise<void>;
     static resizeImage({ filePath, width, height }: ResizeImageParams): Promise<void>;
     static resizeAllImages({ width, height }: ResizeAllImagesParams): Promise<void>;
     static pathExists(filePath: string): Promise<boolean>;

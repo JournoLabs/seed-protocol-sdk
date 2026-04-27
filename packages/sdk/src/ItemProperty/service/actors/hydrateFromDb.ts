@@ -9,6 +9,12 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseFileManager, getMetadataPropertyNamesForQuery } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
+import { downloadTransactionIdWithDedupe } from '@/events/files/download'
+import {
+  readHtmlBodyForStorageSeedPropertyValue,
+  resolveHtmlStorageSeedLocalId,
+} from '@/helpers/readHtmlBodyForStorageSeed'
+
 // Dynamic import to break circular dependency: schema/index -> ... -> hydrateFromDb -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
 
@@ -78,11 +84,18 @@ export const hydrateFromDb = fromCallback<
         : eq(metadata.propertyName, propertyNames[0])
     )
 
-    if (seedUid) {
+    // Draft rows often have only seed_local_id populated; on-chain rows may have uid.
+    // Requiring both with AND misses valid metadata when only one column is set.
+    if (seedUid && seedLocalId) {
+      whereClauses.push(
+        or(
+          eq(metadata.seedLocalId, seedLocalId),
+          eq(metadata.seedUid, seedUid),
+        ) as any,
+      )
+    } else if (seedUid) {
       whereClauses.push(eq(metadata.seedUid, seedUid))
-    }
-
-    if (seedLocalId) {
+    } else if (seedLocalId) {
       whereClauses.push(eq(metadata.seedLocalId, seedLocalId))
     }
 
@@ -115,6 +128,7 @@ export const hydrateFromDb = fromCallback<
 
     let propertyValueProcessed: string | string[] | undefined | null =
       propertyValueFromDb
+    let renderValue: string | string[] | undefined = refResolvedDisplayValue ?? undefined
 
 
     // Image: always resolve display value from file (blob URLs in DB are invalid after reload)
@@ -157,35 +171,69 @@ export const hydrateFromDb = fromCallback<
         }
       }
 
+      const resolveMatchingFilePath = async (dir: string, needle: string): Promise<string | undefined> => {
+        const dirPath = BaseFileManager.getFilesPath(dir)
+        const dirExists = await BaseFileManager.pathExists(dirPath)
+        if (!dirExists) return undefined
+        const fs = await BaseFileManager.getFs()
+        const path = BaseFileManager.getPathModule()
+        const files = await fs.promises.readdir(dirPath)
+        const matchingFiles = files.filter((file: string) => {
+          return path.basename(file).includes(needle)
+        })
+        if (!matchingFiles?.length) return undefined
+        return BaseFileManager.getFilesPath(dir, matchingFiles[0])
+      }
+
       if (refResolvedValue) {
         try {
-          const dirPath = BaseFileManager.getFilesPath(dir)
-          const dirExists = await BaseFileManager.pathExists(dirPath)
-          if (dirExists) {
-            const fs = await BaseFileManager.getFs()
-            const path = BaseFileManager.getPathModule()
-            const files = await fs.promises.readdir(dirPath)
-            const matchingFiles = files.filter((file: string) => {
-              return path.basename(file).includes(refResolvedValue!)
-            })
-            let fileExists = false
-            let filename
-            let filePath
-            if (matchingFiles && matchingFiles.length > 0) {
-              fileExists = true
-              filename = matchingFiles[0]
-              filePath = BaseFileManager.getFilesPath(dir, filename)
-            }
-            localStorageDir = `/${dir}`
-            if (fileExists && filename && filePath) {
-              const file = await BaseFileManager.readFile(filePath)
-              refResolvedDisplayValue = URL.createObjectURL(file)
-              // Do not persist blob URL - it is session-scoped
-            }
+          let filePath = await resolveMatchingFilePath(dir, refResolvedValue)
+          if (!filePath) {
+            await downloadTransactionIdWithDedupe(refResolvedValue)
+            filePath = await resolveMatchingFilePath(dir, refResolvedValue)
+          }
+
+          localStorageDir = `/${dir}`
+          if (filePath) {
+            const file = await BaseFileManager.readFile(filePath)
+            refResolvedDisplayValue = URL.createObjectURL(file)
+            renderValue = refResolvedDisplayValue
+            // Do not persist blob URL - it is session-scoped
           }
         } catch (e) {
           logger('[hydrateFromDb] Image file resolution error', e)
         }
+      }
+    }
+
+    if (isFileDynamic && refResolvedValue) {
+      try {
+        const dir = (localStorageDir ?? '/files').replace(/^\//, '')
+        const resolveMatchingFilePath = async (needle: string): Promise<string | undefined> => {
+          const dirPath = BaseFileManager.getFilesPath(dir)
+          const dirExists = await BaseFileManager.pathExists(dirPath)
+          if (!dirExists) return undefined
+          const fs = await BaseFileManager.getFs()
+          const path = BaseFileManager.getPathModule()
+          const files = await fs.promises.readdir(dirPath)
+          const matchingFiles = files.filter((file: string) =>
+            path.basename(file).includes(needle)
+          )
+          if (!matchingFiles?.length) return undefined
+          return BaseFileManager.getFilesPath(dir, matchingFiles[0])
+        }
+
+        let filePath = await resolveMatchingFilePath(refResolvedValue)
+        if (!filePath) {
+          await downloadTransactionIdWithDedupe(refResolvedValue)
+          filePath = await resolveMatchingFilePath(refResolvedValue)
+        }
+        if (filePath) {
+          localStorageDir = `/${dir}`
+          renderValue = await BaseFileManager.readFileAsString(filePath)
+        }
+      } catch (e) {
+        logger('[hydrateFromDb] File resolution error', e)
       }
     }
 
@@ -211,7 +259,7 @@ export const hydrateFromDb = fromCallback<
       localStorageDir,
       refResolvedValue,
       refResolvedDisplayValue,
-      renderValue: refResolvedDisplayValue,
+      renderValue,
       populatedFromDb: true,
     })
 
@@ -244,15 +292,35 @@ export const hydrateFromDb = fromCallback<
       }
     }
 
-    // Html: read file content for renderValue (blob URLs from DB are invalid after reload)
-    // Fallback: when localStorageDir is null (e.g. EAS sync, legacy records) use '/html'
-    const htmlLocalStorageDir = isHtmlDynamic && refResolvedValue && !localStorageDir ? '/html' : localStorageDir
-    if (isHtmlDynamic && refResolvedValue && htmlLocalStorageDir) {
-      const dir = htmlLocalStorageDir.replace(/^\//, '')
-      const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
-      const exists = await BaseFileManager.pathExists(filePath)
-      if (exists) {
-        const htmlContent = await BaseFileManager.readFileAsString(filePath)
+    // Html: read file content for renderValue (blob URLs from DB are invalid after reload).
+    // When propertyValue is the Html storage seed uid, resolve localId and read `html/{localId}.html`.
+    if (isHtmlDynamic) {
+      const htmlLocalStorageDir =
+        refResolvedValue && !localStorageDir ? '/html' : localStorageDir ?? '/html'
+      let htmlContent: string | undefined
+      let outRef = refResolvedValue
+      let outDir = htmlLocalStorageDir
+      if (refResolvedValue && htmlLocalStorageDir) {
+        const dir = htmlLocalStorageDir.replace(/^\//, '')
+        const filePath = BaseFileManager.getFilesPath(dir, refResolvedValue)
+        let exists = await BaseFileManager.pathExists(filePath)
+        if (!exists) {
+          await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
+          exists = await BaseFileManager.pathExists(filePath)
+        }
+        if (exists) {
+          htmlContent = await BaseFileManager.readFileAsString(filePath)
+        }
+      }
+      if (!htmlContent && propertyValueFromDb) {
+        htmlContent = await readHtmlBodyForStorageSeedPropertyValue(propertyValueFromDb)
+        const lid = await resolveHtmlStorageSeedLocalId(String(propertyValueFromDb))
+        if (lid) {
+          outRef = `${lid}.html`
+          outDir = '/html'
+        }
+      }
+      if (htmlContent) {
         sendBack({
           type: 'updateContext',
           localId,
@@ -264,8 +332,8 @@ export const hydrateFromDb = fromCallback<
           versionUid: versionUidFromDb,
           schemaUid: schemaUidFromDb,
           refValueType,
-          localStorageDir: htmlLocalStorageDir,
-          refResolvedValue,
+          localStorageDir: outDir,
+          refResolvedValue: outRef ?? refResolvedValue,
           refResolvedDisplayValue,
           renderValue: htmlContent,
           populatedFromDb: true,

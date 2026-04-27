@@ -24,6 +24,8 @@ function parseGateway(input: string): { protocol: 'http' | 'https'; host: string
 let _host = DEFAULT_ARWEAVE_HOST
 let _protocol: 'http' | 'https' = 'https'
 let _hostExplicitlySet = false
+/** When true, production `ARWEAVE_HOST` / `NEXT_PUBLIC_ARWEAVE_HOST` does not override `_host` (after a successful read-gateway probe). */
+let _suppressEnvGatewayOverride = false
 
 export abstract class BaseArweaveClient {
   static PlatformClass: typeof BaseArweaveClient
@@ -41,7 +43,7 @@ export abstract class BaseArweaveClient {
         typeof process !== 'undefined' && process.env
           ? process.env.NEXT_PUBLIC_ARWEAVE_HOST || process.env.ARWEAVE_HOST
           : undefined
-      if (envHost && !_hostExplicitlySet) {
+      if (envHost && !_hostExplicitlySet && !_suppressEnvGatewayOverride) {
         return parseGateway(envHost)
       }
     }
@@ -84,6 +86,43 @@ export abstract class BaseArweaveClient {
     _host = parsed.host
     _protocol = parsed.protocol
     _hostExplicitlySet = true
+    _suppressEnvGatewayOverride = false
+  }
+
+  /**
+   * When true, read-path gateway probing does not change the host ({@link setHost}).
+   */
+  static isReadGatewayLocked(): boolean {
+    return _hostExplicitlySet
+  }
+
+  /**
+   * @internal Clears env override suppression after probing (for test isolation).
+   */
+  static resetReadGatewaySelectionStateForTests(): void {
+    _suppressEnvGatewayOverride = false
+  }
+
+  /**
+   * Sets the preferred read gateway without locking. Production env host still takes precedence until a probe applies a host.
+   * Used for seed `arweaveDomain`.
+   */
+  static setPreferredReadGateway(host: string): void {
+    const parsed = parseGateway(host)
+    _host = parsed.host
+    _protocol = parsed.protocol
+    _hostExplicitlySet = false
+  }
+
+  /**
+   * Applies a gateway chosen by read-path health probing so {@link getHost} uses it instead of env override.
+   */
+  static applyProbedReadGateway(host: string): void {
+    const parsed = parseGateway(host)
+    _host = parsed.host
+    _protocol = parsed.protocol
+    _hostExplicitlySet = false
+    _suppressEnvGatewayOverride = true
   }
 
   /**

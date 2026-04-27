@@ -975,7 +975,7 @@ export const addModelsToDb = async (
         .select()
         .from(properties)
         .where(eq(properties.modelId, modelRecord.id!))
-    
+
     // Track which DB properties have been matched to schema properties
     const matchedDbPropertyIds = new Set<number>()
     

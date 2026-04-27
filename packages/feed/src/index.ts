@@ -80,6 +80,191 @@ function getEnclosureUrlFromImageRelationField(value: unknown): string | undefin
   return undefined
 }
 
+interface RssImageCandidate {
+  url: string
+  mimeType?: string
+  width?: number
+  height?: number
+  size?: number
+  format?: string
+}
+
+function coercePositiveNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return undefined
+}
+
+function extractRssImageCandidateFromRelationFieldValue(
+  value: unknown
+): RssImageCandidate | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const candidate = extractRssImageCandidateFromRelationFieldValue(entry)
+      if (candidate) return candidate
+    }
+    return undefined
+  }
+
+  const url = getEnclosureUrlFromImageRelationField(value)
+  if (!url) return undefined
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    const mimeType =
+      (typeof record.mimeType === 'string' && record.mimeType) ||
+      (typeof record.type === 'string' && record.type) ||
+      (typeof record.contentType === 'string' && record.contentType) ||
+      undefined
+    return {
+      url,
+      mimeType,
+      width: coercePositiveNumber(record.width),
+      height: coercePositiveNumber(record.height),
+      size: coercePositiveNumber(record.size ?? record.fileSize),
+      format: typeof record.format === 'string' ? record.format : undefined,
+    }
+  }
+
+  return { url }
+}
+
+function extractRssImageCandidate(item: Record<string, unknown>): RssImageCandidate | undefined {
+  if (item._hasImage && item._imageMetadata && typeof item._imageMetadata === 'object') {
+    const imageMeta = item._imageMetadata as ImageMetadata
+    if (imageMeta.url) {
+      return {
+        url: imageMeta.url,
+        mimeType: imageMeta.mimeType,
+        width: imageMeta.width,
+        height: imageMeta.height,
+        size: imageMeta.size,
+        format: imageMeta.format,
+      }
+    }
+  }
+
+  const imageCandidateFields = [
+    'feature_image',
+    'featureImage',
+    'image',
+    'images',
+    'cover_image',
+    'coverImage',
+    'thumbnail',
+    'thumbnail_image',
+    'thumbnailImage',
+  ]
+
+  for (const key of imageCandidateFields) {
+    if (!(key in item)) continue
+    const candidate = extractRssImageCandidateFromRelationFieldValue(item[key])
+    if (candidate) return candidate
+  }
+
+  return undefined
+}
+
+function applyRssImageCandidate(
+  rssItem: Record<string, unknown>,
+  item: Record<string, unknown>,
+  imageCandidate: RssImageCandidate,
+  schemaName: string,
+  siteAuthor: FeedConfig['author'],
+  siteCopyright: FeedConfig['copyright'],
+): void {
+  const mediaType = imageCandidate.mimeType || 'image/jpeg'
+
+  rssItem.enclosures = [
+    {
+      url: imageCandidate.url,
+      type: mediaType,
+      ...(imageCandidate.size ? { length: imageCandidate.size } : {}),
+    },
+  ]
+
+  const mediaContent: Record<string, unknown> = {
+    url: imageCandidate.url,
+    type: mediaType,
+    medium: 'image',
+  }
+
+  if (imageCandidate.width) mediaContent.width = imageCandidate.width
+  if (imageCandidate.height) mediaContent.height = imageCandidate.height
+  if (imageCandidate.size) mediaContent.fileSize = imageCandidate.size
+  if (imageCandidate.format) mediaContent.format = imageCandidate.format
+  rssItem['media:content'] = [mediaContent]
+
+  const thumbnail: Record<string, unknown> = { url: imageCandidate.url }
+  if (imageCandidate.width) thumbnail.width = imageCandidate.width
+  if (imageCandidate.height) thumbnail.height = imageCandidate.height
+  rssItem['media:thumbnail'] = [thumbnail]
+
+  if (item.title) {
+    rssItem['media:title'] = item.title
+  }
+
+  const mediaDescription = item.description || item.summary || item.title || ''
+  if (mediaDescription) {
+    rssItem['media:description'] = mediaDescription
+  }
+
+  if (item.title) {
+    const keywords: string[] = []
+    keywords.push(...String(item.title).toLowerCase().split(/\s+/).filter((w) => w.length > 3))
+    if (item.description) {
+      keywords.push(...String(item.description).toLowerCase().split(/\s+/).filter((w) => w.length > 3))
+    }
+    if (keywords.length > 0) {
+      rssItem['media:keywords'] = [...new Set(keywords)].slice(0, 10).join(', ')
+    }
+  }
+
+  if (Array.isArray(item.authors) && item.authors.length > 0) {
+    rssItem['media:credit'] = item.authors.map((author: any) => ({
+      value: author.name || author.displayName || 'Unknown',
+      role: 'author',
+    }))
+  } else if (siteAuthor) {
+    rssItem['media:credit'] = [{ value: siteAuthor.name, role: 'author' }]
+  }
+
+  if (siteCopyright) {
+    rssItem['media:copyright'] = siteCopyright
+  }
+
+  if (schemaName) {
+    rssItem['media:category'] = [
+      {
+        value: schemaName,
+        scheme: 'http://www.schema.org/',
+      },
+    ]
+  }
+
+  rssItem['media:group'] = [
+    {
+      'media:content': [mediaContent],
+      'media:thumbnail': [thumbnail],
+      'media:title': item.title || 'Untitled',
+      'media:description': mediaDescription,
+    },
+  ]
+
+  if (
+    imageCandidate.url &&
+    typeof item.content === 'string' &&
+    item.content.trim() !== '' &&
+    !item.content.includes(imageCandidate.url)
+  ) {
+    const imageHtml = `<img src="${imageCandidate.url}" alt="${item.title || ''}"${imageCandidate.width ? ` width="${imageCandidate.width}"` : ''}${imageCandidate.height ? ` height="${imageCandidate.height}"` : ''} />`
+    rssItem['content:encoded'] = `${imageHtml}\n${item.content}`
+  }
+}
+
 let client: any;
 let initializationPromise: Promise<void> | null = null;
 
@@ -602,107 +787,16 @@ export const createFeed = (
             }
           }
           
-          // Add image from storageTransactionId if available (from enrichment)
-          if (item._imageMetadata && item._hasImage) {
-            const imageMeta: ImageMetadata = item._imageMetadata
-            
-            // Add enclosure for RSS (standard RSS 2.0)
-            rssItem.enclosures = [{
-              url: imageMeta.url,
-              type: imageMeta.mimeType || 'image/jpeg',
-              length: imageMeta.size,
-            }]
-            
-            // Build comprehensive Media RSS properties
-            const mediaContent: any = {
-              url: imageMeta.url,
-              type: imageMeta.mimeType || 'image/jpeg',
-              medium: 'image', // image, video, audio, document
-            }
-            
-            // Add dimensions if available
-            if (imageMeta.width) mediaContent.width = imageMeta.width
-            if (imageMeta.height) mediaContent.height = imageMeta.height
-            if (imageMeta.size) mediaContent.fileSize = imageMeta.size
-            if (imageMeta.format) mediaContent.format = imageMeta.format
-            
-            // Add Media RSS namespace properties
-            rssItem['media:content'] = [mediaContent]
-            
-            // Add media:thumbnail (required by many readers)
-            const thumbnail: any = {
-              url: imageMeta.url,
-            }
-            if (imageMeta.width) thumbnail.width = imageMeta.width
-            if (imageMeta.height) thumbnail.height = imageMeta.height
-            rssItem['media:thumbnail'] = [thumbnail]
-            
-            // Add media:title (many readers look for this)
-            if (item.title) {
-              rssItem['media:title'] = item.title
-            }
-            
-            // Add media:description (enhanced)
-            const mediaDescription = item.description || item.summary || item.title || ''
-            if (mediaDescription) {
-              rssItem['media:description'] = mediaDescription
-            }
-            
-            // Add media:keywords for better discoverability
-            if (item.title) {
-              // Extract keywords from title and description
-              const keywords: string[] = []
-              if (item.title) {
-                keywords.push(...item.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
-              }
-              if (item.description) {
-                keywords.push(...item.description.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
-              }
-              if (keywords.length > 0) {
-                rssItem['media:keywords'] = [...new Set(keywords)].slice(0, 10).join(', ')
-              }
-            }
-            
-            // Add media:credit (author information)
-            if (item.authors && Array.isArray(item.authors) && item.authors.length > 0) {
-              rssItem['media:credit'] = item.authors.map((author: any) => ({
-                value: author.name || author.displayName || 'Unknown',
-                role: 'author',
-              }))
-            } else if (SITE_CONFIG.author) {
-              rssItem['media:credit'] = [{
-                value: SITE_CONFIG.author.name,
-                role: 'author',
-              }]
-            }
-            
-            // Add media:copyright
-            if (SITE_CONFIG.copyright) {
-              rssItem['media:copyright'] = SITE_CONFIG.copyright
-            }
-            
-            // Add media:category (can be used for content categorization)
-            if (schemaName) {
-              rssItem['media:category'] = [{
-                value: schemaName,
-                scheme: 'http://www.schema.org/',
-              }]
-            }
-            
-            // Add media:group to bundle all media elements together
-            // This is useful for readers that prefer grouped media
-            rssItem['media:group'] = [{
-              'media:content': [mediaContent],
-              'media:thumbnail': [thumbnail],
-              'media:title': item.title || 'Untitled',
-              'media:description': mediaDescription,
-            }]
-            
-            // Enhance content:encoded with image if not already present
-            if (imageMeta.url && item.content && !item.content.includes(imageMeta.url)) {
-              const imageHtml = `<img src="${imageMeta.url}" alt="${item.title || ''}"${imageMeta.width ? ` width="${imageMeta.width}"` : ''}${imageMeta.height ? ` height="${imageMeta.height}"` : ''} />`
-              rssItem['content:encoded'] = `${imageHtml}\n${item.content}`
-            }
+          const imageCandidate = extractRssImageCandidate(item)
+          if (imageCandidate) {
+            applyRssImageCandidate(
+              rssItem,
+              item,
+              imageCandidate,
+              schemaName,
+              SITE_CONFIG.author,
+              SITE_CONFIG.copyright
+            )
           }
 
           if (
@@ -711,18 +805,6 @@ export const createFeed = (
             rssItem['content:encoded'] === undefined
           ) {
             rssItem['content:encoded'] = item.content
-          }
-          
-          // Map feature_image / image to enclosure for RSS (media attachments) - fallback
-          if (!rssItem.enclosures && (item.feature_image || item.featureImage || item.image)) {
-            const imageField = item.feature_image || item.featureImage || item.image
-            const enclosureUrl = getEnclosureUrlFromImageRelationField(imageField)
-            if (enclosureUrl) {
-              rssItem.enclosures = [{
-                url: enclosureUrl,
-                type: 'image/jpeg',
-              }]
-            }
           }
           
           // Use Dublin Core namespace for additional metadata
@@ -848,7 +930,7 @@ export async function handleFeedRequest(
     // Check if we have cached feed content
     if (config.enabled) {
       const cachedContent = await cache.getFeedContent(schemaName, format, contentKeyOptions);
-      
+
       if (cachedContent) {
         // Check ETag for conditional request
         if (ifNoneMatch && checkIfNoneMatch(ifNoneMatch, cachedContent.etag)) {

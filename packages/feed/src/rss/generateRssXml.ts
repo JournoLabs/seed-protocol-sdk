@@ -4,6 +4,16 @@ import type { XMLBuilder } from 'xmlbuilder2/lib/interfaces'
 const DC_NS = 'http://purl.org/dc/elements/1.1/'
 const CONTENT_NS = 'http://purl.org/rss/1.0/modules/content/'
 const MEDIA_NS = 'http://search.yahoo.com/mrss/'
+type RelationNamespaceContext = { prefix: string; uri: string }
+type RelationNamespaceMap = Record<string, RelationNamespaceContext>
+const RELATION_NAMESPACES: RelationNamespaceMap = {
+  publication: {
+    prefix: 'publication',
+    uri: 'https://seedprotocol.io/ns/publication/1.0',
+  },
+}
+const RELATION_NAMESPACE_URI_BASE = 'https://seedprotocol.io/ns/relations'
+const RESERVED_XML_PREFIXES = new Set(['xml', 'xmlns', 'dc', 'media', 'content', 'atom', 'fh'])
 
 const CAPITALIZED_DUPLICATES = new Set(['Title', 'Link', 'Guid', 'PubDate', 'SeedUid'])
 
@@ -84,40 +94,151 @@ function isExpandedRelationObject(value: unknown): value is Record<string, unkno
 }
 
 const MAX_EXPANDED_RELATION_DEPTH = 4
+const NON_RELATION_KEYS = new Set([
+  ...RSS_ITEM_ORDER,
+  'guid',
+  'source',
+  'dc',
+  'content',
+  'content:encoded',
+  'items',
+])
+
+function normalizeRelationKey(key: string): string {
+  return key.endsWith('s') && key.length > 1 ? key.slice(0, -1) : key
+}
+
+function sanitizePrefixToken(rawKey: string): string {
+  const token = rawKey
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, '_')
+    .replace(/^[^A-Za-z_]+/, '')
+    .replace(/^$/, 'rel')
+  return token.toLowerCase()
+}
+
+function createUniquePrefix(
+  preferredPrefix: string,
+  usedPrefixes: Set<string>
+): string {
+  if (!usedPrefixes.has(preferredPrefix) && !RESERVED_XML_PREFIXES.has(preferredPrefix)) {
+    usedPrefixes.add(preferredPrefix)
+    return preferredPrefix
+  }
+
+  let suffix = 2
+  while (true) {
+    const candidate = `${preferredPrefix}${suffix}`
+    if (!usedPrefixes.has(candidate) && !RESERVED_XML_PREFIXES.has(candidate)) {
+      usedPrefixes.add(candidate)
+      return candidate
+    }
+    suffix += 1
+  }
+}
+
+function isRelationArray(value: unknown): value is Record<string, unknown>[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => isExpandedRelationObject(entry))
+  )
+}
+
+function buildRelationNamespaceMap(items: Record<string, unknown>[]): RelationNamespaceMap {
+  const relationNamespaces: RelationNamespaceMap = { ...RELATION_NAMESPACES }
+  const usedPrefixes = new Set(
+    Object.values(relationNamespaces).map((namespaceContext) => namespaceContext.prefix)
+  )
+
+  const discoveredRelationKeys = new Set<string>()
+  for (const item of items) {
+    for (const [key, value] of Object.entries(item)) {
+      const isAuthorRelation =
+        (key === 'author' && isExpandedRelationObject(value)) ||
+        (key === 'authors' && isRelationArray(value))
+      if (key.startsWith('_')) continue
+      if (NON_RELATION_KEYS.has(key) && !isAuthorRelation) continue
+      if (isExpandedRelationObject(value) || isRelationArray(value)) {
+        discoveredRelationKeys.add(normalizeRelationKey(key))
+      }
+    }
+  }
+
+  const sortedDiscoveredRelationKeys = [...discoveredRelationKeys].sort()
+  for (const relationKey of sortedDiscoveredRelationKeys) {
+    if (relationNamespaces[relationKey]) continue
+    const preferredPrefix = sanitizePrefixToken(relationKey)
+    const prefix = createUniquePrefix(preferredPrefix, usedPrefixes)
+    relationNamespaces[relationKey] = {
+      prefix,
+      uri: `${RELATION_NAMESPACE_URI_BASE}/${relationKey}/1.0`,
+    }
+  }
+
+  return relationNamespaces
+}
+
+function getRelationNamespaceContext(
+  key: string,
+  relationNamespaces: RelationNamespaceMap
+): RelationNamespaceContext | undefined {
+  if (key in relationNamespaces) return relationNamespaces[key]
+  if (key.endsWith('s') && key.length > 1) {
+    const singular = key.slice(0, -1)
+    if (singular in relationNamespaces) return relationNamespaces[singular]
+  }
+  return undefined
+}
+
+function getNamespacedChildTagName(localName: string, namespaceContext?: RelationNamespaceContext): string {
+  if (!namespaceContext) return localName
+  return `${namespaceContext.prefix}:${localName}`
+}
 
 function serializeExpandedRelation(
   parent: XMLBuilder,
   obj: Record<string, unknown>,
   tagName: string,
   addDcCreator?: boolean,
-  depth = 0
+  depth = 0,
+  namespaceContext?: RelationNamespaceContext
 ): void {
   const ele = parent.ele(tagName)
   for (const [k, v] of Object.entries(obj)) {
     if (v == null || k.startsWith('_') || k === 'items') continue
+    const childTagName = getNamespacedChildTagName(k, namespaceContext)
     if (depth >= MAX_EXPANDED_RELATION_DEPTH) {
-      const child = ele.ele(k)
+      const child = ele.ele(childTagName)
       addTextOrCdata(child, typeof v === 'object' ? JSON.stringify(v) : String(v))
       continue
     }
     if (Array.isArray(v)) {
       const itemTag = k.endsWith('s') && k.length > 1 ? k.slice(0, -1) : k
+      const childItemTag = getNamespacedChildTagName(itemTag, namespaceContext)
       for (const entry of v) {
         if (entry === undefined || entry === null) continue
         if (isExpandedRelationObject(entry)) {
-          serializeExpandedRelation(ele, entry, itemTag, false, depth + 1)
+          serializeExpandedRelation(ele, entry, childItemTag, false, depth + 1, namespaceContext)
         } else {
-          const leaf = ele.ele(itemTag)
+          const leaf = ele.ele(childItemTag)
           addTextOrCdata(leaf, String(entry))
         }
       }
       continue
     }
     if (isExpandedRelationObject(v)) {
-      serializeExpandedRelation(ele, v as Record<string, unknown>, k, false, depth + 1)
+      serializeExpandedRelation(
+        ele,
+        v as Record<string, unknown>,
+        childTagName,
+        false,
+        depth + 1,
+        namespaceContext
+      )
       continue
     }
-    const child = ele.ele(k)
+    const child = ele.ele(childTagName)
     addTextOrCdata(child, String(v))
   }
   if (addDcCreator) {
@@ -130,7 +251,8 @@ function serializeItemProperty(
   itemParent: XMLBuilder,
   key: string,
   value: unknown,
-  item: Record<string, unknown>
+  item: Record<string, unknown>,
+  relationNamespaces: RelationNamespaceMap
 ): void {
   if (value === undefined || value === null || key.startsWith('_')) return
   if (key === 'items') return
@@ -210,35 +332,6 @@ function serializeItemProperty(
   }
   if (key === 'content') return
 
-  if (key.startsWith('media:') && Array.isArray(value)) {
-    const localName = key.slice(6)
-    for (const item of value) {
-      if (item === null || typeof item !== 'object') continue
-      const attrs: Record<string, string> = {}
-      let textContent: string | null = null
-      for (const [attr, attrVal] of Object.entries(item)) {
-        if (attrVal === undefined || attrVal === null) continue
-        if (attr === 'value') {
-          textContent = String(attrVal)
-        } else {
-          attrs[attr] = String(attrVal)
-        }
-      }
-      const mediaEle = itemParent.ele(MEDIA_NS, localName, attrs)
-      if (textContent !== null) {
-        addTextOrCdata(mediaEle, textContent)
-      }
-    }
-    return
-  }
-
-  if (key.startsWith('media:') && typeof value === 'string') {
-    const localName = key.slice(6)
-    const ele = itemParent.ele(MEDIA_NS, localName)
-    addTextOrCdata(ele, value)
-    return
-  }
-
   if (key === 'media:group' && Array.isArray(value)) {
     for (const group of value) {
       if (group && typeof group === 'object') {
@@ -272,6 +365,35 @@ function serializeItemProperty(
     return
   }
 
+  if (key.startsWith('media:') && Array.isArray(value)) {
+    const localName = key.slice(6)
+    for (const item of value) {
+      if (item === null || typeof item !== 'object') continue
+      const attrs: Record<string, string> = {}
+      let textContent: string | null = null
+      for (const [attr, attrVal] of Object.entries(item)) {
+        if (attrVal === undefined || attrVal === null) continue
+        if (attr === 'value') {
+          textContent = String(attrVal)
+        } else {
+          attrs[attr] = String(attrVal)
+        }
+      }
+      const mediaEle = itemParent.ele(MEDIA_NS, localName, attrs)
+      if (textContent !== null) {
+        addTextOrCdata(mediaEle, textContent)
+      }
+    }
+    return
+  }
+
+  if (key.startsWith('media:') && typeof value === 'string') {
+    const localName = key.slice(6)
+    const ele = itemParent.ele(MEDIA_NS, localName)
+    addTextOrCdata(ele, value)
+    return
+  }
+
   if (value instanceof Date) {
     const ele = itemParent.ele(key)
     ele.txt(formatRfc822Date(value))
@@ -279,14 +401,16 @@ function serializeItemProperty(
   }
 
   if (key === 'author' && isExpandedRelationObject(value)) {
-    serializeExpandedRelation(itemParent, value, 'author', true)
+    const namespaceContext = getRelationNamespaceContext(key, relationNamespaces)
+    serializeExpandedRelation(itemParent, value, 'author', true, 0, namespaceContext)
     return
   }
 
   if (key === 'authors' && Array.isArray(value)) {
+    const namespaceContext = getRelationNamespaceContext(key, relationNamespaces)
     for (const a of value) {
       if (a && isExpandedRelationObject(a)) {
-        serializeExpandedRelation(itemParent, a, 'author', true)
+        serializeExpandedRelation(itemParent, a, 'author', true, 0, namespaceContext)
       } else {
         const authorStr =
           typeof a === 'string'
@@ -318,8 +442,9 @@ function serializeItemProperty(
   // Array of expanded relation objects (e.g. coAuthors as list)
   if (Array.isArray(value) && value.length > 0 && value.every((v) => isExpandedRelationObject(v))) {
     const tagName = key.endsWith('s') ? key.slice(0, -1) : key
+    const namespaceContext = getRelationNamespaceContext(key, relationNamespaces)
     for (const v of value) {
-      if (v) serializeExpandedRelation(itemParent, v, tagName, false)
+      if (v) serializeExpandedRelation(itemParent, v, tagName, false, 0, namespaceContext)
     }
     return
   }
@@ -338,7 +463,8 @@ function serializeItemProperty(
 
   // Generic expanded relation object (e.g. coAuthor, other relation properties)
   if (isExpandedRelationObject(value)) {
-    serializeExpandedRelation(itemParent, value, key, false)
+    const namespaceContext = getRelationNamespaceContext(key, relationNamespaces)
+    serializeExpandedRelation(itemParent, value, key, false, 0, namespaceContext)
     return
   }
 
@@ -373,11 +499,20 @@ export interface RssFeedInput {
 
 export function generateRssXml(rssFeed: RssFeedInput): string {
   const doc = create({ version: '1.0', encoding: 'UTF-8' })
+  const relationNamespaces = buildRelationNamespaceMap(rssFeed.items)
+  const relationNamespaceAttrs = Object.values(relationNamespaces).reduce<Record<string, string>>(
+    (acc, relationNamespace) => {
+      acc[`xmlns:${relationNamespace.prefix}`] = relationNamespace.uri
+      return acc
+    },
+    {}
+  )
   const rssAttrs: Record<string, string> = {
     'xmlns:dc': DC_NS,
     'xmlns:content': CONTENT_NS,
     'xmlns:media': MEDIA_NS,
     'xmlns:atom': ATOM_NS,
+    ...relationNamespaceAttrs,
   }
   if (rssFeed.isArchive) {
     rssAttrs['xmlns:fh'] = FH_NS
@@ -417,7 +552,7 @@ export function generateRssXml(rssFeed: RssFeedInput): string {
 
     for (const key of RSS_ITEM_ORDER) {
       if (key in item) {
-        serializeItemProperty(itemParent, key, item[key], item)
+        serializeItemProperty(itemParent, key, item[key], item, relationNamespaces)
         processedKeys.add(key)
       }
     }
@@ -431,7 +566,7 @@ export function generateRssXml(rssFeed: RssFeedInput): string {
       )
       .sort()
     for (const key of otherKeys) {
-      serializeItemProperty(itemParent, key, item[key], item)
+      serializeItemProperty(itemParent, key, item[key], item, relationNamespaces)
     }
   }
 

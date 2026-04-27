@@ -218,6 +218,9 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
             getQueryData: () => {
               throw new Error('Not implemented')
             },
+            removeQueries: async (filters) => {
+              await realClient.removeQueries(filters)
+            },
           }
         }
       }

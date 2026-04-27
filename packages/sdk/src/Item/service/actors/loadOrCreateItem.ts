@@ -11,6 +11,7 @@ import {
   resolveStorageNameToSchemaName,
   toSchemaPropertyName,
 } from '@/helpers/metadataPropertyNames'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import debug from 'debug'
 
 const logger = debug('seedSdk:item:actors:loadOrCreateItem')
@@ -55,9 +56,8 @@ function pickBetterMetadataRowForSameInstance(a: any, b: any): any {
   if (sa > 0 && sb === 0) return a
   if (sb > 0 && sa === 0) return b
   if (sa !== sb) return sa > sb ? a : b
-  const ta = a.attestationCreatedAt ?? a.createdAt ?? 0
-  const tb = b.attestationCreatedAt ?? b.createdAt ?? 0
-  return ta >= tb ? a : b
+  const cmp = compareMetadataRowsLatestFirst(a, b)
+  return cmp < 0 ? a : b
 }
 
 function dedupeMetadataRowsByInstanceKey(

@@ -9,7 +9,7 @@ import { setupServiceHandlers } from "@/events/services";
 // import { GlobalState } from "@/client/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
-import { BaseArweaveClient, BaseEasClient, BaseQueryClient } from "@/helpers";
+import { BaseArweaveClient, BaseEasClient, BaseQueryClient, ensureReadGatewaySelected } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { BaseDb } from '../../db/Db/BaseDb'
 import { normalizeAddressConfig } from '@/helpers/addresses'
@@ -164,12 +164,16 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       dbConfig,
       schemaFile,
       schema,
-      syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? false,
+      syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? true,
     } })
     
     if (arweaveDomain) {
       setArweaveDomain(arweaveDomain)
     }
+
+    void ensureReadGatewaySelected().catch(() => {
+      /* non-blocking warm-up for read gateway probe */
+    })
 
     // Models are now Model instances, no registration needed
     // They should be created via Model.create() and are accessible via Model static methods

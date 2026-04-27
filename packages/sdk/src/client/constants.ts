@@ -8,6 +8,7 @@ const MACHINE_ID_SCOPE = '@seedSdk'
 
 export enum MachineIds {
   CLIENT_MANAGER = `${MACHINE_ID_SCOPE}/clientManager`,
+  EAS_SYNC_MANAGER = `${MACHINE_ID_SCOPE}/easSyncManager`,
   GLOBAL      = `${MACHINE_ID_SCOPE}/global`,
   INTERNAL    = `${MACHINE_ID_SCOPE}/internal`,
   EAS         = `${MACHINE_ID_SCOPE}/eas`,
@@ -120,7 +121,7 @@ export const EAS_ENDPOINT =
  * Migration: import { BaseArweaveClient } from '@/helpers' and use BaseArweaveClient.getHost()
  */
 export const ARWEAVE_HOST     =
-               ENV.NEXT_PUBLIC_ARWEAVE_HOST || 'arweave.net'
+               ENV.NEXT_PUBLIC_ARWEAVE_HOST || 'ar.seedprotocol.io'
 
 /**
  * @deprecated Use BaseArweaveClient.getEndpoint() instead.

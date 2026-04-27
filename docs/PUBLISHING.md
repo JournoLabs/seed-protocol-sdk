@@ -54,7 +54,7 @@ Control this with **`publishMode`** when building payloads or starting publish.
 
 Use **`getPublishPendingDiff`** from `@seedprotocol/sdk` with `{ seedLocalId }` / `{ seedUid }` or an **`Item`**. It returns:
 
-- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists.
+- **`pendingProperties`** — Properties whose latest local row has no attestation `uid` (unpublished edits), with optional **`previousPublishedValue`** when an older attested row exists. “Latest” here is ordered by `COALESCE(attestation_created_at, created_at)` descending, then by `local_id` descending so ties are deterministic.
 - **`lastPublishedVersionUid`** / **`lastVersionPublishedAt`** — From the local `versions` table when available.
 
 Use this to show “what will publish” or badges before calling publish.

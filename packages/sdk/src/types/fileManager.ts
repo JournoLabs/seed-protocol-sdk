@@ -4,6 +4,12 @@ type DownloadAllFilesParams = {
   excludedTransactions: Set<string>
 }
 
+type DownloadSingleFileParams = {
+  transactionId: string,
+  arweaveHost: string,
+  excludedTransactions: Set<string>
+}
+
 type ResizeAllImagesParams = {
   width: number,
   height: number

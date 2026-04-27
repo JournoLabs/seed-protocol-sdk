@@ -1,4 +1,4 @@
-import { camelCase, DebouncedFunc, startCase, throttle } from 'lodash-es'
+import { camelCase, startCase } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@/graphql/gql/graphql'
 import {
   metadata,
@@ -38,7 +38,9 @@ import {
 } from '@/eas'
 import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
-
+import { scheduleBulkFilesDownloadFromEasSync } from '@/events/files/download'
+import { eventEmitter } from '@/eventBus'
+import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
@@ -351,17 +353,13 @@ type SaveEasPropertiesToDb = (
   props: SaveEasPropertiesToDbParams,
 ) => Promise<SaveEasPropertiesToDbReturn>
 
-let isSavingToDb = false
+/** Serialize property saves: concurrent `runSyncFromEas` used to hit `isSavingToDb` and return `{}` with no insert. */
+let saveEasPropertiesDbChain: Promise<unknown> = Promise.resolve()
 
-const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
+const saveEasPropertiesToDbBody = async ({
   itemProperties,
   itemSeeds,
-}) => {
-  if (isSavingToDb) {
-    return { propertyUids: [] }
-  }
-  isSavingToDb = true
-
+}: SaveEasPropertiesToDbParams): Promise<SaveEasPropertiesToDbReturn> => {
   const propertyUids = itemProperties.map((property) => property.id)
 
   // Dynamic import to break circular dependency
@@ -582,9 +580,16 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = async ({
 
   await appDb.run(sql.raw(insertPropertiesQuery))
 
-  isSavingToDb = false
-
   return { propertyUids }
+}
+
+const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {
+  const next = saveEasPropertiesDbChain.then(() => saveEasPropertiesToDbBody(params))
+  saveEasPropertiesDbChain = next.then(
+    () => undefined,
+    () => undefined,
+  )
+  return next
 }
 
 const getRelatedSeedsAndVersions = async () => {
@@ -734,17 +739,14 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   })
 
   await getRelatedSeedsAndVersions()
+  scheduleBulkFilesDownloadFromEasSync(addresses)
+
+  try {
+    const itemMod = await import('../../Item/Item')
+    await itemMod.Item.rehydrateCachedItemsFromDbAfterEasSync()
+  } catch (err) {
+    console.warn('[item/events] [syncDbWithEas] rehydrateCachedItemsFromDbAfterEasSync:', err)
+  }
+  eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
 }
 
-const syncDbWithEasHandler: DebouncedFunc<any> = throttle(
-  async (_) => {
-    await runSyncFromEas()
-  },
-  30000,
-  {
-    leading: true,
-    trailing: false,
-  },
-)
-
-export { syncDbWithEasHandler }

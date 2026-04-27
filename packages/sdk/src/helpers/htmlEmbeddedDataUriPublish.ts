@@ -180,28 +180,6 @@ export async function createImageItemFromDataUri(dataUri: string): Promise<{ see
     modelName: 'Image',
   })
   await waitForEntityIdle(imageItem, { timeout: 60_000 })
-  // #region agent log
-  fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '5954ea' },
-    body: JSON.stringify({
-      sessionId: '5954ea',
-      location: 'htmlEmbeddedDataUriPublish.ts:createImageItemFromDataUri',
-      message: 'after waitForEntityIdle',
-      data: {
-        seedLocalId: imageItem.seedLocalId,
-        allPropertyKeys: Object.keys(imageItem.allProperties),
-        hasStorageTransactionId: !!imageItem.allProperties['storageTransactionId'],
-        hasStorageTransactionWrongKey: !!(imageItem.allProperties as Record<string, unknown>)[
-          'storageTransaction'
-        ],
-      },
-      timestamp: Date.now(),
-      runId: 'post-fix',
-      hypothesisId: 'A',
-    }),
-  }).catch(() => {})
-  // #endregion
   const st =
     imageItem.internalProperties['storageTransactionId'] ??
     imageItem.allProperties['storageTransactionId']

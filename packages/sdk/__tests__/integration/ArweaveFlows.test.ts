@@ -10,6 +10,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import { invalidateReadGatewayCache } from '@/helpers/ArweaveClient/selectReadGateway'
+import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { MockArweaveClient } from '../test-utils/MockArweaveClient'
 import { getArweaveUrlForTransaction } from '@/helpers'
 
@@ -23,10 +25,13 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
   beforeEach(() => {
     // Save original platform class
     originalPlatformClass = BaseArweaveClient.PlatformClass
-    
+
     // Set MockArweaveClient as the platform class
     BaseArweaveClient.setPlatformClass(MockArweaveClient)
     MockArweaveClient.reset()
+    BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
+    BaseArweaveClient.resetReadGatewaySelectionStateForTests()
+    invalidateReadGatewayCache()
   })
 
   afterEach(() => {
@@ -40,7 +45,7 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
   describe('URL Generation Flow', () => {
     it('generates correct Arweave URLs via BaseArweaveClient.getRawUrl()', () => {
       const url = BaseArweaveClient.getRawUrl('abc123')
-      expect(url).toBe('https://arweave.net/raw/abc123')
+      expect(url).toBe(`https://${DEFAULT_ARWEAVE_HOST}/raw/abc123`)
     })
 
     it('deprecated getArweaveUrlForTransaction() delegates to BaseArweaveClient', () => {
@@ -61,7 +66,7 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
       expect(deprecatedUrl).toBe('https://custom-gateway.example.com/raw/abc123')
       
       // Reset
-      BaseArweaveClient.setHost('arweave.net')
+      BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
     })
   })
 

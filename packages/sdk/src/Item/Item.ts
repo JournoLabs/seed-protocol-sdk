@@ -25,7 +25,14 @@ import {
 import type { CreateWaitOptions } from '@/types'
 
 import { BehaviorSubject } from 'rxjs'
-import { ActorRefFrom, Subscription, createActor, SnapshotFrom } from 'xstate'
+import {
+  ActorRefFrom,
+  Subscription,
+  createActor,
+  isMachineSnapshot,
+  SnapshotFrom,
+  waitFor,
+} from 'xstate'
 import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
@@ -254,6 +261,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       'schemaUid',
       'latestVersionLocalId',
       'latestVersionUid',
+      'publishedVersionUid',
+      'publishedVersionLocalId',
     ] as const
 
     const keysFromInitial = (Object.keys(initialValues) as Array<string & keyof Partial<T>>).filter(
@@ -300,6 +309,148 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
+  /** Prefer local id so list rows (local + uid) resolve the same cache entry as early draft loads. */
+  private static findItemInstanceCacheEntryByProps(
+    props: Partial<ItemData>,
+  ): { instance: Item<any>; refCount: number } | undefined {
+    const l = props.seedLocalId
+    const u = props.seedUid
+    if (typeof l === 'string' && l.length > 0) {
+      const e = this.instanceCache.get(l)
+      if (e) return e
+    }
+    if (typeof u === 'string' && u.length > 0) {
+      const e = this.instanceCache.get(u)
+      if (e) return e
+    }
+    return undefined
+  }
+
+  private static findItemInstanceCacheEntryById(
+    id: string,
+  ): { instance: Item<any>; refCount: number } | undefined {
+    const direct = this.instanceCache.get(id)
+    if (direct) return direct
+    for (const [, entry] of this.instanceCache) {
+      const ctx = entry.instance._getSnapshotContext() as any
+      if (ctx.seedLocalId === id || ctx.seedUid === id) return entry
+    }
+    return undefined
+  }
+
+  private static collectInstanceCacheKeysForInstance(instance: Item<any>): string[] {
+    const keys: string[] = []
+    for (const [k, v] of this.instanceCache) {
+      if (v.instance === instance) keys.push(k)
+    }
+    return keys
+  }
+
+  private static registerItemInInstanceCache(instance: Item<any>): void {
+    const ctx = instance._getSnapshotContext() as any
+    const lid: string | undefined =
+      typeof ctx.seedLocalId === 'string' && ctx.seedLocalId.length > 0
+        ? ctx.seedLocalId
+        : undefined
+    const uid: string | undefined =
+      typeof ctx.seedUid === 'string' && ctx.seedUid.length > 0 ? ctx.seedUid : undefined
+    const entry = { instance, refCount: 1 }
+    if (lid) this.instanceCache.set(lid, entry)
+    if (uid && uid !== lid) this.instanceCache.set(uid, entry)
+    if (!lid && !uid) {
+      throw new Error('Item.registerItemInInstanceCache: missing seedLocalId and seedUid')
+    }
+  }
+
+  private static releaseItemInstanceCacheHold(instance: Item<any>): void {
+    const keys = this.collectInstanceCacheKeysForInstance(instance)
+    if (keys.length === 0) return
+    const entry = this.instanceCache.get(keys[0])!
+    entry.refCount -= 1
+    if (entry.refCount <= 0) {
+      for (const k of keys) {
+        this.instanceCache.delete(k)
+      }
+    }
+  }
+
+  /**
+   * Item machine can reach `idle` before `propertyInstances` is merged (race) or while
+   * child ItemProperty actors are still hydrating. useItems / Item.all must not return that shell.
+   */
+  private static async waitForItemInstanceReadyForRead(
+    item: Item<any>,
+    readyTimeout: number,
+  ): Promise<void> {
+    await waitForEntityIdle(item, { timeout: readyTimeout })
+    const svc = item.getService()
+    try {
+      await waitFor(
+        svc,
+        (snap: any) => {
+          if ('value' in snap && snap.value === 'error') {
+            throw new Error('Entity failed to load')
+          }
+          if (!('value' in snap) || snap.value !== 'idle') {
+            return false
+          }
+          const ctx = snap.context || {}
+          const versionsCount = ctx.versionsCount ?? 0
+          const hasHeadVersion = !!ctx.latestVersionLocalId
+          if (versionsCount === 0 && !hasHeadVersion) {
+            return true
+          }
+          return (ctx.propertyInstances?.size ?? 0) > 0
+        },
+        { timeout: readyTimeout },
+      )
+    } catch (e: any) {
+      if (e?.message === 'Entity failed to load') {
+        throw e
+      }
+      const msg = typeof e?.message === 'string' ? e.message : ''
+      const isWaitForTimeout =
+        msg.includes('Timeout') || msg.toLowerCase().includes('timed out')
+      if (!isWaitForTimeout) {
+        throw e
+      }
+    }
+    const snap = svc.getSnapshot() as any
+    const pis = snap.context?.propertyInstances as
+      | Map<string, { getService(): any }>
+      | undefined
+    if (!pis || pis.size === 0) {
+      return
+    }
+    await Promise.all(
+      [...pis.values()].map((prop) =>
+        waitForEntityIdle(prop, {
+          timeout: readyTimeout,
+          throwOnError: false,
+        }),
+      ),
+    )
+  }
+
+  private static itemCacheEntryLooksUnhydratedAfterIdle(
+    instance: Item<any>,
+    props: Partial<ItemData>,
+  ): boolean {
+    const snap = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
+    if (snap.value !== 'idle') return false
+    const mapSize = snap.context.propertyInstances?.size ?? 0
+    if (mapSize > 0) return false
+    const ctx = snap.context as any
+    const versionsCount = (props as any).versionsCount ?? ctx.versionsCount ?? 0
+    const hasVersionHead =
+      versionsCount > 0 ||
+      !!(props as any).latestVersionLocalId ||
+      !!ctx.latestVersionLocalId ||
+      !!(props as any).latestVersionUid ||
+      !!ctx.latestVersionUid
+    return hasVersionHead
+  }
+
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
     options?: CreateWaitOptions,
@@ -311,42 +462,65 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       props.modelName = startCase(props.type)
     }
     if (props.seedUid || props.seedLocalId) {
-      const seedId = (props.seedUid || props.seedLocalId) as string
-        if (this.instanceCache.has(seedId)) {
-        const { instance, refCount } = this.instanceCache.get(seedId)!
-        this.instanceCache.set(seedId, {
-          instance,
-          refCount: refCount + 1,
-        })
-        for (const [propertyName, propertyValue] of Object.entries(props)) {
-          const snapshot = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
-          const propertyInstances = snapshot.context.propertyInstances
-          if (!propertyInstances || !propertyInstances.has(propertyName)) {
-            continue
+      cacheReuse: {
+        const cachedEntry = this.findItemInstanceCacheEntryByProps(props)
+        if (cachedEntry) {
+          const instance = cachedEntry.instance
+          cachedEntry.refCount += 1
+          for (const [propertyName, propertyValue] of Object.entries(props)) {
+            const snapshot = instance.getService().getSnapshot() as SnapshotFrom<typeof itemMachineSingle>
+            const propertyInstances = snapshot.context.propertyInstances
+            if (!propertyInstances || !propertyInstances.has(propertyName)) {
+              continue
+            }
+            const propertyInstance = propertyInstances.get(propertyName)
+            if (!propertyInstance) {
+              continue
+            }
+            propertyInstance.getService().send({
+              type: 'updateContext',
+              propertyValue,
+            })
           }
-          const propertyInstance = propertyInstances.get(propertyName)
-          if (!propertyInstance) {
-            continue
-          }
-          propertyInstance.getService().send({
-            type: 'updateContext',
-            propertyValue,
-          })
-        }
-        if (!waitForReady) return instance
-        try {
-          await waitForEntityIdle(instance, { timeout: readyTimeout })
-        } catch (err) {
+          if (!waitForReady) return instance
           try {
-            instance.unload()
-          } catch {
-            /* best-effort cache cleanup */
+            await this.waitForItemInstanceReadyForRead(instance, readyTimeout)
+          } catch (err) {
+            try {
+              instance.unload()
+            } catch {
+              /* best-effort cache cleanup */
+            }
+            throw err
           }
-          throw err
+          if (
+            waitForReady &&
+            this.itemCacheEntryLooksUnhydratedAfterIdle(instance, props)
+          ) {
+            forceRemoveFromCaches(instance, {
+              getCacheKeys: () => this.collectInstanceCacheKeysForInstance(instance),
+              caches: [Item.instanceCache as Map<string, unknown>],
+            })
+            try {
+              unloadEntity(instance, {
+                getCacheKeys: () => [],
+                caches: [],
+                instanceState: itemInstanceState,
+                getService: (inst) => inst._service,
+                onUnload: (inst) => {
+                  inst._subscription?.unsubscribe()
+                },
+              })
+            } catch {
+              /* best-effort teardown for stale cached shell */
+            }
+            break cacheReuse
+          }
+          return instance
         }
-        return instance
       }
-      if (!this.instanceCache.has(seedId)) {
+
+      if (!this.findItemInstanceCacheEntryByProps(props)) {
         // Item no longer needs modelInstance - it loads properties from database independently
         // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
         const { latestVersionUid, ...propsWithoutVersionUid } = props
@@ -447,14 +621,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             return Reflect.getOwnPropertyDescriptor(target, prop)
           },
         }) as Item<any>
-        
-        this.instanceCache.set(seedId, {
-          instance: proxiedInstance,
-          refCount: 1,
-        })
+
+        this.registerItemInInstanceCache(proxiedInstance)
         if (!waitForReady) return proxiedInstance
         try {
-          await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+          await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
         } catch (err) {
           try {
             proxiedInstance.unload()
@@ -655,13 +826,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       },
     }) as Item<any>
     
-    this.instanceCache.set((proxiedInstance.seedUid || proxiedInstance.seedLocalId) as string, {
-      instance: proxiedInstance,
-      refCount: 1,
-    })
+    this.registerItemInInstanceCache(proxiedInstance)
     if (!waitForReady) return proxiedInstance
     try {
-      await waitForEntityIdle(proxiedInstance, { timeout: readyTimeout })
+      await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
     } catch (err) {
       try {
         proxiedInstance.unload()
@@ -684,16 +852,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return null
     }
     
-    // Check cache - the cache key is seedUid || seedLocalId
-    if (this.instanceCache.has(id)) {
-      const { instance, refCount } = this.instanceCache.get(id)!
-      this.instanceCache.set(id, {
-        instance,
-        refCount: refCount + 1,
-      })
-      return instance
+    const entry = this.findItemInstanceCacheEntryById(id)
+    if (entry) {
+      entry.refCount += 1
+      return entry.instance
     }
-    
+
     return null
   }
 
@@ -755,8 +919,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       return undefined
     }
 
-    // Use seedUid as primary ID if available, otherwise use seedLocalId
-    const id = seedUid || seedLocalId
+    // Prefer local id so cache + findEntity align with Item.instanceCache (local-first, uid alias).
+    const id = seedLocalId || seedUid
     if (!id) {
       return undefined
     }
@@ -811,12 +975,145 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (waitForReady && itemInstances.length > 0) {
       await Promise.all(
         itemInstances.map((item) =>
-          waitForEntityIdle(item, { timeout: readyTimeout }),
+          this.waitForItemInstanceReadyForRead(item, readyTimeout),
         ),
       )
     }
 
     return orderBy(itemInstances, ['createdAt'], ['desc'])
+  }
+
+  /**
+   * After EAS sync writes metadata for the latest version, merge new property instances and
+   * re-run DB hydration on cached Items. Item liveQuery watches seeds/versions, not metadata,
+   * and useItems may not invalidate when the seed set is unchanged.
+   */
+  static async rehydrateCachedItemsFromDbAfterEasSync(): Promise<void> {
+    const appDb = BaseDb.getAppDb()
+    if (!appDb || Item.instanceCache.size === 0) {
+      return
+    }
+
+    const { metadata } = await import('../seedSchema')
+    const { eq, and } = await import('drizzle-orm')
+
+    const dedupedInstances = new Map<Item<any>, { instance: Item<any>; refCount: number }>()
+    for (const entry of Item.instanceCache.values()) {
+      dedupedInstances.set(entry.instance, entry)
+    }
+    const entries = [...dedupedInstances.values()]
+    await Promise.all(
+      entries.map(async ({ instance }) => {
+        try {
+          const svc = instance.getService()
+          if (svc.getSnapshot().status !== 'active') {
+            return
+          }
+
+          const ctx = svc.getSnapshot().context as any
+          const seedLocalId = ctx.seedLocalId as string | undefined
+          const seedUid = ctx.seedUid as string | undefined
+          const versionLocalId = ctx.latestVersionLocalId as string | undefined
+          const itemModelName = ctx.modelName as string | undefined
+          const schemaNameForModel = ctx.schemaName as string | undefined
+          if (!seedLocalId || !versionLocalId || !itemModelName) {
+            return
+          }
+
+          const metadataRows = await appDb
+            .select()
+            .from(metadata)
+            .where(
+              and(
+                eq(metadata.seedLocalId, seedLocalId),
+                eq(metadata.versionLocalId, versionLocalId),
+              ),
+            )
+
+          let propertySchemas: Record<string, any> = {}
+          try {
+            const M = getModel()
+            const model =
+              schemaNameForModel !== undefined
+                ? M?.getByName(itemModelName, schemaNameForModel)
+                : M?.getByName(itemModelName)
+            if (model?.properties?.length) {
+              propertySchemas = modelPropertiesToObject(model.properties)
+            }
+          } catch {
+            /* Model optional */
+          }
+
+          const sendToItemMachine = (event: Parameters<typeof svc.send>[0]) => {
+            if (svc.getSnapshot().status !== 'active') {
+              return
+            }
+            svc.send(event)
+          }
+
+          for (const metaRow of metadataRows) {
+            try {
+              let propertyName = metaRow.propertyName as string | undefined
+              const listSchemaKey =
+                propertyName &&
+                Object.keys(propertySchemas).length > 0 &&
+                resolveStorageNameToSchemaName(propertySchemas, propertyName)
+              if (listSchemaKey) {
+                propertyName = listSchemaKey
+              } else {
+                const baseName = propertyName?.endsWith('Id') ? propertyName.slice(0, -2) : undefined
+                const refSeedType = metaRow.refSeedType as string | undefined
+                const isRefTypeFromMeta =
+                  refSeedType === 'file' ||
+                  refSeedType === 'image' ||
+                  refSeedType === 'relation' ||
+                  refSeedType === 'html'
+                if (baseName && (propertySchemas[baseName] || isRefTypeFromMeta)) {
+                  propertyName = baseName
+                }
+              }
+              if (!propertyName) {
+                continue
+              }
+              const property = await ItemProperty.find({
+                propertyName,
+                seedLocalId,
+                seedUid,
+                modelName: itemModelName,
+              })
+              if (property) {
+                sendToItemMachine({
+                  type: 'addPropertyInstance',
+                  propertyName,
+                  propertyInstance: property,
+                })
+              }
+            } catch {
+              /* row skipped */
+            }
+          }
+
+          const instances = svc.getSnapshot().context.propertyInstances as
+            | Map<string, IItemProperty<any>>
+            | undefined
+          if (!instances) {
+            return
+          }
+          for (const propertyInstance of instances.values()) {
+            try {
+              const propertySnap = propertyInstance.getService().getSnapshot()
+              if (isMachineSnapshot(propertySnap) && propertySnap.matches('idle')) {
+                propertyInstance.getService().send({ type: 'rehydrateFromDb' })
+              }
+            } catch {
+              /* best-effort */
+            }
+          }
+        } catch (e) {
+          itemLogger('rehydrateCachedItemsFromDbAfterEasSync item failed:', e)
+        }
+      }),
+    )
   }
 
   protected _createPropertyInstance(props: Partial<CreatePropertyInstanceProps>) {
@@ -1626,17 +1923,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   unload(): void {
     try {
-      const context = this._getSnapshotContext()
-      const cacheKey = context.seedUid || context.seedLocalId
-      const cacheKeys: string[] = []
-      
-      if (cacheKey) {
-        cacheKeys.push(cacheKey)
-      }
-      
+      Item.releaseItemInstanceCacheHold(this)
       unloadEntity(this, {
-        getCacheKeys: () => cacheKeys,
-        caches: [Item.instanceCache],
+        getCacheKeys: () => [],
+        caches: [],
         instanceState: itemInstanceState,
         getService: (instance) => instance._service,
         onUnload: (instance) => {
@@ -1667,8 +1957,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const { assertItemOwned } = await import('@/helpers/ownership')
     await assertItemOwned(this)
     const context = this._getSnapshotContext()
-    const cacheKey = context.seedUid || context.seedLocalId
-    const cacheKeys: string[] = cacheKey ? [cacheKey] : []
+    const cacheKeys = Item.collectInstanceCacheKeysForInstance(this)
 
     clearDestroySubscriptions(this, {
       instanceState: itemInstanceState,

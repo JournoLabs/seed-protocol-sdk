@@ -1,10 +1,14 @@
 import { eventEmitter } from '@/eventBus'
-import { syncDbWithEasHandler } from '@/events/item/syncDbWithEas'
+import {
+  requestEasSyncFromEventBus,
+  startEasSyncActor,
+} from '@/events/item/easSyncManager'
 
 let areReady = false
 
 export const setupAllItemsEventHandlers = () => {
-  eventEmitter.addListener('syncDbWithEas', syncDbWithEasHandler)
+  startEasSyncActor()
+  eventEmitter.addListener('syncDbWithEas', requestEasSyncFromEventBus)
   areReady = true
 }
 

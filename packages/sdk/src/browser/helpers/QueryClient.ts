@@ -17,15 +17,19 @@ class QueryClient extends BaseQueryClient {
 
     const queryClient: IQueryClient = {
       fetchQuery: async (options) => {
-        const { queryKey, queryFn, networkMode } = options
+        const { queryKey, queryFn, networkMode, staleTime } = options
         return reactQueryClient.fetchQuery({
           queryKey,
           queryFn,
           networkMode: networkMode as NetworkMode | undefined,
+          staleTime,
         } as any) as Promise<any>
       },
       getQueryData: (queryKey: any) => {
         return reactQueryClient.getQueryData(queryKey)
+      },
+      removeQueries: async (filters) => {
+        await reactQueryClient.removeQueries(filters)
       },
     }
     return queryClient

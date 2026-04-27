@@ -19,6 +19,11 @@ export declare abstract class BaseArweaveClient {
      * @param host - e.g. 'arweave.net', 'https://arweave.net', or 'http://localhost:1984'
      */
     static setHost(host: string): void;
+    static isReadGatewayLocked(): boolean;
+    /** @internal */
+    static resetReadGatewaySelectionStateForTests(): void;
+    static setPreferredReadGateway(host: string): void;
+    static applyProbedReadGateway(host: string): void;
     /**
      * Get the GraphQL endpoint URL
      * @returns The full GraphQL endpoint URL

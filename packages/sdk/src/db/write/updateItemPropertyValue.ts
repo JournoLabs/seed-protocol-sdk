@@ -83,7 +83,9 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         .select()
         .from(metadata)
         .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId)))
-        .orderBy(sql.raw('COALESCE(attestation_created_at, created_at) DESC'))) as (MetadataType & { localId?: string | null })[]
+        .orderBy(
+          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
+        )) as (MetadataType & { localId?: string | null })[]
     }
   } else if (localIdParam) {
     const localIdRows = await appDb
@@ -102,7 +104,9 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       .select()
       .from(metadata)
       .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId!)))
-      .orderBy(sql.raw('COALESCE(attestation_created_at, created_at) DESC'))) as (MetadataType & { localId?: string | null })[]
+      .orderBy(
+          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
+        )) as (MetadataType & { localId?: string | null })[]
   }
 
   // const mostRecentRecordStatement = `SELECT local_id,
@@ -119,7 +123,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
   //                                    FROM metadata
   //                                    WHERE property_name = '${propertyName}'
   //                                      AND seed_local_id = '${seedLocalId}'
-  //                                    ORDER BY COALESCE(attestation_created_at, created_at) DESC;`
+  //                                    ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC;`
   //
   // const { rows } = await runQueryForStatement(mostRecentRecordStatement)
 

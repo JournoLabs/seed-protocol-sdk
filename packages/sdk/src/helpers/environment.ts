@@ -80,6 +80,14 @@ export const isElectronMain = (): boolean => {
   return false
 }
 
+/**
+ * True where OPFS-backed Arweave file downloads should run: normal browsers and
+ * Electron renderer. {@link isBrowser} is false for every Electron build (including renderer).
+ */
+export const supportsOpfsFileDownloads = (): boolean => {
+  return isBrowser() || isElectronRenderer()
+}
+
 export const getEnvironment = (): string => {
   if (isBrowser()) {
     return 'browser'

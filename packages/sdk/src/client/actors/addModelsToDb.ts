@@ -4,7 +4,6 @@ import { eq, inArray } from 'drizzle-orm'
 import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
-import { eventEmitter } from '@/eventBus'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
 import { GET_SCHEMAS } from '@/Item/queries'
@@ -102,7 +101,7 @@ export const addModelsToDb = fromCallback<
     )
 
     // Fetch schemas from EAS in background - do not block init. EAS can be slow (10s+);
-    // modelUids will be populated async and syncDbWithEas will run when done.
+    // modelUids will be populated async and EAS sync orchestrator runs when done.
     const fetchEasAndPopulateModelUids = async () => {
       try {
         const queryClient = BaseQueryClient.getQueryClient()
@@ -145,7 +144,10 @@ export const addModelsToDb = fromCallback<
               }
             }
           }
-          eventEmitter.emit('syncDbWithEas')
+          const { requestEasSyncFromModelsInit } = await import(
+            '@/events/item/easSyncManager'
+          )
+          requestEasSyncFromModelsInit()
         } else {
           logger('[client/actors] [addModelsToDb] No schemas found from EAS, but continuing')
         }

@@ -233,6 +233,20 @@ export const migrationSql_0012_html_embedded_image_co_publish = `CREATE TABLE \`
 CREATE UNIQUE INDEX \`html_embed_co_pub_parent_html_stable\` ON \`html_embedded_image_co_publish\` (\`parent_seed_local_id\`,\`html_seed_local_id\`,\`stable_key\`);
 `
 
+export const migrationSql_0013_eas_sync_processes = `CREATE TABLE \`eas_sync_processes\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`status\` text NOT NULL,
+	\`started_at\` integer NOT NULL,
+	\`completed_at\` integer,
+	\`request_payload\` text NOT NULL,
+	\`error_message\` text,
+	\`error_details\` text,
+	\`persisted_snapshot\` text NOT NULL,
+	\`created_at\` integer,
+	\`updated_at\` integer
+);
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -328,6 +342,13 @@ export const journalJson = `{
       "when": 1774200000000,
       "tag": "0012_html_embedded_image_co_publish",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1774300000000,
+      "tag": "0013_eas_sync_processes",
+      "breakpoints": true
     }
   ]
 }`
@@ -337,8 +358,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff2318d5-236f-4157-82ae-10ccb44c0e0c",
-  "prevId": "ff040f54-6cfc-4d32-a572-2f08870c5b85",
+  "id": "a9e8f7d6-c5b4-4321-a0b9-c8d7e6f5a4b3",
+  "prevId": "ff2318d5-236f-4157-82ae-10ccb44c0e0c",
   "tables": {
     "appState": {
       "name": "appState",
@@ -1499,6 +1520,86 @@ export const snapshotJson = `{
           "isUnique": true
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "eas_sync_processes": {
+      "name": "eas_sync_processes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request_payload": {
+          "name": "request_payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_details": {
+          "name": "error_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "persisted_snapshot": {
+          "name": "persisted_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -4,6 +4,7 @@ import type { MetadataType } from '@/seedSchema/MetadataSchema'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
 export type PublishPendingPropertyDiff = {
@@ -73,10 +74,7 @@ export async function getPublishPendingDiff(
   }
 
   for (const list of byProp.values()) {
-    list.sort(
-      (a, b) =>
-        (b.attestationCreatedAt ?? b.createdAt ?? 0) - (a.attestationCreatedAt ?? a.createdAt ?? 0),
-    )
+    list.sort(compareMetadataRowsLatestFirst)
   }
 
   const pendingProperties: PublishPendingPropertyDiff[] = []

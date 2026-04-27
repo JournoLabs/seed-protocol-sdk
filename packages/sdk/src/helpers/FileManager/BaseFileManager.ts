@@ -57,6 +57,18 @@ export abstract class BaseFileManager {
     return this.PlatformClass.downloadAllFiles({ transactionIds, arweaveHost, excludedTransactions })
   }
 
+  static downloadFileByTransactionId({
+    transactionId,
+    arweaveHost,
+    excludedTransactions,
+  }: DownloadSingleFileParams): Promise<void> {
+    return this.PlatformClass.downloadAllFiles({
+      transactionIds: [transactionId],
+      arweaveHost,
+      excludedTransactions,
+    })
+  }
+
   static resizeImage( { filePath, width, height }: ResizeImageParams ): Promise<void> {
     return this.PlatformClass.resizeImage({ filePath, width, height })
   }

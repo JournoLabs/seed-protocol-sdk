@@ -1,51 +1,51 @@
-import Oe, { createContext as Xe, useContext as Ze, useState as S, useCallback as x, useEffect as I, useRef as D, useMemo as F, useLayoutEffect as et } from "react";
-import { flushSync as de } from "react-dom";
-import { getClient as me, ClientManagerState as C, eventEmitter as K, BaseDb as W, Item as _e, getAddressesForItemsFilter as tt, seeds as A, getVersionData as rt, createNewItem as nt, ItemProperty as se, metadata as T, appState as ue, Schema as he, schemas as Y, loadAllSchemasFromDb as st, SEED_PROTOCOL_SCHEMA_NAME as ot, Model as oe, models as ae, modelSchemas as be, ModelProperty as fe, properties as ee, getPropertySchema as Ue, getSchemaNameFromId as it, BaseFileManager as j, client as at, resolveMediaRef as lt, normalizeFeedItemFields as ct } from "@seedprotocol/sdk";
-import { orderBy as dt, debounce as ze, startCase as Ce } from "lodash-es";
+import qe, { createContext as rt, useContext as nt, useState as S, useCallback as x, useEffect as w, useRef as C, useMemo as N, useLayoutEffect as st } from "react";
+import { flushSync as ue } from "react-dom";
+import { getClient as ge, ClientManagerState as P, eventEmitter as z, BaseDb as j, Item as Ce, EAS_SEED_DATA_SYNCED_TO_DB_EVENT as ne, getAddressesForItemsFilter as ot, seeds as D, getVersionData as it, createNewItem as at, ItemProperty as ie, metadata as k, appState as fe, Schema as be, schemas as X, loadAllSchemasFromDb as ct, SEED_PROTOCOL_SCHEMA_NAME as lt, Model as ae, models as ce, modelSchemas as ve, ModelProperty as ye, properties as te, getPropertySchema as ze, getSchemaNameFromId as dt, BaseFileManager as W, easSyncProcesses as pe, client as ut, resolveMediaRef as ft, normalizeFeedItemFields as yt } from "@seedprotocol/sdk";
+import { orderBy as pt, debounce as He, startCase as Pe } from "lodash-es";
 import G from "debug";
-import { useSelector as Ie } from "@xstate/react";
-import { jsx as h, jsxs as O, Fragment as ge } from "react/jsx-runtime";
-import { or as te, isNull as le, eq as U, inArray as Re, sql as ut, isNotNull as Ee, and as Le, gt as ft, like as qe, desc as pt } from "drizzle-orm";
-import { toSnakeCase as yt } from "drizzle-orm/casing";
-import { useQueryClient as X, useQuery as Z, QueryClient as mt, QueryClientProvider as ht } from "@tanstack/react-query";
-import gt from "pluralize";
-const q = () => {
-  const t = me().getService();
-  return Ie(t, (n) => n.value === C.IDLE);
-}, Pe = "addresses.persisted", He = Xe(0);
-function Qe() {
-  return Ze(He);
+import { useSelector as Le } from "@xstate/react";
+import { jsx as g, jsxs as U, Fragment as Se } from "react/jsx-runtime";
+import { or as re, isNull as le, eq as q, inArray as Te, sql as mt, isNotNull as Ae, and as xe, gt as ht, like as Qe, desc as Ve } from "drizzle-orm";
+import { toSnakeCase as gt } from "drizzle-orm/casing";
+import { useQueryClient as Z, useQuery as ee, QueryClient as bt, QueryClientProvider as St } from "@tanstack/react-query";
+import vt from "pluralize";
+const Q = () => {
+  const t = ge().getService();
+  return Le(t, (n) => n.value === P.IDLE);
+}, Me = "addresses.persisted", Ke = rt(0);
+function je() {
+  return nt(Ke);
 }
-function bt({
+function wt({
   queryClient: e,
   children: t
 }) {
   const [r, n] = S(0), o = x(() => {
     e.invalidateQueries({ queryKey: ["seed", "items"], exact: !1 }), n((a) => a + 1);
   }, [e]);
-  return I(() => (K.on(Pe, o), () => {
-    K.off(Pe, o);
-  }), [o]), /* @__PURE__ */ h(He.Provider, { value: r, children: t });
+  return w(() => (z.on(Me, o), () => {
+    z.off(Me, o);
+  }), [o]), /* @__PURE__ */ g(Ke.Provider, { value: r, children: t });
 }
-function ie(e) {
-  const [t, r] = S(void 0), n = D(null), o = q(), a = F(() => {
+function Y(e) {
+  const [t, r] = S(void 0), n = C(null), o = Q(), a = N(() => {
     if (!o || !e)
       return null;
     try {
-      return W.liveQuery(e);
+      return j.liveQuery(e);
     } catch (s) {
       return console.error("[useLiveQuery] Failed to create live query:", s), null;
     }
   }, [e, o]);
-  return I(() => {
+  return w(() => {
     if (n.current && (n.current.unsubscribe(), n.current = null), !a)
       return;
     const s = a.subscribe({
-      next: (l) => {
-        r(l !== void 0 ? [...l] : void 0);
+      next: (c) => {
+        r(c !== void 0 ? [...c] : void 0);
       },
-      error: (l) => {
-        console.error("[useLiveQuery] Error:", l);
+      error: (c) => {
+        console.error("[useLiveQuery] Error:", c);
       }
     });
     return n.current = s, () => {
@@ -53,54 +53,63 @@ function ie(e) {
     };
   }, [a]), t;
 }
-const pe = G("seedSdk:react:item"), dr = ({ modelName: e, seedLocalId: t, seedUid: r }) => {
-  const [n, o] = S(), [a, s] = S(!!(t || r)), [l, c] = S(null), i = D(void 0), d = D(!1), u = q(), f = Qe(), g = D(e), v = D(t), b = D(r), y = F(() => u ? !!(v.current || b.current) : !1, [u, t, r]), p = x(async () => {
-    if (!!!(u && (v.current || b.current))) {
-      o(void 0), s(!1), c(null);
+const me = G("seedSdk:react:item"), pr = ({ modelName: e, seedLocalId: t, seedUid: r }) => {
+  const [n, o] = S(), [, a] = S(0), [s, c] = S(!!(t || r)), [l, i] = S(null), d = C(void 0), u = C(!1), f = Q(), b = je(), v = C(e), h = C(t), y = C(r), p = N(() => f ? !!(h.current || y.current) : !1, [f, t, r]), E = x(async () => {
+    if (!!!(f && (h.current || y.current))) {
+      o(void 0), c(!1), i(null);
       return;
     }
     try {
-      c(null);
-      const w = await _e.find({
-        modelName: g.current,
-        seedLocalId: v.current,
-        seedUid: b.current
+      i(null);
+      const _ = await Ce.find({
+        modelName: v.current,
+        seedLocalId: h.current,
+        seedUid: y.current
       });
-      if (!w) {
-        pe("[useItem] [loadItem] no item found", g.current, v.current), o((m) => m && (m.seedLocalId && m.seedLocalId === v.current || m.seedUid && m.seedUid === b.current) ? m : void 0), s(!1), c(null);
+      if (!_) {
+        me("[useItem] [loadItem] no item found", v.current, h.current), o((R) => R && (R.seedLocalId && R.seedLocalId === h.current || R.seedUid && R.seedUid === y.current) ? R : void 0), c(!1), i(null);
         return;
       }
-      o(w), s(!1), c(null);
-    } catch (w) {
-      pe("[useItem] Error loading item:", w), o(void 0), s(!1), c(w);
+      o(_), c(!1), i(null);
+    } catch (_) {
+      me("[useItem] Error loading item:", _), o(void 0), c(!1), i(_);
     }
-  }, [u]);
-  return I(() => {
-    g.current = e, v.current = t, b.current = r;
-  }, [e, t, r]), I(() => {
-    if (!y) {
-      !t && !r && (o(void 0), s(!1), c(null));
+  }, [f]), I = C(E);
+  return w(() => {
+    I.current = E;
+  }, [E]), w(() => {
+    v.current = e, h.current = t, y.current = r;
+  }, [e, t, r]), w(() => {
+    const m = () => {
+      a((_) => _ + 1), I.current();
+    };
+    return z.on(ne, m), () => {
+      z.off(ne, m);
+    };
+  }, []), w(() => {
+    if (!p) {
+      !t && !r && (o(void 0), c(!1), i(null));
       return;
     }
-    p();
-  }, [y, p, t, r, f]), I(() => {
+    E();
+  }, [p, E, t, r, b]), w(() => {
     if (!n) {
-      i.current?.unsubscribe(), i.current = void 0, d.current = !1;
+      d.current?.unsubscribe(), d.current = void 0, u.current = !1;
       return;
     }
-    i.current?.unsubscribe(), d.current = !1;
-    const w = n.getService().subscribe((m) => {
-      m && typeof m == "object" && "value" in m && (m.value === "idle" ? (d.current = !0, s(!1), c(null)) : m.value === "error" ? (c(new Error("Item service error")), s(!1)) : d.current && s(!0));
+    d.current?.unsubscribe(), u.current = !1;
+    const _ = n.getService().subscribe((R) => {
+      R && typeof R == "object" && "value" in R && (R.value === "idle" ? (u.current = !0, c(!1), i(null)) : R.value === "error" ? (i(new Error("Item service error")), c(!1)) : u.current && c(!0));
     });
-    return i.current = w, () => {
-      i.current?.unsubscribe(), i.current = void 0;
+    return d.current = _, () => {
+      d.current?.unsubscribe(), d.current = void 0;
     };
   }, [n]), {
     item: n,
-    isLoading: a,
+    isLoading: s,
     error: l
   };
-}, vt = (e, t, r, n, o) => [
+}, It = (e, t, r, n, o) => [
   "seed",
   "items",
   e ?? null,
@@ -108,129 +117,143 @@ const pe = G("seedSdk:react:item"), dr = ({ modelName: e, seedLocalId: t, seedUi
   r ?? !1,
   n ?? null,
   o ?? 0
-], ur = ({
+], mr = ({
   modelName: e,
   deleted: t = !1,
   includeEas: r = !1,
   addressFilter: n
 }) => {
-  const o = q(), a = Qe(), s = X(), l = D([]), c = D(/* @__PURE__ */ new Set()), i = D(!1), [d, u] = S(null);
-  I(() => {
+  const o = Q(), a = je(), s = Z();
+  w(() => {
+    const I = () => {
+      s.invalidateQueries({ queryKey: ["seed", "items"] });
+    };
+    return z.on(ne, I), () => {
+      z.off(ne, I);
+    };
+  }, [s]);
+  const c = C([]), l = C(/* @__PURE__ */ new Set()), i = C(!1), [d, u] = S(null);
+  w(() => {
     if (n !== "owned" && n !== "watched") {
       u(null);
       return;
     }
-    let w = !1;
-    return tt(n).then((m) => {
-      w || u(m);
+    let I = !1;
+    return ot(n).then((m) => {
+      I || u(m);
     }), () => {
-      w = !0;
+      I = !0;
     };
   }, [n, a]);
-  const f = F(
-    () => vt(e, t, r, n, a),
+  const f = N(
+    () => It(e, t, r, n, a),
     [e, t, r, n, a]
   );
-  I(() => {
+  w(() => {
     i.current = !1;
   }, [f]);
   const {
-    data: g = [],
+    data: b = [],
     isLoading: v,
-    error: b
-  } = Z({
+    error: h
+  } = ee({
     queryKey: f,
-    queryFn: () => _e.all(e, t, { waitForReady: !0, includeEas: r, addressFilter: n }),
+    queryFn: async () => await Ce.all(e, t, {
+      waitForReady: !0,
+      includeEas: r,
+      addressFilter: n
+    }),
     enabled: o,
     // Local SQLite + live invalidation drive freshness; Seed’s default staleTime would keep a
     // mistaken initial [] “fresh” and block refetch when another subscriber mounts.
     staleTime: 0
   });
-  l.current = g;
-  const y = o ? W.getAppDb() : null, p = F(() => {
+  c.current = b;
+  const y = o ? j.getAppDb() : null, p = N(() => {
     if (!y || (n === "owned" || n === "watched") && d === null)
       return null;
-    const w = [];
-    r || w.push(te(le(A.uid), U(A.uid, ""))), e && w.push(U(A.type, yt(e))), n === "owned" ? d && d.length > 0 && w.push(
-      te(
-        Re(A.publisher, d),
-        le(A.publisher)
+    const I = [];
+    r || I.push(re(le(D.uid), q(D.uid, ""))), e && I.push(q(D.type, gt(e))), n === "owned" ? d && d.length > 0 && I.push(
+      re(
+        Te(D.publisher, d),
+        le(D.publisher)
       )
-    ) : n === "watched" && (d && d.length > 0 ? w.push(Re(A.publisher, d)) : w.push(ut`1=0`)), t ? w.push(
-      te(
-        Ee(A._markedForDeletion),
-        U(A._markedForDeletion, 1)
+    ) : n === "watched" && (d && d.length > 0 ? I.push(Te(D.publisher, d)) : I.push(mt`1=0`)), t ? I.push(
+      re(
+        Ae(D._markedForDeletion),
+        q(D._markedForDeletion, 1)
       )
-    ) : (w.push(
-      te(
-        le(A._markedForDeletion),
-        U(A._markedForDeletion, 0)
+    ) : (I.push(
+      re(
+        le(D._markedForDeletion),
+        q(D._markedForDeletion, 0)
       )
-    ), w.push(
-      te(le(A.revokedAt), U(A.revokedAt, 0))
+    ), I.push(
+      re(le(D.revokedAt), q(D.revokedAt, 0))
     ));
-    const m = rt();
+    const m = it();
     return y.with(m).select({
-      localId: A.localId,
-      uid: A.uid,
-      type: A.type,
-      schemaUid: A.schemaUid,
-      createdAt: A.createdAt,
-      attestationCreatedAt: A.attestationCreatedAt,
-      _markedForDeletion: A._markedForDeletion
-    }).from(A).leftJoin(m, U(A.localId, m.seedLocalId)).where(Le(ft(m.versionsCount, 0), ...w)).groupBy(A.localId);
-  }, [y, o, e, t, r, n, d]), E = ie(p);
-  return I(() => {
+      localId: D.localId,
+      uid: D.uid,
+      type: D.type,
+      schemaUid: D.schemaUid,
+      createdAt: D.createdAt,
+      attestationCreatedAt: D.attestationCreatedAt,
+      _markedForDeletion: D._markedForDeletion
+    }).from(D).leftJoin(m, q(D.localId, m.seedLocalId)).where(xe(ht(m.versionsCount, 0), ...I)).groupBy(D.localId);
+  }, [y, o, e, t, r, n, d]), E = Y(p);
+  return w(() => {
     if (!o || !E) return;
-    const w = /* @__PURE__ */ new Set();
-    for (const N of E) {
-      const $ = N.localId || N.uid;
-      $ && w.add($);
+    const I = /* @__PURE__ */ new Set();
+    for (const A of E) {
+      const B = A.localId || A.uid;
+      B && I.add(B);
     }
     const m = /* @__PURE__ */ new Set();
-    for (const N of l.current) {
-      const $ = N.seedLocalId || N.seedUid;
-      $ && m.add($);
+    for (const A of c.current) {
+      const B = A.seedLocalId || A.seedUid;
+      B && m.add(B);
     }
-    if (w.size === 0 && m.size > 0) return;
-    if (!i.current && (i.current = !0, w.size > 0 && m.size === 0)) {
-      c.current = new Set(w), s.invalidateQueries({ queryKey: f });
+    if (I.size === 0 && m.size > 0)
+      return;
+    if (!i.current && (i.current = !0, I.size > 0 && m.size === 0)) {
+      l.current = new Set(I), s.invalidateQueries({ queryKey: f });
       return;
     }
-    const P = c.current;
-    if (P.size === w.size && [...P].every((N) => w.has(N)))
+    const _ = l.current;
+    if (_.size === I.size && [..._].every((A) => I.has(A)))
       return;
-    if (m.size === w.size && [...m].every((N) => w.has(N))) {
-      c.current = new Set(w);
+    if (m.size === I.size && [...m].every((A) => I.has(A))) {
+      l.current = new Set(I);
       return;
     }
-    c.current = new Set(w), s.invalidateQueries({ queryKey: f });
+    l.current = new Set(I), s.invalidateQueries({ queryKey: f });
   }, [o, E, s, f]), {
-    items: dt(
-      g,
+    items: pt(
+      b,
       [
-        (w) => w.lastVersionPublishedAt || w.attestationCreatedAt || w.createdAt
+        (I) => I.lastVersionPublishedAt || I.attestationCreatedAt || I.createdAt
       ],
       ["desc"]
     ),
     isLoading: v,
-    error: b
+    error: h
   };
-}, fr = () => {
+}, hr = () => {
   const [e, t] = S(!1), [r, n] = S(null), o = x(() => n(null), []);
   return {
     createItem: x(
-      async (s, l) => {
+      async (s, c) => {
         if (e) {
-          pe("[useCreateItem] [createItem] already creating item, skipping");
+          me("[useCreateItem] [createItem] already creating item, skipping");
           return;
         }
-        n(null), de(() => t(!0));
+        n(null), ue(() => t(!0));
         try {
-          const c = l ?? {}, { seedLocalId: i } = await nt({ modelName: s, ...c });
-          return await _e.find({ modelName: s, seedLocalId: i }) ?? void 0;
-        } catch (c) {
-          pe("[useCreateItem] Error creating item:", c), n(c instanceof Error ? c : new Error(String(c)));
+          const l = c ?? {}, { seedLocalId: i } = await at({ modelName: s, ...l });
+          return await Ce.find({ modelName: s, seedLocalId: i }) ?? void 0;
+        } catch (l) {
+          me("[useCreateItem] Error creating item:", l), n(l instanceof Error ? l : new Error(String(l)));
           return;
         } finally {
           queueMicrotask(() => t(!1));
@@ -242,180 +265,180 @@ const pe = G("seedSdk:react:item"), dr = ({ modelName: e, seedLocalId: t, seedUi
     error: r,
     resetError: o
   };
-}, pr = () => {
-  const [e, t] = S(null), [r, n] = S(!1), [o, a] = S(null), s = D(void 0), l = x(() => a(null), []), c = x((i) => {
+}, gr = () => {
+  const [e, t] = S(null), [r, n] = S(!1), [o, a] = S(null), s = C(void 0), c = x(() => a(null), []), l = x((i) => {
     i && (t(i), a(null), i.publish().catch(() => {
     }));
   }, []);
-  return I(() => {
+  return w(() => {
     if (!e) {
       s.current?.unsubscribe(), s.current = void 0, n(!1);
       return;
     }
     s.current?.unsubscribe();
     const i = e.getService(), d = i.subscribe((v) => {
-      const b = v?.value, y = v?.context;
-      n(b === "publishing");
+      const h = v?.value, y = v?.context;
+      n(h === "publishing");
       const p = y?._publishError;
       a(p ? new Error(p.message) : null);
     });
     s.current = d;
     const u = i.getSnapshot();
     n(u?.value === "publishing");
-    const g = u?.context?._publishError;
-    return a(g ? new Error(g.message) : null), () => {
+    const b = u?.context?._publishError;
+    return a(b ? new Error(b.message) : null), () => {
       s.current?.unsubscribe(), s.current = void 0;
     };
   }, [e]), {
-    publishItem: c,
+    publishItem: l,
     isLoading: r,
     error: o,
-    resetError: l
+    resetError: c
   };
-}, ye = G("seedSdk:react:property"), ne = G("seedSdk:react:itemProperties");
-function Ve(e, t) {
-  const r = q(), [n, o] = S(void 0), [a, s] = S(!1), [l, c] = S(null), i = D(void 0), [, d] = S(0), f = typeof e == "object" && e != null ? e : null, g = f?.itemId, v = f?.seedLocalId, b = f?.seedUid, y = f?.propertyName, p = typeof e == "string" ? e : g !== void 0 && g !== "" ? g : void 0, w = y ?? (typeof e == "string" ? t : void 0), m = F(() => {
-    const N = p !== void 0 && p !== "" ? p : v, $ = p !== void 0 && p !== "" ? void 0 : b;
-    return (N != null || $ != null) && w != null && w !== "" ? {
+}, he = G("seedSdk:react:property"), oe = G("seedSdk:react:itemProperties");
+function We(e, t) {
+  const r = Q(), [n, o] = S(void 0), [a, s] = S(!1), [c, l] = S(null), i = C(void 0), [, d] = S(0), f = typeof e == "object" && e != null ? e : null, b = f?.itemId, v = f?.seedLocalId, h = f?.seedUid, y = f?.propertyName, p = typeof e == "string" ? e : b !== void 0 && b !== "" ? b : void 0, I = y ?? (typeof e == "string" ? t : void 0), m = N(() => {
+    const A = p !== void 0 && p !== "" ? p : v, B = p !== void 0 && p !== "" ? void 0 : h;
+    return (A != null || B != null) && I != null && I !== "" ? {
       type: "identifiers",
-      seedLocalId: N ?? void 0,
-      seedUid: $,
-      propertyName: w
+      seedLocalId: A ?? void 0,
+      seedUid: B,
+      propertyName: I
     } : null;
-  }, [p, w, v, b]);
-  F(() => m ? !!((m.seedLocalId || m.seedUid) && m.propertyName) : !1, [m]);
-  const P = F(() => !r || !m ? !1 : !!((m.seedLocalId || m.seedUid) && m.propertyName), [r, m]);
-  et(() => {
-    P && s(!0);
-  }, [P]);
-  const H = x(async () => {
+  }, [p, I, v, h]);
+  N(() => m ? !!((m.seedLocalId || m.seedUid) && m.propertyName) : !1, [m]);
+  const _ = N(() => !r || !m ? !1 : !!((m.seedLocalId || m.seedUid) && m.propertyName), [r, m]);
+  st(() => {
+    _ && s(!0);
+  }, [_]);
+  const R = x(async () => {
     if (!r || !m) {
-      o(void 0), s(!1), c(null);
+      o(void 0), s(!1), l(null);
       return;
     }
     try {
-      s(!0), c(null);
-      const N = m.seedLocalId, $ = m.seedUid;
-      if (!N && !$) {
-        o(void 0), s(!1), c(null);
+      s(!0), l(null);
+      const A = m.seedLocalId, B = m.seedUid;
+      if (!A && !B) {
+        o(void 0), s(!1), l(null);
         return;
       }
-      const Q = await se.find({
+      const V = await ie.find({
         propertyName: m.propertyName,
-        seedLocalId: N,
-        seedUid: $
+        seedLocalId: A,
+        seedUid: B
       });
-      if (!Q) {
-        ye(
-          `[useItemProperty] [updateItemProperty] no property found for Item.${N || $}.${m.propertyName}`
-        ), o(void 0), s(!1), c(null);
+      if (!V) {
+        he(
+          `[useItemProperty] [updateItemProperty] no property found for Item.${A || B}.${m.propertyName}`
+        ), o(void 0), s(!1), l(null);
         return;
       }
-      o(Q), s(!1), c(null);
-    } catch (N) {
-      ye("[useItemProperty] Error updating item property:", N), o(void 0), s(!1), c(N);
+      o(V), s(!1), l(null);
+    } catch (A) {
+      he("[useItemProperty] Error updating item property:", A), o(void 0), s(!1), l(A);
     }
   }, [r, m]);
-  return I(() => {
-    if (!P) {
-      o(void 0), s(!1), c(null);
+  return w(() => {
+    if (!_) {
+      o(void 0), s(!1), l(null);
       return;
     }
-    n && m && n.propertyName === m.propertyName && (m.seedLocalId != null && n.seedLocalId === m.seedLocalId || m.seedUid != null && n.seedUid === m.seedUid) || H();
-  }, [P, H, n, m]), I(() => {
+    n && m && n.propertyName === m.propertyName && (m.seedLocalId != null && n.seedLocalId === m.seedLocalId || m.seedUid != null && n.seedUid === m.seedUid) || R();
+  }, [_, R, n, m]), w(() => {
     if (!n) {
       i.current?.unsubscribe(), i.current = void 0;
       return;
     }
     i.current?.unsubscribe();
-    let N = 0, $ = !1, Q;
-    const L = 50, k = n.getService().subscribe((_) => {
-      if (_ && typeof _ == "object" && "value" in _ && _.value === "idle") {
-        s(!1), c(null);
-        const M = _.context, J = JSON.stringify([M.renderValue, M.propertyValue]);
-        (!$ || J !== Q) && ($ = !0, Q = J, d((re) => re + 1));
+    let A = 0, B = !1, V;
+    const L = 50, $ = n.getService().subscribe((F) => {
+      if (F && typeof F == "object" && "value" in F && F.value === "idle") {
+        s(!1), l(null);
+        const M = F.context, J = JSON.stringify([M.renderValue, M.propertyValue]);
+        (!B || J !== V) && (B = !0, V = J, d((se) => se + 1));
         return;
       }
-      $ = !1, Q = void 0;
-      const V = Date.now();
-      V - N >= L && (N = V, d((M) => M + 1));
+      B = !1, V = void 0;
+      const K = Date.now();
+      K - A >= L && (A = K, d((M) => M + 1));
     });
-    return i.current = k, () => {
+    return i.current = $, () => {
       i.current?.unsubscribe(), i.current = void 0;
     };
   }, [n]), {
     property: n,
     isLoading: a,
-    error: l
+    error: c
   };
 }
-function yr(e, t = 300) {
-  const r = "itemId" in e ? e.itemId : void 0, n = "seedLocalId" in e ? e.seedLocalId : void 0, o = "seedUid" in e ? e.seedUid : void 0, a = e.propertyName, s = F(() => r ? { seedLocalId: r, propertyName: a } : { seedLocalId: n, seedUid: o, propertyName: a }, [r, n, o, a]), { property: l, isLoading: c, error: i } = Ve(s), d = D(""), u = F(
-    () => ze((g) => {
-      g.getService().send({
+function br(e, t = 300) {
+  const r = "itemId" in e ? e.itemId : void 0, n = "seedLocalId" in e ? e.seedLocalId : void 0, o = "seedUid" in e ? e.seedUid : void 0, a = e.propertyName, s = N(() => r ? { seedLocalId: r, propertyName: a } : { seedLocalId: n, seedUid: o, propertyName: a }, [r, n, o, a]), { property: c, isLoading: l, error: i } = We(s), d = C(""), u = N(
+    () => He((b) => {
+      b.getService().send({
         type: "save",
         newValue: d.current
       });
     }, t),
     [t]
   );
-  I(() => () => u.cancel(), [u]);
+  w(() => () => u.cancel(), [u]);
   const f = x(
-    (g) => {
-      l && (d.current = g, l.getService().send({
+    (b) => {
+      c && (d.current = b, c.getService().send({
         type: "updateContext",
-        propertyValue: g,
-        renderValue: g
-      }), u(l));
+        propertyValue: b,
+        renderValue: b
+      }), u(c));
     },
-    [l, u]
+    [c, u]
   );
   return {
-    property: l,
+    property: c,
     setValue: f,
-    isLoading: c,
+    isLoading: l,
     error: i
   };
 }
-async function St(e, t) {
+async function Et(e, t) {
   if (!e && !t) return [];
-  const r = W.getAppDb();
+  const r = j.getAppDb();
   if (!r) return [];
-  const n = await se.all(
+  const n = await ie.all(
     { seedLocalId: e ?? void 0, seedUid: t ?? void 0 },
     { waitForReady: !0 }
   ), o = [...n], a = /* @__PURE__ */ new Set();
-  for (const c of n)
-    c.propertyName && a.add(c.propertyName);
+  for (const l of n)
+    l.propertyName && a.add(l.propertyName);
   let s;
   if (n.length > 0) {
-    const c = n[0];
-    s = c.modelName ?? c.modelType, s && typeof s == "string" && (s = Ce(s));
+    const l = n[0];
+    s = l.modelName ?? l.modelType, s && typeof s == "string" && (s = Pe(s));
   }
   if (!s) {
-    const c = await r.select({ type: A.type }).from(A).where(t ? U(A.uid, t) : U(A.localId, e)).limit(1);
-    c.length > 0 && c[0].type && (s = Ce(c[0].type));
+    const l = await r.select({ type: D.type }).from(D).where(t ? q(D.uid, t) : q(D.localId, e)).limit(1);
+    l.length > 0 && l[0].type && (s = Pe(l[0].type));
   }
-  const l = [];
+  const c = [];
   if (s)
     try {
-      const { Model: c } = await import("@seedprotocol/sdk"), i = await c.getByNameAsync(s);
+      const { Model: l } = await import("@seedprotocol/sdk"), i = await l.getByNameAsync(s);
       if (i?.properties)
         for (const d of i.properties)
-          d.name && l.push(d.name);
-    } catch (c) {
-      ne(`[useItemProperties] Error getting ModelProperties for ${s}:`, c);
+          d.name && c.push(d.name);
+    } catch (l) {
+      oe(`[useItemProperties] Error getting ModelProperties for ${s}:`, l);
     }
-  if (s && l.length > 0) {
-    const c = n.length > 0 ? n[0].seedLocalId ?? e : e, i = n.length > 0 ? n[0].seedUid ?? t : t;
-    for (const d of l)
+  if (s && c.length > 0) {
+    const l = n.length > 0 ? n[0].seedLocalId ?? e : e, i = n.length > 0 ? n[0].seedUid ?? t : t;
+    for (const d of c)
       if (!a.has(d))
         try {
-          const u = se.create(
+          const u = ie.create(
             {
               propertyName: d,
               modelName: s,
-              seedLocalId: c || void 0,
+              seedLocalId: l || void 0,
               seedUid: i || void 0,
               propertyValue: null
             },
@@ -423,111 +446,111 @@ async function St(e, t) {
           );
           u && o.push(u);
         } catch (u) {
-          ye(`[useItemProperties] Error creating ItemProperty for missing property ${d}:`, u);
+          he(`[useItemProperties] Error creating ItemProperty for missing property ${d}:`, u);
         }
   }
   if (e || t) {
-    const c = await r.select({ createdAt: A.createdAt }).from(A).where(t ? U(A.uid, t) : U(A.localId, e)).limit(1);
-    if (c.length > 0 && c[0].createdAt) {
+    const l = await r.select({ createdAt: D.createdAt }).from(D).where(t ? q(D.uid, t) : q(D.localId, e)).limit(1);
+    if (l.length > 0 && l[0].createdAt) {
       const i = "createdAt";
       if (!o.some((u) => u.propertyName === i) && s)
         try {
-          const u = n.length > 0 ? n[0].seedLocalId ?? e : e, f = n.length > 0 ? n[0].seedUid ?? t : t, g = se.create(
+          const u = n.length > 0 ? n[0].seedLocalId ?? e : e, f = n.length > 0 ? n[0].seedUid ?? t : t, b = ie.create(
             {
               propertyName: i,
               modelName: s,
               seedLocalId: u || void 0,
               seedUid: f || void 0,
-              propertyValue: c[0].createdAt.toString()
+              propertyValue: l[0].createdAt.toString()
             },
             { waitForReady: !1 }
           );
-          g && o.push(g);
+          b && o.push(b);
         } catch (u) {
-          ye("[useItemProperties] Error creating createdAt ItemProperty:", u);
+          he("[useItemProperties] Error creating createdAt ItemProperty:", u);
         }
     }
   }
   return o;
 }
-function mr(e) {
-  const t = q(), r = X(), n = D(void 0), o = F(() => typeof e == "string" ? { type: "itemId", itemId: e } : typeof e == "object" ? {
+function Sr(e) {
+  const t = Q(), r = Z(), n = C(void 0), o = N(() => typeof e == "string" ? { type: "itemId", itemId: e } : typeof e == "object" ? {
     type: "identifiers",
     seedLocalId: e.seedLocalId,
     seedUid: e.seedUid
-  } : null, [e]), a = F(() => {
+  } : null, [e]), a = N(() => {
     if (o)
       return o.type === "itemId" ? o.itemId : o.seedLocalId;
-  }, [o]), s = F(() => {
+  }, [o]), s = N(() => {
     if (!(!o || o.type === "itemId"))
       return o.seedUid;
-  }, [o]), l = a ?? s ?? "", c = F(
-    () => ["seed", "itemProperties", l],
-    [l]
+  }, [o]), c = a ?? s ?? "", l = N(
+    () => ["seed", "itemProperties", c],
+    [c]
   ), {
     data: i = [],
     isLoading: d,
     error: u
-  } = Z({
-    queryKey: c,
-    queryFn: () => St(a, s),
-    enabled: t && !!l
-  }), f = F(() => {
+  } = ee({
+    queryKey: l,
+    queryFn: () => Et(a, s),
+    enabled: t && !!c
+  }), f = N(() => {
     if (!t || !a && !s)
-      return ne("[useItemProperties] Query: returning null (not ready or no identifiers)"), null;
-    const b = W.getAppDb();
-    if (!b)
-      return ne("[useItemProperties] Query: returning null (no db)"), null;
-    ne(`[useItemProperties] Query: creating query for seedLocalId=${a}, seedUid=${s}`);
-    const y = s ? b.select({
-      propertyName: T.propertyName,
-      propertyValue: T.propertyValue,
-      seedLocalId: T.seedLocalId,
-      seedUid: T.seedUid,
-      modelType: T.modelType,
-      schemaUid: T.schemaUid,
-      createdAt: T.createdAt,
-      attestationCreatedAt: T.attestationCreatedAt
-    }).from(T).where(
-      Le(
-        U(T.seedUid, s),
-        Ee(T.propertyName)
+      return oe("[useItemProperties] Query: returning null (not ready or no identifiers)"), null;
+    const h = j.getAppDb();
+    if (!h)
+      return oe("[useItemProperties] Query: returning null (no db)"), null;
+    oe(`[useItemProperties] Query: creating query for seedLocalId=${a}, seedUid=${s}`);
+    const y = s ? h.select({
+      propertyName: k.propertyName,
+      propertyValue: k.propertyValue,
+      seedLocalId: k.seedLocalId,
+      seedUid: k.seedUid,
+      modelType: k.modelType,
+      schemaUid: k.schemaUid,
+      createdAt: k.createdAt,
+      attestationCreatedAt: k.attestationCreatedAt
+    }).from(k).where(
+      xe(
+        q(k.seedUid, s),
+        Ae(k.propertyName)
       )
-    ) : a ? b.select({
-      propertyName: T.propertyName,
-      propertyValue: T.propertyValue,
-      seedLocalId: T.seedLocalId,
-      seedUid: T.seedUid,
-      modelType: T.modelType,
-      schemaUid: T.schemaUid,
-      createdAt: T.createdAt,
-      attestationCreatedAt: T.attestationCreatedAt
-    }).from(T).where(
-      Le(
-        U(T.seedLocalId, a),
-        Ee(T.propertyName)
+    ) : a ? h.select({
+      propertyName: k.propertyName,
+      propertyValue: k.propertyValue,
+      seedLocalId: k.seedLocalId,
+      seedUid: k.seedUid,
+      modelType: k.modelType,
+      schemaUid: k.schemaUid,
+      createdAt: k.createdAt,
+      attestationCreatedAt: k.attestationCreatedAt
+    }).from(k).where(
+      xe(
+        q(k.seedLocalId, a),
+        Ae(k.propertyName)
       )
     ) : null;
-    return ne("[useItemProperties] Query: created query object", { queryType: s ? "seedUid" : "seedLocalId" }), y;
-  }, [t, a, s]), g = ie(f), v = F(() => {
-    if (!g || g.length === 0)
+    return oe("[useItemProperties] Query: created query object", { queryType: s ? "seedUid" : "seedLocalId" }), y;
+  }, [t, a, s]), b = Y(f), v = N(() => {
+    if (!b || b.length === 0)
       return [];
-    const b = /* @__PURE__ */ new Map();
-    for (const y of g) {
+    const h = /* @__PURE__ */ new Map();
+    for (const y of b) {
       if (!y.propertyName) continue;
-      const p = b.get(y.propertyName);
+      const p = h.get(y.propertyName);
       if (!p)
-        b.set(y.propertyName, y);
+        h.set(y.propertyName, y);
       else {
         const E = p.attestationCreatedAt || p.createdAt || 0;
-        (y.attestationCreatedAt || y.createdAt || 0) > E && b.set(y.propertyName, y);
+        (y.attestationCreatedAt || y.createdAt || 0) > E && h.set(y.propertyName, y);
       }
     }
-    return Array.from(b.values());
-  }, [g]);
-  return I(() => {
+    return Array.from(h.values());
+  }, [b]);
+  return w(() => {
     if (!t || !a && !s || v === void 0) return;
-    const b = JSON.stringify(
+    const h = JSON.stringify(
       v.map((y) => ({
         propertyName: y.propertyName,
         propertyValue: y.propertyValue,
@@ -535,8 +558,8 @@ function mr(e) {
         seedUid: y.seedUid
       })).sort((y, p) => (y.propertyName || "").localeCompare(p.propertyName || ""))
     );
-    n.current !== b && (n.current = b, v.length > 0 && r.invalidateQueries({ queryKey: c }));
-  }, [t, v, i, a, s, r, c]), I(() => {
+    n.current !== h && (n.current = h, v.length > 0 && r.invalidateQueries({ queryKey: l }));
+  }, [t, v, i, a, s, r, l]), w(() => {
     n.current = void 0;
   }, [a, s]), {
     properties: i,
@@ -544,29 +567,29 @@ function mr(e) {
     error: u
   };
 }
-const hr = () => {
-  const e = D(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x((l) => {
-    if (!l.propertyName || !l.seedLocalId && !l.seedUid || !l.modelName) {
+const vr = () => {
+  const e = C(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x((c) => {
+    if (!c.propertyName || !c.seedLocalId && !c.seedUid || !c.modelName) {
       const d = new Error("seedLocalId or seedUid, propertyName, and modelName are required");
       o(d);
       return;
     }
     o(null), r(!0), e.current?.unsubscribe(), e.current = void 0;
-    const c = se.create(l, { waitForReady: !1 });
-    if (!c) {
+    const l = ie.create(c, { waitForReady: !1 });
+    if (!l) {
       o(new Error("Failed to create item property")), r(!1);
       return;
     }
-    const i = c.getService().subscribe((d) => {
+    const i = l.getService().subscribe((d) => {
       if (d?.value === "error") {
         const u = d.context?._loadingError?.error ?? new Error("Failed to create item property");
         o(u instanceof Error ? u : new Error(String(u))), r(!1);
       }
       d?.value === "idle" && (o(null), r(!1));
     });
-    return e.current = i, c;
+    return e.current = i, l;
   }, []);
-  return I(() => () => {
+  return w(() => () => {
     e.current?.unsubscribe(), e.current = void 0;
   }, []), {
     create: s,
@@ -574,26 +597,26 @@ const hr = () => {
     error: n,
     resetError: a
   };
-}, gr = () => {
+}, wr = () => {
   const [e, t] = S(null), [r, n] = S({
     isLoading: !1,
     error: null
   });
-  I(() => {
+  w(() => {
     if (!e) {
       n({ isLoading: !1, error: null });
       return;
     }
-    const s = e.getService(), l = () => {
+    const s = e.getService(), c = () => {
       const d = s.getSnapshot().context;
       n({
         isLoading: !!d._destroyInProgress,
         error: d._destroyError ? new Error(d._destroyError.message) : null
       });
     };
-    l();
-    const c = s.subscribe(l);
-    return () => c.unsubscribe();
+    c();
+    const l = s.subscribe(c);
+    return () => l.unsubscribe();
   }, [e]);
   const o = x(async (s) => {
     s && (t(s), await s.destroy());
@@ -606,14 +629,14 @@ const hr = () => {
     error: r.error,
     resetError: a
   };
-}, xe = G("seedSdk:react:services"), wt = ["idle", "ready", "done", "success", "initialized"], Ke = (e) => {
+}, Ne = G("seedSdk:react:services"), Lt = ["idle", "ready", "done", "success", "initialized"], Je = (e) => {
   let t = "actor";
   const r = e;
-  return e && r.uniqueKey && (t = r.uniqueKey), e && !r.uniqueKey && r.logic && r.logic.config && (t = De(e)), t;
-}, Me = (e) => {
+  return e && r.uniqueKey && (t = r.uniqueKey), e && !r.uniqueKey && r.logic && r.logic.config && (t = Re(e)), t;
+}, ke = (e) => {
   let t;
-  return e && e.getSnapshot() && e.getSnapshot().value && (t = e.getSnapshot().value), Ke(e) === "global" && t && typeof t == "object" && Object.keys(t).length > 0 && Object.keys(t)[0] === "initialized" && (t = "ready"), t && typeof t == "object" && (t = JSON.stringify(t)), t;
-}, De = (e) => {
+  return e && e.getSnapshot() && e.getSnapshot().value && (t = e.getSnapshot().value), Je(e) === "global" && t && typeof t == "object" && Object.keys(t).length > 0 && Object.keys(t)[0] === "initialized" && (t = "ready"), t && typeof t == "object" && (t = JSON.stringify(t)), t;
+}, Re = (e) => {
   const t = e;
   if (!e || !t.logic || !t.logic.config || !t._snapshot)
     return;
@@ -626,36 +649,36 @@ const hr = () => {
   try {
     o = e.getSnapshot();
   } catch (a) {
-    return xe("Error:", a), n;
+    return Ne("Error:", a), n;
   }
   if (o) {
     const a = o.context;
-    a && a.dbName && (n = a.dbName), a && a.modelNamePlural && (n = a.modelNamePlural), a && a.modelName && (n = gt(a.modelName.toLowerCase()));
+    a && a.dbName && (n = a.dbName), a && a.modelNamePlural && (n = a.modelNamePlural), a && a.modelName && (n = vt(a.modelName.toLowerCase()));
   }
   return n;
-}, br = (e) => {
+}, Ir = (e) => {
   const [t, r] = S(0), n = (s) => {
-    let l = 0;
-    const c = s;
-    if (c.logic?.states) {
+    let c = 0;
+    const l = s;
+    if (l.logic?.states) {
       const i = [], d = [];
-      for (const [g, v] of Object.entries(c.logic.states))
-        v.tags?.includes("loading") && (i.push(g), d.push(v));
-      const u = d.length, f = Me(s);
-      if (f && wt.includes(f))
+      for (const [b, v] of Object.entries(l.logic.states))
+        v.tags?.includes("loading") && (i.push(b), d.push(v));
+      const u = d.length, f = ke(s);
+      if (f && Lt.includes(f))
         return 0;
-      f && (l = i.indexOf(f) / u * 100);
+      f && (c = i.indexOf(f) / u * 100);
     }
-    return l;
+    return c;
   }, o = x(
     (s) => {
       e.getSnapshot().context;
-      const l = e.getSnapshot().value;
-      if (l === "done" || l === "success" || l === "idle" || l === "ready") {
+      const c = e.getSnapshot().value;
+      if (c === "done" || c === "success" || c === "idle" || c === "ready") {
         clearInterval(s);
         return;
       }
-      r((c) => c + 1);
+      r((l) => l + 1);
     },
     [e]
   ), a = x(() => {
@@ -664,71 +687,71 @@ const hr = () => {
     }, 1e3);
     return s;
   }, [o, e]);
-  return I(() => {
+  return w(() => {
     const s = a();
     return () => clearInterval(s);
   }, []), {
-    name: Ke(e),
+    name: Je(e),
     timeElapsed: t,
-    value: Me(e),
+    value: ke(e),
     percentComplete: n(e),
-    uniqueKey: De(e)
+    uniqueKey: Re(e)
   };
-}, It = () => {
-  const [e, t] = S(!1), { internalStatus: r } = xt();
-  return I(() => {
+}, At = () => {
+  const [e, t] = S(!1), { internalStatus: r } = _t();
+  return w(() => {
     r === "ready" && t(!0);
-  }, [r]), I(() => {
+  }, [r]), w(() => {
     r === "ready" && t(!0);
   }, []), e;
-}, vr = () => {
-  const [e, t] = S(!1), r = Et(), { services: n, percentComplete: o } = Lt(), a = x(async () => {
-    for (const l of n) {
-      const c = De(l);
-      xe(
-        `would save to db with snapshot__${c}:`,
-        JSON.stringify(l.getPersistedSnapshot())
+}, Er = () => {
+  const [e, t] = S(!1), r = xt(), { services: n, percentComplete: o } = Nt(), a = x(async () => {
+    for (const c of n) {
+      const l = Re(c);
+      Ne(
+        `would save to db with snapshot__${l}:`,
+        JSON.stringify(c.getPersistedSnapshot())
       );
     }
   }, [n]), s = x(async () => {
-    const l = W.getAppDb();
-    return l ? await l.select().from(ue).where(qe(ue.key, "snapshot__%")) : [];
+    const c = j.getAppDb();
+    return c ? await c.select().from(fe).where(Qe(fe.key, "snapshot__%")) : [];
   }, []);
-  I(() => !r || e ? void 0 : ((async () => {
-    const c = await s();
-    xe("persistedSnapshots:", c), t(!0);
+  w(() => !r || e ? void 0 : ((async () => {
+    const l = await s();
+    Ne("persistedSnapshots:", l), t(!0);
   })(), () => {
     a();
   }), [r, e]);
-}, Et = () => {
-  const [e, t] = S(!1), r = It();
-  return I(() => {
+}, xt = () => {
+  const [e, t] = S(!1), r = At();
+  return w(() => {
     r && (async () => {
-      const a = await W.getAppDb().select().from(ue).where(qe(ue.key, "snapshot__%"));
+      const a = await j.getAppDb().select().from(fe).where(Qe(fe.key, "snapshot__%"));
       a && a.length > 0 && t(!0);
     })();
   }, [r]), e;
-}, Lt = () => {
+}, Nt = () => {
   const [e, t] = S([]), [r, n] = S(5);
-  return I(() => {
-    const a = me().getService(), s = a;
+  return w(() => {
+    const a = ge().getService(), s = a;
     s.uniqueKey = "clientManager", t([s]);
-    const l = a.subscribe((c) => {
-      const i = c.value;
+    const c = a.subscribe((l) => {
+      const i = l.value;
       let d = 0;
-      i === C.IDLE ? d = 100 : i === C.ADD_MODELS_TO_DB ? d = 90 : i === C.ADD_MODELS_TO_STORE ? d = 80 : i === C.PROCESS_SCHEMA_FILES ? d = 70 : i === C.SAVE_CONFIG ? d = 60 : i === C.DB_INIT ? d = 50 : i === C.FILE_SYSTEM_INIT ? d = 30 : i === C.PLATFORM_CLASSES_INIT && (d = 10), n(d);
+      i === P.IDLE ? d = 100 : i === P.ADD_MODELS_TO_DB ? d = 90 : i === P.ADD_MODELS_TO_STORE ? d = 80 : i === P.PROCESS_SCHEMA_FILES ? d = 70 : i === P.SAVE_CONFIG ? d = 60 : i === P.DB_INIT ? d = 50 : i === P.FILE_SYSTEM_INIT ? d = 30 : i === P.PLATFORM_CLASSES_INIT && (d = 10), n(d);
     });
     return () => {
-      l.unsubscribe();
+      c.unsubscribe();
     };
   }, []), {
     services: e,
     percentComplete: r
   };
-}, xt = () => {
-  const t = me().getService(), r = Ie(t, (o) => o.value), n = Ie(t, (o) => {
+}, _t = () => {
+  const t = ge().getService(), r = Le(t, (o) => o.value), n = Le(t, (o) => {
     const a = o.value;
-    return a === C.DB_INIT || a === C.SAVE_CONFIG || a === C.PROCESS_SCHEMA_FILES || a === C.ADD_MODELS_TO_STORE || a === C.ADD_MODELS_TO_DB || a === C.IDLE ? "ready" : a;
+    return a === P.DB_INIT || a === P.SAVE_CONFIG || a === P.PROCESS_SCHEMA_FILES || a === P.ADD_MODELS_TO_STORE || a === P.ADD_MODELS_TO_DB || a === P.IDLE ? "ready" : a;
   });
   return {
     status: r,
@@ -736,21 +759,21 @@ const hr = () => {
   };
 };
 G("seedSdk:react:db");
-const Sr = () => {
+const Lr = () => {
   const [e, t] = S(!1), r = x(() => {
     e || t(!0);
   }, []);
-  return I(() => {
+  return w(() => {
     let n;
     return (async () => {
-      const s = me().getService(), l = s.getSnapshot().value;
-      if (l === C.DB_INIT || l === C.SAVE_CONFIG || l === C.PROCESS_SCHEMA_FILES || l === C.ADD_MODELS_TO_STORE || l === C.ADD_MODELS_TO_DB || l === C.IDLE) {
+      const s = ge().getService(), c = s.getSnapshot().value;
+      if (c === P.DB_INIT || c === P.SAVE_CONFIG || c === P.PROCESS_SCHEMA_FILES || c === P.ADD_MODELS_TO_STORE || c === P.ADD_MODELS_TO_DB || c === P.IDLE) {
         r();
         return;
       }
-      n = s.subscribe((c) => {
-        const i = c.value;
-        (i === C.DB_INIT || i === C.SAVE_CONFIG || i === C.PROCESS_SCHEMA_FILES || i === C.ADD_MODELS_TO_STORE || i === C.ADD_MODELS_TO_DB || i === C.IDLE) && (r(), n?.unsubscribe());
+      n = s.subscribe((l) => {
+        const i = l.value;
+        (i === P.DB_INIT || i === P.SAVE_CONFIG || i === P.PROCESS_SCHEMA_FILES || i === P.ADD_MODELS_TO_STORE || i === P.ADD_MODELS_TO_DB || i === P.IDLE) && (r(), n?.unsubscribe());
       });
     })(), () => {
       n && n.unsubscribe();
@@ -758,24 +781,24 @@ const Sr = () => {
   }, []), {
     dbsAreReady: e
   };
-}, je = G("seedSdk:react:schema"), Nt = (e) => {
-  const [t, r] = S(null), [n, o] = S(!!e), [a, s] = S(null), l = D(null), c = q(), i = x((d) => {
+}, Ge = G("seedSdk:react:schema"), Dt = (e) => {
+  const [t, r] = S(null), [n, o] = S(!!e), [a, s] = S(null), c = C(null), l = Q(), i = x((d) => {
     o(!0), s(null);
     try {
-      const u = he.create(d, {
+      const u = be.create(d, {
         waitForReady: !1
       });
       r(u);
       const f = u.getService();
-      f.getSnapshot().value === "idle" ? (de(() => o(!1)), s(null)) : o(!0), l.current = f.subscribe((b) => {
-        b.value === "idle" ? (de(() => o(!1)), s(null)) : o(!0);
+      f.getSnapshot().value === "idle" ? (ue(() => o(!1)), s(null)) : o(!0), c.current = f.subscribe((h) => {
+        h.value === "idle" ? (ue(() => o(!1)), s(null)) : o(!0);
       });
     } catch (u) {
-      return je("[useSchema] Error creating schema:", u), s(u), r(null), o(!1), null;
+      return Ge("[useSchema] Error creating schema:", u), s(u), r(null), o(!1), null;
     }
   }, []);
-  return I(() => {
-    if (l.current && (l.current.unsubscribe(), l.current = null), !c) {
+  return w(() => {
+    if (c.current && (c.current.unsubscribe(), c.current = null), !l) {
       r(null), s(null), o(!1);
       return;
     }
@@ -784,75 +807,75 @@ const Sr = () => {
       return;
     }
     return i(e), () => {
-      l.current && (l.current.unsubscribe(), l.current = null);
+      c.current && (c.current.unsubscribe(), c.current = null);
     };
-  }, [e, c, i]), {
+  }, [e, l, i]), {
     schema: t,
     isLoading: n,
     error: a
   };
-}, ve = ["seed", "schemas"], wr = () => {
-  const e = q(), t = X(), r = D(void 0), n = D([]), {
+}, we = ["seed", "schemas"], Ar = () => {
+  const e = Q(), t = Z(), r = C(void 0), n = C([]), {
     data: o = [],
     isLoading: a,
     error: s
-  } = Z({
-    queryKey: ve,
-    queryFn: () => he.all({ waitForReady: !0 }),
+  } = ee({
+    queryKey: we,
+    queryFn: () => be.all({ waitForReady: !0 }),
     enabled: e
   });
   n.current = o;
-  const l = e ? W.getAppDb() : null, c = F(() => l ? l.select().from(Y).orderBy(Y.name, pt(Y.version)) : null, [l, e]), i = ie(c);
-  return I(() => {
+  const c = e ? j.getAppDb() : null, l = N(() => c ? c.select().from(X).orderBy(X.name, Ve(X.version)) : null, [c, e]), i = Y(l);
+  return w(() => {
     if (typeof BroadcastChannel > "u") return;
     const d = new BroadcastChannel("seed-schemas-invalidate"), u = () => {
-      t.invalidateQueries({ queryKey: ve });
+      t.invalidateQueries({ queryKey: we });
     };
     return d.addEventListener("message", u), () => {
       d.removeEventListener("message", u), d.close();
     };
-  }, [t]), I(() => {
+  }, [t]), w(() => {
     if (!e || !i)
       return;
     const d = r.current, u = d ? JSON.stringify(d) : "undefined", f = i ? JSON.stringify(i) : "undefined";
     if (u === f && d !== void 0)
       return;
     r.current = i;
-    const g = /* @__PURE__ */ new Set();
+    const b = /* @__PURE__ */ new Set();
     for (const p of n.current) {
       const E = p.id || p.schemaFileId;
       if (E)
-        g.add(E);
+        b.add(E);
       else {
-        const w = p.metadata?.name, m = p.version;
-        w && m !== void 0 && g.add(`${w}:${m}`);
+        const I = p.metadata?.name, m = p.version;
+        I && m !== void 0 && b.add(`${I}:${m}`);
       }
     }
     const v = /* @__PURE__ */ new Set();
     for (const p of i)
       p.name !== "Seed Protocol" && (p.schemaFileId ? v.add(p.schemaFileId) : p.name != null && p.version !== void 0 && v.add(`${p.name}:${p.version}`));
-    const b = g.size === v.size && [...g].every((p) => v.has(p)), y = g.size > 0 && v.size > 0 && [...v].some((p) => !g.has(p));
-    !b && y && t.invalidateQueries({ queryKey: ve });
+    const h = b.size === v.size && [...b].every((p) => v.has(p)), y = b.size > 0 && v.size > 0 && [...v].some((p) => !b.has(p));
+    !h && y && t.invalidateQueries({ queryKey: we });
   }, [e, i, t]), {
     schemas: o,
     isLoading: a,
     error: s
   };
-}, Ir = () => {
-  const e = D(null), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x((l) => {
+}, xr = () => {
+  const e = C(null), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x((c) => {
     o(null), r(!0), e.current?.unsubscribe(), e.current = null;
-    const c = he.create(l, {
+    const l = be.create(c, {
       waitForReady: !1
-    }), i = c.getService().subscribe((d) => {
+    }), i = l.getService().subscribe((d) => {
       if (d.value === "error") {
         const u = d.context._loadingError?.error;
         o(u instanceof Error ? u : new Error("Failed to create schema")), r(!1);
       }
       d.value === "idle" && (o(null), r(!1));
     });
-    return e.current = i, c;
+    return e.current = i, l;
   }, []);
-  return I(() => () => {
+  return w(() => () => {
     e.current?.unsubscribe(), e.current = null;
   }, []), {
     createSchema: s,
@@ -860,26 +883,26 @@ const Sr = () => {
     error: n,
     resetError: a
   };
-}, Er = () => {
+}, Nr = () => {
   const [e, t] = S(null), [r, n] = S({
     isLoading: !1,
     error: null
   });
-  I(() => {
+  w(() => {
     if (!e) {
       n({ isLoading: !1, error: null });
       return;
     }
-    const s = e.getService(), l = () => {
+    const s = e.getService(), c = () => {
       const d = s.getSnapshot().context;
       n({
         isLoading: !!d._destroyInProgress,
         error: d._destroyError ? new Error(d._destroyError.message) : null
       });
     };
-    l();
-    const c = s.subscribe(l);
-    return () => c.unsubscribe();
+    c();
+    const l = s.subscribe(c);
+    return () => l.unsubscribe();
   }, [e]);
   const o = x(async (s) => {
     s && (t(s), await s.destroy());
@@ -892,49 +915,49 @@ const Sr = () => {
     error: r.error,
     resetError: a
   };
-}, Lr = () => {
-  const [e, t] = S(), r = D(/* @__PURE__ */ new Map()), n = q(), o = x(async () => {
+}, _r = () => {
+  const [e, t] = S(), r = C(/* @__PURE__ */ new Map()), n = Q(), o = x(async () => {
     if (n)
       try {
-        const a = await st(), s = /* @__PURE__ */ new Set();
-        for (const c of a) {
-          const i = c.schema.metadata?.name;
+        const a = await ct(), s = /* @__PURE__ */ new Set();
+        for (const l of a) {
+          const i = l.schema.metadata?.name;
           i && s.add(i);
         }
-        const l = /* @__PURE__ */ new Map();
-        for (const c of s)
-          if (r.current.has(c)) {
-            const i = r.current.get(c);
-            l.set(c, i);
+        const c = /* @__PURE__ */ new Map();
+        for (const l of s)
+          if (r.current.has(l)) {
+            const i = r.current.get(l);
+            c.set(l, i);
           } else {
-            const i = he.create(c, {
+            const i = be.create(l, {
               waitForReady: !1
             });
-            l.set(c, i);
+            c.set(l, i);
           }
-        for (const [c, i] of r.current.entries())
-          s.has(c) || i.unload();
-        r.current = l, t(Array.from(l.values()));
+        for (const [l, i] of r.current.entries())
+          s.has(l) || i.unload();
+        r.current = c, t(Array.from(c.values()));
       } catch (a) {
-        je("Error fetching all schema versions from database:", a), t(null);
+        Ge("Error fetching all schema versions from database:", a), t(null);
       }
   }, [n]);
-  return I(() => {
+  return w(() => {
     n && o();
-  }, [n, o]), I(() => () => {
+  }, [n, o]), w(() => () => {
     r.current.forEach((a) => {
       a.unload();
     }), r.current.clear();
   }, []), e;
-}, xr = () => Nt(ot), At = (e) => ["seed", "models", e], Te = /* @__PURE__ */ new Map(), Ft = (e) => {
-  const t = q(), r = X(), n = D([]), o = F(() => At(e), [e]), {
+}, Dr = () => Dt(lt), Ft = (e) => ["seed", "models", e], $e = /* @__PURE__ */ new Map(), Ct = (e) => {
+  const t = Q(), r = Z(), n = C([]), o = N(() => Ft(e), [e]), {
     data: a = [],
     isLoading: s,
-    error: l
-  } = Z({
+    error: c
+  } = ee({
     queryKey: o,
     queryFn: async () => {
-      const y = r.getQueryData(o), p = await oe.all(e, { waitForReady: !1 });
+      const y = r.getQueryData(o), p = await ae.all(e, { waitForReady: !1 });
       if (Array.isArray(y) && y.length > 0 && Array.isArray(p) && p.length === 0)
         return [...y];
       if (Array.isArray(p) && p.length === 0) {
@@ -945,74 +968,74 @@ const Sr = () => {
       return p;
     },
     enabled: t && !!e
-  }), c = e && typeof e == "string" ? e : "";
-  a.length > 0 && Te.set(c, a);
-  const i = n.current.length > 0 ? n.current : Te.get(c), d = e ? a.length > 0 ? a : i?.length ? i : a : a;
-  n.current = d, I(() => {
+  }), l = e && typeof e == "string" ? e : "";
+  a.length > 0 && $e.set(l, a);
+  const i = n.current.length > 0 ? n.current : $e.get(l), d = e ? a.length > 0 ? a : i?.length ? i : a : a;
+  n.current = d, w(() => {
     if (!e || typeof BroadcastChannel > "u") return;
     const y = new BroadcastChannel("seed-models-invalidate"), p = (E) => {
-      const { schemaName: w, schemaFileId: m } = E.data || {};
-      (e === w || e === m) && (r.invalidateQueries({ queryKey: o }), r.refetchQueries({ queryKey: o }));
+      const { schemaName: I, schemaFileId: m } = E.data || {};
+      (e === I || e === m) && (r.invalidateQueries({ queryKey: o }), r.refetchQueries({ queryKey: o }));
     };
     return y.addEventListener("message", p), () => {
       y.removeEventListener("message", p), y.close();
     };
   }, [e, r, o]);
-  const u = D(null), f = D(null);
-  function g() {
-    const y = W.getAppDb();
+  const u = C(null), f = C(null);
+  function b() {
+    const y = j.getAppDb();
     return !y || !e ? null : y.select({
-      modelFileId: ae.schemaFileId,
-      modelName: ae.name
-    }).from(Y).innerJoin(be, U(Y.id, be.schemaId)).innerJoin(ae, U(be.modelId, ae.id)).where(
-      te(
-        U(Y.schemaFileId, e),
-        U(Y.name, e)
+      modelFileId: ce.schemaFileId,
+      modelName: ce.name
+    }).from(X).innerJoin(ve, q(X.id, ve.schemaId)).innerJoin(ce, q(ve.modelId, ce.id)).where(
+      re(
+        q(X.schemaFileId, e),
+        q(X.name, e)
       )
     );
   }
-  const v = F(() => {
+  const v = N(() => {
     if (!e || !t) return null;
     const y = { schemaId: e, ready: t }, p = u.current;
     if (p && p.schemaId === y.schemaId && p.ready === y.ready && f.current !== null)
       return f.current;
-    const E = g();
+    const E = b();
     return E ? (u.current = y, f.current = E, E) : null;
-  }, [e, t]), b = ie(v);
-  return I(() => {
-    if (!t || !b || !e) return;
+  }, [e, t]), h = Y(v);
+  return w(() => {
+    if (!t || !h || !e) return;
     const y = /* @__PURE__ */ new Set();
     for (const m of n.current) {
-      const P = m.id || m.modelFileId;
-      P ? y.add(P) : m.modelName && y.add(m.modelName);
+      const _ = m.id || m.modelFileId;
+      _ ? y.add(_) : m.modelName && y.add(m.modelName);
     }
     const p = /* @__PURE__ */ new Set();
-    for (const m of b)
+    for (const m of h)
       m.modelFileId ? p.add(m.modelFileId) : m.modelName && p.add(m.modelName);
-    const E = y.size === p.size && [...y].every((m) => p.has(m)), w = p.size > 0 && [...p].some((m) => !y.has(m));
-    !E && w && r.invalidateQueries({ queryKey: o });
-  }, [t, b, e, r, o]), {
+    const E = y.size === p.size && [...y].every((m) => p.has(m)), I = p.size > 0 && [...p].some((m) => !y.has(m));
+    !E && I && r.invalidateQueries({ queryKey: o });
+  }, [t, h, e, r, o]), {
     models: d,
     isLoading: s,
-    error: l
+    error: c
   };
-}, _t = (e, t) => {
-  const r = q(), [n, o] = S(void 0), [a, s] = S(!1), [l, c] = S(null), i = D(void 0), [, d] = S(0), u = t == null;
-  if (F(() => r ? u ? !!e : !!(e && t) : !1, [r, u, e, t]), I(() => {
+}, Rt = (e, t) => {
+  const r = Q(), [n, o] = S(void 0), [a, s] = S(!1), [c, l] = S(null), i = C(void 0), [, d] = S(0), u = t == null;
+  if (N(() => r ? u ? !!e : !!(e && t) : !1, [r, u, e, t]), w(() => {
     if (!r || !u || !e) {
-      o(void 0), s(!1), c(null);
+      o(void 0), s(!1), l(null);
       return;
     }
     (async () => {
       try {
-        s(!0), c(null);
-        const p = await oe.createById(e);
-        o(p || void 0), s(!1), c(null);
+        s(!0), l(null);
+        const p = await ae.createById(e);
+        o(p || void 0), s(!1), l(null);
       } catch (p) {
-        console.error("[useModel] Error looking up model by ID:", p), o(void 0), s(!1), c(p);
+        console.error("[useModel] Error looking up model by ID:", p), o(void 0), s(!1), l(p);
       }
     })();
-  }, [r, u, e]), I(() => {
+  }, [r, u, e]), w(() => {
     if (!u || !n) {
       i.current?.unsubscribe(), i.current = void 0;
       return;
@@ -1028,34 +1051,34 @@ const Sr = () => {
     return {
       model: n,
       isLoading: a,
-      error: l
+      error: c
     };
-  const { models: f, isLoading: g, error: v } = Ft(e), b = F(() => {
+  const { models: f, isLoading: b, error: v } = Ct(e), h = N(() => {
     if (t)
       return f.find((y) => (y.modelName ?? y.name) === t);
   }, [f, t]);
-  return I(() => {
-    if (u || !b) {
+  return w(() => {
+    if (u || !h) {
       i.current?.unsubscribe(), i.current = void 0;
       return;
     }
     i.current?.unsubscribe();
-    const y = b.getService().subscribe((p) => {
+    const y = h.getService().subscribe((p) => {
       d((E) => E + 1);
     });
     return i.current = y, () => {
       i.current?.unsubscribe(), i.current = void 0;
     };
-  }, [u, b]), {
-    model: b,
-    isLoading: g,
+  }, [u, h]), {
+    model: h,
+    isLoading: b,
     error: v
   };
-}, Nr = () => {
-  const e = D(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x(
-    (l, c, i) => {
+}, Fr = () => {
+  const e = C(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x(
+    (c, l, i) => {
       o(null), r(!0), e.current?.unsubscribe(), e.current = void 0;
-      const d = oe.create(c, l, {
+      const d = ae.create(l, c, {
         ...i,
         waitForReady: !1
       }), u = d.getService().subscribe((f) => {
@@ -1067,7 +1090,7 @@ const Sr = () => {
     },
     []
   );
-  return I(() => () => {
+  return w(() => () => {
     e.current?.unsubscribe(), e.current = void 0;
   }, []), {
     create: s,
@@ -1075,26 +1098,26 @@ const Sr = () => {
     error: n,
     resetError: a
   };
-}, Ar = () => {
+}, Cr = () => {
   const [e, t] = S(null), [r, n] = S({
     isLoading: !1,
     error: null
   });
-  I(() => {
+  w(() => {
     if (!e) {
       n({ isLoading: !1, error: null });
       return;
     }
-    const s = e.getService(), l = () => {
+    const s = e.getService(), c = () => {
       const d = s.getSnapshot().context;
       n({
         isLoading: !!d._destroyInProgress,
         error: d._destroyError ? new Error(d._destroyError.message) : null
       });
     };
-    l();
-    const c = s.subscribe(l);
-    return () => c.unsubscribe();
+    c();
+    const l = s.subscribe(c);
+    return () => l.unsubscribe();
   }, [e]);
   const o = x(async (s) => {
     s && (t(s), await s.destroy());
@@ -1109,9 +1132,9 @@ const Sr = () => {
   };
 };
 G("seedSdk:browser:react:modelProperty");
-const Fr = (e, t) => {
-  const { model: r } = _t(e, t);
-  F(() => {
+const Rr = (e, t) => {
+  const { model: r } = Rt(e, t);
+  N(() => {
     if (r)
       try {
         return r.modelName ?? r.name;
@@ -1119,155 +1142,155 @@ const Fr = (e, t) => {
         return;
       }
   }, [r]);
-  const n = q(), o = X(), a = F(() => {
+  const n = Q(), o = Z(), a = N(() => {
     if (!r) return null;
     try {
       return r._getSnapshotContext()._dbId;
     } catch {
       return null;
     }
-  }, [r]), s = r?.id, l = F(
+  }, [r]), s = r?.id, c = N(
     () => ["seed", "modelProperties", s ?? ""],
     [s]
   ), {
-    data: c = [],
+    data: l = [],
     isLoading: i,
     error: d
-  } = Z({
-    queryKey: l,
-    queryFn: () => fe.all(s, { waitForReady: !0 }),
+  } = ee({
+    queryKey: c,
+    queryFn: () => ye.all(s, { waitForReady: !0 }),
     enabled: n && !!s
-  }), u = n ? W.getAppDb() : null, f = F(() => !u || !a ? null : u.select({
-    id: ee.id,
-    name: ee.name,
-    dataType: ee.dataType,
-    schemaFileId: ee.schemaFileId
-  }).from(ee).where(U(ee.modelId, a)), [u, n, a]), g = ie(f), v = D([]);
-  v.current = c, I(() => {
-    if (!s || c.length > 0 || !o || !l) return;
+  }), u = n ? j.getAppDb() : null, f = N(() => !u || !a ? null : u.select({
+    id: te.id,
+    name: te.name,
+    dataType: te.dataType,
+    schemaFileId: te.schemaFileId
+  }).from(te).where(q(te.modelId, a)), [u, n, a]), b = Y(f), v = C([]);
+  v.current = l, w(() => {
+    if (!s || l.length > 0 || !o || !c) return;
     const p = [400, 1200, 2500].map(
       (E) => setTimeout(() => {
-        o.invalidateQueries({ queryKey: l });
+        o.invalidateQueries({ queryKey: c });
       }, E)
     );
     return () => p.forEach((E) => clearTimeout(E));
-  }, [s, c.length, o, l]), I(() => {
-    if (!n || !r?.id || !g || !l) return;
+  }, [s, l.length, o, c]), w(() => {
+    if (!n || !r?.id || !b || !c) return;
     const y = /* @__PURE__ */ new Set();
     for (const m of v.current) {
-      const H = m._getSnapshotContext()?.id;
-      H ? y.add(H) : m.name && y.add(m.name);
+      const R = m._getSnapshotContext()?.id;
+      R ? y.add(R) : m.name && y.add(m.name);
     }
     const p = /* @__PURE__ */ new Set();
-    for (const m of g)
+    for (const m of b)
       m.schemaFileId ? p.add(m.schemaFileId) : m.name && p.add(m.name);
-    !(y.size === p.size && (y.size === 0 || [...y].every((m) => p.has(m)))) && (y.size > 0 || p.size > 0) && o.invalidateQueries({ queryKey: l });
-  }, [n, g, r?.id, o, l]);
-  const b = i && c.length === 0;
+    !(y.size === p.size && (y.size === 0 || [...y].every((m) => p.has(m)))) && (y.size > 0 || p.size > 0) && o.invalidateQueries({ queryKey: c });
+  }, [n, b, r?.id, o, c]);
+  const h = i && l.length === 0;
   return {
-    modelProperties: c,
-    isLoading: b,
+    modelProperties: l,
+    isLoading: h,
     error: d
   };
-}, Dt = async (e, t) => {
-  const r = await oe.createById(e);
+}, Pt = async (e, t) => {
+  const r = await ae.createById(e);
   if (!r)
     return;
   const n = r.modelName ?? r.name;
   if (n)
-    return Ue(n, t);
+    return ze(n, t);
 };
-function _r(e, t, r) {
-  const n = F(() => r != null ? !!(e && t && r) : t != null ? !!(e && t) : !!e, [e, t, r]), [o, a] = S(void 0), [s, l] = S(n), [c, i] = S(null), d = D(void 0), u = q(), f = F(() => r != null ? { type: "schemaId", schemaId: e, modelName: t, propertyName: r } : t != null ? { type: "modelFileId", modelFileId: e, propertyName: t } : { type: "propertyFileId", propertyFileId: e }, [e, t, r]), g = F(() => u ? f.type === "propertyFileId" ? !!f.propertyFileId : f.type === "modelFileId" ? !!(f.modelFileId && f.propertyName) : !!(f.schemaId && f.modelName && f.propertyName) : !1, [u, f]), v = x(async () => {
+function Pr(e, t, r) {
+  const n = N(() => r != null ? !!(e && t && r) : t != null ? !!(e && t) : !!e, [e, t, r]), [o, a] = S(void 0), [s, c] = S(n), [l, i] = S(null), d = C(void 0), u = Q(), f = N(() => r != null ? { type: "schemaId", schemaId: e, modelName: t, propertyName: r } : t != null ? { type: "modelFileId", modelFileId: e, propertyName: t } : { type: "propertyFileId", propertyFileId: e }, [e, t, r]), b = N(() => u ? f.type === "propertyFileId" ? !!f.propertyFileId : f.type === "modelFileId" ? !!(f.modelFileId && f.propertyName) : !!(f.schemaId && f.modelName && f.propertyName) : !1, [u, f]), v = x(async () => {
     if (!u) {
-      a(void 0), l(!1), i(null);
+      a(void 0), c(!1), i(null);
       return;
     }
     let y, p;
     try {
-      if (l(!0), i(null), f.type === "propertyFileId") {
+      if (c(!0), i(null), f.type === "propertyFileId") {
         if (!f.propertyFileId) {
-          a(void 0), l(!1), i(null);
+          a(void 0), c(!1), i(null);
           return;
         }
-        const E = await fe.createById(f.propertyFileId);
-        E ? (a(E), l(!1), i(null)) : (a(void 0), l(!1), i(null));
+        const E = await ye.createById(f.propertyFileId);
+        E ? (a(E), c(!1), i(null)) : (a(void 0), c(!1), i(null));
         return;
       } else if (f.type === "modelFileId") {
         if (!f.modelFileId || !f.propertyName) {
-          a(void 0), l(!1), i(null);
+          a(void 0), c(!1), i(null);
           return;
         }
-        y = await Dt(f.modelFileId, f.propertyName);
-        const E = await oe.createById(f.modelFileId);
+        y = await Pt(f.modelFileId, f.propertyName);
+        const E = await ae.createById(f.modelFileId);
         p = E?.modelName ?? E?.name;
       } else {
         if (!f.schemaId || !f.modelName || !f.propertyName) {
-          a(void 0), l(!1), i(null);
+          a(void 0), c(!1), i(null);
           return;
         }
-        y = await Ue(f.modelName, f.propertyName), p = f.modelName;
+        y = await ze(f.modelName, f.propertyName), p = f.modelName;
       }
       if (y && p) {
-        const E = fe.create(
+        const E = ye.create(
           { ...y, modelName: p },
           { waitForReady: !1 }
-        ), w = E instanceof Promise ? await E : E;
-        de(() => {
-          a(w), l(!1), i(null);
+        ), I = E instanceof Promise ? await E : E;
+        ue(() => {
+          a(I), c(!1), i(null);
         });
       } else
-        a(void 0), l(!1), i(null);
+        a(void 0), c(!1), i(null);
     } catch (E) {
-      console.error("[useModelProperty] Error updating model property:", E), a(void 0), l(!1), i(E);
+      console.error("[useModelProperty] Error updating model property:", E), a(void 0), c(!1), i(E);
     }
   }, [u, f.type, f.propertyFileId, f.modelFileId, f.propertyName, f.schemaId, f.modelName]);
-  I(() => {
-    if (!g) {
-      a(void 0), l(!1), i(null);
+  w(() => {
+    if (!b) {
+      a(void 0), c(!1), i(null);
       return;
     }
     v();
-  }, [g, v]);
-  const b = f.type === "propertyFileId";
-  return I(() => {
-    if (!o || !b)
+  }, [b, v]);
+  const h = f.type === "propertyFileId";
+  return w(() => {
+    if (!o || !h)
       return;
     d.current?.unsubscribe();
-    const y = ze(v, 100), p = o.getService().subscribe(() => {
+    const y = He(v, 100), p = o.getService().subscribe(() => {
       y();
     });
     return d.current = p, () => {
       y.cancel(), d.current?.unsubscribe(), d.current = void 0;
     };
-  }, [o, v, b]), {
+  }, [o, v, h]), {
     modelProperty: o,
     isLoading: s,
-    error: c
+    error: l
   };
 }
-const Dr = () => {
-  const e = D(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x(
-    (l, c, i) => {
-      if (o(null), r(!0), e.current?.unsubscribe(), e.current = void 0, !c || !i.name || !i.dataType) {
-        const g = new Error("modelName, property name and dataType are required");
-        throw o(g), r(!1), g;
+const Tr = () => {
+  const e = C(void 0), [t, r] = S(!1), [n, o] = S(null), a = x(() => o(null), []), s = x(
+    (c, l, i) => {
+      if (o(null), r(!0), e.current?.unsubscribe(), e.current = void 0, !l || !i.name || !i.dataType) {
+        const b = new Error("modelName, property name and dataType are required");
+        throw o(b), r(!1), b;
       }
-      const d = it(l) ?? l, u = fe.create(
-        { ...i, modelName: c },
+      const d = dt(c) ?? c, u = ye.create(
+        { ...i, modelName: l },
         { waitForReady: !1, schemaName: d }
-      ), f = u.getService().subscribe((g) => {
-        if (g.value === "error") {
-          const v = g.context._loadingError?.error ?? new Error("Failed to create model property");
+      ), f = u.getService().subscribe((b) => {
+        if (b.value === "error") {
+          const v = b.context._loadingError?.error ?? new Error("Failed to create model property");
           o(v instanceof Error ? v : new Error(String(v))), r(!1);
         }
-        g.value === "idle" && (o(null), r(!1));
+        b.value === "idle" && (o(null), r(!1));
       });
       return e.current = f, u;
     },
     []
   );
-  return I(() => () => {
+  return w(() => () => {
     e.current?.unsubscribe(), e.current = void 0;
   }, []), {
     create: s,
@@ -1275,26 +1298,26 @@ const Dr = () => {
     error: n,
     resetError: a
   };
-}, Cr = () => {
+}, Mr = () => {
   const [e, t] = S(null), [r, n] = S({
     isLoading: !1,
     error: null
   });
-  I(() => {
+  w(() => {
     if (!e) {
       n({ isLoading: !1, error: null });
       return;
     }
-    const s = e.getService(), l = () => {
+    const s = e.getService(), c = () => {
       const d = s.getSnapshot().context;
       n({
         isLoading: !!d._destroyInProgress,
         error: d._destroyError ? new Error(d._destroyError.message) : null
       });
     };
-    l();
-    const c = s.subscribe(l);
-    return () => c.unsubscribe();
+    c();
+    const l = s.subscribe(c);
+    return () => l.unsubscribe();
   }, [e]);
   const o = x(async (s) => {
     s && (t(s), await s.destroy());
@@ -1307,26 +1330,26 @@ const Dr = () => {
     error: r.error,
     resetError: a
   };
-}, Rr = () => {
+}, kr = () => {
   const [e, t] = S(null), [r, n] = S({
     isLoading: !1,
     error: null
   });
-  I(() => {
+  w(() => {
     if (!e) {
       n({ isLoading: !1, error: null });
       return;
     }
-    const s = e.getService(), l = () => {
+    const s = e.getService(), c = () => {
       const d = s.getSnapshot().context;
       n({
         isLoading: !!d._destroyInProgress,
         error: d._destroyError ? new Error(d._destroyError.message) : null
       });
     };
-    l();
-    const c = s.subscribe(l);
-    return () => c.unsubscribe();
+    c();
+    const l = s.subscribe(c);
+    return () => l.unsubscribe();
   }, [e]);
   const o = x(async (s) => {
     s && (t(s), await s.destroy());
@@ -1339,26 +1362,26 @@ const Dr = () => {
     error: r.error,
     resetError: a
   };
-}, Se = ["seed", "imageFiles"];
-function Pr() {
-  const e = q(), t = X(), {
+}, Ie = ["seed", "imageFiles"];
+function $r() {
+  const e = Q(), t = Z(), {
     data: r = [],
     isLoading: n,
     error: o,
     refetch: a
-  } = Z({
-    queryKey: Se,
-    queryFn: () => j.listImageFiles(),
+  } = ee({
+    queryKey: Ie,
+    queryFn: () => W.listImageFiles(),
     enabled: e
   });
-  return I(() => {
-    const s = (c) => {
-      c.includes("/images/") && t.invalidateQueries({ queryKey: Se });
-    }, l = () => {
-      t.invalidateQueries({ queryKey: Se });
+  return w(() => {
+    const s = (l) => {
+      l.includes("/images/") && t.invalidateQueries({ queryKey: Ie });
+    }, c = () => {
+      t.invalidateQueries({ queryKey: Ie });
     };
-    return K.on("file-saved", s), K.on("fs.downloadAll.success", l), () => {
-      K.off("file-saved", s), K.off("fs.downloadAll.success", l);
+    return z.on("file-saved", s), z.on("fs.downloadAll.success", c), () => {
+      z.off("file-saved", s), z.off("fs.downloadAll.success", c);
     };
   }, [t]), {
     imageFiles: r,
@@ -1367,35 +1390,63 @@ function Pr() {
     refetch: a
   };
 }
-const Ct = ["seed", "files"];
-function Mr(e = "files") {
-  const t = q(), r = X(), n = F(() => [...Ct, e], [e]), {
+const Tt = ["seed", "files"];
+function Br(e = "files") {
+  const t = Q(), r = Z(), n = N(() => [...Tt, e], [e]), {
     data: o = [],
     isLoading: a,
     error: s,
-    refetch: l
-  } = Z({
+    refetch: c
+  } = ee({
     queryKey: n,
-    queryFn: () => j.listFiles(e),
+    queryFn: () => W.listFiles(e),
     enabled: t
   });
-  return I(() => {
-    const c = (d) => {
+  return w(() => {
+    const l = (d) => {
       d.includes(`/${e}/`) && r.invalidateQueries({ queryKey: n });
     }, i = () => {
       r.invalidateQueries({ queryKey: n });
     };
-    return K.on("file-saved", c), K.on("fs.downloadAll.success", i), () => {
-      K.off("file-saved", c), K.off("fs.downloadAll.success", i);
+    return z.on("file-saved", l), z.on("fs.downloadAll.success", i), () => {
+      z.off("file-saved", l), z.off("fs.downloadAll.success", i);
     };
   }, [r, e, n]), {
     files: o,
     isLoading: a,
     error: s instanceof Error ? s : null,
-    refetch: l
+    refetch: c
   };
 }
-const Rt = {
+function Ye() {
+  const e = j.getAppDb();
+  return N(
+    () => e ? e.select().from(pe).orderBy(Ve(pe.startedAt)) : null,
+    [e]
+  );
+}
+function Mt() {
+  const e = Ye(), t = Y(e), r = N(
+    () => t === void 0 ? void 0 : t.filter((n) => n.status !== "in_progress").length,
+    [t]
+  );
+  return { records: t, nonActiveCount: r };
+}
+function Or() {
+  const e = Ye();
+  return Y(e);
+}
+function Ur() {
+  return Mt().nonActiveCount;
+}
+function qr(e) {
+  const t = j.getAppDb(), r = N(
+    () => e != null && t ? t.select().from(pe).where(q(pe.id, e)).limit(1) : null,
+    [t, e]
+  ), n = Y(r), o = n === void 0;
+  return { record: n && n.length > 0 ? n[0] : null, isLoading: o };
+}
+const kt = {
   queries: {
     networkMode: "offlineFirst",
     gcTime: 1e3 * 60 * 60 * 24,
@@ -1404,11 +1455,11 @@ const Rt = {
     // 1 minute - list data can be slightly stale
   }
 };
-function We() {
-  return { ...Rt };
+function Xe() {
+  return { ...kt };
 }
-function Pt(e) {
-  const t = We();
+function $t(e) {
+  const t = Xe();
   return e ? {
     queries: {
       ...t.queries,
@@ -1420,38 +1471,40 @@ function Pt(e) {
     }
   } : t;
 }
-function Mt(e) {
-  const t = We(), { defaultOptions: r, ...n } = e ?? {};
-  return new mt({
+function Bt(e) {
+  const t = Xe(), { defaultOptions: r, ...n } = e ?? {};
+  return new bt({
     ...n,
-    defaultOptions: r ? Pt(r) : t
+    defaultOptions: r ? $t(r) : t
   });
 }
-let Ne = null;
-function Tr(e) {
-  const t = Ne?.(e);
+let _e = null;
+function zr(e) {
+  const t = _e?.(e);
   return typeof window < "u" && window.__SEED_INVALIDATE_ITEM_PROPERTIES__ && window.__SEED_INVALIDATE_ITEM_PROPERTIES__(e), Promise.resolve(t).then(() => {
   });
 }
-function Tt({ queryClient: e }) {
-  return I(() => {
-    const t = (n) => {
-      const o = ["seed", "itemProperties", n];
-      return e.invalidateQueries({ queryKey: o }), e.refetchQueries({ queryKey: o });
+function Ot({ queryClient: e }) {
+  return w(() => {
+    const t = (o) => {
+      const a = ["seed", "itemProperties", o];
+      return e.invalidateQueries({ queryKey: a }), e.refetchQueries({ queryKey: a });
     };
-    Ne = t, typeof window < "u" && (window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = t);
-    const r = (n) => {
-      const o = n?.seedLocalId ?? n?.seedUid;
-      o && t(o);
+    _e = t, typeof window < "u" && (window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = t);
+    const r = (o) => {
+      const a = o?.seedLocalId ?? o?.seedUid;
+      a && t(a);
+    }, n = () => {
+      e.invalidateQueries({ queryKey: ["seed", "items"], exact: !1 });
     };
-    return K.on("itemProperty.saved", r), () => {
-      K.off("itemProperty.saved", r), Ne = null, typeof window < "u" && (window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = null);
+    return z.on("itemProperty.saved", r), z.on(ne, n), () => {
+      z.off("itemProperty.saved", r), z.off(ne, n), _e = null, typeof window < "u" && (window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = null);
     };
   }, [e]), null;
 }
-function kr({ children: e, queryClient: t, queryClientRef: r }) {
-  const n = F(
-    () => t ?? Mt(),
+function Hr({ children: e, queryClient: t, queryClientRef: r }) {
+  const n = N(
+    () => t ?? Bt(),
     [t]
   );
   if (r && (r.current = n, typeof window < "u")) {
@@ -1462,13 +1515,13 @@ function kr({ children: e, queryClient: t, queryClientRef: r }) {
     } catch {
     }
   }
-  return /* @__PURE__ */ h(ht, { client: n, children: /* @__PURE__ */ O(bt, { queryClient: n, children: [
-    /* @__PURE__ */ h(Tt, { queryClient: n }),
+  return /* @__PURE__ */ g(St, { client: n, children: /* @__PURE__ */ U(wt, { queryClient: n, children: [
+    /* @__PURE__ */ g(Ot, { queryClient: n }),
     e
   ] }) });
 }
-function kt() {
-  return /* @__PURE__ */ h(
+function Ut() {
+  return /* @__PURE__ */ g(
     "div",
     {
       style: {
@@ -1482,7 +1535,7 @@ function kt() {
     }
   );
 }
-function $r({
+function Qr({
   initConfig: e,
   schema: t,
   loadingComponent: r,
@@ -1490,8 +1543,8 @@ function $r({
   loadingClassName: o,
   children: a
 }) {
-  const s = q();
-  I(() => {
+  const s = Q();
+  w(() => {
     const u = t ? {
       ...e,
       config: {
@@ -1499,9 +1552,9 @@ function $r({
         schema: t
       }
     } : e;
-    at.init(u);
+    ut.init(u);
   }, [e, t]);
-  const l = r ?? /* @__PURE__ */ h(kt, {}), c = n ? void 0 : { position: "relative", display: "flex", height: "100vh", width: "100vw" }, i = {
+  const c = r ?? /* @__PURE__ */ g(Ut, {}), l = n ? void 0 : { position: "relative", display: "flex", height: "100vh", width: "100vw" }, i = {
     display: s ? "none" : "flex",
     ...!o && {
       position: "absolute",
@@ -1511,24 +1564,24 @@ function $r({
       justifyContent: "center"
     }
   };
-  return /* @__PURE__ */ O("div", { className: n, style: c, children: [
-    /* @__PURE__ */ h(
+  return /* @__PURE__ */ U("div", { className: n, style: l, children: [
+    /* @__PURE__ */ g(
       "div",
       {
         className: o,
         style: i,
         "aria-hidden": s,
-        children: l
+        children: c
       }
     ),
-    /* @__PURE__ */ h("div", { style: {
+    /* @__PURE__ */ g("div", { style: {
       flex: 1,
       display: s ? "flex" : "none",
       flexDirection: "column"
     }, children: a })
   ] });
 }
-async function Je(e, t = "") {
+async function Ze(e, t = "") {
   const r = [];
   try {
     for await (const [n, o] of e.entries()) {
@@ -1547,7 +1600,7 @@ async function Je(e, t = "") {
           console.warn(`Failed to read file ${a}:`, s);
         }
       else if (o.kind === "directory") {
-        const s = await Je(o, a);
+        const s = await Ze(o, a);
         r.push(...s);
       }
     }
@@ -1556,31 +1609,31 @@ async function Je(e, t = "") {
   }
   return r;
 }
-function $t(e = {}) {
-  const { rootPath: t } = e, [r, n] = S([]), [o, a] = S(!0), [s, l] = S(null), c = x(async () => {
-    a(!0), l(null);
+function qt(e = {}) {
+  const { rootPath: t } = e, [r, n] = S([]), [o, a] = S(!0), [s, c] = S(null), l = x(async () => {
+    a(!0), c(null);
     try {
       let d = await navigator.storage.getDirectory();
       if (t) {
         const f = t.split("/").filter(Boolean);
-        for (const g of f)
-          d = await d.getDirectoryHandle(g);
+        for (const b of f)
+          d = await d.getDirectoryHandle(b);
       }
-      const u = await Je(d, t || "");
-      n(u.sort((f, g) => f.path.localeCompare(g.path)));
+      const u = await Ze(d, t || "");
+      n(u.sort((f, b) => f.path.localeCompare(b.path)));
     } catch (i) {
-      l(
+      c(
         "Failed to access OPFS: " + (i instanceof Error ? i.message : String(i))
       ), console.error("OPFS access error:", i);
     } finally {
       a(!1);
     }
   }, [t]);
-  return I(() => {
-    c();
-  }, [c]), { files: r, isLoading: o, error: s, refetch: c };
+  return w(() => {
+    l();
+  }, [l]), { files: r, isLoading: o, error: s, refetch: l };
 }
-const ke = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ h("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" }) }), Bt = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 48, height: 48 }, children: /* @__PURE__ */ h("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M2.25 12.75V12a2.25 2.25 0 012.25-2.25h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" }) }), Ot = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ h("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" }) }), $e = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ h("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" }) }), Ut = () => /* @__PURE__ */ O(
+const Be = () => /* @__PURE__ */ g("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ g("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" }) }), zt = () => /* @__PURE__ */ g("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 48, height: 48 }, children: /* @__PURE__ */ g("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M2.25 12.75V12a2.25 2.25 0 012.25-2.25h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" }) }), Ht = () => /* @__PURE__ */ g("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ g("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" }) }), Oe = () => /* @__PURE__ */ g("svg", { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", style: { width: 20, height: 20 }, children: /* @__PURE__ */ g("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" }) }), Qt = () => /* @__PURE__ */ U(
   "svg",
   {
     xmlns: "http://www.w3.org/2000/svg",
@@ -1589,7 +1642,7 @@ const ke = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg",
     style: { width: 32, height: 32 },
     "aria-hidden": !0,
     children: [
-      /* @__PURE__ */ h(
+      /* @__PURE__ */ g(
         "circle",
         {
           style: { opacity: 0.25 },
@@ -1600,7 +1653,7 @@ const ke = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg",
           strokeWidth: "4"
         }
       ),
-      /* @__PURE__ */ h(
+      /* @__PURE__ */ g(
         "path",
         {
           style: { opacity: 0.75 },
@@ -1611,24 +1664,24 @@ const ke = () => /* @__PURE__ */ h("svg", { xmlns: "http://www.w3.org/2000/svg",
     ]
   }
 );
-function zt(e) {
+function Vt(e) {
   if (e === 0) return "0 Bytes";
   const t = 1024, r = ["Bytes", "KB", "MB", "GB"], n = Math.floor(Math.log(e) / Math.log(t));
   return Math.round(e / Math.pow(t, n) * 100) / 100 + " " + r[n];
 }
-function qt(e) {
+function Kt(e) {
   return new Date(e).toLocaleString();
 }
-async function Ht(e, t) {
+async function jt(e, t) {
   const r = e.path.split("/").filter(Boolean);
   if (r.length === 0) throw new Error("Invalid file path");
   let n = t;
-  for (let l = 0; l < r.length - 1; l++)
-    n = await n.getDirectoryHandle(r[l]);
+  for (let c = 0; c < r.length - 1; c++)
+    n = await n.getDirectoryHandle(r[c]);
   const o = r[r.length - 1];
   return await (await n.getFileHandle(o)).getFile();
 }
-async function Be(e, t) {
+async function Ue(e, t) {
   const r = e.split("/").filter(Boolean);
   if (r.length === 0) throw new Error("Invalid file path");
   let n = t;
@@ -1637,7 +1690,7 @@ async function Be(e, t) {
   const o = r[r.length - 1];
   await n.removeEntry(o);
 }
-const Qt = {
+const Wt = {
   light: {
     title: "text-gray-900",
     description: "text-gray-500",
@@ -1682,7 +1735,7 @@ const Qt = {
     actionButton: "text-gray-400 hover:text-indigo-400",
     deleteButton: "text-gray-400 hover:text-red-500"
   }
-}, R = {
+}, T = {
   container: { padding: "2rem 0" },
   header: {
     display: "flex",
@@ -1701,7 +1754,7 @@ const Qt = {
   errorBox: "rounded-md border p-4 mt-4",
   emptyState: "text-center py-12"
 };
-function Br({
+function Vr({
   rootPath: e,
   filter: t,
   onBeforeDelete: r,
@@ -1709,110 +1762,110 @@ function Br({
   onDownload: o,
   title: a = "Files",
   description: s = "Browse and download all files stored in the Origin Private File System (OPFS).",
-  theme: l = "dark",
-  className: c
+  theme: c = "dark",
+  className: l
 }) {
-  const i = Qt[l], { files: d, isLoading: u, error: f, refetch: g } = $t({ rootPath: e }), v = t ? d.filter(t) : d, [b, y] = S(/* @__PURE__ */ new Set()), p = D(null), E = v.length > 0 && b.size === v.length, w = b.size > 0 && b.size < v.length, m = (L) => {
-    y((k) => {
-      const _ = new Set(k);
-      return _.has(L) ? _.delete(L) : _.add(L), _;
+  const i = Wt[c], { files: d, isLoading: u, error: f, refetch: b } = qt({ rootPath: e }), v = t ? d.filter(t) : d, [h, y] = S(/* @__PURE__ */ new Set()), p = C(null), E = v.length > 0 && h.size === v.length, I = h.size > 0 && h.size < v.length, m = (L) => {
+    y(($) => {
+      const F = new Set($);
+      return F.has(L) ? F.delete(L) : F.add(L), F;
     });
-  }, P = () => {
+  }, _ = () => {
     y(
-      b.size === v.length ? /* @__PURE__ */ new Set() : new Set(v.map((L) => L.path))
+      h.size === v.length ? /* @__PURE__ */ new Set() : new Set(v.map((L) => L.path))
     );
   };
-  I(() => {
+  w(() => {
     y(/* @__PURE__ */ new Set());
-  }, [v.length]), I(() => {
-    p.current && (p.current.indeterminate = w);
-  }, [w]);
-  const H = async (L, k = !1) => {
+  }, [v.length]), w(() => {
+    p.current && (p.current.indeterminate = I);
+  }, [I]);
+  const R = async (L, $ = !1) => {
     try {
-      const _ = await navigator.storage.getDirectory(), z = await Ht(L, _);
+      const F = await navigator.storage.getDirectory(), H = await jt(L, F);
       if (o)
-        await o(L, z);
+        await o(L, H);
       else {
-        const V = URL.createObjectURL(z), M = document.createElement("a");
-        M.href = V, M.download = L.name, document.body.appendChild(M), M.click(), document.body.removeChild(M), URL.revokeObjectURL(V);
+        const K = URL.createObjectURL(H), M = document.createElement("a");
+        M.href = K, M.download = L.name, document.body.appendChild(M), M.click(), document.body.removeChild(M), URL.revokeObjectURL(K);
       }
-    } catch (_) {
-      const z = "Failed to download file: " + (_ instanceof Error ? _.message : String(_));
-      throw k || alert(z), _;
+    } catch (F) {
+      const H = "Failed to download file: " + (F instanceof Error ? F.message : String(F));
+      throw $ || alert(H), F;
     }
-  }, N = async (L) => {
+  }, A = async (L) => {
     if (!(r && !await r(L)) && confirm(`Are you sure you want to delete "${L.name}"? This action cannot be undone.`))
       try {
-        const k = await navigator.storage.getDirectory();
-        await Be(L.path, k), await g(), await n?.([L.path]);
-      } catch (k) {
-        alert("Failed to delete file: " + (k instanceof Error ? k.message : String(k)));
+        const $ = await navigator.storage.getDirectory();
+        await Ue(L.path, $), await b(), await n?.([L.path]);
+      } catch ($) {
+        alert("Failed to delete file: " + ($ instanceof Error ? $.message : String($)));
       }
-  }, $ = async () => {
-    if (b.size === 0) return;
-    const L = v.filter((_) => b.has(_.path)), k = [];
-    for (const _ of L)
+  }, B = async () => {
+    if (h.size === 0) return;
+    const L = v.filter((F) => h.has(F.path)), $ = [];
+    for (const F of L)
       try {
-        await H(_, !0), await new Promise((z) => setTimeout(z, 100));
-      } catch (z) {
-        k.push(`${_.name}: ${z instanceof Error ? z.message : String(z)}`);
+        await R(F, !0), await new Promise((H) => setTimeout(H, 100));
+      } catch (H) {
+        $.push(`${F.name}: ${H instanceof Error ? H.message : String(H)}`);
       }
-    k.length > 0 && alert(`Some downloads failed:
-${k.join(`
+    $.length > 0 && alert(`Some downloads failed:
+${$.join(`
 `)}`);
-  }, Q = async () => {
-    if (b.size === 0) return;
-    const L = v.filter((M) => b.has(M.path)), k = L.map((M) => M.name).join(", ");
+  }, V = async () => {
+    if (h.size === 0) return;
+    const L = v.filter((M) => h.has(M.path)), $ = L.map((M) => M.name).join(", ");
     if (!confirm(
-      `Are you sure you want to delete ${b.size} file(s)?
+      `Are you sure you want to delete ${h.size} file(s)?
 
-Files: ${k}
+Files: ${$}
 
 This action cannot be undone.`
     ))
       return;
-    const _ = await navigator.storage.getDirectory(), z = [], V = [];
+    const F = await navigator.storage.getDirectory(), H = [], K = [];
     for (const M of L)
       if (!(r && !await r(M)))
         try {
-          await Be(M.path, _), z.push(M.path);
+          await Ue(M.path, F), H.push(M.path);
         } catch (J) {
-          V.push(`${M.name}: ${J instanceof Error ? J.message : String(J)}`);
+          K.push(`${M.name}: ${J instanceof Error ? J.message : String(J)}`);
         }
-    y(/* @__PURE__ */ new Set()), await g(), z.length > 0 && await n?.(z), V.length > 0 && alert(`Some deletions failed:
-${V.join(`
+    y(/* @__PURE__ */ new Set()), await b(), H.length > 0 && await n?.(H), K.length > 0 && alert(`Some deletions failed:
+${K.join(`
 `)}`);
   };
-  return /* @__PURE__ */ O("div", { className: c, style: R.container, children: [
-    /* @__PURE__ */ h("style", { children: "@keyframes opfs-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}" }),
-    /* @__PURE__ */ O("div", { style: R.header, children: [
-      /* @__PURE__ */ O("div", { style: { flex: 1, minWidth: 0 }, children: [
-        /* @__PURE__ */ h("h1", { style: R.title, className: i.title, children: a }),
-        /* @__PURE__ */ h("p", { style: R.description, className: i.description, children: s })
+  return /* @__PURE__ */ U("div", { className: l, style: T.container, children: [
+    /* @__PURE__ */ g("style", { children: "@keyframes opfs-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}" }),
+    /* @__PURE__ */ U("div", { style: T.header, children: [
+      /* @__PURE__ */ U("div", { style: { flex: 1, minWidth: 0 }, children: [
+        /* @__PURE__ */ g("h1", { style: T.title, className: i.title, children: a }),
+        /* @__PURE__ */ g("p", { style: T.description, className: i.description, children: s })
       ] }),
-      /* @__PURE__ */ h("button", { type: "button", onClick: g, className: R.button, children: "Refresh" })
+      /* @__PURE__ */ g("button", { type: "button", onClick: b, className: T.button, children: "Refresh" })
     ] }),
-    b.size > 0 && /* @__PURE__ */ O(
+    h.size > 0 && /* @__PURE__ */ U(
       "div",
       {
         className: `mt-4 flex items-center justify-between rounded-lg border px-4 py-3 ${i.batchBar}`,
         children: [
-          /* @__PURE__ */ O("span", { className: `text-sm font-medium ${i.batchText}`, children: [
-            b.size,
+          /* @__PURE__ */ U("span", { className: `text-sm font-medium ${i.batchText}`, children: [
+            h.size,
             " file",
-            b.size === 1 ? "" : "s",
+            h.size === 1 ? "" : "s",
             " selected"
           ] }),
-          /* @__PURE__ */ O("div", { className: "flex items-center gap-3", children: [
-            /* @__PURE__ */ h("button", { onClick: $, className: R.button, children: /* @__PURE__ */ O("span", { className: "inline-flex items-center gap-2", children: [
-              /* @__PURE__ */ h(ke, {}),
+          /* @__PURE__ */ U("div", { className: "flex items-center gap-3", children: [
+            /* @__PURE__ */ g("button", { onClick: B, className: T.button, children: /* @__PURE__ */ U("span", { className: "inline-flex items-center gap-2", children: [
+              /* @__PURE__ */ g(Be, {}),
               " Download All"
             ] }) }),
-            /* @__PURE__ */ h("button", { onClick: Q, className: R.buttonDanger, children: /* @__PURE__ */ O("span", { className: "inline-flex items-center gap-2", children: [
-              /* @__PURE__ */ h($e, {}),
+            /* @__PURE__ */ g("button", { onClick: V, className: T.buttonDanger, children: /* @__PURE__ */ U("span", { className: "inline-flex items-center gap-2", children: [
+              /* @__PURE__ */ g(Oe, {}),
               " Delete All"
             ] }) }),
-            /* @__PURE__ */ h(
+            /* @__PURE__ */ g(
               "button",
               {
                 onClick: () => y(/* @__PURE__ */ new Set()),
@@ -1824,78 +1877,78 @@ ${V.join(`
         ]
       }
     ),
-    /* @__PURE__ */ h("div", { className: "mt-8", children: u ? /* @__PURE__ */ O("div", { className: "flex justify-center items-center py-12 gap-3", children: [
-      /* @__PURE__ */ h("span", { style: { animation: "opfs-spin 1s linear infinite" }, children: /* @__PURE__ */ h(Ut, {}) }),
-      /* @__PURE__ */ h("span", { className: i.loadingText, children: "Loading files..." })
-    ] }) : f ? /* @__PURE__ */ O("div", { className: `${R.errorBox} ${i.errorBox}`, children: [
-      /* @__PURE__ */ h("h3", { className: `m-0 text-sm font-medium ${i.errorTitle}`, children: "Error" }),
-      /* @__PURE__ */ h("div", { className: `mt-2 text-sm ${i.errorText}`, children: f })
-    ] }) : v.length === 0 ? /* @__PURE__ */ O("div", { className: R.emptyState, children: [
-      /* @__PURE__ */ h("span", { className: i.emptyIcon, children: /* @__PURE__ */ h(Bt, {}) }),
-      /* @__PURE__ */ h("h3", { className: `mt-2 text-sm font-semibold ${i.emptyTitle}`, children: "No files" }),
-      /* @__PURE__ */ h("p", { className: `mt-1 text-sm ${i.emptyText}`, children: "No files found in OPFS." })
-    ] }) : /* @__PURE__ */ h("div", { className: "overflow-x-auto", children: /* @__PURE__ */ O("table", { className: R.table, children: [
-      /* @__PURE__ */ h("thead", { children: /* @__PURE__ */ O("tr", { className: i.tableBorder, children: [
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} w-10 ${i.tableHeader}`, children: /* @__PURE__ */ h(
+    /* @__PURE__ */ g("div", { className: "mt-8", children: u ? /* @__PURE__ */ U("div", { className: "flex justify-center items-center py-12 gap-3", children: [
+      /* @__PURE__ */ g("span", { style: { animation: "opfs-spin 1s linear infinite" }, children: /* @__PURE__ */ g(Qt, {}) }),
+      /* @__PURE__ */ g("span", { className: i.loadingText, children: "Loading files..." })
+    ] }) : f ? /* @__PURE__ */ U("div", { className: `${T.errorBox} ${i.errorBox}`, children: [
+      /* @__PURE__ */ g("h3", { className: `m-0 text-sm font-medium ${i.errorTitle}`, children: "Error" }),
+      /* @__PURE__ */ g("div", { className: `mt-2 text-sm ${i.errorText}`, children: f })
+    ] }) : v.length === 0 ? /* @__PURE__ */ U("div", { className: T.emptyState, children: [
+      /* @__PURE__ */ g("span", { className: i.emptyIcon, children: /* @__PURE__ */ g(zt, {}) }),
+      /* @__PURE__ */ g("h3", { className: `mt-2 text-sm font-semibold ${i.emptyTitle}`, children: "No files" }),
+      /* @__PURE__ */ g("p", { className: `mt-1 text-sm ${i.emptyText}`, children: "No files found in OPFS." })
+    ] }) : /* @__PURE__ */ g("div", { className: "overflow-x-auto", children: /* @__PURE__ */ U("table", { className: T.table, children: [
+      /* @__PURE__ */ g("thead", { children: /* @__PURE__ */ U("tr", { className: i.tableBorder, children: [
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} w-10 ${i.tableHeader}`, children: /* @__PURE__ */ g(
           "input",
           {
             ref: p,
             type: "checkbox",
             checked: E,
-            onChange: P,
+            onChange: _,
             "aria-label": "Select all"
           }
         ) }),
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} ${i.tableHeader}`, children: "Name" }),
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} ${i.tableHeader}`, children: "Path" }),
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} ${i.tableHeader}`, children: "Size" }),
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} ${i.tableHeader}`, children: "Type" }),
-        /* @__PURE__ */ h("th", { className: `${R.tableHeader} ${i.tableHeader}`, children: "Modified" }),
-        /* @__PURE__ */ h(
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} ${i.tableHeader}`, children: "Name" }),
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} ${i.tableHeader}`, children: "Path" }),
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} ${i.tableHeader}`, children: "Size" }),
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} ${i.tableHeader}`, children: "Type" }),
+        /* @__PURE__ */ g("th", { className: `${T.tableHeader} ${i.tableHeader}`, children: "Modified" }),
+        /* @__PURE__ */ g(
           "th",
           {
-            className: `${R.tableHeader} w-24 ${i.tableHeader}`,
+            className: `${T.tableHeader} w-24 ${i.tableHeader}`,
             "aria-label": "Actions"
           }
         )
       ] }) }),
-      /* @__PURE__ */ h("tbody", { className: `divide-y ${i.tableBorder}`, children: v.map((L) => /* @__PURE__ */ O("tr", { className: i.tableRow, children: [
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCell}`, children: /* @__PURE__ */ h(
+      /* @__PURE__ */ g("tbody", { className: `divide-y ${i.tableBorder}`, children: v.map((L) => /* @__PURE__ */ U("tr", { className: i.tableRow, children: [
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCell}`, children: /* @__PURE__ */ g(
           "input",
           {
             type: "checkbox",
-            checked: b.has(L.path),
+            checked: h.has(L.path),
             onChange: () => m(L.path),
             "aria-label": `Select ${L.name}`
           }
         ) }),
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCell}`, children: /* @__PURE__ */ O("span", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ h(Ot, {}),
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCell}`, children: /* @__PURE__ */ U("span", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ g(Ht, {}),
           L.name
         ] }) }),
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCellMuted}`, children: /* @__PURE__ */ h("code", { className: `text-xs px-2 py-1 rounded border ${i.codeBlock}`, children: L.path }) }),
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCellMuted}`, children: zt(L.size) }),
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCellMuted}`, children: L.type }),
-        /* @__PURE__ */ h("td", { className: `${R.tableCell} ${i.tableCellMuted}`, children: qt(L.lastModified) }),
-        /* @__PURE__ */ h("td", { className: R.tableCell, children: /* @__PURE__ */ O("div", { className: "flex gap-2 justify-end", children: [
-          /* @__PURE__ */ h(
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCellMuted}`, children: /* @__PURE__ */ g("code", { className: `text-xs px-2 py-1 rounded border ${i.codeBlock}`, children: L.path }) }),
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCellMuted}`, children: Vt(L.size) }),
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCellMuted}`, children: L.type }),
+        /* @__PURE__ */ g("td", { className: `${T.tableCell} ${i.tableCellMuted}`, children: Kt(L.lastModified) }),
+        /* @__PURE__ */ g("td", { className: T.tableCell, children: /* @__PURE__ */ U("div", { className: "flex gap-2 justify-end", children: [
+          /* @__PURE__ */ g(
             "button",
             {
               type: "button",
-              onClick: () => H(L),
+              onClick: () => R(L),
               title: "Download",
               className: `p-1.5 rounded cursor-pointer bg-transparent border-0 transition-colors ${i.actionButton}`,
-              children: /* @__PURE__ */ h(ke, {})
+              children: /* @__PURE__ */ g(Be, {})
             }
           ),
-          /* @__PURE__ */ h(
+          /* @__PURE__ */ g(
             "button",
             {
               type: "button",
-              onClick: () => N(L),
+              onClick: () => A(L),
               title: "Delete",
               className: `p-1.5 rounded cursor-pointer bg-transparent border-0 transition-colors ${i.deleteButton}`,
-              children: /* @__PURE__ */ h($e, {})
+              children: /* @__PURE__ */ g(Oe, {})
             }
           )
         ] }) })
@@ -1903,118 +1956,118 @@ ${V.join(`
     ] }) }) })
   ] });
 }
-const we = G("seedSdk:react:SeedImage"), ce = /* @__PURE__ */ new Map(), Ge = (e) => {
+const Ee = G("seedSdk:react:SeedImage"), de = /* @__PURE__ */ new Map(), et = (e) => {
   const t = /^(.*[\/\\])?([^\/\\]+?)(\.[^.\/\\]*)?$/, r = e.match(t);
   return r && r[2] ? r[2] : e;
 };
-function Vt(e) {
+function Jt(e) {
   return e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-function Kt(e, t) {
-  const r = new RegExp(`^${Vt(t)}$`), n = Ge(e);
+function Gt(e, t) {
+  const r = new RegExp(`^${Jt(t)}$`), n = et(e);
   return r.test(n);
 }
-const jt = ({ imageProperty: e, width: t, filename: r, ...n }) => {
-  const [o, a] = S(), [s, l] = S(), { property: c } = Ve({
+const Yt = ({ imageProperty: e, width: t, filename: r, ...n }) => {
+  const [o, a] = S(), [s, c] = S(), { property: l } = We({
     propertyName: e.propertyName,
     seedLocalId: e.seedLocalId,
     seedUid: e.seedUid
-  }), i = e ?? c, d = r ?? i?.refResolvedValue ?? i?.value, u = i?.value, f = typeof u == "string" ? u : d, g = u != null && (u instanceof File || u instanceof Blob), [v, b] = S(null), y = Oe.useRef(null);
-  I(() => {
-    if (g && (u instanceof File || u instanceof Blob))
-      return y.current || (y.current = URL.createObjectURL(u), b(y.current)), () => {
-        y.current && (URL.revokeObjectURL(y.current), y.current = null), b(null);
+  }), i = e ?? l, d = r ?? i?.refResolvedValue ?? i?.value, u = i?.value, f = typeof u == "string" ? u : d, b = u != null && (u instanceof File || u instanceof Blob), [v, h] = S(null), y = qe.useRef(null);
+  w(() => {
+    if (b && (u instanceof File || u instanceof Blob))
+      return y.current || (y.current = URL.createObjectURL(u), h(y.current)), () => {
+        y.current && (URL.revokeObjectURL(y.current), y.current = null), h(null);
       };
-    y.current = null, b(null);
-  }, [g, u]), I(() => {
-    if (!d || u && ((N) => typeof N == "string" && N.startsWith("blob:"))(u) || v) return;
-    let P = !1;
+    y.current = null, h(null);
+  }, [b, u]), w(() => {
+    if (!d || u && ((A) => typeof A == "string" && A.startsWith("blob:"))(u) || v) return;
+    let _ = !1;
     return (async () => {
       try {
-        const N = i?.localStoragePath ? i.localStoragePath : `${j.getFilesPath("images")}/${d}`;
-        if (await j.pathExists(N)) {
-          const Q = await j.getContentUrlFromPath(N);
-          !P && Q && l(Q);
+        const A = i?.localStoragePath ? i.localStoragePath : `${W.getFilesPath("images")}/${d}`;
+        if (await W.pathExists(A)) {
+          const V = await W.getContentUrlFromPath(A);
+          !_ && V && c(V);
         }
-      } catch (N) {
-        we("_getOriginalContentUrl error", N);
+      } catch (A) {
+        Ee("_getOriginalContentUrl error", A);
       }
     })(), () => {
-      P = !0;
+      _ = !0;
     };
-  }, [d, u, v, i?.localStoragePath]), I(() => {
+  }, [d, u, v, i?.localStoragePath]), w(() => {
     if (!t || !d)
       return;
     (async () => {
       try {
-        const P = await j.getFs(), H = i?.localStoragePath ? i.localStoragePath.split("/").slice(0, -1).join("/") : j.getFilesPath("images"), Q = P.readdirSync(H, { withFileTypes: !0 }).filter((B) => B.isDirectory()).map((B) => parseInt(B.name)), L = Q.reduce((B, re) => Math.abs(re - t) < Math.abs(B - t) ? re : B, Q[0]), k = Ge(d), _ = `${k}-${L}`;
-        if (ce.has(_))
+        const _ = await W.getFs(), R = i?.localStoragePath ? i.localStoragePath.split("/").slice(0, -1).join("/") : W.getFilesPath("images"), V = _.readdirSync(R, { withFileTypes: !0 }).filter((O) => O.isDirectory()).map((O) => parseInt(O.name)), L = V.reduce((O, se) => Math.abs(se - t) < Math.abs(O - t) ? se : O, V[0]), $ = et(d), F = `${$}-${L}`;
+        if (de.has(F))
           try {
-            const B = ce.get(_);
-            if (B && (await fetch(B)).ok) {
-              a(B);
+            const O = de.get(F);
+            if (O && (await fetch(O)).ok) {
+              a(O);
               return;
             }
-          } catch (B) {
-            we("error", B), ce.delete(_);
+          } catch (O) {
+            Ee("error", O), de.delete(F);
           }
-        const V = P.readdirSync(`${H}/${L}`, { withFileTypes: !0 }).find((B) => B.name ? Kt(B.name, k) : !1);
-        if (!V)
+        const K = _.readdirSync(`${R}/${L}`, { withFileTypes: !0 }).find((O) => O.name ? Gt(O.name, $) : !1);
+        if (!K)
           return;
-        const M = `${H}/${L}/${V?.name}`;
-        if (await j.pathExists(M)) {
-          const B = await j.getContentUrlFromPath(M);
-          B && (ce.set(_, B), a(B));
+        const M = `${R}/${L}/${K?.name}`;
+        if (await W.pathExists(M)) {
+          const O = await W.getContentUrlFromPath(M);
+          O && (de.set(F, O), a(O));
         }
-      } catch (P) {
-        we("_getSizedContentUrl error", P);
+      } catch (_) {
+        Ee("_getSizedContentUrl error", _);
       }
     })();
   }, [i, t, f, d]);
   const p = (m) => typeof m == "string" && m.startsWith("blob:");
   if (!(!!o || !!s || !!v || !!f && p(f)) && !d)
     return null;
-  const w = o || s || v || (p(f) ? f : void 0) || "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-  return /* @__PURE__ */ h("img", { src: w, alt: n.alt || e.propertyName || "Image", ...n });
-}, Or = Oe.memo(
-  jt,
+  const I = o || s || v || (p(f) ? f : void 0) || "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  return /* @__PURE__ */ g("img", { src: I, alt: n.alt || e.propertyName || "Image", ...n });
+}, Kr = qe.memo(
+  Yt,
   (e, t) => e.imageProperty === t.imageProperty && e.width === t.width && e.filename === t.filename
 );
-function Ye(e) {
-  const { value: t, enabled: r = !0, treatAs: n } = e, [o, a] = S(0), [s, l] = S(null), [c, i] = S(null), [d, u] = S("idle");
-  I(() => {
-    let b = !1;
+function tt(e) {
+  const { value: t, enabled: r = !0, treatAs: n } = e, [o, a] = S(0), [s, c] = S(null), [l, i] = S(null), [d, u] = S("idle");
+  w(() => {
+    let h = !1;
     return (async () => {
       if (!r || t == null || String(t).trim() === "") {
-        b || (l(null), i(null), u("idle"));
+        h || (c(null), i(null), u("idle"));
         return;
       }
-      b || (u("loading"), i(null));
+      h || (u("loading"), i(null));
       try {
-        const p = await lt(String(t), { treatAs: n });
-        if (b) return;
-        l(p), p.status === "empty" ? u("empty") : p.status === "ready" ? u("ready") : u("unresolved");
+        const p = await ft(String(t), { treatAs: n });
+        if (h) return;
+        c(p), p.status === "empty" ? u("empty") : p.status === "ready" ? u("ready") : u("unresolved");
       } catch (p) {
-        if (b) return;
-        i(p instanceof Error ? p : new Error(String(p))), l(null), u("error");
+        if (h) return;
+        i(p instanceof Error ? p : new Error(String(p))), c(null), u("error");
       }
     })(), () => {
-      b = !0;
+      h = !0;
     };
   }, [r, t, n, o]);
   const f = x(() => {
-    a((b) => b + 1);
-  }, []), g = s && s.status === "ready" ? s.href : void 0, v = s && s.status === "ready" ? s.source : void 0;
+    a((h) => h + 1);
+  }, []), b = s && s.status === "ready" ? s.href : void 0, v = s && s.status === "ready" ? s.source : void 0;
   return {
-    href: g,
+    href: b,
     status: d,
     source: v,
-    error: c,
+    error: l,
     result: s,
     refetch: f
   };
 }
-function Ur({
+function jr({
   value: e,
   enabled: t,
   treatAs: r,
@@ -2022,20 +2075,20 @@ function Ur({
   alt: o,
   ...a
 }) {
-  const { href: s } = Ye({ value: e, enabled: t, treatAs: r });
+  const { href: s } = tt({ value: e, enabled: t, treatAs: r });
   if (!s)
     return null;
-  const l = { ...a, src: s, alt: o ?? "" };
-  return n ? /* @__PURE__ */ h(ge, { children: n(l) }) : /* @__PURE__ */ h("img", { ...l });
+  const c = { ...a, src: s, alt: o ?? "" };
+  return n ? /* @__PURE__ */ g(Se, { children: n(c) }) : /* @__PURE__ */ g("img", { ...c });
 }
-function Wt(e) {
+function Xt(e) {
   try {
     return new URL(e).pathname.split("/").filter(Boolean).pop() || "Open";
   } catch {
     return "Open";
   }
 }
-function Jt(e) {
+function Zt(e) {
   try {
     const t = new URL(e).protocol;
     return t === "http:" || t === "https:";
@@ -2043,7 +2096,7 @@ function Jt(e) {
     return !1;
   }
 }
-function zr({
+function Wr({
   value: e,
   enabled: t,
   treatAs: r,
@@ -2051,40 +2104,40 @@ function zr({
   render: o,
   children: a,
   target: s,
-  rel: l,
-  ...c
+  rel: c,
+  ...l
 }) {
-  const { href: i } = Ye({ value: e, enabled: t, treatAs: r });
+  const { href: i } = tt({ value: e, enabled: t, treatAs: r });
   if (!i)
     return null;
-  const d = Jt(i), u = s !== void 0 ? s : d ? "_blank" : void 0, f = {
-    ...c,
+  const d = Zt(i), u = s !== void 0 ? s : d ? "_blank" : void 0, f = {
+    ...l,
     href: i,
     download: n,
     target: u,
-    rel: l ?? (d && u === "_blank" ? "noopener noreferrer" : void 0),
-    children: a ?? Wt(i)
+    rel: c ?? (d && u === "_blank" ? "noopener noreferrer" : void 0),
+    children: a ?? Xt(i)
   };
-  return o ? /* @__PURE__ */ h(ge, { children: o(f) }) : /* @__PURE__ */ h("a", { ...f });
+  return o ? /* @__PURE__ */ g(Se, { children: o(f) }) : /* @__PURE__ */ g("a", { ...f });
 }
-function Gt(e) {
+function er(e) {
   return typeof e == "string" && e.trim().length > 0;
 }
-function qr({
+function Jr({
   html: e,
   sanitize: t,
   render: r,
   ...n
 }) {
-  if (!Gt(e))
+  if (!er(e))
     return null;
   const o = t(e);
-  return r ? /* @__PURE__ */ h(ge, { children: r({ html: o }) }) : /* @__PURE__ */ h("div", { ...n, dangerouslySetInnerHTML: { __html: o } });
+  return r ? /* @__PURE__ */ g(Se, { children: r({ html: o }) }) : /* @__PURE__ */ g("div", { ...n, dangerouslySetInnerHTML: { __html: o } });
 }
-function Ae(e, t) {
+function De(e, t) {
   return e.length <= t ? e : `${e.slice(0, t)}…`;
 }
-function Yt(e) {
+function tr(e) {
   const t = e.trim();
   return t.startsWith("{") && t.endsWith("}") || t.startsWith("[") && t.endsWith("]");
 }
@@ -2098,7 +2151,7 @@ function Fe(e, t, r, n, o) {
   if (e instanceof Date)
     return e.toISOString();
   if (typeof e == "string")
-    return Ae(e, r);
+    return De(e, r);
   if (e === null || typeof e != "object")
     return e;
   if (o.has(e))
@@ -2108,11 +2161,11 @@ function Fe(e, t, r, n, o) {
   if (o.add(e), Array.isArray(e))
     return e.map((s) => Fe(s, t, r, n + 1, o));
   const a = {};
-  for (const [s, l] of Object.entries(e))
-    a[s] = Fe(l, t, r, n + 1, o);
+  for (const [s, c] of Object.entries(e))
+    a[s] = Fe(c, t, r, n + 1, o);
   return a;
 }
-function Xt(e, t) {
+function rr(e, t) {
   const r = t?.maxDepth ?? 6, n = t?.maxStringLength ?? 5e4, o = t?.space ?? 2;
   if (e === void 0)
     return "undefined";
@@ -2120,14 +2173,14 @@ function Xt(e, t) {
     return "null";
   let a = e;
   if (typeof e == "string")
-    if (Yt(e))
+    if (tr(e))
       try {
         a = JSON.parse(e);
       } catch {
-        return Ae(e, n);
+        return De(e, n);
       }
     else
-      return Ae(e, n);
+      return De(e, n);
   const s = Fe(a, r, n, 0, /* @__PURE__ */ new WeakSet());
   try {
     return JSON.stringify(s, null, o);
@@ -2135,75 +2188,79 @@ function Xt(e, t) {
     return "[Unserializable JSON]";
   }
 }
-function Hr({
+function Gr({
   value: e,
   format: t,
   formatOptions: r,
   render: n,
   ...o
 }) {
-  const a = t ? t(e) : Xt(e, r);
-  return n ? /* @__PURE__ */ h(ge, { children: n({ text: a }) }) : /* @__PURE__ */ h("pre", { ...o, children: a });
+  const a = t ? t(e) : rr(e, r);
+  return n ? /* @__PURE__ */ g(Se, { children: n({ text: a }) }) : /* @__PURE__ */ g("pre", { ...o, children: a });
 }
-function Qr(e, t) {
-  return F(() => e ? ct(e, t) : {}, [e, t]);
+function Yr(e, t) {
+  return N(() => e ? yt(e, t) : {}, [e, t]);
 }
 export {
-  Pe as ADDRESSES_PERSISTED_EVENT,
-  Ct as FILES_QUERY_KEY_PREFIX,
-  Br as OPFSFilesManager,
-  $r as SeedClientGate,
-  qr as SeedHtml,
-  Or as SeedImage,
-  Hr as SeedJson,
-  zr as SeedMediaFile,
-  Ur as SeedMediaImage,
-  kr as SeedProvider,
-  Mt as createSeedQueryClient,
-  Xt as formatSeedJson,
-  We as getSeedQueryDefaultOptions,
-  Ke as getServiceName,
-  De as getServiceUniqueKey,
-  Me as getServiceValue,
-  Tr as invalidateItemPropertiesForItem,
-  Pt as mergeSeedQueryDefaults,
-  Lr as useAllSchemaVersions,
-  fr as useCreateItem,
-  hr as useCreateItemProperty,
-  Nr as useCreateModel,
-  Dr as useCreateModelProperty,
-  Ir as useCreateSchema,
-  Sr as useDbsAreReady,
-  yr as useDebouncedItemProperty,
-  Rr as useDeleteItem,
-  gr as useDestroyItemProperty,
-  Ar as useDestroyModel,
-  Cr as useDestroyModelProperty,
-  Er as useDestroySchema,
-  Mr as useFiles,
-  xt as useGlobalServiceStatus,
-  Et as useHasSavedSnapshots,
-  Pr as useImageFiles,
-  It as useIsDbReady,
-  dr as useItem,
-  mr as useItemProperties,
-  Ve as useItemProperty,
-  ur as useItems,
-  ie as useLiveQuery,
-  _t as useModel,
-  Fr as useModelProperties,
-  _r as useModelProperty,
-  Ft as useModels,
-  Qr as useNormalizedFeedItemFields,
-  $t as useOPFSFiles,
-  vr as usePersistedSnapshots,
-  pr as usePublishItem,
-  Ye as useResolvedMediaRef,
-  Nt as useSchema,
-  wr as useSchemas,
-  Qe as useSeedAddressRevision,
-  xr as useSeedProtocolSchema,
-  br as useService,
-  Lt as useServices
+  Me as ADDRESSES_PERSISTED_EVENT,
+  Tt as FILES_QUERY_KEY_PREFIX,
+  Vr as OPFSFilesManager,
+  Qr as SeedClientGate,
+  Jr as SeedHtml,
+  Kr as SeedImage,
+  Gr as SeedJson,
+  Wr as SeedMediaFile,
+  jr as SeedMediaImage,
+  Hr as SeedProvider,
+  Bt as createSeedQueryClient,
+  rr as formatSeedJson,
+  Xe as getSeedQueryDefaultOptions,
+  Je as getServiceName,
+  Re as getServiceUniqueKey,
+  ke as getServiceValue,
+  zr as invalidateItemPropertiesForItem,
+  $t as mergeSeedQueryDefaults,
+  _r as useAllSchemaVersions,
+  hr as useCreateItem,
+  vr as useCreateItemProperty,
+  Fr as useCreateModel,
+  Tr as useCreateModelProperty,
+  xr as useCreateSchema,
+  Lr as useDbsAreReady,
+  br as useDebouncedItemProperty,
+  kr as useDeleteItem,
+  wr as useDestroyItemProperty,
+  Cr as useDestroyModel,
+  Mr as useDestroyModelProperty,
+  Nr as useDestroySchema,
+  qr as useEasSyncProcessById,
+  Or as useEasSyncProcesses,
+  Ur as useEasSyncProcessesNonActiveCount,
+  Mt as useEasSyncProcessesState,
+  Br as useFiles,
+  _t as useGlobalServiceStatus,
+  xt as useHasSavedSnapshots,
+  $r as useImageFiles,
+  At as useIsDbReady,
+  pr as useItem,
+  Sr as useItemProperties,
+  We as useItemProperty,
+  mr as useItems,
+  Y as useLiveQuery,
+  Rt as useModel,
+  Rr as useModelProperties,
+  Pr as useModelProperty,
+  Ct as useModels,
+  Yr as useNormalizedFeedItemFields,
+  qt as useOPFSFiles,
+  Er as usePersistedSnapshots,
+  gr as usePublishItem,
+  tt as useResolvedMediaRef,
+  Dt as useSchema,
+  Ar as useSchemas,
+  je as useSeedAddressRevision,
+  Dr as useSeedProtocolSchema,
+  Ir as useService,
+  Nt as useServices
 };
 //# sourceMappingURL=index.js.map

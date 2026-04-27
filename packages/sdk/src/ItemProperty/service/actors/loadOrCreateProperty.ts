@@ -13,8 +13,14 @@ import {
   resolveMetadataRecord,
 } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
-import { normalizeDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
+import { downloadTransactionIdWithDedupe } from '@/events/files/download'
+import {
+  readHtmlBodyForStorageSeedPropertyValue,
+  resolveHtmlStorageSeedLocalId,
+} from '@/helpers/readHtmlBodyForStorageSeed'
+import { updateMetadata } from '@/db/write/updateMetadata'
 
 const logger = debug('seedSdk:itemProperty:actors:loadOrCreateProperty')
 
@@ -231,11 +237,17 @@ export const loadOrCreateProperty = fromCallback<
     // For Html: read file content for renderValue (propertyValue is seed ID; blob URLs in DB are invalid after reload)
     let renderValue: string | string[] | undefined = metadataRecord.propertyValue || undefined
     const refSeedType = (metadataRecord as { refSeedType?: string }).refSeedType
-    const isHtml = refSeedType === 'html' || propertyRecordSchema?.dataType === 'Html'
-    // Fallback: derive refResolvedValue/localStorageDir from propertyValue when missing (e.g. EAS sync, legacy data)
+    const normalizedHtmlDt = normalizeDataType(propertyRecordSchema?.dataType)
+    const isHtml =
+      refSeedType === 'html' || normalizedHtmlDt === ModelPropertyDataTypes.Html
+    // Fallback: derive refResolvedValue/localStorageDir from propertyValue when missing (e.g. EAS sync, legacy data).
+    // After publish, propertyValue may be the Html storage seed uid while files stay named `{localId}.html`.
     if (isHtml && !metadataRecord.refResolvedValue && metadataRecord.propertyValue) {
-      metadataRecord.refResolvedValue = `${metadataRecord.propertyValue}.html`
-      metadataRecord.localStorageDir = '/html'
+      const lid = await resolveHtmlStorageSeedLocalId(metadataRecord.propertyValue)
+      if (lid) {
+        metadataRecord.refResolvedValue = `${lid}.html`
+        metadataRecord.localStorageDir = '/html'
+      }
     }
     // Fallback: when Html has refResolvedValue but localStorageDir is null (e.g. EAS sync, legacy records)
     if (isHtml && metadataRecord.refResolvedValue && !metadataRecord.localStorageDir) {
@@ -245,12 +257,34 @@ export const loadOrCreateProperty = fromCallback<
       try {
         const dir = metadataRecord.localStorageDir.replace(/^\//, '')
         const filePath = BaseFileManager.getFilesPath(dir, metadataRecord.refResolvedValue)
-        const exists = await BaseFileManager.pathExists(filePath)
+        let exists = await BaseFileManager.pathExists(filePath)
+        if (!exists) {
+          await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
+          exists = await BaseFileManager.pathExists(filePath)
+        }
         if (exists) {
           renderValue = await BaseFileManager.readFileAsString(filePath)
+        } else {
+          const viaSeedPointer = await readHtmlBodyForStorageSeedPropertyValue(
+            metadataRecord.propertyValue,
+          )
+          if (viaSeedPointer) {
+            renderValue = viaSeedPointer
+          }
         }
       } catch (e) {
         logger(`Failed to read Html file for ${propertyName}: ${e}`)
+      }
+    }
+    // Covers missing ref row, wrong ref, or DB dataType casing "html" (handled by isHtml above).
+    if (isHtml && metadataRecord.propertyValue) {
+      const pv = String(metadataRecord.propertyValue).trim()
+      const rv = typeof renderValue === 'string' ? renderValue.trim() : ''
+      if (!rv || rv === pv) {
+        const recovered = await readHtmlBodyForStorageSeedPropertyValue(metadataRecord.propertyValue)
+        if (recovered) {
+          renderValue = recovered
+        }
       }
     }
 
@@ -263,29 +297,95 @@ export const loadOrCreateProperty = fromCallback<
       refSeedType === 'image' ||
       normalizedDataType === 'Image' ||
       normalizedRefValueType === 'Image'
+
+    const resolveMatchingFilePath = async (dir: string, needle: string): Promise<string | undefined> => {
+      const dirPath = BaseFileManager.getFilesPath(dir)
+      const dirExists = await BaseFileManager.pathExists(dirPath)
+      if (!dirExists) return undefined
+      const fs = await BaseFileManager.getFs()
+      const path = BaseFileManager.getPathModule()
+      const files = await fs.promises.readdir(dirPath)
+      const matchingFiles = files.filter((file: string) =>
+        path.basename(file).includes(needle)
+      )
+      if (!matchingFiles?.length) return undefined
+      return BaseFileManager.getFilesPath(dir, matchingFiles[0])
+    }
+
+    // EAS-synced rows: parent metadata stores the image seed uid in property_value; filename/Arweave id is on the image seed's metadata.
+    // hydrateFromDb already repairs this; doing it here avoids a multi-second gap where UI shows a non-blob value until rehydrate runs.
+    if (
+      isImage &&
+      !metadataRecord.refResolvedValue &&
+      typeof metadataRecord.propertyValue === 'string' &&
+      metadataRecord.propertyValue.length === 66
+    ) {
+      const storageTxRows = await db
+        .select({ propertyValue: metadata.propertyValue })
+        .from(metadata)
+        .where(
+          and(
+            eq(metadata.seedUid, metadataRecord.propertyValue),
+            or(
+              eq(metadata.propertyName, 'storageTransactionId'),
+              eq(metadata.propertyName, 'transactionId'),
+            ),
+          ),
+        )
+        .limit(1)
+      const derivedTxId = storageTxRows[0]?.propertyValue
+      if (derivedTxId) {
+        metadataRecord.refResolvedValue = derivedTxId
+        metadataRecord.localStorageDir = metadataRecord.localStorageDir ?? '/images'
+        if (metadataRecord.localId) {
+          try {
+            await updateMetadata({
+              localId: metadataRecord.localId,
+              refResolvedValue: derivedTxId,
+              localStorageDir: '/images',
+            })
+          } catch (e) {
+            logger(`loadOrCreateProperty: updateMetadata refResolvedValue failed for ${propertyName}:`, e)
+          }
+        }
+      }
+    }
+
     if (isImage && metadataRecord.refResolvedValue) {
       try {
         const dir = (metadataRecord.localStorageDir ?? '/images').replace(/^\//, '')
-        const dirPath = BaseFileManager.getFilesPath(dir)
-        const dirExists = await BaseFileManager.pathExists(dirPath)
-        if (dirExists) {
-          const fs = await BaseFileManager.getFs()
-          const path = BaseFileManager.getPathModule()
-          const files = await fs.promises.readdir(dirPath)
-          const matchingFiles = files.filter((file: string) =>
-            path.basename(file).includes(metadataRecord.refResolvedValue!)
-          )
-          if (matchingFiles?.length > 0) {
-            const filename = matchingFiles[0]
-            const filePath = BaseFileManager.getFilesPath(dir, filename)
-            const file = await BaseFileManager.readFile(filePath)
-            const freshBlobUrl = URL.createObjectURL(file)
-            renderValue = freshBlobUrl
-            refResolvedDisplayValue = freshBlobUrl
-          }
+        let filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
+        if (!filePath) {
+          await downloadTransactionIdWithDedupe(metadataRecord.refResolvedValue)
+          filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
+        }
+        if (filePath) {
+          const file = await BaseFileManager.readFile(filePath)
+          const freshBlobUrl = URL.createObjectURL(file)
+          renderValue = freshBlobUrl
+          refResolvedDisplayValue = freshBlobUrl
         }
       } catch (e) {
         logger(`Failed to resolve Image file for ${propertyName}: ${e}`)
+      }
+    }
+
+    const isFile =
+      refSeedType === 'file' ||
+      normalizedDataType === 'File'
+    if (isFile && metadataRecord.refResolvedValue) {
+      try {
+        const dir = (metadataRecord.localStorageDir ?? '/files').replace(/^\//, '')
+        let filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
+        if (!filePath) {
+          await downloadTransactionIdWithDedupe(metadataRecord.refResolvedValue)
+          filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
+        }
+        if (filePath) {
+          renderValue = await BaseFileManager.readFileAsString(filePath)
+        }
+      } catch (e) {
+        logger(`Failed to resolve File for ${propertyName}: ${e}`)
       }
     }
 

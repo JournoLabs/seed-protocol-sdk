@@ -105,6 +105,21 @@ type ChildUploadData = {
   localStoragePath: string
 }
 
+const DATA_URI_IMAGE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/i
+
+function decodeDataUriImage(dataUri: string): { mimeType: string; bytes: Uint8Array } | null {
+  const m = DATA_URI_IMAGE.exec((dataUri ?? '').trim())
+  if (!m) return null
+  try {
+    const mimeType = m[1]!.toLowerCase().trim()
+    const base64 = m[2]!.replace(/\s/g, '')
+    const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    return { mimeType, bytes: binary }
+  } catch {
+    return null
+  }
+}
+
 const processUploadPropertyData = async (
   uploadProperty: UploadProperty,
   uploads: PublishUploadData[],
@@ -274,8 +289,31 @@ async function appendCoPublishedImageUploadData(
     if (seen.has(row.imageSeedLocalId)) continue
     const imageItem = await Item.find({ seedLocalId: row.imageSeedLocalId, modelName: 'Image' })
     if (!imageItem) continue
-    const { itemImageProperties } = await getSegmentedItemProperties(imageItem)
-    const more = await getStorageSeedUploadData(itemImageProperties, options)
+
+    const st =
+      imageItem.internalProperties['storageTransactionId'] ??
+      imageItem.allProperties['storageTransactionId']
+    const stSnap = st?.getService().getSnapshot()
+    const stCtx = stSnap && 'context' in stSnap ? stSnap.context : undefined
+    const stValue = typeof (stCtx as { propertyValue?: unknown } | undefined)?.propertyValue === 'string'
+      ? ((stCtx as { propertyValue?: string }).propertyValue ?? '')
+      : ''
+    const decoded = decodeDataUriImage(stValue)
+
+    let more: PublishUploadData[] = []
+    if (decoded && st && st.localId && st.versionLocalId) {
+      const contentHash = await getContentHash(decoded.bytes)
+      more = [{
+        data: decoded.bytes,
+        contentHash,
+        contentType: decoded.mimeType,
+        tags: buildPublishUploadDataTags(contentHash, decoded.mimeType, options?.arweaveUploadTags),
+        itemPropertyName: st.propertyName,
+        itemPropertyLocalId: st.localId,
+        seedLocalId: imageItem.seedLocalId,
+        versionLocalId: st.versionLocalId,
+      }]
+    }
     for (const u of more) {
       if (!seen.has(u.seedLocalId)) {
         uploads.push(u)

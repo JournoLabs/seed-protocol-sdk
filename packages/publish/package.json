@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",

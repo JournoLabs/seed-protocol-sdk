@@ -9,6 +9,13 @@ export { useImageFiles } from './useImageFiles'
 export { useFiles, FILES_QUERY_KEY_PREFIX } from './useFiles'
 export { useModels, useModel, useCreateModel, useDestroyModel } from './model'
 export { useLiveQuery } from './liveQuery'
+export {
+  useEasSyncProcesses,
+  useEasSyncProcessesState,
+  useEasSyncProcessesNonActiveCount,
+  useEasSyncProcessById,
+} from './useEasSyncProcesses'
+export type { EasSyncProcessRecord } from './useEasSyncProcesses'
 export { SeedProvider, invalidateItemPropertiesForItem } from './SeedProvider'
 export type { SeedProviderProps } from './SeedProvider'
 export { useSeedAddressRevision } from './SeedSessionContext'

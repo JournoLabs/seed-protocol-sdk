@@ -4,7 +4,7 @@ import {
   BaseDb,
   getArweaveUploadStatus,
   isArweaveL1AnchoringComplete,
-  queryArweaveGatewayTransaction,
+  queryArweaveGatewayTransactionWithFallback,
 } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { getPublishConfig } from '~/config'
@@ -60,7 +60,7 @@ async function runArweaveL1FinalizeTick(): Promise<void> {
       let l1TxId = job.l1TransactionId
 
       if (!l1TxId) {
-        const gql = await queryArweaveGatewayTransaction(graphqlUrl, dataItemId)
+        const gql = await queryArweaveGatewayTransactionWithFallback(graphqlUrl, dataItemId)
         const bundled = gql?.bundledInId ?? null
         if (bundled) {
           l1TxId = bundled

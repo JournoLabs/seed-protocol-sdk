@@ -28,7 +28,7 @@ export const getMetadataLatest = ({seedLocalId, seedUid}: {seedLocalId?: string,
         rowNum: sql.raw(`
            ROW_NUMBER() OVER (
                PARTITION BY property_name 
-               ORDER BY COALESCE(attestation_created_at, created_at) DESC
+               ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC
            )
           `).as('rowNum')
       })

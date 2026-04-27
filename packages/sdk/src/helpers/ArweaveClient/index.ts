@@ -59,7 +59,7 @@ export const getArweave = (): Arweave | undefined => {
  * This function is kept for backward compatibility but will be removed in a future version.
  */
 export const setArweaveDomain = (newDomain: string): void => {
-  BaseArweaveClient.setHost(newDomain)
+  BaseArweaveClient.setPreferredReadGateway(newDomain)
 }
 
 /**

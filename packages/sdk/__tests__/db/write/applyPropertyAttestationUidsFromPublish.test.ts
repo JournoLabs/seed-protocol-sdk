@@ -88,4 +88,61 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     )
     expect(stillPending).toHaveLength(0)
   })
+
+  it('with two placeholder title rows same timestamp, applies UID to local_id tie-break winner', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({
+      title: 'Two placeholders tie',
+      count: 7,
+    })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+    const titleRow = rows.find((r) => r.propertyName === 'title')
+    expect(titleRow?.localId).toBeTruthy()
+
+    const t = Date.now()
+    await db.insert(metadata).values({
+      localId: `aaa_2ph_title_${t}`,
+      uid: null,
+      propertyName: titleRow!.propertyName,
+      propertyValue: titleRow!.propertyValue,
+      schemaUid: SCHEMA_TITLE,
+      modelType: titleRow!.modelType,
+      seedLocalId: titleRow!.seedLocalId,
+      seedUid: titleRow!.seedUid,
+      versionLocalId: titleRow!.versionLocalId,
+      versionUid: titleRow!.versionUid,
+      easDataType: titleRow!.easDataType,
+      createdAt: t,
+      attestationCreatedAt: null,
+    })
+
+    await db
+      .update(metadata)
+      .set({
+        localId: `zzz_2ph_title_${t}`,
+        uid: null,
+        schemaUid: SCHEMA_TITLE,
+        createdAt: t,
+        attestationCreatedAt: null,
+      })
+      .where(eq(metadata.localId, titleRow!.localId!))
+
+    let diff = await getPublishPendingDiff({ seedLocalId })
+    expect(diff.pendingProperties.map((p) => p.propertyName)).toContain('title')
+
+    await applyPropertyAttestationUidsFromPublish({
+      seedLocalId,
+      attestationCreatedAtMs: t + 5_000,
+      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' }],
+    })
+
+    const zzz = await db.select().from(metadata).where(eq(metadata.localId, `zzz_2ph_title_${t}`))
+    const aaa = await db.select().from(metadata).where(eq(metadata.localId, `aaa_2ph_title_${t}`))
+    expect(zzz[0]?.uid).toBe(ATTEST_TITLE)
+    expect(aaa[0]?.uid == null || aaa[0]?.uid === '').toBe(true)
+
+    diff = await getPublishPendingDiff({ seedLocalId })
+    expect(diff.pendingProperties.map((p) => p.propertyName)).not.toContain('title')
+  })
 })

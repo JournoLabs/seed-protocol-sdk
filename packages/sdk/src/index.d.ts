@@ -14,7 +14,7 @@ export { schemaMachine } from './Schema/service/schemaMachine';
 export { propertyMachine } from './ItemProperty/service/propertyMachine';
 export { SEED_PROTOCOL_SCHEMA_NAME, ImageSize } from './helpers/constants';
 export { BaseFileManager } from './helpers';
-export { seeds, metadata, appState, schemas, models, modelSchemas, properties, publishProcesses, uploadProcesses, arweaveL1FinalizeJobs, } from './seedSchema';
+export { seeds, metadata, appState, schemas, models, modelSchemas, properties, publishProcesses, uploadProcesses, arweaveL1FinalizeJobs, easSyncProcesses, } from './seedSchema';
 export type { SchemaType } from './seedSchema/SchemaSchema';
 export type { SeedType } from './seedSchema/SeedSchema';
 export type { IItem, IItemProperty } from './interfaces';
@@ -31,9 +31,9 @@ export { getModelSchemasFromEas, getItemVersionsFromEas, getItemPropertiesFromEa
 export { getCorrectId, generateId } from './helpers';
 export { classifyMediaRef, resolveMediaRef, normalizeFeedItemFields, getFeedItemStringField, } from './helpers/mediaRef';
 export type { FeedFieldRole, FeedFieldDescriptor, FeedFieldManifest, ClassifyMediaRefOptions, MediaRefClassification, ResolveMediaRefResult, ResolveMediaRefOptions, NormalizedMediaField, NormalizedHtmlField, NormalizedTextField, NormalizedFeedFieldValue, } from './helpers/mediaRef';
-export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS, DEFAULT_ARWEAVE_GRAPHQL_URL, } from './helpers/constants';
+export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_ARWEAVE_GATEWAYS, DEFAULT_ARWEAVE_GRAPHQL_URL, getDefaultArweaveReadGatewayHostsOrdered, mergePrimaryHostWithDefaults, isKnownArweaveGatewayHostname, } from './helpers/constants';
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties';
-export { BaseArweaveClient, getArweaveUrlForTransaction, normalizeUploadApiBaseUrl, getUploadApiArweaveDataUrl, getUploadPipelineTransactionStatus, getUploadApiArweaveStatusUrl, getArweaveUploadStatus, isArweaveL1AnchoringComplete, queryArweaveGatewayTransaction, } from './helpers';
+export { BaseArweaveClient, getArweaveUrlForTransaction, normalizeUploadApiBaseUrl, getUploadApiArweaveDataUrl, getUploadPipelineTransactionStatus, getUploadApiArweaveStatusUrl, getArweaveUploadStatus, isArweaveL1AnchoringComplete, queryArweaveGatewayTransaction, queryArweaveGatewayTransactionWithFallback, ensureReadGatewaySelected, invalidateReadGatewayCache, resetArweaveReadGatewayForTests, } from './helpers';
 export type { ArweaveUploadStatusResponse, ArweaveGatewayTransactionQueryResult, } from './helpers';
 export { waitForEntityIdle } from './helpers/waitForEntityIdle';
 export { setUploadExecutor, getUploadExecutor } from './helpers/publishConfig';
@@ -46,6 +46,10 @@ export { updateModelProperties, renameModelProperty, deletePropertyFromModel, de
 export { importJsonSchema, readJsonImportFile, transformImportToSchemaFile, } from './imports';
 export { client } from './client';
 export type { SyncFromEasOptions } from './events/item/syncDbWithEas';
+export type { EasSyncProcessType } from './seedSchema/EasSyncProcessSchema';
+export { easSyncActor, startEasSyncActor, sendEasSyncClientRequest, requestEasSyncFromAddressChange, requestEasSyncFromEventBus, requestEasSyncFromModelsInit, } from './events/item/easSyncManager';
+export type { EasSyncMachineContext, EasSyncRequestEvent, EasSyncRequestSource, } from './events/item/easSyncManager';
+export { mergeEasSyncRequestIntents } from './events/item/mergeEasSyncOptions';
 export * from './types';
 export type { PublishUpload } from './types/publish';
 //# sourceMappingURL=index.d.ts.map

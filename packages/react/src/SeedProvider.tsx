@@ -2,7 +2,7 @@ import React, { type ReactNode, useMemo, useEffect } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { createSeedQueryClient } from './queryClient'
-import { eventEmitter } from '@seedprotocol/sdk'
+import { eventEmitter, EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@seedprotocol/sdk'
 import { SeedAddressRevisionProvider } from './SeedSessionContext'
 
 export type SeedProviderProps = {
@@ -52,9 +52,14 @@ function SeedProviderEventSubscriber({ queryClient }: { queryClient: QueryClient
         invalidate(canonicalId)
       }
     }
+    const onEasSyncedToDb = () => {
+      void queryClient.invalidateQueries({ queryKey: ['seed', 'items'], exact: false })
+    }
     eventEmitter.on('itemProperty.saved', handler)
+    eventEmitter.on(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSyncedToDb)
     return () => {
       eventEmitter.off('itemProperty.saved', handler)
+      eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSyncedToDb)
       invalidateItemPropertiesRef = null
       if (typeof window !== 'undefined') {
         window.__SEED_INVALIDATE_ITEM_PROPERTIES__ = null

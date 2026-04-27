@@ -30,7 +30,6 @@ export async function executeCreateArweaveDataItemsPhase2(
     uploadDataOpts.onlyHtmlStorageSeedLocalIds = def
     uploadDataOpts.skipRelationRecursion = true
   }
-
   const uploadDataList = await getPublishUploadData(
     item,
     [],

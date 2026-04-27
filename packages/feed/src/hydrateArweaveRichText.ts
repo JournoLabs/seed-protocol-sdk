@@ -1,4 +1,4 @@
-import { BaseArweaveClient } from '@seedprotocol/sdk'
+import { BaseArweaveClient, isKnownArweaveGatewayHostname } from '@seedprotocol/sdk'
 import {
   getFeedFieldStorageModels,
   getFeedListElementStorageModels,
@@ -8,7 +8,8 @@ import {
 /** Same logical fields as legacy `pickFeedItemRichText` primary keys — inline HTML for feeds. */
 const RICH_TEXT_KEYS = ['html', 'Html', 'body', 'Body', 'content', 'Content'] as const
 
-const MAX_BODY_BYTES = 2_000_000
+/** Max UTF-8 bytes for a single rich-body fetch (HTML/JSON on Arweave can exceed 2MB with embeds). */
+const MAX_BODY_BYTES = 8_000_000
 
 /**
  * True for a single-path gateway URL whose path looks like an Arweave transaction id
@@ -21,7 +22,7 @@ export function isArweaveTransactionGatewayUrl(raw: string): boolean {
     const u = new URL(s)
     const host = u.hostname.toLowerCase()
     const expected = BaseArweaveClient.getHost().toLowerCase()
-    if (host !== expected && !host.endsWith('arweave.net')) return false
+    if (host !== expected && !isKnownArweaveGatewayHostname(host)) return false
     const segments = u.pathname.replace(/^\//, '').split('/').filter(Boolean)
     if (segments.length !== 1) return false
     const id = segments[0]!

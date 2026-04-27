@@ -6,6 +6,7 @@ import {
   isValidEasAttestationUid,
   normalizeBytes32Hex,
 } from '@/helpers/easUid'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 
 export type PropertyAttestationApplyPair = {
   schemaUid: string
@@ -52,12 +53,7 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
         }
         return true
       })
-      .sort((a: MetadataType, b: MetadataType) => {
-        const ta = a.attestationCreatedAt ?? a.createdAt ?? 0
-        const tb = b.attestationCreatedAt ?? b.createdAt ?? 0
-        if (tb !== ta) return tb - ta
-        return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
-      })
+      .sort(compareMetadataRowsLatestFirst)
 
     const target = candidates.find((r: MetadataType) => isPlaceholderUid(r.uid))
     if (!target?.localId) continue

@@ -39,7 +39,10 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { normalizeDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
+
+/** Parent Html property `propertyValue` after publish (66-char seed uid). */
+const HTML_PROP_SEED_UID_RE = /^0x[a-fA-F0-9]{64}$/
 
 // Lazy import helper to break circular dependency for synchronous Model access
 // Since Model.getByName() is synchronous and Model imports ItemProperty (via Item),
@@ -348,8 +351,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           context.refResolvedValue &&
           context.localStorageDir
 
+        const normalizedSchemaDt = normalizeDataType(propertyRecordSchema?.dataType)
         const isHtml =
-          (context.refSeedType === 'html' || (propertyRecordSchema?.dataType === ModelPropertyDataTypes.Html)) &&
+          (context.refSeedType === 'html' || normalizedSchemaDt === ModelPropertyDataTypes.Html) &&
           context.refResolvedValue
 
         // Fix: When File/Image property has a File object before save completes, set refResolvedValue and renderValue
@@ -390,7 +394,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           const dir = context.localStorageDir?.replace(/^\//, '') || (isHtml ? 'html' : 'images')
           const filePath = BaseFileManager.getFilesPath(dir, context.refResolvedValue)
           try {
-            const exists = await BaseFileManager.pathExists(filePath)
+            let exists = await BaseFileManager.pathExists(filePath)
+            if (!exists && isHtml) {
+              await BaseFileManager.waitForFileWithContent(filePath, 100, 5000).catch(() => {})
+              exists = await BaseFileManager.pathExists(filePath)
+            }
             if (exists && (isItemStorage || isHtml)) {
               renderValue = await BaseFileManager.readFileAsString(filePath,)
             }
@@ -409,8 +417,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               // Keep filename for display when File object is present but not yet saved to disk
               if (isFile && isFileValue) {
                 renderValue = (pv as unknown as File).name
-              } else if (isImage) {
-                // FS race / path not visible yet: do not clobber a hydrated blob URL with "No file found"
+              } else if (isImage || isHtml) {
+                // FS race, OPFS cleared, or HTML served from Arweave: do not clobber hydrated/rehydrated value
                 renderValue = undefined
               } else {
                 renderValue = 'No file found'
@@ -421,12 +429,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               `[ItemProperty] [${context.seedLocalId}] [${context.propertyName}] [storageType] error`,
               e,
             )
-            renderValue = 'No file found'
+            renderValue = isHtml ? undefined : 'No file found'
           }
         }
 
         if (!renderValue) {
           renderValue = context.renderValue || context.propertyValue
+        }
+        const pvStr = typeof context.propertyValue === 'string' ? context.propertyValue.trim() : ''
+        if (
+          normalizedSchemaDt === ModelPropertyDataTypes.Html &&
+          HTML_PROP_SEED_UID_RE.test(pvStr) &&
+          renderValue === pvStr &&
+          typeof context.renderValue === 'string' &&
+          context.renderValue.length > pvStr.length
+        ) {
+          renderValue = context.renderValue
         }
 
         let transformedPropertyName = propertyName
@@ -915,6 +933,42 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         if (props.refSeedType != null && !ctx.refSeedType) updates.refSeedType = props.refSeedType
         if (Object.keys(updates).length) {
           (instance as ItemProperty<any>)._service.send({ type: 'updateContext', ...updates })
+        }
+      }
+      // After wipe/reconnect, cached actors can stay idle with stale renderValue while DB + Arweave
+      // paths would hydrate. Re-run DB hydration without clobbering propertyValue.
+      const svc = (instance as ItemProperty<any>)._service
+      const snap = svc.getSnapshot() as { status?: string; value?: unknown }
+      if (snap.status === 'active' && snap.value === 'idle') {
+        const schema = props.propertyRecordSchema ?? ctx.propertyRecordSchema
+        const dt = normalizeDataType(schema?.dataType as string | undefined)
+        const isHtmlProp =
+          (props as { refSeedType?: string }).refSeedType === 'html' ||
+          ctx.refSeedType === 'html' ||
+          dt === ModelPropertyDataTypes.Html
+        const isListProp = dt === ModelPropertyDataTypes.List
+        const isRelationProp = dt === ModelPropertyDataTypes.Relation
+        const pv = ctx.propertyValue
+        const pvStr = typeof pv === 'string' ? pv.trim() : ''
+        const renderVal = ctx.renderValue
+        const renderMissing =
+          renderVal == null || (typeof renderVal === 'string' && renderVal.length === 0)
+        const htmlStuckOnUid =
+          isHtmlProp &&
+          HTML_PROP_SEED_UID_RE.test(pvStr) &&
+          (renderMissing || renderVal === pv)
+        const pvPresent =
+          pv != null &&
+          (Array.isArray(pv) ? pv.length > 0 : String(pv).trim().length > 0)
+        const listOrRelationNeedsResolve =
+          (isListProp || isRelationProp) && renderMissing && pvPresent
+        const versionChanged =
+          props.versionLocalId != null &&
+          ctx.versionLocalId != null &&
+          props.versionLocalId !== ctx.versionLocalId
+
+        if (htmlStuckOnUid || listOrRelationNeedsResolve || versionChanged) {
+          svc.send({ type: 'rehydrateFromDb' })
         }
       }
       // On cache hit, do not sync propertyValue: refetches can race with in-memory updates (e.g. save()).

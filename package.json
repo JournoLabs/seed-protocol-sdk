@@ -1,6 +1,6 @@
 {
   "name": "seed-protocol-sdk-monorepo",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "author": "Keith Axline <keith@journodao.xyz>",
   "devDependencies": {
     "@babel/plugin-syntax-dynamic-import": "^7.8.3",

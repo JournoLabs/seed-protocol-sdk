@@ -2,7 +2,7 @@ import { ClientManagerContext, SeedConstructorOptions } from "@/types"
 import { assign, setup } from "xstate"
 import debug from "debug"
 import { normalizeAddressConfig } from "@/helpers/addresses"
-import { runSyncFromEas } from "@/events/item/syncDbWithEas"
+import { requestEasSyncFromAddressChange } from "@/events/item/easSyncManager"
 import { platformClassesInit } from "./actors/platformClassesInit"
 import { saveAppState } from "./actors/saveAppState"
 import { fileSystemInit } from "./actors/fileSystemInit"
@@ -80,13 +80,15 @@ function maybeRunSyncFromEasAfterAddressSave({
   context: ClientManagerContext
   event: { key?: string; value?: unknown }
 }) {
+  const merged = addressesFromPersistedAddressValue(event.value)
   if (!context.syncFromEasOnAddressChange) return
   if (event.key !== "addresses") return
-  const merged = addressesFromPersistedAddressValue(event.value)
   if (merged.length === 0) return
-  void runSyncFromEas({ addresses: merged }).catch((err: unknown) => {
-    logSyncAfterAddressSave("runSyncFromEas after address save failed", err)
-  })
+  try {
+    requestEasSyncFromAddressChange(merged)
+  } catch (err: unknown) {
+    logSyncAfterAddressSave("requestEasSyncFromAddressChange after address save failed", err)
+  }
 }
 
 function emitAddressesPersistedIfAddressesKey(event: {

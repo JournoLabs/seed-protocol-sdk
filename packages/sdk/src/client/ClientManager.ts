@@ -13,8 +13,12 @@ import {
   getOwnedAddressesFromDb,
   getWatchedAddressesFromDb,
 } from '@/helpers/db'
-import { runSyncFromEas } from '@/events/item/syncDbWithEas'
 import type { SyncFromEasOptions } from '@/events/item/syncDbWithEas'
+import {
+  easSyncActor,
+  sendEasSyncClientRequest,
+  startEasSyncActor,
+} from '@/events/item/easSyncManager'
 
 const logger               = debug('seedSdk:client')
 
@@ -162,7 +166,19 @@ const clientInstance = {
    */
   syncFromEas: async (options?: SyncFromEasOptions) => {
     ensureInitialized();
-    await runSyncFromEas(options);
+    startEasSyncActor();
+    const correlationId =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sendEasSyncClientRequest(correlationId, options);
+    await waitFor(easSyncActor, (snapshot) =>
+      snapshot.context.lastFinishedCorrelationIds?.includes(correlationId) ?? false,
+    );
+    const snap = easSyncActor.getSnapshot();
+    if (snap.context.lastFinishedStatus === 'failed') {
+      throw new Error(snap.context.lastFinishedError ?? 'EAS sync failed');
+    }
   },
   addModel: async (modelDef: ModelDefObj) => {
     const db = await BaseDb.getAppDb();

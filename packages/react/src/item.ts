@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { createNewItem, getAddressesForItemsFilter, Item } from '@seedprotocol/sdk'
+import {
+  createNewItem,
+  getAddressesForItemsFilter,
+  Item,
+  eventEmitter,
+  EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
+} from '@seedprotocol/sdk'
 import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
@@ -35,6 +41,8 @@ type UseItem = <T extends ModelValues<T>>(props: UseItemProps) => UseItemReturn<
 
 export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLocalId, seedUid }: UseItemProps) => {
   const [item, setItem] = useState<Item<T> | undefined>()
+  /** Bumped when EAS sync updates SQLite so cached `Item` instances re-render after in-place hydration. */
+  const [, setEasHydrationTick] = useState(0)
   const [isLoading, setIsLoading] = useState(!!(seedLocalId || seedUid))
   const [error, setError] = useState<Error | null>(null)
   const subscriptionRef = useRef<Subscription | undefined>(undefined)
@@ -102,11 +110,27 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
     }
   }, [isClientReady])
 
+  const loadItemRef = useRef(loadItem)
+  useEffect(() => {
+    loadItemRef.current = loadItem
+  }, [loadItem])
+
   useEffect(() => {
     modelNameRef.current = modelName
     seedLocalIdRef.current = seedLocalId
     seedUidRef.current = seedUid
   }, [modelName, seedLocalId, seedUid])
+
+  useEffect(() => {
+    const onEasSynced = () => {
+      setEasHydrationTick((n) => n + 1)
+      void loadItemRef.current()
+    }
+    eventEmitter.on(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
+    return () => {
+      eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
+    }
+  }, [])
 
   // Fetch/refetch when parameters change or client becomes ready
   useEffect(() => {
@@ -228,6 +252,17 @@ export const useItems: UseItems = ({
   const isClientReady = useIsClientReady()
   const addressRevision = useSeedAddressRevision()
   const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const onEasSynced = () => {
+      queryClient.invalidateQueries({ queryKey: ['seed', 'items'] })
+    }
+    eventEmitter.on(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
+    return () => {
+      eventEmitter.off(EAS_SEED_DATA_SYNCED_TO_DB_EVENT, onEasSynced)
+    }
+  }, [queryClient])
+
   const itemsRef = useRef<IItem<any>[]>([])
   const lastFetchedIdsRef = useRef<Set<string>>(new Set())
   const hasSeenLiveSeedsSnapshotRef = useRef(false)
@@ -262,7 +297,14 @@ export const useItems: UseItems = ({
     error: queryError,
   } = useQuery({
     queryKey,
-    queryFn: () => Item.all(modelName, deleted, { waitForReady: true, includeEas, addressFilter }),
+    queryFn: async () => {
+      const rows = await Item.all(modelName, deleted, {
+        waitForReady: true,
+        includeEas,
+        addressFilter,
+      })
+      return rows
+    },
     enabled: isClientReady,
     // Local SQLite + live invalidation drive freshness; Seed’s default staleTime would keep a
     // mistaken initial [] “fresh” and block refetch when another subscriber mounts.
@@ -353,7 +395,9 @@ export const useItems: UseItems = ({
       if (key) currentItemsSet.add(key)
     }
 
-    if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) return
+    if (tableDataItemsSet.size === 0 && currentItemsSet.size > 0) {
+      return
+    }
 
     if (!hasSeenLiveSeedsSnapshotRef.current) {
       hasSeenLiveSeedsSnapshotRef.current = true

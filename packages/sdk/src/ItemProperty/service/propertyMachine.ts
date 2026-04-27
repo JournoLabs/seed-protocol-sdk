@@ -1,4 +1,4 @@
-import { assign, setup } from 'xstate'
+import { assign, setup, stateIn } from 'xstate'
 import { PropertyMachineContext, SaveValueToDbEvent } from '@/types'
 
 import { resolveRemoteStorage } from '@/ItemProperty/service/actors/resolveRemoteStorage'
@@ -22,6 +22,10 @@ export const propertyMachine = setup({
     context: {} as PropertyMachineContext,
     input: {} as PropertyMachineContext,
   },
+  guards: {
+    // stateIn return type does not satisfy setup() inference; runtime guard is correct for root state `idle`.
+    propertyMachineIsIdle: stateIn('idle') as any,
+  },
   // actions: {
   //   updateContext: updateMachineContext,
   // },
@@ -44,7 +48,11 @@ export const propertyMachine = setup({
   initial: 'waitingForDb',
   context: ({ input }) => input as PropertyMachineContext,
   on: {
-    // reload: '.hydratingFromDb',
+    /** Re-run DB hydration (e.g. after EAS sync wrote new metadata for this version). */
+    rehydrateFromDb: {
+      guard: 'propertyMachineIsIdle',
+      target: '.hydratingFromDb',
+    },
     save: {
       actions: assign({
         isSaving: true,
