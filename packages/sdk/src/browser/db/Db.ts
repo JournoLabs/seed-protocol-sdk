@@ -14,7 +14,6 @@ import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
 import { Observable, distinctUntilChanged } from 'rxjs'
-
 const logger = debug('seedSdk:browser:db:Db')
 
 

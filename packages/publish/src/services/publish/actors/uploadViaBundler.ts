@@ -1,14 +1,36 @@
 import { EventObject, fromCallback } from 'xstate'
-import { readFile, stat } from 'node:fs/promises'
 import type { PublishMachineContext } from '../../../types'
 import { getPublishConfig } from '~/config'
 
 const BATCH_UPLOAD_TIMEOUT_MS = 120_000
+const importDynamic = new Function('s', 'return import(s)') as (specifier: string) => Promise<{
+  readFile: (path: string) => Promise<Buffer>
+  stat: (path: string) => Promise<{ size: number }>
+}>
 
 type DataItemLike = {
   raw?: Uint8Array
   filename?: string
   getRaw?: () => Buffer | Promise<Buffer>
+}
+
+let nodeFsPromisesCache: { readFile: (path: string) => Promise<Buffer>; stat: (path: string) => Promise<{ size: number }> } | null = null
+
+const getNodeFsPromises = async () => {
+  if (nodeFsPromisesCache) return nodeFsPromisesCache
+  if (typeof window !== 'undefined') return null
+
+  try {
+    const specifier = `node:${['fs', 'promises'].join('/')}`
+    const mod = await importDynamic(specifier)
+    nodeFsPromisesCache = {
+      readFile: mod.readFile,
+      stat: mod.stat,
+    }
+    return nodeFsPromisesCache
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -60,7 +82,13 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
           return buf.length
         }
         if (o.filename != null) {
-          const st = await stat(o.filename)
+          const nodeFsPromises = await getNodeFsPromises()
+          if (!nodeFsPromises) {
+            throw new Error(
+              'DataItem.filename requires Node.js fs access. In browser runtime, provide DataItem.raw or DataItem.getRaw().'
+            )
+          }
+          const st = await nodeFsPromises.stat(o.filename)
           return st.size
         }
         throw new Error('Cannot get raw bytes from DataItem')
@@ -99,7 +127,13 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
           continue
         }
         if (o.filename != null) {
-          const buf = await readFile(o.filename)
+          const nodeFsPromises = await getNodeFsPromises()
+          if (!nodeFsPromises) {
+            throw new Error(
+              'DataItem.filename requires Node.js fs access. In browser runtime, provide DataItem.raw or DataItem.getRaw().'
+            )
+          }
+          const buf = await nodeFsPromises.readFile(o.filename)
           payload.writeUInt32BE(buf.length, offset)
           offset += 4
           buf.copy(payload, offset)

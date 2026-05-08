@@ -120,6 +120,7 @@ const config = [
           { src: 'src/db/seedSchema', dest: 'dist/db' },
           { src: 'src/seedSchema', dest: 'dist' },
           { src: 'src/db/drizzle', dest: 'dist/db/drizzle' },
+          { src: 'src/vite/arweave-default-shim.js', dest: 'dist' },
         ],
       }),
       twoStepDynamicImportPlugin(),

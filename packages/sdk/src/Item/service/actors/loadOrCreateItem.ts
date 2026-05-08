@@ -460,11 +460,11 @@ export const loadOrCreateItem = fromCallback<
     // Without this, post.html returns seed ID on first render because loadOrCreateProperty hasn't finished.
     // Publish/attestation can keep properties in `saving` for many seconds; 5s caused timeouts during EAS work.
     const propertyIdleTimeoutMs = 120_000
-    await Promise.all(
+    Promise.all(
       Array.from(propertyInstances.values()).map((prop) =>
         waitForEntityIdle(prop, { timeout: propertyIdleTimeoutMs, throwOnError: false })
       )
-    )
+    ).catch(() => {})
 
     // Step 5: Return loaded item data with property instances
     sendBack({

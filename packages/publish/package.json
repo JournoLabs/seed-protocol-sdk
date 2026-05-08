@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.22",
+  "version": "0.4.30",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,6 +33,7 @@
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
+    "drizzle-orm": "^0.44.3",
     "ethers": "^6.13.0",
     "isows": "^1.0.7",
     "viem": "^2.46.2",

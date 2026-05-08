@@ -120,9 +120,9 @@ class FileManager extends BaseFileManager {
       await fsAsync.writeFile(filePath, content, 'utf-8')
     } else if (content instanceof Blob) {
       const arrayBuffer = await content.arrayBuffer()
-      await fsAsync.writeFile(filePath, Buffer.from(arrayBuffer))
+      await fsAsync.writeFile(filePath, new Uint8Array(arrayBuffer))
     } else if (content instanceof ArrayBuffer) {
-      await fsAsync.writeFile(filePath, Buffer.from(content))
+      await fsAsync.writeFile(filePath, new Uint8Array(content))
     } else {
       throw new Error('Unsupported content type')
     }
@@ -144,7 +144,7 @@ class FileManager extends BaseFileManager {
       // But we can read it as ArrayBuffer if it's already available
       throw new Error('Blob content not supported in saveFileSync. Use saveFile() instead or convert to ArrayBuffer first.')
     } else if (content instanceof ArrayBuffer) {
-      fs.writeFileSync(filePath, Buffer.from(content))
+      fs.writeFileSync(filePath, new Uint8Array(content))
     } else {
       throw new Error('Unsupported content type')
     }

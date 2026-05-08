@@ -15,10 +15,9 @@ export abstract class BaseDb implements IDb {
   }
 
   static getAppDb(): any {
-    if (!this.PlatformClass) {
-      return undefined
-    }
-    return this.PlatformClass.getAppDb()
+    const _pc = this.PlatformClass as (typeof BaseDb) | undefined
+    const _db = _pc ? _pc.getAppDb() : undefined
+    return _db
   }
 
   static prepareDb(filesDir: string): Promise<any> {

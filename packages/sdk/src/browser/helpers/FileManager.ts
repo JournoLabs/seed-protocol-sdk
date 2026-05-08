@@ -2,9 +2,38 @@ import { BaseFileManager }     from '@/helpers/FileManager/BaseFileManager'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
 import debug from 'debug'
-import path                    from 'path-browserify'
 
 const logger = debug('seedSdk:browser:helpers:FileManager')
+
+/**
+ * Browser-safe path helpers for SDK virtual file paths.
+ * We intentionally avoid Node/CJS path polyfills here to keep browser bundles ESM-safe.
+ */
+const pathCompat = {
+  dirname(filePath: string): string {
+    if (!filePath) return '.'
+    const normalized = filePath.replace(/\\/g, '/')
+    if (normalized === '/') return '/'
+    const trimmed = normalized.endsWith('/') && normalized.length > 1
+      ? normalized.slice(0, -1)
+      : normalized
+    const lastSlash = trimmed.lastIndexOf('/')
+    if (lastSlash === -1) return '.'
+    if (lastSlash === 0) return '/'
+    return trimmed.slice(0, lastSlash)
+  },
+
+  basename(filePath: string): string {
+    if (!filePath) return ''
+    const normalized = filePath.replace(/\\/g, '/')
+    if (normalized === '/') return '/'
+    const trimmed = normalized.endsWith('/') && normalized.length > 1
+      ? normalized.slice(0, -1)
+      : normalized
+    const lastSlash = trimmed.lastIndexOf('/')
+    return lastSlash === -1 ? trimmed : trimmed.slice(lastSlash + 1)
+  },
+}
 
 /** OPFS / ZenFS can throw NotReadableError while a file is still settling after write. */
 function isTransientOpfsReadError(error: unknown): boolean {
@@ -452,15 +481,15 @@ class FileManager extends BaseFileManager {
   }
 
   static getParentDirPath(filePath: string): string {
-    return path.dirname(filePath)
+    return pathCompat.dirname(filePath)
   }
 
   static getFilenameFromPath(filePath: string): string {
-    return path.basename(filePath)
+    return pathCompat.basename(filePath)
   }
 
   static getPathModule(): any {
-    return path
+    return pathCompat
   }
 }
 
