@@ -120,6 +120,17 @@ const FRAGILE_RENDERER_OPTIMIZE_INCLUDES = [
   'nanoid-dictionary',
 ] as const
 
+/**
+ * Always force-include (do not gate on resolvePackageFile): under bun these live nested
+ * under @seedprotocol/sdk, and eas-sdk's ESM named-imports CJS eas-contracts. Without
+ * prebundling, Vite serves raw /@fs CJS and the browser throws
+ * "does not provide an export named 'EAS__factory'" during SchemaEncoder encode.
+ */
+const EAS_OPTIMIZE_INCLUDES = [
+  '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk',
+  '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
+] as const
+
 type AliasEntry = { find: string | RegExp; replacement: string }
 
 function resolvePackageFile(packageName: string, relativePath: string): string | undefined {
@@ -314,6 +325,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         include: [
           ...(userConfig.optimizeDeps?.include ?? []),
           ...resolvableOptimizeIncludes,
+          ...EAS_OPTIMIZE_INCLUDES,
         ],
         // Keep `global` shim in optimizer esbuild options; top-level Vite `define`
         // can be rejected by Rolldown in some consumer setups.

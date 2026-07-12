@@ -52,6 +52,12 @@ describe('seedVitePlugin renderer hardening', () => {
     const includes = result?.optimizeDeps?.include ?? []
     expect(includes).toContain('debug')
     expect(includes).toContain('nanoid-dictionary')
+    expect(includes).toContain(
+      '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk',
+    )
+    expect(includes).toContain(
+      '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
+    )
   })
 
   it('includes sdk-import-fix post plugin', () => {
