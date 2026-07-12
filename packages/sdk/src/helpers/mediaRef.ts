@@ -1,4 +1,9 @@
 import debug from 'debug'
+
+// #region agent log
+fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'30ce80'},body:JSON.stringify({sessionId:'30ce80',runId:'pre-fix',hypothesisId:'B',location:'mediaRef.ts:3',message:'mediaRef debug import',data:{debugType:typeof debug,debugName:debug?.name??null},timestamp:Date.now()})}).catch(()=>{});
+// #endregion
+
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
 import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient'

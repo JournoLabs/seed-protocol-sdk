@@ -643,9 +643,13 @@ export const publishMachine = setup({
       type: 'final',
     },
     [SUCCESS] : {
+      entry: ({ context }: { context: Partial<PublishMachineContext> }) => {
+      },
       type : 'final',
     },
     [FAILURE] : {
+      entry: ({ context }: { context: Partial<PublishMachineContext> }) => {
+      },
       type : 'final',
     },
   },

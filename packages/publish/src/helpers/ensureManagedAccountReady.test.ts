@@ -97,6 +97,14 @@ describe('isRouterNonModularCoreAccountError', () => {
     ).toBe(true)
   })
 
+  test('detects viem zero-data decode when Router view is absent', () => {
+    expect(
+      isRouterNonModularCoreAccountError(
+        new Error('Cannot decode zero data ("0x") with ABI parameters.\n\nVersion: viem@2.39.0'),
+      ),
+    ).toBe(true)
+  })
+
   test('false for unrelated errors', () => {
     expect(isRouterNonModularCoreAccountError(new Error('insufficient funds'))).toBe(false)
   })

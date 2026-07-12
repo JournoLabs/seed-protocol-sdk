@@ -86,6 +86,14 @@ export interface PublishConfig {
    */
   autoDeployManagedAccount?: boolean
   /**
+   * Optional override for automatic ManagedAccount factory deploy when {@link autoDeployManagedAccount} is true.
+   * When unset, uses Thirdweb `deploySmartAccount` on the managed EIP-4337 in-app wallet account.
+   */
+  deployManagedAccount?: (params: {
+    managedAddress: string
+    managedSigningAccount: import('thirdweb/wallets').Account
+  }) => Promise<void>
+  /**
    * Called when optional wallet setup steps fail after connect (e.g. executor module install).
    */
   onWalletSetupWarning?: (error: unknown) => void

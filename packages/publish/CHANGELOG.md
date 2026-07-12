@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.31
+
+### Fixed
+
+- **First-time modular publish:** Restored automatic session-signer provisioning (`ensureManagedSignerSessionKey`) and unified modular bootstrap (`ensureModularPublishBootstrap`: signer → `setEas` → optional EIP-7702 fallback).
+- **First-time non-modular publish:** `createAttestations` now runs `ensureManagedAccountEasConfigured` before `multiPublish` when `useModularExecutor` is false (required since v0.4.23 per-account routing).
+- **EIP-7702 bootstrap:** `ensureEip7702ModularAccountReady` polls for on-chain bytecode after `deploySmartAccount` timeout before failing.
+
+### Added
+
+- **`ensureManagedSignerSessionKey`**, **`ensureModularPublishBootstrap`:** Exported helpers for custom publish entrypoints.
+- **`MODULAR_SIGNER_ACTIVATION_FAILED`:** New `ManagedAccountPublishError` code when session-key setup fails.
+
 ## 0.4.24
 
 ### Added

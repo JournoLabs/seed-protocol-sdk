@@ -21,7 +21,8 @@ function normAddr(a: string): string {
  * Ensures the ManagedAccount contract’s on-chain EAS address matches {@link getPublishConfig}.easContractAddress.
  * If `getEas` is zero or differs, sends `setEas` signed by `account` (same signer as modular `multiPublish`).
  *
- * Call only on the modular executor path, after {@link ensureEip7702ModularAccountReady}.
+ * Call before `multiPublish` on any path where the publisher contract is a ManagedAccount
+ * (modular executor or non-modular EIP-4337).
  */
 export async function ensureManagedAccountEasConfigured(
   managedAddress: string,

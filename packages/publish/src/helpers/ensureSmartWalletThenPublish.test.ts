@@ -1,22 +1,24 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 
 const cfg = { useModularExecutor: true as boolean }
-const runPrepMock = mock(() => Promise.resolve({ ok: true as const, managedAddress: '0xmanaged0000000000000000000000000000000001' }))
+const getConnectedManagedAccountAddressMock = mock(() =>
+  Promise.resolve('0xmanaged0000000000000000000000000000000001'),
+)
 const getConnectedModularAccountMock = mock(() =>
   Promise.resolve({ address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account),
 )
 const createPublishMock = mock(() => {})
 const resolveSmartWalletForPublishMock = mock(() => Promise.resolve({ needsDeploy: true as const }))
+const ensureEip7702ModularAccountReadyMock = mock(() => Promise.resolve())
 
 mock.module('../config', () => ({
   getPublishConfig: () => cfg,
 }))
 
-mock.module('./ensureManagedAccountReady', () => ({
-  runModularExecutorPublishPrep: (...args: unknown[]) => runPrepMock(...args),
+mock.module('./ensureEip7702ModularAccountReady', () => ({
+  ensureEip7702ModularAccountReady: (...args: unknown[]) => ensureEip7702ModularAccountReadyMock(...args),
 }))
 
-// Include getClient + getModularAccountWallet so this file does not clobber ./thirdweb for other tests in the same run.
 mock.module('./thirdweb', () => ({
   getClient: () => ({}),
   getModularAccountWallet: () => ({
@@ -24,6 +26,7 @@ mock.module('./thirdweb', () => ({
     getAccount: () => ({ address: '0x1234567890123456789012345678901234567890' }),
   }),
   getConnectedModularAccount: (...args: unknown[]) => getConnectedModularAccountMock(...args),
+  getConnectedManagedAccountAddress: (...args: unknown[]) => getConnectedManagedAccountAddressMock(...args),
   resolveSmartWalletForPublish: (...args: unknown[]) => resolveSmartWalletForPublishMock(...args),
 }))
 
@@ -39,14 +42,18 @@ mock.module('../services/publishManager', () => ({
 
 afterEach(() => {
   cfg.useModularExecutor = true
-  runPrepMock.mockClear()
+  getConnectedManagedAccountAddressMock.mockClear()
   getConnectedModularAccountMock.mockClear()
   createPublishMock.mockClear()
   resolveSmartWalletForPublishMock.mockClear()
-  runPrepMock.mockImplementation(() => Promise.resolve({ ok: true as const, managedAddress: '0xmanaged0000000000000000000000000000000001' }))
+  ensureEip7702ModularAccountReadyMock.mockClear()
+  getConnectedManagedAccountAddressMock.mockImplementation(() =>
+    Promise.resolve('0xmanaged0000000000000000000000000000000001'),
+  )
   getConnectedModularAccountMock.mockImplementation(() =>
     Promise.resolve({ address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account),
   )
+  ensureEip7702ModularAccountReadyMock.mockImplementation(() => Promise.resolve())
 })
 
 const itemStub = {
@@ -69,7 +76,7 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
     expect(createPublishMock).not.toHaveBeenCalled()
   })
 
-  test('calls createPublish with managed address and modular account after EIP-7702 readiness', async () => {
+  test('calls createPublish with managed address and modular account without blocking on prep', async () => {
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     const modular = { address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account
     getConnectedModularAccountMock.mockImplementationOnce(() => Promise.resolve(modular))
@@ -88,15 +95,35 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
     expect(address).toBe('0xmanaged0000000000000000000000000000000001')
     expect(account).toBe(modular)
     expect(opts?.dataItemSigner).toBe(modular)
+    expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
   })
 
-  test('returns managed_not_ready when prep fails', async () => {
-    const err = new (await import('../errors')).ManagedAccountPublishError('prep', 'MANAGED_ACCOUNT_UNAVAILABLE')
-    runPrepMock.mockImplementationOnce(() => Promise.resolve({ ok: false as const, error: err }))
+  test('spawns publish immediately; EIP-7702 readiness is owned by the publish actor', async () => {
+    ensureEip7702ModularAccountReadyMock.mockImplementationOnce(() =>
+      Promise.reject(new Error('readiness failed')),
+    )
+    const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
+
+    const result = await ensureSmartWalletThenPublish(itemStub, null, async () => '0xany')
+
+    expect(result).toEqual({ outcome: 'started' })
+    expect(createPublishMock).toHaveBeenCalledTimes(1)
+    expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
+  })
+
+  test('returns managed_not_ready when managed account address is unavailable', async () => {
+    getConnectedManagedAccountAddressMock.mockImplementationOnce(() =>
+      Promise.reject(new Error('managed wallet unavailable')),
+    )
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     const result = await ensureSmartWalletThenPublish(itemStub, null, async () => '0xany')
-    expect(result).toEqual({ outcome: 'managed_not_ready', error: err })
-    expect(getConnectedModularAccountMock).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      outcome: 'managed_not_ready',
+      error: expect.objectContaining({
+        code: 'MANAGED_ACCOUNT_UNAVAILABLE',
+      }),
+    })
+    expect(createPublishMock).not.toHaveBeenCalled()
   })
 })
 

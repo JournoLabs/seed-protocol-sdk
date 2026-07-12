@@ -9,11 +9,12 @@ import {
 } from '@seedprotocol/sdk'
 import { getContract, sendTransaction, waitForReceipt } from 'thirdweb'
 import { optimismSepolia } from 'thirdweb/chains'
-import { getClient, getModularAccountWallet, isSmartWalletDeployed } from '~/helpers/thirdweb'
-import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
 import {
-  multiPublish,
-} from '~/helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
+  getClient,
+  isSmartWalletDeployed,
+} from '~/helpers/thirdweb'
+import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
+import { multiPublish } from '~/helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
@@ -37,7 +38,7 @@ import {
   toHex32,
 } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
-import { ensureEip7702ModularAccountReady } from '~/helpers/ensureEip7702ModularAccountReady'
+import { ensureModularPublishBootstrap } from '~/helpers/ensureModularPublishBootstrap'
 import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
 import debug from 'debug'
 
@@ -285,15 +286,9 @@ export const createAttestations = fromPromise(
         modularAccountModuleContract,
         managedAddress: prep.managedAddress,
       })
-      const modularAccountWallet = getModularAccountWallet()
-      await modularAccountWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
-      const modularAccount = modularAccountWallet.getAccount()
-      if (!modularAccount) {
-        throw new Error('Failed to get modular account')
-      }
-      activeAccount = modularAccount
-      await ensureEip7702ModularAccountReady()
-      await ensureManagedAccountEasConfigured(prep.managedAddress, modularAccount)
+      activeAccount = await ensureModularPublishBootstrap(prep.managedAddress)
+    } else {
+      await ensureManagedAccountEasConfigured(address, activeAccount)
     }
     const targetContract = getContract({
       client: getClient(),
@@ -411,16 +406,10 @@ export const createAttestations = fromPromise(
         gas: 5_000_000n,
       }
 
-      let result: Awaited<ReturnType<typeof sendTransaction>>
-      try {
-        result = await sendTransaction({
-          account: activeAccount,
-          transaction: await Promise.resolve(tx),
-        })
-      } catch (e) {
-        logger('sendTransaction failed in non-sequential publish %O', e)
-        throw e
-      }
+      const result = await sendTransaction({
+        account: activeAccount,
+        transaction: await Promise.resolve(tx),
+      })
 
       const receipt = await waitForReceipt({
         client: getClient(),

@@ -1,4 +1,4 @@
-import { createThirdwebClient, getContract, sendTransaction, waitForReceipt, } from 'thirdweb'
+import { createThirdwebClient, deploySmartAccount, getContract, sendTransaction, } from 'thirdweb'
 import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
@@ -7,9 +7,9 @@ import { useEffect, useRef, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
 import { optimismSepolia, } from 'thirdweb/chains'
 import {
-  createAccount,
   getAddress as getFactoryAddress,
 } from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
+import { createAccount as createManagedAccountOnFactory } from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
 import debug from 'debug'
 import { getPublishConfig } from '../config'
 import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
@@ -155,6 +155,28 @@ export async function isSmartWalletDeployed ( smartWalletAddress: string, ): Pro
   return isContractDeployed(contract,)
 }
 
+const DEFAULT_DEPLOY_POLL_ATTEMPTS = 5
+const DEFAULT_DEPLOY_POLL_INTERVAL_MS = 6_000
+
+/** Polls chain bytecode until the smart account is deployed or attempts are exhausted. */
+export async function pollSmartWalletDeployed(
+  smartWalletAddress: string,
+  attempts: number = DEFAULT_DEPLOY_POLL_ATTEMPTS,
+  intervalMs: number = DEFAULT_DEPLOY_POLL_INTERVAL_MS,
+): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (await isSmartWalletDeployed(smartWalletAddress)) {
+      return true
+    }
+    if (i < attempts - 1) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, intervalMs)
+      })
+    }
+  }
+  return false
+}
+
 /**
  * Resolves the smart wallet address and account to use for publish.
  * If the user has no connected account or no deployed ManagedAccount, returns needsDeploy.
@@ -190,31 +212,41 @@ export const ExternalWalletsForDeploy = [
 ]
 
 export const deploySmartWalletContract = async ( localAccount: Account, ) => {
-  const managedAccountFactoryContract = getManagedAccountFactoryContract()
-  const createAccountTx = createAccount({
-    contract : managedAccountFactoryContract,
-    admin    : localAccount.address,
-    data     : '0x',
-  },)
-
-  const result = await sendTransaction({
-    account     : localAccount,
-    transaction : createAccountTx,
-  },)
-
-  logger('createAccountTx result:', result,)
-
-  const receipt = await waitForReceipt({
+  const accountContract = getContract({
     client: getClient(),
-    transactionHash : result.transactionHash,
-    chain           : optimismSepolia,
+    chain   : optimismSepolia,
+    address : localAccount.address,
   },)
+  const result = await deploySmartAccount({
+    smartAccount    : localAccount,
+    chain           : optimismSepolia,
+    client          : getClient(),
+    accountContract,
+  },)
+  logger('deploySmartAccount result:', result,)
+  return result
+}
 
-  if ( !receipt ) {
-    throw new Error('Failed to deploy smart wallet',)
-  }
-
-  return receipt
+/**
+ * Deploys a ManagedAccount by calling the Thirdweb factory `createAccount`.
+ * Prefer the modular EIP-7702 in-app wallet as `signingAccount` (sponsorGas); it is more reliable
+ * than `deploySmartAccount` on the counterfactual EIP-4337 managed wallet (UserOp factory deploy).
+ */
+export async function deployManagedAccountViaFactory(params: {
+  adminAddress: string
+  signingAccount: Account
+  data?: `0x${string}`
+}): Promise<void> {
+  const factory = getManagedAccountFactoryContract()
+  const tx = createManagedAccountOnFactory({
+    contract: factory,
+    admin: params.adminAddress as `0x${string}`,
+    data: (params.data ?? '0x') as `0x${string}`,
+  })
+  await sendTransaction({
+    account: params.signingAccount,
+    transaction: tx,
+  })
 }
 
 export const appMetadata = {
@@ -405,7 +437,9 @@ let _walletsForConnectButton: Wallet[] | null = null
 
 export const getWalletsForConnectButton = () => {
   if (!_walletsForConnectButton) {
-    _walletsForConnectButton = [getModularAccountWallet()]
+    _walletsForConnectButton = getPublishConfig().useModularExecutor
+      ? [getModularAccountWallet()]
+      : [getManagedAccountWallet()]
   }
   return _walletsForConnectButton
 }

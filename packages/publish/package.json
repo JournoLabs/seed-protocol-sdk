@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.30",
+  "version": "0.4.31",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build",
     "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
-    "test": "bun test src/helpers/arweave.test.ts src/helpers/defaultApprovedTargetsForModularPublish.test.ts src/helpers/ensureManagedAccountReady.test.ts src/helpers/ensureEip7702ModularAccountReady.test.ts src/helpers/publishDisplayHelpers.test.ts src/services/publish/actors/createAttestationsRouting.test.ts src/config.autoDeployEip7702.test.ts && bun test src/helpers/ensureSmartWalletThenPublish.test.ts && bun test src/helpers/ensureManagedAccountEasConfigured.test.ts"
+    "test": "bun test src/helpers/arweave.test.ts src/helpers/defaultApprovedTargetsForModularPublish.test.ts src/helpers/ensureManagedAccountReady.test.ts src/helpers/ensureEip7702ModularAccountReady.test.ts src/helpers/ensureManagedSignerSessionKey.test.ts src/helpers/ensureModularPublishBootstrap.test.ts src/helpers/publishDisplayHelpers.test.ts src/services/publish/actors/createAttestationsRouting.test.ts src/config.autoDeployEip7702.test.ts && bun test src/helpers/ensureSmartWalletThenPublish.test.ts && bun test src/helpers/ensureManagedAccountEasConfigured.test.ts"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
@@ -43,12 +43,12 @@
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.2",
+    "@vitejs/plugin-react": "^6.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "thirdweb": "^5.118.1",
     "typescript": "~5.9.3",
-    "vite": "^7.3.0"
+    "vite": "^8.0.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19",

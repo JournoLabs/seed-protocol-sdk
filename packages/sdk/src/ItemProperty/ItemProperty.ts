@@ -920,6 +920,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       // but cached instance doesn't (e.g. Item constructor created from schema first, then loadOrCreateItem
       // has metadata with refResolvedValue - we must not lose display data).
       const ctx = (instance as ItemProperty<any>)._getSnapshotContext()
+      const incomingSchema = props.propertyRecordSchema
+      if (incomingSchema && !ctx.propertyRecordSchema) {
+        ;(instance as ItemProperty<any>)._dataType = incomingSchema.dataType
+        ;(instance as any)._isRelation = incomingSchema.dataType === 'Relation'
+        ;(instance as any)._isList = incomingSchema.dataType === 'List'
+        ;(instance as ItemProperty<any>)._service.send({
+          type: 'updateContext',
+          propertyRecordSchema: incomingSchema,
+        })
+      }
       const needsRefSync =
         (props.refResolvedValue != null && !ctx.refResolvedValue) ||
         (props.refResolvedDisplayValue != null && !ctx.refResolvedDisplayValue) ||

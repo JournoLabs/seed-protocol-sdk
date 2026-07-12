@@ -1,12 +1,15 @@
 import type { Account } from 'thirdweb/wallets'
 import type { Item } from '@seedprotocol/sdk'
-import { getConnectedModularAccount, resolveSmartWalletForPublish } from './thirdweb'
+import { optimismSepolia } from 'thirdweb/chains'
+import {
+  getConnectedManagedAccountAddress,
+  getConnectedModularAccount,
+  resolveSmartWalletForPublish,
+} from './thirdweb'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
-import { runModularExecutorPublishPrep } from './ensureManagedAccountReady'
 import { ManagedAccountPublishError } from '../errors'
-import { ensureEip7702ModularAccountReady } from './ensureEip7702ModularAccountReady'
 
 export type EnsureSmartWalletResult =
   | { outcome: 'started' }
@@ -17,14 +20,18 @@ export type EnsureSmartWalletResult =
 const MSG_NO_ACCOUNT_MODULAR =
   'A connected wallet is required for publishing with the modular executor. Connect your wallet and try again.'
 
+const MSG_MANAGED_UNAVAILABLE =
+  'Could not connect the managed publishing account on Optimism Sepolia. Reconnect with the same sign-in method and try again.'
+
 /**
  * Resolves the smart wallet for the current account; if deployed, starts publish.
  * If the user has no deployed ManagedAccount (non-modular path), returns needs_deploy so the caller can open the deploy modal.
  *
  * When **`useModularExecutor`** is true:
- * - Runs {@link runModularExecutorPublishPrep} first and uses the **ManagedAccount** address as the publish `address` (context for `multiPublish`).
- * - Resolves the signing account from the **modular EIP-7702** in-app wallet ({@link getConnectedModularAccount}), not from `activeAccount` or {@link resolveSmartWalletForPublish}.
- * - Runs {@link ensureEip7702ModularAccountReady} before spawning the publish machine (idempotent with `createAttestations`).
+ * - Spawns the publish machine immediately using the counterfactual
+ *   **ManagedAccount** address and the **modular EIP-7702** signing account.
+ * - Managed-account deploy, module install, session signer, and EIP-7702 readiness run later in
+ *   `createAttestations` via {@link runModularExecutorPublishPrep} and {@link ensureModularPublishBootstrap}.
  * The **`activeAccount`** argument is ignored on this path (kept for API compatibility with call sites).
  *
  * Pass `options.publishMode`: `patch` (default) publishes only pending properties on the current Version;
@@ -43,22 +50,35 @@ export async function ensureSmartWalletThenPublish(
   }
 
   if (config.useModularExecutor) {
-    const prep = await runModularExecutorPublishPrep()
-    if (!prep.ok) {
-      return { outcome: 'managed_not_ready', error: prep.error }
-    }
-
     const modularAccount = await getConnectedModularAccount()
     if (!modularAccount) {
+      // #region agent log
+      fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a35748'},body:JSON.stringify({sessionId:'a35748',location:'ensureSmartWalletThenPublish.ts:no-modular',message:'getConnectedModularAccount returned null',data:{},timestamp:Date.now(),hypothesisId:'H2',runId:'publish-debug'})}).catch(()=>{});
+      // #endregion
       return {
         outcome: 'managed_not_ready',
         error: new ManagedAccountPublishError(MSG_NO_ACCOUNT_MODULAR, 'MANAGED_ACCOUNT_UNAVAILABLE'),
       }
     }
 
-    await ensureEip7702ModularAccountReady()
+    let managedAddress: string
+    try {
+      managedAddress = await getConnectedManagedAccountAddress(optimismSepolia)
+    } catch (cause) {
+      return {
+        outcome: 'managed_not_ready',
+        error: new ManagedAccountPublishError(
+          MSG_MANAGED_UNAVAILABLE,
+          'MANAGED_ACCOUNT_UNAVAILABLE',
+          undefined,
+          cause,
+        ),
+      }
+    }
 
-    const managedAddress = prep.managedAddress
+    // #region agent log
+    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a35748'},body:JSON.stringify({sessionId:'a35748',location:'ensureSmartWalletThenPublish.ts:createPublish',message:'calling createPublish (prep deferred to createAttestations)',data:{managedAddress,modularAddress:modularAccount.address,itemSeedLocalId:item.seedLocalId},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix-v4'})}).catch(()=>{});
+    // #endregion
     PublishManager.createPublish(item, managedAddress, modularAccount, {
       dataItemSigner: modularAccount,
       ...options,

@@ -1,6 +1,7 @@
 import { deploySmartAccount, getContract } from 'thirdweb'
 import { isContractDeployed } from 'thirdweb/utils'
 import { optimismSepolia } from 'thirdweb/chains'
+import type { ThirdwebContract } from 'thirdweb'
 import { getPublishConfig } from '../config'
 import { Eip7702ModularAccountPublishError } from '../errors'
 import { getClient, getModularAccountWallet } from './thirdweb'
@@ -13,6 +14,25 @@ const MSG_DEPLOY_FAILED =
   'Automatic EIP-7702 smart account setup failed on Optimism Sepolia. Retry or reconnect your wallet.'
 const MSG_NOT_CONFIRMED =
   'EIP-7702 upgrade was sent but on-chain bytecode was not detected yet. Wait a moment and retry.'
+
+const DEPLOY_POLL_ATTEMPTS = 5
+const DEPLOY_POLL_INTERVAL_MS = 6_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function pollContractDeployed(contract: ThirdwebContract, attempts: number): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (await isContractDeployed(contract)) {
+      return true
+    }
+    if (i < attempts - 1) {
+      await sleep(DEPLOY_POLL_INTERVAL_MS)
+    }
+  }
+  return false
+}
 
 /**
  * Ensures the Thirdweb in-app modular wallet (EIP-7702) has non-empty bytecode at its address
@@ -57,6 +77,9 @@ export async function ensureEip7702ModularAccountReady(): Promise<void> {
       accountContract,
     })
   } catch (cause) {
+    if (await pollContractDeployed(accountContract, DEPLOY_POLL_ATTEMPTS)) {
+      return
+    }
     throw new Eip7702ModularAccountPublishError(
       MSG_DEPLOY_FAILED,
       'EIP7702_MODULAR_DEPLOY_FAILED',
@@ -65,7 +88,7 @@ export async function ensureEip7702ModularAccountReady(): Promise<void> {
     )
   }
 
-  if (!(await isContractDeployed(accountContract))) {
+  if (!(await pollContractDeployed(accountContract, DEPLOY_POLL_ATTEMPTS))) {
     throw new Eip7702ModularAccountPublishError(
       MSG_NOT_CONFIRMED,
       'EIP7702_MODULAR_NOT_CONFIRMED',

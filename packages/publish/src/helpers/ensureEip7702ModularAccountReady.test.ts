@@ -67,4 +67,13 @@ describe('ensureEip7702ModularAccountReady', () => {
     const { Eip7702ModularAccountPublishError } = await import('../errors')
     await expect(ensureEip7702ModularAccountReady()).rejects.toBeInstanceOf(Eip7702ModularAccountPublishError)
   })
+
+  test('succeeds when deploy throws but bytecode appears after polling', async () => {
+    deploySmartAccountMock.mockImplementationOnce(() => Promise.reject(new Error('timeout')))
+    icdN = 0
+    icdAlwaysTrue = false
+    const { ensureEip7702ModularAccountReady } = await import('./ensureEip7702ModularAccountReady')
+    await ensureEip7702ModularAccountReady()
+    expect(deploySmartAccountMock).toHaveBeenCalledTimes(1)
+  })
 })

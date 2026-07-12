@@ -16,6 +16,7 @@ export type ManagedAccountPublishErrorCode =
   | 'MANAGED_ACCOUNT_UNAVAILABLE'
   | 'EXECUTOR_MODULE_NOT_INSTALLED'
   | 'MANAGED_ACCOUNT_SET_EAS_FAILED'
+  | 'MODULAR_SIGNER_ACTIVATION_FAILED'
 
 /**
  * Best-effort string for RPC / thirdweb / viem failures that are not plain `Error`
@@ -47,7 +48,7 @@ export function stringifyUnderlyingCause(u: unknown, maxLen = 700): string {
 /**
  * Thrown or returned when the managed publishing account (Optimism Sepolia) is missing,
  * unreachable, missing the executor module for the modular executor path, or EAS
- * pointer setup (`getEas` / `setEas`) fails.
+ * pointer setup (`getEas` / `setEas`) fails, or modular session-signer activation fails.
  */
 export class ManagedAccountPublishError extends Error {
   /** Original error when connection or deployment failed (avoids shadowing `Error.cause`). */
@@ -129,7 +130,11 @@ export function isEip7702ModularAccountPublishError(e: unknown): e is Eip7702Mod
 /**
  * True when the RPC/contract error indicates the account is **not** Thirdweb ModularCore
  * (no Router / `getInstalledModules`), e.g. default EIP-4337 smart accounts.
+ * Includes viem "Cannot decode zero data" when `eth_call` returns `0x` for a missing Router view.
  */
 export function isRouterNonModularCoreAccountError(cause: unknown): boolean {
-  return /Router:\s*function does not exist/i.test(stringifyUnderlyingCause(cause))
+  const msg = stringifyUnderlyingCause(cause)
+  if (/Router:\s*function does not exist/i.test(msg)) return true
+  if (/Cannot decode zero data\s*\(\s*["']0x["']\s*\)/i.test(msg)) return true
+  return false
 }

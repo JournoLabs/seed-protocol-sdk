@@ -109,6 +109,16 @@ const DEFAULT_FS_MODULES = [
 ]
 const SDK_DIST_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ARWEAVE_SHIM_FILE = path.join(SDK_DIST_DIR, 'arweave-default-shim.js')
+const DEBUG_SHIM_FILE = path.join(SDK_DIST_DIR, 'debug-default-shim.js')
+
+/** Fragile renderer deps pre-bundled for stable CJS/ESM interop (aligned with permapress). */
+const FRAGILE_RENDERER_OPTIMIZE_INCLUDES = [
+  'debug',
+  'random',
+  'seedrandom',
+  '@georgedoescode/generative-utils',
+  'nanoid-dictionary',
+] as const
 
 type AliasEntry = { find: string | RegExp; replacement: string }
 
@@ -169,6 +179,39 @@ function mergeAliasEntries(existing: AliasEntry[], additions: AliasEntry[]): Ali
   }
 
   return merged
+}
+
+function addRendererCompatibilityAliases(aliasEntries: AliasEntry[]): void {
+  const nanoidDictionaryEsm = resolvePackageFile(
+    'nanoid-dictionary',
+    'dist/dictionary.esm.js',
+  )
+  if (nanoidDictionaryEsm) {
+    aliasEntries.push({
+      find: /^nanoid-dictionary$/,
+      replacement: nanoidDictionaryEsm,
+    })
+  }
+
+  const zenfsCoreIndex = resolvePackageFile('@zenfs/core', 'dist/index.js')
+  const zenfsCorePath = resolvePackageFile('@zenfs/core', 'dist/path.js')
+  if (zenfsCoreIndex) {
+    aliasEntries.push({ find: /^@zenfs\/core$/, replacement: zenfsCoreIndex })
+  }
+  if (zenfsCorePath) {
+    aliasEntries.push({ find: /^@zenfs\/core\/path$/, replacement: zenfsCorePath })
+  }
+
+  const zenfsDomIndex = resolvePackageFile('@zenfs/dom', 'dist/index.js')
+  if (zenfsDomIndex) {
+    aliasEntries.push({ find: /^@zenfs\/dom$/, replacement: zenfsDomIndex })
+  }
+
+  if (fs.existsSync(DEBUG_SHIM_FILE)) {
+    // Only alias the package root. Do not alias debug/src/browser.js to this shim:
+    // the shim imports that path and aliasing it back creates a circular module.
+    aliasEntries.push({ find: /^debug$/, replacement: DEBUG_SHIM_FILE })
+  }
 }
 
 /**
@@ -233,6 +276,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         )
       }
 
+      addRendererCompatibilityAliases(aliasEntries)
+
       const existingResolve = userConfig.resolve ?? {}
       const mergedAlias = mergeAliasEntries(
         normalizeAliasEntries(existingResolve.alias),
@@ -248,9 +293,10 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         'readable-stream',
         'viem',
         'isows',
+        ...FRAGILE_RENDERER_OPTIMIZE_INCLUDES,
       ]
       const resolvableOptimizeIncludes = desiredOptimizeIncludes.filter(
-        (dep) => !!resolvePackageFile(dep, 'package.json')
+        (dep) => !!resolvePackageFile(dep, 'package.json'),
       )
 
       const optimizeDeps: UserConfig['optimizeDeps'] = {
@@ -512,7 +558,30 @@ if (!window.__seedFsReady) {
     },
   }
 
-  const plugins: Plugin[] = [configPlugin, mainPlugin]
+  const sdkImportFixPlugin: Plugin = {
+    name: 'seed-protocol:sdk-import-fix',
+    enforce: 'post',
+    transform(code, id) {
+      if (!id.includes('@seedprotocol/sdk') || !id.includes('FileManager')) {
+        return null
+      }
+      const hasDefaultPathBrowserifyImport =
+        /import\s+path\s+from\s+['"]path-browserify['"]/.test(code)
+      if (!hasDefaultPathBrowserifyImport) {
+        return null
+      }
+      const transformed = code.replace(
+        /import\s+path\s+from\s+['"]path-browserify['"];/g,
+        "import * as path from 'path';",
+      )
+      if (transformed === code) {
+        return null
+      }
+      return { code: transformed, map: null }
+    },
+  }
+
+  const plugins: Plugin[] = [configPlugin, mainPlugin, sdkImportFixPlugin]
 
   if (includeNodePolyfills) {
     log('Including vite-plugin-node-polyfills with default settings')

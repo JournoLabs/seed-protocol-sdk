@@ -93,4 +93,6 @@ export {
 } from './helpers/ensureManagedAccountReady'
 export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702ModularAccountReady'
 export { ensureManagedAccountEasConfigured } from './helpers/ensureManagedAccountEasConfigured'
+export { ensureManagedSignerSessionKey } from './helpers/ensureManagedSignerSessionKey'
+export { ensureModularPublishBootstrap } from './helpers/ensureModularPublishBootstrap'
 export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'

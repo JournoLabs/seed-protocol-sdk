@@ -160,9 +160,13 @@ When **`useModularExecutor`** is enabled, `multiPublish` is sent **from** the us
 
 **Managed account:** `runModularExecutorPublishPrep()` still ensures the **EIP-4337 managed** publishing contract exists on Optimism Sepolia (and optionally installs the executor module). That is separate from the modular wallet’s EIP-7702 upgrade.
 
-Before the first `multiPublish` on that path, `createAttestations` runs **`ensureManagedAccountEasConfigured`**: it reads **`getEas`** on the ManagedAccount and, if the stored address is zero or does not match **`getPublishConfig().easContractAddress`**, sends **`setEas`** (signed by the same modular EIP-7702 account as `multiPublish`) and waits for the receipt. You can call **`ensureManagedAccountEasConfigured(managedAddress, modularAccount)`** yourself if you build a custom publish entrypoint.
+Before the first `multiPublish` on that path, `createAttestations` runs **`ensureModularPublishBootstrap`**, which:
 
-**Diagnostic helper:** **`defaultApprovedTargetsForModularPublish(managedAddress)`** remains exported for apps that build custom permission flows; the publish package no longer provisions session signers on the managed account automatically.
+1. Provisions the modular wallet as a **session signer** on the ManagedAccount (`ensureManagedSignerSessionKey` — `addSessionKey` signed by the managed EIP-4337 wallet when needed).
+2. Ensures the ManagedAccount EAS pointer matches config (`ensureManagedAccountEasConfigured`).
+3. Falls back to **`ensureEip7702ModularAccountReady`** only when session-key setup fails and `autoDeployEip7702ModularAccount` is enabled.
+
+**Diagnostic helper:** **`defaultApprovedTargetsForModularPublish(managedAddress)`** remains exported for apps that build custom permission flows.
 
 **Resolved config:** Use **`getPublishConfig()`** after `initPublish` / `PublishProvider` for **`autoDeployEip7702ModularAccount`** and other resolved defaults—not only `usePublishConfig()`, which returns the raw `PublishConfig` object.
 
