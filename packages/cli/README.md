@@ -30,12 +30,6 @@ npx @seedprotocol/cli seed [seedDataPath]
 npx @seedprotocol/cli add-model <source-schema-file-path> <output-file-path> <json-string>
 ```
 
-### Start RPC server
-
-```bash
-npx @seedprotocol/cli rpc-server
-```
-
 ## Development
 
 This package shares code with `@seedprotocol/sdk` and is built as part of the monorepo workspace.
