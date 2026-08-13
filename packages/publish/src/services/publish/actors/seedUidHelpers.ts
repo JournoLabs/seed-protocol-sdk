@@ -1,13 +1,6 @@
-import { parseEventLogs } from 'thirdweb'
-import { decodeAbiParameters } from 'viem'
-import {
-  createdAttestationEvent,
-  seedPublishedEvent,
-} from '~/helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
-import {
-  createdAttestationEvent as executorCreatedAttestationEvent,
-  seedPublishedEvent as executorSeedPublishedEvent,
-} from '~/helpers/thirdweb/11155420/0x043462304114da543add6b693c686b7d98865f3e'
+import { parseEventLogs, decodeAbiParameters, type Log } from 'viem'
+import { publisherEventsAbi } from '~/helpers/abi/publisher'
+import { executorEventsAbi } from '~/helpers/abi/executor'
 import { ZERO_BYTES32 } from './utils'
 
 export function toHex32Normalized(v: string | undefined): string {
@@ -19,27 +12,26 @@ export function toHex32Normalized(v: string | undefined): string {
 
 /**
  * Extract the seed attestation UID by matching the request's seedSchemaUid to a CreatedAttestation
- * event. The payload links each request to a schema (seedSchemaUid); the contract emits
- * CreatedAttestation(schemaUid, attestationUid) for each attestation, so we find the event whose
- * schemaUid matches and use its attestationUid. No index guessing.
+ * event.
  */
 export function seedUidFromCreatedAttestationEvents(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   seedSchemaUid: string | undefined,
-  useModularExecutor: boolean
+  useModularExecutor: boolean,
 ): string | undefined {
   if (!seedSchemaUid || !receipt.logs?.length) return undefined
   const wantSchema = toHex32Normalized(seedSchemaUid)
   if (wantSchema === ZERO_BYTES32) return undefined
-  const createdAttestationEvt = useModularExecutor ? executorCreatedAttestationEvent : createdAttestationEvent
+  const abi = useModularExecutor ? executorEventsAbi : publisherEventsAbi
   try {
     const parsed = parseEventLogs({
-      logs: receipt.logs as import('viem').Log[],
-      events: [createdAttestationEvt()],
+      abi,
+      eventName: 'CreatedAttestation',
+      logs: receipt.logs as Log[],
       strict: false,
     })
     for (const ev of parsed) {
-      const result = ev?.args?.result as { schemaUid?: string; attestationUid?: string } | undefined
+      const result = ev.args?.result as { schemaUid?: string; attestationUid?: string } | undefined
       if (!result?.attestationUid) continue
       if (toHex32Normalized(result.schemaUid) === wantSchema) {
         const uid = result.attestationUid
@@ -60,7 +52,6 @@ export type SeedPublishedPair = {
 
 /**
  * Seed + Version UIDs from SeedPublished (executor: typed args; extension: bytes32[] layout).
- * Extension layout: seed at index listOfAttestationsCount, version at listOfAttestationsCount + 1 when present.
  */
 export function uidsFromSeedPublished(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
@@ -72,15 +63,15 @@ export function uidsFromSeedPublished(
   const logs = receipt.logs?.filter((l) => l.address && l.address.toLowerCase() === want)
   if (!logs?.length) return {}
   try {
-    const seedPublishedEvt = useModularExecutor ? executorSeedPublishedEvent : seedPublishedEvent
-    const parsed = parseEventLogs({
-      logs: logs as import('viem').Log[],
-      events: [seedPublishedEvt()],
-      strict: false,
-    })
-    const first = parsed[0]
-    if (!first) return {}
     if (useModularExecutor) {
+      const parsed = parseEventLogs({
+        abi: executorEventsAbi,
+        eventName: 'SeedPublished',
+        logs: logs as Log[],
+        strict: false,
+      })
+      const first = parsed[0]
+      if (!first) return {}
       const args = first.args as { seedUid?: string; versionUid?: string }
       const seedUid =
         args?.seedUid && toHex32Normalized(args.seedUid) !== ZERO_BYTES32 ? args.seedUid : undefined
@@ -90,6 +81,14 @@ export function uidsFromSeedPublished(
           : undefined
       return { seedUid, versionUid }
     }
+    const parsed = parseEventLogs({
+      abi: publisherEventsAbi,
+      eventName: 'SeedPublished',
+      logs: logs as Log[],
+      strict: false,
+    })
+    const first = parsed[0]
+    if (!first) return {}
     const args = first.args as { returnedDataFromEAS?: `0x${string}` }
     const data = args?.returnedDataFromEAS
     if (!data || data === '0x') return {}
@@ -113,12 +112,6 @@ export function uidsFromSeedPublished(
   }
 }
 
-/**
- * Fallback: extract seed UID from SeedPublished when CreatedAttestation events are not
- * available or don't match.
- * Extension: SeedPublished(bytes returnedDataFromEAS) - decode bytes as bytes32[], use index.
- * Executor: SeedPublished(bytes32 seedUid, bytes32 versionUid) - read args.seedUid directly.
- */
 export function seedUidFromSeedPublished(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   contractAddress: string,
@@ -133,9 +126,6 @@ export function seedUidFromSeedPublished(
   ).seedUid
 }
 
-/**
- * Version attestation UID from CreatedAttestation logs (schema matches request versionSchemaUid).
- */
 export function versionUidFromCreatedAttestationEvents(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   versionSchemaUid: string | undefined,
@@ -144,15 +134,16 @@ export function versionUidFromCreatedAttestationEvents(
   if (!versionSchemaUid || !receipt.logs?.length) return undefined
   const wantSchema = toHex32Normalized(versionSchemaUid)
   if (wantSchema === ZERO_BYTES32) return undefined
-  const createdAttestationEvt = useModularExecutor ? executorCreatedAttestationEvent : createdAttestationEvent
+  const abi = useModularExecutor ? executorEventsAbi : publisherEventsAbi
   try {
     const parsed = parseEventLogs({
-      logs: receipt.logs as import('viem').Log[],
-      events: [createdAttestationEvt()],
+      abi,
+      eventName: 'CreatedAttestation',
+      logs: receipt.logs as Log[],
       strict: false,
     })
     for (const ev of parsed) {
-      const result = ev?.args?.result as { schemaUid?: string; attestationUid?: string } | undefined
+      const result = ev.args?.result as { schemaUid?: string; attestationUid?: string } | undefined
       if (!result?.attestationUid) continue
       if (toHex32Normalized(result.schemaUid) === wantSchema) {
         const uid = result.attestationUid
@@ -168,27 +159,22 @@ export function versionUidFromCreatedAttestationEvents(
 
 export type CreatedAttestationPair = { schemaUid: string; attestationUid: string }
 
-/**
- * All `CreatedAttestation` (schemaUid, attestationUid) pairs from the receipt, in parse order.
- * Includes seed, version, and property attestations emitted by the Seed Protocol publish flow.
- */
 export function listCreatedAttestationPairsFromReceipt(
   receipt: { logs?: Array<{ address?: string; data?: string; topics?: unknown[] }> },
   useModularExecutor: boolean,
 ): CreatedAttestationPair[] {
   if (!receipt.logs?.length) return []
-  const createdAttestationEvt = useModularExecutor
-    ? executorCreatedAttestationEvent
-    : createdAttestationEvent
+  const abi = useModularExecutor ? executorEventsAbi : publisherEventsAbi
   try {
     const parsed = parseEventLogs({
-      logs: receipt.logs as import('viem').Log[],
-      events: [createdAttestationEvt()],
+      abi,
+      eventName: 'CreatedAttestation',
+      logs: receipt.logs as Log[],
       strict: false,
     })
     const out: CreatedAttestationPair[] = []
     for (const ev of parsed) {
-      const result = ev?.args?.result as
+      const result = ev.args?.result as
         | { schemaUid?: string; attestationUid?: string }
         | undefined
       if (!result?.attestationUid) continue

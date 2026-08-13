@@ -1,5 +1,5 @@
 import { ethers } from 'ethers'
-import type { Account } from 'thirdweb/wallets'
+import type { SeedSigner } from './seedSigner'
 
 // ============================================================================
 // ANS-104 Data Item construction — zero Node.js dependencies
@@ -58,7 +58,7 @@ function encodeTargetOrAnchorSection(raw: Uint8Array): Uint8Array {
 }
 
 /**
- * Type guard: true if signer is ethers.Wallet (has privateKey). Thirdweb Account does not.
+ * Type guard: true if signer is ethers.Wallet (has privateKey). SeedSigner / Thirdweb Account do not.
  */
 export function isEthersWallet(signer: unknown): signer is ethers.Wallet {
   return (
@@ -275,12 +275,12 @@ export const createSignedDataItem = async (
 }
 
 /**
- * Create a signed ANS-104 DataItem using a Thirdweb Account (EOA, ManagedAccount, Modular Account).
+ * Create a signed ANS-104 DataItem using a SeedSigner (EOA, ManagedAccount, Modular Account).
  * Uses deep-hash for the message to sign (per arbundles/Irys).
  */
 export const createSignedDataItemWithAccount = async (
   data: Uint8Array,
-  account: Account,
+  account: SeedSigner,
   tags: Tag[],
   rawAnchor: Uint8Array = new Uint8Array(0),
 ): Promise<{ id: string; raw: Uint8Array }> => {

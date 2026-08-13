@@ -6,6 +6,8 @@ import {
   getConnectedModularAccount,
   resolveSmartWalletForPublish,
 } from './thirdweb'
+import { asSeedSigner, isSeedSigner, type SeedSigner } from './seedSigner'
+import { ethers } from 'ethers'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
@@ -23,19 +25,18 @@ const MSG_NO_ACCOUNT_MODULAR =
 const MSG_MANAGED_UNAVAILABLE =
   'Could not connect the managed publishing account on Optimism Sepolia. Reconnect with the same sign-in method and try again.'
 
+function coerceDataItemSigner(
+  signer: CreatePublishOptions['dataItemSigner'] | Account | SeedSigner | undefined,
+): CreatePublishOptions['dataItemSigner'] {
+  if (!signer) return undefined
+  if (signer instanceof ethers.Wallet) return signer
+  if (isSeedSigner(signer)) return signer
+  return asSeedSigner(signer as Account)
+}
+
 /**
  * Resolves the smart wallet for the current account; if deployed, starts publish.
- * If the user has no deployed ManagedAccount (non-modular path), returns needs_deploy so the caller can open the deploy modal.
- *
- * When **`useModularExecutor`** is true:
- * - Spawns the publish machine immediately using the counterfactual
- *   **ManagedAccount** address and the **modular EIP-7702** signing account.
- * - Managed-account deploy, module install, session signer, and EIP-7702 readiness run later in
- *   `createAttestations` via {@link runModularExecutorPublishPrep} and {@link ensureModularPublishBootstrap}.
- * The **`activeAccount`** argument is ignored on this path (kept for API compatibility with call sites).
- *
- * Pass `options.publishMode`: `patch` (default) publishes only pending properties on the current Version;
- * `new_version` creates a new Version attestation and re-attests all properties (requires an existing Seed UID).
+ * When **`useModularExecutor`** is true, wraps the modular Thirdweb Account as a SeedSigner at the boundary.
  */
 export async function ensureSmartWalletThenPublish(
   item: Item<any>,
@@ -52,9 +53,6 @@ export async function ensureSmartWalletThenPublish(
   if (config.useModularExecutor) {
     const modularAccount = await getConnectedModularAccount()
     if (!modularAccount) {
-      // #region agent log
-      fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a35748'},body:JSON.stringify({sessionId:'a35748',location:'ensureSmartWalletThenPublish.ts:no-modular',message:'getConnectedModularAccount returned null',data:{},timestamp:Date.now(),hypothesisId:'H2',runId:'publish-debug'})}).catch(()=>{});
-      // #endregion
       return {
         outcome: 'managed_not_ready',
         error: new ManagedAccountPublishError(MSG_NO_ACCOUNT_MODULAR, 'MANAGED_ACCOUNT_UNAVAILABLE'),
@@ -76,21 +74,20 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a35748'},body:JSON.stringify({sessionId:'a35748',location:'ensureSmartWalletThenPublish.ts:createPublish',message:'calling createPublish (prep deferred to createAttestations)',data:{managedAddress,modularAddress:modularAccount.address,itemSeedLocalId:item.seedLocalId},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix-v4'})}).catch(()=>{});
-    // #endregion
-    PublishManager.createPublish(item, managedAddress, modularAccount, {
-      dataItemSigner: modularAccount,
+    const signer = asSeedSigner(modularAccount)
+    PublishManager.createPublish(item, managedAddress, signer, {
       ...options,
+      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? signer,
     })
     return { outcome: 'started' }
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
-    PublishManager.createPublish(item, resolved.address, resolved.account, {
-      dataItemSigner: resolved.account,
+    const signer = asSeedSigner(resolved.account)
+    PublishManager.createPublish(item, resolved.address, signer, {
       ...options,
+      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? signer,
     })
     return { outcome: 'started' }
   }

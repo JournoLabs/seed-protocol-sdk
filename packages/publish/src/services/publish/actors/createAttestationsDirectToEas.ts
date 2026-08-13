@@ -1,9 +1,6 @@
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { ZERO_ADDRESS } from '@ethereum-attestation-service/eas-sdk'
-import { sendTransaction, waitForReceipt } from 'thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
-import { getClient } from '~/helpers/thirdweb'
 import {
   Item,
   updateVersionUid,
@@ -19,6 +16,8 @@ import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransact
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
 import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
+import { waitForPublishReceipt } from '~/helpers/chainClient'
+import { asSeedSigner } from '~/helpers/seedSigner'
 import {
   prepareEasAttest,
   prepareEasMultiAttest,
@@ -145,7 +144,9 @@ export const createAttestationsDirectToEas = fromPromise(
       )
     }
 
-    await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
+    const signer = asSeedSigner(account)
+
+    await ensureEasSchemasForItem(item, signer)
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
@@ -231,7 +232,6 @@ export const createAttestationsDirectToEas = fromPromise(
       }
     }
 
-    const client = getClient()
     let lastAttestationMs = Date.now()
 
     for (let i = 0; i < normalizedRequests.length; i++) {
@@ -240,7 +240,7 @@ export const createAttestationsDirectToEas = fromPromise(
       let newVersionUid = request.versionUid
 
       if (newSeedUid === ZERO_BYTES32) {
-        const attestTx = prepareEasAttest(client, optimismSepolia, {
+        const attestTx = prepareEasAttest({
           schema: request.seedSchemaUid as `0x${string}`,
           data: {
             refUID: ZERO_BYTES32,
@@ -248,14 +248,10 @@ export const createAttestationsDirectToEas = fromPromise(
             revocable: request.seedIsRevocable,
           },
         })
-        const result = await sendTransaction({ account, transaction: attestTx })
-        const receipt = await waitForReceipt({
-          client,
-          chain: optimismSepolia,
-          transactionHash: result.transactionHash,
-        })
+        const result = await signer.sendTransaction(attestTx)
+        const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create Seed attestation')
-        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
+        lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
         const seedUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
         if (!seedUidFromReceipt || seedUidFromReceipt === ZERO_BYTES32) {
@@ -267,7 +263,7 @@ export const createAttestationsDirectToEas = fromPromise(
       }
 
       if (newSeedUid !== ZERO_BYTES32 && newVersionUid === ZERO_BYTES32) {
-        const attestTx = prepareEasAttest(client, optimismSepolia, {
+        const attestTx = prepareEasAttest({
           schema: request.versionSchemaUid as `0x${string}`,
           data: {
             refUID: newSeedUid as `0x${string}`,
@@ -275,14 +271,10 @@ export const createAttestationsDirectToEas = fromPromise(
             revocable: true,
           },
         })
-        const result = await sendTransaction({ account, transaction: attestTx })
-        const receipt = await waitForReceipt({
-          client,
-          chain: optimismSepolia,
-          transactionHash: result.transactionHash,
-        })
+        const result = await signer.sendTransaction(attestTx)
+        const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create Version attestation')
-        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
+        lastAttestationMs = await attestationMsFromReceipt(receipt)
         const { easContractAddress } = getPublishConfig()
         const versionUidFromReceipt = getAttestationUidFromReceipt(receipt, easContractAddress)
         if (!versionUidFromReceipt || versionUidFromReceipt === ZERO_BYTES32) {
@@ -329,15 +321,11 @@ export const createAttestationsDirectToEas = fromPromise(
       }))
 
       if (multiRequests.length > 0) {
-        const multiTx = prepareEasMultiAttest(client, optimismSepolia, multiRequests)
-        const result = await sendTransaction({ account, transaction: multiTx })
-        const receipt = await waitForReceipt({
-          client,
-          chain: optimismSepolia,
-          transactionHash: result.transactionHash,
-        })
+        const multiTx = prepareEasMultiAttest(multiRequests)
+        const result = await signer.sendTransaction(multiTx)
+        const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create property attestations')
-        lastAttestationMs = await attestationMsFromReceipt(client, optimismSepolia, receipt)
+        lastAttestationMs = await attestationMsFromReceipt(receipt)
         logger('created property attestations for request', i)
         const { easContractAddress } = getPublishConfig()
         const attested = getAttestedUidsFromReceipt(receipt, easContractAddress)

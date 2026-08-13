@@ -53,10 +53,6 @@ async function ensureExecutorModulesForConnect(
     return
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7754/ingest/2810478a-7cf0-49a8-bc23-760b81417972',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a35748'},body:JSON.stringify({sessionId:'a35748',location:'ConnectButton.tsx:ensureExecutorModulesForConnect',message:'executor module connect path',data:{useModularExecutor:config.useModularExecutor,modularAccountAddress:modularAccount.address,managedAddress:managedAddress??null,hasModuleContract:Boolean(config.modularAccountModuleContract)},timestamp:Date.now(),hypothesisId:'C',runId:'post-fix'})}).catch(()=>{});
-  // #endregion
-
   if (config.useModularExecutor) {
     if (!managedAddress) {
       reportWalletSetupWarning(

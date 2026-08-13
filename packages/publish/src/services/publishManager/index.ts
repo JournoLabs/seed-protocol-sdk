@@ -163,10 +163,10 @@ export const PublishManager = {
   createPublish: (
     item: InstanceType<typeof Item>,
     address: string,
-    account?: import('thirdweb/wallets').Account,
+    account?: import('../../helpers/seedSigner').SeedSigner,
     options?: import('../../config').CreatePublishOptions
   ) => publishManager.send({ type: 'CREATE_PUBLISH', item, address, account, options }),
-  retryAttestations: (seedLocalId: string, account?: import('thirdweb/wallets').Account) =>
+  retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').SeedSigner) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
   query: (seedLocalId: string) => publishManager.send({ type: 'QUERY', seedLocalId }),

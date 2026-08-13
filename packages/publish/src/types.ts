@@ -5,7 +5,7 @@ export type PublishMode = 'patch' | 'new_version'
 
 /** Aligns with `@seedprotocol/sdk` `HtmlEmbeddedDataUriPolicy`. */
 export type HtmlEmbeddedDataUriPolicy = import('@seedprotocol/sdk').HtmlEmbeddedDataUriPolicy
-import type { Account } from 'thirdweb/wallets'
+import type { SeedSigner } from './helpers/seedSigner'
 import type { ethers } from 'ethers'
 
 export type ReimbursementResponse = { transactionId: string }
@@ -35,7 +35,7 @@ export interface PublishMachineContext {
   modelName?: string
   schemaId?: string
   /** Smart wallet (in-app) account used to sign/send setEas and multiPublish; passed from UI when starting publish. */
-  account?: Account
+  account?: SeedSigner
   seedId?: string
   existingSeedUid?: string
   arweaveTransactions?: ArweaveTransactionInfo[]
@@ -69,7 +69,7 @@ export interface PublishMachineContext {
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<import('./config').ArweaveDataItemInfoResult[]>
   /** Per-publish: signer for DataItems when useArweaveBundler (from createPublish options). */
-  dataItemSigner?: ethers.Wallet | Account
+  dataItemSigner?: ethers.Wallet | SeedSigner
   /** Per-publish: sign Arweave transactions when NOT useArweaveBundler (from createPublish options). */
   signArweaveTransactions?: (
     uploads: import('./config').SerializedPublishUpload[]

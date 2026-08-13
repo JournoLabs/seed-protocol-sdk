@@ -1,9 +1,8 @@
-import { getClient } from '~/helpers/thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
-import { sendTransaction, waitForReceipt } from 'thirdweb'
 import { getConnectedAccount } from '~/helpers/thirdweb'
 import { prepareEasMultiRevoke } from '~/helpers/easDirect'
 import { resolveRevokeAccount } from '~/helpers/resolveRevokeAccount'
+import { waitForPublishReceipt } from '~/helpers/chainClient'
+import { asSeedSigner } from '~/helpers/seedSigner'
 import {
   getVersionsForSeedUid,
   getMetadataAttestationUidsForSeedUid,
@@ -33,10 +32,8 @@ export async function revokeAttestations(params: {
 
   const attester = await getAttesterForSeed({ seedLocalId, seedUid })
   const revokeAccount = await resolveRevokeAccount({ account, attester })
+  const signer = asSeedSigner(revokeAccount)
 
-  const client = getClient()
-
-  // Collect attestation UIDs to revoke
   const [versionRows, metadataRows] = await Promise.all([
     getVersionsForSeedUid(seedUid),
     getMetadataAttestationUidsForSeedUid(seedUid),
@@ -58,7 +55,6 @@ export async function revokeAttestations(params: {
     data: Array<{ uid: `0x${string}`; value?: bigint }>
   }> = []
 
-  // Metadata attestations (group by schema)
   for (const [schemaUid, uids] of metadataBySchema) {
     if (uids.length > 0) {
       requests.push({
@@ -68,7 +64,6 @@ export async function revokeAttestations(params: {
     }
   }
 
-  // Version attestations
   if (versionUids.length > 0) {
     requests.push({
       schema: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA as `0x${string}`,
@@ -76,32 +71,24 @@ export async function revokeAttestations(params: {
     })
   }
 
-  // Seed attestation
   requests.push({
     schema: seedSchemaUid as `0x${string}`,
     data: [{ uid: seedUid as `0x${string}` }],
   })
 
-  // Execute multiRevoke in batches if needed (EAS may have limits)
   for (const req of requests) {
     if (req.data.length === 0) continue
-    const multiRevokeTx = prepareEasMultiRevoke(client, optimismSepolia, [req])
+    const multiRevokeTx = prepareEasMultiRevoke([req])
     try {
-      const result = await sendTransaction({ account: revokeAccount, transaction: multiRevokeTx })
-      await waitForReceipt({
-        client,
-        chain: optimismSepolia,
-        transactionHash: result.transactionHash,
-      })
+      const result = await signer.sendTransaction(multiRevokeTx)
+      await waitForPublishReceipt(result.transactionHash)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      // EAS AccessDenied: only the original attester can revoke (selector 0x4ca88867)
       if (msg.includes('AccessDenied') || msg.includes('0x4ca88867')) {
         throw new Error(
           'Only the original attester can revoke attestations. Connect the wallet that published this item.',
         )
       }
-      // AlreadyRevoked: attestation was already revoked (e.g. double-click, stale UI)
       if (msg.includes('AlreadyRevoked')) {
         continue
       }

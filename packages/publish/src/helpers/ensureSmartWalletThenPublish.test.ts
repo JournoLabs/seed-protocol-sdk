@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { isSeedSigner } from './seedSigner'
 
 const cfg = { useModularExecutor: true as boolean }
 const getConnectedManagedAccountAddressMock = mock(() =>
@@ -76,7 +77,7 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
     expect(createPublishMock).not.toHaveBeenCalled()
   })
 
-  test('calls createPublish with managed address and modular account without blocking on prep', async () => {
+  test('calls createPublish with managed address and SeedSigner without blocking on prep', async () => {
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     const modular = { address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account
     getConnectedModularAccountMock.mockImplementationOnce(() => Promise.resolve(modular))
@@ -88,13 +89,14 @@ describe('ensureSmartWalletThenPublish (useModularExecutor)', () => {
     const [it, address, account, opts] = createPublishMock.mock.calls[0] as [
       typeof itemStub,
       string,
-      import('thirdweb/wallets').Account,
-      { dataItemSigner?: import('thirdweb/wallets').Account },
+      import('./seedSigner').SeedSigner,
+      { dataItemSigner?: import('./seedSigner').SeedSigner },
     ]
     expect(it).toBe(itemStub)
     expect(address).toBe('0xmanaged0000000000000000000000000000000001')
-    expect(account).toBe(modular)
-    expect(opts?.dataItemSigner).toBe(modular)
+    expect(isSeedSigner(account)).toBe(true)
+    expect(account.address.toLowerCase()).toBe(modular.address.toLowerCase())
+    expect(isSeedSigner(opts?.dataItemSigner)).toBe(true)
     expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
   })
 
@@ -143,9 +145,14 @@ describe('ensureSmartWalletThenPublish (non-modular)', () => {
 
     expect(result).toEqual({ outcome: 'started' })
     expect(createPublishMock).toHaveBeenCalledTimes(1)
-    const [, address, account] = createPublishMock.mock.calls[0] as [unknown, string, import('thirdweb/wallets').Account]
+    const [, address, account] = createPublishMock.mock.calls[0] as [
+      unknown,
+      string,
+      import('./seedSigner').SeedSigner,
+    ]
     expect(address).toBe('0xpublisher00000000000000000000000000000004')
-    expect(account).toBe(resolvedAccount)
+    expect(isSeedSigner(account)).toBe(true)
+    expect(account.address.toLowerCase()).toBe(resolvedAccount.address.toLowerCase())
     cfg.useModularExecutor = true
   })
 })

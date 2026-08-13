@@ -1,72 +1,77 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { fromThirdwebAccount } from './seedSigner'
 
 const publishCfg = {
   easContractAddress: '0x4200000000000000000000000000000000000021',
 }
 
-const getEasMock = mock(async () => publishCfg.easContractAddress)
-const setEasMock = mock(() => ({}))
-const sendTransactionMock = mock(async () => ({ transactionHash: `0x${'ab'.repeat(32)}` }))
-const waitForReceiptMock = mock(async () => ({ status: 'success' }))
+const readGetEasMock = mock(async () => publishCfg.easContractAddress)
+const encodeSetEasMock = mock(() => ({
+  to: '0xmanaged' as `0x${string}`,
+  data: '0xseteas' as `0x${string}`,
+}))
+const waitForPublishReceiptMock = mock(async () => ({ status: 'success' }))
 
 mock.module('../config', () => ({
   getPublishConfig: () => publishCfg,
 }))
 
-mock.module('./thirdweb', () => ({
-  getClient: () => ({}),
+mock.module('./contracts', () => ({
+  readGetEas: (...args: unknown[]) => readGetEasMock(...args),
+  encodeSetEas: (...args: unknown[]) => encodeSetEasMock(...args),
 }))
 
-mock.module('thirdweb', () => ({
-  getContract: mock(() => ({})),
-  sendTransaction: (...args: unknown[]) => sendTransactionMock(...args),
-  waitForReceipt: (...args: unknown[]) => waitForReceiptMock(...args),
+mock.module('./chainClient', () => ({
+  waitForPublishReceipt: (...args: unknown[]) => waitForPublishReceiptMock(...args),
 }))
 
-mock.module('./thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148', () => ({
-  getEas: () => getEasMock(),
-  setEas: (...args: unknown[]) => setEasMock(...args),
-}))
+const sendTransactionMock = mock(async () => ({ transactionHash: `0x${'ab'.repeat(32)}` as `0x${string}` }))
+const fakeAccount = fromThirdwebAccount({
+  address: '0x1111111111111111111111111111111111111111',
+  signMessage: async () => '0x',
+  sendTransaction: sendTransactionMock,
+} as any)
 
-const fakeAccount = { address: '0x1111111111111111111111111111111111111111' } as import('thirdweb/wallets').Account
+// Override branded signer send to use our mock
+;(fakeAccount as any).sendTransaction = sendTransactionMock
 
 afterEach(() => {
   publishCfg.easContractAddress = '0x4200000000000000000000000000000000000021'
-  getEasMock.mockClear()
-  setEasMock.mockClear()
+  readGetEasMock.mockClear()
+  encodeSetEasMock.mockClear()
   sendTransactionMock.mockClear()
-  waitForReceiptMock.mockClear()
-  getEasMock.mockImplementation(async () => publishCfg.easContractAddress)
+  waitForPublishReceiptMock.mockClear()
+  readGetEasMock.mockImplementation(async () => publishCfg.easContractAddress)
 })
 
 describe('ensureManagedAccountEasConfigured', () => {
   test('no op when getEas matches config', async () => {
     const { ensureManagedAccountEasConfigured } = await import('./ensureManagedAccountEasConfigured')
     await ensureManagedAccountEasConfigured('0xmanaged', fakeAccount)
-    expect(getEasMock).toHaveBeenCalled()
-    expect(setEasMock).not.toHaveBeenCalled()
+    expect(readGetEasMock).toHaveBeenCalled()
+    expect(encodeSetEasMock).not.toHaveBeenCalled()
     expect(sendTransactionMock).not.toHaveBeenCalled()
   })
 
   test('sends setEas when getEas is zero', async () => {
-    getEasMock.mockImplementationOnce(async () => '0x0000000000000000000000000000000000000000')
+    readGetEasMock.mockImplementationOnce(async () => '0x0000000000000000000000000000000000000000')
     const { ensureManagedAccountEasConfigured } = await import('./ensureManagedAccountEasConfigured')
     await ensureManagedAccountEasConfigured('0xmanaged', fakeAccount)
-    expect(setEasMock).toHaveBeenCalled()
+    expect(encodeSetEasMock).toHaveBeenCalled()
     expect(sendTransactionMock).toHaveBeenCalledTimes(1)
-    expect(waitForReceiptMock).toHaveBeenCalledTimes(1)
+    expect(waitForPublishReceiptMock).toHaveBeenCalledTimes(1)
   })
 
   test('sends setEas when getEas mismatches', async () => {
-    getEasMock.mockImplementationOnce(async () => '0x1000000000000000000000000000000000000001')
+    readGetEasMock.mockImplementationOnce(async () => '0x1000000000000000000000000000000000000001')
     const { ensureManagedAccountEasConfigured } = await import('./ensureManagedAccountEasConfigured')
     await ensureManagedAccountEasConfigured('0xmanaged', fakeAccount)
-    expect(setEasMock).toHaveBeenCalled()
+    expect(encodeSetEasMock).toHaveBeenCalled()
     expect(sendTransactionMock).toHaveBeenCalledTimes(1)
   })
 
   test('throws ManagedAccountPublishError when getEas fails', async () => {
-    getEasMock.mockImplementationOnce(async () => {
+    readGetEasMock.mockImplementationOnce(async () => {
       throw new Error('rpc')
     })
     const { ensureManagedAccountEasConfigured } = await import('./ensureManagedAccountEasConfigured')

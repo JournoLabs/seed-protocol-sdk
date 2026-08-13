@@ -1,17 +1,19 @@
-import { createThirdwebClient, deploySmartAccount, getContract, sendTransaction, } from 'thirdweb'
+import { createThirdwebClient, deploySmartAccount, getContract, } from 'thirdweb'
 import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
-import { isContractDeployed } from 'thirdweb/utils'
 import { useEffect, useRef, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
 import { optimismSepolia, } from 'thirdweb/chains'
-import {
-  getAddress as getFactoryAddress,
-} from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
-import { createAccount as createManagedAccountOnFactory } from './thirdweb/11155420/0x76f47d88bfaf670f5208911181fcdc0e160cb16d'
+import type { Address, Hex } from 'viem'
 import debug from 'debug'
 import { getPublishConfig } from '../config'
+import {
+  isContractDeployed,
+  pollSmartWalletDeployed as pollDeployed,
+} from './chainClient'
+import { encodeCreateAccount, readFactoryGetAddress } from './contracts'
+import { asSeedSigner, type SeedSigner } from './seedSigner'
 import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
 
 const logger = debug('permaPress:helpers:thirdweb')
@@ -117,17 +119,6 @@ export const useActiveSmartWalletContract = () => {
   return contract
 }
 
-export const getManagedAccountFactoryContract = () => {
-  const { thirdwebAccountFactoryAddress } = getPublishConfig()
-  const contract = getContract({
-    client: getClient(),
-    chain   : optimismSepolia,
-    address : thirdwebAccountFactoryAddress,
-  },)
-
-  return contract
-}
-
 /**
  * Returns the deterministic smart wallet address for an admin signer and optional data.
  */
@@ -135,46 +126,23 @@ export async function getSmartWalletAddressForAdmin (
   adminAddress: string,
   data: string = '0x',
 ): Promise<string> {
-  const factory = getManagedAccountFactoryContract()
-  return getFactoryAddress({
-    contract    : factory,
-    adminSigner : adminAddress,
-    data        : data as `0x${string}`,
-  },) as Promise<string>
+  return readFactoryGetAddress(adminAddress as Address, data as Hex)
 }
 
 /**
  * Returns true if the given address has contract bytecode deployed (e.g. a ManagedAccount).
  */
 export async function isSmartWalletDeployed ( smartWalletAddress: string, ): Promise<boolean> {
-  const contract = getContract({
-    client: getClient(),
-    chain   : optimismSepolia,
-    address : smartWalletAddress,
-  },)
-  return isContractDeployed(contract,)
+  return isContractDeployed(smartWalletAddress)
 }
-
-const DEFAULT_DEPLOY_POLL_ATTEMPTS = 5
-const DEFAULT_DEPLOY_POLL_INTERVAL_MS = 6_000
 
 /** Polls chain bytecode until the smart account is deployed or attempts are exhausted. */
 export async function pollSmartWalletDeployed(
   smartWalletAddress: string,
-  attempts: number = DEFAULT_DEPLOY_POLL_ATTEMPTS,
-  intervalMs: number = DEFAULT_DEPLOY_POLL_INTERVAL_MS,
+  attempts?: number,
+  intervalMs?: number,
 ): Promise<boolean> {
-  for (let i = 0; i < attempts; i++) {
-    if (await isSmartWalletDeployed(smartWalletAddress)) {
-      return true
-    }
-    if (i < attempts - 1) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, intervalMs)
-      })
-    }
-  }
-  return false
+  return pollDeployed(smartWalletAddress, attempts, intervalMs)
 }
 
 /**
@@ -234,19 +202,15 @@ export const deploySmartWalletContract = async ( localAccount: Account, ) => {
  */
 export async function deployManagedAccountViaFactory(params: {
   adminAddress: string
-  signingAccount: Account
+  signingAccount: Account | SeedSigner
   data?: `0x${string}`
 }): Promise<void> {
-  const factory = getManagedAccountFactoryContract()
-  const tx = createManagedAccountOnFactory({
-    contract: factory,
-    admin: params.adminAddress as `0x${string}`,
-    data: (params.data ?? '0x') as `0x${string}`,
-  })
-  await sendTransaction({
-    account: params.signingAccount,
-    transaction: tx,
-  })
+  const signer = asSeedSigner(params.signingAccount)
+  const tx = encodeCreateAccount(
+    params.adminAddress as Address,
+    (params.data ?? '0x') as Hex,
+  )
+  await signer.sendTransaction(tx)
 }
 
 export const appMetadata = {

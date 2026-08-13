@@ -1,10 +1,12 @@
-import { getContract, sendTransaction, waitForReceipt } from 'thirdweb'
+import { getContract, sendTransaction } from 'thirdweb'
 import { addSessionKey, shouldUpdateSessionKey } from 'thirdweb/extensions/erc4337'
 import { optimismSepolia } from 'thirdweb/chains'
+import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
+import { waitForPublishReceipt } from './chainClient'
+import { readIsActiveSigner } from './contracts'
 import { defaultApprovedTargetsForModularPublish } from './defaultApprovedTargetsForModularPublish'
 import { getClient, getManagedAccountWallet } from './thirdweb'
-import { isActiveSigner } from './thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
 
 const MSG_UNAVAILABLE =
   'Could not connect the managed publishing account to authorize the modular signer on Optimism Sepolia. Reconnect and try again.'
@@ -14,6 +16,7 @@ const MSG_ACTIVATION_FAILED =
 /**
  * Ensures the modular (EIP-7702) wallet is an active session signer on the ManagedAccount.
  * If permissions are missing or stale, sends `addSessionKey` signed by the managed EIP-4337 wallet.
+ * Session-key AA extensions remain on Thirdweb; verification uses viem.
  */
 export async function ensureManagedSignerSessionKey(params: {
   managedAddress: string
@@ -66,11 +69,7 @@ export async function ensureManagedSignerSessionKey(params: {
         permissions,
       })
       const result = await sendTransaction({ account: managedAccount, transaction: tx })
-      await waitForReceipt({
-        client: getClient(),
-        chain: optimismSepolia,
-        transactionHash: result.transactionHash,
-      })
+      await waitForPublishReceipt(result.transactionHash as `0x${string}`)
     } catch (cause) {
       throw new ManagedAccountPublishError(
         MSG_ACTIVATION_FAILED,
@@ -83,7 +82,7 @@ export async function ensureManagedSignerSessionKey(params: {
 
   let active = false
   try {
-    active = await isActiveSigner({ contract: accountContract, signer: signerAddress })
+    active = await readIsActiveSigner(managedAddress as Address, signerAddress as Address)
   } catch (cause) {
     throw new ManagedAccountPublishError(
       MSG_ACTIVATION_FAILED,

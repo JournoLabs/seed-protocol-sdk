@@ -1,14 +1,10 @@
-import { getContract, sendTransaction, waitForReceipt } from 'thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
-import type { Account } from 'thirdweb/wallets'
-import { zeroAddress } from 'viem'
+import { zeroAddress, type Address } from 'viem'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
-import { getClient } from './thirdweb'
-import {
-  getEas,
-  setEas,
-} from './thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
+import { waitForPublishReceipt } from './chainClient'
+import { encodeSetEas, readGetEas } from './contracts'
+import type { SeedSigner } from './seedSigner'
+import { asSeedSigner } from './seedSigner'
 
 const MSG_SET_EAS =
   'Could not verify or set the EAS contract address on your publishing account on Optimism Sepolia.'
@@ -20,14 +16,12 @@ function normAddr(a: string): string {
 /**
  * Ensures the ManagedAccount contract’s on-chain EAS address matches {@link getPublishConfig}.easContractAddress.
  * If `getEas` is zero or differs, sends `setEas` signed by `account` (same signer as modular `multiPublish`).
- *
- * Call before `multiPublish` on any path where the publisher contract is a ManagedAccount
- * (modular executor or non-modular EIP-4337).
  */
 export async function ensureManagedAccountEasConfigured(
   managedAddress: string,
-  account: Account,
+  account: SeedSigner | Parameters<typeof asSeedSigner>[0],
 ): Promise<void> {
+  const signer = asSeedSigner(account)
   const { easContractAddress } = getPublishConfig()
   const expected = normAddr(easContractAddress)
   if (!expected || expected === normAddr(zeroAddress)) {
@@ -38,15 +32,9 @@ export async function ensureManagedAccountEasConfigured(
     )
   }
 
-  const contract = getContract({
-    client: getClient(),
-    chain: optimismSepolia,
-    address: managedAddress,
-  })
-
   let current: string
   try {
-    const raw = await getEas({ contract })
+    const raw = await readGetEas(managedAddress as Address)
     current = normAddr(typeof raw === 'string' ? raw : String(raw))
   } catch (cause) {
     throw new ManagedAccountPublishError(MSG_SET_EAS, 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
@@ -57,16 +45,9 @@ export async function ensureManagedAccountEasConfigured(
   }
 
   try {
-    const tx = setEas({
-      contract,
-      eas: easContractAddress as `0x${string}`,
-    })
-    const result = await sendTransaction({ transaction: tx, account })
-    await waitForReceipt({
-      client: getClient(),
-      transactionHash: result.transactionHash,
-      chain: optimismSepolia,
-    })
+    const tx = encodeSetEas(managedAddress as Address, easContractAddress as Address)
+    const result = await signer.sendTransaction(tx)
+    await waitForPublishReceipt(result.transactionHash)
   } catch (cause) {
     throw new ManagedAccountPublishError(MSG_SET_EAS, 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
   }

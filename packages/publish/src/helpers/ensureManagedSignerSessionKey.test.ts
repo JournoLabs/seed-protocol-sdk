@@ -6,9 +6,9 @@ const getAccountMock = mock(() => managedAccount)
 
 const shouldUpdateSessionKeyMock = mock(async () => false)
 const addSessionKeyMock = mock(() => ({}))
-const isActiveSignerMock = mock(async () => true)
+const readIsActiveSignerMock = mock(async () => true)
 const sendTransactionMock = mock(async () => ({ transactionHash: `0x${'cd'.repeat(32)}` }))
-const waitForReceiptMock = mock(async () => ({ status: 'success' }))
+const waitForPublishReceiptMock = mock(async () => ({ status: 'success' }))
 
 mock.module('./thirdweb', () => ({
   getClient: () => ({}),
@@ -21,7 +21,6 @@ mock.module('./thirdweb', () => ({
 mock.module('thirdweb', () => ({
   getContract: mock(() => ({})),
   sendTransaction: (...args: unknown[]) => sendTransactionMock(...args),
-  waitForReceipt: (...args: unknown[]) => waitForReceiptMock(...args),
 }))
 
 mock.module('thirdweb/extensions/erc4337', () => ({
@@ -29,8 +28,12 @@ mock.module('thirdweb/extensions/erc4337', () => ({
   addSessionKey: (...args: unknown[]) => addSessionKeyMock(...args),
 }))
 
-mock.module('./thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148', () => ({
-  isActiveSigner: (...args: unknown[]) => isActiveSignerMock(...args),
+mock.module('./contracts', () => ({
+  readIsActiveSigner: (...args: unknown[]) => readIsActiveSignerMock(...args),
+}))
+
+mock.module('./chainClient', () => ({
+  waitForPublishReceipt: (...args: unknown[]) => waitForPublishReceiptMock(...args),
 }))
 
 mock.module('./defaultApprovedTargetsForModularPublish', () => ({
@@ -42,12 +45,12 @@ afterEach(() => {
   getAccountMock.mockClear()
   shouldUpdateSessionKeyMock.mockClear()
   addSessionKeyMock.mockClear()
-  isActiveSignerMock.mockClear()
+  readIsActiveSignerMock.mockClear()
   sendTransactionMock.mockClear()
-  waitForReceiptMock.mockClear()
+  waitForPublishReceiptMock.mockClear()
   getAccountMock.mockImplementation(() => managedAccount)
   shouldUpdateSessionKeyMock.mockImplementation(async () => false)
-  isActiveSignerMock.mockImplementation(async () => true)
+  readIsActiveSignerMock.mockImplementation(async () => true)
 })
 
 describe('ensureManagedSignerSessionKey', () => {
@@ -59,7 +62,7 @@ describe('ensureManagedSignerSessionKey', () => {
     })
     expect(addSessionKeyMock).not.toHaveBeenCalled()
     expect(sendTransactionMock).not.toHaveBeenCalled()
-    expect(isActiveSignerMock).toHaveBeenCalled()
+    expect(readIsActiveSignerMock).toHaveBeenCalled()
   })
 
   test('sends addSessionKey when shouldUpdateSessionKey is true', async () => {
@@ -71,7 +74,7 @@ describe('ensureManagedSignerSessionKey', () => {
     })
     expect(addSessionKeyMock).toHaveBeenCalled()
     expect(sendTransactionMock).toHaveBeenCalledTimes(1)
-    expect(waitForReceiptMock).toHaveBeenCalledTimes(1)
+    expect(waitForPublishReceiptMock).toHaveBeenCalledTimes(1)
   })
 
   test('throws when managed wallet has no account', async () => {
@@ -89,7 +92,7 @@ describe('ensureManagedSignerSessionKey', () => {
   })
 
   test('throws when signer is not active after activation attempt', async () => {
-    isActiveSignerMock.mockImplementationOnce(async () => false)
+    readIsActiveSignerMock.mockImplementationOnce(async () => false)
     const { ensureManagedSignerSessionKey } = await import('./ensureManagedSignerSessionKey')
     await expect(
       ensureManagedSignerSessionKey({

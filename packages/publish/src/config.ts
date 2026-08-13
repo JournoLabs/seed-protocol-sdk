@@ -91,7 +91,7 @@ export interface PublishConfig {
    */
   deployManagedAccount?: (params: {
     managedAddress: string
-    managedSigningAccount: import('thirdweb/wallets').Account
+    managedSigningAccount: import('./helpers/seedSigner').SeedSigner
   }) => Promise<void>
   /**
    * Called when optional wallet setup steps fail after connect (e.g. executor module install).
@@ -127,7 +127,7 @@ export interface PublishConfig {
   /**
    * Optional fallback: Signer for DataItem creation when useArweaveBundler is true. Prefer passing at createPublish time.
    */
-  dataItemSigner?: ethers.Wallet | import('thirdweb/wallets').Account
+  dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
   /**
    * Optional fallback: Sign DataItems when useArweaveBundler is true. Prefer passing at createPublish time.
    * Each upload includes `tags` (content + configured {@link arweaveUploadTags}); forward them into the DataItem.
@@ -149,7 +149,7 @@ export interface CreatePublishOptions {
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<ArweaveDataItemInfoResult[]>
   /** Required when useArweaveBundler: signer for DataItems (backend/script flow) */
-  dataItemSigner?: ethers.Wallet | import('thirdweb/wallets').Account
+  dataItemSigner?: ethers.Wallet | import('./helpers/seedSigner').SeedSigner
   /** Required when NOT useArweaveBundler: sign Arweave transactions */
   signArweaveTransactions?: (
     uploads: SerializedPublishUpload[]

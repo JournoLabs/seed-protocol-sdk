@@ -18,8 +18,7 @@ export const EAS_CONTRACT_ADDRESS =
   '0x4200000000000000000000000000000000000021' as const
 
 /**
- * Optimism Sepolia address of the deployment the **`multiPublish` Thirdweb ABI** was generated from
- * (`helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148`).
+ * Optimism Sepolia address of the deployment the **`multiPublish` ABI** was generated from.
  *
  * **Do not use as the transaction `to` for user publishes.** Runtime `multiPublish` targets the
  * publisher’s deployed ManagedAccount (non-modular), `managedAddress` (modular), or is not used

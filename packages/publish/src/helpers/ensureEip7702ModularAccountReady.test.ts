@@ -5,6 +5,17 @@ let icdN = 0
 let icdAlwaysTrue = false
 
 const deploySmartAccountMock = mock(async () => {})
+const isContractDeployedMock = mock(async () => {
+  if (icdAlwaysTrue) return true
+  icdN++
+  return icdN > 1
+})
+const pollSmartWalletDeployedMock = mock(async (addr: string, attempts?: number) => {
+  for (let i = 0; i < (attempts ?? 5); i++) {
+    if (await isContractDeployedMock(addr)) return true
+  }
+  return false
+})
 
 mock.module('../config', () => ({
   getPublishConfig: () => cfg,
@@ -18,12 +29,10 @@ mock.module('./thirdweb', () => ({
   }),
 }))
 
-mock.module('thirdweb/utils', () => ({
-  isContractDeployed: mock(async () => {
-    if (icdAlwaysTrue) return true
-    icdN++
-    return icdN > 1
-  }),
+mock.module('./chainClient', () => ({
+  isContractDeployed: (...args: unknown[]) => isContractDeployedMock(...(args as [string])),
+  pollSmartWalletDeployed: (...args: unknown[]) =>
+    pollSmartWalletDeployedMock(...(args as [string, number?])),
 }))
 
 mock.module('thirdweb', () => ({
@@ -36,6 +45,7 @@ afterEach(() => {
   icdN = 0
   icdAlwaysTrue = false
   deploySmartAccountMock.mockClear()
+  isContractDeployedMock.mockClear()
 })
 
 describe('ensureEip7702ModularAccountReady', () => {
@@ -44,6 +54,12 @@ describe('ensureEip7702ModularAccountReady', () => {
     icdN = 0
     icdAlwaysTrue = false
     deploySmartAccountMock.mockClear()
+    isContractDeployedMock.mockClear()
+    isContractDeployedMock.mockImplementation(async () => {
+      if (icdAlwaysTrue) return true
+      icdN++
+      return icdN > 1
+    })
   })
 
   test('calls deploySmartAccount when chain bytecode is empty then ready', async () => {

@@ -35,11 +35,55 @@ export type { PublishMode } from './types'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider'
 export type { PublishProviderProps } from './react/PublishProvider'
 export { SeedProvider } from '@seedprotocol/react'
-export * from './helpers/thirdweb'
+
+export type { SeedSigner, SeedTxRequest } from './helpers/seedSigner'
+export {
+  fromThirdwebAccount,
+  fromEthersWallet,
+  asSeedSigner,
+  isSeedSigner,
+} from './helpers/seedSigner'
+export {
+  getPublishPublicClient,
+  waitForPublishReceipt,
+  isContractDeployed,
+} from './helpers/chainClient'
+export {
+  encodeMultiPublish,
+  encodeMultiPublishInteger,
+  encodeSetEas,
+  encodeEasAttest,
+  encodeEasMultiAttest,
+  encodeEasMultiRevoke,
+  readGetEas,
+  readIsActiveSigner,
+} from './helpers/contracts'
+
+export {
+  getClient,
+  getManagedAccountWallet,
+  getModularAccountWallet,
+  getWalletsForConnectButton,
+  getConnectedModularAccount,
+  getConnectedAccount,
+  getConnectedManagedAccountAddress,
+  resolveSmartWalletForPublish,
+  isSmartWalletDeployed,
+  pollSmartWalletDeployed,
+  deploySmartWalletContract,
+  deployManagedAccountViaFactory,
+  getSmartWalletAddressForAdmin,
+  appMetadata,
+  wallets,
+  ExternalWalletsForDeploy,
+  getSharedPublishInAppWalletStorage,
+  useActiveSmartWalletContract,
+  useLocalWalletAccount,
+} from './helpers/thirdweb'
+
 export {
   ensureEasSchemasForItem,
 } from './services/publish/helpers/ensureEasSchemas'
-export * from './helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
 export {

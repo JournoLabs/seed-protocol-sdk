@@ -2,8 +2,7 @@ import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from 'xstate'
-import { optimismSepolia } from 'thirdweb/chains'
-import { getClient, isSmartWalletDeployed } from '~/helpers/thirdweb'
+import { isSmartWalletDeployed } from '~/helpers/thirdweb'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
@@ -41,7 +40,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
 
       try {
         if (account) {
-          await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
+          await ensureEasSchemasForItem(item, account)
         }
 
         const validation = await (validateItemForPublish as any)(item, [], {

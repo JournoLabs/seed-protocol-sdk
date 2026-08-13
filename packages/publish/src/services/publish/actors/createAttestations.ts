@@ -7,14 +7,14 @@ import {
   resolvePublishPayloadValues,
   updateVersionUid,
 } from '@seedprotocol/sdk'
-import { getContract, sendTransaction, waitForReceipt } from 'thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
 import {
-  getClient,
   isSmartWalletDeployed,
 } from '~/helpers/thirdweb'
 import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
-import { multiPublish } from '~/helpers/thirdweb/11155420/0xcd8c945872df8e664e55cf8885c85ea3ea8f2148'
+import { encodeMultiPublish } from '~/helpers/contracts'
+import { waitForPublishReceipt } from '~/helpers/chainClient'
+import { asSeedSigner } from '~/helpers/seedSigner'
+import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
@@ -118,7 +118,7 @@ async function persistVersionUidFromPublishReceipt(params: {
     ).versionUid
   const versionUid = raw ? toHex32(raw) : undefined
   if (!versionUid || versionUid === ZERO_BYTES32) return
-  const attMs = await attestationMsFromReceipt(getClient(), optimismSepolia, receipt)
+  const attMs = await attestationMsFromReceipt(receipt)
   await updateVersionUid({
     seedLocalId,
     versionUid,
@@ -157,7 +157,7 @@ async function persistPropertyMetadataUidsFromContractReceipt(params: {
   const { receipt, normalizedRequests, useModularExecutor } = params
   const allPairs = listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)
   if (!allPairs.length) return
-  const attMs = await attestationMsFromReceipt(getClient(), optimismSepolia, receipt)
+  const attMs = await attestationMsFromReceipt(receipt)
   let offset = 0
   for (const req of normalizedRequests) {
     const list = req.listOfAttestations ?? []
@@ -245,9 +245,9 @@ export const createAttestations = fromPromise(
       useModularExecutor: false,
       publisherAddress: address,
     })
-    let activeAccount = account
+    let activeAccount = asSeedSigner(account)
 
-    await ensureEasSchemasForItem(item, account, getClient(), optimismSepolia)
+    await ensureEasSchemasForItem(item, activeAccount)
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
@@ -286,15 +286,10 @@ export const createAttestations = fromPromise(
         modularAccountModuleContract,
         managedAddress: prep.managedAddress,
       })
-      activeAccount = await ensureModularPublishBootstrap(prep.managedAddress)
+      activeAccount = asSeedSigner(await ensureModularPublishBootstrap(prep.managedAddress))
     } else {
       await ensureManagedAccountEasConfigured(address, activeAccount)
     }
-    const targetContract = getContract({
-      client: getClient(),
-      chain: optimismSepolia,
-      address: routing.txTargetAddress,
-    })
 
     const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)
 
@@ -317,24 +312,15 @@ export const createAttestations = fromPromise(
         const byLocalIdSingle = new Map([[normalizedOne.localId, normalizedOne]])
         applyPropertiesToUpdatePlaceholders([normalizedOne], byLocalIdSingle)
 
-        const tx = {
-          ...multiPublish({
-            contract: targetContract,
-            requests: [normalizedOne],
-          }),
-          gas: 5_000_000n,
-        }
+        const tx = encodeMultiPublish(
+          routing.txTargetAddress as Address,
+          [normalizedOne] as any,
+          5_000_000n,
+        )
 
-        const result = await sendTransaction({
-          account: activeAccount,
-          transaction: await Promise.resolve(tx),
-        })
+        const result = await activeAccount.sendTransaction(tx)
 
-        const receipt = await waitForReceipt({
-          client: getClient(),
-          chain: optimismSepolia,
-          transactionHash: result.transactionHash,
-        })
+        const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) {
           throw new Error('Failed to send transaction')
         }
@@ -398,24 +384,15 @@ export const createAttestations = fromPromise(
       applyPropertiesToUpdatePlaceholders(normalizedRequests, byLocalId)
 
       const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-      const tx = {
-        ...multiPublish({
-          contract: targetContract,
-          requests: payloadForContract,
-        }),
-        gas: 5_000_000n,
-      }
+      const tx = encodeMultiPublish(
+        routing.txTargetAddress as Address,
+        payloadForContract as any,
+        5_000_000n,
+      )
 
-      const result = await sendTransaction({
-        account: activeAccount,
-        transaction: await Promise.resolve(tx),
-      })
+      const result = await activeAccount.sendTransaction(tx)
 
-      const receipt = await waitForReceipt({
-        client: getClient(),
-        chain: optimismSepolia,
-        transactionHash: result.transactionHash,
-      })
+      const receipt = await waitForPublishReceipt(result.transactionHash)
       if (!receipt) {
         throw new Error('Failed to send transaction')
       }
@@ -467,7 +444,7 @@ export const createAttestations = fromPromise(
     const rootSeedUid = rootRequest?.seedUid
     if (rootSeedUid && rootSeedUid !== ZERO_BYTES32) {
       const seedAttMs = lastAttestationReceipt
-        ? await attestationMsFromReceipt(getClient(), optimismSepolia, lastAttestationReceipt)
+        ? await attestationMsFromReceipt(lastAttestationReceipt)
         : undefined
       await persistSeedUidSafely(itemWithPersist, address, seedAttMs)
     }

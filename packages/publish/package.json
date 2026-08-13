@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/publish",
-  "version": "0.4.32",
+  "version": "0.5.0",
   "description": "Publish UI components and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -53,8 +53,7 @@
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
-    "thirdweb": "^5",
-    "typescript": "^5"
+    "thirdweb": "^5"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

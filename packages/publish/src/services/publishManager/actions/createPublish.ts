@@ -2,8 +2,25 @@ import type { Item } from '@seedprotocol/sdk'
 import type { Account } from 'thirdweb/wallets'
 import { enqueueActions } from 'xstate'
 import { getPublishConfig } from '~/config'
+import { asSeedSigner, isSeedSigner, type SeedSigner } from '~/helpers/seedSigner'
+import { ethers } from 'ethers'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
+
+function coerceAccount(account: unknown): SeedSigner | undefined {
+  if (!account) return undefined
+  if (isSeedSigner(account)) return account
+  return asSeedSigner(account as Account)
+}
+
+function coerceDataItemSigner(
+  signer: import('~/config').CreatePublishOptions['dataItemSigner'],
+): import('~/config').CreatePublishOptions['dataItemSigner'] {
+  if (!signer) return undefined
+  if (signer instanceof ethers.Wallet) return signer
+  if (isSeedSigner(signer)) return signer
+  return asSeedSigner(signer as Account)
+}
 
 export const createPublish = enqueueActions(({ event, enqueue }) => {
   const ev = event as unknown as {
@@ -41,11 +58,11 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
       input: {
         item,
         address: address as string,
-        account: account as Account | undefined,
+        account: coerceAccount(account),
         modelName: item.modelName,
         schemaId: item.schemaUid,
         signDataItems: options?.signDataItems,
-        dataItemSigner: options?.dataItemSigner,
+        dataItemSigner: coerceDataItemSigner(options?.dataItemSigner),
         signArweaveTransactions: options?.signArweaveTransactions,
         arweaveJwk: options?.arweaveJwk,
         publishMode: options?.publishMode ?? 'patch',
