@@ -59,8 +59,6 @@ class PathResolver extends BasePathResolver {
       appSchemaDir: `${dotSeedDir}/schema`,
       appDbDir: `${dotSeedDir}/db`,
       appMetaDir: `${dotSeedDir}/db/meta`,
-      drizzleKitPath: `${this.getNodeModulesDir()}/drizzle-kit/bin.cjs`,
-      templatePath: `${this.getSdkRootDir()}/node/codegen/templates`
     }
   }
 }

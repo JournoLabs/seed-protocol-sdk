@@ -8,6 +8,7 @@ const logger = debug('seedSdk:browser:helpers:FileManager')
 /**
  * Browser-safe path helpers for SDK virtual file paths.
  * We intentionally avoid Node/CJS path polyfills here to keep browser bundles ESM-safe.
+ * Provides the subset of Node path APIs used via BaseFileManager.getPathModule().
  */
 const pathCompat = {
   dirname(filePath: string): string {
@@ -32,6 +33,62 @@ const pathCompat = {
       : normalized
     const lastSlash = trimmed.lastIndexOf('/')
     return lastSlash === -1 ? trimmed : trimmed.slice(lastSlash + 1)
+  },
+
+  isAbsolute(filePath: string): boolean {
+    if (!filePath) return false
+    const normalized = filePath.replace(/\\/g, '/')
+    return normalized.startsWith('/')
+  },
+
+  join(...segments: string[]): string {
+    if (segments.length === 0) return '.'
+    const joined = segments
+      .filter((s) => s != null && s !== '')
+      .map((s) => String(s).replace(/\\/g, '/'))
+      .join('/')
+    return pathCompat.normalize(joined)
+  },
+
+  resolve(...segments: string[]): string {
+    // POSIX-like resolve for virtual paths: walk right-to-left until absolute.
+    let resolved = ''
+    let absolute = false
+    for (let i = segments.length - 1; i >= 0 && !absolute; i--) {
+      const segment = segments[i]
+      if (segment == null || segment === '') continue
+      const normalized = String(segment).replace(/\\/g, '/')
+      resolved = resolved ? `${normalized}/${resolved}` : normalized
+      absolute = pathCompat.isAbsolute(normalized)
+    }
+    // Browser has no process.cwd(); treat unresolved relative paths as root-relative.
+    if (!absolute) {
+      resolved = `/${resolved}`
+    }
+    return pathCompat.normalize(resolved)
+  },
+
+  normalize(filePath: string): string {
+    if (!filePath) return '.'
+    const normalized = filePath.replace(/\\/g, '/')
+    const absolute = normalized.startsWith('/')
+    const parts = normalized.split('/')
+    const stack: string[] = []
+    for (const part of parts) {
+      if (!part || part === '.') continue
+      if (part === '..') {
+        if (stack.length > 0 && stack[stack.length - 1] !== '..') {
+          stack.pop()
+        } else if (!absolute) {
+          stack.push('..')
+        }
+        continue
+      }
+      stack.push(part)
+    }
+    const result = stack.join('/')
+    if (absolute) return `/${result}`
+    return result || '.'
   },
 }
 

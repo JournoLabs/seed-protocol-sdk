@@ -172,25 +172,6 @@ class PathResolver extends BasePathResolver {
     const dotSeedDir = this.getDotSeedDir(schemaFileDir)
     const nodeModulesDir = this.getNodeModulesDir()
 
-    let drizzleKitPath = path.join(nodeModulesDir, 'drizzle-kit', 'bin.cjs')
-
-    if (env === 'linked-sdk') {
-      const sdkRootDir = this.getSdkRootDir()
-      const sdkPackageDir = path.dirname(sdkRootDir)
-      const sdkNodeModulesDir = path.join(sdkPackageDir, 'node_modules')
-      drizzleKitPath = path.join(sdkNodeModulesDir, 'drizzle-kit', 'bin.cjs')
-    }
-
-    // Determine the correct template path based on environment
-    let templatePath: string
-    if (env === 'production') {
-      // In production, templates are at dist/node/codegen/templates
-      templatePath = path.join(this.getSdkRootDir(), 'node', 'codegen', 'templates')
-    } else {
-      // In development/test, templates are at src/node/codegen/templates
-      templatePath = path.join(this.getSdkRootDir(), 'src', 'node', 'codegen', 'templates')
-    }
-
     logger('env', env)
 
     logger('getAppPaths', {
@@ -209,8 +190,6 @@ class PathResolver extends BasePathResolver {
       appSchemaDir: path.join(dotSeedDir, 'schema'),
       appDbDir: path.join(dotSeedDir, 'db'),
       appMetaDir: path.join(dotSeedDir, 'db', 'meta'),
-      drizzleKitPath,
-      templatePath
     }
   }
 }

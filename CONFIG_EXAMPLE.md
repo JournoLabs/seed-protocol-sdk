@@ -49,10 +49,12 @@ To customize database settings, you'll need to pass a `dbConfig` object. The `Db
 ```typescript
 interface DbConfig {
   dbUrl?: string      // Database URL (defaults to `${filesDir}/db/seed.db`)
-  schemaDir?: string  // Schema directory (defaults to `${filesDir}/schema`)
-  outDir?: string     // Output directory for migrations (defaults to `${filesDir}/db`)
+  schemaDir?: string  // Deprecated / unused — app models are EAV data, not per-model Drizzle tables
+  outDir?: string     // Directory for the SQLite file + applied SDK SQL migrations (defaults to `${filesDir}/db`)
 }
 ```
+
+SDK internal table migrations are prebuilt (`packages/sdk/src/db/drizzle`) and applied automatically on `prepareDb` (browser and Node). App domain schemas are defined in JSON and stored as data — they do not generate SQL migrations.
 
 ### Example: Custom Database Path
 

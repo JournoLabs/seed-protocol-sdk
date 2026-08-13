@@ -20,7 +20,7 @@ export { ItemProperty } from '../ItemProperty/ItemProperty'
 
 // Node.js specific exports
 export { FileManager } from './helpers/FileManager'
-export { Db } from './db/Db'
+export { Db, resolveSdkDrizzleMigrationsDir } from './db/Db'
 
 // Schema exports
 export { models, versions, seeds, metadata, appState, config, modelUids } from '../seedSchema'
@@ -54,11 +54,13 @@ export * from '../types'
 // CLI exports
 export { PathResolver } from './helpers/PathResolver'
 export { BasePathResolver } from '../helpers/PathResolver/BasePathResolver'
-export { getTsImport } from './helpers'
-export { commandExists, runSeedInit, findSeedBinary } from './helpers/scripts'
+export {
+  commandExists,
+  ensureNodeDbSchema,
+  runSeedInit,
+  findSeedBinary,
+} from './helpers/scripts'
 export { INIT_SCRIPT_SUCCESS_MESSAGE, SCHEMA_TS } from '../helpers/constants'
-// Codegen functions exported for CLI usage (Node.js only, so bundling concerns don't apply)
-export { createDrizzleSchemaFilesFromConfig, generateModelCode } from './codegen/drizzle'
 
 // Side effect imports for CLI
 import './helpers/EasClient'

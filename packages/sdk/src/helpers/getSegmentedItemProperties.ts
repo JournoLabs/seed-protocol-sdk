@@ -1,12 +1,17 @@
 import { UploadProperty } from '@/db/read/getPublishUploads'
 import { IItem } from '@/interfaces'
-import { ModelPropertyDataTypes } from '@/Schema'
+import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
 import { getPropertySchema, TProperty } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models, properties } from '@/seedSchema'
 import { eq, and } from 'drizzle-orm'
 import { camelCase, upperFirst } from 'lodash-es'
+
+const matchesDataType = (
+  actual: string | undefined,
+  expected: ModelPropertyDataTypes | string,
+): boolean => normalizeDataType(actual) === expected
 async function resolvePropertyDef(
   modelName: string,
   propertyName: string,
@@ -98,30 +103,30 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
       itemProperty.propertyName === 'storage_transaction_id'
 
     const isStorageSeedType =
-      propertyDef.dataType === ModelPropertyDataTypes.Image ||
-      propertyDef.dataType === ModelPropertyDataTypes.File ||
-      propertyDef.dataType === ModelPropertyDataTypes.Html ||
-      propertyDef.dataType === ModelPropertyDataTypes.Json ||
-      (propertyDef.dataType === ModelPropertyDataTypes.Relation &&
-        (propertyDef.refValueType === ModelPropertyDataTypes.Image ||
-          propertyDef.refValueType === ModelPropertyDataTypes.File ||
-          propertyDef.refValueType === ModelPropertyDataTypes.Html ||
-          propertyDef.refValueType === ModelPropertyDataTypes.Json))
+      matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Image) ||
+      matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.File) ||
+      matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Html) ||
+      matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Json) ||
+      (matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Relation) &&
+        (matchesDataType(propertyDef.refValueType, ModelPropertyDataTypes.Image) ||
+          matchesDataType(propertyDef.refValueType, ModelPropertyDataTypes.File) ||
+          matchesDataType(propertyDef.refValueType, ModelPropertyDataTypes.Html) ||
+          matchesDataType(propertyDef.refValueType, ModelPropertyDataTypes.Json)))
 
     if (isStorageSeedType) {
       itemImageProperties.push(itemProperty)
-      if (propertyDef.dataType === ModelPropertyDataTypes.Relation) {
+      if (matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Relation)) {
         itemRelationProperties.push(itemProperty)
       }
       continue
     }
 
-    if (propertyDef.dataType === ModelPropertyDataTypes.Relation) {
+    if (matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.Relation)) {
       itemRelationProperties.push(itemProperty)
       continue
     }
 
-    if (propertyDef.dataType === ModelPropertyDataTypes.List) {
+    if (matchesDataType(propertyDef.dataType, ModelPropertyDataTypes.List)) {
       // List-of-relations: ref present, goes to processListProperty
       // List-of-primitives: ref absent, treat as basic property
       const listRef =

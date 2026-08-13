@@ -367,20 +367,6 @@ testDescribe('Client in node', () => {
     console.log('mockProjectPath:', mockProjectPath)
     console.log('============================')
 
-    // Ensure .cache directory exists to avoid ts-import errors
-    // Also clean up any stale cache that might cause issues
-    const cacheDir = path.join(mockProjectPath, '.cache')
-    if (fs.existsSync(cacheDir)) {
-      // Clean up stale cache to avoid rename errors
-      try {
-        fs.rmSync(cacheDir, { recursive: true, force: true })
-      } catch (error) {
-        // Ignore errors if cleanup fails
-      }
-    }
-    // Create fresh cache directory
-    fs.mkdirSync(cacheDir, { recursive: true })
-
     // Run init command using tsx - this creates the .seed directory and initializes the database
     // The CLI will resolve @libsql/client from the mock project's node_modules
     // OLD CODE: The CLI will resolve better-sqlite3 from the mock project's node_modules

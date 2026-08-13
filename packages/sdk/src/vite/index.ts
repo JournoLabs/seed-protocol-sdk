@@ -33,6 +33,8 @@ export interface SeedVitePluginOptions {
 
   /**
    * Whether to automatically include vite-plugin-node-polyfills with sensible defaults.
+   * The SDK depends on that package and aliases its injected shim imports to absolute
+   * paths, so consuming apps do not need to install vite-plugin-node-polyfills themselves.
    * @default true
    */
   includeNodePolyfills?: boolean
@@ -133,31 +135,163 @@ const EAS_OPTIMIZE_INCLUDES = [
 
 type AliasEntry = { find: string | RegExp; replacement: string }
 
+function pushBunPackageCandidates(
+  bunDir: string,
+  packageName: string,
+  relativePath: string,
+  candidates: string[],
+): void {
+  if (!fs.existsSync(bunDir)) return
+  // Nested scopes (@scope/name) live under .bun as @scope+name@version/...
+  const bunPrefix = packageName.startsWith('@')
+    ? packageName.replace('/', '+')
+    : packageName
+  for (const entry of fs.readdirSync(bunDir)) {
+    if (!entry.startsWith(`${bunPrefix}@`) && !entry.startsWith(`${packageName}@`)) continue
+    candidates.push(path.join(bunDir, entry, `node_modules/${packageName}`, relativePath))
+  }
+}
+
 function resolvePackageFile(packageName: string, relativePath: string): string | undefined {
   const candidates: string[] = []
+  const sdkRoot = path.resolve(SDK_DIST_DIR, '..')
 
   try {
     const pkgJson = _req.resolve(`${packageName}/package.json`)
     candidates.push(path.join(path.dirname(pkgJson), relativePath))
   } catch {
-    // package may be hoisted/unavailable in this graph
+    // Many packages (e.g. sqlocal) omit package.json from "exports". Resolve an
+    // entry file and walk up to the package root instead.
+    try {
+      const entry = _req.resolve(packageName)
+      let dir = path.dirname(entry)
+      for (let i = 0; i < 8; i++) {
+        const pkgJsonPath = path.join(dir, 'package.json')
+        if (fs.existsSync(pkgJsonPath)) {
+          try {
+            const pkgName = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')).name
+            if (pkgName === packageName) {
+              candidates.push(path.join(dir, relativePath))
+              break
+            }
+          } catch {
+            // ignore invalid package.json
+          }
+        }
+        const parent = path.dirname(dir)
+        if (parent === dir) break
+        dir = parent
+      }
+    } catch {
+      // package may be hoisted/unavailable in this graph
+    }
   }
+
+  // Linked/file installs: deps often live under the SDK package, not the app cwd.
+  candidates.push(path.join(sdkRoot, 'node_modules', packageName, relativePath))
 
   const cwdNodeModules = path.join(process.cwd(), 'node_modules')
   candidates.push(path.join(cwdNodeModules, packageName, relativePath))
 
-  const bunDir = path.join(cwdNodeModules, '.bun')
-  if (fs.existsSync(bunDir)) {
-    for (const entry of fs.readdirSync(bunDir)) {
-      if (!entry.startsWith(`${packageName}@`)) continue
-      candidates.push(path.join(bunDir, entry, `node_modules/${packageName}`, relativePath))
-    }
+  pushBunPackageCandidates(
+    path.join(cwdNodeModules, '.bun'),
+    packageName,
+    relativePath,
+    candidates,
+  )
+  pushBunPackageCandidates(
+    path.join(sdkRoot, 'node_modules', '.bun'),
+    packageName,
+    relativePath,
+    candidates,
+  )
+  const bunInstallRoot = findNodeModulesBunRoot(sdkRoot)
+  if (bunInstallRoot) {
+    pushBunPackageCandidates(
+      path.join(bunInstallRoot, 'node_modules', '.bun'),
+      packageName,
+      relativePath,
+      candidates,
+    )
   }
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate
   }
   return undefined
+}
+
+/** Walk up from startDir looking for a directory that contains node_modules/.bun. */
+function findNodeModulesBunRoot(startDir: string): string | undefined {
+  let dir = path.resolve(startDir)
+  for (let i = 0; i < 8; i++) {
+    if (fs.existsSync(path.join(dir, 'node_modules', '.bun'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return undefined
+}
+
+function isFsAllowCovering(allow: readonly string[], filePath: string): boolean {
+  const child = path.resolve(filePath)
+  return allow.some((uri) => {
+    const parent = path.resolve(String(uri))
+    return (
+      child === parent ||
+      child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep)
+    )
+  })
+}
+
+function realpathOrResolve(p: string): string {
+  try {
+    return fs.realpathSync(p)
+  } catch {
+    return path.resolve(p)
+  }
+}
+
+/**
+ * When the SDK is linked (file:/symlink) into an external app, sqlocal's worker
+ * and sqlite-wasm assets resolve into the SDK install tree (often bun's .bun
+ * store). Vite's default server.fs.allow only covers the consumer workspace, so
+ * those absolute /@fs requests 403 unless we allowlist the install roots.
+ */
+function collectDevServerFsAllowPaths(): string[] {
+  const paths = new Set<string>()
+  const add = (p?: string) => {
+    if (!p) return
+    paths.add(realpathOrResolve(p))
+  }
+
+  let sdkPkgDir: string
+  try {
+    sdkPkgDir = path.dirname(_req.resolve('@seedprotocol/sdk/package.json'))
+  } catch {
+    sdkPkgDir = path.resolve(SDK_DIST_DIR, '..')
+  }
+  add(sdkPkgDir)
+
+  const bunInstallRoot = findNodeModulesBunRoot(sdkPkgDir)
+  if (bunInstallRoot) add(bunInstallRoot)
+
+  for (const pkg of ['sqlocal', '@sqlite.org/sqlite-wasm'] as const) {
+    const pkgJson = resolvePackageFile(pkg, 'package.json')
+    if (pkgJson) add(path.dirname(pkgJson))
+  }
+
+  return [...paths]
+}
+
+function ensureDevServerFsAllow(allow: string[]): string[] {
+  const added: string[] = []
+  for (const dir of collectDevServerFsAllowPaths()) {
+    if (isFsAllowCovering(allow, dir)) continue
+    allow.push(dir)
+    added.push(dir)
+  }
+  return added
 }
 
 function normalizeAliasEntries(
@@ -190,6 +324,194 @@ function mergeAliasEntries(existing: AliasEntry[], additions: AliasEntry[]): Ali
   }
 
   return merged
+}
+
+/** Bare IDs that vite-plugin-node-polyfills injects into every transformed module. */
+const NODE_POLYFILL_SHIM_IDS = [
+  'vite-plugin-node-polyfills/shims/buffer',
+  'vite-plugin-node-polyfills/shims/global',
+  'vite-plugin-node-polyfills/shims/process',
+] as const
+
+type NodePolyfillShimPaths = {
+  buffer?: string
+  global?: string
+  process?: string
+}
+
+/**
+ * Prefer the package "import" ESM build (index.js). createRequire resolves the
+ * "require" condition (index.cjs); Vite then serves `/@fs/...cjs?import` and
+ * default-import fails in the browser.
+ */
+function resolvePolyfillShimFile(shimId: string): string {
+  const resolved = _req.resolve(shimId)
+  if (resolved.endsWith('.cjs')) {
+    const esm = resolved.slice(0, -4) + '.js'
+    if (fs.existsSync(esm)) return esm
+  }
+  return resolved
+}
+
+function resolveNodePolyfillShimPaths(): {
+  paths: NodePolyfillShimPaths
+  unresolved: string[]
+} {
+  const paths: NodePolyfillShimPaths = {}
+  const unresolved: string[] = []
+  for (const id of NODE_POLYFILL_SHIM_IDS) {
+    try {
+      const abs = resolvePolyfillShimFile(id)
+      if (id.endsWith('/buffer')) paths.buffer = abs
+      else if (id.endsWith('/global')) paths.global = abs
+      else if (id.endsWith('/process')) paths.process = abs
+    } catch {
+      unresolved.push(id)
+    }
+  }
+  return { paths, unresolved }
+}
+
+/**
+ * Collapse repeated vite-plugin-node-polyfills globals banners (Vite 8 optimizer + serve).
+ * Re-inject with absolute ESM paths: this runs in transform order "post" (after
+ * import-analysis), so bare package ids would reach the browser unresolved
+ * ("Relative references must start with /, ./, or ../").
+ */
+function dedupeNodePolyfillBanner(
+  code: string,
+  paths: NodePolyfillShimPaths,
+): string | null {
+  const importCount = (code.match(/import\s+__buffer_polyfill\b/g) || []).length
+  if (importCount <= 1) return null
+  if (!paths.buffer || !paths.global || !paths.process) return null
+
+  const bannerRe =
+    /import\s+__buffer_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.Buffer\s*=\s*globalThis\.Buffer\s*\|\|\s*__buffer_polyfill;?\s*\n\s*import\s+__global_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.global\s*=\s*globalThis\.global\s*\|\|\s*__global_polyfill;?\s*\n\s*import\s+__process_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.process\s*=\s*globalThis\.process\s*\|\|\s*__process_polyfill;?\s*\n?/g
+
+  const cleaned = code.replace(bannerRe, '')
+  if (cleaned === code) return null
+
+  const banner =
+    `import __buffer_polyfill from ${JSON.stringify(paths.buffer)};\n` +
+    'globalThis.Buffer = globalThis.Buffer || __buffer_polyfill;\n' +
+    `import __global_polyfill from ${JSON.stringify(paths.global)};\n` +
+    'globalThis.global = globalThis.global || __global_polyfill;\n' +
+    `import __process_polyfill from ${JSON.stringify(paths.process)};\n` +
+    'globalThis.process = globalThis.process || __process_polyfill;\n'
+
+  return banner + cleaned
+}
+
+/** Rewrite leftover bare shim package ids to absolute ESM files (post import-analysis). */
+function rewriteBarePolyfillShimImports(
+  code: string,
+  paths: NodePolyfillShimPaths,
+): string | null {
+  let next = code
+  let changed = false
+  const replacements: Array<[string, string]> = []
+  if (paths.buffer) {
+    replacements.push(['vite-plugin-node-polyfills/shims/buffer', paths.buffer])
+  }
+  if (paths.global) {
+    replacements.push(['vite-plugin-node-polyfills/shims/global', paths.global])
+  }
+  if (paths.process) {
+    replacements.push(['vite-plugin-node-polyfills/shims/process', paths.process])
+  }
+  for (const [bare, abs] of replacements) {
+    const absLiteral = JSON.stringify(abs)
+    for (const quote of ['"', "'"] as const) {
+      const from = `${quote}${bare}${quote}`
+      if (!next.includes(from)) continue
+      next = next.split(from).join(absLiteral)
+      changed = true
+    }
+  }
+  return changed ? next : null
+}
+
+/**
+ * Alias polyfill shim bare imports + buffer/process/global module ids to absolute
+ * paths resolved from this package. Nested installs under @seedprotocol/sdk are
+ * invisible to consumer-project resolution (and to Vite 8's Rolldown optimizer)
+ * unless we rewrite to absolute files.
+ */
+function addNodePolyfillShimAliases(
+  aliasEntries: AliasEntry[],
+  paths: NodePolyfillShimPaths,
+): void {
+  if (paths.buffer) {
+    aliasEntries.push(
+      { find: 'vite-plugin-node-polyfills/shims/buffer', replacement: paths.buffer },
+      { find: /^buffer$/, replacement: paths.buffer },
+      { find: /^node:buffer$/, replacement: paths.buffer },
+    )
+  }
+  if (paths.global) {
+    aliasEntries.push(
+      { find: 'vite-plugin-node-polyfills/shims/global', replacement: paths.global },
+      { find: /^global$/, replacement: paths.global },
+    )
+  }
+  if (paths.process) {
+    aliasEntries.push(
+      { find: 'vite-plugin-node-polyfills/shims/process', replacement: paths.process },
+      { find: /^process$/, replacement: paths.process },
+      { find: /^node:process$/, replacement: paths.process },
+    )
+  }
+}
+
+/** Object-form aliases for optimizeDeps.rolldown/rollup resolve (string keys). */
+function nodePolyfillShimAliasObject(paths: NodePolyfillShimPaths): Record<string, string> {
+  const alias: Record<string, string> = {}
+  if (paths.buffer) {
+    alias['vite-plugin-node-polyfills/shims/buffer'] = paths.buffer
+    alias.buffer = paths.buffer
+    alias['node:buffer'] = paths.buffer
+  }
+  if (paths.global) {
+    alias['vite-plugin-node-polyfills/shims/global'] = paths.global
+    alias.global = paths.global
+  }
+  if (paths.process) {
+    alias['vite-plugin-node-polyfills/shims/process'] = paths.process
+    alias.process = paths.process
+    alias['node:process'] = paths.process
+  }
+  return alias
+}
+
+const POLYFILL_ALIAS_FINDS_TO_REPLACE = new Set([
+  'vite-plugin-node-polyfills/shims/buffer',
+  'vite-plugin-node-polyfills/shims/global',
+  'vite-plugin-node-polyfills/shims/process',
+  'buffer',
+  'node:buffer',
+  'process',
+  'node:process',
+  'global',
+])
+
+/**
+ * Put absolute polyfill aliases first and drop bare/package-id entries that
+ * vite-plugin-node-polyfills may have added for the same modules (first match wins).
+ */
+function withPreferredPolyfillAliases(
+  existing: AliasEntry[],
+  paths: NodePolyfillShimPaths,
+): AliasEntry[] {
+  const preferred: AliasEntry[] = []
+  addNodePolyfillShimAliases(preferred, paths)
+  if (preferred.length === 0) return existing
+
+  const filtered = existing.filter((entry) => {
+    if (typeof entry.find !== 'string') return true
+    return !POLYFILL_ALIAS_FINDS_TO_REPLACE.has(entry.find)
+  })
+  return [...preferred, ...filtered]
 }
 
 function addRendererCompatibilityAliases(aliasEntries: AliasEntry[]): void {
@@ -230,11 +552,12 @@ function addRendererCompatibilityAliases(aliasEntries: AliasEntry[]): void {
  * - Aliases fs → @zenfs/core (and promises variant)
  * - Aliases path → path-browserify
  * - Ensures CommonJS in SDK dist is transformed by Vite's CommonJS plugin
+ * - Allowlists linked SDK / sqlocal worker paths on server.fs.allow for Vite dev
  * - Optionally injects a simple ZenFS initialization script
  * - Optionally wires up vite-plugin-node-polyfills with safe defaults
  *
  * This plugin assumes the SDK does not bundle Node-only code in the browser entry.
- * For Electron, Node-only work (e.g. drizzle-kit, better-sqlite3) should run in the
+ * For Electron, Node-only work (e.g. better-sqlite3) should run in the
  * main process; the renderer should only use browser-safe SDK usage.
  *
  * For the renderer build:
@@ -252,6 +575,21 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   } = options
 
   const log = (...args: unknown[]) => {
+    if (debug) console.log('[seed-vite-plugin]', ...args)
+  }
+
+  const { paths: polyfillShimPaths, unresolved: unresolvedPolyfillShims } =
+    resolveNodePolyfillShimPaths()
+  const polyfillShimAliasObj = nodePolyfillShimAliasObject(polyfillShimPaths)
+
+  if (includeNodePolyfills && unresolvedPolyfillShims.length > 0) {
+    console.warn(
+      '[seed-vite-plugin] Could not resolve vite-plugin-node-polyfills shims from the SDK package:\n' +
+        unresolvedPolyfillShims.map((id) => `  - ${id}`).join('\n') +
+        '\nNode polyfill globals may fail to resolve. Reinstall @seedprotocol/sdk, or set includeNodePolyfills: false and configure polyfills yourself.',
+    )
+  } else if (unresolvedPolyfillShims.length === 0) {
+    log('Resolved vite-plugin-node-polyfills shims to absolute paths')
   }
 
   /**
@@ -260,6 +598,16 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const configPlugin: Plugin = {
     name: 'seed-protocol:config',
     enforce: 'pre',
+
+    configResolved(resolvedConfig) {
+      const addedAllowPaths = ensureDevServerFsAllow(resolvedConfig.server.fs.allow)
+      if (addedAllowPaths.length > 0) {
+        log(
+          'Extended server.fs.allow for linked SDK / sqlocal worker paths:',
+          addedAllowPaths,
+        )
+      }
+    },
 
     config(userConfig) {
       const aliasEntries: AliasEntry[] = []
@@ -288,6 +636,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
 
       addRendererCompatibilityAliases(aliasEntries)
+      addNodePolyfillShimAliases(aliasEntries, polyfillShimPaths)
 
       const existingResolve = userConfig.resolve ?? {}
       const mergedAlias = mergeAliasEntries(
@@ -310,33 +659,55 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         (dep) => !!resolvePackageFile(dep, 'package.json'),
       )
 
+      const existingOptimize = userConfig.optimizeDeps ?? {}
+      const existingOptimizeRollup = (existingOptimize as { rollupOptions?: Record<string, unknown> })
+        .rollupOptions ?? {}
+      const existingOptimizeResolve =
+        (existingOptimizeRollup.resolve as { alias?: Record<string, string> } | undefined) ?? {}
+
       const optimizeDeps: UserConfig['optimizeDeps'] = {
-        ...(userConfig.optimizeDeps ?? {}),
+        ...existingOptimize,
         exclude: [
-          ...(userConfig.optimizeDeps?.exclude ?? []),
+          ...(existingOptimize.exclude ?? []),
           // Do not prebundle the SDK itself or clearly node-only tools
           '@seedprotocol/sdk',
-          'drizzle-kit',
           'drizzle-orm',
           'better-sqlite3',
           // sqlocal uses workers and should not be prebundled
           'sqlocal',
         ],
         include: [
-          ...(userConfig.optimizeDeps?.include ?? []),
+          ...(existingOptimize.include ?? []),
           ...resolvableOptimizeIncludes,
           ...EAS_OPTIMIZE_INCLUDES,
         ],
         // Keep `global` shim in optimizer esbuild options; top-level Vite `define`
         // can be rejected by Rolldown in some consumer setups.
         esbuildOptions: {
-          ...(userConfig.optimizeDeps?.esbuildOptions ?? {}),
+          ...(existingOptimize.esbuildOptions ?? {}),
           define: {
-            ...(userConfig.optimizeDeps?.esbuildOptions?.define ?? {}),
+            ...(existingOptimize.esbuildOptions?.define ?? {}),
             global: 'globalThis',
           },
         },
-      }
+        // Vite 8 / Rolldown: vite-plugin-node-polyfills sets optimizeDeps.rollupOptions.resolve.alias
+        // with bare shim package ids. Point those (and buffer/process/global) at absolute SDK paths
+        // so nested installs resolve during dependency optimization.
+        ...(Object.keys(polyfillShimAliasObj).length > 0
+          ? {
+              rollupOptions: {
+                ...existingOptimizeRollup,
+                resolve: {
+                  ...existingOptimizeResolve,
+                  alias: {
+                    ...existingOptimizeResolve.alias,
+                    ...polyfillShimAliasObj,
+                  },
+                },
+              },
+            }
+          : {}),
+      } as UserConfig['optimizeDeps']
 
       return {
         // Apply global → globalThis for Rollup production builds too.
@@ -378,6 +749,102 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         },
         optimizeDeps,
       }
+    },
+  }
+
+  /**
+   * Runs after vite-plugin-node-polyfills so absolute shim aliases win over its bare
+   * package-id aliases in both resolve.alias and the Rolldown optimizeDeps graph.
+   */
+  const polyfillResolvePlugin: Plugin = {
+    name: 'seed-protocol:polyfill-resolve',
+    enforce: 'post',
+
+    config(userConfig) {
+      if (Object.keys(polyfillShimAliasObj).length === 0) return
+
+      const existingResolve = userConfig.resolve ?? {}
+      const mergedAlias = withPreferredPolyfillAliases(
+        normalizeAliasEntries(existingResolve.alias),
+        polyfillShimPaths,
+      )
+
+      const existingOptimize = userConfig.optimizeDeps ?? {}
+      const existingOptimizeRollup = (existingOptimize as { rollupOptions?: Record<string, unknown> })
+        .rollupOptions ?? {}
+      const existingOptimizeResolve =
+        (existingOptimizeRollup.resolve as { alias?: Record<string, string> } | undefined) ?? {}
+
+      return {
+        resolve: {
+          ...existingResolve,
+          alias: mergedAlias,
+        },
+        optimizeDeps: {
+          ...existingOptimize,
+          rollupOptions: {
+            ...existingOptimizeRollup,
+            resolve: {
+              ...existingOptimizeResolve,
+              // Later merge overwrites bare shim ids from vite-plugin-node-polyfills.
+              alias: {
+                ...existingOptimizeResolve.alias,
+                ...polyfillShimAliasObj,
+              },
+            },
+          },
+        } as UserConfig['optimizeDeps'],
+      }
+    },
+
+    resolveId: {
+      order: 'pre',
+      handler(id) {
+        // Always rewrite injected shim package ids (safe even if nested under the SDK).
+        if (id === 'vite-plugin-node-polyfills/shims/buffer') {
+          return polyfillShimPaths.buffer ?? null
+        }
+        if (id === 'vite-plugin-node-polyfills/shims/global') {
+          return polyfillShimPaths.global ?? null
+        }
+        if (id === 'vite-plugin-node-polyfills/shims/process') {
+          return polyfillShimPaths.process ?? null
+        }
+        // Only remap node globals when we own the polyfills plugin config.
+        if (!includeNodePolyfills) return null
+        if (id === 'buffer' || id === 'node:buffer') return polyfillShimPaths.buffer ?? null
+        if (id === 'global') return polyfillShimPaths.global ?? null
+        if (id === 'process' || id === 'node:process') return polyfillShimPaths.process ?? null
+        return null
+      },
+    },
+
+    transform: {
+      // After polyfills banner/inject so we collapse duplicates left in optimized deps.
+      // Must emit absolute shim paths: order "post" runs after import-analysis.
+      order: 'post',
+      handler(code) {
+        const count = (code.match(/import\s+__buffer_polyfill\b/g) || []).length
+        let next = code
+        let mutated = false
+
+        if (count > 1) {
+          const deduped = dedupeNodePolyfillBanner(next, polyfillShimPaths)
+          if (deduped) {
+            next = deduped
+            mutated = true
+          }
+        }
+
+        const rewritten = rewriteBarePolyfillShimImports(next, polyfillShimPaths)
+        if (rewritten) {
+          next = rewritten
+          mutated = true
+        }
+
+        if (mutated) return { code: next, map: null }
+        return null
+      },
     },
   }
 
@@ -427,19 +894,9 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         transformMixedEsModules: true,
       }
 
-      // Externalize Node.js-only dev/build tools that should never be bundled
+      // Externalize Node.js-only packages that should never be bundled for the browser
       const nodeOnlyPackages = [
-        'drizzle-kit',
         'better-sqlite3', // Native SQLite binding (Node.js only)
-        // Database drivers that drizzle-kit dynamically imports (should not be bundled)
-        '@electric-sql/pglite',
-        'pg',
-        'postgres',
-        '@vercel/postgres',
-        '@neondatabase/serverless',
-        'mysql2',
-        'mysql2/promise',
-        '@planetscale/database',
       ]
 
       const isNodeOnlyExternal = (id: string) =>
@@ -597,20 +1054,29 @@ if (!window.__seedFsReady) {
 
   if (includeNodePolyfills) {
     log('Including vite-plugin-node-polyfills with default settings')
-    plugins.push(
-      nodePolyfills({
-        // Let fs be handled by @zenfs/core instead of polyfills
-        exclude: ['readline',],
-        // Common set of browser-friendly polyfills used by many deps
-        include: ['path', 'crypto', 'stream', 'util', 'buffer', 'events', 'string_decoder',],
-        globals: {
-          Buffer: true,
-          global: true,
-          process: true,
-        },
-        protocolImports: true,
-      }) as unknown as Plugin,
-    )
+    // vite-plugin-node-polyfills ≥0.27 returns Plugin[]; older versions returned a single Plugin.
+    const polyfillPlugins = nodePolyfills({
+      // Let fs be handled by @zenfs/core instead of polyfills
+      exclude: ['readline',],
+      // Common set of browser-friendly polyfills used by many deps
+      include: ['path', 'crypto', 'stream', 'util', 'buffer', 'events', 'string_decoder',],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+      protocolImports: true,
+    }) as unknown as Plugin | Plugin[]
+    if (Array.isArray(polyfillPlugins)) {
+      plugins.push(...polyfillPlugins)
+    } else {
+      plugins.push(polyfillPlugins)
+    }
+  }
+
+  // After nodePolyfills so config() can overwrite its bare shim aliases.
+  if (Object.keys(polyfillShimAliasObj).length > 0) {
+    plugins.push(polyfillResolvePlugin)
   }
 
   return plugins

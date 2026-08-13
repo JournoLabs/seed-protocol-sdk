@@ -47,11 +47,7 @@ export default {
     'url',
     'node:process',
     'rimraf',
-    'better-sqlite3',
     'drizzle-orm',
-    'drizzle-kit',
-    '@grpc/grpc-js',
-    '@grpc/proto-loader'
   ],
   plugins: [
     preserveShebang(),

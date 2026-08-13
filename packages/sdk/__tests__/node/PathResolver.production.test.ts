@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import { PathResolver } from '@/node/PathResolver'
+import { fileURLToPath } from 'node:url'
+import { PathResolver } from '@/node/helpers/PathResolver'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+/** packages/sdk — mocks and dist live under the package, not monorepo root */
+const packageRoot = path.resolve(__dirname, '../..')
 
 describe('PathResolver - Production Environment', () => {
   let originalCwd: string
@@ -12,7 +18,7 @@ describe('PathResolver - Production Environment', () => {
     originalCwd = process.cwd()
     
     // Create a mock production-like environment
-    testProjectDir = path.join(process.cwd(), '__tests__', '__mocks__', 'production-test')
+    testProjectDir = path.join(packageRoot, '__tests__', '__mocks__', 'production-test')
     mockSdkDir = path.join(testProjectDir, 'node_modules', '@seedprotocol', 'sdk')
     
     // Clean up any existing test directory
@@ -24,7 +30,7 @@ describe('PathResolver - Production Environment', () => {
     fs.mkdirSync(mockSdkDir, { recursive: true })
     
     // Copy the dist directory to simulate the installed package
-    const distSource = path.join(process.cwd(), 'dist')
+    const distSource = path.join(packageRoot, 'dist')
     if (fs.existsSync(distSource)) {
       fs.cpSync(distSource, path.join(mockSdkDir, 'dist'), { recursive: true })
     }
@@ -71,11 +77,9 @@ describe('PathResolver - Production Environment', () => {
     const pathResolver = PathResolver.getInstance()
     const appPaths = pathResolver.getAppPaths(process.cwd())
     
-    // Should resolve drizzle kit path correctly
-    expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
-    
     // Should resolve SDK root dir correctly
     expect(appPaths.sdkRootDir).toContain('dist')
+    expect(appPaths.appDbDir).toContain('db')
   })
 
   it('should handle missing seedSchema directory gracefully', () => {
@@ -92,4 +96,4 @@ describe('PathResolver - Production Environment', () => {
     // Should not exist
     expect(fs.existsSync(seedSchemaPath2)).toBe(false)
   })
-}) 
+})

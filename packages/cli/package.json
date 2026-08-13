@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/cli",
-  "version": "0.4.32",
+  "version": "0.5.0",
   "description": "CLI tool for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -40,11 +40,7 @@
   },
   "dependencies": {
     "@seedprotocol/sdk": "workspace:*",
-    "@grpc/grpc-js": "^1.13.3",
-    "@grpc/proto-loader": "^0.7.15",
-    "better-sqlite3": "^12.2.0",
     "commander": "^12.1.0",
-    "drizzle-kit": "^0.31.4",
     "drizzle-orm": "^0.44.3",
     "rimraf": "^6.0.1"
   },

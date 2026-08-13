@@ -1,8 +1,14 @@
 import { describe, it, beforeEach, afterEach } from 'vitest'
 import path             from 'path'
-import { PathResolver } from '@/node/PathResolver'
+import { fileURLToPath } from 'node:url'
+import { PathResolver } from '@/node/helpers/PathResolver'
 import process                                     from 'node:process'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+/** packages/sdk — mocks live under packages/sdk/__tests__/__mocks__ */
+const packageRoot = path.resolve(__dirname, '../..')
+const mocksRoot = path.join(packageRoot, '__tests__', '__mocks__')
 
 describe('PathResolver', () => {
   let originalCwd: string | undefined
@@ -11,6 +17,9 @@ describe('PathResolver', () => {
   })
 
   afterEach(() => {
+    if (originalCwd) {
+      process.chdir(originalCwd)
+    }
   })
 
   describe('Singleton Pattern', () => {
@@ -23,7 +32,7 @@ describe('PathResolver', () => {
 
   describe('Environment Detection', () => {
     it('should detect sdk-dev environment', ({expect}) => {
-      const sdkDevCwd = path.join(originalCwd!, '__tests__', '__mocks__', 'sdk-dev', 'project')
+      const sdkDevCwd = path.join(mocksRoot, 'sdk-dev', 'project')
       process.chdir(sdkDevCwd)
 
       const resolver = PathResolver.getInstance()
@@ -47,8 +56,8 @@ describe('PathResolver', () => {
     })
 
     it('should detect linked-sdk environment', ({expect}) => {
-      const linkSdkCwd = path.join(originalCwd!, '__tests__', '__mocks__', 'linked-sdk', 'project-link')
-      const portalSdkCwd = path.join(originalCwd!, '__tests__', '__mocks__', 'linked-sdk', 'project-portal')
+      const linkSdkCwd = path.join(mocksRoot, 'linked-sdk', 'project-link')
+      const portalSdkCwd = path.join(mocksRoot, 'linked-sdk', 'project-portal')
       process.chdir(linkSdkCwd)
 
       const resolver = PathResolver.getInstance()
@@ -69,8 +78,8 @@ describe('PathResolver', () => {
       const originalNodeEnv = process.env.NODE_ENV
       process.env.NODE_ENV = ''
 
-      const prodBrowserCwd = path.join(originalCwd!, '__tests__', '__mocks__', 'browser', 'project', 'node_modules', '@seedprotocol', 'sdk')
-      const prodNodeCwd = path.join(originalCwd!, '__tests__', '__mocks__', 'node', 'project', 'node_modules', '@seedprotocol', 'sdk')
+      const prodBrowserCwd = path.join(mocksRoot, 'browser', 'project', 'node_modules', '@seedprotocol', 'sdk')
+      const prodNodeCwd = path.join(mocksRoot, 'node', 'project', 'node_modules', '@seedprotocol', 'sdk')
 
       process.chdir(prodBrowserCwd)
 
@@ -92,7 +101,7 @@ describe('PathResolver', () => {
 
   describe('Path Resolution', () => {
     it('should resolve app paths correctly for node project', ( {expect} ) => {
-      const schemaFileDir = './__tests__/__mocks__/node/project'
+      const schemaFileDir = path.join(mocksRoot, 'node', 'project')
 
       const resolver = PathResolver.getInstance()
       const appPaths = resolver.getAppPaths(schemaFileDir)
@@ -100,15 +109,13 @@ describe('PathResolver', () => {
       expect(appPaths.appSchemaDir).toContain('.seed/schema')
       expect(appPaths.appDbDir).toContain('.seed/db')
       expect(appPaths.appMetaDir).toContain('.seed/db/meta')
-      expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
-      expect(appPaths.templatePath).toContain('codegen/templates')
     })
 
     it('should resolve app paths correctly for linked-sdk project', ( {expect} ) => {
       const originalNodeEnv = process.env.NODE_ENV
       process.env.NODE_ENV = ''
 
-      const linkedProjectDir = path.join(originalCwd!, '__tests__', '__mocks__', 'linked-sdk', 'project-link')
+      const linkedProjectDir = path.join(mocksRoot, 'linked-sdk', 'project-link')
 
       const schemaFileDir = path.join(linkedProjectDir, 'seed.config.ts')
 
@@ -120,8 +127,7 @@ describe('PathResolver', () => {
       expect(appPaths.appSchemaDir).toContain('.seed/schema')
       expect(appPaths.appDbDir).toContain('.seed/db')
       expect(appPaths.appMetaDir).toContain('.seed/db/meta')
-      expect(appPaths.drizzleKitPath).toContain('drizzle-kit/bin.cjs')
-      expect(appPaths.templatePath).toContain('codegen/templates')
+
 
       process.chdir(originalCwd!)
 

@@ -3,8 +3,17 @@ import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
 
 export { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
-export { loadFeedConfig } from './config';
+export {
+  loadFeedConfig,
+  DEFAULT_SITE_CONFIG,
+  getSiteConfig,
+  setSiteConfig,
+  resetSiteConfig,
+  resolveSiteConfig,
+  type SiteConfigOverrides,
+} from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
+export type { FeedConfig } from './types';
 export {
   classifyMediaRef,
   resolveMediaRef,
@@ -32,7 +41,7 @@ import { generateAtomFeed, generateJsonFeed } from 'feedsmith';
 import { generateRssXml } from './rss/generateRssXml';
 import { CacheManager } from './cache/CacheManager';
 import { loadCacheConfig } from './cache/config';
-import { loadFeedConfig } from './config';
+import { loadFeedConfig, resolveSiteConfig, type SiteConfigOverrides } from './config';
 import { checkIfNoneMatch } from './utils/etag';
 import { ArweaveImageService } from './services/arweaveImageService';
 import {
@@ -374,28 +383,6 @@ export const teardownSeedClient = async (): Promise<void> => {
 }
 
 // ============================================================================
-// Configuration
-// ============================================================================
-
-const SITE_CONFIG: FeedConfig = {
-  title: 'Seed Protocol',
-  description: 'Content published via Seed Protocol',
-  siteUrl: 'https://seedprotocol.io',
-  feedUrl: 'https://feed.seedprotocol.io',
-  language: 'en',
-  copyright: `© ${new Date().getFullYear()} All rights reserved`,
-  author: {
-    name: 'Seed Protocol',
-    email: 'info@seedprotocol.io',
-    link: 'https://seedprotocol.io',
-  },
-}
-
-// ============================================================================
-// GraphQL Client (replace with your actual client)
-// ============================================================================
-
-// ============================================================================
 // Feed Transformation
 // ============================================================================
 
@@ -591,12 +578,14 @@ export const createFeed = (
   archiveLinks?: FeedArchiveLink[],
   isArchive?: boolean,
   transformOverrides?: Partial<TransformOptions>,
+  siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<string> => {
+  const siteConfig = resolveSiteConfig(siteConfigOverrides)
   const collectionName = pluralize(schemaName)
   // Add cache busting parameter to feed URL if provided
-  const feedUrlBase = `${SITE_CONFIG.siteUrl}/${collectionName}/${format}`
+  const feedUrlBase = `${siteConfig.siteUrl}/${collectionName}/${format}`
   const feedUrl = cacheBust ? `${feedUrlBase}?v=${cacheBust}` : feedUrlBase
-  const feedTitle = `${SITE_CONFIG.title} - ${capitalize(collectionName)}`
+  const feedTitle = `${siteConfig.title} - ${capitalize(collectionName)}`
   const now = new Date()
 
   const feedConfig = loadFeedConfig()
@@ -623,7 +612,7 @@ export const createFeed = (
   // Transform items to preserve all dynamic properties
   const transformedItems = transformToFeedItems(items, {
     schemaName,
-    siteUrl: SITE_CONFIG.siteUrl,
+    siteUrl: siteConfig.siteUrl,
     itemUrlBase: feedConfig.itemUrlBase,
     itemUrlPath: feedConfig.itemUrlPath,
     richTextDataUriImages:
@@ -636,7 +625,7 @@ export const createFeed = (
       // Atom feed requires: id, title, updated, links, entries
       const atomLinks: Array<{ href: string; rel?: string; type?: string }> = [
         { href: feedUrl, rel: 'self' },
-        { href: SITE_CONFIG.siteUrl },
+        { href: siteConfig.siteUrl },
       ]
       for (const link of links) {
         atomLinks.push({
@@ -650,12 +639,12 @@ export const createFeed = (
         title: feedTitle,
         updated: now,
         links: atomLinks,
-        subtitle: SITE_CONFIG.description,
-        rights: SITE_CONFIG.copyright,
-        author: SITE_CONFIG.author ? {
-          name: SITE_CONFIG.author.name,
-          email: SITE_CONFIG.author.email,
-          uri: SITE_CONFIG.author.link,
+        subtitle: siteConfig.description,
+        rights: siteConfig.copyright,
+        author: siteConfig.author ? {
+          name: siteConfig.author.name,
+          email: siteConfig.author.email,
+          uri: siteConfig.author.link,
         } : undefined,
         entries: transformedItems.map((item) => {
           // Atom entries require: id, title, updated, links
@@ -701,13 +690,13 @@ export const createFeed = (
         : undefined
       const jsonFeed = {
         title: feedTitle,
-        home_page_url: SITE_CONFIG.siteUrl,
+        home_page_url: siteConfig.siteUrl,
         feed_url: feedUrl,
         ...(nextUrl && { next_url: nextUrl }),
-        description: SITE_CONFIG.description,
-        author: SITE_CONFIG.author ? {
-          name: SITE_CONFIG.author.name,
-          url: SITE_CONFIG.author.link,
+        description: siteConfig.description,
+        author: siteConfig.author ? {
+          name: siteConfig.author.name,
+          url: siteConfig.author.link,
         } : undefined,
         items: transformedItems.map((item) => {
           // JSON items require: id
@@ -753,13 +742,13 @@ export const createFeed = (
       // RSS feed requires: title, link, description, items
       const rssFeed = {
         title: feedTitle,
-        link: SITE_CONFIG.siteUrl,
-        description: SITE_CONFIG.description,
+        link: siteConfig.siteUrl,
+        description: siteConfig.description,
         links: links.length ? links.map((l) => ({ rel: l.rel, href: l.href, type: l.type })) : undefined,
         isArchive: isArchive ?? false,
-        language: SITE_CONFIG.language,
-        copyright: SITE_CONFIG.copyright,
-        webMaster: SITE_CONFIG.author?.email,
+        language: siteConfig.language,
+        copyright: siteConfig.copyright,
+        webMaster: siteConfig.author?.email,
         pubDate: now,
         lastBuildDate: now,
         items: transformedItems.map((item: any) => {
@@ -794,8 +783,8 @@ export const createFeed = (
               item,
               imageCandidate,
               schemaName,
-              SITE_CONFIG.author,
-              SITE_CONFIG.copyright
+              siteConfig.author,
+              siteConfig.copyright
             )
           }
 
@@ -894,7 +883,8 @@ export async function handleFeedRequest(
   formatSegment: string,
   ifNoneMatch?: string | null,
   cacheBust?: string,
-  page?: number
+  page?: number,
+  siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<Response> {
   // Validate format
   const format = parseFormat(formatSegment)
@@ -911,6 +901,7 @@ export async function handleFeedRequest(
   // De-pluralize the collection name to get model type
   const schemaName = pluralize.singular(collectionSegment.toLowerCase())
   const collectionName = pluralize(schemaName)
+  const siteConfig = resolveSiteConfig(siteConfigOverrides)
 
   const feedConfig = loadFeedConfig()
   const pageNum = Math.max(1, page ?? 1)
@@ -1015,7 +1006,7 @@ export async function handleFeedRequest(
         })
       : await fetchItems();
 
-    const baseUrl = `${SITE_CONFIG.feedUrl}/${collectionName}/${format}`;
+    const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
     const hasNext = feedItems.length === pageSize;
     const archiveLinksForMain: FeedArchiveLink[] = [];
     if (pageNum === 1) {
@@ -1023,7 +1014,7 @@ export async function handleFeedRequest(
       const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       archiveLinksForMain.push({
         rel: 'prev-archive',
-        href: `${SITE_CONFIG.feedUrl}/${collectionName}/archive/${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}/${format}`,
+        href: `${siteConfig.feedUrl}/${collectionName}/archive/${prevMonth.getFullYear()}/${prevMonth.getMonth() + 1}/${format}`,
       });
     }
 
@@ -1041,7 +1032,9 @@ export async function handleFeedRequest(
       cacheBust,
       paginationOptions,
       archiveLinksForMain.length ? archiveLinksForMain : undefined,
-      false
+      false,
+      undefined,
+      siteConfigOverrides,
     );
     const contentType = getContentType(format);
 
@@ -1127,7 +1120,8 @@ export async function handleArchiveFeedRequest(
   month: number,
   formatSegment: string,
   ifNoneMatch?: string | null,
-  cacheBust?: string
+  cacheBust?: string,
+  siteConfigOverrides?: SiteConfigOverrides,
 ): Promise<Response> {
   if (year < 1970 || year > 2100) {
     return new Response(
@@ -1152,6 +1146,7 @@ export async function handleArchiveFeedRequest(
 
   const schemaName = pluralize.singular(collectionSegment.toLowerCase());
   const collectionName = pluralize(schemaName);
+  const siteConfig = resolveSiteConfig(siteConfigOverrides);
 
   const contentKeyOptions = { archive: { year, month } };
   const cache = getCacheManager();
@@ -1188,8 +1183,8 @@ export async function handleArchiveFeedRequest(
 
     const items = await getFeedItemsBySchemaNameForMonth(schemaName, year, month) as GraphQLItem[];
 
-    const baseUrl = `${SITE_CONFIG.feedUrl}/${collectionName}/${format}`;
-    const archiveBase = `${SITE_CONFIG.feedUrl}/${collectionName}/archive`;
+    const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
+    const archiveBase = `${siteConfig.feedUrl}/${collectionName}/archive`;
 
     const archiveLinks: FeedArchiveLink[] = [
       { rel: 'prev-archive', href: `${archiveBase}/${month === 1 ? year - 1 : year}/${month === 1 ? 12 : month - 1}/${format}` },
@@ -1210,7 +1205,9 @@ export async function handleArchiveFeedRequest(
       cacheBust,
       undefined,
       archiveLinks,
-      true
+      true,
+      undefined,
+      siteConfigOverrides,
     );
 
     const contentType = getContentType(format);

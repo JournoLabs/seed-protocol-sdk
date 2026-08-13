@@ -31,6 +31,7 @@ const DATA_TYPE_LOWER_MAP: Record<string, string> = {
   boolean: 'Boolean',
   date: 'Date',
   html: 'Html',
+  blob: 'Blob',
 }
 
 /**

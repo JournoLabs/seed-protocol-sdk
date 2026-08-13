@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from "xstate"
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
 import { ClientManagerEvents } from "@/client/constants"
-import { isInternalSchema, INTERNAL_SCHEMA_IDS } from "@/helpers/constants"
+import { isInternalSchema, INTERNAL_SCHEMA_IDS, SEED_PROTOCOL_SCHEMA_NAME } from "@/helpers/constants"
 import { listSchemaFiles, loadAllSchemasFromDb } from "@/helpers/schema"
 import { BaseDb } from "@/db/Db/BaseDb"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
@@ -33,6 +33,28 @@ function resolveSchemaFilePath(schemaFile: string): string {
   }
   const workingDir = BaseFileManager.getWorkingDir()
   return path.join(workingDir, schemaFile)
+}
+
+/** Resolve schema display name from an inlined object or on-disk JSON path. */
+async function resolveSchemaNameFromSource(
+  source: string | SchemaFileFormat,
+): Promise<string | null> {
+  if (typeof source === 'object' && source?.metadata?.name) {
+    return String(source.metadata.name)
+  }
+  if (typeof source === 'string') {
+    try {
+      const resolvedPath = resolveSchemaFilePath(source)
+      const content = await BaseFileManager.readFileAsString(resolvedPath)
+      const parsed = JSON.parse(content) as SchemaFileFormat
+      if (parsed?.metadata?.name) {
+        return String(parsed.metadata.name)
+      }
+    } catch (error) {
+      logger('Could not resolve schema name from path:', source, error)
+    }
+  }
+  return null
 }
 
 // Timeout for the entire schema processing operation (120 seconds)
@@ -81,6 +103,9 @@ export const processSchemaFiles = fromCallback<
   }, PROCESS_SCHEMA_FILES_TIMEOUT_MS)
 
   const _processSchemaFiles = async () => {
+    // Schemas written (or confirmed present) this run — skip redundant loadSchemaFromFile later
+    const schemasWrittenThisRun = new Set<string>()
+
     // First, load the internal seed-protocol schema
     logger('Loading internal seed-protocol schema')
     const internalSchemaData = internalSchema as SchemaFileFormat
@@ -88,6 +113,8 @@ export const processSchemaFiles = fromCallback<
     const internalSchemaExists = db
       ? (await db.select().from(schemasTable).where(eq(schemasTable.schemaFileId, INTERNAL_SCHEMA_IDS[0])).limit(1)).length > 0
       : false
+    // Always mark internal schema as written so the DB/file loop does not re-apply it
+    schemasWrittenThisRun.add(SEED_PROTOCOL_SCHEMA_NAME)
     if (internalSchemaExists) {
       logger('Internal seed-protocol schema already in DB, skipping import')
     } else {
@@ -117,7 +144,11 @@ export const processSchemaFiles = fromCallback<
         logger('Schema is internal (Seed Protocol), already loaded - skipping syncSchemaFromSource')
       } else {
         try {
+          const syncedName = await resolveSchemaNameFromSource(context.schema)
           await syncSchemaFromSource(context.schema)
+          if (syncedName) {
+            schemasWrittenThisRun.add(syncedName)
+          }
           logger(`Synced canonical schema from ${typeof context.schema === 'string' ? context.schema : 'object'}`)
         } catch (error: any) {
           logger(`Error syncing canonical schema:`, error)
@@ -129,7 +160,11 @@ export const processSchemaFiles = fromCallback<
       try {
         const resolvedPath = resolveSchemaFilePath(context.schemaFile)
         const content = await BaseFileManager.readFileAsString(resolvedPath)
+        const parsed = JSON.parse(content) as SchemaFileFormat
         await importJsonSchema({ contents: content })
+        if (parsed?.metadata?.name) {
+          schemasWrittenThisRun.add(String(parsed.metadata.name))
+        }
         logger(`Loaded schema from ${resolvedPath}`)
       } catch (error: any) {
         logger(`Error loading schema file ${context.schemaFile}:`, error)
@@ -152,18 +187,14 @@ export const processSchemaFiles = fromCallback<
       for (const schemaFile of schemaFiles) {
         try {
           await importJsonSchema(schemaFile.filePath)
+          if (schemaFile.name) {
+            schemasWrittenThisRun.add(schemaFile.name)
+          }
         } catch (error) {
           logger(`Error importing schema file ${schemaFile.filePath}:`, error)
         }
       }
     }
-
-    // Track schema name we just synced from config.schema - skip redundant loadSchemaFromFile for it
-    // (loadSchemaFromFile was already called inside syncSchemaFromSource; calling again creates duplicate models)
-    const syncedSchemaName =
-      context.schema && typeof context.schema === 'object' && (context.schema as any)?.metadata?.name
-        ? String((context.schema as any).metadata.name)
-        : null
 
     // Then, load all schemas using the unified database-first approach
     logger('Loading schemas from database and files')
@@ -200,10 +231,13 @@ export const processSchemaFiles = fromCallback<
         const fileExists = latest ? await BaseFileManager.pathExists(latest.filePath) : false
         if (latest && fileExists) {
           try {
-            // Skip loadSchemaFromFile when we already synced this schema via config.schema - it would
-            // create duplicate models (Publication 1, Identity 1, etc.). Use createModelsFromJsonFile
-            // only to get model definitions for context.
-            if (syncedSchemaName && schemaName === syncedSchemaName) {
+            // Skip loadSchemaFromFile when this schema was already written this run (or is
+            // internal) — re-applying creates UNIQUE constraint races on properties.
+            // Use createModelsFromJsonFile only to get model definitions for context.
+            const alreadyWritten =
+              schemasWrittenThisRun.has(schemaName) ||
+              isInternalSchema(schemaName, schema.id)
+            if (alreadyWritten) {
               const modelDefinitions = await createModelsFromJsonFile(latest.filePath)
               Object.assign(allModels, modelDefinitions)
             } else {

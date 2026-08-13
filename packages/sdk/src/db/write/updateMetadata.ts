@@ -8,6 +8,7 @@ import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { Schema as EASSchema } from '@/graphql/gql/graphql'
 import { GET_SCHEMA_BY_NAME } from '@/Item/queries'
+import { normalizeDataType } from '@/helpers/property'
 
 type UpdateMetadata = (
   metadataValues: Partial<MetadataType>,
@@ -55,8 +56,10 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
       const easClient = BaseEasClient.getEasClient()
 
       if (queryClient && easClient && propertyRecordSchema.dataType) {
-        // Type-safe lookup of EAS data type
-        const dataTypeKey = propertyRecordSchema.dataType as keyof typeof INTERNAL_DATA_TYPES
+        // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
+        const dataTypeKey = normalizeDataType(
+          propertyRecordSchema.dataType,
+        ) as keyof typeof INTERNAL_DATA_TYPES
         const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
 
         if (easDataType) {

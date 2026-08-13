@@ -8,7 +8,7 @@ import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { Schema as EASSchema } from '@/graphql/gql/graphql'
-import { ModelPropertyDataTypes } from '@/helpers/property'
+import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 
 /** Validation error shape for MetadataValidationError */
 type MetadataValidationErrorItem = { field: string; message: string; code?: string }
@@ -84,9 +84,11 @@ export const createMetadata: CreateMetadata = async (
     const validationService = new SchemaValidationService()
     const validationResult = validationService.validatePropertyValue(
       metadataValues.propertyValue,
-      propertyRecordSchema.dataType as ModelPropertyDataTypes,
+      normalizeDataType(propertyRecordSchema.dataType) as ModelPropertyDataTypes,
       propertyRecordSchema.validation,
-      propertyRecordSchema.refValueType as string | undefined,
+      propertyRecordSchema.refValueType
+        ? normalizeDataType(String(propertyRecordSchema.refValueType))
+        : undefined,
     )
     if (!validationResult.isValid && validationResult.errors.length > 0) {
       const validationErrors: MetadataValidationErrorItem[] = validationResult.errors.map((e) => ({
@@ -105,8 +107,10 @@ export const createMetadata: CreateMetadata = async (
       const easClient = BaseEasClient.getEasClient()
 
       if (queryClient && easClient && propertyRecordSchema.dataType) {
-        // Type-safe lookup of EAS data type
-        const dataTypeKey = propertyRecordSchema.dataType as keyof typeof INTERNAL_DATA_TYPES
+        // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
+        const dataTypeKey = normalizeDataType(
+          propertyRecordSchema.dataType,
+        ) as keyof typeof INTERNAL_DATA_TYPES
         const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
 
         if (easDataType) {

@@ -88,7 +88,6 @@ export const withSeed = (config: any, webpack: any, isServer: boolean) => {
 
   if (isServer) {
     config.externals.push('@sqlite.org/sqlite-wasm')
-    config.externals.push('nunjucks')
     config.externals.push('chokidar')
     config.externals.push('arweave')
   }

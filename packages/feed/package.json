@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.4.32",
+  "version": "0.5.0",
   "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,9 +38,6 @@
     "@types/bun": "latest",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

@@ -2,7 +2,6 @@ import { AttestationRequestData } from '@ethereum-attestation-service/eas-sdk';
 export declare const ZERO_ADDRESS: string;
 export declare const ZERO_BYTES = "0x";
 export declare const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
-export declare const SCHEMA_NJK = "schema.njk";
 export declare const SEED_CONFIG_FILE = "seed.config.ts";
 export declare const SEED_CONFIG_FALLBACKS: string[];
 export declare const SCHEMA_TS = "seed.config.ts";

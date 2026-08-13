@@ -22,6 +22,7 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 // Dynamic import to break circular dependency: Model -> ... -> helpers/db -> ModelProperty -> ... -> Model
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
+import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -229,6 +230,116 @@ export const getSqlResultObject = (
 
   return obj
 }
+/**
+ * Find or create a models row by schemaFileId (preferred) or name.
+ * Reuses an existing same-name row (especially schemaFileId=null stubs created via
+ * ref resolution) instead of inserting a second row — models.name is not unique,
+ * and duplicate names break createOrUpdate lookups (e.g. Resource.tags → Tag).
+ */
+const findOrCreateModelRecord = async (
+  db: BetterSQLite3Database | SqliteRemoteDatabase,
+  modelName: string,
+  modelFileId?: string,
+): Promise<NewModelRecord> => {
+  if (modelFileId) {
+    const byFileId = await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.schemaFileId, modelFileId))
+      .limit(1)
+    if (byFileId.length > 0) {
+      const record = byFileId[0] as NewModelRecord
+      if (record.name !== modelName) {
+        await db
+          .update(modelsTable)
+          .set({ name: modelName })
+          .where(eq(modelsTable.id, record.id!))
+        return { ...record, name: modelName }
+      }
+      return record
+    }
+  }
+
+  const byName = (await db
+    .select()
+    .from(modelsTable)
+    .where(eq(modelsTable.name, modelName))) as NewModelRecord[]
+
+  if (byName.length > 0) {
+    // Prefer exact file-id match, then adoptable null schemaFileId stub, then any single row.
+    let chosen =
+      (modelFileId
+        ? byName.find((r) => r.schemaFileId === modelFileId)
+        : undefined) ||
+      byName.find((r) => !r.schemaFileId) ||
+      (byName.length === 1 ? byName[0] : undefined) ||
+      byName.find((r) => !!r.schemaFileId) ||
+      byName[0]
+
+    if (modelFileId && chosen.schemaFileId !== modelFileId) {
+      const conflict = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.schemaFileId, modelFileId))
+        .limit(1)
+      if (conflict.length > 0) {
+        return conflict[0] as NewModelRecord
+      }
+      // Adopt stub (null schemaFileId) or sole same-name row by attaching this file id.
+      if (!chosen.schemaFileId || byName.length === 1) {
+        await db
+          .update(modelsTable)
+          .set({ schemaFileId: modelFileId, isEdited: false })
+          .where(eq(modelsTable.id, chosen.id!))
+        chosen = { ...chosen, schemaFileId: modelFileId, isEdited: false }
+        logger(
+          `Adopted existing model "${modelName}" (id: ${chosen.id}) with schemaFileId "${modelFileId}"`,
+        )
+      }
+    }
+
+    return chosen
+  }
+
+  try {
+    const inserted = await db
+      .insert(modelsTable)
+      .values({
+        name: modelName,
+        schemaFileId: modelFileId || null,
+        isEdited: false,
+      })
+      .returning()
+    return inserted[0] as NewModelRecord
+  } catch (error: any) {
+    if (isSqliteUniqueConstraintError(error) && modelFileId) {
+      const existing = await db
+        .select()
+        .from(modelsTable)
+        .where(eq(modelsTable.schemaFileId, modelFileId))
+        .limit(1)
+      if (existing.length > 0) {
+        return existing[0] as NewModelRecord
+      }
+    }
+    // Race: another writer inserted by name — reuse rather than throw on duplicates.
+    const raced = (await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.name, modelName))) as NewModelRecord[]
+    if (raced.length > 0) {
+      return (
+        (modelFileId
+          ? raced.find((r) => r.schemaFileId === modelFileId)
+          : undefined) ||
+        raced.find((r) => !r.schemaFileId) ||
+        raced[0]
+      )
+    }
+    throw error
+  }
+}
+
 export const createOrUpdate = async <T>(
   db: BetterSQLite3Database | SqliteRemoteDatabase,
   table: SQLiteTableWithColumns<any>,
@@ -872,102 +983,30 @@ export const addModelsToDb = async (
   for (const [modelName, modelClass] of Object.entries(models)) {
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
-    
-    // First try to find by schemaFileId if available
-    let modelRecord: NewModelRecord | undefined
-    if (modelFileId) {
-      const existingByFileId = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.schemaFileId, modelFileId))
-        .limit(1)
-      
-      if (existingByFileId.length > 0) {
-        modelRecord = existingByFileId[0] as NewModelRecord
-        // Update name if it changed
-        if (modelRecord.name !== modelName) {
-          await db
-            .update(modelsTable)
-            .set({ name: modelName })
-            .where(eq(modelsTable.id, modelRecord.id!))
-          modelRecord = { ...modelRecord, name: modelName }
-        }
-      }
-    }
-    
-    // Fallback to finding by name, but ONLY if we don't have a modelFileId
-    // If we have a modelFileId, we should create a new record with it (don't reuse existing by name)
-    if (!modelRecord) {
-      if (modelFileId) {
-        // We have a modelFileId but no existing record - create new with the correct schemaFileId
-        // Double-check before insert to avoid race conditions
-        const doubleCheck = await db
+
+      let modelRecord = await findOrCreateModelRecord(db, modelName, modelFileId)
+
+      // Keep schemaFileId aligned when findOrCreate returned a row that still needs adoption
+      // (e.g. sole same-name row that already had a different non-null id — rare).
+      if (modelFileId && modelRecord.schemaFileId !== modelFileId) {
+        const existingWithFileId = await db
           .select()
           .from(modelsTable)
           .where(eq(modelsTable.schemaFileId, modelFileId))
           .limit(1)
-        
-        if (doubleCheck.length > 0) {
-          modelRecord = doubleCheck[0] as NewModelRecord
-          logger(`Model with schemaFileId "${modelFileId}" was created by another process, using existing record`)
-        } else {
-          try {
-            const newModel = await db.insert(modelsTable).values({
-              name: modelName,
-              schemaFileId: modelFileId,
-              isEdited: false, // Set isEdited = false when loading from schema file
-            }).returning()
-            modelRecord = newModel[0] as NewModelRecord
-            logger(`Created new model "${modelName}" with schemaFileId "${modelFileId}"`)
-          } catch (error: any) {
-            // Handle unique constraint violation
-            if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || error?.message?.includes('UNIQUE constraint')) {
-              logger(`Unique constraint violation for schemaFileId "${modelFileId}", attempting to find existing model`)
-              const existing = await db
-                .select()
-                .from(modelsTable)
-                .where(eq(modelsTable.schemaFileId, modelFileId))
-                .limit(1)
-              if (existing.length > 0) {
-                modelRecord = existing[0] as NewModelRecord
-                logger(`Found existing model with schemaFileId "${modelFileId}" (id: ${modelRecord.id}) after constraint violation`)
-              } else {
-                throw new Error(`Failed to create or find model "${modelName}" with schemaFileId "${modelFileId}": ${error.message}`)
-              }
-            } else {
-              throw error
-            }
-          }
+
+        if (existingWithFileId.length > 0 && existingWithFileId[0].id !== modelRecord.id) {
+          logger(`WARNING: Model "${modelName}" (id: ${modelRecord.id}) conflicts with existing model "${existingWithFileId[0].name}" (id: ${existingWithFileId[0].id}) both trying to use schemaFileId "${modelFileId}"`)
+          modelRecord = existingWithFileId[0] as NewModelRecord
+        } else if (!modelRecord.schemaFileId) {
+          await db
+            .update(modelsTable)
+            .set({ schemaFileId: modelFileId })
+            .where(eq(modelsTable.id, modelRecord.id!))
+          modelRecord = { ...modelRecord, schemaFileId: modelFileId }
         }
-      } else {
-        // No modelFileId - use createOrUpdate (finds by name or creates)
-        modelRecord = await createOrUpdate<NewModelRecord>(db, modelsTable, {
-          name: modelName,
-        })
       }
-    }
-    
-    // Update schemaFileId if we have it and it's not set (or if it's different)
-    if (modelFileId && modelRecord.schemaFileId !== modelFileId) {
-      // Check if another model already has this schemaFileId
-      const existingWithFileId = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.schemaFileId, modelFileId))
-        .limit(1)
-      
-      if (existingWithFileId.length > 0 && existingWithFileId[0].id !== modelRecord.id) {
-        logger(`WARNING: Model "${modelName}" (id: ${modelRecord.id}) conflicts with existing model "${existingWithFileId[0].name}" (id: ${existingWithFileId[0].id}) both trying to use schemaFileId "${modelFileId}"`)
-        // Don't update - keep existing assignment to avoid conflicts
-      } else {
-        await db
-          .update(modelsTable)
-          .set({ schemaFileId: modelFileId })
-          .where(eq(modelsTable.id, modelRecord.id!))
-        modelRecord = { ...modelRecord, schemaFileId: modelFileId }
-      }
-    }
-    
+
       modelRecords.set(modelName, modelRecord)
 
       // Get all existing properties for this model upfront to handle renamed properties
@@ -1055,9 +1094,13 @@ export const addModelsToDb = async (
       if (refModelName) {
         // When ref model was already processed in this batch, use it (avoids db round-trip)
         const cachedRef = modelRecords.get(refModelName)
+        const refModelFileId = schemaFileData?.modelFileIds?.get(refModelName)
         const refModel = cachedRef
           ? cachedRef
-          : await createOrUpdate<NewModelRecord>(db, modelsTable, { name: refModelName })
+          : await findOrCreateModelRecord(db, refModelName, refModelFileId)
+        if (!cachedRef) {
+          modelRecords.set(refModelName, refModel)
+        }
         propertyData.refModelId = refModel.id ?? null
         expectedRefModelId = refModel.id ?? null
       } else {
@@ -1161,12 +1204,30 @@ export const addModelsToDb = async (
           ...propertyData,
           isEdited: false,
         }
+        // Global schemaFileId lookup (unique across all models) before insert — avoids
+        // UNIQUE races when the property already exists on another model row or from a prior pass.
+        if (propertyFileId) {
+          const existingByFileId = await db
+            .select()
+            .from(properties)
+            .where(eq(properties.schemaFileId, propertyFileId))
+            .limit(1)
+          if (existingByFileId.length > 0) {
+            const found = existingByFileId[0] as PropertyType
+            matchedDbPropertyIds.add(found.id!)
+            logger(
+              `Property ${modelName}:${propertyName} already exists by schemaFileId "${propertyFileId}" (id: ${found.id}), skipping insert`,
+            )
+            continue
+          }
+        }
+
         logger(`Creating new property ${modelName}:${propertyName} with schemaFileId: ${propertyData.schemaFileId}`)
         try {
           await db.insert(properties).values(propertyDataWithIsEdited)
         } catch (insertError: any) {
           // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb call)
-          if (insertError?.code === 'SQLITE_CONSTRAINT_UNIQUE' || insertError?.message?.includes('UNIQUE constraint')) {
+          if (isSqliteUniqueConstraintError(insertError)) {
             logger(`Property ${modelName}:${propertyName} already exists (UNIQUE constraint), treating as success`)
           } else {
             throw insertError
@@ -1546,7 +1607,7 @@ export const savePropertyToDb = async (
       logger(`Created property ${property.modelName}:${property.name} in database`)
     } catch (insertError: any) {
       // Treat UNIQUE constraint as success - property already exists (e.g. from concurrent addModelsToDb or race)
-      if (insertError?.code === 'SQLITE_CONSTRAINT_UNIQUE' || insertError?.message?.includes('UNIQUE constraint')) {
+      if (isSqliteUniqueConstraintError(insertError)) {
         logger(`Property ${property.modelName}:${property.name} already exists (UNIQUE constraint), treating as success`)
       } else {
         throw insertError
@@ -1713,7 +1774,7 @@ export async function writeModelToDb(
         modelId = newModel[0].id!
       } catch (error: any) {
         // Handle unique constraint violation
-        if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || error?.message?.includes('UNIQUE constraint')) {
+        if (isSqliteUniqueConstraintError(error)) {
           logger(`Unique constraint violation for schemaFileId "${modelFileId}", attempting to find existing model`)
           const existing = await db
             .select()
@@ -1996,7 +2057,7 @@ export async function writePropertyToDb(
         logger(`Created property ${data.name} (${propertyFileId}) in database`)
       } catch (error: any) {
         // Handle unique constraint violation
-        if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || error?.message?.includes('UNIQUE constraint')) {
+        if (isSqliteUniqueConstraintError(error)) {
           logger(`Unique constraint violation for property schemaFileId "${propertyFileId}", attempting to find existing property`)
           const existing = await db
             .select()

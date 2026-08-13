@@ -63,7 +63,6 @@ export default defineConfig({
           exclude: [
             '@sqlite.org/sqlite-wasm',
             '@seedprotocol/cli',
-            'drizzle-kit',
             'drizzle-orm',
             'sqlocal'
           ],
@@ -145,7 +144,6 @@ export default defineConfig({
         optimizeDeps: {
           exclude: [
             '@sqlite.org/sqlite-wasm',
-            'drizzle-kit',
             'drizzle-orm',
             'sqlocal',
           ],

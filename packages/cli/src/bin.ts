@@ -28,33 +28,10 @@ export const seedDatabase = async (seedDataPath: string, dotSeedDir?: string) =>
   console.log('[Seed Protocol] Running seed script')
 
   try {
-    // OLD CODE: Import better-sqlite3 dynamically to handle optional dependency
-    // Try to resolve from the project's node_modules first, then fall back to SDK's node_modules
-    // let drizzle: any
-    // let Database: any
-    
-    // Get the project directory first (needed for both module resolution and database path)
+    // Get the project directory first (needed for module resolution and database path)
     const actualDotSeedDir = dotSeedDir || pathResolver.getDotSeedDir()
     const projectDir = path.dirname(actualDotSeedDir)
-    
-    // OLD CODE: Try to resolve better-sqlite3 from the project directory first
-    // const projectBetterSqlite3Path = path.join(projectDir, 'node_modules', 'better-sqlite3')
-    // 
-    // let betterSqlite3Module: any
-    // if (fs.existsSync(projectBetterSqlite3Path)) {
-    //   // Use createRequire to resolve from project's node_modules
-    //   const { createRequire } = await import('module')
-    //   const projectRequire = createRequire(path.join(projectDir, 'package.json'))
-    //   betterSqlite3Module = projectRequire('better-sqlite3')
-    //   // better-sqlite3 is a CommonJS module, so it might not have a default export
-    //   Database = betterSqlite3Module.default || betterSqlite3Module
-    // } else {
-    //   // Fall back to regular import (from SDK's node_modules)
-    //   betterSqlite3Module = await import('better-sqlite3')
-    //   Database = betterSqlite3Module.default
-    // }
-    
-    // NEW CODE: Use libsql instead of better-sqlite3
+
     let drizzle: any
     let createClient: any
     
@@ -99,10 +76,6 @@ export const seedDatabase = async (seedDataPath: string, dotSeedDir?: string) =>
       fs.mkdirSync(dbDir, { recursive: true })
     }
     
-    // OLD CODE: const sqlite = new Database(dbPath)
-    // OLD CODE: const db = drizzle(sqlite)
-    
-    // NEW CODE: Use libsql client with file: URL
     const dbUrl = `file:${path.resolve(dbPath)}`
     const client = createClient({ url: dbUrl })
     const db = drizzle(client)

@@ -10,6 +10,7 @@ import {
 import {
   AttestationRequest,
   AttestationRequestData,
+  SchemaEncoder,
 } from '@ethereum-attestation-service/eas-sdk'
 
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
@@ -38,9 +39,15 @@ import { eq, and } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import debug from 'debug'
 import {ethers} from 'ethers'
-import { ModelPropertyDataTypes } from '@/Schema'
+import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
 import type { ValidationError } from '@/Schema/validation'
 const logger = debug('seedSdk:db:getPublishPayload')
+
+/** Case-insensitive dataType match (schema JSON may use "text" vs "Text"). */
+const matchesDataType = (
+  actual: string | undefined,
+  expected: ModelPropertyDataTypes | string,
+): boolean => normalizeDataType(actual) === expected
 
 /** Validation error collected during publish payload building. */
 export type PublishValidationError = Pick<ValidationError, 'field' | 'message'> & { code?: string }
@@ -172,14 +179,17 @@ const getPropertyData = async (
   itemProperty: IItemProperty<any>,
   ctx?: PublishValidationContext,
 ): Promise<PropertyDataResult | null> => {
-  const dataType = itemProperty.propertyDef?.dataType
-  const entry = dataType != null ? INTERNAL_DATA_TYPES[dataType as keyof typeof INTERNAL_DATA_TYPES] : undefined
+  const rawDataType = itemProperty.propertyDef?.dataType
+  const dataType = rawDataType ? normalizeDataType(String(rawDataType)) : undefined
+  const entry = dataType
+    ? INTERNAL_DATA_TYPES[dataType as keyof typeof INTERNAL_DATA_TYPES]
+    : undefined
   const easDataType = entry?.eas
   if (!easDataType) {
     if (ctx) {
       addValidationError(
         ctx,
-        `Unknown or unsupported property data type "${dataType ?? 'undefined'}" for property: ${itemProperty.propertyName}. Supported types: ${Object.keys(INTERNAL_DATA_TYPES).join(', ')}.`,
+        `Unknown or unsupported property data type "${rawDataType ?? 'undefined'}" for property: ${itemProperty.propertyName}. Supported types: ${Object.keys(INTERNAL_DATA_TYPES).join(', ')}.`,
         itemProperty.propertyName,
       )
     }
@@ -198,11 +208,11 @@ const getPropertyData = async (
       : itemProperty.propertyName
   // Align List-of-relation EAS field name with processListProperty (authorIdentityIds for authors → Identity)
   if (
-    propertyDefForName?.dataType === ModelPropertyDataTypes.List &&
-    (propertyDefForName.ref || propertyDefForName.refModelName) &&
+    matchesDataType(propertyDefForName?.dataType, ModelPropertyDataTypes.List) &&
+    (propertyDefForName?.ref || propertyDefForName?.refModelName) &&
     !(ip.storagePropertyName && ip.storagePropertyName.length > 0)
   ) {
-    const ref = propertyDefForName.ref ?? propertyDefForName.refModelName
+    const ref = propertyDefForName?.ref ?? propertyDefForName?.refModelName
     if (ref) {
       const singular = pluralize.singular(itemProperty.propertyName)
       nameForEas = `${singular}${ref}Ids`
@@ -240,7 +250,9 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
   const toFix = targetItem.properties.filter(
     (p) =>
       targetItem.modelName &&
-      (!p.propertyDef || (p.propertyDef?.dataType === 'Relation' && p.propertyDef?.required === undefined)),
+      (!p.propertyDef ||
+        (matchesDataType(p.propertyDef?.dataType, ModelPropertyDataTypes.Relation) &&
+          p.propertyDef?.required === undefined)),
   )
   let schema: any
   for (const itemProperty of targetItem.properties) {
@@ -324,16 +336,6 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
   }
 }
 
-// Lazy import SchemaEncoder to avoid module resolution issues with ts-import
-let SchemaEncoderClass: typeof import('@ethereum-attestation-service/eas-sdk').SchemaEncoder | null = null
-const getSchemaEncoder = async () => {
-  if (!SchemaEncoderClass) {
-    const easSdk = await import('@ethereum-attestation-service/eas-sdk')
-    SchemaEncoderClass = easSdk.SchemaEncoder
-  }
-  return SchemaEncoderClass
-}
-
 type PublishBuildOpts = { forceFullSnapshot?: boolean }
 
 const processBasicProperties = async (
@@ -353,13 +355,13 @@ const processBasicProperties = async (
     const propertyDef =
       basicProperty.propertyDef ?? (context ? (context as any).propertyRecordSchema : undefined)
     const isFileImageHtml =
-      propertyDef?.dataType === ModelPropertyDataTypes.File ||
-      propertyDef?.dataType === ModelPropertyDataTypes.Image ||
-      propertyDef?.dataType === ModelPropertyDataTypes.Html
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.File) ||
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Image) ||
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Html)
     const isJsonStorage =
-      propertyDef?.dataType === ModelPropertyDataTypes.Json ||
-      propertyDef?.refValueType === ModelPropertyDataTypes.Json
-    const isRelation = propertyDef?.dataType === ModelPropertyDataTypes.Relation
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Json) ||
+      matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.Json)
+    const isRelation = matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Relation)
     // storageTransactionId is usually Text in the schema; .value still prefers renderValue (URL, label).
     const isStorageTransactionIdProp = isStorageTransactionPropertyName(basicProperty.propertyName)
     // File/Image/Html + Relation + Json storage + storage tx id: use propertyValue (canonical).
@@ -380,7 +382,7 @@ const processBasicProperties = async (
     }
     // Relation + Image/File/Html/Json refs often expose seedLocalId on context.propertyValue while .value is an object — align for encode + resolve hints
     if (
-      propertyDef?.dataType === ModelPropertyDataTypes.Relation ||
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Relation) ||
       isFileImageHtml ||
       isJsonStorage
     ) {
@@ -449,9 +451,11 @@ const processBasicProperties = async (
       const validationService = new SchemaValidationService()
       const validationResult = validationService.validatePropertyValue(
         value,
-        propertyDef.dataType as ModelPropertyDataTypes,
+        normalizeDataType(propertyDef.dataType) as ModelPropertyDataTypes,
         propertyDef.validation,
-        propertyDef.refValueType as string | undefined,
+        propertyDef.refValueType
+          ? (normalizeDataType(propertyDef.refValueType) as string)
+          : undefined,
       )
       if (!validationResult.isValid && validationResult.errors.length > 0) {
         const firstError = validationResult.errors[0]
@@ -522,8 +526,7 @@ const processBasicProperties = async (
 
     let encodedData: string
     try {
-      const SchemaEncoder = await getSchemaEncoder()
-      const dataEncoder = new SchemaEncoder(schemaDef)
+            const dataEncoder = new SchemaEncoder(schemaDef)
       encodedData = dataEncoder.encodeData(data) as string
     } catch (encodeErr) {
       addValidationError(
@@ -624,15 +627,15 @@ const processRelationOrImageProperty = async (
   // File/Image/Html/Json metadata is stored with Id suffix (e.g. "textId"); context may not have propertyValue
   // if the property was created from schema before metadata loaded. Fallback to metadata lookup.
   const isStorageSeed =
-    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.File ||
-    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image ||
-    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Html ||
-    relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Json ||
-    (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Relation &&
-      (relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.File ||
-        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Image ||
-        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Html ||
-        relationOrImageProperty.propertyDef?.refValueType === ModelPropertyDataTypes.Json))
+    matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.File) ||
+    matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Image) ||
+    matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Html) ||
+    matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Json) ||
+    (matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Relation) &&
+      (matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.File) ||
+        matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.Image) ||
+        matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.Html) ||
+        matchesDataType(relationOrImageProperty.propertyDef?.refValueType, ModelPropertyDataTypes.Json)))
   if (isStorageSeed && ((context as any).seedLocalId || (context as any).seedUid)) {
     const { getPropertyData: getPropertyDataFromDb } = await import('@/db/read/getPropertyData')
     const metaRow = await getPropertyDataFromDb({
@@ -694,17 +697,17 @@ const processRelationOrImageProperty = async (
   // Required relation/image/file/html/json with no value: cannot publish
   if (isRequired && !value) {
     const typeLabel =
-      propertyDef?.dataType === ModelPropertyDataTypes.File ||
-      propertyDef?.refValueType === ModelPropertyDataTypes.File
+      matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.File) ||
+      matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.File)
         ? 'file'
-        : propertyDef?.dataType === ModelPropertyDataTypes.Image ||
-            propertyDef?.refValueType === ModelPropertyDataTypes.Image
+        : matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Image) ||
+            matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.Image)
           ? 'image'
-          : propertyDef?.dataType === ModelPropertyDataTypes.Html ||
-              propertyDef?.refValueType === ModelPropertyDataTypes.Html
+          : matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Html) ||
+              matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.Html)
             ? 'html'
-            : propertyDef?.dataType === ModelPropertyDataTypes.Json ||
-                propertyDef?.refValueType === ModelPropertyDataTypes.Json
+            : matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Json) ||
+                matchesDataType(propertyDef?.refValueType, ModelPropertyDataTypes.Json)
               ? 'json'
               : 'relation'
     const refLabel = propertyDef?.ref ?? propertyDef?.refModelName ?? 'related'
@@ -771,19 +774,19 @@ const processRelationOrImageProperty = async (
 
   let modelName: string | undefined
 
-  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
+  if (matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Image)) {
     modelName = 'Image'
   }
 
-  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.File) {
+  if (matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.File)) {
     modelName = 'File'
   }
 
-  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Html) {
+  if (matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Html)) {
     modelName = 'Html'
   }
 
-  if (relationOrImageProperty.propertyDef?.dataType === ModelPropertyDataTypes.Relation) {
+  if (matchesDataType(relationOrImageProperty.propertyDef?.dataType, ModelPropertyDataTypes.Relation)) {
     const def = relationOrImageProperty.propertyDef as { ref?: string; refModelName?: string }
     modelName = def.ref ?? def.refModelName
   }
@@ -891,7 +894,7 @@ async function resolveHtmlPropertySchemaUidByHtmlSeed(
 ): Promise<string | undefined> {
   const want = htmlSeedLocalId.trim()
   for (const p of item.properties) {
-    if (p.propertyDef?.dataType !== ModelPropertyDataTypes.Html) continue
+    if (!matchesDataType(p.propertyDef?.dataType, ModelPropertyDataTypes.Html)) continue
     const snap = p.getService().getSnapshot()
     const c = 'context' in snap ? snap.context : null
     const pv = typeof (c as any)?.propertyValue === 'string' ? (c as any).propertyValue.trim() : ''
@@ -1135,15 +1138,15 @@ const processListProperty = async (
       modelName = def.ref ?? def.refModelName
     }
 
-    if (listProperty.propertyDef?.dataType === ModelPropertyDataTypes.Image) {
+    if (matchesDataType(listProperty.propertyDef?.dataType, ModelPropertyDataTypes.Image)) {
       modelName = 'Image'
     }
 
-    if (listProperty.propertyDef?.dataType === ModelPropertyDataTypes.File) {
+    if (matchesDataType(listProperty.propertyDef?.dataType, ModelPropertyDataTypes.File)) {
       modelName = 'File'
     }
 
-    if (listProperty.propertyDef?.dataType === ModelPropertyDataTypes.Html) {
+    if (matchesDataType(listProperty.propertyDef?.dataType, ModelPropertyDataTypes.Html)) {
       modelName = 'Html'
     }
 
@@ -1828,8 +1831,7 @@ export const resolvePublishPayloadValues = async (
     return multiPayload
   }
 
-  const SchemaEncoder = await getSchemaEncoder()
-  const result: MultiPublishPayload = []
+    const result: MultiPublishPayload = []
 
   for (const payload of multiPayload) {
     const updatedAttestations: PublishPayload['listOfAttestations'] = []

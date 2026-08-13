@@ -9,7 +9,6 @@ export const ZERO_BYTES = '0x'
 export const ZERO_BYTES32 = '0x0000000000000000000000000000000000000000000000000000000000000000'
 
 
-export const SCHEMA_NJK = 'schema.njk'
 // Primary config file name for Seed Protocol SDK
 export const SEED_CONFIG_FILE = 'seed.config.ts'
 // Fallback config file names (in order of preference)

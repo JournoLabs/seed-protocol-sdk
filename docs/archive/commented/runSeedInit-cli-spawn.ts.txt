@@ -1,0 +1,60 @@
+  // // First, try to dynamically import the CLI package's init function
+  // // This prefers local monorepo version in development, falls back to published package
+  // try {
+  //   const cliModule = await importCliPackage()
+  //   if (cliModule && typeof cliModule.init === 'function') {
+  //     await cliModule.init(schemaFileDir, appFilesDirPath)
+  //     return
+  //   }
+  // } catch (importError: any) {
+  //   // CLI package not available, continue to other methods
+  //   console.log('[seedInit] CLI package not available, trying binary execution')
+  // }
+  
+  // // Try to find and execute the binary
+  // const seedBinary = findSeedBinary()
+  
+  // if (seedBinary) {
+  //   // Binary found, execute it directly
+  //   const args = ['init']
+  //   if (schemaFileDir) {
+  //     args.push(schemaFileDir)
+  //   }
+  //   if (appFilesDirPath) {
+  //     args.push(appFilesDirPath)
+  //   }
+    
+  //   try {
+  //     execSync(`node "${seedBinary}" ${args.join(' ')}`, {
+  //       stdio: 'inherit',
+  //       cwd: process.cwd(),
+  //     })
+  //     return
+  //   } catch (error: any) {
+  //     console.warn(`[seedInit] Failed to execute binary at ${seedBinary}: ${error.message}`)
+  //     // Continue to npx fallback
+  //   }
+  // }
+  
+  // // Final fallback: use npx
+  // const args = ['seed', 'init']
+  // if (schemaFileDir) {
+  //   args.push(schemaFileDir)
+  // }
+  // if (appFilesDirPath) {
+  //   args.push(appFilesDirPath)
+  // }
+  
+  // try {
+  //   execSync(`npx ${args.join(' ')}`, {
+  //     stdio: 'inherit',
+  //     cwd: process.cwd(),
+  //   })
+  // } catch (error: any) {
+  //   throw new Error(
+  //     `Failed to run seed init command. ` +
+  //     `Tried: CLI package import, binary execution, and npx. ` +
+  //     `Please ensure @seedprotocol/cli is installed: ${error.message}`
+  //   )
+  // }
+}

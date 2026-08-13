@@ -1,0 +1,229 @@
+  // static async migrate(): Promise<void> {
+
+  //   const schemaGlobString = `${BROWSER_FS_TOP_DIR}/schema/*`
+  //   const pathToDbDir = `${this.filesDir}/db`
+  //   const dbName = DB_NAME_APP
+
+  //   logger('[Db.migrate] running migrations')
+
+  //   const drizzleDb = drizzle(
+  //     async (sql, params,) => {
+  //       try {
+  //         logger(
+  //           `executing sql`,
+  //           sql,
+  //         )
+
+  //         const finalResult = await this.exec(sql, params)
+
+  //         // logger(`finalResult with method: ${method}`, finalResult)
+  //         // Drizzle always waits for {rows: string[][]} or {rows: string[]} for the return value.
+
+  //         // When the method is get,  you should return a value as {rows: string[]}.
+  //         // Otherwise, you should return {rows: string[][]}.
+
+  //         return { rows: finalResult }
+  //       } catch (e: any) {
+  //         console.error('Error from sqlite proxy server: ', JSON.stringify(e))
+  //         return { rows: [] }
+  //       }
+  //     },
+  //     {
+  //       schema,
+  //       // logger: true,
+  //     },
+  //   )
+
+  //   try {
+  //     const zenfs = await BaseFileManager.getFs()
+
+  //     logger('[Db.migrate] calling readMigrationFiles')
+
+  //     const migrations = readMigrationFiles({
+  //       migrationsFolder: pathToDbDir,
+  //     })
+
+  //     logger('[Db.migrate] migrations', migrations)
+
+  //     if (migrations.length > 0) {
+  //       const incomingMigrationHashes = migrations.map(
+  //         (migration) => migration.hash,
+  //       )
+
+  //       let existingMigrationHashes
+  //       let rows = []
+
+  //       try {
+
+  //         const queryMigrationsTable = await drizzleDb.run(
+  //           sql.raw(
+  //             `SELECT name 
+  //              FROM sqlite_master 
+  //              WHERE type='table' 
+  //              AND name='__drizzle_migrations';`,
+  //           ),
+  //         )
+
+  //         logger('queryMigrationsTable', queryMigrationsTable)
+
+  //         if (queryMigrationsTable && queryMigrationsTable.rows && queryMigrationsTable.rows.length > 0) {
+  //           const query = await drizzleDb.run(
+  //             sql.raw(
+  //               `SELECT hash, created_at
+  //                FROM main.__drizzle_migrations;`,
+  //             ),
+  //           )
+  
+  //           rows = query.rows
+  //         }
+
+  //       } catch (e) {
+  //         rows = []
+  //       }
+
+  //       if (rows && rows.length > 0) {
+  //         existingMigrationHashes = rows.map((row) => row[0])
+  //       }
+
+  //       if (existingMigrationHashes) {
+  //         let shouldRebuildDb = false
+  //         for (const existingHash of existingMigrationHashes) {
+  //           if (!incomingMigrationHashes.includes(existingHash)) {
+  //             shouldRebuildDb = true
+  //             break
+  //           }
+  //         }
+  //         if (shouldRebuildDb) {
+  //           await zenfs.promises.unlink(`${pathToDbDir}/${dbName}.db`)
+  //         }
+  //       }
+  //     }
+
+  //     logger('[Db.migrate] running migrations')
+
+  //     await drizzleMigrate(
+  //       drizzleDb,
+  //       async (queriesToRun) => {
+  //         // logger('queriesToRun', queriesToRun)
+  //         for (const query of queriesToRun) {
+  //           // logger('query', query)
+  //           await drizzleDb.run(sql.raw(query))
+  //         }
+  //       },
+  //       {
+  //         migrationsFolder: pathToDbDir,
+  //       },
+  //     )
+  //   } catch (error) {
+  //     logger('[Db.migrate] error', JSON.stringify(error))
+  //     // await BaseFileManager.waitForFile(`${pathToDbDir}/meta/_journal.json`)
+
+  //     // const journalExists = await BaseFileManager.pathExists(
+  //     //   `${pathToDbDir}/meta/_journal.json`,
+  //     // )
+
+  //     // if (journalExists) {
+  //     //   await this.migrate(pathToDbDir, dbName,)
+  //     // }
+
+  //     // if (!journalExists) {
+  //     //   throw new Error('Failed to migrate database')
+  //     // }
+
+
+  //   }
+
+  //   this.appDb = drizzleDb
+
+  //   // Old code for migrating the database
+  //   // const createTempTableQuery = await appDb.run(
+  //   //   sql.raw(
+  //   //     `CREATE TEMP TABLE IF NOT EXISTS temp_last_inserted_id (id INTEGER, table TEXT);`,
+  //   //   ),
+  //   // )
+  //   //
+  //   // logger(
+  //   //   '[db/actors] [migrate] createTempTableQuery',
+  //   //   createTempTableQuery,
+  //   // )
+
+  //   // const triggersQuery = await appDb.run(
+  //   //   sql.raw(
+  //   //     `SELECT name
+  //   //      FROM main.sqlite_master
+  //   //      WHERE type = 'trigger';`,
+  //   //   ),
+  //   // )
+  //   //
+  //   // logger('[db/actors] [migrate] triggersQuery', triggersQuery)
+  //   //
+  //   // const triggers = triggersQuery.rows.map((row) => row[0])
+  //   //
+  //   // const tablesQuery = await appDb.run(
+  //   //   sql.raw(
+  //   //     `SELECT name
+  //   //      FROM main.sqlite_master
+  //   //      WHERE type = 'table';`,
+  //   //   ),
+  //   // )
+  //   //
+  //   // logger('[db/actors] [migrate] tablesQuery', tablesQuery)
+  //   //
+  //   // const tableNames = tablesQuery.rows.map((row) => row[0])
+  //   // logger('[db/actors] [migrate] tableNames', tableNames)
+  //   // for (const tableName of tableNames) {
+  //   //   const triggerName = `after_insert_${tableName}`
+  //   //   if (triggers.includes(triggerName)) {
+  //   //     continue
+  //   //   }
+  //   //           const createTriggerQuery = await appDb.run(
+  //   //             sql.raw(
+  //   //               `CREATE TRIGGER after_insert_${tableName}
+  //   // AFTER INSERT ON ${tableName}
+  //   // BEGIN
+  //   //     DELETE FROM temp_last_inserted_id;
+  //   //     INSERT INTO temp_last_inserted_id (id) VALUES (new.id);
+  //   // END;`,
+  //   //             ),
+  //   //           )
+  //   //
+  //   //           logger(
+  //   //             '[db/actors] [migrate] createTriggerQuery',
+  //   //             createTriggerQuery,
+  //   //           )
+  //   //         }
+  // }
+
+  // static async exec(sql: string, params: any[]) {
+  //   const rowsToReturnRaw: SqliteWasmResult[] = []
+  //   const rowsValues: string[][] = []
+  
+  //   // For a single exec command, the callback potentially gets called several times -- once for each row.
+  //   // So we need to collect all rows into a final array to return (execResult).
+  //   const rowsToReturn = await new Promise((resolve, reject) => {
+
+
+  //    this.sqliteWasmClient('exec', {
+  //       dbId:this.dbId,
+  //       sql,
+  //       bind: params,
+  //       callback: (result) => {
+  //         // Checks if this is the final callback of the query
+  //         if (!result || !result.row || !result.rowNumber) {
+  //           const returnResult = []
+  //           for (const currRow of rowsToReturnRaw) {
+  //             returnResult.push(currRow.row)
+  //           }
+  //           resolve(returnResult)
+  //         } else {
+  //           // If not the final response, add this row to the return array
+  //           rowsToReturnRaw.push(result)
+  //         }
+  //       },
+  //     }).catch(async (error) => {
+  //       reject(error)
+  //     })
+  //   })
+  
+  //   return rowsToReturn || []
+  // }
