@@ -48,6 +48,7 @@
         "@vitest/browser": "^4.0.16",
         "@vitest/browser-playwright": "^4.0.16",
         "@vitest/ui": "^4.0.16",
+        "dotenv": "^17.2.3",
         "drizzle-kit": "^0.31.8",
         "eslint": "9.39.2",
         "eslint-config-prettier": "^10.1.8",
@@ -174,6 +175,7 @@
         "react": "^18 || ^19",
         "react-dom": "^18 || ^19",
         "thirdweb": "^5",
+        "typescript": "^5",
       },
     },
     "packages/react": {

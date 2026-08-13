@@ -8,6 +8,7 @@ Contents:
 - `commented/runSeedInit-cli-spawn.ts.txt` — CLI-spawn / npx seed-init orchestration
 - `commented/browser-Db-legacy-migrate.ts.txt` — Browser DB hash-divergence delete-and-rebuild sketches
 - `vite-index.ts.bak` — Vite plugin backup
+- `rpc-server/` — Experimental gRPC SeedService (server, proto, cursor variant, and test). Not wired into packages, bins, or npm scripts.
 
 ## Current model (after 0.5.0)
 
@@ -15,3 +16,10 @@ Contents:
 - App domain schemas: JSON → OPFS/DB rows (EAV). No per-model Drizzle codegen at runtime.
 - `drizzle-kit` remains a **monorepo** devDependency for SDK maintainers (`scripts/track-drizzle-changes.ts`), not a consumer install.
 
+## Restarting the RPC experiment
+
+Files live under `docs/archive/rpc-server/`. To revive:
+
+1. Re-add `@grpc/grpc-js` and `@grpc/proto-loader` as monorepo/dev dependencies (not SDK publish deps unless intentional).
+2. Copy or symlink `rpcServer.ts` + `protos/` back under `scripts/` (or a dedicated package).
+3. Optionally restore a root script / CLI bin once the entrypoint exists again.

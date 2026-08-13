@@ -63,10 +63,6 @@ export default {
     copy({
       targets: [
         {
-          src: 'src/protos',
-          dest: 'dist'
-        },
-        {
           src: 'src/seedData.json',
           dest: 'dist'
         }

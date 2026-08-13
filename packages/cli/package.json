@@ -21,8 +21,7 @@
     "cli": "./dist/bin.js",
     "seed": "./dist/bin.js",
     "seed-init": "./dist/bin.js",
-    "seed-add-model": "./dist/addModel.js",
-    "seed-rpc-server": "./dist/rpcServer.js"
+    "seed-add-model": "./dist/addModel.js"
   },
   "files": [
     "dist"
