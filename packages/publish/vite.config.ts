@@ -12,14 +12,20 @@ export default defineConfig({
   build: {
     emptyOutDir: false,
     lib: {
-      entry: 'src/index.ts',
+      entry: {
+        index: 'src/index.ts',
+        thirdweb: 'src/thirdweb.ts',
+      },
       formats: ['es'],
-      fileName: () => 'index.js',
+      fileName: (_format, entryName) => `${entryName}.js`,
     },
     target: 'node20',
     rollupOptions: {
       external: (id) =>
         id === '@seedprotocol/sdk' ||
+        id === '@seedprotocol/react' ||
+        id === 'thirdweb' ||
+        id.startsWith('thirdweb/') ||
         (!id.startsWith('.') &&
           !id.startsWith('/') &&
           !id.startsWith('\0') &&

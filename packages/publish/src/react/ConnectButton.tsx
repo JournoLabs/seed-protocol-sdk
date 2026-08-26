@@ -15,7 +15,9 @@ import {
   getModularAccountWallet,
   getWalletsForConnectButton,
 } from "../helpers/thirdweb"
-import { usePublishConfig } from "./PublishProvider"
+import { fromThirdwebAccount } from "../helpers/adapters/thirdwebAccount"
+import { setPublishWallet, clearPublishWallet } from "../helpers/publishWalletRegistry"
+import { usePublishConfig } from "./PublishConfigContext"
 import { getPublishConfig } from "../config"
 import { optimismSepolia } from "thirdweb/chains"
 import type { Account, Wallet } from "thirdweb/wallets"
@@ -170,7 +172,12 @@ const ConnectButton: FC = () => {
       }
       lastSyncedOwnedKey.current = ownedKey
       try {
-        await seedClient.setAddresses({ owned: [...owned] })
+        const publishWallet = fromThirdwebAccount(account)
+        await setPublishWallet({
+          ...publishWallet,
+          ownedAddresses: [...owned],
+          publisherAddress: managedAddress ?? account.address,
+        })
       } catch (err) {
         lastSyncedOwnedKey.current = null
         console.warn("[ConnectButton] Failed to set seed client addresses:", err)
@@ -222,6 +229,7 @@ const ConnectButton: FC = () => {
     } catch {
       /* private mode / SSR */
     }
+    clearPublishWallet()
     PublishManager.stopAll()
   }
 

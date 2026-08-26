@@ -27,6 +27,15 @@ mock.module('./thirdweb', () => ({
     autoConnect: mock(() => Promise.resolve()),
     getAccount: () => ({ address: '0x1234567890123456789012345678901234567890' }),
   }),
+  getManagedAccountWallet: () => ({
+    autoConnect: mock(() => Promise.resolve()),
+    getAccount: () => ({ address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }),
+  }),
+  isSmartWalletDeployed: mock(async () => true),
+  pollSmartWalletDeployed: mock(async () => true),
+  getConnectedModularAccount: mock(async () => null),
+  getConnectedManagedAccountAddress: mock(async () => '0xmanaged'),
+  getConnectedAccount: mock(async () => null),
 }))
 
 mock.module('./chainClient', () => ({
@@ -36,8 +45,12 @@ mock.module('./chainClient', () => ({
 }))
 
 mock.module('thirdweb', () => ({
+  createThirdwebClient: mock(() => ({})),
   deploySmartAccount: deploySmartAccountMock,
   getContract: mock(() => ({})),
+  prepareTransaction: mock(() => ({})),
+  sendTransaction: mock(async () => ({ transactionHash: '0x' })),
+  defineChain: mock((c: unknown) => c),
 }))
 
 afterEach(() => {

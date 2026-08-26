@@ -12,6 +12,7 @@ export {
   type SerializedPublishUpload,
   type ArweaveTransactionInfoResult,
   type ArweaveDataItemInfoResult,
+  type PublishAccountMode,
 } from './config'
 export type {
   PublishUploadData,
@@ -28,21 +29,41 @@ export {
   type Eip7702ModularAccountPublishErrorCode,
   stringifyUnderlyingCause,
 } from './errors'
-export { default as ConnectButton } from './react/ConnectButton'
 export { PublishModeButtons } from './react/PublishModeButtons'
 export type { PublishModeButtonsProps } from './react/PublishModeButtons'
 export type { PublishMode } from './types'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider'
 export type { PublishProviderProps } from './react/PublishProvider'
+export { useSeedWallet } from './react/useSeedWallet'
+export type { UseSeedWalletResult, SeedWalletStatus } from './react/useSeedWallet'
 export { SeedProvider } from '@seedprotocol/react'
 
-export type { SeedSigner, SeedTxRequest } from './helpers/seedSigner'
+export type {
+  SeedSigner,
+  SeedTxSender,
+  SeedTxRequest,
+  PublishWallet,
+} from './helpers/seedSigner'
 export {
-  fromThirdwebAccount,
   fromEthersWallet,
   asSeedSigner,
+  asSeedTxSender,
+  asPublishWallet,
   isSeedSigner,
+  isSeedTxSender,
+  isPublishWallet,
 } from './helpers/seedSigner'
+export {
+  fromEip1193Provider,
+  fromWindowEthereum,
+} from './helpers/adapters/eip1193'
+export { createPermissionlessTxSender } from './helpers/adapters/permissionlessTxSender'
+export {
+  setPublishWallet,
+  getPublishWallet,
+  clearPublishWallet,
+  type PublishWalletSession,
+} from './helpers/publishWalletRegistry'
 export {
   getPublishPublicClient,
   waitForPublishReceipt,
@@ -58,28 +79,6 @@ export {
   readGetEas,
   readIsActiveSigner,
 } from './helpers/contracts'
-
-export {
-  getClient,
-  getManagedAccountWallet,
-  getModularAccountWallet,
-  getWalletsForConnectButton,
-  getConnectedModularAccount,
-  getConnectedAccount,
-  getConnectedManagedAccountAddress,
-  resolveSmartWalletForPublish,
-  isSmartWalletDeployed,
-  pollSmartWalletDeployed,
-  deploySmartWalletContract,
-  deployManagedAccountViaFactory,
-  getSmartWalletAddressForAdmin,
-  appMetadata,
-  wallets,
-  ExternalWalletsForDeploy,
-  getSharedPublishInAppWalletStorage,
-  useActiveSmartWalletContract,
-  useLocalWalletAccount,
-} from './helpers/thirdweb'
 
 export {
   ensureEasSchemasForItem,
@@ -124,19 +123,7 @@ export {
   type RequestWithIntegerIds,
 } from './helpers/transformPayloadToIntegerIds'
 export {
-  ensureSmartWalletThenPublish,
-  type EnsureSmartWalletResult,
-} from './helpers/ensureSmartWalletThenPublish'
-export { ensureExecutorModuleInstalled } from './helpers/ensureExecutorModule'
-export {
-  ensureManagedAccountReady,
-  tryDeployManagedAccount,
-  runModularExecutorPublishPrep,
-  type EnsureManagedAccountReadyResult,
-  type ModularExecutorPublishPrepResult,
-} from './helpers/ensureManagedAccountReady'
-export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702ModularAccountReady'
+  ensureWalletThenPublish,
+  type EnsureWalletThenPublishResult,
+} from './helpers/ensureWalletThenPublish'
 export { ensureManagedAccountEasConfigured } from './helpers/ensureManagedAccountEasConfigured'
-export { ensureManagedSignerSessionKey } from './helpers/ensureManagedSignerSessionKey'
-export { ensureModularPublishBootstrap } from './helpers/ensureModularPublishBootstrap'
-export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'

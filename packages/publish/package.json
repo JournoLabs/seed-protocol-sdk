@@ -15,6 +15,16 @@
         "default": "./dist/index.js"
       }
     },
+    "./thirdweb": {
+      "import": {
+        "types": "./dist/thirdweb.d.ts",
+        "default": "./dist/thirdweb.js"
+      },
+      "require": {
+        "types": "./dist/thirdweb.d.ts",
+        "default": "./dist/thirdweb.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -36,6 +46,7 @@
     "drizzle-orm": "^0.44.3",
     "ethers": "^6.13.0",
     "isows": "^1.0.7",
+    "permissionless": "^0.4.0",
     "viem": "^2.46.2",
     "xstate": "^5.28.0"
   },
@@ -54,6 +65,11 @@
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
     "thirdweb": "^5"
+  },
+  "peerDependenciesMeta": {
+    "thirdweb": {
+      "optional": true
+    }
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

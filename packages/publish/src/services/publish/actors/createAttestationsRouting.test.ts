@@ -1,6 +1,27 @@
-import { describe, expect, test } from 'bun:test'
-import { MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA } from '../../../helpers/constants'
-import { resolvePublishRouting } from './createAttestations'
+import { describe, expect, mock, test } from 'bun:test'
+
+mock.module('../../../helpers/thirdweb', () => ({
+  isSmartWalletDeployed: mock(async () => true),
+  getClient: () => ({}),
+  getManagedAccountWallet: () => ({ autoConnect: async () => {}, getAccount: () => null }),
+  getModularAccountWallet: () => ({ autoConnect: async () => {}, getAccount: () => null }),
+}))
+
+mock.module('../../../helpers/ensureManagedAccountReady', () => ({
+  runModularExecutorPublishPrep: mock(async () => ({ ok: true, managedAddress: '0xmanaged' })),
+}))
+
+mock.module('thirdweb', () => ({
+  createThirdwebClient: mock(() => ({})),
+  deploySmartAccount: mock(async () => {}),
+  getContract: mock(() => ({})),
+  prepareTransaction: mock(() => ({})),
+  sendTransaction: mock(async () => ({ transactionHash: '0x' })),
+  defineChain: mock((c: unknown) => c),
+}))
+
+const { MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA } = await import('../../../helpers/constants')
+const { resolvePublishRouting } = await import('./createAttestations')
 
 describe('resolvePublishRouting', () => {
   test('uses publisher contract as multiPublish target in non-modular mode', () => {

@@ -1,21 +1,12 @@
-import React, { createContext, FC, useContext, useEffect } from "react"
+import React, { FC, useEffect } from "react"
 import type { MutableRefObject } from "react"
 import type { QueryClient } from "@tanstack/react-query"
-import { ThirdwebProvider } from "thirdweb/react"
 import { SeedProvider } from '@seedprotocol/react'
 import { initPublish, getConfigRef, type PublishConfig } from "../config"
+import { PublishConfigContext, usePublishConfig } from "./PublishConfigContext"
 
-const PublishConfigContext = createContext<PublishConfig | null>(null)
-
-export function usePublishConfig(): PublishConfig {
-  const config = useContext(PublishConfigContext)
-  if (!config) {
-    throw new Error(
-      'usePublishConfig: PublishConfig is missing. Pass config to PublishProvider or call initPublish() before render.',
-    )
-  }
-  return config
-}
+export { usePublishConfig }
+export type { PublishConfig }
 
 export interface PublishProviderProps {
   children: React.ReactNode
@@ -30,6 +21,10 @@ export interface PublishProviderProps {
   queryClientRef?: MutableRefObject<QueryClient | null>
 }
 
+/**
+ * Core PublishProvider — no Thirdweb dependency.
+ * For in-app wallets / ConnectButton, use `@seedprotocol/publish/thirdweb`.
+ */
 const PublishProvider: FC<PublishProviderProps> = ({
   children,
   config,
@@ -44,11 +39,9 @@ const PublishProvider: FC<PublishProviderProps> = ({
 
   return (
     <PublishConfigContext.Provider value={config ?? getConfigRef()}>
-      <ThirdwebProvider>
-        <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
-          {children}
-        </SeedProvider>
-      </ThirdwebProvider>
+      <SeedProvider queryClient={queryClient} queryClientRef={queryClientRef}>
+        {children}
+      </SeedProvider>
     </PublishConfigContext.Provider>
   )
 }

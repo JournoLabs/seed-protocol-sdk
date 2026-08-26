@@ -19,8 +19,12 @@ mock.module('./thirdweb', () => ({
 }))
 
 mock.module('thirdweb', () => ({
+  createThirdwebClient: mock(() => ({})),
   getContract: mock(() => ({})),
   sendTransaction: (...args: unknown[]) => sendTransactionMock(...args),
+  prepareTransaction: mock(() => ({})),
+  deploySmartAccount: mock(async () => {}),
+  defineChain: mock((c: unknown) => c),
 }))
 
 mock.module('thirdweb/extensions/erc4337', () => ({
