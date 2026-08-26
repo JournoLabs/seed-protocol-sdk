@@ -41,6 +41,7 @@ export default {
   external: [
     '@seedprotocol/sdk',
     '@seedprotocol/feed-hyper',
+    '@seedprotocol/gateway-hyper',
     'commander',
     'fs',
     'path',

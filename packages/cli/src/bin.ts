@@ -18,6 +18,7 @@ import {
 import { runInit } from './init'
 import { runExportSql } from './export-sql'
 import { registerFeedCommands } from './feed'
+import { registerGatewayCommands } from './gateway'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -158,6 +159,7 @@ program
   })
 
 registerFeedCommands(program)
+registerGatewayCommands(program)
 
 // Parse command line arguments
 const calledFrom = pathToFileURL(process.argv[1]).href
