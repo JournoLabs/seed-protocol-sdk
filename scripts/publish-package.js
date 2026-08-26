@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: sdk, react, feed, feed-hyper, publish, cli, ghost
+ * Packages: eas, arweave, vite, webpack, sdk, react, feed, feed-hyper, publish, cli, ghost
  *
  * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
@@ -27,7 +27,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish', 'cli', 'ghost']
+const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'webpack', 'sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish', 'cli', 'ghost']
+const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'webpack']
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')
@@ -175,7 +176,7 @@ async function main() {
     console.log('[Publish] -f flag: skipping tests before build')
   }
 
-  if (packageArg !== 'sdk') {
+  if (packageArg !== 'sdk' && !LEAN_PACKAGES.includes(packageArg)) {
     console.log('\n[Publish] Checking if @seedprotocol/sdk is published on npm...')
     const sdkPublished = await isSdkVersionPublished(sdkVersion)
 

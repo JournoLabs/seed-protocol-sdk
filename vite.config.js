@@ -11,7 +11,7 @@ import tsConfigPaths from 'vite-tsconfig-paths'
 import { playwright } from '@vitest/browser-playwright'
 import Inspect from 'vite-plugin-inspect'
 import { configDefaults } from 'vitest/config'
-import { seedVitePlugin } from './packages/sdk/src/vite'
+import { seedVitePlugin } from '@seedprotocol/vite'
 
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'

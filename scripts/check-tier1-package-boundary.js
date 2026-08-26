@@ -20,7 +20,7 @@ const FORBIDDEN = [
   '@tanstack/react-query',
 ]
 
-const PACKAGES = ['eas', 'arweave']
+const PACKAGES = ['eas', 'arweave', 'vite', 'webpack']
 
 function checkPackage(shortName) {
   const pkgPath = join(rootDir, 'packages', shortName, 'package.json')
@@ -46,4 +46,4 @@ if (all.length > 0) {
   process.exit(1)
 }
 
-console.log('[tier1-boundary] OK — eas and arweave stay lean')
+console.log('[tier1-boundary] OK — eas, arweave, vite, and webpack stay lean')
