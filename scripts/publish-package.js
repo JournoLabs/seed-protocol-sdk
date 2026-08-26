@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['sdk', 'react', 'feed', 'feed-hyper', 'publish', 'cli', 'ghost']
+const VALID_PACKAGES = ['sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish', 'cli', 'ghost']
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')

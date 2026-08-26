@@ -11,6 +11,8 @@ export * from './browser'
 export * from './arweave'
 export * from './publish'
 
+export * from './gateway'
+
 export type Endpoints = {
   filePaths: string
   files: string
@@ -44,6 +46,10 @@ export interface SeedConfig {
   readonly endpoints: Endpoints
   models?: Record<string, Model>
   arweaveDomain?: string
+  /** Upload API origin (HTTP / hybrid fallback). */
+  uploadApiBaseUrl?: string
+  /** Gateway + upload transport (`http-gateway` default). */
+  gateway?: import('./gateway').SeedGatewayConfig
   filesDir?: string
   dbConfig?: DbConfig
   /** Path to schema JSON file (e.g. 'schema.json'). Node: relative to process.cwd(); Browser: relative to working dir */

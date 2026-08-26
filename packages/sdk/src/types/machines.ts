@@ -15,6 +15,11 @@ export type GlobalMachineContext = {
   models?: { [key: string]: Model }
   publishItemService?: ActorRefFrom<any>
   arweaveDomain?: string
+  uploadApiBaseUrl?: string
+  gatewayTransport?: import('./gateway').SeedGatewayTransportMode
+  gatewayHyperKey?: string
+  gatewaySidecarHost?: string
+  gatewaySidecarPort?: number
   filesDir?: string
 }
 
@@ -50,6 +55,11 @@ export type ClientManagerContext = {
   models?: { [key: string]: Model }
   schemas?: { [schemaName: string]: SchemaFileFormat }
   arweaveDomain?: string
+  uploadApiBaseUrl?: string
+  gatewayTransport?: import('./gateway').SeedGatewayTransportMode
+  gatewayHyperKey?: string
+  gatewaySidecarHost?: string
+  gatewaySidecarPort?: number
   filesDir?: string
   dbConfig?: import('@/types').DbConfig
   schemaFile?: string

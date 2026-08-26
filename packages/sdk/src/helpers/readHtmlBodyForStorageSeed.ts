@@ -1,8 +1,7 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import {
-  getDefaultArweaveReadGatewayHostsOrdered,
-  mergePrimaryHostWithDefaults,
-} from '@/helpers/constants'
+import { getDefaultArweaveReadGatewayHostsOrdered } from '@/helpers/constants'
+import { getResolvedSeedGatewayEndpoints } from '@/helpers/gateway/gatewayState'
+import { getReadGatewayHostsForConfig } from '@/helpers/gateway/resolveSeedGatewayEndpoints'
 
 /** Published storage seeds use `0x` + 64 hex; `saveHtml` still writes `html/{localId}.html`. */
 const SEED_UID_HEX_RE = /^0x[a-fA-F0-9]{64}$/
@@ -28,20 +27,23 @@ async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | und
   if (!id || SEED_UID_HEX_RE.test(id)) return undefined
 
   try {
-    const { ensureReadGatewaySelected } = await import(
-      '@/helpers/ArweaveClient/selectReadGateway'
-    )
-    await ensureReadGatewaySelected().catch(() => {})
+    const resolved = getResolvedSeedGatewayEndpoints()
+    if (!resolved || resolved.activePath !== 'hyper-sidecar') {
+      const { ensureReadGatewaySelected } = await import(
+        '@/helpers/ArweaveClient/selectReadGateway'
+      )
+      await ensureReadGatewaySelected().catch(() => {})
+    }
   } catch {
     /* optional */
   }
 
   const { BaseArweaveClient } = await import('@/helpers/ArweaveClient/BaseArweaveClient')
   const protocol = BaseArweaveClient.getProtocol()
-  const hosts = mergePrimaryHostWithDefaults(
-    BaseArweaveClient.getHost(),
-    getDefaultArweaveReadGatewayHostsOrdered(),
-  )
+  const resolved = getResolvedSeedGatewayEndpoints()
+  const hosts = resolved
+    ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
+    : [BaseArweaveClient.getHost(), ...getDefaultArweaveReadGatewayHostsOrdered()]
 
   for (const host of hosts) {
     const h = host.trim().replace(/\/$/, '')

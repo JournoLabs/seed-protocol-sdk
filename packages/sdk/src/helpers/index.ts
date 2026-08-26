@@ -15,6 +15,20 @@ export {
   probeGateway,
   selectFirstHealthyReadGateway,
 } from './ArweaveClient/selectReadGateway'
+export {
+  resolveSeedGatewayEndpoints,
+  invalidateSidecarProbeCache,
+  getReadGatewayHostsForConfig,
+} from './gateway/resolveSeedGatewayEndpoints'
+export type { ResolveSeedGatewayEndpointsOptions } from './gateway/resolveSeedGatewayEndpoints'
+export {
+  seedGatewayConfigFromSeedConfig,
+  seedGatewayConfigFromClientContext,
+} from './gateway/seedGatewayConfig'
+export {
+  getResolvedSeedGatewayEndpoints,
+  setResolvedSeedGatewayEndpoints,
+} from './gateway/gatewayState'
 export * from './EasClient/BaseEasClient'
 export * from './QueryClient/BaseQueryClient'
 export * from './FileManager/BaseFileManager'

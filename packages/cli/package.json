@@ -38,10 +38,13 @@
     "dev:seed": "tsx src/bin.ts seed",
     "dev:feed-publish": "tsx src/bin.ts feed publish",
     "dev:feed-seed": "tsx src/bin.ts feed seed",
-    "dev:feed-serve": "tsx src/bin.ts feed serve"
+    "dev:feed-serve": "tsx src/bin.ts feed serve",
+    "dev:gateway-serve": "tsx src/bin.ts gateway tunnel serve",
+    "dev:gateway-connect": "tsx src/bin.ts gateway tunnel connect"
   },
   "dependencies": {
     "@seedprotocol/feed-hyper": "workspace:*",
+    "@seedprotocol/gateway-hyper": "workspace:*",
     "@seedprotocol/sdk": "workspace:*",
     "commander": "^12.1.0",
     "drizzle-orm": "^0.44.3",

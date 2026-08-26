@@ -64,6 +64,10 @@ export declare const INTERNAL_SCHEMA_IDS: readonly ["SEEDPROTOCOL"];
 export declare const DEFAULT_ARWEAVE_HOST = "ar.seedprotocol.io";
 /** Official Seed Protocol public feed Hyperdrive key (z32). Empty until first release. */
 export declare const DEFAULT_SEED_FEED_HYPER_KEY = "";
+/** Official Seed Protocol gateway Hyper tunnel operator key (z32). */
+export declare const DEFAULT_SEED_GATEWAY_HYPER_KEY = "";
+export declare const DEFAULT_GATEWAY_SIDECAR_HOST = "127.0.0.1";
+export declare const DEFAULT_GATEWAY_SIDECAR_PORT = 1984;
 /** Default Arweave gateway GraphQL endpoint */
 export declare const DEFAULT_ARWEAVE_GRAPHQL_URL = "https://ar.seedprotocol.io/graphql";
 /** Default Arweave gateways for fallback / metadata fetching (ordered by preference) */

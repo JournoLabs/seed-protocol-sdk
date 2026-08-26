@@ -1,4 +1,10 @@
-import { DEFAULT_ARWEAVE_GATEWAYS, ensureReadGatewaySelected } from '@seedprotocol/sdk'
+import {
+  DEFAULT_ARWEAVE_GATEWAYS,
+  ensureReadGatewaySelected,
+  getDefaultArweaveReadGatewayHostsOrdered,
+  getReadGatewayHostsForConfig,
+  getResolvedSeedGatewayEndpoints,
+} from '@seedprotocol/sdk'
 import sizeOf from 'image-size'
 import type { ImageMetadata } from '../types'
 
@@ -21,15 +27,26 @@ export class ArweaveImageService {
    * Detect if an Arweave transaction ID links to an image and extract metadata
    */
   async detectImage(transactionId: string): Promise<ImageMetadata> {
-    await ensureReadGatewaySelected().catch(() => {
-      /* feed may run without browser client init */
-    })
-    const gateways = this.config.gateways || [...DEFAULT_ARWEAVE_GATEWAYS]
+    const resolved = getResolvedSeedGatewayEndpoints()
+    if (!resolved || resolved.activePath !== 'hyper-sidecar') {
+      await ensureReadGatewaySelected().catch(() => {
+        /* feed may run without browser client init */
+      })
+    }
+
+    const gatewayHosts = resolved
+      ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
+      : this.config.gateways?.length
+        ? this.config.gateways
+        : [...DEFAULT_ARWEAVE_GATEWAYS]
+
+    const protocol = resolved?.arweaveProtocol ?? 'https'
 
     // Try each gateway until one succeeds
-    for (const gateway of gateways) {
+    for (const gateway of gatewayHosts) {
       try {
-        const url = `https://${gateway}/${transactionId}`
+        const host = gateway.trim().replace(/\/$/, '')
+        const url = `${protocol}://${host}/${transactionId}`
         const metadata = await this.getImageMetadata(url)
         if (metadata.isImage) {
           return metadata
@@ -44,7 +61,7 @@ export class ArweaveImageService {
     // If all gateways failed, return non-image result
     return {
       isImage: false,
-      url: `https://${gateways[0]}/${transactionId}`,
+      url: `${protocol}://${gatewayHosts[0]?.trim() || DEFAULT_ARWEAVE_GATEWAYS[0]}/${transactionId}`,
     }
   }
 
