@@ -1,6 +1,7 @@
 import {
-  DEFAULT_ARWEAVE_GATEWAYS,
+  BaseArweaveClient,
   ensureReadGatewaySelected,
+  getArweaveReadGatewayHostsForPrimary,
   getDefaultArweaveReadGatewayHostsOrdered,
   getReadGatewayHostsForConfig,
   getResolvedSeedGatewayEndpoints,
@@ -38,7 +39,7 @@ export class ArweaveImageService {
       ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
       : this.config.gateways?.length
         ? this.config.gateways
-        : [...DEFAULT_ARWEAVE_GATEWAYS]
+        : getArweaveReadGatewayHostsForPrimary(BaseArweaveClient.getHost())
 
     const protocol = resolved?.arweaveProtocol ?? 'https'
 
@@ -61,7 +62,7 @@ export class ArweaveImageService {
     // If all gateways failed, return non-image result
     return {
       isImage: false,
-      url: `${protocol}://${gatewayHosts[0]?.trim() || DEFAULT_ARWEAVE_GATEWAYS[0]}/${transactionId}`,
+      url: `${protocol}://${gatewayHosts[0]?.trim() || BaseArweaveClient.getHost()}/${transactionId}`,
     }
   }
 

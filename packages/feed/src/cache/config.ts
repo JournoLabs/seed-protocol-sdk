@@ -1,4 +1,8 @@
-import { DEFAULT_ARWEAVE_GATEWAYS } from '@seedprotocol/arweave'
+import {
+  BaseArweaveClient,
+  getArweaveReadGatewayHostsForPrimary,
+  resolveArweaveHostFromEnv,
+} from '@seedprotocol/arweave'
 import type { CacheConfig, ImageMetadataConfig } from './types';
 
 /**
@@ -61,7 +65,9 @@ export function loadCacheConfig(): CacheConfig {
   const imageMetadataTtl = parseInt(process.env.IMAGE_METADATA_TTL || '604800', 10); // 7 days default
   const imageMetadataGateways = process.env.IMAGE_METADATA_GATEWAYS
     ? process.env.IMAGE_METADATA_GATEWAYS.split(',').map(g => g.trim())
-    : [...DEFAULT_ARWEAVE_GATEWAYS];
+    : getArweaveReadGatewayHostsForPrimary(
+        resolveArweaveHostFromEnv() ?? BaseArweaveClient.getHost(),
+      );
   const imageMetadataTimeout = parseInt(process.env.IMAGE_METADATA_TIMEOUT || '5000', 10);
 
   const imageMetadata: ImageMetadataConfig = {

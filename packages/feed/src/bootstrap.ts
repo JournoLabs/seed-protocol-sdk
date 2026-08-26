@@ -1,9 +1,13 @@
-import { DEFAULT_ARWEAVE_HOST } from '@seedprotocol/arweave'
+import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '@seedprotocol/arweave'
 
 let initialized = false
 
 export type InitializeFeedPlatformOptions = {
   arweaveDomain?: string
+}
+
+function resolveFeedArweaveDomain(explicit?: string): string {
+  return explicit ?? resolveArweaveHostFromEnv() ?? DEFAULT_ARWEAVE_HOST
 }
 
 /** Register Node EAS + Arweave clients for feed generation (no full SDK client). */
@@ -16,9 +20,12 @@ export async function initializeFeedPlatform(
     import('@seedprotocol/arweave/node'),
   ])
   registerNodeEasPlatform()
-  registerNodeArweavePlatform({
-    arweaveDomain: options?.arweaveDomain ?? DEFAULT_ARWEAVE_HOST,
-  })
+  const arweaveDomain = resolveFeedArweaveDomain(options?.arweaveDomain)
+  registerNodeArweavePlatform({ arweaveDomain })
+  if (options?.arweaveDomain) {
+    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
+    BaseArweaveClient.setHost(options.arweaveDomain)
+  }
   initialized = true
 }
 

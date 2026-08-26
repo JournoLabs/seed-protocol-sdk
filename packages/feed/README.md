@@ -18,6 +18,33 @@ Revoked attestations are excluded from feed queries by default. Items that have 
 
 In development (`NODE_ENV=development`), feed caching is **disabled by default** so you always see fresh content. Set `CACHE_ENABLED=true` to enable caching in dev. See `packages/feed/src/cache/README.md` for full cache configuration.
 
+### Arweave gateway URLs
+
+Feed generation resolves Arweave transaction IDs to gateway URLs (RSS enclosures, image relations, rich-text hydration). Configure the primary gateway with any of these (first match wins):
+
+- `ARWEAVE_HOST` — server-side (Node, Bun, etc.)
+- `NEXT_PUBLIC_ARWEAVE_HOST` — Next.js / universal apps
+- `VITE_ARWEAVE_HOST` — Vite apps (also set this for Bun if you use a `VITE_`-prefixed `.env`)
+
+Or pass an explicit domain at init time (takes precedence over env):
+
+```ts
+import { initializeFeedPlatform } from '@seedprotocol/feed'
+
+await initializeFeedPlatform({ arweaveDomain: 'arweave.net' })
+```
+
+When unset, the default primary gateway is `ar.seedprotocol.io`.
+
+**Read fallbacks** (image metadata probing, gateway health checks) use additional public gateways. To override the fallback list:
+
+- `ARWEAVE_READ_GATEWAYS` or `NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS` — comma-separated hostnames
+- `IMAGE_METADATA_GATEWAYS` — comma-separated hostnames for RSS image dimension detection
+
+When a custom primary gateway is configured, `ar.seedprotocol.io` is omitted from automatic fallbacks (unless you include it explicitly in one of the env lists above).
+
+**Note:** Items already stored with full `https://ar.seedprotocol.io/...` URLs are passed through unchanged. Only newly resolved transaction IDs use the configured gateway.
+
 ### Feed Item URLs (EASScan attestation links)
 
 Item links in the feed can point to EASScan attestation pages. Set these environment variables:
@@ -31,6 +58,9 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 ### Example .env
 
 ```bash
+# Arweave gateway for feed media / relation URLs
+ARWEAVE_HOST=arweave.net
+
 # Default: item links use https://easscan.org/attestation/view/{uid}
 # Override for testnet:
 FEED_ITEM_URL_BASE=https://optimism-sepolia.easscan.org
