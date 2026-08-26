@@ -40,6 +40,7 @@ export default {
   },
   external: [
     '@seedprotocol/sdk',
+    '@seedprotocol/feed-hyper',
     'commander',
     'fs',
     'path',

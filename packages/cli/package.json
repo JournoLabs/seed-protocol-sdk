@@ -35,9 +35,13 @@
     "dev": "tsx src/bin.ts",
     "dev:init": "tsx src/bin.ts init",
     "dev:export-sql": "tsx src/bin.ts export-sql",
-    "dev:seed": "tsx src/bin.ts seed"
+    "dev:seed": "tsx src/bin.ts seed",
+    "dev:feed-publish": "tsx src/bin.ts feed publish",
+    "dev:feed-seed": "tsx src/bin.ts feed seed",
+    "dev:feed-serve": "tsx src/bin.ts feed serve"
   },
   "dependencies": {
+    "@seedprotocol/feed-hyper": "workspace:*",
     "@seedprotocol/sdk": "workspace:*",
     "commander": "^12.1.0",
     "drizzle-orm": "^0.44.3",
