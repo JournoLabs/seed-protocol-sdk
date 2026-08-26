@@ -1,0 +1,63 @@
+import type { CreateTransactionInterface } from 'arweave/web'
+
+/**
+ * Transaction presence / status as returned by {@link BaseArweaveClient.getTransactionStatus}.
+ * `confirmed` is only populated by mocks or legacy paths; gateway checks use HTTP status only.
+ */
+export type TransactionStatus = {
+  status: number
+  confirmed: {
+    block_height: number
+    block_indep_hash: string
+    number_of_confirmations: number
+  } | null
+}
+
+/**
+ * Transaction tag (name-value pair)
+ */
+export type TransactionTag = {
+  name: string
+  value: string
+}
+
+/**
+ * Options for fetching transaction data
+ */
+export type GetDataOptions = {
+  decode?: boolean
+  string?: boolean
+}
+
+/**
+ * Parameters for bulk file download operations
+ */
+export type DownloadFilesParams = {
+  transactionIds: string[]
+  excludedTransactions?: Set<string>
+}
+
+/**
+ * Result of a file download operation
+ */
+export type DownloadResult = {
+  transactionId: string
+  success: boolean
+  contentType?: string
+  data?: Uint8Array | string
+  error?: string
+}
+
+/**
+ * Arweave transaction interface (from arweave package)
+ */
+export type ArweaveTransaction = Awaited<ReturnType<{
+  createTransaction(attributes: Partial<CreateTransactionInterface>): Promise<any>
+}['createTransaction']>>
+
+/**
+ * Options for creating a transaction
+ */
+export type CreateTransactionOptions = {
+  tags?: TransactionTag[]
+}
