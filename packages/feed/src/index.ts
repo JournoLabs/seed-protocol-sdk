@@ -13,7 +13,7 @@ export {
   type SiteConfigOverrides,
 } from './config';
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
-export type { FeedConfig } from './types';
+export type { FeedConfig, FeedFormat, GraphQLItem } from './types';
 export {
   classifyMediaRef,
   resolveMediaRef,
@@ -582,8 +582,8 @@ export const createFeed = (
 ): Promise<string> => {
   const siteConfig = resolveSiteConfig(siteConfigOverrides)
   const collectionName = pluralize(schemaName)
-  // Add cache busting parameter to feed URL if provided
-  const feedUrlBase = `${siteConfig.siteUrl}/${collectionName}/${format}`
+  // Feed document self-links use feedUrl; channel home/link uses siteUrl
+  const feedUrlBase = `${siteConfig.feedUrl}/${collectionName}/${format}`
   const feedUrl = cacheBust ? `${feedUrlBase}?v=${cacheBust}` : feedUrlBase
   const feedTitle = `${siteConfig.title} - ${capitalize(collectionName)}`
   const now = new Date()

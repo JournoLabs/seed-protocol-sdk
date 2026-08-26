@@ -17,6 +17,7 @@ import {
 } from '@seedprotocol/sdk/node'
 import { runInit } from './init'
 import { runExportSql } from './export-sql'
+import { registerFeedCommands } from './feed'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -155,6 +156,8 @@ program
   .action(async (schemaPath?: string, outputPath?: string) => {
     await runExportSql(schemaPath, outputPath)
   })
+
+registerFeedCommands(program)
 
 // Parse command line arguments
 const calledFrom = pathToFileURL(process.argv[1]).href

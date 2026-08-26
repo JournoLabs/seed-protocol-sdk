@@ -124,6 +124,12 @@ export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
 /** Default Arweave gateway host used across all packages (first in {@link DEFAULT_ARWEAVE_GATEWAYS}) */
 export const DEFAULT_ARWEAVE_HOST = 'ar.seedprotocol.io'
 
+/**
+ * Official Seed Protocol public feed Hyperdrive key (z32).
+ * Empty until the first official publisher keypair is generated and backed up by ops.
+ */
+export const DEFAULT_SEED_FEED_HYPER_KEY = ''
+
 /** Default Arweave gateway GraphQL endpoint (transaction / block queries). */
 export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/graphql`
 
