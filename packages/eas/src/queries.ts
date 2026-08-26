@@ -99,3 +99,47 @@ export const GET_ALL_PROPERTIES_FOR_ALL_VERSIONS = graphql(/* GraphQL */ `
     }
   }
 `) as TypedDocumentNode<{ allProperties: Attestation[] }>
+
+export const GET_FILES_METADATA = graphql(/* GraphQL */ `
+  query GetFilesMetadata($where: AttestationWhereInput!) {
+    filesMetadata: attestations(
+      where: $where
+      orderBy: [{ timeCreated: desc }]
+    ) {
+      ...attestationFields
+    }
+  }
+`) as TypedDocumentNode<{ filesMetadata: Attestation[] }>
+
+export const GET_IMAGE_SEEDS = graphql(/* GraphQL */ `
+  query GetImageSeeds($where: AttestationWhereInput!) {
+    imageSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {
+      id
+      decodedDataJson
+      attester
+      schema {
+        schemaNames {
+          name
+        }
+      }
+      refUID
+      revoked
+      schemaId
+      txid
+      timeCreated
+      time
+      isOffchain
+    }
+  }
+`) as TypedDocumentNode<{ imageSeeds: Attestation[] }>
+
+export const GET_IMAGE_VERSIONS = graphql(/* GraphQL */ `
+  query GetImageVersions($where: AttestationWhereInput!) {
+    imageVersions: attestations(
+      where: $where
+      orderBy: [{ timeCreated: desc }]
+    ) {
+      ...attestationFields
+    }
+  }
+`) as TypedDocumentNode<{ imageVersions: Attestation[] }>

@@ -9,4 +9,8 @@ export * from './EasClient/BaseEasClient.js'
 export { EasClient } from './EasClient/BaseEasClient.js'
 export * from './QueryClient/BaseQueryClient.js'
 export * from './stores/schemaUidCache.js'
-export type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
+export type {
+  Attestation,
+  Schema as EASSchema,
+  SchemaWhereInput,
+} from './graphql/gql/graphql.js'
