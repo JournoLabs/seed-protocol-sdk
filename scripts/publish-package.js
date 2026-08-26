@@ -4,10 +4,11 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: sdk, react, feed, publish, cli, ghost
+ * Packages: sdk, react, feed, feed-hyper, publish, cli, ghost
  *
  * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
+ * - If publishing 'feed-hyper', also checks that @seedprotocol/feed@<same version> is published
  * - If publishing 'publish', also checks that @seedprotocol/react@<same version> is published
  * - If React version is not published, prompts to publish it first
  * - If user declines, script exits
@@ -26,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['sdk', 'react', 'feed', 'publish', 'cli', 'ghost']
+const VALID_PACKAGES = ['sdk', 'react', 'feed', 'feed-hyper', 'publish', 'cli', 'ghost']
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')
@@ -226,6 +227,28 @@ async function main() {
     } else {
       console.log(`✅ @seedprotocol/react@${reactVersion} is already published.\n`)
     }
+  }
+
+  if (packageArg === 'feed-hyper') {
+    console.log('\n[Publish] Checking if @seedprotocol/feed is published on npm...')
+    let feedPublished = false
+    try {
+      execSync(`npm view @seedprotocol/feed@${sdkVersion} version`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      feedPublished = true
+    } catch {
+      feedPublished = false
+    }
+
+    if (!feedPublished) {
+      console.log(`\n⚠️  @seedprotocol/feed@${sdkVersion} is not published on npm.`)
+      console.log('   @seedprotocol/feed-hyper depends on it, so it must be published first.\n')
+      console.log('Aborted. Publish @seedprotocol/feed first, then run this script again.')
+      process.exit(1)
+    }
+    console.log(`✅ @seedprotocol/feed@${sdkVersion} is already published.\n`)
   }
 
   if (packageArg === 'sdk') {

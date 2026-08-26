@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Version synchronization script for monorepo packages
- * Ensures SDK, CLI, Publish, Feed, and Ghost packages have matching versions
+ * Ensures SDK, CLI, Publish, Feed, Feed-hyper, and Ghost packages have matching versions
  */
 
 import { readFileSync, writeFileSync } from 'fs'
@@ -38,6 +38,7 @@ function syncVersions(newVersion = null) {
   const cliPackagePath = join(rootDir, 'packages', 'cli', 'package.json')
   const publishPackagePath = join(rootDir, 'packages', 'publish', 'package.json')
   const feedPackagePath = join(rootDir, 'packages', 'feed', 'package.json')
+  const feedHyperPackagePath = join(rootDir, 'packages', 'feed-hyper', 'package.json')
   const ghostPackagePath = join(rootDir, 'packages', 'ghost', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
@@ -45,6 +46,7 @@ function syncVersions(newVersion = null) {
   const cliPackage = readPackageJson(cliPackagePath)
   const publishPackage = readPackageJson(publishPackagePath)
   const feedPackage = readPackageJson(feedPackagePath)
+  const feedHyperPackage = readPackageJson(feedHyperPackagePath)
   const ghostPackage = readPackageJson(ghostPackagePath)
 
   // Use SDK version as source of truth, or use provided version
@@ -116,6 +118,15 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] Feed SDK dependency: ${feedPackage.dependencies['@seedprotocol/sdk']}`)
   }
 
+  // Update Feed-hyper version
+  if (feedHyperPackage.version !== targetVersion) {
+    feedHyperPackage.version = targetVersion
+    writePackageJson(feedHyperPackagePath, feedHyperPackage)
+    console.log(`[Version Sync] Updated Feed-hyper version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Feed-hyper version already at ${targetVersion}`)
+  }
+
   // Update Ghost version
   if (ghostPackage.version !== targetVersion) {
     ghostPackage.version = targetVersion
@@ -136,6 +147,7 @@ function syncVersions(newVersion = null) {
   console.log(`[Version Sync] CLI: ${cliPackage.version}`)
   console.log(`[Version Sync] Publish: ${publishPackage.version}`)
   console.log(`[Version Sync] Feed: ${feedPackage.version}`)
+  console.log(`[Version Sync] Feed-hyper: ${feedHyperPackage.version}`)
   console.log(`[Version Sync] Ghost: ${ghostPackage.version}`)
 }
 
