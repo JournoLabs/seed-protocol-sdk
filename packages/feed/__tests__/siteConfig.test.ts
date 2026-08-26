@@ -56,4 +56,26 @@ describe('site config', () => {
     expect(xml).toContain('<description>Custom description</description>')
     expect(getSiteConfig()).toEqual(DEFAULT_SITE_CONFIG)
   })
+
+  it('createFeed uses feedUrl for document self-links and siteUrl for channel link', async () => {
+    const xml = await createFeed(
+      [{ id: '1', title: 'Hello', description: 'World' }],
+      'post',
+      'atom',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        title: 'Custom Feed',
+        siteUrl: 'https://custom.example',
+        feedUrl: 'hyper://abcd1234',
+        description: 'Custom description',
+      },
+    )
+
+    expect(xml).toContain('https://custom.example')
+    expect(xml).toContain('hyper://abcd1234/posts/atom')
+  })
 })
