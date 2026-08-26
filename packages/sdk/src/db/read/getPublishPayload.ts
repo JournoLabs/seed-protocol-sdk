@@ -38,7 +38,7 @@ import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPubl
 import { eq, and } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import debug from 'debug'
-import {ethers} from 'ethers'
+import { encodeBytes32String } from '@/helpers/ethereumUtils'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
 import type { ValidationError } from '@/Schema/validation'
 const logger = debug('seedSdk:db:getPublishPayload')
@@ -496,7 +496,7 @@ const processBasicProperties = async (
         if (!trimmed) continue
         rawIds.push(trimmed)
         if (trimmed.length !== 66 && !trimmed.startsWith('0x')) {
-          newValues.push(ethers.encodeBytes32String(trimmed))
+          newValues.push(encodeBytes32String(trimmed))
         } else {
           newValues.push(trimmed)
         }

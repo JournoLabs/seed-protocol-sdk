@@ -25,7 +25,6 @@
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
-    "@seedprotocol/sdk": "workspace:*",
     "@tryghost/admin-api": "^1.14.6"
   },
   "devDependencies": {
