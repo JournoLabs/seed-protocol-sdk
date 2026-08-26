@@ -3,6 +3,7 @@ import {
   DEFAULT_ARWEAVE_HOST,
   DEFAULT_GATEWAY_SIDECAR_HOST,
   DEFAULT_GATEWAY_SIDECAR_PORT,
+  getArweaveReadGatewayHostsForPrimary,
 } from '../constants.js'
 import type {
   ResolvedSeedGatewayEndpoints,
@@ -146,23 +147,10 @@ export async function resolveSeedGatewayEndpoints(
 /** Build ordered gateway host list for read fallback (sidecar first in hybrid when active). */
 export function getReadGatewayHostsForConfig(
   resolved: ResolvedSeedGatewayEndpoints,
-  defaults: readonly string[],
+  _defaults?: readonly string[],
 ): string[] {
   if (resolved.activePath === 'hyper-sidecar') {
     return [resolved.arweaveHost]
   }
-  const primary = resolved.arweaveHost
-  const seen = new Set<string>()
-  const out: string[] = []
-  const add = (h: string) => {
-    const t = h.trim().replace(/\/$/, '')
-    if (!t) return
-    const k = t.toLowerCase()
-    if (seen.has(k)) return
-    seen.add(k)
-    out.push(t)
-  }
-  add(primary)
-  for (const d of defaults) add(d)
-  return out
+  return getArweaveReadGatewayHostsForPrimary(resolved.arweaveHost)
 }

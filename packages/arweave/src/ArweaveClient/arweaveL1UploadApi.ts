@@ -1,6 +1,6 @@
 import {
   getDefaultArweaveReadGatewayHostsOrdered,
-  mergePrimaryHostWithDefaults,
+  getArweaveReadGatewayHostsForPrimary,
 } from '../constants.js'
 import { normalizeUploadApiBaseUrl } from './uploadApiVerification.js'
 import { probeGateway } from './selectReadGateway.js'
@@ -181,7 +181,7 @@ export async function queryArweaveGatewayTransactionWithFallback(
 
   const ordered =
     preferredHost && preferredHost.length > 0
-      ? mergePrimaryHostWithDefaults(preferredHost, defaults)
+      ? getArweaveReadGatewayHostsForPrimary(preferredHost)
       : [...defaults]
 
   const signal = init?.signal

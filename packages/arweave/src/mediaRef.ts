@@ -1,4 +1,4 @@
-import { DEFAULT_ARWEAVE_HOST } from './constants.js'
+import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
 import {
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
@@ -185,5 +185,5 @@ export function normalizeFeedItemFields(
 }
 
 export function getArweaveUrlForTransaction(transactionId: string): string {
-  return `https://${DEFAULT_ARWEAVE_HOST}/${transactionId}`
+  return `${BaseArweaveClient.getBaseUrl()}/${transactionId}`
 }

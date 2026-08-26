@@ -1,8 +1,7 @@
 import { BaseArweaveClient } from './BaseArweaveClient.js'
 import {
   DEFAULT_ARWEAVE_HOST,
-  getDefaultArweaveReadGatewayHostsOrdered,
-  mergePrimaryHostWithDefaults,
+  getArweaveReadGatewayHostsForPrimary,
 } from '../constants.js'
 
 const READ_GATEWAY_CACHE_TTL_MS = 3 * 60 * 1000
@@ -76,9 +75,7 @@ export async function selectFirstHealthyReadGateway(
 }
 
 function buildOrderedHostsForProbe(): string[] {
-  const primary = BaseArweaveClient.getHost()
-  const defaults = getDefaultArweaveReadGatewayHostsOrdered()
-  return mergePrimaryHostWithDefaults(primary, defaults)
+  return getArweaveReadGatewayHostsForPrimary(BaseArweaveClient.getHost())
 }
 
 /**

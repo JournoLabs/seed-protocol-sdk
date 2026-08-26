@@ -35,6 +35,50 @@ export const DEFAULT_ARWEAVE_GATEWAYS = [
 
 const READ_GATEWAYS_ENV_KEYS = ['ARWEAVE_READ_GATEWAYS', 'NEXT_PUBLIC_ARWEAVE_READ_GATEWAYS'] as const
 
+/** Env keys checked for primary Arweave gateway host (first match wins). */
+export const ARWEAVE_HOST_ENV_KEYS = [
+  'NEXT_PUBLIC_ARWEAVE_HOST',
+  'ARWEAVE_HOST',
+  'VITE_ARWEAVE_HOST',
+] as const
+
+function normalizeGatewayHostInput(input: string): string {
+  const t = input.trim()
+  if (t.startsWith('http://')) return t.slice(7).replace(/\/$/, '')
+  if (t.startsWith('https://')) return t.slice(8).replace(/\/$/, '')
+  return t.replace(/\/$/, '')
+}
+
+/**
+ * Primary gateway host from env (`NEXT_PUBLIC_ARWEAVE_HOST`, `ARWEAVE_HOST`, or `VITE_ARWEAVE_HOST`).
+ * Scheme prefixes (`http://`, `https://`) are stripped.
+ */
+export function resolveArweaveHostFromEnv(): string | undefined {
+  if (typeof process === 'undefined' || !process.env) return undefined
+  for (const key of ARWEAVE_HOST_ENV_KEYS) {
+    const raw = process.env[key]?.trim()
+    if (raw) return normalizeGatewayHostInput(raw)
+  }
+  return undefined
+}
+
+function filterDefaultsForPrimary(primary: string, defaults: readonly string[]): string[] {
+  const primaryNorm = primary.trim().toLowerCase().replace(/\/$/, '')
+  const seedNorm = DEFAULT_ARWEAVE_HOST.toLowerCase()
+  if (primaryNorm === seedNorm) return [...defaults]
+  return defaults.filter((g) => g.toLowerCase() !== seedNorm)
+}
+
+/**
+ * Ordered read gateways: `primary` first, then fallbacks.
+ * When `primary` is not {@link DEFAULT_ARWEAVE_HOST}, `ar.seedprotocol.io` is omitted from fallbacks
+ * unless it appears in an explicit `ARWEAVE_READ_GATEWAYS` env list.
+ */
+export function getArweaveReadGatewayHostsForPrimary(primary: string): string[] {
+  const defaults = getDefaultArweaveReadGatewayHostsOrdered()
+  return mergePrimaryHostWithDefaults(primary, filterDefaultsForPrimary(primary, defaults))
+}
+
 /** Ordered gateway hostnames for reads: env list if set, otherwise {@link DEFAULT_ARWEAVE_GATEWAYS}. */
 export function getDefaultArweaveReadGatewayHostsOrdered(): string[] {
   if (typeof process === 'undefined' || !process.env) {

@@ -7,7 +7,7 @@ import type {
   DownloadResult,
   CreateTransactionOptions,
 } from '../types/arweave.js'
-import { DEFAULT_ARWEAVE_HOST } from '../constants.js'
+import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '../constants.js'
 
 function parseGateway(input: string): { protocol: 'http' | 'https'; host: string } {
   const t = input.trim()
@@ -24,7 +24,7 @@ function parseGateway(input: string): { protocol: 'http' | 'https'; host: string
 let _host = DEFAULT_ARWEAVE_HOST
 let _protocol: 'http' | 'https' = 'https'
 let _hostExplicitlySet = false
-/** When true, production `ARWEAVE_HOST` / `NEXT_PUBLIC_ARWEAVE_HOST` does not override `_host` (after a successful read-gateway probe). */
+/** When true, env gateway host does not override `_host` (after a successful read-gateway probe). */
 let _suppressEnvGatewayOverride = false
 
 export abstract class BaseArweaveClient {
@@ -38,14 +38,9 @@ export abstract class BaseArweaveClient {
    * Resolved gateway host (no scheme) and protocol from env override or setHost().
    */
   static resolveGateway(): { protocol: 'http' | 'https'; host: string } {
-    if (process.env.NODE_ENV === 'production') {
-      const envHost =
-        typeof process !== 'undefined' && process.env
-          ? process.env.NEXT_PUBLIC_ARWEAVE_HOST || process.env.ARWEAVE_HOST
-          : undefined
-      if (envHost && !_hostExplicitlySet && !_suppressEnvGatewayOverride) {
-        return parseGateway(envHost)
-      }
+    const envHost = resolveArweaveHostFromEnv()
+    if (envHost && !_hostExplicitlySet && !_suppressEnvGatewayOverride) {
+      return parseGateway(envHost)
     }
     return { protocol: _protocol, host: _host }
   }
@@ -104,7 +99,7 @@ export abstract class BaseArweaveClient {
   }
 
   /**
-   * Sets the preferred read gateway without locking. Production env host still takes precedence until a probe applies a host.
+   * Sets the preferred read gateway without locking. Env host still takes precedence until a probe applies a host.
    * Used for seed `arweaveDomain`.
    */
   static setPreferredReadGateway(host: string): void {
