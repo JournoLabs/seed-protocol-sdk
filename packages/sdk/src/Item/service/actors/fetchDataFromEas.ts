@@ -1,8 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
-import { GET_PROPERTIES } from '@/Item/queries'
-import { itemMachineSingle } from '@/Item/service/itemMachineSingle'
+import { GET_PROPERTIES, type Attestation } from '@seedprotocol/eas'
 import { PropertyType } from '@/seedSchema'
-import { Attestation } from '@/graphql/gql/graphql'
 import { BaseEasClient, BaseQueryClient } from '@/helpers'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> fetchDataFromEas -> Model
 // import { Model } from '@/Model/Model'

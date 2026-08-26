@@ -3,7 +3,7 @@ import {
   fetchAllBinaryData,
   fetchAllMetadataRecords,
 } from '@/helpers/file/fetchAll/actors'
-import { Attestation } from '@/graphql/gql/graphql'
+import { GET_FILES_METADATA, type Attestation } from '@seedprotocol/eas'
 
 type FetchAllFilesMachineContext = {
   addresses: string[]

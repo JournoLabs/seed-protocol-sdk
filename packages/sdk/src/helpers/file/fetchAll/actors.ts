@@ -1,6 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { fetchAllFilesMachine } from '@/helpers/file/fetchAll/index'
-import { GET_FILES_METADATA } from '@/helpers/file/queries'
+import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import {
   BaseFileManager,
   getDataTypeFromString,

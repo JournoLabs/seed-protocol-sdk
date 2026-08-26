@@ -1,4 +1,4 @@
-import { GET_SCHEMAS } from '@/Item/queries'
+import { GET_SCHEMAS } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'

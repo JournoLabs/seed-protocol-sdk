@@ -1,2 +1,3 @@
-import '@seedprotocol/arweave/node'
-export { ArweaveClient } from '@seedprotocol/arweave/node'
+import { ArweaveClient } from '@seedprotocol/arweave/node'
+
+export { ArweaveClient }

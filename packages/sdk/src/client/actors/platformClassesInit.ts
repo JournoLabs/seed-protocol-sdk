@@ -87,10 +87,10 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     } else if (isNode()) {
       FileManager = (await import('../../node/helpers/FileManager')).FileManager
       Db = (await import('../../node/db/Db')).Db
-      QueryClient = (await import('../../node/helpers/QueryClient')).QueryClient
-      ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
+      QueryClient = (await import('@seedprotocol/eas/node')).QueryClient
+      EasClient = (await import('@seedprotocol/eas/node')).EasClient
+      ArweaveClient = (await import('@seedprotocol/arweave/node')).ArweaveClient
       PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
-      EasClient = (await import('../../node/helpers/EasClient')).EasClient
     } else {
       throw new Error(`Unable to determine environment. isBrowser()=${isBrowser()}, isNode()=${isNode()}. Platform-specific implementations could not be loaded.`)
     }

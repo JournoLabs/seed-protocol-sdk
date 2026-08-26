@@ -1,2 +1,3 @@
-import '@seedprotocol/eas/node'
-export { EasClient } from '@seedprotocol/eas/node'
+import { EasClient } from '@seedprotocol/eas/node'
+
+export { EasClient }

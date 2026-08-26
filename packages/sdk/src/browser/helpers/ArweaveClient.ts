@@ -9,7 +9,7 @@ import type {
   DownloadResult,
   CreateTransactionOptions,
 } from "@/types/arweave";
-import { GET_TRANSACTION_TAGS } from "@/helpers/ArweaveClient/queries";
+import { GET_TRANSACTION_TAGS } from '@seedprotocol/arweave'
 import debug from "debug";
 
 const logger = debug("seedSdk:browser:ArweaveClient");

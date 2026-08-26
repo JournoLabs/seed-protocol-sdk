@@ -1,6 +1,6 @@
 import { GetCorrectId } from '@/types/helpers';
-export * from './ArweaveClient/BaseArweaveClient';
-export * from './EasClient/BaseEasClient';
+export { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient';
+export { BaseEasClient } from './EasClient/BaseEasClient';
 export * from './QueryClient/BaseQueryClient';
 export * from './FileManager/BaseFileManager';
 export { waitForEntityIdle } from './waitForEntityIdle';

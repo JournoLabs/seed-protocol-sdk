@@ -1,6 +1,5 @@
-import { Schema as EASSchema, SchemaWhereInput } from '@/graphql/gql/graphql'
+import { type EASSchema, type SchemaWhereInput, GET_SCHEMAS } from '@seedprotocol/eas'
 import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
-import { GET_SCHEMAS } from '@/Item/queries'
 import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
 
 // Extract TypedData type from EIP712MessageTypes

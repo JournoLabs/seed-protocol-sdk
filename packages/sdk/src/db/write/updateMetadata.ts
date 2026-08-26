@@ -6,8 +6,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { Schema as EASSchema } from '@/graphql/gql/graphql'
-import { GET_SCHEMA_BY_NAME } from '@/Item/queries'
+import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
 import { normalizeDataType } from '@/helpers/property'
 
 type UpdateMetadata = (

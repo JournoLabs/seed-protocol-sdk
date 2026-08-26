@@ -1,4 +1,4 @@
-import { Schema as EASSchema } from '@/graphql/gql/graphql';
+import type { EASSchema } from '@seedprotocol/eas';
 import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk';
 type ExtractTypedData<T> = T extends {
     [key: string]: infer U;

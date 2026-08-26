@@ -29,16 +29,14 @@ async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | und
   try {
     const resolved = getResolvedSeedGatewayEndpoints()
     if (!resolved || resolved.activePath !== 'hyper-sidecar') {
-      const { ensureReadGatewaySelected } = await import(
-        '@/helpers/ArweaveClient/selectReadGateway'
-      )
+      const { ensureReadGatewaySelected } = await import('@seedprotocol/arweave')
       await ensureReadGatewaySelected().catch(() => {})
     }
   } catch {
     /* optional */
   }
 
-  const { BaseArweaveClient } = await import('@/helpers/ArweaveClient/BaseArweaveClient')
+  const { BaseArweaveClient } = await import('@seedprotocol/arweave')
   const protocol = BaseArweaveClient.getProtocol()
   const resolved = getResolvedSeedGatewayEndpoints()
   const hosts = resolved
@@ -108,7 +106,7 @@ async function readHtmlBodyFromChildStorageArweave(seedLocalId: string): Promise
   }
 
   try {
-    const { BaseArweaveClient } = await import('@/helpers/ArweaveClient/BaseArweaveClient')
+    const { BaseArweaveClient } = await import('@seedprotocol/arweave')
     const data = await BaseArweaveClient.getTransactionData(extractArweaveTransactionId(txId), {
       string: true,
     })

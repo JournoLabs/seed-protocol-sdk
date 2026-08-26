@@ -1,6 +1,6 @@
 import { tags } from 'typia';
 import { PropertyType as PropertySchemaType } from '@/types/property';
-import { Attestation } from '@/graphql/gql/graphql';
+import type { Attestation } from '@seedprotocol/eas';
 import { PropertyType } from '@/seedSchema';
 import { IItemProperty } from '@/interfaces';
 import { Item } from '@/Item/Item';

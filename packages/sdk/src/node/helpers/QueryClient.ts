@@ -1,2 +1,3 @@
-import '@seedprotocol/eas/node'
-export { QueryClient } from '@seedprotocol/eas/node'
+import { QueryClient } from '@seedprotocol/eas/node'
+
+export { QueryClient }

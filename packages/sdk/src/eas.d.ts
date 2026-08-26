@@ -1,4 +1,4 @@
-import { Attestation, Schema as EASSchema } from "@/graphql/gql/graphql";
+import type { Attestation, EASSchema } from '@seedprotocol/eas'
 type GetModelSchemasFromEas = () => Promise<EASSchema[]>;
 export declare const getModelSchemasFromEas: GetModelSchemasFromEas;
 type GetItemVersionsFromEasProps = {

@@ -4,10 +4,9 @@ import { getPropertyIdForModelAndName } from '@/helpers/db'
 import { PropertyType } from '@/types'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
 import { BaseDb } from '../Db/BaseDb'
-import { GET_SCHEMA_BY_NAME, } from '@/Item/queries'
+import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { Schema as EASSchema } from '@/graphql/gql/graphql'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 
 /** Validation error shape for MetadataValidationError */

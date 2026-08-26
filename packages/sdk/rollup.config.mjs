@@ -38,6 +38,9 @@ function twoStepDynamicImportPlugin() {
   // Promise form (no await): const x = import('...').then(function (n) { return n.X; }) - rewrite to async IIFE
   const PROMISE_FUNC = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)/gm
   const PROMISE_ARROW = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)/gm
+  // Assignment: Foo = (await import('...').then(function (n) { return n.aB; })).Foo
+  const AWAIT_THEN_PROP_FUNC = /^(\s*)(\w+)\s*=\s*\(await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)\)\.\2\s*;/gm
+  const AWAIT_THEN_PROP_ARROW = /^(\s*)(\w+)\s*=\s*\(await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)\)\.\2\s*;/gm
 
   return {
     name: 'two-step-dynamic-import',
@@ -67,6 +70,16 @@ function twoStepDynamicImportPlugin() {
         changed = true
         const i = chunkIndex++
         return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(AWAIT_THEN_PROP_FUNC, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const _mod_${i} = await import(${importPath});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}${lhs} = _ns_${i}.${lhs};`
+      })
+      magicString.replaceAll(AWAIT_THEN_PROP_ARROW, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}const _mod_${i} = await import(${importPath});\n${indent}const _ns_${i} = _mod_${i}.${exportName};\n${indent}${lhs} = _ns_${i}.${lhs};`
       })
 
       if (!changed) return null
@@ -100,7 +113,7 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
-    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave'],
+    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/vite', '@seedprotocol/webpack'],
     plugins: [
       alias({
         entries: [
@@ -119,9 +132,7 @@ const config = [
         targets: [
           { src: 'src/db/seedSchema', dest: 'dist/db' },
           { src: 'src/seedSchema', dest: 'dist' },
-          { src: 'src/db/drizzle', dest: 'dist/db/drizzle' },
-          { src: 'src/vite/arweave-default-shim.js', dest: 'dist' },
-          { src: 'src/vite/debug-default-shim.js', dest: 'dist' },
+          { src: 'src/db/drizzle', dest: 'dist/db' },
         ],
       }),
       twoStepDynamicImportPlugin(),
@@ -149,6 +160,8 @@ const config = [
       if (id === '@seedprotocol/feed') return true
       if (id === '@seedprotocol/eas') return true
       if (id === '@seedprotocol/arweave') return true
+      if (id === '@seedprotocol/vite') return true
+      if (id === '@seedprotocol/webpack') return true
       // Mark browser imports as external for Node.js build
       if (id.includes('/browser/') || id.includes('\\browser\\')) {
         return true

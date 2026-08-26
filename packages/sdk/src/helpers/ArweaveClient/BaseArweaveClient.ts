@@ -1,1 +1,1 @@
-export { BaseArweaveClient, ArweaveClient } from '@seedprotocol/arweave'
+export { BaseArweaveClient } from '@seedprotocol/arweave'

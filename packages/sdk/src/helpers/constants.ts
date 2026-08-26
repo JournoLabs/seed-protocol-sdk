@@ -118,7 +118,7 @@ export enum SeedModels {
 export const SEED_PROTOCOL_SCHEMA_NAME = 'Seed Protocol'
 export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
 
-export {
+import {
   DEFAULT_ARWEAVE_HOST,
   DEFAULT_SEED_FEED_HYPER_KEY,
   DEFAULT_SEED_GATEWAY_HYPER_KEY,
@@ -130,6 +130,19 @@ export {
   mergePrimaryHostWithDefaults,
   isKnownArweaveGatewayHostname,
 } from '@seedprotocol/arweave'
+
+export {
+  DEFAULT_ARWEAVE_HOST,
+  DEFAULT_SEED_FEED_HYPER_KEY,
+  DEFAULT_SEED_GATEWAY_HYPER_KEY,
+  DEFAULT_GATEWAY_SIDECAR_HOST,
+  DEFAULT_GATEWAY_SIDECAR_PORT,
+  DEFAULT_ARWEAVE_GRAPHQL_URL,
+  DEFAULT_ARWEAVE_GATEWAYS,
+  getDefaultArweaveReadGatewayHostsOrdered,
+  mergePrimaryHostWithDefaults,
+  isKnownArweaveGatewayHostname,
+}
 
 /** Fired after `syncDbWithEas` persists EAS seeds/versions/metadata to SQLite (see `Item.rehydrateCachedItemsFromDbAfterEasSync`). */
 export const EAS_SEED_DATA_SYNCED_TO_DB_EVENT = 'easSeedDataSyncedToDb' as const

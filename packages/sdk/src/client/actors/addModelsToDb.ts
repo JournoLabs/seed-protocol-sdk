@@ -6,7 +6,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
-import { GET_SCHEMAS } from '@/Item/queries'
+import { GET_SCHEMAS } from '@seedprotocol/eas'
 
 const logger = debug('seedSdk:client:actors:addModelsToDb')
 

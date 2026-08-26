@@ -71,7 +71,8 @@ export {
   getSeedsBySchemaName,
 } from './eas'
 
-export { getCorrectId, generateId, withExcludeRevokedFilter } from './helpers'
+export { getCorrectId, generateId } from './helpers'
+export { withExcludeRevokedFilter } from '@seedprotocol/eas'
 export {
   classifyMediaRef,
   resolveMediaRef,
@@ -93,14 +94,12 @@ export type {
 } from './helpers/mediaRef'
 export {
   pickLatestPropertyAttestationsByRefAndSchema,
-} from './helpers/easPropertyCanonical'
-export type { AttestationLikeForCanonical } from './helpers/easPropertyCanonical'
-export { isItemOwned } from './helpers/ownership'
-export {
   isPlaceholderUid,
   isValidEasAttestationUid,
   normalizeBytes32Hex,
-} from './helpers/easUid'
+} from '@seedprotocol/eas'
+export type { AttestationLikeForCanonical } from '@seedprotocol/eas'
+export { isItemOwned } from './helpers/ownership'
 
 export {
   SeedModels,
@@ -137,9 +136,9 @@ export { applyArweaveL1TransactionIdLocal } from './db/write/applyArweaveL1Trans
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
 
+export { getArweaveUrlForTransaction } from './helpers'
 export {
   BaseArweaveClient,
-  getArweaveUrlForTransaction,
   normalizeUploadApiBaseUrl,
   getUploadApiArweaveDataUrl,
   getUploadPipelineTransactionStatus,
@@ -158,7 +157,7 @@ export {
   seedGatewayConfigFromClientContext,
   getResolvedSeedGatewayEndpoints,
   setResolvedSeedGatewayEndpoints,
-} from './helpers'
+} from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
   SeedGatewayActivePath,
@@ -166,8 +165,11 @@ export type {
   SeedGatewayConfig,
   ResolvedSeedGatewayEndpoints,
 } from './types/gateway'
-export type { ResolveSeedGatewayEndpointsOptions } from './helpers'
-export type { ArweaveUploadStatusResponse, ArweaveGatewayTransactionQueryResult } from './helpers'
+export type {
+  ResolveSeedGatewayEndpointsOptions,
+  ArweaveUploadStatusResponse,
+  ArweaveGatewayTransactionQueryResult,
+} from '@seedprotocol/arweave'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
   setUploadExecutor,

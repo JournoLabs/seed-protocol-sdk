@@ -1,1 +1,3 @@
-export { BaseQueryClient } from '@seedprotocol/eas'
+import { BaseQueryClient } from '@seedprotocol/eas'
+
+export { BaseQueryClient }

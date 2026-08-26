@@ -5,7 +5,7 @@ import { getAllAddressesFromDb } from '@/helpers/db'
 import {
   BaseFileManager,
 } from '@/helpers'
-import { GET_FILES_METADATA } from '@/helpers/file/queries'
+import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import debug from 'debug'
 // Dynamic import to break circular dependency with globalMachine
 // import { getGlobalService } from '@/services/global/globalMachine'

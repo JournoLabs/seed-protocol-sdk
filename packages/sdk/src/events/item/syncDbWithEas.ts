@@ -1,5 +1,5 @@
 import { camelCase, startCase } from 'lodash-es'
-import { Attestation, SchemaWhereInput } from '@/graphql/gql/graphql'
+import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
 import {
   metadata,
   MetadataType,
@@ -18,7 +18,7 @@ import {
   GET_PROPERTIES,
   GET_SEEDS,
   GET_VERSIONS,
-} from '@/Item/queries'
+} from '@seedprotocol/eas'
 import { escapeSqliteString, getAllAddressesFromDb, getPropertyIdForModelAndName } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'

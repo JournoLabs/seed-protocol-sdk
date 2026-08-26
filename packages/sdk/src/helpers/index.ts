@@ -4,42 +4,34 @@ import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
 import { BaseFileManager } from './FileManager/BaseFileManager'
-import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient'
-export * from './ArweaveClient/BaseArweaveClient'
-export * from './ArweaveClient/uploadApiVerification'
-export * from './ArweaveClient/arweaveL1UploadApi'
-export {
+import {
+  BaseArweaveClient,
   ensureReadGatewaySelected,
-  invalidateReadGatewayCache,
-  resetArweaveReadGatewayForTests,
-  probeGateway,
-  selectFirstHealthyReadGateway,
-} from './ArweaveClient/selectReadGateway'
-export {
   resolveSeedGatewayEndpoints,
-  invalidateSidecarProbeCache,
   getReadGatewayHostsForConfig,
-} from './gateway/resolveSeedGatewayEndpoints'
-export type { ResolveSeedGatewayEndpointsOptions } from './gateway/resolveSeedGatewayEndpoints'
-export {
   seedGatewayConfigFromSeedConfig,
-  seedGatewayConfigFromClientContext,
-} from './gateway/seedGatewayConfig'
-export {
   getResolvedSeedGatewayEndpoints,
   setResolvedSeedGatewayEndpoints,
-} from './gateway/gatewayState'
-export * from './EasClient/BaseEasClient'
-export * from './QueryClient/BaseQueryClient'
+} from '@seedprotocol/arweave'
+export { BaseArweaveClient }
+export {
+  ensureReadGatewaySelected,
+  resolveSeedGatewayEndpoints,
+  getReadGatewayHostsForConfig,
+  seedGatewayConfigFromSeedConfig,
+  getResolvedSeedGatewayEndpoints,
+  setResolvedSeedGatewayEndpoints,
+}
+import { BaseEasClient } from './EasClient/BaseEasClient'
+export { BaseEasClient }
+import { BaseQueryClient } from './QueryClient/BaseQueryClient'
+export { BaseQueryClient }
 export * from './FileManager/BaseFileManager'
 export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
-export * from './easRevokedFilter'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'
 export * from './mediaRef'
-export * from './easUid'
-export * from './easPropertyCanonical'
 const logger = debug('seedSdk:shared:helpers')
 
 const { alphanumeric } = nanoIdDictionary

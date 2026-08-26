@@ -1,5 +1,5 @@
 import { GraphQLClient } from 'graphql-request';
-import { Attestation } from '@/graphql/gql/graphql';
+import type { Attestation } from '@seedprotocol/eas';
 export declare abstract class BaseEasClient {
     static PlatformClass: typeof BaseEasClient;
     protected static easClient: GraphQLClient;

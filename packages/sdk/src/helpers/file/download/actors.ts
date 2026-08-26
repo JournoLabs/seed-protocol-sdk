@@ -1,5 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
-import { GET_FILES_METADATA } from '@/helpers/file/queries'
+import { GET_FILES_METADATA } from '@seedprotocol/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 
