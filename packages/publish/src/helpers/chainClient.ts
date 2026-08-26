@@ -1,28 +1,30 @@
-import { createPublicClient, http, type Address, type Hex } from 'viem'
-import { optimismSepolia } from 'viem/chains'
-import { getPublishConfig } from '../config'
+import { createPublicClient, http, type Address, type Hex, type PublicClient } from 'viem'
+import { getPublishRpcUrl, getPublishViemChain } from './chainConfig'
 
-type PublishPublicClient = ReturnType<typeof createPublishPublicClient>
+type PublishPublicClient = PublicClient
 
-function createPublishPublicClient(thirdwebClientId: string) {
+let _client: PublishPublicClient | null = null
+let _clientKey: string | null = null
+
+function createPublishPublicClient(): PublishPublicClient {
+  const chain = getPublishViemChain()
+  const rpcUrl = getPublishRpcUrl()
   return createPublicClient({
-    chain: optimismSepolia,
-    transport: http(`https://11155420.rpc.thirdweb.com/${thirdwebClientId}`),
+    chain,
+    transport: http(rpcUrl),
   })
 }
 
-let _client: PublishPublicClient | null = null
-let _clientId: string | null = null
-
 /**
- * Viem public client for Optimism Sepolia reads / receipts.
- * Uses the same Thirdweb RPC edge URL as the wallet client (no new env var).
+ * Viem public client for reads / receipts on the configured publish chain.
  */
 export function getPublishPublicClient(): PublishPublicClient {
-  const { thirdwebClientId } = getPublishConfig()
-  if (!_client || _clientId !== thirdwebClientId) {
-    _clientId = thirdwebClientId
-    _client = createPublishPublicClient(thirdwebClientId)
+  const chain = getPublishViemChain()
+  const rpcUrl = getPublishRpcUrl()
+  const key = `${chain.id}:${rpcUrl}`
+  if (!_client || _clientKey !== key) {
+    _clientKey = key
+    _client = createPublishPublicClient()
   }
   return _client
 }
@@ -30,7 +32,7 @@ export function getPublishPublicClient(): PublishPublicClient {
 /** Reset cached client (tests). */
 export function resetPublishPublicClient(): void {
   _client = null
-  _clientId = null
+  _clientKey = null
 }
 
 export async function waitForPublishReceipt(transactionHash: Hex) {

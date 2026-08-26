@@ -5,14 +5,15 @@ import {
   setRevokeExecutor,
   type TransactionTag,
 } from '@seedprotocol/sdk'
-import { getConnectedManagedAccountAddress } from './helpers/thirdweb'
-import { optimismSepolia } from 'thirdweb/chains'
+import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
 import {
   THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
   EAS_CONTRACT_ADDRESS,
 } from './helpers/constants'
 import { ethers } from 'ethers'
+import { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
+import { getPublishWallet } from './helpers/publishWalletRegistry'
 
 /** Serialized upload item for Arweave signing (input to callback or used internally with JWK) */
 export interface SerializedPublishUpload {
@@ -35,10 +36,44 @@ export interface ArweaveDataItemInfoResult {
   modelName?: string
 }
 
+export type PublishAccountMode = 'eoa' | 'eip7702'
+
 export interface PublishConfig {
-  thirdwebClientId: string
+  /**
+   * Thirdweb client id — only required when using `@seedprotocol/publish/thirdweb`.
+   * When set without `rpcUrl`, the public client falls back to Thirdweb’s RPC edge.
+   */
+  thirdwebClientId?: string
+  /**
+   * Viem chain for reads and adapters. Defaults to Optimism Sepolia.
+   */
+  chain?: Chain
+  /**
+   * JSON-RPC URL for the publish chain. Required when `thirdwebClientId` is unset.
+   */
+  rpcUrl?: string
+  /**
+   * ERC-4337 / EIP-7702 bundler URL for permissionless `SeedTxSender` (gasless path).
+   */
+  bundlerUrl?: string
+  /**
+   * Paymaster / sponsorship endpoint for permissionless EIP-7702 sends.
+   */
+  paymasterUrl?: string
+  /**
+   * How non-Thirdweb wallets submit txs. Defaults to `eip7702` when `bundlerUrl` is set, else `eoa`.
+   */
+  accountMode?: PublishAccountMode
   /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
+  /**
+   * Gateway transport for publish + read paths. Prefer resolving once via
+   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` at app bootstrap
+   * and passing `uploadApiBaseUrl` / `arweaveGraphqlUrl` from the result.
+   */
+  gatewayTransport?: 'http-gateway' | 'hyper' | 'hybrid'
+  /** Operator Gateway Hyper key (z32) — informational; sidecar is configured separately. */
+  gatewayHyperKey?: string
   /**
    * Optional origin for verifying uploads via `GET /api/upload/arweave/data/:id`.
    * Defaults to {@link uploadApiBaseUrl} (e.g. set `ARWEAVE_UPLOAD_API_BASE_URL` as `uploadApiBaseUrl`).
@@ -91,7 +126,7 @@ export interface PublishConfig {
    */
   deployManagedAccount?: (params: {
     managedAddress: string
-    managedSigningAccount: import('./helpers/seedSigner').SeedSigner
+    managedSigningAccount: import('./helpers/seedSigner').PublishWallet
   }) => Promise<void>
   /**
    * Called when optional wallet setup steps fail after connect (e.g. executor module install).
@@ -193,11 +228,10 @@ export function getConfigRef(): PublishConfig | null {
 export function initPublish(c: PublishConfig): void {
   setConfigRef(c)
   setGetPublisherForNewSeeds(async () => {
-    try {
-      return await getConnectedManagedAccountAddress(optimismSepolia)
-    } catch {
-      return undefined
-    }
+    const wallet = getPublishWallet()
+    if (wallet?.publisherAddress) return wallet.publisherAddress
+    if (wallet?.signer?.address) return wallet.signer.address
+    return undefined
   })
   setRevokeExecutor(revokeAttestations)
   void import('./services/arweaveL1Finalize/worker').then((m) => {
@@ -233,6 +267,10 @@ export interface ResolvedPublishConfig extends PublishConfig {
    * Resolved: when `useModularExecutor` is true, defaults to true unless explicitly false.
    */
   autoDeployEip7702ModularAccount: boolean
+  /** Resolved viem chain (defaults to Optimism Sepolia). */
+  chain: Chain
+  /** Resolved account mode for non-Thirdweb senders. */
+  accountMode: PublishAccountMode
 }
 
 /**
@@ -254,6 +292,9 @@ export function getPublishConfig(): ResolvedPublishConfig {
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
   const useModularExecutor = config.useModularExecutor ?? false
+  const chain = config.chain ?? DEFAULT_PUBLISH_CHAIN
+  const accountMode: PublishAccountMode =
+    config.accountMode ?? (config.bundlerUrl ? 'eip7702' : 'eoa')
   return {
     ...config,
     thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
@@ -267,6 +308,8 @@ export function getPublishConfig(): ResolvedPublishConfig {
     arweaveGraphqlUrl,
     autoDeployManagedAccount: config.autoDeployManagedAccount ?? false,
     autoDeployEip7702ModularAccount: resolveAutoDeployEip7702ModularAccount(config, useModularExecutor),
+    chain,
+    accountMode,
   }
 }
 
