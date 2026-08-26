@@ -39,6 +39,7 @@ function syncVersions(newVersion = null) {
   const publishPackagePath = join(rootDir, 'packages', 'publish', 'package.json')
   const feedPackagePath = join(rootDir, 'packages', 'feed', 'package.json')
   const feedHyperPackagePath = join(rootDir, 'packages', 'feed-hyper', 'package.json')
+  const gatewayHyperPackagePath = join(rootDir, 'packages', 'gateway-hyper', 'package.json')
   const ghostPackagePath = join(rootDir, 'packages', 'ghost', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
@@ -47,6 +48,7 @@ function syncVersions(newVersion = null) {
   const publishPackage = readPackageJson(publishPackagePath)
   const feedPackage = readPackageJson(feedPackagePath)
   const feedHyperPackage = readPackageJson(feedHyperPackagePath)
+  const gatewayHyperPackage = readPackageJson(gatewayHyperPackagePath)
   const ghostPackage = readPackageJson(ghostPackagePath)
 
   // Use SDK version as source of truth, or use provided version
@@ -127,6 +129,15 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] Feed-hyper version already at ${targetVersion}`)
   }
 
+  // Update Gateway-hyper version
+  if (gatewayHyperPackage.version !== targetVersion) {
+    gatewayHyperPackage.version = targetVersion
+    writePackageJson(gatewayHyperPackagePath, gatewayHyperPackage)
+    console.log(`[Version Sync] Updated Gateway-hyper version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Gateway-hyper version already at ${targetVersion}`)
+  }
+
   // Update Ghost version
   if (ghostPackage.version !== targetVersion) {
     ghostPackage.version = targetVersion
@@ -148,6 +159,7 @@ function syncVersions(newVersion = null) {
   console.log(`[Version Sync] Publish: ${publishPackage.version}`)
   console.log(`[Version Sync] Feed: ${feedPackage.version}`)
   console.log(`[Version Sync] Feed-hyper: ${feedHyperPackage.version}`)
+  console.log(`[Version Sync] Gateway-hyper: ${gatewayHyperPackage.version}`)
   console.log(`[Version Sync] Ghost: ${ghostPackage.version}`)
 }
 
