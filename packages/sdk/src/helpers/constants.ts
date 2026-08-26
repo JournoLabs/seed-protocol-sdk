@@ -127,7 +127,9 @@ import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   DEFAULT_ARWEAVE_GATEWAYS,
   getDefaultArweaveReadGatewayHostsOrdered,
+  getArweaveReadGatewayHostsForPrimary,
   mergePrimaryHostWithDefaults,
+  resolveArweaveHostFromEnv,
   isKnownArweaveGatewayHostname,
 } from '@seedprotocol/arweave'
 
@@ -140,7 +142,9 @@ export {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   DEFAULT_ARWEAVE_GATEWAYS,
   getDefaultArweaveReadGatewayHostsOrdered,
+  getArweaveReadGatewayHostsForPrimary,
   mergePrimaryHostWithDefaults,
+  resolveArweaveHostFromEnv,
   isKnownArweaveGatewayHostname,
 }
 

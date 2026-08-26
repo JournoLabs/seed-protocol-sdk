@@ -1,5 +1,5 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { getDefaultArweaveReadGatewayHostsOrdered } from '@/helpers/constants'
+import { getDefaultArweaveReadGatewayHostsOrdered, getArweaveReadGatewayHostsForPrimary } from '@/helpers/constants'
 import { getResolvedSeedGatewayEndpoints } from '@/helpers/gateway/gatewayState'
 import { getReadGatewayHostsForConfig } from '@/helpers/gateway/resolveSeedGatewayEndpoints'
 
@@ -41,7 +41,7 @@ async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | und
   const resolved = getResolvedSeedGatewayEndpoints()
   const hosts = resolved
     ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
-    : [BaseArweaveClient.getHost(), ...getDefaultArweaveReadGatewayHostsOrdered()]
+    : getArweaveReadGatewayHostsForPrimary(BaseArweaveClient.getHost())
 
   for (const host of hosts) {
     const h = host.trim().replace(/\/$/, '')
