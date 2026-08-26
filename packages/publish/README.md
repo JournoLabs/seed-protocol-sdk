@@ -10,19 +10,82 @@ The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `ge
 
 ## Setup
 
-Wrap your app with `PublishProvider`. The provider includes:
+`uploadApiBaseUrl` is required. Provide either `rpcUrl` or `thirdwebClientId` (RPC falls back to Thirdweb’s edge when only the client id is set).
 
-- Thirdweb's required context (React Query, connection manager)
-- SeedProvider (React Query for Seed SDK hooks like `useItems`, `useModels`, `useSchemas`)
+Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`.
 
-You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
+### Recipe 1: EIP-1193 + EOA (no Thirdweb)
 
-`thirdwebClientId` and `uploadApiBaseUrl` are required in config. Other values (account factory, EAS contract) are defined as constants in the package.
-
-### Option A: Config via provider
+User pays gas. Works with MetaMask / injected wallets.
 
 ```tsx
-import { PublishProvider, ConnectButton } from '@seedprotocol/publish'
+import {
+  PublishProvider,
+  useSeedWallet,
+  ensureWalletThenPublish,
+  initPublish,
+} from '@seedprotocol/publish'
+import { optimismSepolia } from 'viem/chains'
+
+initPublish({
+  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
+  rpcUrl: import.meta.env.VITE_RPC_URL,
+  chain: optimismSepolia,
+  accountMode: 'eoa',
+})
+
+function Connect() {
+  const { status, connect, address } = useSeedWallet()
+  return (
+    <button
+      onClick={() => connect((window as any).ethereum)}
+      disabled={status === 'connecting'}
+    >
+      {address ?? 'Connect wallet'}
+    </button>
+  )
+}
+
+function App() {
+  return (
+    <PublishProvider>
+      <Connect />
+    </PublishProvider>
+  )
+}
+
+// Later:
+// await ensureWalletThenPublish(item, { dataItemSigner: /* from useSeedWallet().signer */ })
+```
+
+### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)
+
+```tsx
+initPublish({
+  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
+  rpcUrl: import.meta.env.VITE_RPC_URL,
+  chain: optimismSepolia,
+  accountMode: 'eip7702',
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  paymasterUrl: import.meta.env.VITE_PAYMASTER_URL, // optional; defaults to bundlerUrl
+})
+```
+
+`useSeedWallet().connect(provider)` upgrades the EOA sender to a permissionless EIP-7702 `SeedTxSender` when `accountMode` is `eip7702` and `bundlerUrl` is set. ModularCore / ManagedAccount session-key flows remain Thirdweb-only.
+
+### Recipe 3: Thirdweb ConnectButton (batteries-included)
+
+```tsx
+import { initPublish } from '@seedprotocol/publish'
+import {
+  PublishProvider,
+  ConnectButton,
+} from '@seedprotocol/publish/thirdweb'
+
+initPublish({
+  thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
+  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
+})
 
 function App() {
   return (
@@ -38,24 +101,7 @@ function App() {
 }
 ```
 
-### Option B: Config via initPublish
-
-```tsx
-import { PublishProvider, ConnectButton, initPublish } from '@seedprotocol/publish'
-
-initPublish({
-  thirdwebClientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID,
-  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
-})
-
-function App() {
-  return (
-    <PublishProvider>
-      <ConnectButton />
-    </PublishProvider>
-  )
-}
-```
+You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
 ### useIntegerLocalIds
 

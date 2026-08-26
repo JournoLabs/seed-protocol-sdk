@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0
+
+### Breaking
+
+- **Thirdweb is optional.** Core `@seedprotocol/publish` no longer re-exports Thirdweb helpers, `ConnectButton`, or Thirdweb-backed wallet bootstrap APIs. Import them from **`@seedprotocol/publish/thirdweb`**.
+- **`PublishConfig.thirdwebClientId`** is optional. When unset, **`rpcUrl`** is required.
+- **`SeedSigner`** no longer includes `sendTransaction`. Use **`SeedTxSender`** / **`PublishWallet`** (`{ signer, txSender }`). Wrap Thirdweb Accounts with **`fromThirdwebAccount`** from the `/thirdweb` entry.
+- Core **`PublishProvider`** no longer wraps **`ThirdwebProvider`**. Use `@seedprotocol/publish/thirdweb`’s `PublishProvider` for ConnectButton apps.
+
+### Added
+
+- **`SeedTxSender`**, **`PublishWallet`**, **`fromEthersWallet`** (returns `PublishWallet`), **`fromEip1193Provider`**, **`useSeedWallet`**, **`setPublishWallet` / `getPublishWallet`**.
+- **`ensureWalletThenPublish`** for vendor-neutral publish entry (registry wallet + optional permissionless EIP-7702).
+- **`createPermissionlessTxSender`** (permissionless `to7702SimpleSmartAccount`) with config fields **`bundlerUrl`**, **`paymasterUrl`**, **`accountMode`**, **`chain`**, **`rpcUrl`**.
+
 ## 0.4.31
 
 ### Fixed
