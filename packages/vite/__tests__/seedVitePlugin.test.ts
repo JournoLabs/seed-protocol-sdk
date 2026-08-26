@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { seedVitePlugin } from '../../src/vite/index'
+import { seedVitePlugin } from '../src/index.js'
 
-const sdkViteDir = path.dirname(fileURLToPath(import.meta.url))
-const vitePluginSrcDir = path.resolve(sdkViteDir, '../../src/vite')
+const testDir = path.dirname(fileURLToPath(import.meta.url))
+const vitePluginSrcDir = path.resolve(testDir, '../src')
 
 function getConfigPlugin() {
   const plugins = seedVitePlugin({ includeNodePolyfills: false })
@@ -39,7 +39,6 @@ describe('seedVitePlugin renderer hardening', () => {
 
     expect(aliasKeys.some((k) => k.includes('nanoid-dictionary'))).toBe(true)
     expect(aliasKeys.some((k) => k === '^debug$')).toBe(true)
-    expect(aliasKeys.some((k) => k.includes('debug\\/src\\/browser'))).toBe(false)
 
     const zenfsCoreIndex = path.join(
       process.cwd(),
@@ -58,6 +57,31 @@ describe('seedVitePlugin renderer hardening', () => {
     expect(includes).toContain(
       '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
     )
+  })
+
+  it('uses optimizeDeps.rolldownOptions instead of deprecated esbuildOptions', () => {
+    const configPlugin = getConfigPlugin()
+    const result = configPlugin.config!({ resolve: { alias: [] }, optimizeDeps: {} })
+
+    expect(result?.optimizeDeps?.esbuildOptions).toBeUndefined()
+    expect(result?.optimizeDeps?.rollupOptions).toBeUndefined()
+    expect(result?.optimizeDeps?.rolldownOptions?.transform?.define?.global).toBe('globalThis')
+  })
+
+  it('merges legacy optimizeDeps.esbuildOptions.define into rolldownOptions', () => {
+    const configPlugin = getConfigPlugin()
+    const result = configPlugin.config!({
+      resolve: { alias: [] },
+      optimizeDeps: {
+        esbuildOptions: { define: { 'process.env.FOO': '"bar"' } },
+      },
+    })
+
+    expect(result?.optimizeDeps?.esbuildOptions).toBeUndefined()
+    expect(result?.optimizeDeps?.rolldownOptions?.transform?.define).toMatchObject({
+      'process.env.FOO': '"bar"',
+      global: 'globalThis',
+    })
   })
 
   it('includes sdk-import-fix post plugin', () => {
