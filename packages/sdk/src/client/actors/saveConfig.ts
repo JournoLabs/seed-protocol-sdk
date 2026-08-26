@@ -15,7 +15,18 @@ export const saveConfig = fromCallback<
 
   logger('saveConfig starting')
 
-  const { endpoints, addresses, ownedAddresses, watchedAddresses, arweaveDomain } = context
+  const {
+    endpoints,
+    addresses,
+    ownedAddresses,
+    watchedAddresses,
+    arweaveDomain,
+    uploadApiBaseUrl,
+    gatewayTransport,
+    gatewayHyperKey,
+    gatewaySidecarHost,
+    gatewaySidecarPort,
+  } = context
 
   // Validate endpoints - required for proper initialization
   // If endpoints are missing or invalid, initialization should fail
@@ -84,6 +95,25 @@ export const saveConfig = fromCallback<
             value: arweaveDomain || DEFAULT_ARWEAVE_HOST,
           },
         })
+
+      const persistKey = async (key: string, value: string | undefined) => {
+        if (value == null || value === '') return
+        await appDb
+          .insert(appState)
+          .values({ key, value })
+          .onConflictDoUpdate({
+            target: appState.key,
+            set: { value },
+          })
+      }
+
+      await persistKey('uploadApiBaseUrl', uploadApiBaseUrl)
+      await persistKey('gatewayTransport', gatewayTransport)
+      await persistKey('gatewayHyperKey', gatewayHyperKey)
+      await persistKey('gatewaySidecarHost', gatewaySidecarHost)
+      if (gatewaySidecarPort != null) {
+        await persistKey('gatewaySidecarPort', String(gatewaySidecarPort))
+      }
     } catch (error: any) {
       logger('[internal/actors] [saveConfig] Error saving config:', error)
       // In test environments, continue anyway

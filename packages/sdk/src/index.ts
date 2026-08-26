@@ -108,6 +108,9 @@ export {
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
   DEFAULT_ARWEAVE_HOST,
   DEFAULT_SEED_FEED_HYPER_KEY,
+  DEFAULT_SEED_GATEWAY_HYPER_KEY,
+  DEFAULT_GATEWAY_SIDECAR_HOST,
+  DEFAULT_GATEWAY_SIDECAR_PORT,
   DEFAULT_ARWEAVE_GATEWAYS,
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   getDefaultArweaveReadGatewayHostsOrdered,
@@ -148,7 +151,22 @@ export {
   ensureReadGatewaySelected,
   invalidateReadGatewayCache,
   resetArweaveReadGatewayForTests,
+  resolveSeedGatewayEndpoints,
+  invalidateSidecarProbeCache,
+  getReadGatewayHostsForConfig,
+  seedGatewayConfigFromSeedConfig,
+  seedGatewayConfigFromClientContext,
+  getResolvedSeedGatewayEndpoints,
+  setResolvedSeedGatewayEndpoints,
 } from './helpers'
+export type {
+  SeedGatewayTransportMode,
+  SeedGatewayActivePath,
+  SeedGatewayHyperConfig,
+  SeedGatewayConfig,
+  ResolvedSeedGatewayEndpoints,
+} from './types/gateway'
+export type { ResolveSeedGatewayEndpointsOptions } from './helpers'
 export type { ArweaveUploadStatusResponse, ArweaveGatewayTransactionQueryResult } from './helpers'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {

@@ -272,13 +272,13 @@ const downloadTransactionIds = async (
   if (transactionIdsToDownload.length === 1) {
     await BaseFileManager.downloadFileByTransactionId({
       transactionId: transactionIdsToDownload[0],
-      arweaveHost: BaseArweaveClient.getHost(),
+      arweaveHost: BaseArweaveClient.getBaseUrl(),
       excludedTransactions,
     })
   } else {
     await BaseFileManager.downloadAllFiles({
       transactionIds: transactionIdsToDownload,
-      arweaveHost: BaseArweaveClient.getHost(),
+      arweaveHost: BaseArweaveClient.getBaseUrl(),
       excludedTransactions,
     })
   }

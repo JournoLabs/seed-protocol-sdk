@@ -130,6 +130,16 @@ export const DEFAULT_ARWEAVE_HOST = 'ar.seedprotocol.io'
  */
 export const DEFAULT_SEED_FEED_HYPER_KEY = ''
 
+/**
+ * Official Seed Protocol gateway Hyper tunnel operator key (z32).
+ * Empty until ops generate and back up the first operator keypair.
+ */
+export const DEFAULT_SEED_GATEWAY_HYPER_KEY = ''
+
+/** Default localhost sidecar bind for Gateway Hyper client mode. */
+export const DEFAULT_GATEWAY_SIDECAR_HOST = '127.0.0.1'
+export const DEFAULT_GATEWAY_SIDECAR_PORT = 1984
+
 /** Default Arweave gateway GraphQL endpoint (transaction / block queries). */
 export const DEFAULT_ARWEAVE_GRAPHQL_URL = `https://${DEFAULT_ARWEAVE_HOST}/graphql`
 

@@ -143,7 +143,21 @@ const downloadFiles = async ({
 
   for (const transactionId of transactionIds) {
     try {
-      const response = await fetch(`https://${arweaveHost}/raw/${transactionId}`);
+      const response = await fetch(
+        (() => {
+          const base = arweaveHost.trim().startsWith('http')
+            ? arweaveHost.trim().replace(/\/$/, '')
+            : (() => {
+                const h = arweaveHost.trim()
+                const protocol =
+                  h.startsWith('127.0.0.1') || h.startsWith('localhost') || h.includes(':1984')
+                    ? 'http'
+                    : 'https'
+                return `${protocol}://${h}`
+              })()
+          return `${base}/raw/${transactionId}`
+        })(),
+      )
 
       arrayBuffer = await response.arrayBuffer();
     } catch(error) {

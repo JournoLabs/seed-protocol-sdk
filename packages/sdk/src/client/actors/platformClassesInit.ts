@@ -1,7 +1,6 @@
 import { ClientManagerContext, FromCallbackInput, SeedConstructorOptions } from '@/types'
 import { fromCallback, EventObject, waitFor }                      from "xstate";
 import debug                                       from 'debug'
-import { setArweaveDomain } from "@/helpers/ArweaveClient";
 import { setupServicesEventHandlers } from "@/services/events";
 import { setupAllItemsEventHandlers } from "@/events/item";
 import { setupServiceHandlers } from "@/events/services";
@@ -9,7 +8,15 @@ import { setupServiceHandlers } from "@/events/services";
 // import { GlobalState } from "@/client/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
-import { BaseArweaveClient, BaseEasClient, BaseQueryClient, ensureReadGatewaySelected } from "@/helpers";
+import {
+  BaseArweaveClient,
+  BaseEasClient,
+  BaseQueryClient,
+  ensureReadGatewaySelected,
+  resolveSeedGatewayEndpoints,
+  seedGatewayConfigFromSeedConfig,
+  setResolvedSeedGatewayEndpoints,
+} from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { BaseDb } from '../../db/Db/BaseDb'
 import { normalizeAddressConfig } from '@/helpers/addresses'
@@ -104,7 +111,16 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       return
     }
     
-    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile, schema } = config
+    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile, schema, gateway, uploadApiBaseUrl } = config
+    const gatewayConfig = seedGatewayConfigFromSeedConfig({
+      ...config,
+      arweaveDomain,
+      uploadApiBaseUrl,
+      gateway,
+    })
+    const resolvedGateway = await resolveSeedGatewayEndpoints(gatewayConfig)
+    setResolvedSeedGatewayEndpoints(resolvedGateway)
+    BaseArweaveClient.setHost(`${resolvedGateway.arweaveProtocol}://${resolvedGateway.arweaveHost}`)
 
     // Note: Validation already happened above, but we have endpoints here for path normalization
 
@@ -156,7 +172,12 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     sendBack({ type: 'updateContext', context: { 
       models: models || {}, 
       endpoints, 
-      arweaveDomain, 
+      arweaveDomain: resolvedGateway.arweaveHost, 
+      uploadApiBaseUrl: resolvedGateway.uploadApiBaseUrl,
+      gatewayTransport: resolvedGateway.mode,
+      gatewayHyperKey: resolvedGateway.gatewayHyperKey,
+      gatewaySidecarHost: gatewayConfig.hyper?.localSidecarHost,
+      gatewaySidecarPort: gatewayConfig.hyper?.localSidecarPort,
       addresses: normalizedAddresses.owned,
       ownedAddresses: normalizedAddresses.owned,
       watchedAddresses: normalizedAddresses.watched,
@@ -167,13 +188,11 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? true,
     } })
     
-    if (arweaveDomain) {
-      setArweaveDomain(arweaveDomain)
+    if (resolvedGateway.activePath !== 'hyper-sidecar') {
+      void ensureReadGatewaySelected().catch(() => {
+        /* non-blocking warm-up for read gateway probe */
+      })
     }
-
-    void ensureReadGatewaySelected().catch(() => {
-      /* non-blocking warm-up for read gateway probe */
-    })
 
     // Models are now Model instances, no registration needed
     // They should be created via Model.create() and are accessible via Model static methods
