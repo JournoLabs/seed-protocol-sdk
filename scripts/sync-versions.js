@@ -40,6 +40,8 @@ function syncVersions(newVersion = null) {
   const feedPackagePath = join(rootDir, 'packages', 'feed', 'package.json')
   const feedHyperPackagePath = join(rootDir, 'packages', 'feed-hyper', 'package.json')
   const gatewayHyperPackagePath = join(rootDir, 'packages', 'gateway-hyper', 'package.json')
+  const easPackagePath = join(rootDir, 'packages', 'eas', 'package.json')
+  const arweavePackagePath = join(rootDir, 'packages', 'arweave', 'package.json')
   const ghostPackagePath = join(rootDir, 'packages', 'ghost', 'package.json')
 
   const sdkPackage = readPackageJson(sdkPackagePath)
@@ -49,6 +51,8 @@ function syncVersions(newVersion = null) {
   const feedPackage = readPackageJson(feedPackagePath)
   const feedHyperPackage = readPackageJson(feedHyperPackagePath)
   const gatewayHyperPackage = readPackageJson(gatewayHyperPackagePath)
+  const easPackage = readPackageJson(easPackagePath)
+  const arweavePackage = readPackageJson(arweavePackagePath)
   const ghostPackage = readPackageJson(ghostPackagePath)
 
   // Use SDK version as source of truth, or use provided version
@@ -138,6 +142,24 @@ function syncVersions(newVersion = null) {
     console.log(`[Version Sync] Gateway-hyper version already at ${targetVersion}`)
   }
 
+  // Update EAS version
+  if (easPackage.version !== targetVersion) {
+    easPackage.version = targetVersion
+    writePackageJson(easPackagePath, easPackage)
+    console.log(`[Version Sync] Updated EAS version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] EAS version already at ${targetVersion}`)
+  }
+
+  // Update Arweave version
+  if (arweavePackage.version !== targetVersion) {
+    arweavePackage.version = targetVersion
+    writePackageJson(arweavePackagePath, arweavePackage)
+    console.log(`[Version Sync] Updated Arweave version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Arweave version already at ${targetVersion}`)
+  }
+
   // Update Ghost version
   if (ghostPackage.version !== targetVersion) {
     ghostPackage.version = targetVersion
@@ -160,6 +182,8 @@ function syncVersions(newVersion = null) {
   console.log(`[Version Sync] Feed: ${feedPackage.version}`)
   console.log(`[Version Sync] Feed-hyper: ${feedHyperPackage.version}`)
   console.log(`[Version Sync] Gateway-hyper: ${gatewayHyperPackage.version}`)
+  console.log(`[Version Sync] EAS: ${easPackage.version}`)
+  console.log(`[Version Sync] Arweave: ${arweavePackage.version}`)
   console.log(`[Version Sync] Ghost: ${ghostPackage.version}`)
 }
 

@@ -102,7 +102,7 @@
     "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:feed && bun run build:feed-hyper && bun run build:gateway-hyper && bun run build:sdk && bun run build:cli && bun run build:publish\"",
     "clean": "rimraf coverage build tmp",
     "lint": "eslint .",
-    "test": "vitest run --reporter=default",
+    "test": "vitest run --reporter=default && node scripts/check-tier1-package-boundary.js",
     "prettier": "prettier --config .prettierrc --write .",
     "test:ui": "vitest --ui --reporter=default",
     "test:watch": "vitest",
