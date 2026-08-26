@@ -8,12 +8,13 @@ import {
   updateVersionUid,
 } from '@seedprotocol/sdk'
 import {
-  isSmartWalletDeployed,
-} from '~/helpers/thirdweb'
+  isContractDeployed,
+} from '~/helpers/chainClient'
 import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
 import { encodeMultiPublish } from '~/helpers/contracts'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
-import { asSeedSigner } from '~/helpers/seedSigner'
+import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
+import type { PublishWallet } from '~/helpers/seedSigner'
 import type { Address } from 'viem'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
@@ -202,7 +203,7 @@ async function persistPropertyMetadataUidsFromContractReceipt(params: {
 
 export const createAttestations = fromPromise(
   async ({ input: { context } }: PublishInput): Promise<{ easPayload: unknown }> => {
-    const { address, account } = context
+    const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
@@ -213,11 +214,11 @@ export const createAttestations = fromPromise(
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
     }
 
-    if (!account) {
+    if (!wallet && !account) {
       throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
-    if (!useModularExecutor && !(await isSmartWalletDeployed(address))) {
+    if (!useModularExecutor && !(await isContractDeployed(address))) {
       throw new Error(
         'EOA publishing must use the direct EAS path (multiPublish requires a deployed publisher contract). If you see this, attestation routing is misconfigured.',
       )
@@ -245,9 +246,9 @@ export const createAttestations = fromPromise(
       useModularExecutor: false,
       publisherAddress: address,
     })
-    let activeAccount = asSeedSigner(account)
+    let activeWallet: PublishWallet = resolvePublishWallet(context)
 
-    await ensureEasSchemasForItem(item, activeAccount)
+    await ensureEasSchemasForItem(item, activeWallet)
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
@@ -286,9 +287,11 @@ export const createAttestations = fromPromise(
         modularAccountModuleContract,
         managedAddress: prep.managedAddress,
       })
-      activeAccount = asSeedSigner(await ensureModularPublishBootstrap(prep.managedAddress))
+      const { ensureModularPublishBootstrap } = await import('~/helpers/ensureModularPublishBootstrap')
+      const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
+      activeWallet = fromThirdwebAccount(await ensureModularPublishBootstrap(prep.managedAddress))
     } else {
-      await ensureManagedAccountEasConfigured(address, activeAccount)
+      await ensureManagedAccountEasConfigured(address, activeWallet)
     }
 
     const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)
@@ -318,7 +321,7 @@ export const createAttestations = fromPromise(
           5_000_000n,
         )
 
-        const result = await activeAccount.sendTransaction(tx)
+        const result = await activeWallet.txSender.sendTransaction(tx)
 
         const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) {
@@ -390,7 +393,7 @@ export const createAttestations = fromPromise(
         5_000_000n,
       )
 
-      const result = await activeAccount.sendTransaction(tx)
+      const result = await activeWallet.txSender.sendTransaction(tx)
 
       const receipt = await waitForPublishReceipt(result.transactionHash)
       if (!receipt) {

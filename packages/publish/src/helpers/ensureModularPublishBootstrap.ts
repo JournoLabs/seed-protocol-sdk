@@ -34,6 +34,6 @@ export async function ensureModularPublishBootstrap(managedAddress: string): Pro
     await ensureEip7702ModularAccountReady()
   }
 
-  await ensureManagedAccountEasConfigured(managedAddress, modularAccount)
+  await ensureManagedAccountEasConfigured(managedAddress, (await import('./adapters/thirdwebAccount')).fromThirdwebAccount(modularAccount))
   return modularAccount
 }

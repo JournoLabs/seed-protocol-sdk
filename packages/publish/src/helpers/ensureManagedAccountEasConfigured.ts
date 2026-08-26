@@ -3,8 +3,12 @@ import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
 import { waitForPublishReceipt } from './chainClient'
 import { encodeSetEas, readGetEas } from './contracts'
-import type { SeedSigner } from './seedSigner'
-import { asSeedSigner } from './seedSigner'
+import {
+  isPublishWallet,
+  isSeedTxSender,
+  type PublishWallet,
+  type SeedTxSender,
+} from './seedSigner'
 
 const MSG_SET_EAS =
   'Could not verify or set the EAS contract address on your publishing account on Optimism Sepolia.'
@@ -19,9 +23,17 @@ function normAddr(a: string): string {
  */
 export async function ensureManagedAccountEasConfigured(
   managedAddress: string,
-  account: SeedSigner | Parameters<typeof asSeedSigner>[0],
+  account: PublishWallet | SeedTxSender,
 ): Promise<void> {
-  const signer = asSeedSigner(account)
+  const txSender: SeedTxSender = isPublishWallet(account)
+    ? account.txSender
+    : isSeedTxSender(account)
+      ? account
+      : (() => {
+          throw new Error(
+            '@seedprotocol/publish: ensureManagedAccountEasConfigured requires PublishWallet or SeedTxSender',
+          )
+        })()
   const { easContractAddress } = getPublishConfig()
   const expected = normAddr(easContractAddress)
   if (!expected || expected === normAddr(zeroAddress)) {
@@ -46,7 +58,7 @@ export async function ensureManagedAccountEasConfigured(
 
   try {
     const tx = encodeSetEas(managedAddress as Address, easContractAddress as Address)
-    const result = await signer.sendTransaction(tx)
+    const result = await txSender.sendTransaction(tx)
     await waitForPublishReceipt(result.transactionHash)
   } catch (cause) {
     throw new ManagedAccountPublishError(MSG_SET_EAS, 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)

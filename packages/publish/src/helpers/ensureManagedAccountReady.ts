@@ -93,9 +93,10 @@ async function deploySmartWalletWithTimeout(account: import('thirdweb/wallets').
 export async function tryDeployManagedAccount(managedAddress: string): Promise<void> {
   const config = getPublishConfig()
   const account = await getManagedAccountSigningAccount()
-  const { asSeedSigner } = await import('./seedSigner')
+  const { fromThirdwebAccount } = await import('./adapters/thirdwebAccount')
+  const managedSigningAccount = fromThirdwebAccount(account)
 
-  const deployParams = { managedAddress, managedSigningAccount: asSeedSigner(account) }
+  const deployParams = { managedAddress, managedSigningAccount }
 
   try {
     if (config.deployManagedAccount) {

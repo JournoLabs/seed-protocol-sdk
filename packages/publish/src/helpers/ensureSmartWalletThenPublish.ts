@@ -1,12 +1,13 @@
-import type { Account } from 'thirdweb/wallets'
 import type { Item } from '@seedprotocol/sdk'
+import type { Account } from 'thirdweb/wallets'
 import { optimismSepolia } from 'thirdweb/chains'
 import {
   getConnectedManagedAccountAddress,
   getConnectedModularAccount,
   resolveSmartWalletForPublish,
 } from './thirdweb'
-import { asSeedSigner, isSeedSigner, type SeedSigner } from './seedSigner'
+import { fromThirdwebAccount } from './adapters/thirdwebAccount'
+import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
@@ -26,17 +27,18 @@ const MSG_MANAGED_UNAVAILABLE =
   'Could not connect the managed publishing account on Optimism Sepolia. Reconnect with the same sign-in method and try again.'
 
 function coerceDataItemSigner(
-  signer: CreatePublishOptions['dataItemSigner'] | Account | SeedSigner | undefined,
+  signer: CreatePublishOptions['dataItemSigner'] | Account | SeedSigner | PublishWallet | undefined,
 ): CreatePublishOptions['dataItemSigner'] {
   if (!signer) return undefined
   if (signer instanceof ethers.Wallet) return signer
+  if (isPublishWallet(signer)) return signer.signer
   if (isSeedSigner(signer)) return signer
-  return asSeedSigner(signer as Account)
+  return fromThirdwebAccount(signer as Account).signer
 }
 
 /**
- * Resolves the smart wallet for the current account; if deployed, starts publish.
- * When **`useModularExecutor`** is true, wraps the modular Thirdweb Account as a SeedSigner at the boundary.
+ * Thirdweb path: resolves the smart wallet for the current account; if deployed, starts publish.
+ * Prefer {@link ensureWalletThenPublish} for vendor-neutral entry.
  */
 export async function ensureSmartWalletThenPublish(
   item: Item<any>,
@@ -74,20 +76,20 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    const signer = asSeedSigner(modularAccount)
-    PublishManager.createPublish(item, managedAddress, signer, {
+    const wallet = fromThirdwebAccount(modularAccount)
+    PublishManager.createPublish(item, managedAddress, wallet, {
       ...options,
-      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? signer,
+      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
     return { outcome: 'started' }
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
-    const signer = asSeedSigner(resolved.account)
-    PublishManager.createPublish(item, resolved.address, signer, {
+    const wallet = fromThirdwebAccount(resolved.account)
+    PublishManager.createPublish(item, resolved.address, wallet, {
       ...options,
-      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? signer,
+      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
     return { outcome: 'started' }
   }

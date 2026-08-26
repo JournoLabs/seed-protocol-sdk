@@ -11,6 +11,27 @@ mock.module('../config', () => ({
   getPublishConfig: () => cfg,
 }))
 
+mock.module('./adapters/thirdwebAccount', () => ({
+  fromThirdwebAccount: (account: { address: string }) => {
+    const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
+    const SEED_TX_SENDER_BRAND = Symbol.for('seedprotocol.SeedTxSender')
+    const address = account.address as `0x${string}`
+    return {
+      signer: Object.assign(
+        { address, signMessage: async () => '0x' as `0x${string}` },
+        { [SEED_SIGNER_BRAND]: true as const },
+      ),
+      txSender: Object.assign(
+        {
+          address,
+          sendTransaction: async () => ({ transactionHash: '0x' as `0x${string}` }),
+        },
+        { [SEED_TX_SENDER_BRAND]: true as const },
+      ),
+    }
+  },
+}))
+
 mock.module('./thirdweb', () => ({
   getClient: () => ({}),
   getModularAccountWallet: () => ({
@@ -18,7 +39,6 @@ mock.module('./thirdweb', () => ({
     getAccount: () => modularAccount,
   }),
 }))
-
 mock.module('./ensureManagedSignerSessionKey', () => ({
   ensureManagedSignerSessionKey: (...args: unknown[]) => ensureManagedSignerSessionKeyMock(...args),
 }))
@@ -50,7 +70,13 @@ describe('ensureModularPublishBootstrap', () => {
       managedAddress: '0xmanaged',
       signerAddress: modularAccount.address,
     })
-    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith('0xmanaged', modularAccount)
+    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith(
+      '0xmanaged',
+      expect.objectContaining({
+        signer: expect.objectContaining({ address: modularAccount.address }),
+        txSender: expect.objectContaining({ address: modularAccount.address }),
+      }),
+    )
     expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
   })
 
@@ -64,7 +90,12 @@ describe('ensureModularPublishBootstrap', () => {
     const { ensureModularPublishBootstrap } = await import('./ensureModularPublishBootstrap')
     await ensureModularPublishBootstrap('0xmanaged')
     expect(ensureEip7702ModularAccountReadyMock).toHaveBeenCalledTimes(1)
-    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith('0xmanaged', modularAccount)
+    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith(
+      '0xmanaged',
+      expect.objectContaining({
+        signer: expect.objectContaining({ address: modularAccount.address }),
+      }),
+    )
   })
 
   test('rethrows signer activation when auto-deploy EIP-7702 is off', async () => {

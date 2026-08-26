@@ -17,7 +17,7 @@ import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1F
 import { getPublishConfig } from '~/config'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
-import { asSeedSigner } from '~/helpers/seedSigner'
+import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import {
   prepareEasAttest,
   prepareEasMultiAttest,
@@ -113,7 +113,7 @@ type NormalizedRequest = {
 
 export const createAttestationsDirectToEas = fromPromise(
   async ({ input: { context, event } }: PublishInput): Promise<{ easPayload: unknown }> => {
-    const { address, account } = context
+    const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
     let { item } = context
@@ -122,7 +122,7 @@ export const createAttestationsDirectToEas = fromPromise(
       throw new Error('No wallet address for publish. Connect a wallet and try again.')
     }
 
-    if (!account) {
+    if (!wallet && !account) {
       throw new Error('Wallet session is missing. Reconnect your wallet and retry the publish.')
     }
 
@@ -144,9 +144,10 @@ export const createAttestationsDirectToEas = fromPromise(
       )
     }
 
-    const signer = asSeedSigner(account)
+    const publishWallet = resolvePublishWallet(context)
+    const txSender = publishWallet.txSender
 
-    await ensureEasSchemasForItem(item, signer)
+    await ensureEasSchemasForItem(item, publishWallet)
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {
@@ -248,7 +249,7 @@ export const createAttestationsDirectToEas = fromPromise(
             revocable: request.seedIsRevocable,
           },
         })
-        const result = await signer.sendTransaction(attestTx)
+        const result = await txSender.sendTransaction(attestTx)
         const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create Seed attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
@@ -271,7 +272,7 @@ export const createAttestationsDirectToEas = fromPromise(
             revocable: true,
           },
         })
-        const result = await signer.sendTransaction(attestTx)
+        const result = await txSender.sendTransaction(attestTx)
         const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create Version attestation')
         lastAttestationMs = await attestationMsFromReceipt(receipt)
@@ -322,7 +323,7 @@ export const createAttestationsDirectToEas = fromPromise(
 
       if (multiRequests.length > 0) {
         const multiTx = prepareEasMultiAttest(multiRequests)
-        const result = await signer.sendTransaction(multiTx)
+        const result = await txSender.sendTransaction(multiTx)
         const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) throw new Error('Failed to create property attestations')
         lastAttestationMs = await attestationMsFromReceipt(receipt)

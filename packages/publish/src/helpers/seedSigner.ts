@@ -1,6 +1,3 @@
-import { prepareTransaction, sendTransaction } from 'thirdweb'
-import type { Account } from 'thirdweb/wallets'
-import { optimismSepolia } from 'thirdweb/chains'
 import type { Address, Hex, SignableMessage } from 'viem'
 import { ethers } from 'ethers'
 
@@ -13,69 +10,77 @@ export type SeedTxRequest = {
 }
 
 /**
- * Vendor-neutral signer for Arweave DataItems and on-chain sends.
- * Thirdweb Account remains the AA backend via {@link fromThirdwebAccount}.
+ * Vendor-neutral key custody for Arweave DataItems and message signing.
+ * Does not submit on-chain transactions.
  */
 export interface SeedSigner {
   readonly address: Address
 
   /**
-   * personal_sign. For Arweave/ANS-104 use `message: { raw: Hex | Uint8Array }`
-   * (matches Thirdweb Account). Plain string is UTF-8 prefixed hash.
+   * personal_sign. For Arweave/ANS-104 use `message: { raw: Hex | Uint8Array }`.
+   * Plain string is UTF-8 prefixed hash.
    */
   signMessage(args: { message: SignableMessage }): Promise<Hex>
+}
 
-  /**
-   * Submit already-encoded calldata. Thirdweb adapter preserves EIP-4337 / EIP-7702 sponsorship.
-   */
+/**
+ * Vendor-neutral transaction submission (EOA, AA, sponsored, etc.).
+ */
+export interface SeedTxSender {
+  readonly address: Address
+
+  /** Submit already-encoded calldata. */
   sendTransaction(tx: SeedTxRequest): Promise<{ transactionHash: Hex }>
+
+  waitForReceipt?(transactionHash: Hex): Promise<{ status: 'success' | 'reverted' }>
+}
+
+/** Bundle used by publish / revoke flows that need both signing and sending. */
+export type PublishWallet = {
+  signer: SeedSigner
+  txSender: SeedTxSender
 }
 
 const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
+const SEED_TX_SENDER_BRAND = Symbol.for('seedprotocol.SeedTxSender')
 
 type BrandedSeedSigner = SeedSigner & { readonly [SEED_SIGNER_BRAND]: true }
+type BrandedSeedTxSender = SeedTxSender & { readonly [SEED_TX_SENDER_BRAND]: true }
 
-function brand(signer: SeedSigner): SeedSigner {
+function brandSigner(signer: SeedSigner): SeedSigner {
   return Object.assign(signer, { [SEED_SIGNER_BRAND]: true as const }) as BrandedSeedSigner
+}
+
+function brandTxSender(sender: SeedTxSender): SeedTxSender {
+  return Object.assign(sender, { [SEED_TX_SENDER_BRAND]: true as const }) as BrandedSeedTxSender
 }
 
 export function isSeedSigner(value: unknown): value is SeedSigner {
   return !!value && typeof value === 'object' && SEED_SIGNER_BRAND in value
 }
 
-/**
- * Wrap a Thirdweb Account so AA gas sponsorship still flows through thirdweb `sendTransaction`.
- */
-export function fromThirdwebAccount(account: Account): SeedSigner {
-  return brand({
-    address: account.address as Address,
-    signMessage: async ({ message }) => {
-      const sig = await account.signMessage({ message })
-      return sig as Hex
-    },
-    sendTransaction: async (tx) => {
-      // Lazy import avoids circular dependency with helpers/thirdweb.ts
-      const { getClient } = await import('./thirdweb')
-      const transaction = prepareTransaction({
-        client: getClient(),
-        chain: optimismSepolia,
-        to: tx.to,
-        data: tx.data,
-        value: tx.value,
-        gas: tx.gas,
-      })
-      const result = await sendTransaction({ account, transaction })
-      return { transactionHash: result.transactionHash as Hex }
-    },
-  })
+export function isSeedTxSender(value: unknown): value is SeedTxSender {
+  return !!value && typeof value === 'object' && SEED_TX_SENDER_BRAND in value
+}
+
+export function isPublishWallet(value: unknown): value is PublishWallet {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'signer' in value &&
+    'txSender' in value &&
+    isSeedSigner((value as PublishWallet).signer) &&
+    isSeedTxSender((value as PublishWallet).txSender)
+  )
 }
 
 /**
- * Wrap an ethers Wallet for tests / EOA scripts.
+ * Wrap an ethers Wallet for tests / EOA scripts (signs + sends; no AA sponsorship).
  */
-export function fromEthersWallet(wallet: ethers.Wallet): SeedSigner {
-  return brand({
-    address: wallet.address as Address,
+export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
+  const address = wallet.address as Address
+  const signer = brandSigner({
+    address,
     signMessage: async ({ message }) => {
       if (typeof message === 'string') {
         return (await wallet.signMessage(message)) as Hex
@@ -89,6 +94,9 @@ export function fromEthersWallet(wallet: ethers.Wallet): SeedSigner {
             : new Uint8Array(raw)
       return (await wallet.signMessage(bytes)) as Hex
     },
+  })
+  const txSender = brandTxSender({
+    address,
     sendTransaction: async (tx) => {
       const result = await wallet.sendTransaction({
         to: tx.to,
@@ -99,12 +107,37 @@ export function fromEthersWallet(wallet: ethers.Wallet): SeedSigner {
       return { transactionHash: result.hash as Hex }
     },
   })
+  return { signer, txSender }
 }
 
 /**
- * Coerce Thirdweb Account or SeedSigner. Thirdweb Accounts are wrapped; branded SeedSigners pass through.
+ * Coerce a branded SeedSigner, PublishWallet.signer, or pass-through unknown branded value.
+ * Does not wrap Thirdweb Accounts — use `fromThirdwebAccount` from `@seedprotocol/publish/thirdweb`.
  */
-export function asSeedSigner(accountOrSigner: Account | SeedSigner): SeedSigner {
-  if (isSeedSigner(accountOrSigner)) return accountOrSigner
-  return fromThirdwebAccount(accountOrSigner)
+export function asSeedSigner(value: SeedSigner | PublishWallet): SeedSigner {
+  if (isPublishWallet(value)) return value.signer
+  if (isSeedSigner(value)) return value
+  throw new Error(
+    '@seedprotocol/publish: expected a SeedSigner or PublishWallet. Use fromEthersWallet, fromEip1193Provider, or fromThirdwebAccount.',
+  )
 }
+
+/** Resolve tx sender from a PublishWallet or branded SeedTxSender. */
+export function asSeedTxSender(value: SeedTxSender | PublishWallet): SeedTxSender {
+  if (isPublishWallet(value)) return value.txSender
+  if (isSeedTxSender(value)) return value
+  throw new Error(
+    '@seedprotocol/publish: expected a SeedTxSender or PublishWallet. Use fromEthersWallet, fromEip1193Provider, or fromThirdwebAccount.',
+  )
+}
+
+/** Prefer PublishWallet; if only a branded SeedSigner is passed, throw (tx path needs a sender). */
+export function asPublishWallet(value: PublishWallet | SeedSigner): PublishWallet {
+  if (isPublishWallet(value)) return value
+  throw new Error(
+    '@seedprotocol/publish: expected a PublishWallet (signer + txSender). Use fromEthersWallet, fromEip1193Provider, or fromThirdwebAccount.',
+  )
+}
+
+/** @internal used by optional Thirdweb adapter */
+export { brandSigner, brandTxSender }

@@ -1,4 +1,3 @@
-import type { SeedSigner } from '~/helpers/seedSigner'
 import type { ActorRefFrom } from 'xstate'
 import { setup, assign } from 'xstate'
 import {
@@ -141,7 +140,14 @@ export const publishMachine = setup({
       errorStep : () => 'creatingAttestationsDirectToEas',
     },),
     assignAccountFromRetry : assign({
-      account : ( { event, }, ) => (event as { account?: SeedSigner }).account,
+      wallet : ( { event, }, ) => {
+        const ev = event as { wallet?: import('~/helpers/seedSigner').PublishWallet; account?: import('~/helpers/seedSigner').PublishWallet }
+        return ev.wallet ?? ev.account
+      },
+      account : ( { event, }, ) => {
+        const ev = event as { wallet?: import('~/helpers/seedSigner').PublishWallet; account?: import('~/helpers/seedSigner').PublishWallet }
+        return ev.wallet ?? ev.account
+      },
     },),
     assignErrorNotOwner : assign({
       error     : () => new Error('Item is read-only: you do not own this item. Only the publisher can publish.'),

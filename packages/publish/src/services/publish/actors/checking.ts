@@ -2,7 +2,7 @@ import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from 'xstate'
-import { isSmartWalletDeployed } from '~/helpers/thirdweb'
+import { isContractDeployed } from '~/helpers/chainClient'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
@@ -14,13 +14,13 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
   const cfg = getPublishConfig()
   if (cfg.useDirectEas) return 'directEas'
   if (cfg.useModularExecutor) return 'multiPublish'
-  const deployed = await isSmartWalletDeployed(publisherAddress)
+  const deployed = await isContractDeployed(publisherAddress)
   return deployed ? 'multiPublish' : 'directEas'
 }
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
   ({ sendBack, input: { context } }) => {
-    const { item, account, publishMode, address } = context
+    const { item, account, wallet, publishMode, address } = context
 
     const _check = async () => {
       const owned = await isItemOwned(item)
@@ -39,8 +39,9 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
       activePublishProcesses.add(item.seedLocalId)
 
       try {
-        if (account) {
-          await ensureEasSchemasForItem(item, account)
+        const publishWallet = wallet ?? account
+        if (publishWallet) {
+          await ensureEasSchemasForItem(item, publishWallet as import('~/helpers/seedSigner').PublishWallet)
         }
 
         const validation = await (validateItemForPublish as any)(item, [], {

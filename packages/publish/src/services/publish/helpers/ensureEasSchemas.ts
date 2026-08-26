@@ -11,9 +11,12 @@ import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { getSchemaRecord, registerSchema } from '~/helpers/schemaRegistry'
 import { prepareNameSchemaAttestation } from '~/helpers/nameSchemaAttestation'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
-import type { SeedSigner } from '~/helpers/seedSigner'
-import { asSeedSigner } from '~/helpers/seedSigner'
-import type { Account } from 'thirdweb/wallets'
+import {
+  isPublishWallet,
+  isSeedTxSender,
+  type PublishWallet,
+  type SeedTxSender,
+} from '~/helpers/seedSigner'
 
 const RESOLVER_ADDRESS = '0x0000000000000000000000000000000000000000'
 const REVOCABLE = true
@@ -54,8 +57,8 @@ async function getModelNamesForItem(item: IItem<any>): Promise<Set<string>> {
   return modelNames
 }
 
-async function sendAndWait(signer: SeedSigner, tx: Parameters<SeedSigner['sendTransaction']>[0]) {
-  const result = await signer.sendTransaction(tx)
+async function sendAndWait(txSender: SeedTxSender, tx: Parameters<SeedTxSender['sendTransaction']>[0]) {
+  const result = await txSender.sendTransaction(tx)
   await waitForPublishReceipt(result.transactionHash)
 }
 
@@ -66,9 +69,17 @@ async function sendAndWait(signer: SeedSigner, tx: Parameters<SeedSigner['sendTr
  */
 export async function ensureEasSchemasForItem(
   item: IItem<any>,
-  account: Account | SeedSigner,
+  account: PublishWallet | SeedTxSender,
 ): Promise<void> {
-  const signer = asSeedSigner(account)
+  const sender: SeedTxSender = isPublishWallet(account)
+    ? account.txSender
+    : isSeedTxSender(account)
+      ? account
+      : (() => {
+          throw new Error(
+            '@seedprotocol/publish: ensureEasSchemasForItem requires a PublishWallet or SeedTxSender',
+          )
+        })()
   const { itemBasicProperties, itemRelationProperties, itemImageProperties, itemListProperties } =
     await getSegmentedItemProperties(item)
 
@@ -105,7 +116,7 @@ export async function ensureEasSchemasForItem(
 
     try {
       await sendAndWait(
-        signer,
+        sender,
         registerSchema({
           schema: schemaDef,
           resolverAddress: RESOLVER_ADDRESS,
@@ -120,7 +131,7 @@ export async function ensureEasSchemasForItem(
 
     try {
       await sendAndWait(
-        signer,
+        sender,
         prepareNameSchemaAttestation({
           schemaUid,
           schemaName: toSnakeCase(modelName),
@@ -151,7 +162,7 @@ export async function ensureEasSchemasForItem(
   ) {
     try {
       await sendAndWait(
-        signer,
+        sender,
         registerSchema({
           schema: storageSchemaDef,
           resolverAddress: RESOLVER_ADDRESS,
@@ -159,7 +170,7 @@ export async function ensureEasSchemasForItem(
         }),
       )
       await sendAndWait(
-        signer,
+        sender,
         prepareNameSchemaAttestation({
           schemaUid: storageSchemaUid,
           schemaName: 'storage_transaction_id',
@@ -241,7 +252,7 @@ export async function ensureEasSchemasForItem(
 
     try {
       await sendAndWait(
-        signer,
+        sender,
         registerSchema({
           schema: schemaDef,
           resolverAddress: RESOLVER_ADDRESS,
@@ -256,7 +267,7 @@ export async function ensureEasSchemasForItem(
 
     try {
       await sendAndWait(
-        signer,
+        sender,
         prepareNameSchemaAttestation({
           schemaUid,
           schemaName: propertyNameSnakeCase,
@@ -274,6 +285,6 @@ export async function ensureEasSchemasForItem(
 
   const relatedItems = await getRelatedItemsForPublish(item)
   for (const relatedItem of relatedItems) {
-    await ensureEasSchemasForItem(relatedItem as IItem<any>, signer)
+    await ensureEasSchemasForItem(relatedItem as IItem<any>, sender)
   }
 }

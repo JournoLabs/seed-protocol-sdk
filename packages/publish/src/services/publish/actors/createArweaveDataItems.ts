@@ -14,6 +14,7 @@ import {
   isEthersWallet,
   verifyDataItem,
 } from '~/helpers/arweave'
+import { isPublishWallet, type SeedSigner } from '~/helpers/seedSigner'
 
 const logger = debug('seedProtocol:createArweaveDataItems')
 
@@ -52,10 +53,8 @@ export async function signBundlerUploadDataList(
       modelName: r.modelName,
     }))
   } else if (dataItemSigner) {
-    const signer = dataItemSigner
     const items: Awaited<ReturnType<typeof createSignedDataItem>>[] = []
     const timestampMs = Date.now()
-    const walletAddress = signer.address
     for (let i = 0; i < uploadDataList.length; i++) {
       const upload = uploadDataList[i]!
       const tags = upload.tags
@@ -64,10 +63,23 @@ export async function signBundlerUploadDataList(
       const uniqueness =
         (new DataView(randomUniq.buffer).getBigUint64(0, false) ^ BigInt(i)) &
         0xffffffffffffffffn
-      const rawAnchor = buildPublishAnchorBytes(walletAddress, timestampMs, uniqueness)
-      const dataItem = isEthersWallet(signer)
-        ? await createSignedDataItem(upload.data, signer, tags, rawAnchor)
-        : await createSignedDataItemWithAccount(upload.data, signer, tags, rawAnchor)
+
+      let dataItem: Awaited<ReturnType<typeof createSignedDataItem>>
+      if (isEthersWallet(dataItemSigner)) {
+        const rawAnchor = buildPublishAnchorBytes(dataItemSigner.address, timestampMs, uniqueness)
+        dataItem = await createSignedDataItem(upload.data, dataItemSigner, tags, rawAnchor)
+      } else {
+        const seedSigner: SeedSigner = isPublishWallet(dataItemSigner)
+          ? dataItemSigner.signer
+          : dataItemSigner
+        const rawAnchor = buildPublishAnchorBytes(seedSigner.address, timestampMs, uniqueness)
+        dataItem = await createSignedDataItemWithAccount(
+          upload.data,
+          seedSigner,
+          tags,
+          rawAnchor,
+        )
+      }
 
       const isValid = await verifyDataItem(dataItem.raw)
       if (!isValid) {

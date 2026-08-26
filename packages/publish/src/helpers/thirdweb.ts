@@ -13,7 +13,7 @@ import {
   pollSmartWalletDeployed as pollDeployed,
 } from './chainClient'
 import { encodeCreateAccount, readFactoryGetAddress } from './contracts'
-import { asSeedSigner, type SeedSigner } from './seedSigner'
+import type { PublishWallet } from './seedSigner'
 import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
 
 const logger = debug('permaPress:helpers:thirdweb')
@@ -55,6 +55,11 @@ let _client: ReturnType<typeof createThirdwebClient> | null = null
 export function getClient() {
   if (!_client) {
     const { thirdwebClientId } = getPublishConfig()
+    if (!thirdwebClientId) {
+      throw new Error(
+        '@seedprotocol/publish/thirdweb: thirdwebClientId is required. Pass it in initPublish / PublishProvider config.',
+      )
+    }
     _client = createThirdwebClient({ clientId: thirdwebClientId })
   }
   return _client
@@ -202,15 +207,16 @@ export const deploySmartWalletContract = async ( localAccount: Account, ) => {
  */
 export async function deployManagedAccountViaFactory(params: {
   adminAddress: string
-  signingAccount: Account | SeedSigner
+  signingAccount: Account | PublishWallet
   data?: `0x${string}`
 }): Promise<void> {
-  const signer = asSeedSigner(params.signingAccount)
+  const { asThirdwebPublishWallet } = await import('./adapters/thirdwebAccount')
+  const wallet = asThirdwebPublishWallet(params.signingAccount as Account | PublishWallet)
   const tx = encodeCreateAccount(
     params.adminAddress as Address,
     (params.data ?? '0x') as Hex,
   )
-  await signer.sendTransaction(tx)
+  await wallet.txSender.sendTransaction(tx)
 }
 
 export const appMetadata = {

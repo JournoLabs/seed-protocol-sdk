@@ -1,25 +1,43 @@
 import type { Item } from '@seedprotocol/sdk'
-import type { Account } from 'thirdweb/wallets'
 import { enqueueActions } from 'xstate'
 import { getPublishConfig } from '~/config'
-import { asSeedSigner, isSeedSigner, type SeedSigner } from '~/helpers/seedSigner'
+import {
+  isPublishWallet,
+  isSeedSigner,
+  type PublishWallet,
+  type SeedSigner,
+} from '~/helpers/seedSigner'
 import { ethers } from 'ethers'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
+import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 
-function coerceAccount(account: unknown): SeedSigner | undefined {
+function coerceWallet(account: unknown): PublishWallet | undefined {
   if (!account) return undefined
-  if (isSeedSigner(account)) return account
-  return asSeedSigner(account as Account)
+  if (isPublishWallet(account)) return account
+  // Legacy: SeedSigner alone cannot send — try registry wallet
+  if (isSeedSigner(account)) {
+    const registered = getPublishWallet()
+    if (registered && registered.signer.address.toLowerCase() === account.address.toLowerCase()) {
+      return registered
+    }
+    throw new Error(
+      '@seedprotocol/publish: createPublish requires a PublishWallet (signer + txSender). Use fromEthersWallet, fromEip1193Provider, or fromThirdwebAccount.',
+    )
+  }
+  throw new Error(
+    '@seedprotocol/publish: createPublish account must be a PublishWallet. Thirdweb Account must be wrapped with fromThirdwebAccount from @seedprotocol/publish/thirdweb.',
+  )
 }
 
 function coerceDataItemSigner(
   signer: import('~/config').CreatePublishOptions['dataItemSigner'],
-): import('~/config').CreatePublishOptions['dataItemSigner'] {
+): SeedSigner | ethers.Wallet | undefined {
   if (!signer) return undefined
   if (signer instanceof ethers.Wallet) return signer
+  if (isPublishWallet(signer)) return signer.signer
   if (isSeedSigner(signer)) return signer
-  return asSeedSigner(signer as Account)
+  return undefined
 }
 
 export const createPublish = enqueueActions(({ event, enqueue }) => {
@@ -54,11 +72,14 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
       ...(options?.arweaveUploadTags ?? []),
     ]
 
+    const wallet = coerceWallet(account) ?? getPublishWallet() ?? undefined
+
     const publishProcess = spawn(publishMachine, {
       input: {
         item,
         address: address as string,
-        account: coerceAccount(account),
+        wallet,
+        account: wallet,
         modelName: item.modelName,
         schemaId: item.schemaUid,
         signDataItems: options?.signDataItems,
@@ -78,31 +99,13 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     publishProcesses.set(item.seedLocalId, publishProcess)
 
     return {
-      publishProcesses: new Map(publishProcesses),
+      ...context,
+      publishProcesses,
     }
   })
 
-  enqueue.assign(({ context, spawn }) => {
-    const { subscriptions, publishProcesses } = context
-    const publishProcess = publishProcesses.get(item.seedLocalId)
-    if (!publishProcess) {
-      console.warn(`Publish process with seedLocalId "${item.seedLocalId}" does not exist.`)
-      return context
-    }
-
-    if (subscriptions && subscriptions.has(item.seedLocalId)) {
-      console.warn(`Subscription with seedLocalId "${item.seedLocalId}" already exists.`)
-      return context
-    }
-
-    const subscriptionProcess = spawn(subscribe, {
-      input: { publishProcess, seedLocalId: item.seedLocalId },
-    })
-
-    subscriptions.set(item.seedLocalId, subscriptionProcess)
-
-    return {
-      subscriptions: new Map(subscriptions),
-    }
+  enqueue(({ context }) => {
+    const process = context.publishProcesses?.get(item.seedLocalId)
+    if (process) subscribe(process)
   })
 })
