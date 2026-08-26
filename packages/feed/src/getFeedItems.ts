@@ -6,7 +6,8 @@ import {
   setSchemaUidForSchemaDefinition,
   withExcludeRevokedFilter,
   pickLatestPropertyAttestationsByRefAndSchema,
-} from '@seedprotocol/sdk';
+} from '@seedprotocol/eas';
+import { initializeFeedPlatform } from './bootstrap';
 import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { gql } from 'graphql-request';
 import { loadFeedConfig } from './config';
@@ -659,6 +660,7 @@ export const getFeedItemsBySchemaName = async (
   schemaName: string,
   options?: { limit?: number; skip?: number }
 ): Promise<Record<string, unknown>[]> => {
+  await initializeFeedPlatform();
   const feedConfig = loadFeedConfig();
   const limit = options?.limit ?? 100;
   const skip = options?.skip ?? 0;
@@ -673,6 +675,7 @@ export const getFeedItemsBySchemaNameForMonth = async (
   year: number,
   month: number
 ): Promise<Record<string, unknown>[]> => {
+  await initializeFeedPlatform();
   const feedConfig = loadFeedConfig();
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);

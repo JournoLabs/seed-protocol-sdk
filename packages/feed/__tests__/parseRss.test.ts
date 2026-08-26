@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseRssString } from '../src/consume/parseRss'
-import { normalizeFeedItemFields } from '../../sdk/src/helpers/mediaRef.ts'
+import { normalizeFeedItemFields } from '@seedprotocol/arweave'
 
 const MINIMAL_RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">

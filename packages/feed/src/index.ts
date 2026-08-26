@@ -1,4 +1,10 @@
-import { client as seedClient, DEFAULT_ARWEAVE_HOST } from '@seedprotocol/sdk';
+import {
+  initializeFeedPlatform,
+  initializeSeedClient,
+  getClient,
+  teardownSeedClient,
+  DEFAULT_ARWEAVE_HOST,
+} from './bootstrap';
 import { getArweaveUrlForTransaction } from './utils/arweaveUrl';
 import { getFeedItemsBySchemaName, getFeedItemsBySchemaNameForMonth } from './getFeedItems';
 
@@ -15,11 +21,17 @@ export {
 export { parseRssString, type ParsedRssChannel } from './consume/parseRss';
 export type { FeedConfig, FeedFormat, GraphQLItem } from './types';
 export {
+  initializeFeedPlatform,
+  initializeSeedClient,
+  getClient,
+  teardownSeedClient,
+  DEFAULT_ARWEAVE_HOST,
+} from './bootstrap';
+export {
   classifyMediaRef,
-  resolveMediaRef,
   normalizeFeedItemFields,
   getFeedItemStringField,
-} from '@seedprotocol/sdk';
+} from '@seedprotocol/arweave';
 export type {
   FeedFieldManifest,
   FeedFieldDescriptor,
@@ -32,7 +44,7 @@ export type {
   NormalizedHtmlField,
   NormalizedTextField,
   NormalizedFeedFieldValue,
-} from '@seedprotocol/sdk';
+} from '@seedprotocol/arweave';
 import pluralize from 'pluralize';
 import type { FeedFormat, GraphQLItem, TransformOptions, FeedConfig, ImageMetadata } from './types';
 
@@ -274,9 +286,6 @@ function applyRssImageCandidate(
   }
 }
 
-let client: any;
-let initializationPromise: Promise<void> | null = null;
-
 // Initialize cache manager
 let cacheManager: CacheManager | null = null;
 
@@ -293,93 +302,6 @@ function getCacheManager(): CacheManager {
  */
 export function resetCacheManager(): void {
   cacheManager = null;
-}
-
-/**
- * Initialize the Seed Protocol client
- * This should be called as soon as the app is ready
- */
-export const initializeSeedClient = async (): Promise<void> => {
-  // If already initializing, wait for that to complete
-  if (initializationPromise) {
-    return initializationPromise;
-  }
-
-  // If already initialized, return immediately
-  if (client) {
-    return;
-  }
-
-  initializationPromise = (async () => {
-    try {
-      console.log('Initializing Seed Protocol client...');
-
-      
-      await seedClient.init({ config: {
-        endpoints: {
-          filePaths: 'app-files',
-          files: '/app-files',
-        },
-        arweaveDomain: DEFAULT_ARWEAVE_HOST,
-      }, addresses: [], });
-      console.log('✅ Seed Protocol client initialized successfully');
-      client = seedClient;
-      initializationPromise = null; // Clear the promise after successful initialization
-    } catch (error) {
-      console.error('❌ Failed to initialize Seed Protocol client:', error);
-      initializationPromise = null; // Clear the promise on error so we can retry
-      throw error;
-    }
-  })();
-
-  return initializationPromise;
-}
-
-/**
- * Get the Seed Protocol client, initializing it if necessary
- * This function can be called from any context (Electron main process or Vite dev server)
- */
-export const getClient = async (): Promise<any> => {
-  // If client is already initialized, return it
-  if (client) {
-    return client;
-  }
-
-  // If initialization is in progress, wait for it
-  if (initializationPromise) {
-    await initializationPromise;
-    return client;
-  }
-
-  // Otherwise, initialize it now
-  await initializeSeedClient();
-  return client;
-}
-
-
-/**
- * Teardown the Seed Protocol client
- * This should be called when the app is quitting
- */
-export const teardownSeedClient = async (): Promise<void> => {
-  try {
-    console.log('Tearing down Seed Protocol client...');
-    
-    if (typeof seedClient.stop === 'function') {
-      await seedClient.stop();
-      console.log('✅ Seed Protocol client stopped');
-    }
-    
-    if (typeof seedClient.unload === 'function') {
-      await seedClient.unload();
-      console.log('✅ Seed Protocol client unloaded');
-    }
-    
-    console.log('✅ Seed Protocol client teardown complete');
-  } catch (error) {
-    console.error('❌ Failed to teardown Seed Protocol client:', error);
-    // Don't throw - we want the app to quit even if teardown fails
-  }
 }
 
 // ============================================================================

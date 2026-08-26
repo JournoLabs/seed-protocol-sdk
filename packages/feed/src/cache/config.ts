@@ -1,4 +1,4 @@
-import { DEFAULT_ARWEAVE_GATEWAYS } from '@seedprotocol/sdk'
+import { DEFAULT_ARWEAVE_GATEWAYS } from '@seedprotocol/arweave'
 import type { CacheConfig, ImageMetadataConfig } from './types';
 
 /**

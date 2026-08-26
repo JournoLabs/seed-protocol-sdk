@@ -11,10 +11,11 @@ export default defineConfig({
     target: 'node20',
     rollupOptions: {
       external: (id) =>
-        id === '@seedprotocol/sdk' ||
-        !id.startsWith('.') &&
+        id === '@seedprotocol/eas' ||
+        id === '@seedprotocol/arweave' ||
+        (!id.startsWith('.') &&
         !id.startsWith('/') &&
-        !id.startsWith('\0'),
+        !id.startsWith('\0')),
     },
     sourcemap: true,
   },

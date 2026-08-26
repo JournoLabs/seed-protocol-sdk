@@ -1,4 +1,4 @@
-import { BaseArweaveClient, isKnownArweaveGatewayHostname } from '@seedprotocol/sdk'
+import { BaseArweaveClient, isKnownArweaveGatewayHostname } from '@seedprotocol/arweave'
 import {
   getFeedFieldStorageModels,
   getFeedListElementStorageModels,

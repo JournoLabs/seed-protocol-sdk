@@ -4,7 +4,7 @@ import {
   getDefaultArweaveReadGatewayHostsOrdered,
   getReadGatewayHostsForConfig,
   getResolvedSeedGatewayEndpoints,
-} from '@seedprotocol/sdk'
+} from '@seedprotocol/arweave'
 import sizeOf from 'image-size'
 import type { ImageMetadata } from '../types'
 

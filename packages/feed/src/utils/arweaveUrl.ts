@@ -1,4 +1,4 @@
-import { BaseArweaveClient } from '@seedprotocol/sdk'
+import { BaseArweaveClient } from '@seedprotocol/arweave'
 
 /**
  * Builds an Arweave URL for a transaction ID (without the /raw segment).
