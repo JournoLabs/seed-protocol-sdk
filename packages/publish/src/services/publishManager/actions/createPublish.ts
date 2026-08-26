@@ -104,8 +104,28 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     }
   })
 
-  enqueue(({ context }) => {
-    const process = context.publishProcesses?.get(item.seedLocalId)
-    if (process) subscribe(process)
+  enqueue.assign(({ context, spawn }) => {
+    const { subscriptions, publishProcesses } = context
+    const publishProcess = publishProcesses.get(item.seedLocalId)
+    if (!publishProcess) {
+      console.warn(`Publish process with seedLocalId "${item.seedLocalId}" does not exist.`)
+      return context
+    }
+
+    if (subscriptions.has(item.seedLocalId)) {
+      console.warn(`Subscription with seedLocalId "${item.seedLocalId}" already exists.`)
+      return context
+    }
+
+    const subscriptionProcess = spawn(subscribe, {
+      input: { publishProcess, seedLocalId: item.seedLocalId },
+    })
+
+    subscriptions.set(item.seedLocalId, subscriptionProcess)
+
+    return {
+      ...context,
+      subscriptions: new Map(subscriptions),
+    }
   })
 })

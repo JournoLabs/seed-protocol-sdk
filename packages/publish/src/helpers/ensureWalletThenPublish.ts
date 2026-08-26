@@ -6,11 +6,14 @@ import { getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
+import type { ManagedAccountPublishError } from '../errors'
 
 export type EnsureWalletThenPublishResult =
   | { outcome: 'started' }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
+  | { outcome: 'needs_deploy' }
+  | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
 
 function coerceDataItemSigner(
   signer: CreatePublishOptions['dataItemSigner'] | SeedSigner | PublishWallet | undefined,
