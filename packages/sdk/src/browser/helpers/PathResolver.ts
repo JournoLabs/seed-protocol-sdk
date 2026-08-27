@@ -1,6 +1,12 @@
+import type { IPathResolver } from '@/helpers/PathResolver/IPathResolver'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
-class PathResolver extends BasePathResolver {
+export class BrowserPathResolver implements IPathResolver {
+  /** @deprecated Prefer BasePathResolver static methods or configure(). */
+  static getInstance(): IPathResolver {
+    return BasePathResolver.getInstance()
+  }
+
   /**
    * Gets the root directory containing node_modules
    * Note: In browser, this returns a virtual path based on OPFS
@@ -63,7 +69,10 @@ class PathResolver extends BasePathResolver {
   }
 }
 
-BasePathResolver.setPlatformClass(PathResolver)
+/** @deprecated Prefer BrowserPathResolver. */
+export const PathResolver = BrowserPathResolver
 
-export { PathResolver }
+BasePathResolver.configure(new BrowserPathResolver())
 
+const _check: IPathResolver = new BrowserPathResolver()
+void _check

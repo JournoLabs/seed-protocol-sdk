@@ -1,11 +1,10 @@
 import { BaseQueryClient } from "@/helpers/QueryClient/BaseQueryClient";
-import { ARWEAVE_ENDPOINT } from "@/client/constants";
 import { NetworkMode, QueryClient as ReactQueryClient, } from "@tanstack/react-query";
-import { IQueryClient } from "@/interfaces/IQueryClient";
+import type { IQueryClient } from "@/interfaces/IQueryClient";
+import type { IQueryClientFactory } from "@seedprotocol/eas";
 
-class QueryClient extends BaseQueryClient {
-  static getQueryClient(): IQueryClient {
-    // Implement the browser-specific logic here
+export class BrowserQueryClient implements IQueryClientFactory {
+  getQueryClient(): IQueryClient {
     const reactQueryClient = new ReactQueryClient({
       defaultOptions: {
         queries: {
@@ -36,4 +35,7 @@ class QueryClient extends BaseQueryClient {
   }
 }
 
-export { QueryClient };
+/** @deprecated Prefer BrowserQueryClient */
+export const QueryClient = BrowserQueryClient
+
+BaseQueryClient.configure(new BrowserQueryClient())

@@ -10,7 +10,11 @@ const RESTORE_DB_POLL_MS = 2_000
 async function waitForDb(maxWaitMs: number): Promise<boolean> {
   const deadline = Date.now() + maxWaitMs
   while (Date.now() < deadline) {
-    if (BaseDb.PlatformClass && BaseDb.getAppDb()) return true
+    try {
+      if (BaseDb.isAppDbReady() && BaseDb.getAppDb()) return true
+    } catch {
+      // Db facade not configured yet
+    }
     await new Promise((r) => setTimeout(r, RESTORE_DB_POLL_MS))
   }
   return false
@@ -116,7 +120,7 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
       const newPublishProcesses = new Map<string, import('xstate').ActorRef<any, any>>()
       const newSubscriptions = new Map<string, import('xstate').ActorRef<any, EventObject>>()
 
-      // BaseDb.PlatformClass is set by platformClassesInit when client.init() runs.
+      // BaseDb is configured by platformClassesInit when client.init() runs.
       // PublishManager starts on module load, which can happen before client.init().
       // Wait for DB to be ready before attempting restore (poll every 2s, up to 60s).
       const dbReady = await waitForDb(RESTORE_DB_WAIT_MS)

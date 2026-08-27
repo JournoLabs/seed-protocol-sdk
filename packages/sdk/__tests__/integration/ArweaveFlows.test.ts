@@ -19,15 +19,11 @@ import { getArweaveUrlForTransaction } from '@/helpers'
 const isNodeEnv = typeof window === 'undefined'
 
 describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
-  // Store original platform class
-  let originalPlatformClass: typeof BaseArweaveClient | undefined
+  let mock: MockArweaveClient
 
   beforeEach(() => {
-    // Save original platform class
-    originalPlatformClass = BaseArweaveClient.PlatformClass
-
-    // Set MockArweaveClient as the platform class
-    BaseArweaveClient.setPlatformClass(MockArweaveClient)
+    mock = new MockArweaveClient()
+    BaseArweaveClient.configure(mock)
     MockArweaveClient.reset()
     BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
     BaseArweaveClient.resetReadGatewaySelectionStateForTests()
@@ -35,10 +31,6 @@ describe.skipIf(!isNodeEnv)('Arweave Consumer Flows', () => {
   })
 
   afterEach(() => {
-    // Restore original platform class
-    if (originalPlatformClass) {
-      BaseArweaveClient.setPlatformClass(originalPlatformClass)
-    }
     MockArweaveClient.reset()
   })
 

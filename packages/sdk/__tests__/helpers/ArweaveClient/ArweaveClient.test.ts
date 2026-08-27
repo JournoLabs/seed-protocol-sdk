@@ -17,15 +17,13 @@ import { MockArweaveClient } from '../../test-utils/MockArweaveClient'
 const isNodeEnv = typeof window === 'undefined'
 
 describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
-  // Store original platform class
-  let originalPlatformClass: typeof BaseArweaveClient | undefined
+  let mock: MockArweaveClient
+  let restore: (() => void) | undefined
 
   beforeEach(() => {
-    // Save original platform class
-    originalPlatformClass = BaseArweaveClient.PlatformClass
-
-    // Set MockArweaveClient as the platform class
-    BaseArweaveClient.setPlatformClass(MockArweaveClient)
+    mock = new MockArweaveClient()
+    // configure() replaces prior impl; restore by re-configuring a fresh node client if needed
+    BaseArweaveClient.configure(mock)
     MockArweaveClient.reset()
     BaseArweaveClient.setPreferredReadGateway(DEFAULT_ARWEAVE_HOST)
     BaseArweaveClient.resetReadGatewaySelectionStateForTests()
@@ -33,11 +31,8 @@ describe.skipIf(!isNodeEnv)('BaseArweaveClient', () => {
   })
 
   afterEach(() => {
-    // Restore original platform class
-    if (originalPlatformClass) {
-      BaseArweaveClient.setPlatformClass(originalPlatformClass)
-    }
     MockArweaveClient.reset()
+    restore?.()
   })
 
   describe('Configuration Methods', () => {

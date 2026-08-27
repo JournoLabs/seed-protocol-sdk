@@ -8,6 +8,7 @@ import type {
   CreateTransactionOptions,
 } from '../types/arweave.js'
 import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '../constants.js'
+import type { IArweaveClient } from './IArweaveClient.js'
 
 function parseGateway(input: string): { protocol: 'http' | 'https'; host: string } {
   const t = input.trim()
@@ -20,7 +21,7 @@ function parseGateway(input: string): { protocol: 'http' | 'https'; host: string
   return { protocol: 'https', host: t.replace(/\/$/, '') }
 }
 
-// Internal state
+// Internal gateway state (process-wide; stays on the facade)
 let _host = DEFAULT_ARWEAVE_HOST
 let _protocol: 'http' | 'https' = 'https'
 let _hostExplicitlySet = false
@@ -28,10 +29,24 @@ let _hostExplicitlySet = false
 let _suppressEnvGatewayOverride = false
 
 export abstract class BaseArweaveClient {
-  static PlatformClass: typeof BaseArweaveClient
+  private static _impl: IArweaveClient | null = null
 
-  static setPlatformClass(platformClass: typeof BaseArweaveClient) {
-    this.PlatformClass = platformClass
+  static configure(impl: IArweaveClient): void {
+    if (!impl) {
+      throw new Error(
+        'Cannot configure ArweaveClient with undefined or null. Ensure the platform-specific ArweaveClient is properly created.',
+      )
+    }
+    BaseArweaveClient._impl = impl
+  }
+
+  private static requireImpl(): IArweaveClient {
+    if (!BaseArweaveClient._impl) {
+      throw new Error(
+        'ArweaveClient not configured. Import from @seedprotocol/arweave/node to register the Node.js implementation, or ensure SDK platform init has run.',
+      )
+    }
+    return BaseArweaveClient._impl
   }
 
   /**
@@ -46,7 +61,7 @@ export abstract class BaseArweaveClient {
   }
 
   // ============================================
-  // Configuration Methods
+  // Configuration Methods (facade / process-wide)
   // ============================================
 
   /**
@@ -146,75 +161,36 @@ export abstract class BaseArweaveClient {
   }
 
   // ============================================
-  // GraphQL Client
+  // Delegated to platform instance
   // ============================================
 
-  /**
-   * Get the GraphQL client for Arweave queries
-   * @returns GraphQL client instance
-   */
   static getArweaveClient(): GraphQLClient {
-    return this.PlatformClass.getArweaveClient()
+    return BaseArweaveClient.requireImpl().getArweaveClient()
   }
 
-  // ============================================
-  // Transaction Operations (delegated to platform)
-  // ============================================
-
-  /**
-   * Check gateway presence for a transaction (HTTP 200). Does not parse confirmation JSON.
-   * @param transactionId - The Arweave transaction ID
-   * @returns Transaction status; `confirmed` is null for real gateway responses
-   */
   static getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
-    return this.PlatformClass.getTransactionStatus(transactionId)
+    return BaseArweaveClient.requireImpl().getTransactionStatus(transactionId)
   }
 
-  /**
-   * Get transaction data
-   * @param transactionId - The Arweave transaction ID
-   * @param options - Options for data retrieval (decode, string)
-   * @returns Transaction data as Uint8Array or string
-   */
   static getTransactionData(
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
-    return this.PlatformClass.getTransactionData(transactionId, options)
+    return BaseArweaveClient.requireImpl().getTransactionData(transactionId, options)
   }
 
-  /**
-   * Get transaction tags
-   * @param transactionId - The Arweave transaction ID
-   * @returns Array of transaction tags
-   */
   static getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
-    return this.PlatformClass.getTransactionTags(transactionId)
+    return BaseArweaveClient.requireImpl().getTransactionTags(transactionId)
   }
 
-  /**
-   * Create a new unsigned transaction
-   * @param data - Transaction data (string or Uint8Array)
-   * @param options - Options including tags
-   * @returns The created transaction object
-   */
   static createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions
   ): Promise<any> {
-    return this.PlatformClass.createTransaction(data, options)
+    return BaseArweaveClient.requireImpl().createTransaction(data, options)
   }
 
-  // ============================================
-  // Bulk Operations
-  // ============================================
-
-  /**
-   * Download multiple files from Arweave
-   * @param params - Download parameters including transaction IDs
-   * @returns Array of download results
-   */
   static downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
-    return this.PlatformClass.downloadFiles(params)
+    return BaseArweaveClient.requireImpl().downloadFiles(params)
   }
 }

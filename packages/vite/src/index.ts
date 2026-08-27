@@ -793,7 +793,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // Prevent duplicate React/thirdweb instances when @seedprotocol/publish is workspace-linked.
           // Multiple copies break context (e.g. useActiveAccount must be used within ThirdwebProvider).
           // Also dedupe XState and Seed packages: two xstate copies cause Object.assign _version errors;
-          // two @seedprotocol/sdk copies leave BaseDb.PlatformClass / Db.appDb on different module instances
+          // two @seedprotocol/sdk copies leave BaseDb facade / Db.appDb on different module instances
           // ("App DB not found", undefined.$with on PostsPage).
           dedupe: Array.from(
             new Set([

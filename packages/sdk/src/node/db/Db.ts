@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { IDb } from '@/interfaces'
+import type { IDb } from '@/interfaces/IDb'
 import path from 'path'
+import { fileURLToPath } from 'node:url'
 import debug from 'debug'
 import { appState } from '@/seedSchema'
 import fs from 'fs'
@@ -37,11 +38,15 @@ export function resolveSdkDrizzleMigrationsDir(sdkRootDir?: string): string {
     sdkRootDir ||
     (() => {
       try {
-        return BasePathResolver.getInstance().getSdkRootDir()
+        return BasePathResolver.getSdkRootDir()
       } catch {
         return process.cwd()
       }
     })()
+
+  // Also resolve relative to this module so temp-cwd tests / odd roots still find
+  // packages/sdk/src/db/drizzle (or dist/db/drizzle after publish).
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
   const candidates = [
     path.join(root, 'db', 'drizzle'), // production: sdkRoot is dist/
@@ -49,6 +54,9 @@ export function resolveSdkDrizzleMigrationsDir(sdkRootDir?: string): string {
     path.join(root, 'src', 'db', 'drizzle'), // monorepo / sdk-dev
     path.join(root, 'packages', 'sdk', 'src', 'db', 'drizzle'), // monorepo root as cwd
     path.join(root, 'packages', 'sdk', 'dist', 'db', 'drizzle'),
+    path.join(moduleDir, '..', '..', 'db', 'drizzle'), // src/node/db -> src/db/drizzle
+    path.join(moduleDir, '..', '..', '..', 'src', 'db', 'drizzle'), // dist/node -> src
+    path.join(moduleDir, '..', 'db', 'drizzle'), // dist layout variants
   ]
 
   for (const candidate of candidates) {
@@ -78,25 +86,22 @@ function copyDirRecursive(sourceDir: string, targetDir: string) {
   }
 }
 
-class Db extends BaseDb implements IDb {
-  static db: any
+export class NodeDb implements IDb {
+  db: any
 
-  constructor() {
-    super()
-  }
 
-  static getAppDb() {
+  getAppDb() {
     return this.db
   }
 
-  static isAppDbReady() {
+  isAppDbReady() {
     return true
   }
 
   /**
    * Copy prebuilt SQL migrations into the app db directory (overwrite to stay current).
    */
-  static copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string): string {
+  copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string): string {
     const { outDir } = resolveDbPaths(filesDir)
     const source = migrationsSourceDir || resolveSdkDrizzleMigrationsDir()
     logger('[Db.copyDrizzleFiles] copying from %s to %s', source, outDir)
@@ -104,7 +109,7 @@ class Db extends BaseDb implements IDb {
     return outDir
   }
 
-  static async prepareDb(filesDir: string, config?: DbConfig) {
+  async prepareDb(filesDir: string, config?: DbConfig) {
     const resolvedFilesDir = path.resolve(filesDir)
 
     if (!fs.existsSync(resolvedFilesDir)) {
@@ -138,13 +143,13 @@ class Db extends BaseDb implements IDb {
     return this.db
   }
 
-  static async connectToDb(_pathToDir: string) {
+  async connectToDb(_pathToDir: string) {
     return {
       id: this.db ? this.db.constructor.name : '',
     }
   }
 
-  static async migrate(pathToDbDir: string, _dbName: string, _dbId: string) {
+  async migrate(pathToDbDir: string, _dbName: string, _dbId: string) {
     try {
       if (!this.db) {
         throw new Error('Database not initialized. Call prepareDb first.')
@@ -183,7 +188,7 @@ class Db extends BaseDb implements IDb {
   /**
    * Polling-based liveQuery stub for Node. Prefer browser reactive queries in UI apps.
    */
-  static liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
+  liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
     if (!this.db) {
       throw new Error('Database not initialized. Call prepareDb first.')
     }
@@ -216,6 +221,10 @@ class Db extends BaseDb implements IDb {
   }
 }
 
-BaseDb.setPlatformClass(Db)
+/** @deprecated Prefer NodeDb */
+export const Db = NodeDb
 
-export { Db }
+BaseDb.configure(new NodeDb())
+
+const _check: IDb = new NodeDb()
+void _check

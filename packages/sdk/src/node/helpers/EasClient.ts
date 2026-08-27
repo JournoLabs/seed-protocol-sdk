@@ -1,3 +1,5 @@
-import { EasClient } from '@seedprotocol/eas/node'
+import { NodeEasClient } from '@seedprotocol/eas/node'
 
-export { EasClient }
+/** @deprecated Prefer NodeEasClient */
+export const EasClient = NodeEasClient
+export { NodeEasClient }

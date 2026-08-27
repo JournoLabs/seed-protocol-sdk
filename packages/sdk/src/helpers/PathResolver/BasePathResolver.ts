@@ -1,36 +1,68 @@
+import type { IPathResolver } from './IPathResolver'
+import {
+  createFacadeTestHandle,
+  type PlatformTestHandle,
+} from '@/testing/platformTestHandle'
+
 export abstract class BasePathResolver {
-  private static instance: BasePathResolver
-  private static PlatformClass: typeof BasePathResolver
+  private static _impl: IPathResolver | null = null
 
-  static setPlatformClass(platformClass: typeof BasePathResolver) {
-    this.PlatformClass = platformClass
-  }
-
-  static getInstance(): BasePathResolver {
-    if (!BasePathResolver.instance) {
-      if (!BasePathResolver.PlatformClass) {
-        throw new Error('PathResolver PlatformClass not set. Please ensure the platform-specific PathResolver is imported. For Node.js, import from @seedprotocol/sdk/node. For browser, the SDK should auto-initialize.')
-      }
-      if (BasePathResolver.PlatformClass === BasePathResolver) {
-        throw new Error('Circular reference detected: PlatformClass is set to BasePathResolver')
-      }
-      BasePathResolver.instance = new (BasePathResolver.PlatformClass as any)()
+  static configure(impl: IPathResolver): void {
+    if (!impl) {
+      throw new Error(
+        'Cannot configure PathResolver with undefined or null. Ensure the platform-specific PathResolver is properly created.',
+      )
     }
-    return BasePathResolver.instance
+    BasePathResolver._impl = impl
   }
 
-  abstract getRootWithNodeModules(): string
-  abstract getSdkRootDir(): string
-  abstract getNodeModulesDir(): string
-  abstract getDotSeedDir(schemaFileDir?: string): string
-  abstract findConfigFile(searchDir?: string): string | null
-  abstract getAppPaths(schemaFileDir?: string | undefined): {
-    sdkRootDir: string
-    dotSeedDir: string
-    nodeModulesDir: string
-    appSchemaDir: string
-    appDbDir: string
-    appMetaDir: string
+  static createForTesting(impl: IPathResolver): PlatformTestHandle {
+    return createFacadeTestHandle(
+      () => BasePathResolver._impl,
+      (next) => {
+        BasePathResolver._impl = next
+      },
+      impl,
+    )
+  }
+
+  private static requireImpl(): IPathResolver {
+    if (!BasePathResolver._impl) {
+      throw new Error(
+        'PathResolver not configured. Please ensure the platform-specific PathResolver is registered. For Node.js, import from @seedprotocol/sdk/node. For browser, the SDK should auto-initialize.',
+      )
+    }
+    return BasePathResolver._impl
+  }
+
+  /**
+   * @deprecated Prefer static facade methods (e.g. BasePathResolver.getDotSeedDir()).
+   */
+  static getInstance(): IPathResolver {
+    return BasePathResolver.requireImpl()
+  }
+
+  static getRootWithNodeModules(): string {
+    return BasePathResolver.requireImpl().getRootWithNodeModules()
+  }
+
+  static getSdkRootDir(): string {
+    return BasePathResolver.requireImpl().getSdkRootDir()
+  }
+
+  static getNodeModulesDir(): string {
+    return BasePathResolver.requireImpl().getNodeModulesDir()
+  }
+
+  static getDotSeedDir(schemaFileDir?: string): string {
+    return BasePathResolver.requireImpl().getDotSeedDir(schemaFileDir)
+  }
+
+  static findConfigFile(searchDir?: string): string | null {
+    return BasePathResolver.requireImpl().findConfigFile(searchDir)
+  }
+
+  static getAppPaths(schemaFileDir?: string | undefined) {
+    return BasePathResolver.requireImpl().getAppPaths(schemaFileDir)
   }
 }
-

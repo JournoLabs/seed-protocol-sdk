@@ -1,4 +1,5 @@
 import { BaseArweaveClient } from '../ArweaveClient/BaseArweaveClient.js';
+import type { IArweaveClient } from '../ArweaveClient/IArweaveClient.js';
 import { GraphQLClient } from 'graphql-request';
 import Arweave from 'arweave';
 import type {
@@ -48,18 +49,12 @@ const getArweaveInstance = (): Arweave => {
   return _arweaveInstance!;
 };
 
-class ArweaveClient extends BaseArweaveClient {
-  /**
-   * Get the GraphQL client for Arweave queries
-   */
-  static override getArweaveClient(): GraphQLClient {
+export class NodeArweaveClient implements IArweaveClient {
+  getArweaveClient(): GraphQLClient {
     return new GraphQLClient(BaseArweaveClient.getEndpoint());
   }
 
-  /**
-   * Get the status of a transaction
-   */
-  static override async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
+  async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
     const url = BaseArweaveClient.getStatusUrl(transactionId);
 
     try {
@@ -96,10 +91,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Get transaction data
-   */
-  static override async getTransactionData(
+  async getTransactionData(
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
@@ -132,10 +124,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Get transaction tags via GraphQL
-   */
-  static override async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
+  async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
     const client = this.getArweaveClient();
     
     try {
@@ -155,10 +144,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Create a new unsigned transaction
-   */
-  static override async createTransaction(
+  async createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions
   ): Promise<any> {
@@ -178,10 +164,7 @@ class ArweaveClient extends BaseArweaveClient {
     return tx;
   }
 
-  /**
-   * Download multiple files from Arweave
-   */
-  static override async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
+  async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
     const { transactionIds, excludedTransactions } = params;
     const results: DownloadResult[] = [];
     const baseUrl = BaseArweaveClient.getBaseUrl();
@@ -231,6 +214,10 @@ class ArweaveClient extends BaseArweaveClient {
   }
 }
 
-BaseArweaveClient.setPlatformClass(ArweaveClient);
+/** @deprecated Prefer NodeArweaveClient */
+export const ArweaveClient = NodeArweaveClient;
 
-export { ArweaveClient };
+BaseArweaveClient.configure(new NodeArweaveClient());
+
+const _check: IArweaveClient = new NodeArweaveClient();
+void _check;

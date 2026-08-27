@@ -90,6 +90,21 @@
         "default": "./dist/main.cjs"
       }
     },
+    "./platform": {
+      "browser": {
+        "types": "./dist/src/platform/index.browser.d.ts",
+        "default": "./dist/platform.browser.js"
+      },
+      "node": {
+        "types": "./dist/src/platform/index.node.d.ts",
+        "default": "./dist/platform.node.js"
+      },
+      "import": {
+        "types": "./dist/src/platform/index.d.ts",
+        "default": "./dist/platform.node.js"
+      },
+      "default": "./dist/platform.node.js"
+    },
     "./vite": {
       "import": {
         "types": "./dist/src/vite/index.d.ts",

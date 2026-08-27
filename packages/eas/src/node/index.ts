@@ -1,10 +1,13 @@
-import './EasClient.js'
-import './QueryClient.js'
+import { NodeEasClient } from './EasClient.js'
+import { NodeQueryClient } from './QueryClient.js'
+import { BaseEasClient } from '../EasClient/BaseEasClient.js'
+import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 
-export { EasClient } from './EasClient.js'
-export { QueryClient } from './QueryClient.js'
+export { EasClient, NodeEasClient } from './EasClient.js'
+export { QueryClient, NodeQueryClient } from './QueryClient.js'
 
 /** Register Node.js EAS + query client implementations. */
 export function registerNodeEasPlatform(): void {
-  // Side-effect imports above register platform classes.
+  BaseEasClient.configure(new NodeEasClient())
+  BaseQueryClient.configure(new NodeQueryClient())
 }

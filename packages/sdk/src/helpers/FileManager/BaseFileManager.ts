@@ -1,18 +1,33 @@
+import type {
+  DownloadAllFilesParams,
+  DownloadSingleFileParams,
+  IFileManager,
+  ResizeAllImagesParams,
+  ResizeImageParams,
+} from './IFileManager'
+
 export abstract class BaseFileManager {
   private static fileSystemInitialized = false
   private static initializing = false
   private static workingDir: string | undefined
+  private static _impl: IFileManager | null = null
 
-  static PlatformClass: typeof BaseFileManager
+  static configure(impl: IFileManager): void {
+    if (!impl) {
+      throw new Error(
+        'Cannot configure FileManager with undefined or null. Ensure the platform-specific FileManager is properly created.',
+      )
+    }
+    BaseFileManager._impl = impl
+  }
 
-  static setPlatformClass( platformClass: typeof BaseFileManager ) {
-    if (!platformClass) {
-      throw new Error('Cannot set PlatformClass to undefined or null. Ensure the platform-specific FileManager is properly imported.')
+  private static requireImpl(): IFileManager {
+    if (!BaseFileManager._impl) {
+      throw new Error(
+        'FileManager not configured. Call BaseFileManager.configure() during platform init.',
+      )
     }
-    if (platformClass === BaseFileManager) {
-      throw new Error('Cannot set PlatformClass to BaseFileManager itself. Use a platform-specific implementation (e.g., node/FileManager or browser/FileManager).')
-    }
-    this.PlatformClass = platformClass
+    return BaseFileManager._impl
   }
 
   static async initializeFileSystem(workingDir?: string): Promise<void> {
@@ -20,7 +35,7 @@ export abstract class BaseFileManager {
       return Promise.resolve()
     }
     this.initializing = true
-    await this.PlatformClass.initializeFileSystem(workingDir)
+    await BaseFileManager.requireImpl().initializeFileSystem(workingDir)
     this.fileSystemInitialized = true
     this.initializing = false
     this.workingDir = workingDir
@@ -45,16 +60,20 @@ export abstract class BaseFileManager {
     return parts.join('/').replace(/\/+/g, '/')
   }
 
-  static getContentUrlFromPath( path: string ): Promise<string | undefined> {
-    return this.PlatformClass.getContentUrlFromPath(path)
+  static getContentUrlFromPath(path: string): Promise<string | undefined> {
+    return BaseFileManager.requireImpl().getContentUrlFromPath(path)
   }
 
-  static downloadAllFiles( {
-                             transactionIds,
-                             arweaveHost,
-                             excludedTransactions,
-                           }: DownloadAllFilesParams ): Promise<void> {
-    return this.PlatformClass.downloadAllFiles({ transactionIds, arweaveHost, excludedTransactions })
+  static downloadAllFiles({
+    transactionIds,
+    arweaveHost,
+    excludedTransactions,
+  }: DownloadAllFilesParams): Promise<void> {
+    return BaseFileManager.requireImpl().downloadAllFiles({
+      transactionIds,
+      arweaveHost,
+      excludedTransactions,
+    })
   }
 
   static downloadFileByTransactionId({
@@ -62,30 +81,30 @@ export abstract class BaseFileManager {
     arweaveHost,
     excludedTransactions,
   }: DownloadSingleFileParams): Promise<void> {
-    return this.PlatformClass.downloadAllFiles({
+    return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds: [transactionId],
       arweaveHost,
       excludedTransactions,
     })
   }
 
-  static resizeImage( { filePath, width, height }: ResizeImageParams ): Promise<void> {
-    return this.PlatformClass.resizeImage({ filePath, width, height })
+  static resizeImage({ filePath, width, height }: ResizeImageParams): Promise<void> {
+    return BaseFileManager.requireImpl().resizeImage({ filePath, width, height })
   }
 
-  static resizeAllImages( { width, height }: ResizeAllImagesParams ): Promise<void> {
-    return this.PlatformClass.resizeAllImages({ width, height })
+  static resizeAllImages({ width, height }: ResizeAllImagesParams): Promise<void> {
+    return BaseFileManager.requireImpl().resizeAllImages({ width, height })
   }
 
   static pathExists(filePath: string): Promise<boolean> {
-    return this.PlatformClass.pathExists(filePath)
+    return BaseFileManager.requireImpl().pathExists(filePath)
   }
 
   /**
    * Returns a list of filenames in the given directory (e.g. 'images', 'files').
    */
   static listFiles(dir: string): Promise<string[]> {
-    return this.PlatformClass.listFiles(dir)
+    return BaseFileManager.requireImpl().listFiles(dir)
   }
 
   /**
@@ -97,86 +116,62 @@ export abstract class BaseFileManager {
   }
 
   static createDirIfNotExists(filePath: string): Promise<void> {
-    return this.PlatformClass.createDirIfNotExists(filePath)
+    return BaseFileManager.requireImpl().createDirIfNotExists(filePath)
   }
 
   static async waitForFile(filePath: string): Promise<boolean> {
-    return this.PlatformClass.waitForFile(filePath)
+    return BaseFileManager.requireImpl().waitForFile(filePath)
   }
 
-  static async waitForFileWithContent(filePath: string, interval?: number, timeout?: number): Promise<boolean> {
-    return this.PlatformClass.waitForFileWithContent(filePath, interval, timeout)
+  static async waitForFileWithContent(
+    filePath: string,
+    interval?: number,
+    timeout?: number,
+  ): Promise<boolean> {
+    return BaseFileManager.requireImpl().waitForFileWithContent(filePath, interval, timeout)
   }
 
   static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
-    return this.PlatformClass.saveFile(filePath, content)
+    return BaseFileManager.requireImpl().saveFile(filePath, content)
   }
 
   static saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
-    return this.PlatformClass.saveFileSync(filePath, content)
+    return BaseFileManager.requireImpl().saveFileSync(filePath, content)
   }
 
   static async readFile(filePath: string): Promise<File> {
-    return this.PlatformClass.readFile(filePath)
+    return BaseFileManager.requireImpl().readFile(filePath)
   }
 
   static readFileSync(filePath: string): File {
-    return this.PlatformClass.readFileSync(filePath)
+    return BaseFileManager.requireImpl().readFileSync(filePath)
   }
 
   static async readFileAsBuffer(filePath: string): Promise<Buffer | Blob> {
-    return this.PlatformClass.readFileAsBuffer(filePath)
+    return BaseFileManager.requireImpl().readFileAsBuffer(filePath)
   }
 
   static async readFileAsString(filePath: string): Promise<string> {
-    return this.PlatformClass.readFileAsString(filePath)
+    return BaseFileManager.requireImpl().readFileAsString(filePath)
   }
 
   static async getFs(): Promise<any> {
-    if (!this.PlatformClass) {
-      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
-    }
-    if (this.PlatformClass === BaseFileManager) {
-      throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
-    }
-    // Check if the getFs method is the same as BaseFileManager.getFs (catches cases where
-    // PlatformClass doesn't properly override getFs or bundling causes method sharing)
-    if (this.PlatformClass.getFs === BaseFileManager.getFs) {
-      throw new Error('Circular reference detected: PlatformClass.getFs is the same as BaseFileManager.getFs')
-    }
-    // Check if we're calling ourselves recursively (more reliable than function reference comparison)
-    // This will catch actual infinite recursion regardless of how the code is bundled/transpiled
-    const stack = new Error().stack || ''
-    const getFsCalls = (stack.match(/getFs/g) || []).length
-    if (getFsCalls > 10) {
-      throw new Error('Infinite recursion detected in getFs')
-    }
-    return this.PlatformClass.getFs()
+    return BaseFileManager.requireImpl().getFs()
   }
 
   static getFsSync(): any {
-    if (!this.PlatformClass) {
-      throw new Error('PlatformClass not set. Call setPlatformClass() first.')
-    }
-    if (this.PlatformClass === BaseFileManager) {
-      throw new Error('Circular reference detected: PlatformClass is set to BaseFileManager')
-    }
-    // Check if getFsSync method exists on platform class
-    if (typeof this.PlatformClass.getFsSync !== 'function') {
-      throw new Error('PlatformClass does not implement getFsSync()')
-    }
-    return this.PlatformClass.getFsSync()
+    return BaseFileManager.requireImpl().getFsSync()
   }
 
   static getPathModule(): any {
-    return this.PlatformClass.getPathModule()
+    return BaseFileManager.requireImpl().getPathModule()
   }
 
   static getParentDirPath(filePath: string): string {
-    return this.PlatformClass.getParentDirPath(filePath)
+    return BaseFileManager.requireImpl().getParentDirPath(filePath)
   }
 
   static getFilenameFromPath(filePath: string): string {
-    return this.PlatformClass.getFilenameFromPath(filePath)
+    return BaseFileManager.requireImpl().getFilenameFromPath(filePath)
   }
 }

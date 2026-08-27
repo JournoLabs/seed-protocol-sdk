@@ -1,3 +1,5 @@
-import { ArweaveClient } from '@seedprotocol/arweave/node'
+import { NodeArweaveClient } from '@seedprotocol/arweave/node'
 
-export { ArweaveClient }
+/** @deprecated Prefer NodeArweaveClient */
+export const ArweaveClient = NodeArweaveClient
+export { NodeArweaveClient }

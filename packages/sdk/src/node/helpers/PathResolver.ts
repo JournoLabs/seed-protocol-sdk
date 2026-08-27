@@ -1,12 +1,18 @@
 import path from 'path'
 import fs from 'fs'
 import { SEED_CONFIG_FILE, SEED_CONFIG_FALLBACKS } from '@/helpers/constants'
+import type { IPathResolver } from '@/helpers/PathResolver/IPathResolver'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import debug from 'debug'
 
 const logger = debug('seedSdk:node:helpers:PathResolver')
 
-class PathResolver extends BasePathResolver {
+export class NodePathResolver implements IPathResolver {
+  /** @deprecated Prefer BasePathResolver static methods or configure(). */
+  static getInstance(): IPathResolver {
+    return BasePathResolver.getInstance()
+  }
+
   /**
    * Detects the current environment based on filesystem structure and package.json
    */
@@ -194,7 +200,10 @@ class PathResolver extends BasePathResolver {
   }
 }
 
-BasePathResolver.setPlatformClass(PathResolver)
+/** @deprecated Prefer NodePathResolver; kept for CLI / node entry exports. */
+export const PathResolver = NodePathResolver
 
-export { PathResolver }
+BasePathResolver.configure(new NodePathResolver())
 
+const _check: IPathResolver = new NodePathResolver()
+void _check

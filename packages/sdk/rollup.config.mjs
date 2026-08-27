@@ -101,6 +101,8 @@ const config = [
       main: 'src/index.ts',
       node: 'src/node/index.ts',
       vite: 'src/vite/index.ts', // Separate entry for vite plugin (Node.js only)
+      'platform.node': 'src/platform/index.node.ts',
+      'platform.browser': 'src/platform/index.browser.ts',
     },
     output: [
       {

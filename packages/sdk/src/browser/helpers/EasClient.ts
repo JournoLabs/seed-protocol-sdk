@@ -1,9 +1,12 @@
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
+import type { IEasClient } from '@seedprotocol/eas'
 import { EAS_ENDPOINT } from '@/client/constants'
 import { GraphQLClient } from 'graphql-request'
 
-class EasClient extends BaseEasClient {
-  static getEasClient() {
+export class BrowserEasClient implements IEasClient {
+  private easClient: GraphQLClient | undefined
+
+  getEasClient(): GraphQLClient {
     if (!this.easClient) {
       this.easClient = new GraphQLClient(EAS_ENDPOINT)
     }
@@ -11,6 +14,7 @@ class EasClient extends BaseEasClient {
   }
 }
 
-BaseEasClient.setPlatformClass(EasClient)
+/** @deprecated Prefer BrowserEasClient */
+export const EasClient = BrowserEasClient
 
-export { EasClient }
+BaseEasClient.configure(new BrowserEasClient())

@@ -7,18 +7,14 @@ import { setupServiceHandlers } from "@/events/services";
 // import { getGlobalService, } from "@/services/global/globalMachine";
 // import { GlobalState } from "@/client/constants";
 import { isBrowser, isNode } from "@/helpers/environment";
-import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager";
 import {
   BaseArweaveClient,
-  BaseEasClient,
-  BaseQueryClient,
   ensureReadGatewaySelected,
   resolveSeedGatewayEndpoints,
   seedGatewayConfigFromSeedConfig,
   setResolvedSeedGatewayEndpoints,
 } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
-import { BaseDb } from '../../db/Db/BaseDb'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -70,41 +66,20 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       throw new Error('Config must include endpoints with filePaths and files')
     }
 
-    let FileManager: typeof BaseFileManager
-    let Db: typeof BaseDb
-    let QueryClient: typeof BaseQueryClient
-    let ArweaveClient: typeof BaseArweaveClient
-    let PathResolver: typeof BasePathResolver
-    let EasClient: typeof BaseEasClient
-
+    // Prefer the condition-resolved factory when available; fall back to explicit
+    // platform imports so source/vitest resolution stays reliable.
+    const { configurePlatform } = await import('../../platform/configurePlatform')
     if (isBrowser()) {
-      FileManager = (await import('../../browser/helpers/FileManager')).FileManager
-      Db = (await import('../../browser/db/Db')).Db
-      QueryClient = (await import('../../browser/helpers/QueryClient')).QueryClient
-      ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
-      PathResolver = (await import('../../browser/helpers/PathResolver')).PathResolver
-      EasClient = (await import('../../browser/helpers/EasClient')).EasClient
+      const { createPlatformServices } = await import('../../platform/index.browser')
+      configurePlatform(createPlatformServices())
     } else if (isNode()) {
-      FileManager = (await import('../../node/helpers/FileManager')).FileManager
-      Db = (await import('../../node/db/Db')).Db
-      QueryClient = (await import('@seedprotocol/eas/node')).QueryClient
-      EasClient = (await import('@seedprotocol/eas/node')).EasClient
-      ArweaveClient = (await import('@seedprotocol/arweave/node')).ArweaveClient
-      PathResolver = (await import('../../node/helpers/PathResolver')).PathResolver
+      const { createPlatformServices } = await import('../../platform/index.node')
+      configurePlatform(createPlatformServices())
     } else {
-      throw new Error(`Unable to determine environment. isBrowser()=${isBrowser()}, isNode()=${isNode()}. Platform-specific implementations could not be loaded.`)
+      throw new Error(
+        `Unable to determine environment. isBrowser()=${isBrowser()}, isNode()=${isNode()}. Platform-specific implementations could not be loaded.`,
+      )
     }
-    
-    if (!FileManager) {
-      throw new Error('FileManager is undefined. Platform-specific FileManager could not be loaded.')
-    }
-    
-    BaseFileManager.setPlatformClass(FileManager)
-    BaseDb.setPlatformClass(Db!)
-    BaseQueryClient.setPlatformClass(QueryClient!)
-    BaseEasClient.setPlatformClass(EasClient!)
-    BaseArweaveClient.setPlatformClass(ArweaveClient!)
-    BasePathResolver.setPlatformClass(PathResolver!)
 
     // Check if cancelled after async imports
     if (cancelled) {
@@ -132,8 +107,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     if (isNode() && !isBrowser() && normalizedFilesDir) {
       const path = (await import('node:path')).default
       const fs = (await import('node:fs')).default
-      const pathResolver = BasePathResolver.getInstance()
-      const dotSeedDir = pathResolver.getDotSeedDir()
+      const dotSeedDir = BasePathResolver.getDotSeedDir()
       
       // Ensure .seed directory exists
       if (!fs.existsSync(dotSeedDir)) {

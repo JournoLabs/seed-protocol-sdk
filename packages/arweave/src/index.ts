@@ -7,6 +7,7 @@ export type { SeedConfigGatewayInput, ClientGatewayContextInput } from './types/
 export * from './ArweaveClient/queries.js'
 export * from './ArweaveClient/BaseArweaveClient.js'
 export { BaseArweaveClient as ArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
+export type { IArweaveClient } from './ArweaveClient/IArweaveClient.js'
 export * from './ArweaveClient/selectReadGateway.js'
 export * from './ArweaveClient/uploadApiVerification.js'
 export * from './ArweaveClient/arweaveL1UploadApi.js'

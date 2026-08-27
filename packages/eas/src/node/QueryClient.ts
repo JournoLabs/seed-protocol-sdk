@@ -1,14 +1,21 @@
 import { BaseQueryClient } from '../QueryClient/BaseQueryClient.js'
 import type { FetchQueryOptions, IQueryClient } from '../QueryClient/IQueryClient.js'
+import type { IQueryClientFactory } from '../QueryClient/IQueryClientFactory.js'
 
-class QueryClient extends BaseQueryClient {
-  static override getQueryClient = (): IQueryClient => ({
-    fetchQuery: async <T>({ queryFn }: FetchQueryOptions<T>): Promise<T> => queryFn(),
-    getQueryData: () => undefined,
-    removeQueries: async () => {},
-  })
+export class NodeQueryClient implements IQueryClientFactory {
+  getQueryClient(): IQueryClient {
+    return {
+      fetchQuery: async <T>({ queryFn }: FetchQueryOptions<T>): Promise<T> => queryFn(),
+      getQueryData: () => undefined,
+      removeQueries: async () => {},
+    }
+  }
 }
 
-BaseQueryClient.setPlatformClass(QueryClient)
+/** @deprecated Prefer NodeQueryClient */
+export const QueryClient = NodeQueryClient
 
-export { QueryClient }
+BaseQueryClient.configure(new NodeQueryClient())
+
+const _check: IQueryClientFactory = new NodeQueryClient()
+void _check

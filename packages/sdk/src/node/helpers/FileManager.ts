@@ -1,55 +1,47 @@
-import * as fsAsync        from 'fs/promises'
-import * as fs             from 'fs'
+import * as fsAsync from 'fs/promises'
+import * as fs from 'fs'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import path                from 'path'
+import type { IFileManager } from '@/helpers/FileManager/IFileManager'
+import path from 'path'
 
-class FileManager extends BaseFileManager {
-
-  static async getFs() {
+export class NodeFileManager implements IFileManager {
+  async getFs() {
     return fs
   }
 
-  static getFsSync() {
+  getFsSync() {
     return fs
   }
 
-  static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+  async getContentUrlFromPath(_path: string): Promise<string | undefined> {
+    throw new Error('Not implemented')
   }
 
-  static async initializeFileSystem(workingDir?: string): Promise<void> {
+  async initializeFileSystem(_workingDir?: string): Promise<void> {
     return // No need to initialize file system in node
   }
 
-  static async downloadAllFiles(): Promise<void> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+  async downloadAllFiles(): Promise<void> {
+    throw new Error('Not implemented')
   }
 
-  static async resizeImage(): Promise<void> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+  async resizeImage(): Promise<void> {
+    throw new Error('Not implemented')
   }
 
-  static async resizeAllImages(): Promise<void> {
-    return new Promise(( resolve, reject ) => {
-      reject(new Error('Not implemented'))
-    })
+  async resizeAllImages(): Promise<void> {
+    throw new Error('Not implemented')
   }
 
-  static async pathExists(filePath: string): Promise<boolean> {
+  async pathExists(filePath: string): Promise<boolean> {
     return await fsAsync.access(filePath).then(() => true).catch(() => false)
   }
 
-  static async listImageFiles(): Promise<string[]> {
+  async listImageFiles(): Promise<string[]> {
     return this.listFiles('images')
   }
 
-  static async listFiles(dir: string): Promise<string[]> {
+  async listFiles(dir: string): Promise<string[]> {
     const targetDir = BaseFileManager.getFilesPath(dir)
     const exists = await this.pathExists(targetDir)
     if (!exists) {
@@ -59,12 +51,11 @@ class FileManager extends BaseFileManager {
     return entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
   }
 
-  static async createDirIfNotExists(filePath: string): Promise<void> {
+  async createDirIfNotExists(filePath: string): Promise<void> {
     await fsAsync.mkdir(filePath, { recursive: true })
   }
 
-  static async waitForFile(filePath: string, interval: number = 1000, timeout: number = 60000): Promise<boolean> {
-    // Check if file exists immediately
+  async waitForFile(filePath: string, interval: number = 1000, timeout: number = 60000): Promise<boolean> {
     const pathExists = await this.pathExists(filePath)
     if (pathExists) {
       return true
@@ -104,18 +95,14 @@ class FileManager extends BaseFileManager {
     })
   }
 
-  static async waitForFileWithContent(filePath: string, interval: number = 100, timeout: number = 5000): Promise<boolean> {
-    // In node, file writes are synchronous, so if the file exists, it has content
-    // Just wait for the file to exist
+  async waitForFileWithContent(filePath: string, interval: number = 100, timeout: number = 5000): Promise<boolean> {
     return this.waitForFile(filePath, interval, timeout)
   }
 
-  static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
-    // Ensure the directory exists
+  async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
     const dir = path.dirname(filePath)
     await fsAsync.mkdir(dir, { recursive: true })
 
-    // Write the content based on type
     if (typeof content === 'string') {
       await fsAsync.writeFile(filePath, content, 'utf-8')
     } else if (content instanceof Blob) {
@@ -128,20 +115,15 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
-    // Ensure the directory exists
+  saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
     const dir = path.dirname(filePath)
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
     }
 
-    // Write the content based on type
     if (typeof content === 'string') {
       fs.writeFileSync(filePath, content, 'utf-8')
     } else if (content instanceof Blob) {
-      // For Blob, we need to convert to Buffer synchronously
-      // This is a limitation - we can't do this truly synchronously
-      // But we can read it as ArrayBuffer if it's already available
       throw new Error('Blob content not supported in saveFileSync. Use saveFile() instead or convert to ArrayBuffer first.')
     } else if (content instanceof ArrayBuffer) {
       fs.writeFileSync(filePath, new Uint8Array(content))
@@ -150,34 +132,39 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static async readFileAsBuffer( filePath: string ): Promise<Buffer> {
+  async readFileAsBuffer(filePath: string): Promise<Buffer> {
     return await fsAsync.readFile(filePath)
   }
 
-  static async readFileAsString(filePath: string): Promise<string> {
+  async readFileAsString(filePath: string): Promise<string> {
     return await fsAsync.readFile(filePath, 'utf-8')
   }
 
-  static async readFile(filePath: string): Promise<File> {
+  async readFile(filePath: string): Promise<File> {
     return new File([await fsAsync.readFile(filePath)], filePath)
   }
 
-  static readFileSync(filePath: string): File {
+  readFileSync(filePath: string): File {
     return new File([fs.readFileSync(filePath)], filePath)
   }
 
-  static getParentDirPath(filePath: string): string {
+  getParentDirPath(filePath: string): string {
     return path.dirname(filePath)
   }
 
-  static getFilenameFromPath(filePath: string): string {
+  getFilenameFromPath(filePath: string): string {
     return path.basename(filePath)
   }
 
-  static getPathModule(): any {
+  getPathModule(): any {
     return path
   }
 }
 
-export { FileManager }
+/** @deprecated Prefer NodeFileManager */
+export const FileManager = NodeFileManager
 
+BaseFileManager.configure(new NodeFileManager())
+
+const _check: IFileManager = new NodeFileManager()
+void _check

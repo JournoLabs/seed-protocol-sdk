@@ -198,37 +198,33 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
   })
 
   describe('cache key behavior (queryKey includes parameters)', () => {
-    let originalPlatformClass: typeof BaseQueryClient
     const recordedQueryKeys: unknown[][] = []
+    let restoreQueryClient: (() => void) | undefined
 
     beforeEach(() => {
-      originalPlatformClass = BaseQueryClient.PlatformClass
       recordedQueryKeys.length = 0
 
-      // Use a QueryClient that records queryKeys and delegates to real implementation
-      // (real network - no mocking, just observation for cache key verification)
-      class RecordingQueryClient extends BaseQueryClient {
-        static getQueryClient(): IQueryClient {
-          const realClient = NodeQueryClient.getQueryClient()
-          return {
-            fetchQuery: async (options) => {
-              recordedQueryKeys.push(options.queryKey)
-              return realClient.fetchQuery(options)
-            },
-            getQueryData: () => {
-              throw new Error('Not implemented')
-            },
-            removeQueries: async (filters) => {
-              await realClient.removeQueries(filters)
-            },
-          }
-        }
-      }
-      BaseQueryClient.setPlatformClass(RecordingQueryClient as typeof BaseQueryClient)
+      const realClient = new NodeQueryClient().getQueryClient()
+      BaseQueryClient.configure({
+        getQueryClient: (): IQueryClient => ({
+          fetchQuery: async (options) => {
+            recordedQueryKeys.push(options.queryKey)
+            return realClient.fetchQuery(options)
+          },
+          getQueryData: () => {
+            throw new Error('Not implemented')
+          },
+          removeQueries: async (filters) => {
+            await realClient.removeQueries(filters)
+          },
+        }),
+      })
     })
 
     afterEach(() => {
-      BaseQueryClient.setPlatformClass(originalPlatformClass)
+      // Re-register node query client after test
+      BaseQueryClient.configure(new NodeQueryClient())
+      restoreQueryClient?.()
     })
 
     it('getItemVersionsFromEas includes seedUids in queryKey', async () => {

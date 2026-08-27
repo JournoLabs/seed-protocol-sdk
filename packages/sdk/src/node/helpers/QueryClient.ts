@@ -1,3 +1,5 @@
-import { QueryClient } from '@seedprotocol/eas/node'
+import { NodeQueryClient } from '@seedprotocol/eas/node'
 
-export { QueryClient }
+/** @deprecated Prefer NodeQueryClient */
+export const QueryClient = NodeQueryClient
+export { NodeQueryClient }

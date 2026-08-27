@@ -17,28 +17,25 @@ import { Observable, distinctUntilChanged } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
 
 
-class Db extends BaseDb implements IDb {
+export class BrowserDb implements IDb {
 
-  static sqliteWasmClient: any
-  static filesDir: string | undefined
-  static pathToDb: string | undefined
-  static dbId: string | undefined
-  static appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
-  static sqlocalInstance: SQLocalDrizzle | undefined
+  sqliteWasmClient: any
+  filesDir: string | undefined
+  pathToDb: string | undefined
+  dbId: string | undefined
+  appDb: SqliteRemoteDatabase<Record<string, unknown>> | undefined
+  sqlocalInstance: SQLocalDrizzle | undefined
 
-  constructor() {
-    super()
-  }
 
-  static getAppDb() {
+  getAppDb() {
     return this.appDb
   }
 
-  static isAppDbReady() {
+  isAppDbReady() {
     return !!this.appDb
   }
 
-  static async prepareDb(filesDir: string) {
+  async prepareDb(filesDir: string) {
 
     logger('[Db.prepareDb] preparing database')
 
@@ -181,14 +178,14 @@ class Db extends BaseDb implements IDb {
   //   await this.migrate()
   // }
 
-  static async connectToDb(filesDir: string,): Promise<string | undefined> {
+  async connectToDb(filesDir: string,): Promise<string | undefined> {
 
 
 
     return this.dbId
   }
 
-  static async copyDrizzleFiles(filesDir: string): Promise<void> {
+  async copyDrizzleFiles(filesDir: string): Promise<void> {
     logger('[Db.copyDrizzleFiles] copying drizzle migration files')
 
     try {
@@ -256,7 +253,7 @@ class Db extends BaseDb implements IDb {
   }
 
   /** Internal migration runner. Used by prepareDb before appDb is set. */
-  private static async runMigrations(
+  private async runMigrations(
     db: SqliteRemoteDatabase<Record<string, unknown>>,
     pathToDbDir?: string
   ): Promise<void> {
@@ -289,7 +286,7 @@ class Db extends BaseDb implements IDb {
     }
   }
 
-  static async migrate(pathToDbDir: string, _dbName: string, _dbId: string): Promise<void> {
+  async migrate(pathToDbDir: string, _dbName: string, _dbId: string): Promise<void> {
     const targetDb = this.appDb
     if (!targetDb) {
       throw new Error('Database not prepared')
@@ -327,7 +324,7 @@ class Db extends BaseDb implements IDb {
    * })
    * ```
    */
-  static liveQuery<T>(
+  liveQuery<T>(
     query: ((sql: any) => any) | any
   ): Observable<T[]> {
     if (!this.sqlocalInstance) {
@@ -368,4 +365,10 @@ class Db extends BaseDb implements IDb {
   }
 }
 
-export { Db }
+/** @deprecated Prefer BrowserDb */
+export const Db = BrowserDb
+
+BaseDb.configure(new BrowserDb())
+
+const _check: IDb = new BrowserDb()
+void _check

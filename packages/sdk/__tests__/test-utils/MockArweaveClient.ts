@@ -1,19 +1,19 @@
 /**
  * MockArweaveClient for testing
- * 
+ *
  * This mock implementation allows tests to control Arweave behavior without
- * making real network requests. Use this by setting it as the platform class:
- * 
+ * making real network requests. Use this by configuring it on the facade:
+ *
  * @example
  * ```typescript
  * import { MockArweaveClient } from '../test-utils/MockArweaveClient'
  * import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
- * 
+ *
  * beforeEach(() => {
- *   BaseArweaveClient.setPlatformClass(MockArweaveClient)
+ *   BaseArweaveClient.configure(new MockArweaveClient())
  *   MockArweaveClient.reset()
  * })
- * 
+ *
  * it('should download a file', async () => {
  *   MockArweaveClient.addMockTransaction('tx123', new TextEncoder().encode('test content'))
  *   const data = await BaseArweaveClient.getTransactionData('tx123')
@@ -22,7 +22,7 @@
  * ```
  */
 
-import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
+import type { IArweaveClient } from '@seedprotocol/arweave'
 import { GraphQLClient } from 'graphql-request'
 import type {
   TransactionStatus,
@@ -46,34 +46,30 @@ type MockCreatedTransaction = {
   tags: TransactionTag[]
 }
 
-class MockArweaveClient extends BaseArweaveClient {
-  // Storage for mock transactions
-  private static mockTransactions = new Map<string, MockTransaction>()
-  
-  // Storage for created transactions (for testing createTransaction)
-  private static createdTransactions: MockCreatedTransaction[] = []
-  
-  // Counter for generating mock transaction IDs
-  private static transactionIdCounter = 0
-  
-  // Custom host for testing
-  private static mockHost = 'arweave.net'
+/** Shared mock state so static helpers and configured instances stay in sync for tests. */
+const shared = {
+  mockTransactions: new Map<string, MockTransaction>(),
+  createdTransactions: [] as MockCreatedTransaction[],
+  transactionIdCounter: 0,
+  mockHost: 'arweave.net',
+}
 
+export class MockArweaveClient implements IArweaveClient {
   /**
    * Reset all mock data
    */
   static reset(): void {
-    this.mockTransactions.clear()
-    this.createdTransactions = []
-    this.transactionIdCounter = 0
-    this.mockHost = 'arweave.net'
+    shared.mockTransactions.clear()
+    shared.createdTransactions = []
+    shared.transactionIdCounter = 0
+    shared.mockHost = 'arweave.net'
   }
 
   /**
    * Set a custom mock host
    */
   static setMockHost(host: string): void {
-    this.mockHost = host
+    shared.mockHost = host
   }
 
   /**
@@ -88,10 +84,9 @@ class MockArweaveClient extends BaseArweaveClient {
       confirmed?: TransactionStatus['confirmed']
     }
   ): void {
-    // Check if 'confirmed' was explicitly provided (including null)
     const hasExplicitConfirmed = options && 'confirmed' in options
     
-    this.mockTransactions.set(id, {
+    shared.mockTransactions.set(id, {
       data,
       tags: options?.tags || [],
       status: options?.status ?? 200,
@@ -109,34 +104,49 @@ class MockArweaveClient extends BaseArweaveClient {
    * Remove a mock transaction
    */
   static removeMockTransaction(id: string): void {
-    this.mockTransactions.delete(id)
+    shared.mockTransactions.delete(id)
   }
 
   /**
    * Get all created transactions (useful for verifying createTransaction was called)
    */
   static getCreatedTransactions(): MockCreatedTransaction[] {
-    return [...this.createdTransactions]
+    return [...shared.createdTransactions]
   }
 
   /**
    * Get the last created transaction
    */
   static getLastCreatedTransaction(): MockCreatedTransaction | undefined {
-    return this.createdTransactions[this.createdTransactions.length - 1]
+    return shared.createdTransactions[shared.createdTransactions.length - 1]
   }
 
-  // ============================================
-  // Implementation of BaseArweaveClient methods
-  // ============================================
-
-  static getArweaveClient(): GraphQLClient {
-    // Return a mock GraphQL client that doesn't actually make requests
-    return new GraphQLClient(`https://${this.mockHost}/graphql`)
+  reset(): void {
+    MockArweaveClient.reset()
   }
 
-  static async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
-    const tx = this.mockTransactions.get(transactionId)
+  setMockHost(host: string): void {
+    MockArweaveClient.setMockHost(host)
+  }
+
+  addMockTransaction(
+    id: string,
+    data: Uint8Array,
+    options?: {
+      tags?: TransactionTag[]
+      status?: number
+      confirmed?: TransactionStatus['confirmed']
+    }
+  ): void {
+    MockArweaveClient.addMockTransaction(id, data, options)
+  }
+
+  getArweaveClient(): GraphQLClient {
+    return new GraphQLClient(`https://${shared.mockHost}/graphql`)
+  }
+
+  async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
+    const tx = shared.mockTransactions.get(transactionId)
     
     if (!tx) {
       return {
@@ -151,11 +161,11 @@ class MockArweaveClient extends BaseArweaveClient {
     }
   }
 
-  static async getTransactionData(
+  async getTransactionData(
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
-    const tx = this.mockTransactions.get(transactionId)
+    const tx = shared.mockTransactions.get(transactionId)
     
     if (!tx) {
       throw new Error(`Transaction ${transactionId} not found`)
@@ -168,8 +178,8 @@ class MockArweaveClient extends BaseArweaveClient {
     return tx.data
   }
 
-  static async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
-    const tx = this.mockTransactions.get(transactionId)
+  async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
+    const tx = shared.mockTransactions.get(transactionId)
     
     if (!tx) {
       return []
@@ -178,14 +188,12 @@ class MockArweaveClient extends BaseArweaveClient {
     return tx.tags
   }
 
-  static async createTransaction(
+  async createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions
   ): Promise<any> {
-    // Generate a mock transaction ID
-    const id = `mock-tx-${++this.transactionIdCounter}`
+    const id = `mock-tx-${++shared.transactionIdCounter}`
     
-    // Convert data to Uint8Array if string
     const dataArray = typeof data === 'string' 
       ? new TextEncoder().encode(data)
       : data
@@ -196,9 +204,8 @@ class MockArweaveClient extends BaseArweaveClient {
       tags: options?.tags || [],
     }
 
-    this.createdTransactions.push(mockTx)
+    shared.createdTransactions.push(mockTx)
 
-    // Return a mock transaction object that mimics the Arweave transaction structure
     return {
       id,
       data: dataArray,
@@ -209,17 +216,16 @@ class MockArweaveClient extends BaseArweaveClient {
     }
   }
 
-  static async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
+  async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
     const { transactionIds, excludedTransactions } = params
     const results: DownloadResult[] = []
 
     for (const transactionId of transactionIds) {
-      // Skip excluded transactions
       if (excludedTransactions?.has(transactionId)) {
         continue
       }
 
-      const tx = this.mockTransactions.get(transactionId)
+      const tx = shared.mockTransactions.get(transactionId)
 
       if (!tx) {
         results.push({
@@ -250,5 +256,3 @@ class MockArweaveClient extends BaseArweaveClient {
     return results
   }
 }
-
-export { MockArweaveClient }

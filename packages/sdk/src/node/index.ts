@@ -62,10 +62,9 @@ export {
 } from './helpers/scripts'
 export { INIT_SCRIPT_SUCCESS_MESSAGE, SCHEMA_TS } from '../helpers/constants'
 
-// Side effect imports for CLI — register platform classes in tier-1 packages
-import '@seedprotocol/eas/node'
-import '@seedprotocol/arweave/node'
-import './helpers/FileManager'
-import './helpers/PathResolver'
+// Side effect imports for CLI — register platform services
+import { createPlatformServices } from '../platform/index.node'
+import { configurePlatform } from '../platform/configurePlatform'
+configurePlatform(createPlatformServices())
 
 enableMapSet() 

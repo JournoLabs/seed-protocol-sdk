@@ -1,4 +1,5 @@
 import { BaseArweaveClient } from "@/helpers/ArweaveClient/BaseArweaveClient";
+import type { IArweaveClient } from "@seedprotocol/arweave";
 import { GraphQLClient } from "graphql-request";
 import Arweave from "arweave";
 import type {
@@ -48,18 +49,12 @@ const getArweaveInstance = (): Arweave => {
   return _arweaveInstance!;
 };
 
-class ArweaveClient extends BaseArweaveClient {
-  /**
-   * Get the GraphQL client for Arweave queries
-   */
-  static getArweaveClient(): GraphQLClient {
+export class BrowserArweaveClient implements IArweaveClient {
+  getArweaveClient(): GraphQLClient {
     return new GraphQLClient(BaseArweaveClient.getEndpoint());
   }
 
-  /**
-   * Get the status of a transaction
-   */
-  static async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
+  async getTransactionStatus(transactionId: string): Promise<TransactionStatus> {
     const url = BaseArweaveClient.getStatusUrl(transactionId);
 
     try {
@@ -96,10 +91,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Get transaction data
-   */
-  static async getTransactionData(
+  async getTransactionData(
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
@@ -132,10 +124,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Get transaction tags via GraphQL
-   */
-  static async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
+  async getTransactionTags(transactionId: string): Promise<TransactionTag[]> {
     const client = this.getArweaveClient();
     
     try {
@@ -155,10 +144,7 @@ class ArweaveClient extends BaseArweaveClient {
     }
   }
 
-  /**
-   * Create a new unsigned transaction
-   */
-  static async createTransaction(
+  async createTransaction(
     data: string | Uint8Array,
     options?: CreateTransactionOptions
   ): Promise<any> {
@@ -178,10 +164,7 @@ class ArweaveClient extends BaseArweaveClient {
     return tx;
   }
 
-  /**
-   * Download multiple files from Arweave
-   */
-  static async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
+  async downloadFiles(params: DownloadFilesParams): Promise<DownloadResult[]> {
     const { transactionIds, excludedTransactions } = params;
     const results: DownloadResult[] = [];
     const baseUrl = BaseArweaveClient.getBaseUrl();
@@ -231,6 +214,7 @@ class ArweaveClient extends BaseArweaveClient {
   }
 }
 
-BaseArweaveClient.setPlatformClass(ArweaveClient);
+/** @deprecated Prefer BrowserArweaveClient */
+export const ArweaveClient = BrowserArweaveClient;
 
-export { ArweaveClient };
+BaseArweaveClient.configure(new BrowserArweaveClient());

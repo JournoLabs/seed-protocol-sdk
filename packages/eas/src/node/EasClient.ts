@@ -1,9 +1,12 @@
 import { BaseEasClient } from '../EasClient/BaseEasClient.js'
+import type { IEasClient } from '../EasClient/IEasClient.js'
 import { EAS_ENDPOINT } from '../constants.js'
 import { GraphQLClient } from 'graphql-request'
 
-class EasClient extends BaseEasClient {
-  static override getEasClient() {
+export class NodeEasClient implements IEasClient {
+  private easClient: GraphQLClient | undefined
+
+  getEasClient(): GraphQLClient {
     if (!this.easClient) {
       this.easClient = new GraphQLClient(EAS_ENDPOINT)
     }
@@ -11,6 +14,10 @@ class EasClient extends BaseEasClient {
   }
 }
 
-BaseEasClient.setPlatformClass(EasClient)
+/** @deprecated Prefer NodeEasClient */
+export const EasClient = NodeEasClient
 
-export { EasClient }
+BaseEasClient.configure(new NodeEasClient())
+
+const _check: IEasClient = new NodeEasClient()
+void _check

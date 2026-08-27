@@ -1,30 +1,40 @@
 import type { Attestation } from '../graphql/gql/graphql.js'
-import { GraphQLClient } from 'graphql-request'
+import type { GraphQLClient } from 'graphql-request'
+import type { IEasClient } from './IEasClient.js'
 
 export abstract class BaseEasClient {
-  static PlatformClass: typeof BaseEasClient
-  protected static easClient: GraphQLClient
+  private static _impl: IEasClient | null = null
 
-  static setPlatformClass(platformClass: typeof BaseEasClient) {
-    if (!platformClass) {
+  static configure(impl: IEasClient): void {
+    if (!impl) {
       throw new Error(
-        'Cannot set PlatformClass to undefined or null. Ensure the platform-specific EasClient is properly imported.',
+        'Cannot configure EasClient with undefined or null. Ensure the platform-specific EasClient is properly created.',
       )
     }
-    if (platformClass === BaseEasClient) {
+    BaseEasClient._impl = impl
+  }
+
+  private static requireImpl(): IEasClient {
+    if (!BaseEasClient._impl) {
       throw new Error(
-        'Cannot set PlatformClass to BaseEasClient itself. Use a platform-specific implementation.',
+        'EasClient not configured. Import from @seedprotocol/eas/node to register the Node.js implementation, or ensure SDK platform init has run.',
       )
     }
-    this.PlatformClass = platformClass
+    return BaseEasClient._impl
   }
 
   static getEasClient(): GraphQLClient {
-    return this.PlatformClass.getEasClient()
+    return BaseEasClient.requireImpl().getEasClient()
   }
 
-  static async getSeedsBySchemaName(schemaName: string): Promise<Attestation[]> {
-    return this.PlatformClass.getSeedsBySchemaName(schemaName)
+  /**
+   * @deprecated Prefer getSeedsBySchemaName from @seedprotocol/eas api helpers.
+   * Kept for API compatibility; not implemented by platform clients.
+   */
+  static async getSeedsBySchemaName(_schemaName: string): Promise<Attestation[]> {
+    throw new Error(
+      'BaseEasClient.getSeedsBySchemaName is not implemented. Use getSeedsBySchemaName from @seedprotocol/eas instead.',
+    )
   }
 }
 

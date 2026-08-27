@@ -1,4 +1,10 @@
-import { BaseFileManager }     from '@/helpers/FileManager/BaseFileManager'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import type {
+  DownloadAllFilesParams,
+  IFileManager,
+  ResizeAllImagesParams,
+  ResizeImageParams,
+} from '@/helpers/FileManager/IFileManager'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
 import debug from 'debug'
@@ -109,24 +115,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-class FileManager extends BaseFileManager {
-  private static zenfsCache: any = null
+export class BrowserFileManager implements IFileManager {
+  private zenfsCache: any = null
 
-  static async getFs() {
+  async getFs() {
     if (!this.zenfsCache) {
       this.zenfsCache = await import('@zenfs/core')
     }
     return this.zenfsCache
   }
 
-  static getFsSync() {
+  getFsSync() {
     if (!this.zenfsCache) {
       throw new Error('File system not initialized. Call getFs() or initializeFileSystem() first.')
     }
     return this.zenfsCache
   }
 
-  static async getContentUrlFromPath( path: string ): Promise<string | undefined> {
+  async getContentUrlFromPath( path: string ): Promise<string | undefined> {
 
     const fileExists = await this.pathExists(path)
     if ( fileExists ) {
@@ -135,7 +141,7 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static async initializeFileSystem(workingDir?: string): Promise<void> {
+  async initializeFileSystem(workingDir?: string): Promise<void> {
 
     const zenfs = await this.getFs()
     const zenfsDomMod = await import('@zenfs/dom')
@@ -160,7 +166,7 @@ class FileManager extends BaseFileManager {
     // Cache is already set in getFs(), so no need to set it again
   }
 
-  static async downloadAllFiles( {
+  async downloadAllFiles( {
                                    transactionIds,
                                    arweaveHost,
                                    excludedTransactions,
@@ -169,21 +175,21 @@ class FileManager extends BaseFileManager {
     await fileDownloader.downloadAll({ transactionIds, arweaveHost, excludedTransactions })
   }
 
-  static async resizeImage( { filePath, width, height }: ResizeImageParams ): Promise<void> {
+  async resizeImage( { filePath, width, height }: ResizeImageParams ): Promise<void> {
     const imageResizer = new ImageResizer()
     await imageResizer.resize({ filePath, width, height })
   }
 
-  static async resizeAllImages( { width, height }: ResizeAllImagesParams ): Promise<void> {
+  async resizeAllImages( { width, height }: ResizeAllImagesParams ): Promise<void> {
     const imageResizer = new ImageResizer()
     await imageResizer.resizeAll({ width, height })
   }
 
-  static async listImageFiles(): Promise<string[]> {
+  async listImageFiles(): Promise<string[]> {
     return this.listFiles('images')
   }
 
-  static async listFiles(dir: string): Promise<string[]> {
+  async listFiles(dir: string): Promise<string[]> {
     const targetDir = BaseFileManager.getFilesPath(dir)
     const exists = await this.pathExists(targetDir)
     if (!exists) {
@@ -194,7 +200,7 @@ class FileManager extends BaseFileManager {
     return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
   }
 
-  static async pathExists(filePath: string): Promise<boolean> {
+  async pathExists(filePath: string): Promise<boolean> {
     try {
       const zenfs = await this.getFs()
       await zenfs.promises.access(filePath, zenfs.constants.F_OK)
@@ -209,7 +215,7 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static async createDirIfNotExists(filePath: string): Promise<void> {
+  async createDirIfNotExists(filePath: string): Promise<void> {
     if (!(await this.pathExists(filePath))) {
       try {
         const zenfs = await this.getFs()
@@ -228,7 +234,7 @@ class FileManager extends BaseFileManager {
    * @param {number} timeout - The timeout in milliseconds to wait for the file to exist (default: 10s).
    * @returns {Promise<boolean>} - Resolves to true if the file exists within the timeout period, otherwise false.
    */
-  static async waitForFile(filePath: string, interval: number = 1000, timeout: number = 60000): Promise<boolean> {
+  async waitForFile(filePath: string, interval: number = 1000, timeout: number = 60000): Promise<boolean> {
 
     // const fs = await this.getFs()
     // const fsNode = await import('node:fs')
@@ -328,7 +334,7 @@ class FileManager extends BaseFileManager {
    * @param {number} timeout - The timeout in milliseconds to wait (default: 5s).
    * @returns {Promise<boolean>} - Resolves to true if the file exists with content within the timeout period.
    */
-  static async waitForFileWithContent(filePath: string, interval: number = 100, timeout: number = 5000): Promise<boolean> {
+  async waitForFileWithContent(filePath: string, interval: number = 100, timeout: number = 5000): Promise<boolean> {
     // First wait for file to exist
     await this.waitForFile(filePath, interval, timeout)
 
@@ -384,7 +390,7 @@ class FileManager extends BaseFileManager {
     })
   }
 
-  static async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
+  async saveFile(filePath: string, content: string | Blob | ArrayBuffer): Promise<void> {
     const zenfs = await this.getFs()
     
     // Convert content to a format that zenfs.writeFile accepts
@@ -442,7 +448,7 @@ class FileManager extends BaseFileManager {
     // }
   }
 
-  static saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
+  saveFileSync(filePath: string, content: string | Blob | ArrayBuffer): void {
     // Note: This is a synchronous wrapper, but zenfs operations may still be async under the hood
     // For true sync operations in browser, we'd need to use OPFS sync access handles
     // For now, we'll use zenfs.writeFileSync which should be available
@@ -464,7 +470,7 @@ class FileManager extends BaseFileManager {
     zenfs.writeFileSync(filePath, writeContent)
   }
 
-  static async readFile(filePath: string): Promise<File> {
+  async readFile(filePath: string): Promise<File> {
     const zenfs = await this.getFs()
     const maxAttempts = 3
     const baseDelayMs = 50
@@ -508,7 +514,7 @@ class FileManager extends BaseFileManager {
     // }
   }
 
-  static readFileSync(filePath: string): File {
+  readFileSync(filePath: string): File {
     // Note: This is a synchronous wrapper, but zenfs operations may still be async under the hood
     // For true sync operations in browser, we'd need to use OPFS sync access handles
     // For now, we'll use zenfs.readFileSync which should be available
@@ -517,7 +523,7 @@ class FileManager extends BaseFileManager {
     return new File([new Uint8Array(file)], filePath)
   }
 
-  static async readFileAsBuffer(filePath: string): Promise<Blob> {
+  async readFileAsBuffer(filePath: string): Promise<Blob> {
     try {
       // Get the file and read it as an ArrayBuffer
       const file = await this.readFile(filePath)
@@ -532,20 +538,20 @@ class FileManager extends BaseFileManager {
     }
   }
 
-  static async readFileAsString(filePath: string): Promise<string> {
+  async readFileAsString(filePath: string): Promise<string> {
     const blob = await this.readFileAsBuffer(filePath)
     return blob.text()
   }
 
-  static getParentDirPath(filePath: string): string {
+  getParentDirPath(filePath: string): string {
     return pathCompat.dirname(filePath)
   }
 
-  static getFilenameFromPath(filePath: string): string {
+  getFilenameFromPath(filePath: string): string {
     return pathCompat.basename(filePath)
   }
 
-  static getPathModule(): any {
+  getPathModule(): any {
     return pathCompat
   }
 }
@@ -601,5 +607,10 @@ class CancelableInterval {
     }
 }
 
+/** @deprecated Prefer BrowserFileManager */
+export const FileManager = BrowserFileManager
 
-export { FileManager }
+BaseFileManager.configure(new BrowserFileManager())
+
+const _check: IFileManager = new BrowserFileManager()
+void _check
