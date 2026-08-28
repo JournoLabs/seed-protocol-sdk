@@ -42,8 +42,7 @@ export const createModelProperties = fromCallback<
         for (const [propName, propData] of Object.entries(propertyDefinitions)) {
           // Use provided ID or generate a random one
           // IDs should be generated in the import process before creating properties
-          const helpersMod = await import('../../../helpers')
-          const { generateId } = helpersMod
+          const { generateId } = await import('../../../helpers/generateId')
           const propertyFileId = propData.id || generateId()
           
           logger(`Creating property "${propName}" with fileId "${propertyFileId}"`)

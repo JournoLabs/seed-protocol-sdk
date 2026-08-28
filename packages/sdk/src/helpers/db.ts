@@ -1057,8 +1057,7 @@ export const addModelsToDb = async (
       // If no propertyFileId from map, generate a random ID
       // IDs should be generated in the import process before calling addModelsToDb
       if (!propertyFileId) {
-        const helpersIndexMod = await import('./index')
-        const { generateId } = helpersIndexMod
+        const { generateId } = await import('./generateId')
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${modelName}:${propertyName}" (not found in propertyFileIds map)`)
       }
@@ -1921,8 +1920,7 @@ export async function writeModelToDb(
       } else {
         // Generate random propertyFileId
         // IDs should be generated in the import process before calling writeModelToDb
-        const helpersIndexMod = await import('./index')
-        const { generateId } = helpersIndexMod
+        const { generateId } = await import('./generateId')
         propertyFileId = generateId()
         logger(`Generated propertyFileId "${propertyFileId}" for property "${data.modelName}:${propName}"`)
       }

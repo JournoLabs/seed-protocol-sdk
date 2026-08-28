@@ -1,5 +1,3 @@
-import { customAlphabet } from 'nanoid'
-import * as nanoIdDictionary from 'nanoid-dictionary'
 import debug from 'debug'
 import { GetCorrectId } from '@/types/helpers'
 import { GetCorrectIdReturn } from '@/types/helpers'
@@ -13,32 +11,43 @@ import {
   getResolvedSeedGatewayEndpoints,
   setResolvedSeedGatewayEndpoints,
 } from '@seedprotocol/arweave'
-export { BaseArweaveClient }
+import { BaseEasClient, BaseQueryClient } from '@seedprotocol/eas'
+
 export {
+  BaseArweaveClient,
   ensureReadGatewaySelected,
   resolveSeedGatewayEndpoints,
   getReadGatewayHostsForConfig,
   seedGatewayConfigFromSeedConfig,
   getResolvedSeedGatewayEndpoints,
   setResolvedSeedGatewayEndpoints,
+  BaseEasClient,
+  BaseQueryClient,
 }
-import { BaseEasClient } from './EasClient/BaseEasClient'
-export { BaseEasClient }
-import { BaseQueryClient } from './QueryClient/BaseQueryClient'
-export { BaseQueryClient }
+
+// Exported object keeps external facade bindings live for Rollup. Dynamic
+// `await import('@/helpers')` otherwise emits a frozen module-namespace that
+// can reference tree-shaken imports → ReferenceError in the browser.
+export const __rollupExternalFacadeInterop = {
+  BaseArweaveClient,
+  BaseEasClient,
+  BaseQueryClient,
+  ensureReadGatewaySelected,
+  resolveSeedGatewayEndpoints,
+  getReadGatewayHostsForConfig,
+  seedGatewayConfigFromSeedConfig,
+  getResolvedSeedGatewayEndpoints,
+  setResolvedSeedGatewayEndpoints,
+} as const
+
 export * from './FileManager/BaseFileManager'
 export { waitForEntityIdle } from './waitForEntityIdle'
 export * from './publishConfig'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'
 export * from './mediaRef'
+export { generateId } from './generateId'
 const logger = debug('seedSdk:shared:helpers')
-
-const { alphanumeric } = nanoIdDictionary
-
-export const generateId = (): string => {
-  return customAlphabet(alphanumeric, 10)()
-}
 
 export const toSnakeCase = (str: string) => {
   return str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()

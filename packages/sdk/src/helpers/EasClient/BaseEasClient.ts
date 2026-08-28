@@ -1,3 +1,1 @@
-import { BaseEasClient } from '@seedprotocol/eas'
-
-export { BaseEasClient }
+export { BaseEasClient } from '@seedprotocol/eas'

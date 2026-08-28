@@ -1,7 +1,7 @@
 import { execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
-import { Db } from '@/node/db/Db'
+import { BaseDb } from '@/db/Db/BaseDb'
 
 export const commandExists = (command: string): boolean => {
   try {
@@ -49,7 +49,7 @@ export const ensureNodeDbSchema = async (
     throw new Error('ensureNodeDbSchema requires appFilesDirPath')
   }
 
-  await Db.prepareDb(appFilesDirPath)
+  await BaseDb.prepareDb(appFilesDirPath)
 }
 
 /** @deprecated Use ensureNodeDbSchema */

@@ -2,16 +2,14 @@ import { BaseArweaveClient } from './BaseArweaveClient'
 import Arweave from 'arweave'
 import { isBrowser } from '../environment'
 
-let ArweaveClient: typeof BaseArweaveClient | undefined
+/** @deprecated Prefer BaseArweaveClient facade after configure() */
+export const ArweaveClient = BaseArweaveClient
 
 export const initArweaveClient = async () => {
   if (isBrowser()) {
-    ArweaveClient = (await import('../../browser/helpers/ArweaveClient')).ArweaveClient
+    const { BrowserArweaveClient } = await import('../../browser/helpers/ArweaveClient')
+    BaseArweaveClient.configure(new BrowserArweaveClient())
   }
-
-  // if (!isBrowser()) {
-  //   ArweaveClient = (await import('../../node/helpers/ArweaveClient')).ArweaveClient
-  // }
 }
 
 /**
@@ -69,5 +67,3 @@ export const setArweaveDomain = (newDomain: string): void => {
 export const getArweaveDomain = (): string => {
   return BaseArweaveClient.getHost()
 }
-
-export { ArweaveClient }
