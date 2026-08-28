@@ -9,6 +9,7 @@ import {
   deployManagedAccountViaFactory,
   isSmartWalletDeployed,
   pollSmartWalletDeployed,
+  syncPublishInAppAuthToken,
 } from './thirdweb'
 import { getPublishConfig } from '../config'
 import { isManagedAccountPublishError, ManagedAccountPublishError, stringifyUnderlyingCause } from '../errors'
@@ -57,6 +58,7 @@ export async function ensureManagedAccountReady(): Promise<EnsureManagedAccountR
 }
 
 async function getManagedAccountSigningAccount() {
+  syncPublishInAppAuthToken()
   const managedWallet = getManagedAccountWallet()
   await managedWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
   const acc = managedWallet.getAccount()

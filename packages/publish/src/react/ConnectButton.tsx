@@ -13,7 +13,9 @@ import {
   getConnectedManagedAccountAddress,
   getManagedAccountWallet,
   getModularAccountWallet,
+  getSmartWalletAddressForAdmin,
   getWalletsForConnectButton,
+  syncPublishInAppAuthToken,
 } from "../helpers/thirdweb"
 import { fromThirdwebAccount } from "../helpers/adapters/thirdwebAccount"
 import { setPublishWallet, clearPublishWallet } from "../helpers/publishWalletRegistry"
@@ -29,7 +31,8 @@ import { PublishManager } from "../services/publishManager"
 const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
 
 function reportWalletSetupWarning(err: unknown) {
-  console.error("[ConnectButton] Wallet setup / module install failed:", err)
+  // Expected when managed-wallet autoConnect is still catching up; publish prep retries.
+  console.warn("[ConnectButton] Wallet setup / module install skipped:", err)
   getPublishConfig().onWalletSetupWarning?.(err)
 }
 
@@ -57,24 +60,19 @@ async function ensureExecutorModulesForConnect(
 
   if (config.useModularExecutor) {
     if (!managedAddress) {
-      reportWalletSetupWarning(
-        new Error(
-          'Executor module: managed account address not available yet (managed wallet may still be syncing).',
-        ),
-      )
       return
     }
     try {
+      syncPublishInAppAuthToken()
       const mw = getManagedAccountWallet()
       await mw.autoConnect({ client: getClient(), chain: optimismSepolia })
       const ma = mw.getAccount()
       if (!ma) {
-        reportWalletSetupWarning(new Error('Executor module: managed wallet has no account'))
         return
       }
       await ensureExecutorModuleInstalled(managedAddress, ma, config)
-    } catch (err) {
-      reportWalletSetupWarning(err)
+    } catch {
+      /* managed wallet session may lag modular connect; publish prep retries module install */
     }
     return
   }
@@ -150,11 +148,18 @@ const ConnectButton: FC = () => {
       const owned = new Set<string>([account.address.toLowerCase()])
       let managedAddress: string | undefined
       if (config.useModularExecutor) {
+        syncPublishInAppAuthToken()
+        const adminAddress =
+          activeWallet.getAdminAccount?.()?.address ?? account.address
         const tryManaged = async () => {
           try {
             return await getConnectedManagedAccountAddress(optimismSepolia)
           } catch {
-            return undefined
+            try {
+              return await getSmartWalletAddressForAdmin(adminAddress)
+            } catch {
+              return undefined
+            }
           }
         }
         managedAddress = await tryManaged()

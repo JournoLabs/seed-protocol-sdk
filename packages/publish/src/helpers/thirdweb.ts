@@ -50,6 +50,61 @@ export function getSharedPublishInAppWalletStorage() {
   return _publishInAppWalletStorage
 }
 
+/**
+ * Copies Thirdweb in-app auth tokens between default localStorage keys and the
+ * prefixed keys used by publish in-app wallets (`seedProtocol:inAppPublish:`).
+ *
+ * Modular ConnectButton writes the fresh session to prefixed storage; bare may be
+ * stale. Prefer prefixed when both exist so managed-wallet autoConnect does not
+ * overwrite a valid JWT with an old bare token.
+ */
+export function syncPublishInAppAuthToken(): {
+  syncedBareToPrefixed: boolean
+  syncedPrefixedToBare: boolean
+} {
+  if (typeof window === 'undefined') {
+    return { syncedBareToPrefixed: false, syncedPrefixedToBare: false }
+  }
+  const { thirdwebClientId } = getPublishConfig()
+  if (!thirdwebClientId) {
+    return { syncedBareToPrefixed: false, syncedPrefixedToBare: false }
+  }
+  try {
+    const bareKey = `walletToken-${thirdwebClientId}`
+    const prefixedKey = `${SEED_IN_APP_SESSION_PREFIX}${bareKey}`
+    const bare = localStorage.getItem(bareKey)
+    const prefixed = localStorage.getItem(prefixedKey)
+
+    let syncedBareToPrefixed = false
+    let syncedPrefixedToBare = false
+
+    // Only copy bare → prefixed when prefixed is missing (cold-start / refresh recovery).
+    if (bare && !prefixed) {
+      localStorage.setItem(prefixedKey, bare)
+      syncedBareToPrefixed = true
+    }
+    if (prefixed && !bare) {
+      localStorage.setItem(bareKey, prefixed)
+      syncedPrefixedToBare = true
+    }
+    if (prefixed && bare && bare !== prefixed) {
+      localStorage.setItem(bareKey, prefixed)
+      syncedPrefixedToBare = true
+    }
+
+    return { syncedBareToPrefixed, syncedPrefixedToBare }
+  } catch {
+    return { syncedBareToPrefixed: false, syncedPrefixedToBare: false }
+  }
+}
+
+async function connectManagedAccountWallet(chain: Chain = optimismSepolia) {
+  syncPublishInAppAuthToken()
+  const managedAccountWallet = getManagedAccountWallet()
+  await managedAccountWallet.autoConnect({ client: getClient(), chain })
+  return managedAccountWallet
+}
+
 let _client: ReturnType<typeof createThirdwebClient> | null = null
 
 export function getClient() {
@@ -236,8 +291,7 @@ export const appMetadata = {
 export async function getConnectedManagedAccountAddress(
   chain: Chain = optimismSepolia
 ): Promise<string> {
-  const managedAccountWallet = getManagedAccountWallet()
-  await managedAccountWallet.autoConnect({ client: getClient(), chain })
+  const managedAccountWallet = await connectManagedAccountWallet(chain)
   const managedAccount = managedAccountWallet.getAccount()
   if (!managedAccount) {
     throw new Error('Failed to get managed account')
