@@ -32,7 +32,10 @@ export abstract class BaseDb {
   }
 
   static isAppDbReady(): boolean {
-    return BaseDb.requireImpl().isAppDbReady()
+    if (!BaseDb._impl) {
+      return false
+    }
+    return BaseDb._impl.isAppDbReady()
   }
 
   static connectToDb(pathToDir: string): Promise<unknown> {
