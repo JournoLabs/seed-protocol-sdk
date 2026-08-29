@@ -1,7 +1,8 @@
 {
   "name": "@seedprotocol/ghost",
   "version": "0.5.1",
-  "description": "Ghost CMS integration for Seed Protocol",
+  "private": true,
+  "description": "Experimental — not supported; do not depend on or publish. Ghost CMS integration for Seed Protocol.",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -21,8 +22,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build"
   },
   "dependencies": {
     "@tryghost/admin-api": "^1.14.6"
@@ -34,8 +34,5 @@
     "vite": "^8.0.0"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
-  "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  }
+  "license": "MIT"
 }

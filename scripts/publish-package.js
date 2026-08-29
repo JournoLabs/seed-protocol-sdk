@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: eas, arweave, vite, webpack, sdk, react, feed, feed-hyper, publish, cli, ghost
+ * Packages: eas, arweave, vite, sdk, react, feed, feed-hyper, gateway-hyper, publish
  *
  * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
@@ -14,6 +14,7 @@
  * - If user declines, script exits
  * - If user accepts (or dependencies already published), publishes the requested package
  * - Use -f or --force to skip running tests before build
+ * - Experimental packages (cli, webpack, ghost) are private and not publishable via this script
  */
 
 import { readFileSync } from 'fs'
@@ -27,8 +28,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'webpack', 'sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish', 'cli', 'ghost']
-const LEAN_PACKAGES = ['eas', 'arweave', 'vite', 'webpack']
+const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish']
+const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')
@@ -182,7 +183,7 @@ async function main() {
 
     if (!sdkPublished) {
       console.log(`\n⚠️  @seedprotocol/sdk@${sdkVersion} is not published on npm.`)
-      console.log('   The feed, publish, cli, and ghost packages depend on it, so it must be published first.\n')
+      console.log('   Downstream packages depend on it, so it must be published first.\n')
 
       const answer = await prompt('Do you want to publish the SDK now? (y/n): ')
 

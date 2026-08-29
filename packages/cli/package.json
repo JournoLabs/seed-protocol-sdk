@@ -1,7 +1,8 @@
 {
   "name": "@seedprotocol/cli",
   "version": "0.5.1",
-  "description": "CLI tool for Seed Protocol",
+  "private": true,
+  "description": "Experimental — not supported; do not depend on or publish. CLI tool for Seed Protocol.",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -31,7 +32,6 @@
   },
   "scripts": {
     "build": "tsc && rollup -c",
-    "prepublishOnly": "npm run build && node ../../scripts/sync-versions.js",
     "dev": "tsx src/bin.ts",
     "dev:init": "tsx src/bin.ts init",
     "dev:export-sql": "tsx src/bin.ts export-sql",
@@ -60,8 +60,5 @@
     "typescript": "~5.7.2"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
-  "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  }
+  "license": "MIT"
 }

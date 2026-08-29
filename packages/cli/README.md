@@ -1,44 +1,13 @@
 # @seedprotocol/cli
 
-CLI tool for Seed Protocol. This package can be used independently via `npx @seedprotocol/cli` or installed as a dependency.
+**Experimental — not supported. Do not depend on or publish this package.**
 
-## Installation
+This package is private (`"private": true`) and is kept in the monorepo for local experimentation only. It is not part of the supported release/publish train.
 
-```bash
-npm install -g @seedprotocol/cli
-# or
-npx @seedprotocol/cli
-```
-
-## Usage
-
-### Initialize a Seed Protocol project
+## Local development
 
 ```bash
-npx @seedprotocol/cli init [schemaPath] [appFilesPath]
+cd packages/cli && bun run build
+# or run from source:
+bun run --cwd packages/cli dev
 ```
-
-### Seed the database
-
-```bash
-npx @seedprotocol/cli seed [seedDataPath]
-```
-
-### Add a model
-
-```bash
-npx @seedprotocol/cli add-model <source-schema-file-path> <output-file-path> <json-string>
-```
-
-## Development
-
-This package shares code with `@seedprotocol/sdk` and is built as part of the monorepo workspace.
-
-```bash
-# Build the CLI package
-npm run build:cli
-
-# Build both SDK and CLI
-npm run build:all
-```
-

@@ -1,7 +1,8 @@
 {
   "name": "@seedprotocol/webpack",
   "version": "0.5.1",
-  "description": "Webpack config helper for Seed Protocol apps (Next.js and similar)",
+  "private": true,
+  "description": "Experimental — not supported; do not depend on or publish. Prefer withSeed from @seedprotocol/sdk/node.",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -22,8 +23,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
-    "test": "vitest run --reporter=default",
-    "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
+    "test": "vitest run --reporter=default"
   },
   "peerDependencies": {
     "webpack": ">=5.0.0"
@@ -45,8 +45,5 @@
     "vitest": "^3.0.0"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
-  "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  }
+  "license": "MIT"
 }

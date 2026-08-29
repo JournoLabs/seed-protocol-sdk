@@ -50,7 +50,6 @@
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
     "@seedprotocol/vite": "workspace:*",
-    "@seedprotocol/webpack": "workspace:*",
     "@sinclair/typebox": "^0.34.45",
     "@sqlite.org/sqlite-wasm": "^3.51.1-build2",
     "arweave": "^1.15.5",

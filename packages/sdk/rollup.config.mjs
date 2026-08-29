@@ -115,7 +115,7 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
-    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/vite', '@seedprotocol/webpack'],
+    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/vite'],
     plugins: [
       alias({
         entries: [
@@ -163,7 +163,6 @@ const config = [
       if (id === '@seedprotocol/eas') return true
       if (id === '@seedprotocol/arweave') return true
       if (id === '@seedprotocol/vite') return true
-      if (id === '@seedprotocol/webpack') return true
       // Mark browser imports as external for Node.js build
       if (id.includes('/browser/') || id.includes('\\browser\\')) {
         return true
