@@ -5,8 +5,8 @@
  */
 
 import { readFileSync, writeFileSync } from 'fs'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join, dirname, resolve } from 'path'
+import { fileURLToPath, pathToFileURL } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -68,11 +68,24 @@ function syncVersions(newVersion = null) {
 
   console.log(`[Version Sync] Syncing all packages to version: ${targetVersion}`)
 
-  // Update SDK version if newVersion was provided
-  if (newVersion && sdkPackage.version !== newVersion) {
-    sdkPackage.version = newVersion
+  // Keep monorepo root version aligned (private; not published)
+  const rootPackagePath = join(rootDir, 'package.json')
+  const rootPackage = readPackageJson(rootPackagePath)
+  if (rootPackage.version !== targetVersion) {
+    rootPackage.version = targetVersion
+    writePackageJson(rootPackagePath, rootPackage)
+    console.log(`[Version Sync] Updated root version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] Root version already at ${targetVersion}`)
+  }
+
+  // Update SDK version if newVersion was provided or SDK is out of sync
+  if (sdkPackage.version !== targetVersion) {
+    sdkPackage.version = targetVersion
     writePackageJson(sdkPackagePath, sdkPackage)
-    console.log(`[Version Sync] Updated SDK version to ${newVersion}`)
+    console.log(`[Version Sync] Updated SDK version to ${targetVersion}`)
+  } else {
+    console.log(`[Version Sync] SDK version already at ${targetVersion}`)
   }
 
   // Update React version
@@ -197,6 +210,7 @@ function syncVersions(newVersion = null) {
   }
 
   console.log('[Version Sync] Version synchronization complete!')
+  console.log(`[Version Sync] Root: ${rootPackage.version}`)
   console.log(`[Version Sync] SDK: ${sdkPackage.version}`)
   console.log(`[Version Sync] React: ${reactPackage.version}`)
   console.log(`[Version Sync] CLI: ${cliPackage.version}`)
@@ -211,16 +225,20 @@ function syncVersions(newVersion = null) {
   console.log(`[Version Sync] Ghost: ${ghostPackage.version}`)
 }
 
-// Run if called directly (simplified - always execute when run as script)
-// This script is meant to be run directly, not imported
-const newVersion = process.argv[2] || null
-try {
-  syncVersions(newVersion)
-  process.exit(0)
-} catch (error) {
-  console.error('[Version Sync] Error:', error.message)
-  process.exit(1)
-}
-
 export { syncVersions }
+
+// Only run when invoked as a CLI script (not when imported by new-version.js)
+const isDirectRun =
+  process.argv[1] != null && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+
+if (isDirectRun) {
+  const newVersion = process.argv[2] || null
+  try {
+    syncVersions(newVersion)
+    process.exit(0)
+  } catch (error) {
+    console.error('[Version Sync] Error:', error.message)
+    process.exit(1)
+  }
+}
 

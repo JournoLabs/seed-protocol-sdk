@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/eas",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "EAS GraphQL read client and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,7 +27,9 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.build.json && vite build",
     "test": "vitest run --reporter=default",

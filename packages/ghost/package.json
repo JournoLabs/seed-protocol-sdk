@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/ghost",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Ghost CMS integration for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",

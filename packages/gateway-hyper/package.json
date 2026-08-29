@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/gateway-hyper",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Hyperswarm HTTP tunnel for Seed Protocol gateway + upload API infrastructure",
   "type": "module",
   "main": "./dist/index.js",
