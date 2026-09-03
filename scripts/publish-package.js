@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: eas, arweave, vite, sdk, react, feed, feed-hyper, gateway-hyper, publish
+ * Packages: eas, arweave, vite, sdk, react, query, feed, feed-hyper, gateway-hyper, publish
  *
  * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
@@ -28,7 +28,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish']
+const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'query', 'feed', 'feed-hyper', 'gateway-hyper', 'publish']
 const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
 
 function readPackageJson(path) {
@@ -229,6 +229,28 @@ async function main() {
     } else {
       console.log(`✅ @seedprotocol/react@${reactVersion} is already published.\n`)
     }
+  }
+
+  if (packageArg === 'feed') {
+    console.log('\n[Publish] Checking if @seedprotocol/query is published on npm...')
+    let queryPublished = false
+    try {
+      execSync(`npm view @seedprotocol/query@${sdkVersion} version`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      queryPublished = true
+    } catch {
+      queryPublished = false
+    }
+
+    if (!queryPublished) {
+      console.log(`\n⚠️  @seedprotocol/query@${sdkVersion} is not published on npm.`)
+      console.log('   @seedprotocol/feed depends on it, so it must be published first.\n')
+      console.log('Aborted. Publish @seedprotocol/query first, then run this script again.')
+      process.exit(1)
+    }
+    console.log(`✅ @seedprotocol/query@${sdkVersion} is already published.\n`)
   }
 
   if (packageArg === 'feed-hyper') {

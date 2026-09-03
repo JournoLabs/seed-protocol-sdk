@@ -13,6 +13,7 @@ export default defineConfig({
       external: (id) =>
         id === '@seedprotocol/eas' ||
         id === '@seedprotocol/arweave' ||
+        id === '@seedprotocol/query' ||
         (!id.startsWith('.') &&
         !id.startsWith('/') &&
         !id.startsWith('\0')),
