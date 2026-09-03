@@ -231,6 +231,28 @@ async function main() {
     }
   }
 
+  if (packageArg === 'feed') {
+    console.log('\n[Publish] Checking if @seedprotocol/query is published on npm...')
+    let queryPublished = false
+    try {
+      execSync(`npm view @seedprotocol/query@${sdkVersion} version`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      queryPublished = true
+    } catch {
+      queryPublished = false
+    }
+
+    if (!queryPublished) {
+      console.log(`\n⚠️  @seedprotocol/query@${sdkVersion} is not published on npm.`)
+      console.log('   @seedprotocol/feed depends on it, so it must be published first.\n')
+      console.log('Aborted. Publish @seedprotocol/query first, then run this script again.')
+      process.exit(1)
+    }
+    console.log(`✅ @seedprotocol/query@${sdkVersion} is already published.\n`)
+  }
+
   if (packageArg === 'feed-hyper') {
     console.log('\n[Publish] Checking if @seedprotocol/feed is published on npm...')
     let feedPublished = false
