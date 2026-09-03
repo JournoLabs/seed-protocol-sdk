@@ -4,53 +4,122 @@ import type { TunnelMeta, TunnelResponseMeta } from '../types'
 /** Maximum single frame payload (64 MiB). */
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024
 
-function readExact(stream: Readable, length: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let total = 0
+type ByteWaiter = {
+  length: number
+  resolve: (buf: Buffer) => void
+  reject: (err: Error) => void
+}
 
-    const onData = (chunk: Buffer) => {
-      chunks.push(chunk)
-      total += chunk.length
-      if (total >= length) {
-        cleanup()
-        const buf = Buffer.concat(chunks)
-        resolve(buf.subarray(0, length))
-        const extra = buf.subarray(length)
-        if (extra.length > 0) {
-          stream.unshift(extra)
+/**
+ * Per-stream byte buffer. HyperDHT duplexes do not reliably support `unshift`,
+ * so we accumulate and slice locally instead of pushing leftovers back.
+ */
+class StreamByteReader {
+  private buffer = Buffer.alloc(0)
+  private waiters: ByteWaiter[] = []
+  private ended = false
+  private readonly onData: (chunk: Buffer) => void
+  private readonly onError: (err: Error) => void
+  private readonly onEnd: () => void
+
+  constructor(private readonly stream: Readable) {
+    this.onData = (chunk: Buffer) => {
+      this.buffer = Buffer.concat([this.buffer, chunk])
+      this.drain()
+    }
+    this.onError = (err: Error) => {
+      const waiters = this.waiters.splice(0)
+      for (const w of waiters) w.reject(err)
+    }
+    this.onEnd = () => {
+      this.ended = true
+      this.drain()
+      if (this.waiters.length > 0) {
+        const waiters = this.waiters.splice(0)
+        for (const w of waiters) {
+          w.reject(
+            new Error(
+              `Unexpected end of stream (expected ${w.length} bytes, got ${this.buffer.length})`,
+            ),
+          )
         }
       }
     }
+    stream.on('data', this.onData)
+    stream.on('error', this.onError)
+    stream.on('end', this.onEnd)
+  }
 
-    const onError = (err: Error) => {
-      cleanup()
-      reject(err)
+  readExact(length: number): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      if (length === 0) {
+        resolve(Buffer.alloc(0))
+        return
+      }
+      this.waiters.push({ length, resolve, reject })
+      this.drain()
+      if (this.ended && this.waiters.length > 0) {
+        const waiters = this.waiters.splice(0)
+        for (const w of waiters) {
+          w.reject(
+            new Error(
+              `Unexpected end of stream (expected ${w.length} bytes, got ${this.buffer.length})`,
+            ),
+          )
+        }
+      }
+    })
+  }
+
+  private drain(): void {
+    while (this.waiters.length > 0) {
+      const next = this.waiters[0]
+      if (!next || this.buffer.length < next.length) break
+      this.waiters.shift()
+      const out = this.buffer.subarray(0, next.length)
+      this.buffer = this.buffer.subarray(next.length)
+      next.resolve(out)
     }
+  }
+}
 
-    const onEnd = () => {
-      cleanup()
-      reject(new Error(`Unexpected end of stream (expected ${length} bytes, got ${total})`))
-    }
+const readers = new WeakMap<Readable, StreamByteReader>()
 
-    const cleanup = () => {
-      stream.off('data', onData)
-      stream.off('error', onError)
-      stream.off('end', onEnd)
-    }
+function getReader(stream: Readable): StreamByteReader {
+  let reader = readers.get(stream)
+  if (!reader) {
+    reader = new StreamByteReader(stream)
+    readers.set(stream, reader)
+  }
+  return reader
+}
 
-    stream.on('data', onData)
-    stream.on('error', onError)
-    stream.on('end', onEnd)
-  })
+function readExact(stream: Readable, length: number): Promise<Buffer> {
+  return getReader(stream).readExact(length)
 }
 
 function writeBuffer(stream: Writable, buf: Buffer): Promise<void> {
   return new Promise((resolve, reject) => {
-    stream.write(buf, (err) => {
-      if (err) reject(err)
-      else resolve()
-    })
+    // HyperDHT duplexes often never invoke write(callback). Use return value + drain.
+    try {
+      const ok = stream.write(buf)
+      if (ok) {
+        resolve()
+        return
+      }
+      const onDrain = () => {
+        stream.off('error', onError)
+        resolve()
+      }
+      const onError = (err: Error) => {
+        stream.off('drain', onDrain)
+        reject(err)
+      }
+      stream.once('drain', onDrain)
+      stream.once('error', onError)
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
   })
 }
 
@@ -60,10 +129,8 @@ export async function writeFrame(stream: Writable, payload: Buffer): Promise<voi
   }
   const header = Buffer.alloc(4)
   header.writeUInt32BE(payload.length, 0)
-  await writeBuffer(stream, header)
-  if (payload.length > 0) {
-    await writeBuffer(stream, payload)
-  }
+  // Single write — HyperDHT can drop/stall subsequent writes in the same turn.
+  await writeBuffer(stream, Buffer.concat([header, payload]))
 }
 
 export async function readFrame(stream: Readable): Promise<Buffer> {

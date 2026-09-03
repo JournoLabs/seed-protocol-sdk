@@ -9,16 +9,19 @@ function handleConnection(
   socket: Duplex,
   upstream: string,
 ): void {
+  // Attach framed readers synchronously so HyperDHT early bytes are not lost.
+  let pendingRequest = readTunnelRequest(socket)
   void (async () => {
     try {
       while (true) {
-        const { meta, body } = await readTunnelRequest(socket)
+        const { meta, body } = await pendingRequest
         const result = await proxyTunnelRequest(upstream, meta, body)
         await writeTunnelResponse(
           socket,
           { status: result.status, headers: result.headers },
           result.body,
         )
+        pendingRequest = readTunnelRequest(socket)
       }
     } catch {
       socket.destroy()

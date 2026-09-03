@@ -2,6 +2,9 @@ export { encodePublicKeyZ32, decodePublicKey, loadOrCreateOperatorKeypair } from
 
 export { serveTunnel } from './tunnel/serve'
 export { connectTunnel, localGatewayUrl } from './tunnel/connect'
+export { createGatewayProxy } from './tunnel/proxyApp'
+export { stripMountPath } from './tunnel/mountPath'
+export { createTunnelSession } from './tunnel/session'
 
 export {
   writeFrame,
@@ -23,6 +26,8 @@ export type {
   ConnectTunnelOptions,
   ConnectTunnelResult,
   OperatorKeyPair,
+  CreateGatewayProxyOptions,
+  GatewayProxy,
 } from './types'
 
 export { DEFAULT_SEED_GATEWAY_HYPER_KEY } from './constants'

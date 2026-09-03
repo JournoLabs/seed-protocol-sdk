@@ -49,3 +49,35 @@ export type OperatorKeyPair = {
   secretKey: Buffer
   z32: string
 }
+
+export type CreateGatewayProxyOptions = {
+  /**
+   * Operator public key (z32 or hex).
+   * Defaults to `process.env.SEED_GATEWAY_HYPER_KEY`.
+   */
+  key?: string
+  /**
+   * URL path prefix the app mounts the proxy on (stripped before tunneling).
+   * Default `/api/seed-gateway`.
+   */
+  mountPath?: string
+  /** Optional DHT client state directory */
+  storePath?: string
+  /** Start the Hyper session immediately (default: lazy on first request) */
+  eager?: boolean
+}
+
+export type GatewayProxy = {
+  mountPath: string
+  /** Ensure the Hyper tunnel session is connected */
+  start: () => Promise<void>
+  close: () => Promise<void>
+  /** Express / `node:http` style handler */
+  handleNode: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  /**
+   * Fetch API handler for Next.js App Router (Node runtime only — not Edge).
+   * Export as GET/POST/PUT/PATCH/DELETE.
+   */
+  handleFetch: (request: Request) => Promise<Response>
+}
+

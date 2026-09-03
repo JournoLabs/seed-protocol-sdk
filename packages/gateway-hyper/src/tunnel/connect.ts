@@ -1,13 +1,9 @@
 import http from 'node:http'
-import type { Duplex } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import HyperDHT from 'hyperdht'
 import {
   flattenRequestHeaders,
-  readTunnelResponse,
-  writeTunnelRequest,
 } from './protocol'
-import { createEphemeralClientKeypair, decodePublicKey } from '../keys'
+import { createTunnelSession } from './session'
 import type { ConnectTunnelOptions, ConnectTunnelResult } from '../types'
 
 async function readRequestBody(req: IncomingMessage): Promise<Buffer> {
@@ -19,7 +15,10 @@ async function readRequestBody(req: IncomingMessage): Promise<Buffer> {
 }
 
 function createLocalServer(
-  runOnTunnel: <T>(fn: (socket: Duplex) => Promise<T>) => Promise<T>,
+  forwardHttp: (
+    meta: { method: string; path: string; headers: Record<string, string> },
+    body: Buffer,
+  ) => Promise<{ meta: { status: number; headers: Record<string, string> }; body: Buffer }>,
 ): http.Server {
   return http.createServer((req, res) => {
     void (async () => {
@@ -32,10 +31,7 @@ function createLocalServer(
           headers: flattenRequestHeaders(req.headers as Record<string, string | string[] | undefined>),
         }
 
-        const { meta: responseMeta, body: responseBody } = await runOnTunnel(async (socket) => {
-          await writeTunnelRequest(socket, meta, body)
-          return readTunnelResponse(socket)
-        })
+        const { meta: responseMeta, body: responseBody } = await forwardHttp(meta, body)
 
         res.writeHead(responseMeta.status, responseMeta.headers)
         res.end(responseBody)
@@ -56,48 +52,13 @@ function createLocalServer(
 export async function connectTunnel(options: ConnectTunnelOptions): Promise<ConnectTunnelResult> {
   const host = options.host ?? '127.0.0.1'
   const port = options.port ?? 1984
-  const remotePublicKey = decodePublicKey(options.key)
-  const clientKey = createEphemeralClientKeypair()
 
-  const dht = new HyperDHT()
-  let activeSocket: Duplex | null = null
-  let connecting: Promise<Duplex> | null = null
+  const session = await createTunnelSession({
+    key: options.key,
+    storePath: options.storePath,
+  })
 
-  const getSocket = async (): Promise<Duplex> => {
-    if (activeSocket && !activeSocket.destroyed) {
-      return activeSocket
-    }
-    if (connecting) {
-      return connecting
-    }
-    connecting = new Promise<Duplex>((resolve, reject) => {
-      const socket = dht.connect(remotePublicKey, {
-        keyPair: { publicKey: clientKey.publicKey, secretKey: clientKey.secretKey },
-      }) as Duplex
-      const onReady = () => {
-        activeSocket = socket
-        connecting = null
-        resolve(socket)
-      }
-      socket.once('open', onReady)
-      socket.once('connect', onReady)
-      socket.once('error', (err: Error) => {
-        connecting = null
-        reject(err)
-      })
-    })
-    return connecting
-  }
-
-  /** Serialize tunnel transactions on one persistent socket. */
-  let tunnelQueue: Promise<unknown> = Promise.resolve()
-  const runOnTunnel = async <T>(fn: (socket: Duplex) => Promise<T>): Promise<T> => {
-    const run = tunnelQueue.then(() => getSocket()).then(fn)
-    tunnelQueue = run.catch(() => {})
-    return run
-  }
-
-  const server = createLocalServer((handler) => runOnTunnel(handler))
+  const server = createLocalServer((meta, body) => session.forwardHttp(meta, body))
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -117,10 +78,7 @@ export async function connectTunnel(options: ConnectTunnelOptions): Promise<Conn
     baseUrl,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      if (activeSocket && !activeSocket.destroyed) {
-        activeSocket.destroy()
-      }
-      await dht.destroy()
+      await session.close()
     },
   }
 }

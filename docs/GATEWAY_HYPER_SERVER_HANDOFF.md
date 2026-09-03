@@ -45,11 +45,15 @@ export const gateway = {
   transport: 'hybrid',
   uploadApiBaseUrl: 'https://app.example.com', // HTTP fallback
   arweaveDomain: 'ar.example.com',
-  gatewayHyperKey: '<operator-z32>',
+  gatewayHyperKey: '<operator-z32>', // Path A (local sidecar)
+  // Path B (hosted web): omit key from browser; set proxyBaseUrl instead
+  // proxyBaseUrl: '/api/seed-gateway',
 }
 ```
 
-They must run `seed gateway tunnel connect <key>` before the app starts when using `hyper` or when `hybrid` should prefer P2P.
+**Path A:** They must run `seed gateway tunnel connect <key>` before the app starts when using `hyper` or when `hybrid` should prefer P2P on the local machine.
+
+**Path B:** Their Node app mounts `createGatewayProxy` from `@seedprotocol/gateway-hyper` with `SEED_GATEWAY_HYPER_KEY`; the browser only configures `proxyBaseUrl`.
 
 ## Contact
 
