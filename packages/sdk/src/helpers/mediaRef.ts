@@ -1,4 +1,5 @@
 import debug from 'debug'
+import { isEasAttestationExplorerUrl } from '@seedprotocol/arweave'
 
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
@@ -29,6 +30,7 @@ export type ClassifyMediaRefOptions = {
 export type MediaRefClassification =
   | { kind: 'empty' }
   | { kind: 'url'; href: string }
+  | { kind: 'nonMediaUrl'; href: string }
   | { kind: 'seedUid'; uid: string }
   | { kind: 'seedLocalId'; localId: string }
   | { kind: 'arweaveTxId'; txId: string }
@@ -104,6 +106,9 @@ export function classifyMediaRef(
   }
 
   if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('blob:') || s.startsWith('data:')) {
+    if (isEasAttestationExplorerUrl(s)) {
+      return { kind: 'nonMediaUrl', href: s }
+    }
     return { kind: 'url', href: s }
   }
 
@@ -188,6 +193,12 @@ export async function resolveMediaRef(
         status: 'ready',
         href: classification.href,
         source: 'direct',
+      }
+    case 'nonMediaUrl':
+      return {
+        status: 'unresolved',
+        reason: 'non_media_url',
+        classification,
       }
     case 'seedLocalId':
       return {

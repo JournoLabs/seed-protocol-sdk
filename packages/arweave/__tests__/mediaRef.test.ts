@@ -20,6 +20,17 @@ describe('classifyMediaRef', () => {
     })
   })
 
+  it('classifies EAS attestation explorer URLs as non-media', () => {
+    expect(
+      classifyMediaRef(
+        'https://optimism-sepolia.easscan.org/attestation/view/0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb',
+      ),
+    ).toEqual({
+      kind: 'nonMediaUrl',
+      href: 'https://optimism-sepolia.easscan.org/attestation/view/0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb',
+    })
+  })
+
   it('classifies arweave tx ids', () => {
     expect(classifyMediaRef(TX_43)).toEqual({ kind: 'arweaveTxId', txId: TX_43 })
   })

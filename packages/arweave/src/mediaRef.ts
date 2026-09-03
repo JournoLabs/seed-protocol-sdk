@@ -1,4 +1,5 @@
 import { BaseArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
+import { isEasAttestationExplorerUrl } from './easAttestationUrl.js'
 import {
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
@@ -20,6 +21,7 @@ export type ClassifyMediaRefOptions = {
 export type MediaRefClassification =
   | { kind: 'empty' }
   | { kind: 'url'; href: string }
+  | { kind: 'nonMediaUrl'; href: string }
   | { kind: 'seedUid'; uid: string }
   | { kind: 'seedLocalId'; localId: string }
   | { kind: 'arweaveTxId'; txId: string }
@@ -93,6 +95,9 @@ export function classifyMediaRef(
     s.startsWith('blob:') ||
     s.startsWith('data:')
   ) {
+    if (isEasAttestationExplorerUrl(s)) {
+      return { kind: 'nonMediaUrl', href: s }
+    }
     return { kind: 'url', href: s }
   }
 

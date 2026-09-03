@@ -1,5 +1,7 @@
 export * from './constants.js'
+export * from './easAttestationUrl.js'
 export * from './mediaRef.js'
+export * from './resolveSeedRssImageRelationRef.js'
 export * from './relationSeedRef.js'
 export * from './types/gateway.js'
 export * from './types/arweave.js'

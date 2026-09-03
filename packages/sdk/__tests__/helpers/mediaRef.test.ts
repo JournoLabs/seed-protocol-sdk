@@ -31,6 +31,15 @@ describe('classifyMediaRef', () => {
     })
   })
 
+  it('classifies EAS attestation explorer URLs as non-media', () => {
+    const easUrl =
+      'https://optimism-sepolia.easscan.org/attestation/view/0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb'
+    expect(classifyMediaRef(easUrl)).toEqual({
+      kind: 'nonMediaUrl',
+      href: easUrl,
+    })
+  })
+
   it('classifies 0x66 as seedUid', () => {
     const uid =
       '0x' + 'a'.repeat(64)
@@ -123,6 +132,17 @@ describe('resolveMediaRef', () => {
       href: 'https://example.com/x',
       source: 'direct',
     })
+  })
+
+  it('returns unresolved for EAS attestation explorer URLs', async () => {
+    const easUrl =
+      'https://optimism-sepolia.easscan.org/attestation/view/0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb'
+    const r = await resolveMediaRef(easUrl)
+    expect(r.status).toBe('unresolved')
+    if (r.status === 'unresolved') {
+      expect(r.reason).toBe('non_media_url')
+      expect(r.classification).toEqual({ kind: 'nonMediaUrl', href: easUrl })
+    }
   })
 
   it('returns empty for empty string', async () => {

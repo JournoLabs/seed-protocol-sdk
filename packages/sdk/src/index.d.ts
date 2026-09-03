@@ -31,6 +31,8 @@ export { getModelSchemasFromEas, getItemVersionsFromEas, getItemPropertiesFromEa
 export { getCorrectId, generateId } from './helpers';
 export { classifyMediaRef, resolveMediaRef, normalizeFeedItemFields, getFeedItemStringField, } from './helpers/mediaRef';
 export type { FeedFieldRole, FeedFieldDescriptor, FeedFieldManifest, ClassifyMediaRefOptions, MediaRefClassification, ResolveMediaRefResult, ResolveMediaRefOptions, NormalizedMediaField, NormalizedHtmlField, NormalizedTextField, NormalizedFeedFieldValue, } from './helpers/mediaRef';
+export { isEasAttestationExplorerUrl, resolveSeedRssImageRelationRef, resolveSeedRssImageRelationFromItem, SEED_RSS_IMAGE_RELATION_FIELD_KEYS, } from '@seedprotocol/arweave';
+export type { SeedRssImageRelationRef } from '@seedprotocol/arweave';
 export { SeedModels, INTERNAL_DATA_TYPES, VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA, DEFAULT_ARWEAVE_HOST, DEFAULT_SEED_FEED_HYPER_KEY, DEFAULT_ARWEAVE_GATEWAYS, DEFAULT_ARWEAVE_GRAPHQL_URL, getDefaultArweaveReadGatewayHostsOrdered, mergePrimaryHostWithDefaults, isKnownArweaveGatewayHostname, } from './helpers/constants';
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties';
 export { BaseArweaveClient, getArweaveUrlForTransaction, normalizeUploadApiBaseUrl, getUploadApiArweaveDataUrl, getUploadPipelineTransactionStatus, getUploadApiArweaveStatusUrl, getArweaveUploadStatus, isArweaveL1AnchoringComplete, queryArweaveGatewayTransaction, queryArweaveGatewayTransactionWithFallback, ensureReadGatewaySelected, invalidateReadGatewayCache, resetArweaveReadGatewayForTests, } from './helpers';

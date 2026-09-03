@@ -93,6 +93,13 @@ export type {
   NormalizedFeedFieldValue,
 } from './helpers/mediaRef'
 export {
+  isEasAttestationExplorerUrl,
+  resolveSeedRssImageRelationRef,
+  resolveSeedRssImageRelationFromItem,
+  SEED_RSS_IMAGE_RELATION_FIELD_KEYS,
+} from '@seedprotocol/arweave'
+export type { SeedRssImageRelationRef } from '@seedprotocol/arweave'
+export {
   pickLatestPropertyAttestationsByRefAndSchema,
   isPlaceholderUid,
   isValidEasAttestationUid,
