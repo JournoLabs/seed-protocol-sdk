@@ -10,19 +10,6 @@ export function generateETag(value: string): string {
 }
 
 /**
- * Generate an ETag for feed data based on schema, format, timestamp, and item count
- */
-export function generateFeedETag(
-  schemaName: string,
-  format: string,
-  lastProcessedTimestamp: number,
-  itemCount: number
-): string {
-  const etagValue = `${schemaName}-${format}-${lastProcessedTimestamp}-${itemCount}`;
-  return generateETag(etagValue);
-}
-
-/**
  * Generate an ETag for cached feed content
  */
 export function generateContentETag(

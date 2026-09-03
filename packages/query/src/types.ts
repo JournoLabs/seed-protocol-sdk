@@ -12,6 +12,12 @@ export type AssembleOptions = {
   expandRelations?: boolean
   /** Fetch Arweave gateway bodies into html/body/content (and marked storage fields). Default true. */
   hydrateStorage?: boolean
+  /**
+   * Use collection/item cache when enabled via CACHE_* env.
+   * Default: follow loadQueryCacheConfig().enabled.
+   * Pass false to bypass cache for this call.
+   */
+  cache?: boolean
 }
 
 export type QueryBySchemaOptions = AssembleOptions & {
@@ -23,6 +29,8 @@ export type QueryBySchemaResult = {
   items: SeedRecord[]
   limit: number
   skip: number
+  /** Present when collection cache was consulted or updated (skip === 0). */
+  etag?: string
 }
 
 export type AttestationLike = {

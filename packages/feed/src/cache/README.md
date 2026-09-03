@@ -1,43 +1,40 @@
-# Cache Configuration
+# Feed cache (content + image metadata)
 
-The feed caching system can be configured using environment variables.
+This package caches **serialized** RSS / Atom / JSON Feed bodies and Arweave **image metadata** for enclosure enrichment.
+
+**Collection / item (assembled Seed JSON) caching** lives in [`@seedprotocol/query`](../../query) — see that package’s README. Feed calls `queryBySchema` on content miss; query owns TTL, incremental merge, and refresh locks for assembled records.
 
 ## Environment Variables
 
-- `CACHE_TTL` - Cache time-to-live in seconds (default: 3600 = 1 hour)
+Shared with `@seedprotocol/query` for enablement and TTL:
+
+- `CACHE_TTL` - Content TTL in seconds (default: 3600 = 1 hour); also used by query for collection/item TTL
 - `CACHE_DIR` - Directory for persistent cache files (default: `./cache`)
 - `CACHE_ENABLED` - Enable/disable caching. In development (`NODE_ENV=development`), cache is disabled by default. Set to `true` to enable in dev, or `false` to disable in production.
-- `CACHE_BACKGROUND_REFRESH` - Enable background refresh job (default: `false`)
-- `CACHE_REFRESH_INTERVAL` - Background refresh interval in seconds (default: 300 = 5 minutes)
+- `CACHE_PAGE_TTL` - TTL for paginated content keys page > 1 (default: 300)
+- `CACHE_ARCHIVE_TTL` - TTL for monthly archive content (default: 86400)
+- `CACHE_BACKGROUND_REFRESH` / `CACHE_REFRESH_INTERVAL` - Reserved (unused)
 
-## Example .env file
+Image metadata:
 
-```bash
-CACHE_TTL=3600
-CACHE_DIR=./cache
-CACHE_ENABLED=true
-CACHE_BACKGROUND_REFRESH=false
-CACHE_REFRESH_INTERVAL=300
-```
+- `IMAGE_METADATA_ENABLED` - default true
+- `IMAGE_METADATA_TTL` - default 604800 (7 days)
+- `IMAGE_METADATA_GATEWAYS` / `IMAGE_METADATA_TIMEOUT`
 
 ## How It Works
 
-1. **First Request (Cold Cache)**: Fetches all items from Seed Protocol, caches them, and generates the feed
-2. **Subsequent Requests (Warm Cache)**: 
-   - Checks cache validity
-   - If valid and ETag matches, returns 304 Not Modified
-   - If expired, fetches only new items (incremental update)
-   - Merges new items with cached items
-   - Regenerates and caches the feed
+1. **Content hit** — return cached body (or 304 if `If-None-Match` matches)
+2. **Content miss** — `getFeedItemsBySchemaName` → `@seedprotocol/query` (may hit collection cache) → optional image enrich → `createFeed` → store content
+3. **Archives / page > 1** — content-only keys with archive/page TTL; no feed-local item list cache
 
 ## Cache Storage
 
-- **Memory Cache**: Fast in-memory storage for active requests
-- **File Cache**: Persistent JSON files in `CACHE_DIR` that survive server restarts
+- **Memory** — active content + image metadata
+- **Files** — `{schema}-{format}.json`, page/archive variants, `image-metadata/{txId}.json`
+
+Do not confuse with query’s `{schema}.json` collection files in the same `CACHE_DIR`.
 
 ## HTTP Conditional Requests
 
-The cache supports HTTP conditional requests:
-- `ETag` header is included in responses
-- `If-None-Match` header is checked for 304 responses
-- `Last-Modified` header is included for additional cache validation
+- `ETag` / `If-None-Match` → 304
+- `Last-Modified` / `Cache-Control` on responses

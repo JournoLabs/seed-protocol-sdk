@@ -1,17 +1,6 @@
 import type { GraphQLItem, ImageMetadata } from '../types';
 
 /**
- * Cached feed data for a specific schema
- */
-export interface CachedFeedData {
-  items: GraphQLItem[];           // Processed items
-  lastProcessedTimestamp: number;  // Unix timestamp of newest item
-  lastProcessedItemId: string;    // ID of newest item (for deduplication)
-  lastUpdated: number;            // When cache was last updated (Unix timestamp)
-  etag: string;                   // ETag for HTTP conditional requests
-}
-
-/**
  * Cached image metadata for an Arweave transaction ID
  */
 export interface CachedImageMetadata {
@@ -42,15 +31,16 @@ export interface ImageMetadataConfig {
 }
 
 /**
- * Cache configuration options
+ * Cache configuration options (serialized content + image metadata).
+ * Collection/item caching lives in @seedprotocol/query.
  */
 export interface CacheConfig {
   ttl: number;                    // Time to live in seconds
   cacheDir: string;               // Directory for persistent cache
   enabled: boolean;               // Enable/disable caching
-  backgroundRefresh: boolean;     // Enable background refresh job
+  backgroundRefresh: boolean;     // Enable background refresh job (unused)
   refreshInterval: number;        // Background refresh interval in seconds
-  imageMetadata?: ImageMetadataConfig // Image metadata cache configuration
+  imageMetadata?: ImageMetadataConfig
   pageTtl?: number;                // TTL for page > 1 (default: 300)
   archiveTtl?: number;            // TTL for archives (default: 86400)
 }
@@ -86,3 +76,6 @@ export interface CacheStats {
   refreshes: number;
   errors: number;
 }
+
+// Re-export for callers that imported GraphQLItem from cache types historically
+export type { GraphQLItem };

@@ -17,6 +17,21 @@ export type {
   AttestationLike,
 } from './types.js'
 
+export {
+  getQueryCacheManager,
+  resetQueryCacheManager,
+  createQueryCacheManager,
+  loadQueryCacheConfig,
+  CacheManager,
+  buildAssembleOptionsKey,
+} from './cache/index.js'
+export type {
+  CachedCollectionData,
+  CachedItemData,
+  QueryCacheConfig,
+  QueryCacheStats,
+} from './cache/index.js'
+
 export { getArweaveUrlForTransaction } from './arweaveUrl.js'
 
 export {

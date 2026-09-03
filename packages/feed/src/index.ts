@@ -1,7 +1,6 @@
 import {
   initializeFeedPlatform,
   initializeSeedClient,
-  getClient,
   teardownSeedClient,
   DEFAULT_ARWEAVE_HOST,
 } from './bootstrap';
@@ -859,11 +858,15 @@ export async function handleFeedRequest(
       }
     }
 
-    // Cache miss or disabled - fetch and process items
+    // Content cache miss or disabled — fetch items via query (owns collection cache)
     console.log(`Cache miss for ${schemaName}:${format} - fetching items`);
 
-    const fetchItems = async (): Promise<GraphQLItem[]> => {
-      const items = await getFeedItemsBySchemaName(schemaName, { limit: pageSize, skip }) as GraphQLItem[];
+    const feedItems = await (async (): Promise<GraphQLItem[]> => {
+      const items = await getFeedItemsBySchemaName(schemaName, {
+        limit: pageSize,
+        skip,
+      }) as GraphQLItem[];
+      console.log(`Found ${items.length} feed items for schema ${schemaName}`);
       if (config.imageMetadata?.enabled) {
         const imageService = new ArweaveImageService({
           gateways: config.imageMetadata.gateways,
@@ -872,45 +875,7 @@ export async function handleFeedRequest(
         return enrichFeedItemsWithMedia(items, imageService, cache);
       }
       return items;
-    };
-
-    const feedItems = config.enabled && pageNum === 1
-      ? await cache.withRefreshLock(schemaName, async () => {
-          const cachedData = await cache.getFeedData(schemaName);
-          let items: GraphQLItem[];
-
-          if (cachedData) {
-            console.log(`Incremental fetch: last processed timestamp: ${cachedData.lastProcessedTimestamp}`);
-            const allItems = await getFeedItemsBySchemaName(schemaName, { limit: pageSize, skip: 0 }) as GraphQLItem[];
-            const newItems = cache.filterNewItems(allItems, cachedData.lastProcessedTimestamp);
-
-            if (newItems.length > 0) {
-              console.log(`Found ${newItems.length} new items, merging with ${cachedData.items.length} cached items`);
-              items = cache.mergeItems(cachedData.items, newItems).slice(0, pageSize);
-            } else {
-              items = cachedData.items;
-            }
-          } else {
-            console.log(`Cold cache - fetching page 1`);
-            const client = await getClient();
-            if (client) console.log(`Client initialized: ${client.isInitialized()}`);
-            items = await getFeedItemsBySchemaName(schemaName, { limit: pageSize, skip: 0 }) as GraphQLItem[];
-            console.log(`Found ${items.length} feed items for schema ${schemaName}`);
-          }
-
-          if (config.imageMetadata?.enabled) {
-            const imageService = new ArweaveImageService({
-              gateways: config.imageMetadata.gateways,
-              timeout: config.imageMetadata.timeout,
-            });
-            const enrichedItems = await enrichFeedItemsWithMedia(items, imageService, cache);
-            await cache.setFeedData(schemaName, items);
-            return enrichedItems;
-          }
-          await cache.setFeedData(schemaName, items);
-          return items;
-        })
-      : await fetchItems();
+    })();
 
     const baseUrl = `${siteConfig.feedUrl}/${collectionName}/${format}`;
     const hasNext = feedItems.length === pageSize;
