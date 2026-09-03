@@ -30,7 +30,7 @@ const getArweaveInstance = (): Arweave => {
 
   _arweaveGatewayKey = gatewayKey;
 
-  const host = BaseArweaveClient.getHost();
+  const host = BaseArweaveClient.getArweaveSdkHost();
   const protocol = BaseArweaveClient.getProtocol();
 
   // Handle both ES modules and CommonJS exports from arweave package
@@ -95,6 +95,19 @@ export class BrowserArweaveClient implements IArweaveClient {
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
+    // Path-prefixed proxies (app-server Hyper proxy) are not supported by arweave.init host;
+    // fetch via getRawUrl so /api/seed-gateway/... works.
+    if (BaseArweaveClient.getGatewayPath()) {
+      const response = await fetch(BaseArweaveClient.getRawUrl(transactionId));
+      if (!response.ok) {
+        throw new Error(`Failed to fetch transaction data: HTTP ${response.status}`);
+      }
+      if (options?.string) {
+        return response.text();
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    }
+
     const arweave = getArweaveInstance();
 
     try {

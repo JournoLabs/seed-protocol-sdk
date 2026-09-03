@@ -28,7 +28,7 @@ async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | und
 
   try {
     const resolved = getResolvedSeedGatewayEndpoints()
-    if (!resolved || resolved.activePath !== 'hyper-sidecar') {
+    if (!resolved || (resolved.activePath !== 'hyper-sidecar' && resolved.activePath !== 'http-proxy')) {
       const { ensureReadGatewaySelected } = await import('@seedprotocol/arweave')
       await ensureReadGatewaySelected().catch(() => {})
     }

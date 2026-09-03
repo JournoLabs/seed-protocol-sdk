@@ -1,5 +1,6 @@
 export {
   resolveSeedGatewayEndpoints,
+  resolveProxyBaseUrl,
   invalidateSidecarProbeCache,
   getReadGatewayHostsForConfig,
   type ResolveSeedGatewayEndpointsOptions,

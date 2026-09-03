@@ -8,6 +8,10 @@ export declare abstract class BaseArweaveClient {
         host: string;
     };
     static getHost(): string;
+    /** Hostname (+ optional port) without path prefix — safe for arweave npm `init({ host })`. */
+    static getArweaveSdkHost(): string;
+    /** Path prefix on the gateway origin (e.g. `/api/seed-gateway`), or empty. */
+    static getGatewayPath(): string;
     static getProtocol(): 'http' | 'https';
     static getBaseUrl(): string;
     static setHost(host: string): void;

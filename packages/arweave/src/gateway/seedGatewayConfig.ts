@@ -14,6 +14,7 @@ export function seedGatewayConfigFromSeedConfig(
     transport: gateway.transport,
     arweaveDomain: config.arweaveDomain ?? gateway.arweaveDomain,
     uploadApiBaseUrl: config.uploadApiBaseUrl ?? gateway.uploadApiBaseUrl,
+    proxyBaseUrl: gateway.proxyBaseUrl?.trim() || undefined,
     hyper: {
       gatewayHyperKey:
         gateway.hyper?.gatewayHyperKey?.trim() ||
@@ -34,6 +35,7 @@ export function seedGatewayConfigFromClientContext(
     transport: context.gatewayTransport,
     arweaveDomain: context.arweaveDomain,
     uploadApiBaseUrl: context.uploadApiBaseUrl,
+    proxyBaseUrl: context.gatewayProxyBaseUrl?.trim() || undefined,
     hyper: {
       gatewayHyperKey:
         context.gatewayHyperKey?.trim() || DEFAULT_SEED_GATEWAY_HYPER_KEY || undefined,

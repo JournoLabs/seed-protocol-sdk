@@ -11,13 +11,15 @@ import type {
   SeedGatewayTransportMode,
 } from '../types/gateway.js'
 
-const SIDECAR_PROBE_TTL_MS = 3 * 60 * 1000
+const PROBE_TTL_MS = 3 * 60 * 1000
 
 let sidecarProbeCache: { healthy: boolean; expiresAt: number } | null = null
+const proxyProbeCache = new Map<string, { healthy: boolean; expiresAt: number }>()
 
-/** Clears cached sidecar probe (tests / forced re-probe). */
+/** Clears cached sidecar / proxy probes (tests / forced re-probe). */
 export function invalidateSidecarProbeCache(): void {
   sidecarProbeCache = null
+  proxyProbeCache.clear()
 }
 
 function parseGatewayHost(input: string | undefined): { host: string; protocol: 'http' | 'https' } {
@@ -46,17 +48,64 @@ function sidecarOrigin(config: SeedGatewayConfig): {
   }
 }
 
-async function probeSidecarHealthy(baseUrl: string, signal?: AbortSignal): Promise<boolean> {
+function browserOrigin(): string | undefined {
+  try {
+    const g = globalThis as { window?: { location?: { origin?: string } } }
+    const origin = g.window?.location?.origin
+    return typeof origin === 'string' && origin.length > 0 ? origin.replace(/\/$/, '') : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Resolve `proxyBaseUrl` to an absolute origin+path (no trailing slash).
+ * Relative paths require a browser `window.location.origin` or {@link ResolveSeedGatewayEndpointsOptions.origin}.
+ */
+export function resolveProxyBaseUrl(
+  proxyBaseUrl: string,
+  options?: { origin?: string },
+): string {
+  const raw = proxyBaseUrl.trim()
+  if (!raw) {
+    throw new Error('proxyBaseUrl is empty')
+  }
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return raw.replace(/\/$/, '')
+  }
+  if (raw.startsWith('/')) {
+    const origin = (options?.origin?.trim() || browserOrigin() || '').replace(/\/$/, '')
+    if (!origin) {
+      throw new Error(
+        `Relative proxyBaseUrl "${proxyBaseUrl}" requires a browser origin or resolve options.origin`,
+      )
+    }
+    return `${origin}${raw.replace(/\/$/, '')}`
+  }
+  return `https://${raw.replace(/\/$/, '')}`
+}
+
+async function probeUrlHealthy(
+  baseUrl: string,
+  cacheKey: 'sidecar' | string,
+  signal?: AbortSignal,
+): Promise<boolean> {
   const now = Date.now()
-  if (sidecarProbeCache && now < sidecarProbeCache.expiresAt) {
-    return sidecarProbeCache.healthy
+  if (cacheKey === 'sidecar') {
+    if (sidecarProbeCache && now < sidecarProbeCache.expiresAt) {
+      return sidecarProbeCache.healthy
+    }
+    const healthy = await probeGateway(baseUrl, signal)
+    sidecarProbeCache = { healthy, expiresAt: now + PROBE_TTL_MS }
+    return healthy
   }
 
-  const healthy = await probeGateway(baseUrl, signal)
-  sidecarProbeCache = {
-    healthy,
-    expiresAt: now + SIDECAR_PROBE_TTL_MS,
+  const cached = proxyProbeCache.get(cacheKey)
+  if (cached && now < cached.expiresAt) {
+    return cached.healthy
   }
+  const healthy = await probeGateway(baseUrl, signal)
+  proxyProbeCache.set(cacheKey, { healthy, expiresAt: now + PROBE_TTL_MS })
   return healthy
 }
 
@@ -91,14 +140,60 @@ function buildHyperEndpoints(config: SeedGatewayConfig): ResolvedSeedGatewayEndp
   }
 }
 
+function buildProxyEndpoints(
+  config: SeedGatewayConfig,
+  absoluteProxyBaseUrl: string,
+): ResolvedSeedGatewayEndpoints {
+  const parsed = new URL(absoluteProxyBaseUrl)
+  const protocol: 'http' | 'https' = parsed.protocol === 'http:' ? 'http' : 'https'
+  const path = parsed.pathname.replace(/\/$/, '')
+  const hostWithPath = path ? `${parsed.host}${path}` : parsed.host
+  const baseUrl = `${protocol}://${hostWithPath}`
+  return {
+    mode: config.transport ?? 'http-gateway',
+    arweaveHost: hostWithPath,
+    arweaveProtocol: protocol,
+    arweaveBaseUrl: baseUrl,
+    arweaveGraphqlUrl: `${baseUrl}/graphql`,
+    uploadApiBaseUrl: baseUrl,
+    activePath: 'http-proxy',
+    gatewayHyperKey: config.hyper?.gatewayHyperKey?.trim() || undefined,
+    proxyBaseUrl: absoluteProxyBaseUrl,
+  }
+}
+
 export type ResolveSeedGatewayEndpointsOptions = {
   signal?: AbortSignal
-  /** Skip cache and probe sidecar again (hybrid). */
+  /** Skip cache and probe sidecar / proxy again. */
   forceSidecarProbe?: boolean
+  /**
+   * Origin used to resolve relative `proxyBaseUrl` (e.g. `https://app.example.com`).
+   * Defaults to `window.location.origin` in browsers.
+   */
+  origin?: string
+}
+
+async function tryProxyEndpoints(
+  config: SeedGatewayConfig,
+  options?: ResolveSeedGatewayEndpointsOptions,
+): Promise<ResolvedSeedGatewayEndpoints | null> {
+  const raw = config.proxyBaseUrl?.trim()
+  if (!raw) return null
+
+  const absolute = resolveProxyBaseUrl(raw, { origin: options?.origin })
+  const shouldProbe = config.hyper?.probeSidecar !== false
+  if (shouldProbe) {
+    const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
+    if (!ok) return null
+  }
+  return buildProxyEndpoints(config, absolute)
 }
 
 /**
  * Resolve effective gateway + upload API URLs for the configured transport mode.
+ *
+ * Preference when a proxy and/or sidecar may apply:
+ * configured + healthy `proxyBaseUrl` → local Hyper sidecar → public HTTP gateway.
  */
 export async function resolveSeedGatewayEndpoints(
   config: SeedGatewayConfig,
@@ -109,30 +204,48 @@ export async function resolveSeedGatewayEndpoints(
   }
 
   const mode: SeedGatewayTransportMode = config.transport ?? 'http-gateway'
+  const shouldProbe = config.hyper?.probeSidecar !== false
 
   if (mode === 'http-gateway') {
+    if (config.proxyBaseUrl?.trim()) {
+      const absolute = resolveProxyBaseUrl(config.proxyBaseUrl, { origin: options?.origin })
+      if (shouldProbe) {
+        const ok = await probeUrlHealthy(absolute, `proxy:${absolute}`, options?.signal)
+        if (!ok) {
+          throw new Error(
+            `Gateway HTTP proxy not reachable at ${absolute}. ` +
+              'Ensure your Node route runs createGatewayProxy (or equivalent) and mounts at proxyBaseUrl.',
+          )
+        }
+      }
+      return buildProxyEndpoints({ ...config, transport: mode }, absolute)
+    }
     return buildHttpEndpoints({ ...config, transport: mode })
   }
 
   if (mode === 'hyper') {
-    const hyperEndpoints = buildHyperEndpoints(config)
-    const shouldProbe = config.hyper?.probeSidecar !== false
+    const proxy = await tryProxyEndpoints({ ...config, transport: mode }, options)
+    if (proxy) return proxy
+
+    const hyperEndpoints = buildHyperEndpoints({ ...config, transport: mode })
     if (shouldProbe) {
-      const ok = await probeSidecarHealthy(hyperEndpoints.arweaveBaseUrl, options?.signal)
+      const ok = await probeUrlHealthy(hyperEndpoints.arweaveBaseUrl, 'sidecar', options?.signal)
       if (!ok) {
         throw new Error(
           `Gateway Hyper sidecar not reachable at ${hyperEndpoints.arweaveBaseUrl}. ` +
-            'Run: seed gateway tunnel connect <operator-z32-key>',
+            'Run: seed gateway tunnel connect <operator-z32-key> — or configure gateway.proxyBaseUrl for an app-server proxy.',
         )
       }
     }
     return hyperEndpoints
   }
 
-  // hybrid
+  // hybrid: proxy → sidecar → public HTTP
+  const proxy = await tryProxyEndpoints({ ...config, transport: mode }, options)
+  if (proxy) return proxy
+
   const sidecar = sidecarOrigin(config)
-  const shouldProbe = config.hyper?.probeSidecar !== false
-  if (shouldProbe && (await probeSidecarHealthy(sidecar.baseUrl, options?.signal))) {
+  if (shouldProbe && (await probeUrlHealthy(sidecar.baseUrl, 'sidecar', options?.signal))) {
     return buildHyperEndpoints({ ...config, transport: 'hyper' })
   }
 
@@ -144,12 +257,12 @@ export async function resolveSeedGatewayEndpoints(
   }
 }
 
-/** Build ordered gateway host list for read fallback (sidecar first in hybrid when active). */
+/** Build ordered gateway host list for read fallback (sidecar/proxy first when active). */
 export function getReadGatewayHostsForConfig(
   resolved: ResolvedSeedGatewayEndpoints,
   _defaults?: readonly string[],
 ): string[] {
-  if (resolved.activePath === 'hyper-sidecar') {
+  if (resolved.activePath === 'hyper-sidecar' || resolved.activePath === 'http-proxy') {
     return [resolved.arweaveHost]
   }
   return getArweaveReadGatewayHostsForPrimary(resolved.arweaveHost)

@@ -2,9 +2,18 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import http from 'node:http'
 import {
   resolveSeedGatewayEndpoints,
+  resolveProxyBaseUrl,
   invalidateSidecarProbeCache,
 } from '@/helpers/gateway/resolveSeedGatewayEndpoints'
 import { DEFAULT_ARWEAVE_HOST, DEFAULT_GATEWAY_SIDECAR_PORT } from '@/helpers/constants'
+
+describe('resolveProxyBaseUrl', () => {
+  it('resolves relative paths with options.origin', () => {
+    expect(
+      resolveProxyBaseUrl('/api/seed-gateway', { origin: 'https://app.example.com' }),
+    ).toBe('https://app.example.com/api/seed-gateway')
+  })
+})
 
 describe('resolveSeedGatewayEndpoints', () => {
   beforeEach(() => {
@@ -67,6 +76,17 @@ describe('resolveSeedGatewayEndpoints', () => {
       })
       expect(resolved.activePath).toBe('hybrid-fallback-http')
       expect(resolved.arweaveHost).toBe('fallback.gateway')
+    })
+
+    it('hybrid prefers proxy over sidecar when proxy is healthy', async () => {
+      const resolved = await resolveSeedGatewayEndpoints({
+        transport: 'hybrid',
+        proxyBaseUrl: `http://127.0.0.1:${port}/api/seed-gateway`,
+        arweaveDomain: DEFAULT_ARWEAVE_HOST,
+        hyper: { localSidecarPort: DEFAULT_GATEWAY_SIDECAR_PORT, probeSidecar: true },
+      })
+      expect(resolved.activePath).toBe('http-proxy')
+      expect(resolved.arweaveBaseUrl).toBe(`http://127.0.0.1:${port}/api/seed-gateway`)
     })
   })
 })

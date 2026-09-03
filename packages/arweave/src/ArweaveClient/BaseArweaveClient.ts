@@ -65,11 +65,30 @@ export abstract class BaseArweaveClient {
   // ============================================
 
   /**
-   * Get the current Arweave host (hostname, optionally with port — no URL scheme)
-   * @returns The Arweave host (e.g. 'arweave.net' or 'localhost:1984')
+   * Get the current Arweave host (hostname, optionally with port and path prefix — no URL scheme)
+   * @returns The Arweave host (e.g. 'arweave.net', 'localhost:1984', or 'app.example.com/api/seed-gateway')
    */
   static getHost(): string {
     return this.resolveGateway().host
+  }
+
+  /**
+   * Hostname (+ optional port) without a path prefix — safe for the `arweave` npm client's `init({ host })`.
+   */
+  static getArweaveSdkHost(): string {
+    const host = this.getHost()
+    const slash = host.indexOf('/')
+    return slash === -1 ? host : host.slice(0, slash)
+  }
+
+  /**
+   * Path prefix on the gateway origin (e.g. `/api/seed-gateway`), or empty.
+   */
+  static getGatewayPath(): string {
+    const host = this.getHost()
+    const slash = host.indexOf('/')
+    if (slash === -1) return ''
+    return host.slice(slash).replace(/\/$/, '') || ''
   }
 
   /**
@@ -80,7 +99,8 @@ export abstract class BaseArweaveClient {
   }
 
   /**
-   * Base URL for the configured gateway (e.g. https://arweave.net or http://localhost:1984)
+   * Base URL for the configured gateway (e.g. https://arweave.net, http://localhost:1984,
+   * or https://app.example.com/api/seed-gateway)
    */
   static getBaseUrl(): string {
     const { protocol, host } = this.resolveGateway()

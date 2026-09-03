@@ -8,6 +8,7 @@ export type SeedConfigGatewayInput = {
     transport?: SeedGatewayTransportMode
     arweaveDomain?: string
     uploadApiBaseUrl?: string
+    proxyBaseUrl?: string
     gatewayHyperKey?: string
     localSidecarHost?: string
     localSidecarPort?: number
@@ -23,6 +24,7 @@ export type ClientGatewayContextInput = {
   gatewayHyperKey?: string
   gatewaySidecarHost?: string
   gatewaySidecarPort?: number
+  gatewayProxyBaseUrl?: string
 }
 
 export type { SeedGatewayConfig }

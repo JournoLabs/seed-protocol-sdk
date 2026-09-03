@@ -152,6 +152,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       gatewayHyperKey: resolvedGateway.gatewayHyperKey,
       gatewaySidecarHost: gatewayConfig.hyper?.localSidecarHost,
       gatewaySidecarPort: gatewayConfig.hyper?.localSidecarPort,
+      gatewayProxyBaseUrl: resolvedGateway.proxyBaseUrl ?? gatewayConfig.proxyBaseUrl,
       addresses: normalizedAddresses.owned,
       ownedAddresses: normalizedAddresses.owned,
       watchedAddresses: normalizedAddresses.watched,
@@ -162,7 +163,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? true,
     } })
     
-    if (resolvedGateway.activePath !== 'hyper-sidecar') {
+    if (resolvedGateway.activePath !== 'hyper-sidecar' && resolvedGateway.activePath !== 'http-proxy') {
       void ensureReadGatewaySelected().catch(() => {
         /* non-blocking warm-up for read gateway probe */
       })

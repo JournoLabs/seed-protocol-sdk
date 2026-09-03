@@ -20,6 +20,7 @@ export type GlobalMachineContext = {
   gatewayHyperKey?: string
   gatewaySidecarHost?: string
   gatewaySidecarPort?: number
+  gatewayProxyBaseUrl?: string
   filesDir?: string
 }
 
@@ -60,6 +61,7 @@ export type ClientManagerContext = {
   gatewayHyperKey?: string
   gatewaySidecarHost?: string
   gatewaySidecarPort?: number
+  gatewayProxyBaseUrl?: string
   filesDir?: string
   dbConfig?: import('@/types').DbConfig
   schemaFile?: string

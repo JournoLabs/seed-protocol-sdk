@@ -26,6 +26,7 @@ export const saveConfig = fromCallback<
     gatewayHyperKey,
     gatewaySidecarHost,
     gatewaySidecarPort,
+    gatewayProxyBaseUrl,
   } = context
 
   // Validate endpoints - required for proper initialization
@@ -114,6 +115,7 @@ export const saveConfig = fromCallback<
       if (gatewaySidecarPort != null) {
         await persistKey('gatewaySidecarPort', String(gatewaySidecarPort))
       }
+      await persistKey('gatewayProxyBaseUrl', gatewayProxyBaseUrl)
     } catch (error: any) {
       logger('[internal/actors] [saveConfig] Error saving config:', error)
       // In test environments, continue anyway

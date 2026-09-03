@@ -29,7 +29,7 @@ export class ArweaveImageService {
    */
   async detectImage(transactionId: string): Promise<ImageMetadata> {
     const resolved = getResolvedSeedGatewayEndpoints()
-    if (!resolved || resolved.activePath !== 'hyper-sidecar') {
+    if (!resolved || (resolved.activePath !== 'hyper-sidecar' && resolved.activePath !== 'http-proxy')) {
       await ensureReadGatewaySelected().catch(() => {
         /* feed may run without browser client init */
       })
