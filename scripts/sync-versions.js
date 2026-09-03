@@ -20,6 +20,7 @@ const SYNC_PACKAGES = [
   'sdk',
   'react',
   'publish',
+  'query',
   'feed',
   'feed-hyper',
   'gateway-hyper',

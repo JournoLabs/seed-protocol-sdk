@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/publish-package.js [-f] <package>
  *
- * Packages: eas, arweave, vite, sdk, react, feed, feed-hyper, gateway-hyper, publish
+ * Packages: eas, arweave, vite, sdk, react, query, feed, feed-hyper, gateway-hyper, publish
  *
  * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
@@ -28,7 +28,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'feed', 'feed-hyper', 'gateway-hyper', 'publish']
+const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'query', 'feed', 'feed-hyper', 'gateway-hyper', 'publish']
 const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
 
 function readPackageJson(path) {

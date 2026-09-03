@@ -1,6 +1,6 @@
 # @seedprotocol/feed
 
-Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. For EAS-assembled feeds, `getFeedItemsBySchemaName` marks relation fields with `_feedFieldStorageModels` / `_feedListElementStorageModels` so `pickFeedItemContent` prefers **html** / **file** / **json** storage relations before the legacy `html` / `body` / `content` chain; feed output is **not** sanitized—see [FEED_RICH_FIELDS.md](../../docs/FEED_RICH_FIELDS.md) (including **Publishing feeds** and trust boundaries).
+Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. Item assembly (Seed → Version → canonical properties, relation expand, Arweave rich-text hydrate) is provided by [`@seedprotocol/query`](../query); this package applies feed defaults (`link` / `guid` / `pubDate`) and serializes RSS/Atom/JSON Feed. For EAS-assembled feeds, relation fields are marked with `_feedFieldStorageModels` / `_feedListElementStorageModels` so `pickFeedItemContent` prefers **html** / **file** / **json** storage relations before the legacy `html` / `body` / `content` chain; feed output is **not** sanitized—see [FEED_RICH_FIELDS.md](../../docs/FEED_RICH_FIELDS.md) (including **Publishing feeds** and trust boundaries).
 
 ## P2P distribution
 

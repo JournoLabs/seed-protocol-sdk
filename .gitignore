@@ -149,5 +149,6 @@ vite/app-files
 packages/cli/dist
 packages/sdk/dist
 packages/feed/dist
+packages/query/dist
 packages/publish/dist
 packages/react/dist
