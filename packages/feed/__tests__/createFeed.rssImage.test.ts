@@ -109,4 +109,31 @@ describe('createFeed rss image tags', () => {
     expect(xml).not.toContain('<media:content ')
     expect(xml).not.toContain('<media:thumbnail ')
   })
+
+  it('does not emit enclosure or EAS link for nested featureImage without storage tx', async () => {
+    const imageUid =
+      '0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb'
+    const easLink = `https://optimism-sepolia.easscan.org/attestation/view/${imageUid}`
+    const xml = await createFeed(
+      [
+        {
+          id: 'post-6',
+          title: 'Post 6',
+          link: easLink,
+          featureImage: {
+            seedUid: imageUid,
+            timeCreated: 1773361995,
+          },
+        } as any,
+      ],
+      'post',
+      'rss'
+    )
+
+    expect(xml).toContain(`<link>${easLink}</link>`)
+    expect(xml).toContain(`<featureimage:seedUid>${imageUid}</featureimage:seedUid>`)
+    expect(xml).not.toContain(`<featureimage:link>${easLink}</featureimage:link>`)
+    expect(xml).not.toContain('<featureimage:link>')
+    expect(xml).not.toContain('<enclosure ')
+  })
 })

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { parseRssString } from '../src/consume/parseRss'
-import { normalizeFeedItemFields } from '@seedprotocol/arweave'
+import {
+  normalizeFeedItemFields,
+  resolveSeedRssImageRelationFromItem,
+} from '@seedprotocol/arweave'
 
 const MINIMAL_RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -40,5 +43,21 @@ describe('parseRssString', () => {
     if (normalized.featureImage && normalized.featureImage.role === 'image') {
       expect(normalized.featureImage.classification.kind).toBe('url')
     }
+  })
+
+  it('resolveSeedRssImageRelationFromItem ignores EAS explorer URLs on nested objects', () => {
+    const imageUid =
+      '0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb'
+    const easLink = `https://optimism-sepolia.easscan.org/attestation/view/${imageUid}`
+    expect(
+      resolveSeedRssImageRelationFromItem({
+        featureImage: {
+          seedUid: imageUid,
+          link: easLink,
+        },
+      }),
+    ).toEqual({
+      seedUid: imageUid,
+    })
   })
 })

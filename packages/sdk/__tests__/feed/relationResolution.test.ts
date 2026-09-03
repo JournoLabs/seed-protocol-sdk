@@ -87,9 +87,10 @@ describe('Feed relation resolution', () => {
 
       const rss = await createFeed(items, 'post', 'rss')
 
-      expect(rss).toContain(`enclosure url="${url}"`)
+      expect(rss).toContain('enclosure url="https://')
+      expect(rss).toContain('JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY')
       expect(rss).not.toContain('arweave.net/[object Object]')
-      expect(rss).toContain('<arweaveUrl>')
+      expect(rss).toContain('<featureimage:arweaveUrl>')
       expect(rss).toContain(url)
     })
 
@@ -114,6 +115,33 @@ describe('Feed relation resolution', () => {
       expect(rss).toContain(tx)
       expect(rss).not.toContain('[object Object]')
     })
+
+    it('nested featureImage without storage tx does not emit EAS link or enclosure', async () => {
+      const imageUid =
+        '0x302bafd11cebdd34606a974f19b7f576a6d74eb775c4b131c5fc9986afc467bb'
+      const easLink = `https://optimism-sepolia.easscan.org/attestation/view/${imageUid}`
+      const items = [
+        {
+          seedUid: '0xpostNoStorageImg',
+          title: 'Post',
+          text: 'Body',
+          link: easLink,
+          timeCreated: Math.floor(Date.now() / 1000),
+          featureImage: {
+            seedUid: imageUid,
+            timeCreated: 1773361995,
+          },
+        },
+      ]
+
+      const rss = await createFeed(items, 'post', 'rss')
+
+      expect(rss).toContain(`<link>${easLink}</link>`)
+      expect(rss).toContain(`<featureimage:seedUid>${imageUid}</featureimage:seedUid>`)
+      expect(rss).not.toContain(`<featureimage:link>${easLink}</featureimage:link>`)
+      expect(rss).not.toContain('<featureimage:link>')
+      expect(rss).not.toContain('<enclosure ')
+    })
   })
 
   describe('RSS output with expanded author relation', () => {
@@ -136,8 +164,8 @@ describe('Feed relation resolution', () => {
       const rss = await createFeed(items, 'post', 'rss')
 
       expect(rss).toContain('<author>')
-      expect(rss).toContain('<name>Test User</name>')
-      expect(rss).toContain('<seedUid>0xf8a7e27935e0da0203e53f6bf2a698149adb3fdb3212e2145c19946f4c7ffdda</seedUid>')
+      expect(rss).toContain('<author:name>Test User</author:name>')
+      expect(rss).toContain('<author:seedUid>0xf8a7e27935e0da0203e53f6bf2a698149adb3fdb3212e2145c19946f4c7ffdda</author:seedUid>')
       expect(rss).toContain('dc:creator')
     })
 
@@ -167,10 +195,10 @@ describe('Feed relation resolution', () => {
 
       const rss = await createFeed(items, 'post', 'rss')
 
-      expect(rss).toContain('<name>Alice</name>')
-      expect(rss).toContain('<name>Bob</name>')
-      expect(rss).toContain('<seedUid>0xalice123</seedUid>')
-      expect(rss).toContain('<seedUid>0xbob456</seedUid>')
+      expect(rss).toContain('<author:name>Alice</author:name>')
+      expect(rss).toContain('<author:name>Bob</author:name>')
+      expect(rss).toContain('<author:seedUid>0xalice123</author:seedUid>')
+      expect(rss).toContain('<author:seedUid>0xbob456</author:seedUid>')
     })
   })
 

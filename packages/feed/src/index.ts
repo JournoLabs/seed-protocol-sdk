@@ -31,6 +31,10 @@ export {
   classifyMediaRef,
   normalizeFeedItemFields,
   getFeedItemStringField,
+  isEasAttestationExplorerUrl,
+  resolveSeedRssImageRelationRef,
+  resolveSeedRssImageRelationFromItem,
+  SEED_RSS_IMAGE_RELATION_FIELD_KEYS,
 } from '@seedprotocol/arweave';
 export type {
   FeedFieldManifest,
@@ -44,6 +48,7 @@ export type {
   NormalizedHtmlField,
   NormalizedTextField,
   NormalizedFeedFieldValue,
+  SeedRssImageRelationRef,
 } from '@seedprotocol/arweave';
 import pluralize from 'pluralize';
 import type { FeedFormat, GraphQLItem, TransformOptions, FeedConfig, ImageMetadata } from './types';
@@ -56,6 +61,7 @@ import { loadCacheConfig } from './cache/config';
 import { loadFeedConfig, resolveSiteConfig, type SiteConfigOverrides } from './config';
 import { checkIfNoneMatch } from './utils/etag';
 import { ArweaveImageService } from './services/arweaveImageService';
+import { resolveSeedRssImageRelationRef } from '@seedprotocol/arweave';
 import {
   pickFeedItemContent,
   pickFeedItemDescription,
@@ -76,29 +82,7 @@ export {
 
 /** RSS enclosure URL from a plain string (URL or tx id) or nested Image relation object. */
 function getEnclosureUrlFromImageRelationField(value: unknown): string | undefined {
-  if (value == null) return undefined
-  if (typeof value === 'string') {
-    if (value.startsWith('http://') || value.startsWith('https://')) return value
-    try {
-      return getArweaveUrlForTransaction(value)
-    } catch {
-      return undefined
-    }
-  }
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    const o = value as Record<string, unknown>
-    const direct = o.arweaveUrl
-    if (typeof direct === 'string' && direct.trim()) return direct.trim()
-    const tx = (o.storageTransactionId ?? o.storage_transaction_id) as string | undefined
-    if (tx && typeof tx === 'string' && tx.trim()) {
-      try {
-        return getArweaveUrlForTransaction(tx.trim())
-      } catch {
-        return undefined
-      }
-    }
-  }
-  return undefined
+  return resolveSeedRssImageRelationRef(value)?.mediaUrl
 }
 
 interface RssImageCandidate {

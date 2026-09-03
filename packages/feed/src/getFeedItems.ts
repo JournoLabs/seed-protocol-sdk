@@ -214,6 +214,82 @@ const setFeedItemDefaults = (
   }
 };
 
+/**
+ * Defaults for expanded Image relation clones in feeds.
+ * Does not emit EAS attestation explorer URLs as `link` — only gateway URLs when storage exists.
+ */
+const setImageRelationCloneForFeed = (
+  clone: Record<string, unknown>,
+  seedUid: string,
+): void => {
+  if (!clone.title && !clone.Title) {
+    clone.title = seedUid;
+    clone.Title = seedUid;
+  } else if (clone.title && !clone.Title) {
+    clone.Title = clone.title;
+  } else if (clone.Title && !clone.title) {
+    clone.title = clone.Title;
+  }
+
+  if (clone.timeCreated && !clone.pubDate && !clone.PubDate) {
+    const pubDate = formatRfc822Date(clone.timeCreated as number);
+    clone.pubDate = pubDate;
+    clone.PubDate = pubDate;
+  } else if (clone.pubDate && !clone.PubDate) {
+    clone.PubDate = clone.pubDate;
+  } else if (clone.PubDate && !clone.pubDate) {
+    clone.pubDate = clone.PubDate;
+  }
+
+  if (!clone.seedUid && !clone.SeedUid) {
+    clone.seedUid = seedUid;
+    clone.SeedUid = seedUid;
+  } else if (clone.seedUid && !clone.SeedUid) {
+    clone.SeedUid = clone.seedUid;
+  } else if (clone.SeedUid && !clone.seedUid) {
+    clone.seedUid = clone.SeedUid;
+  }
+
+  if (clone.attester && !clone.Attester) {
+    clone.Attester = clone.attester;
+  } else if (clone.Attester && !clone.attester) {
+    clone.attester = clone.Attester;
+  }
+
+  const storageTransactionIdSnake =
+    clone.storage_transaction_id &&
+    typeof clone.storage_transaction_id === 'string' &&
+    clone.storage_transaction_id.trim() !== '' &&
+    clone.storage_transaction_id !== 'undefined' &&
+    clone.storage_transaction_id !== seedUid
+      ? (clone.storage_transaction_id as string).trim()
+      : null;
+  const storageTransactionIdCamel =
+    clone.storageTransactionId &&
+    typeof clone.storageTransactionId === 'string' &&
+    clone.storageTransactionId.trim() !== '' &&
+    clone.storageTransactionId !== 'undefined' &&
+    clone.storageTransactionId !== seedUid
+      ? (clone.storageTransactionId as string).trim()
+      : null;
+  const storageTransactionId = storageTransactionIdSnake || storageTransactionIdCamel;
+
+  delete clone.link;
+  delete clone.Link;
+  delete clone.guid;
+  delete clone.Guid;
+
+  if (storageTransactionId && storageTransactionId.length > 0) {
+    try {
+      const mediaLink = getArweaveUrlForTransaction(storageTransactionId);
+      clone.link = mediaLink;
+      clone.Link = mediaLink;
+    } catch {
+      // omit link when gateway URL cannot be built
+    }
+  }
+};
+
 const seedUidToModelType = new Map<string, string>();
 const relatedSeedUids = new Set<string>();
 const versionUidToSeedUid = new Map<string, string>();
@@ -568,7 +644,7 @@ function expandRelationProperties(
         if (isImage) {
           const relatedSchema = seedUidToModelType.get(uid) ?? 'unknown';
           const clone = { ...related } as Record<string, unknown>;
-          setFeedItemDefaults(clone, uid, relatedSchema, options);
+          setImageRelationCloneForFeed(clone, uid);
           enrichImageSeedCloneForFeed(clone);
           expanded.push(clone);
           didExpand = true;
