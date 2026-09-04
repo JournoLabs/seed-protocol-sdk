@@ -7,6 +7,9 @@ export type SeedRecord = {
   data: Record<string, unknown>
 }
 
+/** Where to load Seed/Version/property attestations from. Default `'remote'`. */
+export type QuerySourceMode = 'local' | 'remote' | 'auto'
+
 export type AssembleOptions = {
   /** Expand relation UIDs to nested objects when possible. Default true. */
   expandRelations?: boolean
@@ -16,8 +19,14 @@ export type AssembleOptions = {
    * Use collection/item cache when enabled via CACHE_* env.
    * Default: follow loadQueryCacheConfig().enabled.
    * Pass false to bypass cache for this call.
+   * Only applies when the resolved source is `'remote'`.
    */
   cache?: boolean
+  /**
+   * Data backend: remote EAS, registered local SQLite adapter, or auto (local then remote).
+   * Default `'remote'`.
+   */
+  source?: QuerySourceMode
 }
 
 export type ChangelogInclude = 'data' | 'data+changelog' | 'changelog'

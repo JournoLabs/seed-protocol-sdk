@@ -134,6 +134,14 @@ export type {
 } from './db/read/getPublishPendingDiff'
 export { getSeedPublishState } from './db/read/getSeedPublishState'
 export type { SeedPublishState } from './db/read/getSeedPublishState'
+export {
+  createLocalQueryDataSource,
+  registerSeedQueryLocalSource,
+  unregisterSeedQueryLocalSource,
+  isSeedQueryLocalSourceRegistered,
+  getPublishedSeedRecord,
+} from './query'
+export type { GetPublishedSeedRecordOptions } from './query'
 export type { PublishMode, GetPublishPayloadOptions } from './db/read/getPublishPayload'
 export { getMetadataAttestationUidsForSeedUid } from './db/read/getMetadataAttestationUidsForSeedUid'
 export { getAttesterForSeed } from './db/read/getAttesterForSeed'

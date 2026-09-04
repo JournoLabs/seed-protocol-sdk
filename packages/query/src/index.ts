@@ -11,6 +11,18 @@ export { assembleSeedChangelog } from './assembleChangelog.js'
 export { getSeed, queryBySchema, queryBySchemaForMonth } from './api.js'
 
 export {
+  registerLocalQuerySource,
+  clearLocalQuerySource,
+  getRegisteredLocalQuerySource,
+  hasLocalQuerySource,
+  createRemoteQueryDataSource,
+  getRemoteQueryDataSource,
+  resolveQuerySource,
+  normalizeSourceMode,
+} from './source/index.js'
+export type { QueryDataSource, ResolvedQuerySource } from './source/index.js'
+
+export {
   buildFlatSnapshotFromProperties,
   diffVersionSnapshots,
   diffPropertyAttestations,
@@ -22,6 +34,7 @@ export {
 export type {
   SeedRecord,
   AssembleOptions,
+  QuerySourceMode,
   GetSeedOptions,
   GetSeedResult,
   ChangelogInclude,
@@ -101,3 +114,4 @@ export {
   hydrateArweaveRichTextInFeedItems,
   isArweaveTransactionGatewayUrl,
 } from './hydrateArweaveRichText.js'
+export type { HydrateStorageOptions } from './hydrateArweaveRichText.js'

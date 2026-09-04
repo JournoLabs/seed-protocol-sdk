@@ -1,19 +1,19 @@
 # @seedprotocol/query
 
-Canonical **Seed JSON** reads from remote EAS (Seed → Version → property attestations).
+Canonical **Seed JSON** reads from remote EAS or a registered local SQLite/files adapter (Seed → Version → property attestations).
 
 Feed generation (`@seedprotocol/feed`) uses this package to assemble items; RSS/Atom/JSON Feed formatting and **HTTP / serialized content** caching stay in feed.
 
 ## Scope
 
-- **Remote-only** assembly (EAS GraphQL + Arweave gateway hydration)
 - `getSeed(seedUid)` — one seed’s canonical JSON envelope, optional **changelog**
 - `queryBySchema(schemaName, { limit, skip })` — paginated collection (latest-only)
 - `queryBySchemaForMonth` — calendar-month listing (used by feed archives)
 - Resolve mode: **latest Version**, then newest property attestation per `(version, schemaId)`
-- **Shared collection + item cache** (memory → disk), with the same TTL / incremental-merge / refresh-lock patterns feed used for item lists
+- **`source: 'local' | 'remote' | 'auto'`** — pluggable backends (default `'remote'`)
+- **Shared collection + item cache** for **remote** reads (memory → disk)
 
-Later phases: `source: 'local' | 'remote' | 'auto'`, SDK sync consolidation.
+Later phase: SDK sync consolidation (`syncDbWithEas` sharing canonicalization).
 
 ## Usage
 
@@ -48,7 +48,42 @@ const { items, limit, skip, etag } = await queryBySchema('post', {
 }
 ```
 
-Options on both APIs: `expandRelations` (default `true`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass).
+Options on both APIs: `expandRelations` (default `true`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass), `source` (default `'remote'`).
+
+## Source (`local` / `remote` / `auto`)
+
+| `source` | Behavior |
+|----------|----------|
+| `'remote'` (default) | EAS GraphQL + Arweave hydrate; uses query CacheManager when enabled |
+| `'local'` | Requires `registerLocalQuerySource(...)` (SDK registers on client init). Published SQLite snapshot only — not drafts |
+| `'auto'` | Prefer registered local when the seed/collection resolves; otherwise remote. No sync refresh yet |
+
+```ts
+import {
+  registerLocalQuerySource,
+  getSeed,
+  type QueryDataSource,
+} from '@seedprotocol/query'
+
+// SDK apps: Client.init registers automatically via registerSeedQueryLocalSource().
+// Or register a custom adapter:
+registerLocalQuerySource(myLocalSource)
+
+const local = await getSeed('0x...', { source: 'local' })
+const either = await getSeed('0x...', { source: 'auto' })
+```
+
+Unresolved `source: 'local'` without a registered adapter throws. Local / resolved-local `auto` **bypasses** the query disk/memory cache (SQLite is the store).
+
+From `@seedprotocol/sdk`:
+
+```ts
+import { getPublishedSeedRecord } from '@seedprotocol/sdk'
+
+const published = await getPublishedSeedRecord('0x...', { source: 'local' })
+```
+
+Authoring UIs keep using `Item` / liveQuery for drafts; published JSON snapshots use query + `source`.
 
 ## Changelog (`getSeed` only)
 
@@ -70,6 +105,7 @@ const withHistory = await getSeed('0x...', {
 - **Version granularity** (default) — consecutive flat Version snapshots with `before` / `after` / `changedKeys`.
 - **Property granularity** — one entry per property attestation change (`previousValue` / `nextValue`).
 - Historical snapshots are **flat** (no relation expand / Arweave hydrate). Collections stay latest-only.
+- Works for `source: 'local'` when versions + attested metadata exist in the DB.
 
 ## Caching
 
@@ -83,14 +119,17 @@ Controlled by the same env vars as feed content cache (ops compatibility):
 
 Behavior:
 
-- **Collection cache** — only for `queryBySchema` with `skip === 0` (working set). Warm hits still fetch the page to detect newer `timeCreated`, then merge/dedupe.
-- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by `getSeed` and write-through from collection/month queries.
+- **Collection cache** — only for **remote** `queryBySchema` with `skip === 0` (working set). Warm hits still fetch the page to detect newer `timeCreated`, then merge/dedupe.
+- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by remote `getSeed` and write-through from collection/month queries.
 - **`cache: false`** — skip all cache reads/writes for that call.
 - **`skip > 0`** — no collection cache; still write-through items when cache is enabled.
-- Refresh lock — concurrent `queryBySchema` for the same schema share one in-flight refresh.
+- **Local source** — no query CacheManager (SQLite is authoritative).
+- Refresh lock — concurrent remote `queryBySchema` for the same schema share one in-flight refresh.
 
 Feed still owns serialized RSS/Atom/JSON bodies, HTTP `ETag` / 304, and image-metadata probing.
 
 ## Init
 
 Call `initializeQueryPlatform()` once (registers Node EAS + Arweave clients), or rely on `getSeed` / `queryBySchema` which initialize automatically.
+
+For local reads, also ensure the SDK client has initialized (registers `registerLocalQuerySource`) or call `registerSeedQueryLocalSource()` / `registerLocalQuerySource` yourself.

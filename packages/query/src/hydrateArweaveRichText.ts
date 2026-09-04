@@ -11,6 +11,15 @@ const RICH_TEXT_KEYS = ['html', 'Html', 'body', 'Body', 'content', 'Content'] as
 /** Max UTF-8 bytes for a single rich-body fetch. */
 const MAX_BODY_BYTES = 8_000_000
 
+export type HydrateStorageOptions = {
+  /** Prefer local file body when available; fall back to Arweave gateway fetch. */
+  readStorageBody?: (ref: {
+    propertyName: string
+    value: unknown
+    localPathHint?: string
+  }) => Promise<string | null>
+}
+
 /**
  * True for a single-path gateway URL whose path looks like an Arweave transaction id.
  */
@@ -50,25 +59,44 @@ async function fetchGatewayPayloadAsUtf8(url: string): Promise<string | null> {
   }
 }
 
-async function hydrateStringFieldIfGateway(
+async function resolveHydratedBody(
+  propertyName: string,
+  value: string,
+  readStorageBody?: HydrateStorageOptions['readStorageBody'],
+): Promise<string | null> {
+  if (readStorageBody) {
+    try {
+      const local = await readStorageBody({ propertyName, value })
+      if (local != null && local.length > 0) return local
+    } catch {
+      // fall through to gateway
+    }
+  }
+  if (!isArweaveTransactionGatewayUrl(value)) return null
+  return fetchGatewayPayloadAsUtf8(value)
+}
+
+async function hydrateStringField(
   item: Record<string, unknown>,
   key: string,
+  readStorageBody?: HydrateStorageOptions['readStorageBody'],
 ): Promise<void> {
   const v = item[key]
   if (typeof v !== 'string' || v.trim() === '') return
-  if (!isArweaveTransactionGatewayUrl(v)) return
-  const text = await fetchGatewayPayloadAsUtf8(v)
+  const text = await resolveHydratedBody(key, v, readStorageBody)
   if (text === null) return
   item[key] = text
 }
 
 /**
- * After relation URL resolution, Html/File fields may be gateway URLs.
- * Replace those with the fetched UTF-8 body when `hydrateStorage` is enabled.
+ * After relation URL resolution, Html/File fields may be gateway URLs (or local paths).
+ * Replace those with the UTF-8 body when `hydrateStorage` is enabled.
  */
 export async function hydrateArweaveRichTextInItems(
   items: Record<string, unknown>[],
+  options?: HydrateStorageOptions,
 ): Promise<void> {
+  const readStorageBody = options?.readStorageBody
   for (const item of items) {
     const keysToHydrate = new Set<string>([...RICH_TEXT_KEYS])
     const fieldModels = getFieldStorageModels(item)
@@ -78,7 +106,7 @@ export async function hydrateArweaveRichTextInItems(
       }
     }
     for (const key of keysToHydrate) {
-      await hydrateStringFieldIfGateway(item, key)
+      await hydrateStringField(item, key, readStorageBody)
     }
 
     const listModels = getListElementStorageModels(item)
@@ -90,8 +118,8 @@ export async function hydrateArweaveRichTextInItems(
         for (let i = 0; i < n; i++) {
           if (!isRichBodyStorageSchema(models[i]!)) continue
           const el = arr[i]
-          if (typeof el !== 'string' || !isArweaveTransactionGatewayUrl(el)) continue
-          const text = await fetchGatewayPayloadAsUtf8(el)
+          if (typeof el !== 'string') continue
+          const text = await resolveHydratedBody(listKey, el, readStorageBody)
           if (text === null) continue
           arr[i] = text
         }

@@ -19,6 +19,10 @@ import {
   sendEasSyncClientRequest,
   startEasSyncActor,
 } from '@/events/item/easSyncManager'
+import {
+  registerSeedQueryLocalSource,
+  unregisterSeedQueryLocalSource,
+} from '@/query/registerSeedQueryLocalSource'
 
 const logger               = debug('seedSdk:client')
 
@@ -138,6 +142,8 @@ const clientInstance = {
       }
       throw error
     }
+    // Wire `@seedprotocol/query` local source once DB is ready
+    registerSeedQueryLocalSource({ force: true })
   },
   setAddresses: async (addresses: AddressConfiguration) => {
     ensureInitialized();
@@ -202,10 +208,12 @@ const clientInstance = {
   },
   stop: () => {
     ensureInitialized();
+    unregisterSeedQueryLocalSource()
     clientManager.stop();
   },
   unload: () => {
     ensureInitialized();
+    unregisterSeedQueryLocalSource()
     clientManager.stop();
     subscription.unsubscribe();
   },

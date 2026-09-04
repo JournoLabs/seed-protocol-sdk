@@ -1,9 +1,3 @@
-import {
-  getSeedsBySchemaName,
-  EasClient,
-  withExcludeRevokedFilter,
-  GET_SEEDS,
-} from '@seedprotocol/eas'
 import { initializeQueryPlatform } from './bootstrap.js'
 import { assembleSeeds } from './assembleSeeds.js'
 import { assembleSeedChangelog } from './assembleChangelog.js'
@@ -11,9 +5,14 @@ import {
   buildAssembleOptionsKey,
   getQueryCacheManager,
 } from './cache/index.js'
+import {
+  normalizeSourceMode,
+  resolveQuerySource,
+  getRemoteQueryDataSource,
+} from './source/index.js'
+import type { QueryDataSource } from './source/types.js'
 import type {
   AssembleOptions,
-  AttestationLike,
   GetSeedOptions,
   GetSeedResult,
   QueryBySchemaOptions,
@@ -21,7 +20,11 @@ import type {
   SeedRecord,
 } from './types.js'
 
-function shouldUseCache(options?: AssembleOptions): boolean {
+function shouldUseCache(
+  options: AssembleOptions | undefined,
+  allowCache: boolean,
+): boolean {
+  if (!allowCache) return false
   if (options?.cache === false) return false
   return getQueryCacheManager().enabled
 }
@@ -38,14 +41,38 @@ async function fetchAndAssemble(
   schemaName: string,
   limit: number,
   skip: number,
-  options?: AssembleOptions,
+  options: AssembleOptions | undefined,
+  dataSource: QueryDataSource,
 ): Promise<SeedRecord[]> {
-  const seeds = (await getSeedsBySchemaName(
-    schemaName,
+  const seeds = await dataSource.listSeedsBySchemaName(schemaName, {
     limit,
     skip,
-  )) as AttestationLike[]
-  return assembleSeeds(schemaName, seeds, options)
+  })
+  return assembleSeeds(schemaName, seeds, options, dataSource)
+}
+
+/**
+ * For `source: 'auto'`: try local first; if empty/miss, fall back to remote.
+ */
+async function withAutoFallbackForCollection(
+  mode: ReturnType<typeof normalizeSourceMode>,
+  dataSource: QueryDataSource,
+  run: (ds: QueryDataSource) => Promise<SeedRecord[]>,
+): Promise<{ items: SeedRecord[]; dataSource: QueryDataSource; useQueryCache: boolean }> {
+  const items = await run(dataSource)
+  if (mode !== 'auto' || dataSource.kind !== 'local') {
+    return {
+      items,
+      dataSource,
+      useQueryCache: dataSource.kind === 'remote',
+    }
+  }
+  if (items.length > 0) {
+    return { items, dataSource, useQueryCache: false }
+  }
+  const remote = getRemoteQueryDataSource()
+  const remoteItems = await run(remote)
+  return { items: remoteItems, dataSource: remote, useQueryCache: true }
 }
 
 export async function queryBySchema(
@@ -55,12 +82,20 @@ export async function queryBySchema(
   await initializeQueryPlatform()
   const limit = options?.limit ?? 100
   const skip = options?.skip ?? 0
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
-  const useCache = shouldUseCache(options)
-  const cache = getQueryCacheManager()
 
-  // Collection cache only for skip=0 working set
-  if (useCache && skip === 0) {
+  const runAssemble = (ds: QueryDataSource) =>
+    fetchAndAssemble(schemaName, limit, skip, options, ds)
+
+  // Collection cache only for remote + skip=0 working set
+  if (
+    shouldUseCache(options, resolved.useQueryCache) &&
+    skip === 0 &&
+    resolved.dataSource.kind === 'remote'
+  ) {
+    const cache = getQueryCacheManager()
     return cache.withRefreshLock(schemaName, async () => {
       const cachedData = await cache.getCollection(schemaName)
       let items: SeedRecord[]
@@ -72,6 +107,7 @@ export async function queryBySchema(
           limit,
           0,
           options,
+          resolved.dataSource,
         )
         const newItems = cache.filterNewRecords(
           pageItems,
@@ -86,7 +122,13 @@ export async function queryBySchema(
           items = cachedData.items.slice(0, limit)
         }
       } else {
-        items = await fetchAndAssemble(schemaName, limit, 0, options)
+        items = await fetchAndAssemble(
+          schemaName,
+          limit,
+          0,
+          options,
+          resolved.dataSource,
+        )
       }
 
       const stored = await cache.setCollection(schemaName, items)
@@ -97,9 +139,16 @@ export async function queryBySchema(
     })
   }
 
-  const items = await fetchAndAssemble(schemaName, limit, skip, options)
-  if (useCache) {
-    await cache.writeThroughItems(items, optionsKey)
+  const {
+    items,
+    dataSource: used,
+    useQueryCache,
+  } = await withAutoFallbackForCollection(mode, resolved.dataSource, (ds) =>
+    runAssemble(ds),
+  )
+
+  if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
+    await getQueryCacheManager().writeThroughItems(items, optionsKey)
   }
   return { items, limit, skip }
 }
@@ -115,27 +164,35 @@ export async function getSeed(
 
   const trimmed = seedUid.trim()
   const include = options?.include ?? 'data'
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
-  const useCache = shouldUseCache(options)
-  const cache = getQueryCacheManager()
 
-  if (useCache) {
-    const cached = await cache.getItem(trimmed, optionsKey)
+  let dataSource = resolved.dataSource
+  let allowCache = resolved.useQueryCache
+
+  if (shouldUseCache(options, allowCache) && dataSource.kind === 'remote') {
+    const cached = await getQueryCacheManager().getItem(trimmed, optionsKey)
     if (cached) {
       return cached.record
     }
   }
 
-  const easClient = EasClient.getEasClient()
-  const { itemSeeds } = await easClient.request(GET_SEEDS, {
-    where: withExcludeRevokedFilter({
-      id: { equals: trimmed },
-    }),
-    take: 1,
-    skip: 0,
-  })
+  let seed = await dataSource.getSeedByUid(trimmed)
 
-  const seed = (itemSeeds ?? [])[0] as AttestationLike | undefined
+  // auto: local miss → remote
+  if (!seed && mode === 'auto' && dataSource.kind === 'local') {
+    dataSource = getRemoteQueryDataSource()
+    allowCache = true
+    seed = await dataSource.getSeedByUid(trimmed)
+    if (shouldUseCache(options, allowCache)) {
+      const cached = await getQueryCacheManager().getItem(trimmed, optionsKey)
+      if (cached) {
+        return cached.record
+      }
+    }
+  }
+
   if (!seed) return null
 
   const schemaName = seed.schema?.schemaNames?.[0]?.name
@@ -144,16 +201,22 @@ export async function getSeed(
   let result: GetSeedResult | null = null
 
   if (!wantsChangelog(include)) {
-    const records = await assembleSeeds(schemaName, [seed], options)
+    const records = await assembleSeeds(schemaName, [seed], options, dataSource)
     result = records[0] ?? null
   } else {
     const { latestVersionUid, changelog } = await assembleSeedChangelog(
       trimmed,
       options,
+      dataSource,
     )
 
     if (wantsData(include)) {
-      const records = await assembleSeeds(schemaName, [seed], options)
+      const records = await assembleSeeds(
+        schemaName,
+        [seed],
+        options,
+        dataSource,
+      )
       const record = records[0]
       if (!record) {
         result = null
@@ -173,8 +236,12 @@ export async function getSeed(
     }
   }
 
-  if (result && useCache) {
-    await cache.setItem(result, optionsKey)
+  if (
+    result &&
+    shouldUseCache(options, allowCache) &&
+    dataSource.kind === 'remote'
+  ) {
+    await getQueryCacheManager().setItem(result, optionsKey)
   }
 
   return result
@@ -182,7 +249,7 @@ export async function getSeed(
 
 /**
  * Query seeds of a schema created within a calendar month (local timezone bounds).
- * No collection cache this phase; may write-through to item cache.
+ * No collection cache; may write-through to item cache when remote.
  */
 export async function queryBySchemaForMonth(
   schemaName: string,
@@ -191,41 +258,22 @@ export async function queryBySchemaForMonth(
   options?: AssembleOptions,
 ): Promise<SeedRecord[]> {
   await initializeQueryPlatform()
-  const startDate = new Date(year, month - 1, 1)
-  const endDate = new Date(year, month, 0, 23, 59, 59)
-  const startTs = Math.floor(startDate.getTime() / 1000)
-  const endTs = Math.floor(endDate.getTime() / 1000) + 1
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
 
-  const where = withExcludeRevokedFilter({
-    AND: [
-      {
-        schema: {
-          is: {
-            schemaNames: {
-              some: {
-                name: { equals: schemaName },
-              },
-            },
-          },
-        },
-      },
-      {
-        timeCreated: { gte: startTs, lt: endTs },
-      },
-    ],
-  })
+  const run = async (ds: QueryDataSource) => {
+    const seeds = await ds.listSeedsBySchemaNameForMonth(
+      schemaName,
+      year,
+      month,
+    )
+    return assembleSeeds(schemaName, seeds, options, ds)
+  }
 
-  const easClient = EasClient.getEasClient()
-  const { itemSeeds } = await easClient.request(GET_SEEDS, {
-    where,
-    take: 1000,
-    skip: 0,
-  })
+  const { items, dataSource: used, useQueryCache } =
+    await withAutoFallbackForCollection(mode, resolved.dataSource, run)
 
-  const seeds = (itemSeeds ?? []) as AttestationLike[]
-  const items = await assembleSeeds(schemaName, seeds, options)
-
-  if (shouldUseCache(options)) {
+  if (shouldUseCache(options, useQueryCache) && used.kind === 'remote') {
     const optionsKey = buildAssembleOptionsKey(options)
     await getQueryCacheManager().writeThroughItems(items, optionsKey)
   }

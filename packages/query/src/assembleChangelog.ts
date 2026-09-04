@@ -1,8 +1,4 @@
-import {
-  getItemVersionsFromEas,
-  getItemPropertiesFromEas,
-  pickLatestPropertyAttestationsByRefAndSchema,
-} from '@seedprotocol/eas'
+import { pickLatestPropertyAttestationsByRefAndSchema } from '@seedprotocol/eas'
 import {
   applyChangelogFilters,
   buildFlatSnapshotFromProperties,
@@ -10,6 +6,8 @@ import {
   diffVersionSnapshots,
   type VersionSnapshot,
 } from './changelog.js'
+import { getRemoteQueryDataSource } from './source/remote.js'
+import type { QueryDataSource } from './source/types.js'
 import type {
   AttestationLike,
   ChangelogEntry,
@@ -23,19 +21,18 @@ export type AssembleSeedChangelogResult = {
 }
 
 /**
- * Build a changelog for one seed from all remote Versions + property attestations.
+ * Build a changelog for one seed from all Versions + property attestations.
  * Snapshots are flat (no relation expand / hydrate).
  */
 export async function assembleSeedChangelog(
   seedUid: string,
   options?: Pick<GetSeedOptions, 'changelog'>,
+  dataSource: QueryDataSource = getRemoteQueryDataSource(),
 ): Promise<AssembleSeedChangelogResult> {
   const changelogOpts: ChangelogOptions = options?.changelog ?? {}
   const granularity = changelogOpts.granularity ?? 'version'
 
-  const itemVersions = (await getItemVersionsFromEas({
-    seedUids: [seedUid],
-  })) as AttestationLike[]
+  const itemVersions = await dataSource.getVersionsForSeed(seedUid)
 
   const sortedVersions = [...itemVersions].sort(
     (a, b) => a.timeCreated - b.timeCreated,
@@ -48,9 +45,8 @@ export async function assembleSeedChangelog(
   const latestVersionUid = sortedVersions[sortedVersions.length - 1]!.id
   const versionUids = sortedVersions.map((v) => v.id)
 
-  const rawProperties = (await getItemPropertiesFromEas({
-    versionUids,
-  })) as AttestationLike[]
+  const rawProperties =
+    await dataSource.getPropertiesForVersionUids(versionUids)
 
   let changelog: ChangelogEntry[]
 

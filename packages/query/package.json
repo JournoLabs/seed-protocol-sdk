@@ -1,7 +1,7 @@
 {
   "name": "@seedprotocol/query",
   "version": "0.5.1",
-  "description": "Canonical Seed JSON query (remote EAS assembly) for Seed Protocol",
+  "description": "Canonical Seed JSON query (remote EAS + local SQLite adapters) for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

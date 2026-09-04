@@ -94,7 +94,7 @@
     "build:eas": "cd packages/eas && bun run build",
     "build:arweave": "cd packages/arweave && bun run build",
     "build:vite": "cd packages/vite && bun run build",
-    "build:sdk": "bun run build:eas && bun run build:arweave && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev",
+    "build:sdk": "bun run build:eas && bun run build:arweave && bun run build:query && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev",
     "build:watch": "cd packages/sdk && tsc -w -p tsconfig.json",
     "build:publish": "node scripts/build-with-tests.js \"cd packages/publish && bun run build\"",
     "build:query": "node scripts/build-with-tests.js \"cd packages/query && bun run build\"",

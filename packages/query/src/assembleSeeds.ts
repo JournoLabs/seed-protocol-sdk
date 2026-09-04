@@ -1,11 +1,6 @@
 import {
-  getItemVersionsFromEas,
-  getItemPropertiesFromEas,
-  EasClient,
   setSchemaUidForSchemaDefinition,
-  withExcludeRevokedFilter,
   pickLatestPropertyAttestationsByRefAndSchema,
-  GET_SEEDS,
 } from '@seedprotocol/eas'
 import { getArweaveUrlForTransaction } from './arweaveUrl.js'
 import {
@@ -20,6 +15,8 @@ import {
   setFieldStorageModel,
   setListElementStorageModels,
 } from './fieldStorageModel.js'
+import { getRemoteQueryDataSource } from './source/remote.js'
+import type { QueryDataSource } from './source/types.js'
 import type { AssembleOptions, AttestationLike, SeedRecord } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
@@ -191,7 +188,11 @@ async function processItemProperty(
   ctx.assembledItems.set(seedUidForProperty, existingItem)
 }
 
-async function processSeeds(ctx: AssembleContext, seeds: AttestationLike[]): Promise<void> {
+async function processSeeds(
+  ctx: AssembleContext,
+  seeds: AttestationLike[],
+  dataSource: QueryDataSource,
+): Promise<void> {
   const seedUids: string[] = []
 
   for (let i = 0; i < seeds.length; i++) {
@@ -212,7 +213,7 @@ async function processSeeds(ctx: AssembleContext, seeds: AttestationLike[]): Pro
 
   if (seedUids.length === 0) return
 
-  const itemVersions = await getItemVersionsFromEas({ seedUids })
+  const itemVersions = await dataSource.getVersionsForSeeds(seedUids)
 
   for (let i = 0; i < itemVersions.length; i++) {
     const itemVersion = itemVersions[i] as AttestationLike
@@ -235,7 +236,8 @@ async function processSeeds(ctx: AssembleContext, seeds: AttestationLike[]): Pro
 
   if (latestVersionUids.length === 0) return
 
-  const rawProperties = await getItemPropertiesFromEas({ versionUids: latestVersionUids })
+  const rawProperties =
+    await dataSource.getPropertiesForVersionUids(latestVersionUids)
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
   for (let i = 0; i < itemProperties.length; i++) {
@@ -471,29 +473,21 @@ export async function assembleSeeds(
   schemaName: string,
   seeds: AttestationLike[],
   options?: AssembleOptions,
+  dataSource: QueryDataSource = getRemoteQueryDataSource(),
 ): Promise<SeedRecord[]> {
   const expandRelations = options?.expandRelations !== false
   const hydrateStorage = options?.hydrateStorage !== false
 
   const ctx = createAssembleContext()
 
-  await processSeeds(ctx, seeds)
+  await processSeeds(ctx, seeds, dataSource)
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
     (uid) => !ctx.assembledItems.has(uid),
   )
   if (relatedSeedUidsArray.length > 0) {
-    const easClient = EasClient.getEasClient()
-    const { itemSeeds: relatedSeeds } = await easClient.request(GET_SEEDS, {
-      where: withExcludeRevokedFilter({
-        id: {
-          in: relatedSeedUidsArray,
-        },
-      }),
-      take: relatedSeedUidsArray.length || 1,
-      skip: 0,
-    })
-    await processSeeds(ctx, (relatedSeeds ?? []) as AttestationLike[])
+    const relatedSeeds = await dataSource.getSeedsByUids(relatedSeedUidsArray)
+    await processSeeds(ctx, relatedSeeds, dataSource)
   }
 
   resolveRelationPropertiesToUrls(ctx, schemaName)
@@ -502,7 +496,12 @@ export async function assembleSeeds(
   const records = toSeedRecords(ctx, schemaName)
 
   if (hydrateStorage) {
-    await hydrateArweaveRichTextInItems(records.map((r) => r.data))
+    await hydrateArweaveRichTextInItems(
+      records.map((r) => r.data),
+      dataSource.readStorageBody
+        ? { readStorageBody: dataSource.readStorageBody.bind(dataSource) }
+        : undefined,
+    )
   }
 
   return records
