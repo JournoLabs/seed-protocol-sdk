@@ -50,6 +50,9 @@ export type GetPublishedSeedRecordOptions = Omit<GetSeedOptions, 'source'> & {
 /**
  * Thin published-JSON helper: `getSeed` via the local (or auto) query source.
  * Does not touch Item / drafts / liveQuery.
+ *
+ * Prefer this (or `@seedprotocol/query` `getSeed` / `queryBySchema`) for
+ * canonical published Seed JSON. Use `getItemData` / Item for draft-head authoring.
  */
 export async function getPublishedSeedRecord(
   seedUid: string,

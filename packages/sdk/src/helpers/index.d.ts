@@ -21,10 +21,6 @@ export declare const convertTxIdToImage: (txId: string) => Promise<string | unde
 export declare const getArweaveUrlForTransaction: (storageTransactionId: string) => string;
 export declare const getExecutionTime: (task: (...args: any[]) => Promise<any>, args: any[]) => Promise<number>;
 export declare const capitalizeFirstLetter: (string: string) => string;
-export declare const parseEasRelationPropertyName: (easPropertyName: string) => {
-    propertyName: string;
-    modelName: string;
-    isList: boolean;
-};
+export { parseEasRelationPropertyName, type ParsedEasRelationPropertyName } from '@seedprotocol/query';
 export declare const isBinary: (arrayBuffer: ArrayBuffer) => boolean;
 //# sourceMappingURL=index.d.ts.map

@@ -11,6 +11,7 @@ import {
 import { enrichImageSeedClone } from './imageRelationEnrichment.js'
 import { hydrateArweaveRichTextInItems } from './hydrateArweaveRichText.js'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
+import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import {
   setFieldStorageModel,
   setListElementStorageModels,
@@ -40,18 +41,6 @@ const RESERVED_KEYS = new Set([
 
 const toCamelCase = (str: string): string => {
   return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
-}
-
-const parseEasRelationPropertyName = (
-  easPropertyName: string,
-): { propertyName: string; modelName: string; isList: boolean } | null => {
-  const [singularProperty, modelName, idSegment] = easPropertyName.split('_')
-  if (!singularProperty || !modelName) return null
-  const isList = idSegment === 'ids'
-  const propertyName = singularProperty.endsWith('s')
-    ? singularProperty
-    : singularProperty + 's'
-  return { propertyName, modelName, isList }
 }
 
 type AssembleContext = {

@@ -15,6 +15,14 @@ import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
 
+/**
+ * Assemble flat ItemData for Item / liveQuery / draft-head authoring.
+ *
+ * For **published chain JSON** (Seed → latest attested Version → properties),
+ * prefer `getPublishedSeedRecord` from `@seedprotocol/sdk` or
+ * `getSeed` / `queryBySchema` from `@seedprotocol/query`. This function remains
+ * the correct path for local-head / draft-wins property selection used by Item.
+ */
 export const getItemData: GetItemData = async ({
   modelName,
   seedLocalId,

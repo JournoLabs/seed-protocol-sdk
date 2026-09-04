@@ -1,5 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import { sql } from 'drizzle-orm'
+import { parseEasPropertyMetadata } from '@seedprotocol/query'
 import { escapeSqliteString, getPropertyIdForModelAndName } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -70,35 +71,29 @@ export const saveDataToDb = fromCallback<
       )) {
         for (const property of (properties as any[])) {
           // Validate and parse decodedDataJson
-          if (!property.decodedDataJson || property.decodedDataJson.trim() === '') {
-            console.warn(
-              '[Item/service/actors] [saveDataToDb] empty decodedDataJson for property: ',
-              property.id,
-            )
+          const parsed = parseEasPropertyMetadata(property.decodedDataJson)
+          if (!parsed.ok) {
+            if (parsed.reason === 'empty') {
+              console.warn(
+                '[Item/service/actors] [saveDataToDb] empty decodedDataJson for property: ',
+                property.id,
+              )
+            } else if (parsed.reason === 'parse') {
+              console.warn(
+                '[Item/service/actors] [saveDataToDb] failed to parse decodedDataJson for property: ',
+                property.id,
+                parsed.error,
+              )
+            } else {
+              console.warn(
+                '[Item/service/actors] [saveDataToDb] invalid decodedDataJson structure for property: ',
+                property.id,
+              )
+            }
             continue
           }
 
-          let json
-          try {
-            json = JSON.parse(property.decodedDataJson)
-          } catch (error) {
-            console.warn(
-              '[Item/service/actors] [saveDataToDb] failed to parse decodedDataJson for property: ',
-              property.id,
-              error,
-            )
-            continue
-          }
-
-          if (!Array.isArray(json) || json.length === 0 || !json[0]?.value) {
-            console.warn(
-              '[Item/service/actors] [saveDataToDb] invalid decodedDataJson structure for property: ',
-              property.id,
-            )
-            continue
-          }
-
-          const attestationValue = json[0].value
+          const attestationValue = parsed.metadata
           let propertyValue = attestationValue.value
 
           if (typeof propertyValue === 'string') {

@@ -1,6 +1,10 @@
 import { camelCase, startCase } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
 import {
+  parseEasPropertyMetadata,
+  parseEasRelationPropertyName,
+} from '@seedprotocol/query'
+import {
   metadata,
   MetadataType,
   modelUids,
@@ -11,7 +15,6 @@ import {
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   generateId,
-  parseEasRelationPropertyName,
 } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
 import {
@@ -245,37 +248,36 @@ const createMetadataRecordsForStorageTransactionId = async (
   }
 
   // Validate and parse decodedDataJson
-  if (!storageTransactionIdProperty.decodedDataJson || storageTransactionIdProperty.decodedDataJson.trim() === '') {
-    console.warn(
-      '[item/events] [syncDbWithEas] empty decodedDataJson for storageTransactionIdProperty: ',
-      storageTransactionIdProperty.id,
-    )
+  const parsed = parseEasPropertyMetadata(
+    storageTransactionIdProperty.decodedDataJson,
+  )
+  if (!parsed.ok) {
+    if (parsed.reason === 'empty') {
+      console.warn(
+        '[item/events] [syncDbWithEas] empty decodedDataJson for storageTransactionIdProperty: ',
+        storageTransactionIdProperty.id,
+      )
+    } else if (parsed.reason === 'parse') {
+      console.warn(
+        '[item/events] [syncDbWithEas] failed to parse decodedDataJson for storageTransactionIdProperty: ',
+        storageTransactionIdProperty.id,
+        parsed.error,
+      )
+    } else {
+      console.warn(
+        '[item/events] [syncDbWithEas] invalid decodedDataJson structure for storageTransactionIdProperty: ',
+        storageTransactionIdProperty.id,
+      )
+    }
     return
   }
 
-  let parsedData
-  try {
-    parsedData = JSON.parse(storageTransactionIdProperty.decodedDataJson)
-  } catch (error) {
-    console.warn(
-      '[item/events] [syncDbWithEas] failed to parse decodedDataJson for storageTransactionIdProperty: ',
-      storageTransactionIdProperty.id,
-      error,
-    )
-    return
-  }
-
-  if (!Array.isArray(parsedData) || parsedData.length === 0 || !parsedData[0]?.value) {
-    console.warn(
-      '[item/events] [syncDbWithEas] invalid decodedDataJson structure for storageTransactionIdProperty: ',
-      storageTransactionIdProperty.id,
-    )
-    return
-  }
-
-  const attestationData = parsedData[0].value
+  const attestationData = parsed.metadata
   const propertyName = camelCase(attestationData.name)
-  const propertyValue = attestationData.value
+  const propertyValue =
+    typeof attestationData.value === 'string'
+      ? attestationData.value
+      : JSON.stringify(attestationData.value)
 
   const itemStorageProperties = new Map<string, PropertyType>()
 
@@ -409,37 +411,31 @@ const saveEasPropertiesToDbBody = async ({
     const propertyLocalId = generateId()
     
     // Validate and parse decodedDataJson
-    if (!property.decodedDataJson || property.decodedDataJson.trim() === '') {
-      console.warn(
-        '[item/events] [syncDbWithEas] empty decodedDataJson for property: ',
-        property.id,
-      )
+    const parsed = parseEasPropertyMetadata(property.decodedDataJson)
+    if (!parsed.ok) {
+      if (parsed.reason === 'empty') {
+        console.warn(
+          '[item/events] [syncDbWithEas] empty decodedDataJson for property: ',
+          property.id,
+        )
+      } else if (parsed.reason === 'parse') {
+        console.warn(
+          '[item/events] [syncDbWithEas] failed to parse decodedDataJson for property: ',
+          property.id,
+          parsed.error,
+        )
+      } else {
+        console.warn(
+          '[item/events] [syncDbWithEas] invalid decodedDataJson structure for property: ',
+          property.id,
+        )
+      }
       continue
     }
 
-    let parsedData
-    try {
-      parsedData = JSON.parse(property.decodedDataJson)
-    } catch (error) {
-      console.warn(
-        '[item/events] [syncDbWithEas] failed to parse decodedDataJson for property: ',
-        property.id,
-        error,
-      )
-      continue
-    }
+    const propertyMetadata = parsed.metadata
 
-    if (!Array.isArray(parsedData) || parsedData.length === 0 || !parsedData[0]?.value) {
-      console.warn(
-        '[item/events] [syncDbWithEas] invalid decodedDataJson structure for property: ',
-        property.id,
-      )
-      continue
-    }
-
-    const metadata = parsedData[0].value
-
-    let propertyNameSnake = metadata.name
+    let propertyNameSnake = propertyMetadata.name
 
     if (!propertyNameSnake) {
       console.warn(
@@ -470,7 +466,7 @@ const saveEasPropertiesToDbBody = async ({
     ) {
       isRelation = true
 
-      if (Array.isArray(metadata.value)) {
+      if (Array.isArray(propertyMetadata.value)) {
         isList = true
         refValueType = 'list'
 
@@ -481,20 +477,20 @@ const saveEasPropertiesToDbBody = async ({
           refSeedType = result.modelName
         }
 
-        metadata.value.forEach((value: string) => {
+        propertyMetadata.value.forEach((value: string) => {
           relatedSeedUids.add(value)
         })
       }
 
       if (!isList) {
-        if (relationValuesToExclude.includes(metadata.value)) {
+        if (relationValuesToExclude.includes(propertyMetadata.value as string)) {
           continue
         }
-        relatedSeedUids.add(metadata.value)
+        relatedSeedUids.add(propertyMetadata.value as string)
       }
     }
 
-    let propertyValue = metadata.value
+    let propertyValue = propertyMetadata.value
 
     if (typeof propertyValue !== 'string') {
       propertyValue = JSON.stringify(propertyValue)
@@ -502,7 +498,7 @@ const saveEasPropertiesToDbBody = async ({
 
     if (isRelation && !isList) {
       const relatedSeed = itemSeeds.find(
-        (seed: Attestation) => seed.id === metadata.value,
+        (seed: Attestation) => seed.id === propertyMetadata.value,
       )
       if (relatedSeed && relatedSeed.schema && relatedSeed.schema.schemaNames) {
         refSeedType = relatedSeed.schema.schemaNames[0].name
@@ -512,7 +508,7 @@ const saveEasPropertiesToDbBody = async ({
 
     if (isRelation && isList) {
       const relatedSeeds = itemSeeds.filter((seed: Attestation) =>
-        metadata.value.includes(seed.id),
+        (propertyMetadata.value as string[]).includes(seed.id),
       )
       if (relatedSeeds && relatedSeeds.length > 0) {
         refSeedType = relatedSeeds[0].schema.schemaNames[0].name
@@ -522,7 +518,7 @@ const saveEasPropertiesToDbBody = async ({
 
     const propertyName = camelCase(propertyNameSnake)
     propertyValue = escapeSqliteString(propertyValue)
-    const easDataType = metadata.type
+    const easDataType = propertyMetadata.type
     const versionUid = property.refUID
     const versionLocalId = versionUidToLocalId.get(versionUid)
     const attestationCreatedAt = property.timeCreated * 1000
@@ -626,8 +622,11 @@ const getRelatedSeedsAndVersions = async () => {
     },
   })
 
+  const canonicalRelatedProperties =
+    pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
+
   await saveEasPropertiesToDb({
-    itemProperties,
+    itemProperties: canonicalRelatedProperties,
     itemSeeds,
   })
 }

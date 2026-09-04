@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseEasPropertyMetadata } from '../src/parseEasPropertyMetadata'
+import { parseEasRelationPropertyName } from '../src/parseEasRelationPropertyName'
 import { pickLatestPropertyAttestationsByRefAndSchema } from '@seedprotocol/eas'
 
 describe('parseEasPropertyMetadata', () => {
@@ -21,6 +22,37 @@ describe('parseEasPropertyMetadata', () => {
   it('rejects bad shape', () => {
     expect(parseEasPropertyMetadata('{}').ok).toBe(false)
     expect(parseEasPropertyMetadata('[]').ok).toBe(false)
+  })
+
+  it('rejects invalid JSON', () => {
+    const result = parseEasPropertyMetadata('{not-json')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toBe('parse')
+    }
+  })
+})
+
+describe('parseEasRelationPropertyName', () => {
+  it('parses singular relation', () => {
+    expect(parseEasRelationPropertyName('cover_image_id')).toEqual({
+      propertyName: 'covers',
+      modelName: 'image',
+      isList: false,
+    })
+  })
+
+  it('parses list relation', () => {
+    expect(parseEasRelationPropertyName('tag_tag_ids')).toEqual({
+      propertyName: 'tags',
+      modelName: 'tag',
+      isList: true,
+    })
+  })
+
+  it('returns null for non-relation shapes', () => {
+    expect(parseEasRelationPropertyName('title')).toBeNull()
+    expect(parseEasRelationPropertyName('')).toBeNull()
   })
 })
 

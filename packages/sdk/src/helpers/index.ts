@@ -200,24 +200,10 @@ export const getExecutionTime = async (task: (...args: any[]) => Promise<any>, a
 export const capitalizeFirstLetter = (string: string) =>
   string.charAt(0).toUpperCase() + string.slice(1)
 
-export const parseEasRelationPropertyName = (easPropertyName: string) => {
-  // Split the input string on the first underscore
-  const [singularProperty, modelName, idSegment] = easPropertyName.split('_')
-
-  // If there are any other parts, assume it is a list (e.g., has 'ids' or other suffix)
-  const isList = idSegment === 'ids'
-
-  // Create the final property name by pluralizing the singular part
-  const propertyName = singularProperty.endsWith('s')
-    ? singularProperty
-    : singularProperty + 's'
-
-  return {
-    propertyName, // Plural form of the property name
-    modelName, // Model name extracted from the second part
-    isList, // True if the property is a list (e.g., 'ids' is present)
-  }
-}
+export {
+  parseEasRelationPropertyName,
+  type ParsedEasRelationPropertyName,
+} from '@seedprotocol/query'
 
 
 export const isBinary = (arrayBuffer: ArrayBuffer): boolean => {

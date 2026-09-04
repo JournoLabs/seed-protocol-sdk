@@ -4,6 +4,8 @@ Canonical **Seed JSON** reads from remote EAS or a registered local SQLite/files
 
 Feed generation (`@seedprotocol/feed`) uses this package to assemble items; RSS/Atom/JSON Feed formatting and **HTTP / serialized content** caching stay in feed.
 
+SDK `runSyncFromEas` / `syncDbWithEas` persists the same EAS graph into SQLite using shared **`parseEasPropertyMetadata`**, **`parseEasRelationPropertyName`**, and **`pickLatestPropertyAttestationsByRefAndSchema`** — one definition of property decode/canonicalization for reads and sync writes.
+
 ## Scope
 
 - `getSeed(seedUid)` — one seed’s canonical JSON envelope, optional **changelog**
@@ -13,7 +15,15 @@ Feed generation (`@seedprotocol/feed`) uses this package to assemble items; RSS/
 - **`source: 'local' | 'remote' | 'auto'`** — pluggable backends (default `'remote'`)
 - **Shared collection + item cache** for **remote** reads (memory → disk)
 
-Later phase: SDK sync consolidation (`syncDbWithEas` sharing canonicalization).
+### Published vs authoring
+
+| Need | Use |
+|------|-----|
+| Published / canonical Seed JSON | `getSeed` / `queryBySchema` / SDK `getPublishedSeedRecord` |
+| Drafts, edits, liveQuery, publish | SDK `Item` / `getItemData` (local-head) |
+| Populate local DB from EAS | SDK `Client.syncFromEas` / `runSyncFromEas` (shared parse + pickLatest) |
+
+The Query API conversion (remote assemble → cache → changelog → local source → sync consolidation) is **complete**. Optional follow-ons (HTTP JSON routes, `auto` freshness TTL) are outside this package’s core read surface.
 
 ## Usage
 
@@ -56,7 +66,7 @@ Options on both APIs: `expandRelations` (default `true`), `hydrateStorage` (defa
 |----------|----------|
 | `'remote'` (default) | EAS GraphQL + Arweave hydrate; uses query CacheManager when enabled |
 | `'local'` | Requires `registerLocalQuerySource(...)` (SDK registers on client init). Published SQLite snapshot only — not drafts |
-| `'auto'` | Prefer registered local when the seed/collection resolves; otherwise remote. No sync refresh yet |
+| `'auto'` | Prefer registered local when the seed/collection resolves; otherwise remote. No sync refresh / freshness TTL |
 
 ```ts
 import {

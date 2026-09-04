@@ -81,6 +81,9 @@ export type {
   ParseEasPropertyMetadataForFeedResult,
 } from './parseEasPropertyMetadata.js'
 
+export { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
+export type { ParsedEasRelationPropertyName } from './parseEasRelationPropertyName.js'
+
 export {
   RICH_BODY_STORAGE_SCHEMAS,
   FEED_RICH_BODY_STORAGE_SCHEMAS,

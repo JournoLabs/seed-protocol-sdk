@@ -1,4 +1,5 @@
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
+import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import type {
   AttestationLike,
   ChangelogEntry,
@@ -9,18 +10,6 @@ import type {
 
 const toCamelCase = (str: string): string => {
   return str.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
-}
-
-const parseEasRelationPropertyName = (
-  easPropertyName: string,
-): { propertyName: string } | null => {
-  const [singularProperty, modelName, idSegment] = easPropertyName.split('_')
-  if (!singularProperty || !modelName) return null
-  if (idSegment !== 'ids') return null
-  const propertyName = singularProperty.endsWith('s')
-    ? singularProperty
-    : singularProperty + 's'
-  return { propertyName }
 }
 
 /**
@@ -78,7 +67,7 @@ export function decodePropertyAttestation(
       isList = true
       if (isNamingConventionRelation) {
         const result = parseEasRelationPropertyName(propertyNameSnake)
-        if (result) {
+        if (result?.isList) {
           propertyNameSnake = result.propertyName
         }
       }
