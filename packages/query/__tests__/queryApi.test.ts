@@ -169,6 +169,131 @@ describe('queryBySchema / getSeed / assembleSeeds', () => {
     })
     expect(records[0]!.data.title).toBe('New')
   })
+
+  it('getSeed with data+changelog returns version diffs', async () => {
+    const seedUid = '0xseedCl'
+    const v1 = '0xv1'
+    const v2 = '0xv2'
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        {
+          id: seedUid,
+          decodedDataJson: '',
+          refUID: '0x0',
+          schemaId: '0xschema',
+          timeCreated: 100,
+          attester: '0xattester',
+          schema: { schemaNames: [{ name: 'post' }] },
+        },
+      ],
+    })
+    mockGetItemVersionsFromEas.mockResolvedValue([
+      {
+        id: v1,
+        decodedDataJson: '',
+        refUID: seedUid,
+        schemaId: '0xversion',
+        timeCreated: 110,
+      },
+      {
+        id: v2,
+        decodedDataJson: '',
+        refUID: seedUid,
+        schemaId: '0xversion',
+        timeCreated: 210,
+      },
+    ])
+    mockGetItemPropertiesFromEas.mockImplementation(
+      async ({ versionUids }: { versionUids: string[] }) => {
+        const props: AttestationLike[] = []
+        if (versionUids.includes(v1)) {
+          props.push({
+            id: '0xp1',
+            decodedDataJson: propDecoded('title', 'First'),
+            refUID: v1,
+            schemaId: '0xtitleSchema',
+            timeCreated: 120,
+          })
+        }
+        if (versionUids.includes(v2)) {
+          props.push({
+            id: '0xp2',
+            decodedDataJson: propDecoded('title', 'Second'),
+            refUID: v2,
+            schemaId: '0xtitleSchema',
+            timeCreated: 220,
+          })
+        }
+        return props
+      },
+    )
+
+    const result = await getSeed(seedUid, {
+      include: 'data+changelog',
+      expandRelations: false,
+      hydrateStorage: false,
+      cache: false,
+    })
+
+    expect(result?.data.title).toBe('Second')
+    expect(result?.changelog).toHaveLength(2)
+    expect(result?.changelog?.[0]).toMatchObject({
+      type: 'version',
+      versionUid: v1,
+      before: {},
+      after: { title: 'First' },
+    })
+    expect(result?.changelog?.[1]).toMatchObject({
+      type: 'version',
+      versionUid: v2,
+      before: { title: 'First' },
+      after: { title: 'Second' },
+      changedKeys: ['title'],
+    })
+  })
+
+  it('getSeed include changelog sets empty data', async () => {
+    const seedUid = '0xseedClOnly'
+    const v1 = '0xv1only'
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        {
+          id: seedUid,
+          decodedDataJson: '',
+          refUID: '0x0',
+          schemaId: '0xschema',
+          timeCreated: 50,
+          schema: { schemaNames: [{ name: 'post' }] },
+        },
+      ],
+    })
+    mockGetItemVersionsFromEas.mockResolvedValue([
+      {
+        id: v1,
+        decodedDataJson: '',
+        refUID: seedUid,
+        schemaId: '0xversion',
+        timeCreated: 60,
+      },
+    ])
+    mockGetItemPropertiesFromEas.mockResolvedValue([
+      {
+        id: '0xp',
+        decodedDataJson: propDecoded('title', 'Only'),
+        refUID: v1,
+        schemaId: '0xtitleSchema',
+        timeCreated: 70,
+      },
+    ])
+
+    const result = await getSeed(seedUid, {
+      include: 'changelog',
+      cache: false,
+    })
+    expect(result?.data).toEqual({})
+    expect(result?.versionUid).toBe(v1)
+    expect(result?.changelog).toHaveLength(1)
+  })
 })
 
 describe('queryBySchema / getSeed caching', () => {
@@ -263,5 +388,77 @@ describe('queryBySchema / getSeed caching', () => {
     })
     expect(hit?.data.title).toBe('FromCollection')
     expect(mockRequest).not.toHaveBeenCalled()
+  })
+
+  it('data+changelog does not share cache with data-only', async () => {
+    const seedUid = '0xseedSep'
+    const v1 = '0xvsep1'
+    const v2 = '0xvsep2'
+    mockRequest.mockResolvedValue({
+      itemSeeds: [
+        {
+          id: seedUid,
+          decodedDataJson: '',
+          refUID: '0x0',
+          schemaId: '0xschema',
+          timeCreated: 100,
+          schema: { schemaNames: [{ name: 'post' }] },
+        },
+      ],
+    })
+    mockGetItemVersionsFromEas.mockResolvedValue([
+      {
+        id: v1,
+        decodedDataJson: '',
+        refUID: seedUid,
+        schemaId: '0xversion',
+        timeCreated: 110,
+      },
+      {
+        id: v2,
+        decodedDataJson: '',
+        refUID: seedUid,
+        schemaId: '0xversion',
+        timeCreated: 210,
+      },
+    ])
+    mockGetItemPropertiesFromEas.mockResolvedValue([
+      {
+        id: '0xp1',
+        decodedDataJson: propDecoded('title', 'First'),
+        refUID: v1,
+        schemaId: '0xtitleSchema',
+        timeCreated: 120,
+      },
+      {
+        id: '0xp2',
+        decodedDataJson: propDecoded('title', 'Second'),
+        refUID: v2,
+        schemaId: '0xtitleSchema',
+        timeCreated: 220,
+      },
+    ])
+
+    const withCl = await getSeed(seedUid, {
+      include: 'data+changelog',
+      expandRelations: false,
+      hydrateStorage: false,
+    })
+    expect(withCl?.changelog?.length).toBeGreaterThan(0)
+
+    const dataKey = buildAssembleOptionsKey({
+      expandRelations: false,
+      hydrateStorage: false,
+    })
+    const clKey = buildAssembleOptionsKey({
+      include: 'data+changelog',
+      expandRelations: false,
+      hydrateStorage: false,
+    })
+    expect(dataKey).not.toBe(clKey)
+    expect(await getQueryCacheManager().getItem(seedUid, dataKey)).toBeNull()
+    expect(
+      (await getQueryCacheManager().getItem(seedUid, clKey))?.record.changelog,
+    ).toHaveLength(2)
   })
 })

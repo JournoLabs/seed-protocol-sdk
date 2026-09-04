@@ -1,4 +1,4 @@
-import type { SeedRecord } from '../types.js'
+import type { GetSeedResult, SeedRecord } from '../types.js'
 import { FileCache } from './FileCache.js'
 import { MemoryCache } from './MemoryCache.js'
 import type {
@@ -117,7 +117,7 @@ export class CacheManager {
   }
 
   async setItem(
-    record: SeedRecord,
+    record: GetSeedResult,
     optionsKey: string,
   ): Promise<CachedItemData | null> {
     if (!this.config.enabled) return null

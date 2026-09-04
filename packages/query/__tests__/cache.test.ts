@@ -36,6 +36,12 @@ describe('buildAssembleOptionsKey', () => {
       buildAssembleOptionsKey({ expandRelations: false, hydrateStorage: false }),
     ).toBe('e0-h0')
   })
+
+  it('isolates changelog include from default key', () => {
+    expect(buildAssembleOptionsKey({ include: 'data+changelog' })).toBe(
+      'e1-h1-i1-gv-s0-l0',
+    )
+  })
 })
 
 describe('CacheManager collection + item', () => {

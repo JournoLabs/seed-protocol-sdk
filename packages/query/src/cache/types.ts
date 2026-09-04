@@ -1,4 +1,9 @@
-import type { SeedRecord } from '../types.js'
+import type {
+  ChangelogInclude,
+  GetSeedOptions,
+  GetSeedResult,
+  SeedRecord,
+} from '../types.js'
 
 /**
  * Cached collection working set for a schema (skip=0 page).
@@ -12,10 +17,10 @@ export type CachedCollectionData = {
 }
 
 /**
- * Cached single-seed assembly result.
+ * Cached single-seed assembly result (may include changelog).
  */
 export type CachedItemData = {
-  record: SeedRecord
+  record: GetSeedResult
   lastUpdated: number
   etag: string
   /** Fingerprint of assemble options used when caching. */
@@ -37,16 +42,39 @@ export type QueryCacheStats = {
   errors: number
 }
 
+function includeCode(include?: ChangelogInclude): string {
+  if (!include || include === 'data') return ''
+  if (include === 'data+changelog') return 'i1'
+  return 'i2' // changelog
+}
+
 /**
  * Build a stable key for assemble options that affect cached payloads.
+ * Default latest-only (`include: 'data'`) keeps Phase 2 key `e1-h1`.
  */
 export function buildAssembleOptionsKey(options?: {
   expandRelations?: boolean
   hydrateStorage?: boolean
+  include?: ChangelogInclude
+  changelog?: GetSeedOptions['changelog']
 }): string {
   const expand = options?.expandRelations !== false
   const hydrate = options?.hydrateStorage !== false
-  return `e${expand ? 1 : 0}-h${hydrate ? 1 : 0}`
+  const base = `e${expand ? 1 : 0}-h${hydrate ? 1 : 0}`
+
+  const inc = includeCode(options?.include)
+  if (!inc) return base
+
+  const gran = options?.changelog?.granularity === 'property' ? 'gp' : 'gv'
+  const since =
+    typeof options?.changelog?.since === 'number'
+      ? `s${options.changelog.since}`
+      : 's0'
+  const limit =
+    typeof options?.changelog?.limit === 'number'
+      ? `l${options.changelog.limit}`
+      : 'l0'
+  return `${base}-${inc}-${gran}-${since}-${limit}`
 }
 
 /**

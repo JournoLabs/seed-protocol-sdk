@@ -1,4 +1,4 @@
-import type { SeedRecord } from '../types.js'
+import type { GetSeedResult, SeedRecord } from '../types.js'
 import { generateCollectionETag, generateItemETag } from './etag.js'
 import type {
   CachedCollectionData,
@@ -80,7 +80,7 @@ export class MemoryCache {
   }
 
   setItem(
-    record: SeedRecord,
+    record: GetSeedResult,
     optionsKey: string,
   ): CachedItemData {
     const now = Math.floor(Date.now() / 1000)
@@ -90,8 +90,15 @@ export class MemoryCache {
       record.timeCreated,
       optionsKey,
     )
+    const cachedRecord: GetSeedResult = {
+      ...record,
+      data: { ...record.data },
+    }
+    if (record.changelog) {
+      cachedRecord.changelog = [...record.changelog]
+    }
     const cached: CachedItemData = {
-      record: { ...record, data: { ...record.data } },
+      record: cachedRecord,
       lastUpdated: now,
       etag,
       optionsKey,

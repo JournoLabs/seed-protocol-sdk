@@ -7,11 +7,28 @@ export {
 export type { InitializeQueryPlatformOptions } from './bootstrap.js'
 
 export { assembleSeeds } from './assembleSeeds.js'
+export { assembleSeedChangelog } from './assembleChangelog.js'
 export { getSeed, queryBySchema, queryBySchemaForMonth } from './api.js'
+
+export {
+  buildFlatSnapshotFromProperties,
+  diffVersionSnapshots,
+  diffPropertyAttestations,
+  applyChangelogFilters,
+  decodePropertyAttestation,
+  changelogValuesEqual,
+} from './changelog.js'
 
 export type {
   SeedRecord,
   AssembleOptions,
+  GetSeedOptions,
+  GetSeedResult,
+  ChangelogInclude,
+  ChangelogOptions,
+  ChangelogEntry,
+  VersionChangelogEntry,
+  PropertyChangelogEntry,
   QueryBySchemaOptions,
   QueryBySchemaResult,
   AttestationLike,

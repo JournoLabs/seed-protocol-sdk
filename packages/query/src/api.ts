@@ -6,6 +6,7 @@ import {
 } from '@seedprotocol/eas'
 import { initializeQueryPlatform } from './bootstrap.js'
 import { assembleSeeds } from './assembleSeeds.js'
+import { assembleSeedChangelog } from './assembleChangelog.js'
 import {
   buildAssembleOptionsKey,
   getQueryCacheManager,
@@ -13,6 +14,8 @@ import {
 import type {
   AssembleOptions,
   AttestationLike,
+  GetSeedOptions,
+  GetSeedResult,
   QueryBySchemaOptions,
   QueryBySchemaResult,
   SeedRecord,
@@ -21,6 +24,14 @@ import type {
 function shouldUseCache(options?: AssembleOptions): boolean {
   if (options?.cache === false) return false
   return getQueryCacheManager().enabled
+}
+
+function wantsChangelog(include: GetSeedOptions['include']): boolean {
+  return include === 'data+changelog' || include === 'changelog'
+}
+
+function wantsData(include: GetSeedOptions['include']): boolean {
+  return include !== 'changelog'
 }
 
 async function fetchAndAssemble(
@@ -95,14 +106,15 @@ export async function queryBySchema(
 
 export async function getSeed(
   seedUid: string,
-  options?: AssembleOptions,
-): Promise<SeedRecord | null> {
+  options?: GetSeedOptions,
+): Promise<GetSeedResult | null> {
   await initializeQueryPlatform()
   if (!seedUid || typeof seedUid !== 'string' || seedUid.trim() === '') {
     return null
   }
 
   const trimmed = seedUid.trim()
+  const include = options?.include ?? 'data'
   const optionsKey = buildAssembleOptionsKey(options)
   const useCache = shouldUseCache(options)
   const cache = getQueryCacheManager()
@@ -129,14 +141,43 @@ export async function getSeed(
   const schemaName = seed.schema?.schemaNames?.[0]?.name
   if (!schemaName) return null
 
-  const records = await assembleSeeds(schemaName, [seed], options)
-  const record = records[0] ?? null
+  let result: GetSeedResult | null = null
 
-  if (record && useCache) {
-    await cache.setItem(record, optionsKey)
+  if (!wantsChangelog(include)) {
+    const records = await assembleSeeds(schemaName, [seed], options)
+    result = records[0] ?? null
+  } else {
+    const { latestVersionUid, changelog } = await assembleSeedChangelog(
+      trimmed,
+      options,
+    )
+
+    if (wantsData(include)) {
+      const records = await assembleSeeds(schemaName, [seed], options)
+      const record = records[0]
+      if (!record) {
+        result = null
+      } else {
+        result = { ...record, changelog }
+      }
+    } else {
+      result = {
+        seedUid: trimmed,
+        schemaName,
+        attester: seed.attester,
+        timeCreated: seed.timeCreated,
+        versionUid: latestVersionUid,
+        data: {},
+        changelog,
+      }
+    }
   }
 
-  return record
+  if (result && useCache) {
+    await cache.setItem(result, optionsKey)
+  }
+
+  return result
 }
 
 /**

@@ -7,13 +7,13 @@ Feed generation (`@seedprotocol/feed`) uses this package to assemble items; RSS/
 ## Scope
 
 - **Remote-only** assembly (EAS GraphQL + Arweave gateway hydration)
-- `getSeed(seedUid)` — one seed’s canonical JSON envelope
-- `queryBySchema(schemaName, { limit, skip })` — paginated collection
+- `getSeed(seedUid)` — one seed’s canonical JSON envelope, optional **changelog**
+- `queryBySchema(schemaName, { limit, skip })` — paginated collection (latest-only)
 - `queryBySchemaForMonth` — calendar-month listing (used by feed archives)
 - Resolve mode: **latest Version**, then newest property attestation per `(version, schemaId)`
 - **Shared collection + item cache** (memory → disk), with the same TTL / incremental-merge / refresh-lock patterns feed used for item lists
 
-Later phases: changelog, `source: 'local' | 'remote' | 'auto'`, SDK sync consolidation.
+Later phases: `source: 'local' | 'remote' | 'auto'`, SDK sync consolidation.
 
 ## Usage
 
@@ -50,6 +50,27 @@ const { items, limit, skip, etag } = await queryBySchema('post', {
 
 Options on both APIs: `expandRelations` (default `true`), `hydrateStorage` (default `true`), `cache` (default: follow env; pass `false` to bypass).
 
+## Changelog (`getSeed` only)
+
+```ts
+const withHistory = await getSeed('0x...', {
+  include: 'data+changelog', // 'data' | 'data+changelog' | 'changelog'
+  changelog: {
+    granularity: 'version', // or 'property'
+    since: 1700000000,      // optional unix seconds
+    limit: 20,              // optional; keeps newest N after since
+  },
+})
+// withHistory.changelog?: ChangelogEntry[]
+```
+
+- **`include: 'data'`** (default) — same as before; no `changelog` field.
+- **`include: 'data+changelog'`** — latest assembled `data` (expand/hydrate apply) plus history.
+- **`include: 'changelog'`** — envelope + `changelog`; `data` is `{}`.
+- **Version granularity** (default) — consecutive flat Version snapshots with `before` / `after` / `changedKeys`.
+- **Property granularity** — one entry per property attestation change (`previousValue` / `nextValue`).
+- Historical snapshots are **flat** (no relation expand / Arweave hydrate). Collections stay latest-only.
+
 ## Caching
 
 Controlled by the same env vars as feed content cache (ops compatibility):
@@ -63,7 +84,7 @@ Controlled by the same env vars as feed content cache (ops compatibility):
 Behavior:
 
 - **Collection cache** — only for `queryBySchema` with `skip === 0` (working set). Warm hits still fetch the page to detect newer `timeCreated`, then merge/dedupe.
-- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage`). Filled by `getSeed` and write-through from collection/month queries.
+- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by `getSeed` and write-through from collection/month queries.
 - **`cache: false`** — skip all cache reads/writes for that call.
 - **`skip > 0`** — no collection cache; still write-through items when cache is enabled.
 - Refresh lock — concurrent `queryBySchema` for the same schema share one in-flight refresh.
