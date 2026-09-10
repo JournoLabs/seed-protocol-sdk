@@ -9,6 +9,7 @@ import React, {
 import type { QueryClient } from '@tanstack/react-query'
 import { eventEmitter } from '@seedprotocol/sdk'
 import { ADDRESSES_PERSISTED_EVENT } from './addressesPersistedEventName'
+import { LOCAL_COPIES_REMOVED_EVENT } from './localCopiesRemovedEventName'
 
 const SeedAddressRevisionContext = createContext(0)
 
@@ -30,17 +31,19 @@ export function SeedAddressRevisionProvider({
 }) {
   const [addressRevision, setAddressRevision] = useState(0)
 
-  const onAddressesPersisted = useCallback(() => {
+  const onSessionInvalidation = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['seed', 'items'], exact: false })
     setAddressRevision((n) => n + 1)
   }, [queryClient])
 
   useEffect(() => {
-    eventEmitter.on(ADDRESSES_PERSISTED_EVENT, onAddressesPersisted)
+    eventEmitter.on(ADDRESSES_PERSISTED_EVENT, onSessionInvalidation)
+    eventEmitter.on(LOCAL_COPIES_REMOVED_EVENT, onSessionInvalidation)
     return () => {
-      eventEmitter.off(ADDRESSES_PERSISTED_EVENT, onAddressesPersisted)
+      eventEmitter.off(ADDRESSES_PERSISTED_EVENT, onSessionInvalidation)
+      eventEmitter.off(LOCAL_COPIES_REMOVED_EVENT, onSessionInvalidation)
     }
-  }, [onAddressesPersisted])
+  }, [onSessionInvalidation])
 
   return (
     <SeedAddressRevisionContext.Provider value={addressRevision}>

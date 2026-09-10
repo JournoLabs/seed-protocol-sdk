@@ -1,9 +1,18 @@
 /** Emitted by the client manager after `app_state.addresses` is written (post-`setAddresses`). */
 export const ADDRESSES_PERSISTED_EVENT = 'addresses.persisted' as const
 
+/** Emitted after hard-deleting local on-chain seed copies for publisher addresses. */
+export const LOCAL_COPIES_REMOVED_EVENT = 'localCopies.removed' as const
+
 export type AddressesPersistedPayload = {
   owned: string[]
   watched: string[]
+}
+
+export type LocalCopiesRemovedPayload = {
+  addresses: string[]
+  removedSeedLocalIds: string[]
+  removedSeedUids: string[]
 }
 
 export function parseAddressesPersistedPayload(

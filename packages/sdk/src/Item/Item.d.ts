@@ -26,6 +26,10 @@ export declare class Item<T extends ModelValues<ModelSchema>> implements IItem<T
      */
     static getById(id: string): Item<any> | null;
     /**
+     * Drop cached Item instances for the given seed local ids / uids without soft-deleting DB rows.
+     */
+    static dropCachedInstancesForSeedIds(ids: string[]): void;
+    /**
      * Create Item instance by ID (queries database if not in cache)
      * The ID can be either seedUid or seedLocalId
      * @param id - seedUid or seedLocalId

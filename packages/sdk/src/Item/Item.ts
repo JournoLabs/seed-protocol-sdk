@@ -862,6 +862,44 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
+   * Drop cached Item instances for the given seed local ids / uids without soft-deleting DB rows.
+   * Used by local purge (`removeLocalCopiesForAddresses`) before hard-deleting rows.
+   */
+  static dropCachedInstancesForSeedIds(ids: string[]): void {
+    const uniqueIds = [
+      ...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)),
+    ]
+    const seenInstances = new Set<Item<any>>()
+
+    for (const id of uniqueIds) {
+      const entry = this.findItemInstanceCacheEntryById(id)
+      if (entry && !seenInstances.has(entry.instance)) {
+        seenInstances.add(entry.instance)
+        const instance = entry.instance
+        const cacheKeys = this.collectInstanceCacheKeysForInstance(instance)
+
+        clearDestroySubscriptions(instance, {
+          instanceState: itemInstanceState,
+          onUnload: (inst) => (inst as Item<any>)._subscription?.unsubscribe(),
+        })
+
+        forceRemoveFromCaches(instance, {
+          getCacheKeys: () => cacheKeys,
+          caches: [Item.instanceCache as Map<string, unknown>],
+        })
+
+        try {
+          instance._service.stop()
+        } catch {
+          // Service may already be stopped
+        }
+      }
+
+      ItemProperty.clearInstanceCacheForItem(id)
+    }
+  }
+
+  /**
    * Create Item instance by ID (queries database if not in cache)
    * The ID can be either seedUid or seedLocalId
    * @param id - seedUid or seedLocalId

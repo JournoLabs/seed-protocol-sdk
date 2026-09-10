@@ -34,7 +34,8 @@ async function getSeedRowForItem(item: ItemLike): Promise<SeedRow | null> {
   return seedRows[0]
 }
 
-function getPublisherFromRow(row: SeedRow): string | null {
+/** Resolve publisher from seed row: `publisher` column, else `attestationRaw.attester`. */
+export function resolvePublisherFromSeedRow(row: SeedRow): string | null {
   if (row.publisher) return row.publisher
   if (row.attestationRaw) {
     try {
@@ -57,7 +58,7 @@ export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean>
   const row = await getSeedRowForItem(item)
   if (!row) return false
 
-  const publisher = getPublisherFromRow(row)
+  const publisher = resolvePublisherFromSeedRow(row)
   if (!publisher) {
     if (!row.uid && !row.attestationRaw) {
       return true

@@ -23,6 +23,13 @@ import {
   registerSeedQueryLocalSource,
   unregisterSeedQueryLocalSource,
 } from '@/query/registerSeedQueryLocalSource'
+import { eventEmitter } from '@/eventBus'
+import { LOCAL_COPIES_REMOVED_EVENT } from '@/client/events'
+import {
+  findLocalOnchainCopiesForAddresses,
+  hardDeleteLocalSeedsByLocalIds,
+} from '@/db/write/removeLocalCopiesForAddresses'
+import { Item } from '@/Item/Item'
 
 const logger               = debug('seedSdk:client')
 
@@ -165,6 +172,29 @@ const clientInstance = {
   getWatchedAddresses: async () => {
     ensureInitialized();
     return getWatchedAddressesFromDb();
+  },
+  /**
+   * Hard-delete local on-chain seed copies for the given publisher addresses.
+   * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
+   */
+  removeLocalCopiesForAddresses: async (addresses: string[]) => {
+    ensureInitialized()
+    const list = Array.isArray(addresses) ? addresses : []
+    const matched = await findLocalOnchainCopiesForAddresses(list)
+    const cacheIds = [
+      ...matched.removedSeedLocalIds,
+      ...matched.removedSeedUids,
+    ]
+    if (cacheIds.length > 0) {
+      Item.dropCachedInstancesForSeedIds(cacheIds)
+    }
+    await hardDeleteLocalSeedsByLocalIds(matched.removedSeedLocalIds)
+    eventEmitter.emit(LOCAL_COPIES_REMOVED_EVENT, {
+      addresses: list,
+      removedSeedLocalIds: matched.removedSeedLocalIds,
+      removedSeedUids: matched.removedSeedUids,
+    })
+    return matched
   },
   /**
    * Syncs item attestations from EAS for the configured models and given addresses.

@@ -20,6 +20,14 @@ export declare const ClientManager: {
     getOwnedAddresses: () => Promise<any>;
     getWatchedAddresses: () => Promise<any>;
     /**
+     * Hard-delete local on-chain seed copies for the given publisher addresses.
+     * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
+     */
+    removeLocalCopiesForAddresses: (addresses: string[]) => Promise<{
+        removedSeedLocalIds: string[];
+        removedSeedUids: string[];
+    }>;
+    /**
      * Syncs item attestations from EAS for the configured models and given addresses.
      * Uses owned + watched addresses from DB when addresses are not provided.
      */
@@ -40,6 +48,14 @@ export declare const getClient: () => {
     }>;
     getOwnedAddresses: () => Promise<any>;
     getWatchedAddresses: () => Promise<any>;
+    /**
+     * Hard-delete local on-chain seed copies for the given publisher addresses.
+     * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
+     */
+    removeLocalCopiesForAddresses: (addresses: string[]) => Promise<{
+        removedSeedLocalIds: string[];
+        removedSeedUids: string[];
+    }>;
     /**
      * Syncs item attestations from EAS for the configured models and given addresses.
      * Uses owned + watched addresses from DB when addresses are not provided.

@@ -1,7 +1,7 @@
 export { ModelPropertyDataTypes, } from './Schema';
 export { eventEmitter } from './eventBus';
-export { ADDRESSES_PERSISTED_EVENT, parseAddressesPersistedPayload, } from './client/events';
-export type { AddressesPersistedPayload } from './client/events';
+export { ADDRESSES_PERSISTED_EVENT, LOCAL_COPIES_REMOVED_EVENT, parseAddressesPersistedPayload, } from './client/events';
+export type { AddressesPersistedPayload, LocalCopiesRemovedPayload } from './client/events';
 export { getClient } from './client/ClientManager';
 export { ClientManagerState, MachineIds } from './client/constants';
 export { BaseDb } from './db/Db/BaseDb';
