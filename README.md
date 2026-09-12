@@ -1,5 +1,10 @@
 # Seed Protocol SDK
 
+[![npm](https://img.shields.io/npm/v/@seedprotocol/sdk.svg)](https://www.npmjs.com/package/@seedprotocol/sdk)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/node/v/@seedprotocol/sdk.svg)](https://nodejs.org)
+[![Docs](https://img.shields.io/badge/docs-seedprotocol.io-0B6E4F)](https://seedprotocol.io)
+
 The official JavaScript/TypeScript SDK for [Seed Protocol](https://seedprotocol.io)—a local-first, decentralized data layer.
 
 **[→ Full documentation at seedprotocol.io](https://seedprotocol.io)**
