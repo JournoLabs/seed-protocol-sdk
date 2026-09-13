@@ -97,12 +97,13 @@
     "build:sdk": "bun run build:eas && bun run build:arweave && bun run build:query && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev",
     "build:watch": "cd packages/sdk && tsc -w -p tsconfig.json",
     "build:publish": "node scripts/build-with-tests.js \"cd packages/publish && bun run build\"",
+    "build:mapping": "node scripts/build-with-tests.js \"cd packages/mapping && bun run build\"",
     "build:query": "node scripts/build-with-tests.js \"cd packages/query && bun run build\"",
     "build:feed": "node scripts/build-with-tests.js \"cd packages/feed && bun run build\"",
     "build:feed-hyper": "node scripts/build-with-tests.js \"cd packages/feed-hyper && bun run build\"",
     "build:gateway-hyper": "node scripts/build-with-tests.js \"cd packages/gateway-hyper && bun run build\"",
     "build:react": "node scripts/build-with-tests.js \"bun run --filter @seedprotocol/react build\"",
-    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:eas && bun run build:arweave && bun run build:query && bun run build:feed && bun run build:feed-hyper && bun run build:gateway-hyper && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev && bun run build:publish\"",
+    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:eas && bun run build:arweave && bun run build:query && bun run build:feed && bun run build:feed-hyper && bun run build:gateway-hyper && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev && bun run build:publish && bun run build:mapping\"",
     "clean": "rimraf coverage build tmp",
     "lint": "eslint .",
     "test": "vitest run --reporter=default && node scripts/check-tier1-package-boundary.js",
@@ -132,7 +133,8 @@
     "publish:feed": "node scripts/publish-package.js feed",
     "publish:feed-hyper": "node scripts/publish-package.js feed-hyper",
     "publish:gateway-hyper": "node scripts/publish-package.js gateway-hyper",
-    "publish:publish": "node scripts/publish-package.js publish"
+    "publish:publish": "node scripts/publish-package.js publish",
+    "publish:mapping": "node scripts/publish-package.js mapping"
   },
   "type": "module",
   "workspaces": [
