@@ -72,4 +72,9 @@ To make content visible again, call `item.publish()`. This creates **new** attes
 ## Related
 
 - [Publishing.md](./PUBLISHING.md) – Publish flow and schema setup
+- [DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md) – Tool domain ownership sidecar (DNS TXT + RDAP + EAS)
 - [getSeedsBySchemaName](../packages/sdk/src/eas.ts), [getSeedsFromSchemaUids](../packages/sdk/src/eas.ts) – EAS queries that exclude revoked by default
+
+## Tool DomainOwnership revoke
+
+`item.unpublish()` does **not** revoke a tool’s DomainOwnership attestation (different attester and schema). Call `revokeDomainOwnership({ wallet: toolWallet, uid })` from `@seedprotocol/publish` when a live RDAP recheck returns `likely_transferred` or when the tool withdraws the claim. See [DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md).

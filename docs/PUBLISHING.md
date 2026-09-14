@@ -25,6 +25,10 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
 
 You do not need to run schema setup yourself when using this flow.
 
+## Domain ownership (tool sidecar)
+
+To prove DNS control of a domain and seal a tool-attested EAS claim, see **[DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md)** (`createDomainOwnershipChallenge` → TXT → `verifyAndAttestDomainOwnership`). That flow is separate from Seed/Version publish.
+
 ## Publish modes: `patch` vs `new_version`
 
 Control this with **`publishMode`** when building payloads or starting publish.
