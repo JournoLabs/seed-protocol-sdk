@@ -27,6 +27,7 @@ const SYNC_PACKAGES = [
   'eas',
   'arweave',
   'vite',
+  'mapping',
 ]
 
 /**

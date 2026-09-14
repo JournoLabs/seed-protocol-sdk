@@ -216,6 +216,7 @@ export default defineConfig({
           include: [
             'packages/sdk/__tests__/**/*.test.ts',
             'packages/feed/__tests__/**/*.test.ts',
+            'packages/mapping/__tests__/**/*.test.ts',
             'packages/publish/src/**/*.test.ts',
             'packages/react/__tests__/**/*.node.test.tsx',
           ],
