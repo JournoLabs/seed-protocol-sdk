@@ -602,6 +602,9 @@ export const publishMachine = setup({
           target : SUCCESS,
           actions : assign({
             easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
+            publishedBatch : ( { event, }, ) =>
+              (event.output as { publishedBatch?: PublishMachineContext['publishedBatch'] })
+                ?.publishedBatch ?? null,
           },),
         },
         onError : {
@@ -626,6 +629,9 @@ export const publishMachine = setup({
           target : SUCCESS,
           actions : assign({
             easPayload : ( { event, }, ) => (event.output as { easPayload?: unknown })?.easPayload,
+            publishedBatch : ( { event, }, ) =>
+              (event.output as { publishedBatch?: PublishMachineContext['publishedBatch'] })
+                ?.publishedBatch ?? null,
           },),
         },
         onError : {
@@ -650,6 +656,21 @@ export const publishMachine = setup({
     },
     [SUCCESS] : {
       entry: ({ context }: { context: Partial<PublishMachineContext> }) => {
+        const batch = context.publishedBatch
+        const onPublished = context.onPublished
+        if (!onPublished || !batch?.seedUid) return
+        const seedLocalId = context.item?.seedLocalId
+        if (!seedLocalId) return
+        void Promise.resolve(
+          onPublished({
+            seedLocalId,
+            seedUid: batch.seedUid,
+            versionUid: batch.versionUid,
+            attestationUids: batch.attestationUids,
+          }),
+        ).catch((err) => {
+          console.warn('[publish] onPublished callback failed:', err)
+        })
       },
       type : 'final',
     },

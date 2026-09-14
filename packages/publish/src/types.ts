@@ -108,5 +108,11 @@ export interface PublishMachineContext {
    * INSERT a duplicate row after the same run already completed.
    */
   publishRunId?: string
+  /**
+   * Optional callback when publish succeeds with a resolved attestation batch (tool PublishedBy flow).
+   */
+  onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /** Resolved batch from attest actors; set on transition to success. */
+  publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown
 }

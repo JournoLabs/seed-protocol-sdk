@@ -175,6 +175,12 @@ export interface PublishConfig {
    * Results are cached for 60s.
    */
   getTokenPrices?: () => Promise<{ ethUsd: number; arUsd: number }>
+  /**
+   * Called when an author publish run reaches success with the resolved batch UID list.
+   * Tool backends use this to call {@link import('./services/publishedBy').attestPublishedBy}.
+   * Per-publish {@link CreatePublishOptions.onPublished} overrides this when set.
+   */
+  onPublished?: import('./services/publishedBy').OnPublishedCallback
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
@@ -206,6 +212,11 @@ export interface CreatePublishOptions {
    * Default: `materialize`.
    */
   htmlEmbeddedDataUriPolicy?: import('./types').HtmlEmbeddedDataUriPolicy
+  /**
+   * Called when this publish run succeeds with the resolved Seed/Version/property UID batch.
+   * Overrides {@link PublishConfig.onPublished} when both are set.
+   */
+  onPublished?: import('./services/publishedBy').OnPublishedCallback
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */

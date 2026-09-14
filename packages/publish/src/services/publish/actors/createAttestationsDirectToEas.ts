@@ -234,6 +234,7 @@ export const createAttestationsDirectToEas = fromPromise(
     }
 
     let lastAttestationMs = Date.now()
+    const batchExtraUids: string[] = []
 
     for (let i = 0; i < normalizedRequests.length; i++) {
       const request = normalizedRequests[i] as NormalizedRequest
@@ -260,7 +261,10 @@ export const createAttestationsDirectToEas = fromPromise(
         }
         newSeedUid = seedUidFromReceipt
         request.seedUid = seedUidFromReceipt
+        batchExtraUids.push(seedUidFromReceipt)
         logger('created Seed attestation', newSeedUid)
+      } else if (newSeedUid !== ZERO_BYTES32) {
+        batchExtraUids.push(newSeedUid)
       }
 
       if (newSeedUid !== ZERO_BYTES32 && newVersionUid === ZERO_BYTES32) {
@@ -283,6 +287,7 @@ export const createAttestationsDirectToEas = fromPromise(
         }
         newVersionUid = versionUidFromReceipt
         request.versionUid = versionUidFromReceipt
+        batchExtraUids.push(versionUidFromReceipt)
         await updateVersionUid({
           seedLocalId: request.localId,
           versionUid: versionUidFromReceipt,
@@ -290,6 +295,8 @@ export const createAttestationsDirectToEas = fromPromise(
           attestationCreatedAt: lastAttestationMs,
         })
         logger('created Version attestation', newVersionUid)
+      } else if (newVersionUid !== ZERO_BYTES32) {
+        batchExtraUids.push(newVersionUid)
       }
 
       for (const att of request.listOfAttestations) {
@@ -330,6 +337,9 @@ export const createAttestationsDirectToEas = fromPromise(
         logger('created property attestations for request', i)
         const { easContractAddress } = getPublishConfig()
         const attested = getAttestedUidsFromReceipt(receipt, easContractAddress)
+        for (const a of attested) {
+          if (a.uid) batchExtraUids.push(a.uid)
+        }
         const list = request.listOfAttestations
         const sameLen = attested.length === list.length
         await applyPropertyAttestationUidsFromPublish({
@@ -377,6 +387,17 @@ export const createAttestationsDirectToEas = fromPromise(
       /* best-effort cleanup */
     }
 
-    return { easPayload: requestData }
+    const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
+    const rootReq =
+      normalizedRequests.find((r) => r?.localId === item.seedLocalId) ?? normalizedRequests[0]
+    const publishedBatch = rootReq?.seedUid
+      ? collectPublishedBatch({
+          seedUid: String(rootReq.seedUid),
+          versionUid: rootReq.versionUid ? String(rootReq.versionUid) : undefined,
+          extraUids: batchExtraUids,
+        })
+      : null
+
+    return { easPayload: requestData, publishedBatch }
   },
 )

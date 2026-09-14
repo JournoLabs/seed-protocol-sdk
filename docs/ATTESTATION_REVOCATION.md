@@ -69,12 +69,18 @@ To make content visible again, call `item.publish()`. This creates **new** attes
 
 4. **Filtering:** All discovery and feed queries exclude revoked attestations by default (`revoked: false`). No extra client-side filtering is needed.
 
-## Related
+## Tool PublishedBy revoke
 
-- [Publishing.md](./PUBLISHING.md) – Publish flow and schema setup
-- [DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md) – Tool domain ownership sidecar (DNS TXT + RDAP + EAS)
-- [getSeedsBySchemaName](../packages/sdk/src/eas.ts), [getSeedsFromSchemaUids](../packages/sdk/src/eas.ts) – EAS queries that exclude revoked by default
+`item.unpublish()` revokes the **author’s** Seed / Version / property attestations only. It does **not** revoke a tool’s PublishedBy sidecar (different attester).
+
+When a publishing tool mediates unpublish, call `revokePublishedBy({ wallet: toolWallet, uid })` from `@seedprotocol/publish` so allowlisted clients lose the live tool pointer. Revoked PublishedBy rows remain on-chain and can still be queried with `excludeRevoked: false` for historical reconstruction.
 
 ## Tool DomainOwnership revoke
 
 `item.unpublish()` does **not** revoke a tool’s DomainOwnership attestation (different attester and schema). Call `revokeDomainOwnership({ wallet: toolWallet, uid })` from `@seedprotocol/publish` when a live RDAP recheck returns `likely_transferred` or when the tool withdraws the claim. See [DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md).
+
+## Related
+
+- [Publishing.md](./PUBLISHING.md) – Publish flow, schema setup, and PublishedBy sidecar
+- [DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md) – Tool domain ownership sidecar (DNS TXT + RDAP + EAS)
+- [getSeedsBySchemaName](../packages/sdk/src/eas.ts), [getSeedsFromSchemaUids](../packages/sdk/src/eas.ts), [getPublishedByFromEas](../packages/sdk/src/eas.ts) – EAS queries that exclude revoked by default

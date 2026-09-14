@@ -379,6 +379,7 @@ export const createAttestations = fromPromise(
 
     let effectiveRequests: any[]
     let lastAttestationReceipt: ReceiptLike | null = null
+    const batchExtraUids: string[] = []
 
     if (needsSequential) {
       let workingPayload = structuredClone(reqs) as any[]
@@ -411,6 +412,9 @@ export const createAttestations = fromPromise(
 
         lastAttestationReceipt = receipt
         const listOfAttestationsCount = normalizedOne?.listOfAttestations?.length ?? 0
+        for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
+          if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
+        }
         await persistVersionUidFromPublishReceipt({
           receipt,
           seedLocalId: rawReq.localId,
@@ -436,6 +440,7 @@ export const createAttestations = fromPromise(
           if (seedUidFromTx) {
             resolvedUids[rawReq.localId] = seedUidFromTx
             workingPayload[i] = { ...workingPayload[i], seedUid: seedUidFromTx }
+            batchExtraUids.push(seedUidFromTx)
           }
         }
 
@@ -483,6 +488,9 @@ export const createAttestations = fromPromise(
       }
 
       lastAttestationReceipt = receipt
+      for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
+        if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
+      }
       const rootReqSingle =
         normalizedRequests.find((r: any) => r?.localId === item.seedLocalId) ?? normalizedRequests[0]
       await persistVersionUidFromPublishReceipt({
@@ -516,6 +524,7 @@ export const createAttestations = fromPromise(
             useModularExecutor,
           ))
         : undefined
+      if (seedUidFromTx) batchExtraUids.push(seedUidFromTx)
       effectiveRequests =
         seedUidFromTx && normalizedRequests.length > 0
           ? [{ ...normalizedRequests[0], seedUid: seedUidFromTx }, ...normalizedRequests.slice(1)]
@@ -546,6 +555,21 @@ export const createAttestations = fromPromise(
       /* best-effort cleanup */
     }
 
-    return { easPayload: requestData }
+    const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
+    const rootForBatch =
+      effectiveRequests.find((r) => r?.localId === item.seedLocalId) ?? effectiveRequests[0]
+    for (const r of effectiveRequests) {
+      if (r?.seedUid) batchExtraUids.push(String(r.seedUid))
+      if (r?.versionUid) batchExtraUids.push(String(r.versionUid))
+    }
+    const publishedBatch = rootForBatch?.seedUid
+      ? collectPublishedBatch({
+          seedUid: String(rootForBatch.seedUid),
+          versionUid: rootForBatch.versionUid ? String(rootForBatch.versionUid) : undefined,
+          extraUids: batchExtraUids,
+        })
+      : null
+
+    return { easPayload: requestData, publishedBatch }
   },
 )

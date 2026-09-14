@@ -188,3 +188,19 @@ export {
   type AttestPublishAuthorizationResult,
   type AssessPublishAuthorizationLiveResult,
 } from './services/publishAuthorization/public'
+export {
+  PUBLISHED_BY_SCHEMA_DEF,
+  PUBLISHED_BY_SCHEMA_NAME,
+  hashPublishedByBatch,
+  getPublishedBySchemaUid,
+  ensurePublishedBySchema,
+  encodePublishedByAttestationData,
+  attestPublishedBy,
+  revokePublishedBy,
+  collectPublishedBatch,
+  uidsFromAttestationPairs,
+  type PublishedBatchResult,
+  type OnPublishedCallback,
+  type AttestPublishedByParams,
+  type AttestPublishedByResult,
+} from './services/publishedBy/public'

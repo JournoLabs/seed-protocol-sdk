@@ -93,6 +93,7 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
           options?.htmlEmbeddedDataUriPolicy ??
           publishCfg.htmlEmbeddedDataUriPolicy ??
           'materialize',
+        onPublished: options?.onPublished ?? publishCfg.onPublished,
       },
     })
 

@@ -119,6 +119,69 @@ EAS schemas must be:
 
 If a schema is registered but has no naming attestation, attestations will work but EASSCAN will not show a friendly name. The publish package's `ensureEasSchemasForItem` handles both steps.
 
+## Tool PublishedBy sidecar
+
+Publishing tools (e.g. Permapress) can seal a **PublishedBy** attestation from a **tool-controlled wallet** after the author’s Seed/Version/property batch lands. This is a sidecar claim — not part of the author’s `multiPublish` / direct EAS batch — so ownership and revoke for the Seed stay with the author.
+
+### Schema
+
+Named `seedprotocol.publishedBy` (revocable):
+
+```text
+bytes32 seedUid, bytes32 versionUid, bytes32[] attestationUids, bytes32 batchHash, string toolName, string toolVersion
+```
+
+`refUID` is the Seed UID. Callers choose a payload mode at attest time:
+
+| Mode | On-chain `attestationUids` | `batchHash` |
+|------|----------------------------|-------------|
+| **`uids`** | Full list from the publish batch | Always set to `hashPublishedByBatch(sortedUids)` (override allowed) |
+| **`hash`** | Empty array | Required; keep the full UID list off-chain and verify with `verifyPublishedByBatch` |
+
+### APIs (`@seedprotocol/publish`)
+
+- `ensurePublishedBySchema(wallet)` — register + name once
+- `attestPublishedBy({ wallet, seedUid, versionUid, toolName, toolVersion, mode: 'uids' \| 'hash', ... })`
+- `revokePublishedBy({ wallet, uid })` — tool attester only
+- `hashPublishedByBatch` / `collectPublishedBatch` / `getPublishedBySchemaUid`
+
+### `onPublished` hook
+
+Pass `onPublished` on `initPublish` config or `CreatePublishOptions`. When the publish machine reaches success, it invokes the callback with `{ seedLocalId, seedUid, versionUid, attestationUids }`. Tool backends should call `attestPublishedBy` from operator-controlled infra (do not embed the tool private key in the browser).
+
+```ts
+import {
+  initPublish,
+  attestPublishedBy,
+  hashPublishedByBatch,
+} from '@seedprotocol/publish'
+
+initPublish({
+  uploadApiBaseUrl: '...',
+  onPublished: async ({ seedUid, versionUid, attestationUids }) => {
+    // Run on a server with the tool wallet:
+    await attestPublishedBy({
+      wallet: toolWallet,
+      seedUid,
+      versionUid,
+      toolName: 'Permapress',
+      toolVersion: '1.0.0',
+      mode: 'uids',
+      attestationUids,
+    })
+    // Or hash-only:
+    // mode: 'hash', batchHash: hashPublishedByBatch(attestationUids)
+  },
+})
+```
+
+### Reads (`@seedprotocol/eas` / `@seedprotocol/sdk`)
+
+- `getPublishedByFromEas({ toolAddresses, refUIDs?, schemaUid?, excludeRevoked })`
+- `decodePublishedByData(decodedDataJson)` / `verifyPublishedByBatch({ attestationUids, batchHash })`
+
+Allowlist clients: filter non-revoked PublishedBy rows by the known tool attester, then treat only the listed UIDs (or a matching `batchHash`) as tool-endorsed — later author patches outside that batch are not covered.
+
 ## Revoking (Unpublishing)
 
 To revoke attestations and remove an item from feeds and discovery, call `item.unpublish()`. Revocation is permanent; see [ATTESTATION_REVOCATION.md](./ATTESTATION_REVOCATION.md) for permanence, UX guidance, and republishing.

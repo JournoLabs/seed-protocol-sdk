@@ -6,8 +6,19 @@ export {
   getSeedsFromSchemaUids,
   getSeedsBySchemaName,
   getSeedUidsBySchemaName,
+  getPublishedByFromEas,
+  decodePublishedByData,
+  hashPublishedByBatch,
+  verifyPublishedByBatch,
+  PUBLISHED_BY_SCHEMA_DEF,
+  PUBLISHED_BY_SCHEMA_NAME,
 } from '@seedprotocol/eas'
-export type { Attestation, EASSchema } from '@seedprotocol/eas'
+export type {
+  Attestation,
+  EASSchema,
+  PublishedByDecoded,
+  GetPublishedByFromEasParams,
+} from '@seedprotocol/eas'
 
 import { toSnakeCase } from '@/helpers'
 import { withExcludeRevokedFilter } from '@seedprotocol/eas'
