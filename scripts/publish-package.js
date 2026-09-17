@@ -1,20 +1,33 @@
 #!/usr/bin/env node
 /**
- * Publish a package to npm with SDK (and publish→React) dependency validation
+ * Publish package(s) to npm with dependency validation.
  *
- * Usage: node scripts/publish-package.js [-f] <package>
+ * Usage:
+ *   node scripts/publish-package.js [-f] [-y] <package>
+ *   node scripts/publish-package.js [-f] [-y] all
+ *   node scripts/publish-package.js [-f] [-y]          # same as "all" (used by bun run publish:all)
  *
- * Packages: eas, arweave, vite, sdk, react, query, feed, feed-hyper, gateway-hyper, publish, mapping
+ * Packages: eas, arweave, vite, query, sdk, feed, feed-hyper, gateway-hyper, react, publish, mapping
  *
- * - If publishing anything except 'sdk', checks that @seedprotocol/sdk@<version> is published
+ * Single-package mode:
+ * - If publishing anything except 'sdk' / lean packages, checks that @seedprotocol/sdk@<version> is published
  * - If SDK version is not published, prompts to publish it first
+ * - If publishing 'feed', also checks that @seedprotocol/query@<same version> is published
  * - If publishing 'feed-hyper', also checks that @seedprotocol/feed@<same version> is published
  * - If publishing 'publish', also checks that @seedprotocol/react@<same version> is published
  * - If React version is not published, prompts to publish it first
  * - If user declines, script exits
- * - If user accepts (or dependencies already published), publishes the requested package
- * - Use -f or --force to skip running tests before build
- * - Experimental packages (cli, webpack, ghost) are private and not publishable via this script
+ *
+ * All mode (`all` or no package arg):
+ * - Publishes every supported package in dependency order
+ * - Skips packages already published at the monorepo version (resume-safe)
+ * - Prompts once before starting unless -y / --yes
+ *
+ * Flags:
+ * - `-f` / `--force` — skip running tests before build (sdk / react paths)
+ * - `-y` / `--yes` — skip the publish:all confirmation prompt
+ *
+ * Experimental packages (cli, webpack, ghost) are private and not publishable via this script.
  */
 
 import { readFileSync } from 'fs'
@@ -28,7 +41,25 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-const VALID_PACKAGES = ['eas', 'arweave', 'vite', 'sdk', 'react', 'query', 'feed', 'feed-hyper', 'gateway-hyper', 'publish', 'mapping']
+/**
+ * Dependency-safe publish order for a full release.
+ * Keep in sync with real @seedprotocol/* package.json dependencies.
+ */
+const PUBLISH_ORDER = [
+  'eas',
+  'arweave',
+  'vite',
+  'query',
+  'sdk',
+  'feed',
+  'feed-hyper',
+  'gateway-hyper',
+  'react',
+  'publish',
+  'mapping',
+]
+
+const VALID_PACKAGES = [...PUBLISH_ORDER]
 const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
 
 function readPackageJson(path) {
@@ -49,11 +80,13 @@ function getReactVersion() {
 }
 
 /**
- * Check if a specific version of @seedprotocol/sdk is published on npm
+ * Check if a specific version of an @seedprotocol package is on npm
+ * @param {string} shortName - e.g. "sdk", "feed-hyper"
+ * @param {string} version
  */
-function isSdkVersionPublished(version) {
+function isPackageVersionPublished(shortName, version) {
   try {
-    execSync(`npm view @seedprotocol/sdk@${version} version`, {
+    execSync(`npm view @seedprotocol/${shortName}@${version} version`, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -63,19 +96,12 @@ function isSdkVersionPublished(version) {
   }
 }
 
-/**
- * Check if a specific version of @seedprotocol/react is published on npm
- */
+function isSdkVersionPublished(version) {
+  return isPackageVersionPublished('sdk', version)
+}
+
 function isReactVersionPublished(version) {
-  try {
-    execSync(`npm view @seedprotocol/react@${version} version`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    return true
-  } catch {
-    return false
-  }
+  return isPackageVersionPublished('react', version)
 }
 
 /**
@@ -156,30 +182,33 @@ async function publishPackage(packageName) {
   console.log(`\n✅ @seedprotocol/${packageName} published successfully!\n`)
 }
 
-async function main() {
-  const args = process.argv.slice(2)
-  const forceIndex = args.findIndex((arg) => arg === '-f' || arg === '--force')
-  const skipTests = forceIndex !== -1
-  const packageArg = args.filter((_, i) => i !== forceIndex)[0]
-
-  if (!packageArg || !VALID_PACKAGES.includes(packageArg)) {
-    console.error('❌ Error: Invalid or missing package name')
-    console.error(`Usage: node scripts/publish-package.js [-f] <package>`)
-    console.error(`Valid packages: ${VALID_PACKAGES.join(', ')}`)
-    console.error(`  -f, --force  Skip running tests before build`)
-    process.exit(1)
+/**
+ * Publish one package (build + npm publish), without dependency prompts.
+ * @param {string} packageName
+ * @param {{ skipTests?: boolean }} options
+ */
+async function publishOne(packageName, { skipTests = false } = {}) {
+  if (packageName === 'sdk') {
+    await publishSdk(skipTests)
+    return
   }
+  if (packageName === 'react') {
+    await publishReact(skipTests)
+    return
+  }
+  await publishPackage(packageName)
+}
 
+/**
+ * @param {string} packageArg
+ * @param {{ skipTests?: boolean }} options
+ */
+async function ensureSinglePackageDependencies(packageArg, { skipTests = false } = {}) {
   const sdkVersion = getSdkVersion()
-  console.log(`[Publish] Target package: ${packageArg}`)
-  console.log(`[Publish] SDK version in monorepo: ${sdkVersion}`)
-  if (skipTests) {
-    console.log('[Publish] -f flag: skipping tests before build')
-  }
 
   if (packageArg !== 'sdk' && !LEAN_PACKAGES.includes(packageArg)) {
     console.log('\n[Publish] Checking if @seedprotocol/sdk is published on npm...')
-    const sdkPublished = await isSdkVersionPublished(sdkVersion)
+    const sdkPublished = isSdkVersionPublished(sdkVersion)
 
     if (!sdkPublished) {
       console.log(`\n⚠️  @seedprotocol/sdk@${sdkVersion} is not published on npm.`)
@@ -207,7 +236,7 @@ async function main() {
     const reactVersion = getReactVersion()
     console.log(`[Publish] React version in monorepo: ${reactVersion}`)
     console.log('\n[Publish] Checking if @seedprotocol/react is published on npm...')
-    const reactPublished = await isReactVersionPublished(reactVersion)
+    const reactPublished = isReactVersionPublished(reactVersion)
 
     if (!reactPublished) {
       console.log(`\n⚠️  @seedprotocol/react@${reactVersion} is not published on npm.`)
@@ -233,16 +262,7 @@ async function main() {
 
   if (packageArg === 'feed') {
     console.log('\n[Publish] Checking if @seedprotocol/query is published on npm...')
-    let queryPublished = false
-    try {
-      execSync(`npm view @seedprotocol/query@${sdkVersion} version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      queryPublished = true
-    } catch {
-      queryPublished = false
-    }
+    const queryPublished = isPackageVersionPublished('query', sdkVersion)
 
     if (!queryPublished) {
       console.log(`\n⚠️  @seedprotocol/query@${sdkVersion} is not published on npm.`)
@@ -255,16 +275,7 @@ async function main() {
 
   if (packageArg === 'feed-hyper') {
     console.log('\n[Publish] Checking if @seedprotocol/feed is published on npm...')
-    let feedPublished = false
-    try {
-      execSync(`npm view @seedprotocol/feed@${sdkVersion} version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      feedPublished = true
-    } catch {
-      feedPublished = false
-    }
+    const feedPublished = isPackageVersionPublished('feed', sdkVersion)
 
     if (!feedPublished) {
       console.log(`\n⚠️  @seedprotocol/feed@${sdkVersion} is not published on npm.`)
@@ -274,21 +285,129 @@ async function main() {
     }
     console.log(`✅ @seedprotocol/feed@${sdkVersion} is already published.\n`)
   }
+}
 
-  if (packageArg === 'sdk') {
-    try {
-      await publishSdk(skipTests)
-    } catch (error) {
-      console.error('\n❌ SDK publish failed:', error.message)
+/**
+ * @param {{ skipTests?: boolean, assumeYes?: boolean }} options
+ */
+async function publishAll({ skipTests = false, assumeYes = false } = {}) {
+  const version = getSdkVersion()
+  console.log(`[Publish] Publishing all packages at version ${version}`)
+  console.log(`[Publish] Order: ${PUBLISH_ORDER.join(' → ')}`)
+  if (skipTests) {
+    console.log('[Publish] -f flag: skipping tests before build')
+  }
+
+  if (!assumeYes) {
+    const answer = await prompt(
+      `\nPublish all ${PUBLISH_ORDER.length} packages at ${version}? Already-published packages will be skipped. (y/n): `,
+    )
+    if (answer !== 'y' && answer !== 'yes') {
+      console.log('\nAborted.')
       process.exit(1)
     }
-  } else {
+  }
+
+  console.log('\n[Publish] Syncing package versions...')
+  await runCommand('bun run sync-versions', { cwd: rootDir })
+
+  const published = []
+  const skipped = []
+
+  for (const packageName of PUBLISH_ORDER) {
+    if (isPackageVersionPublished(packageName, version)) {
+      console.log(
+        `\n⏭️  Skipping @seedprotocol/${packageName}@${version} (already on npm)\n`,
+      )
+      skipped.push(packageName)
+      continue
+    }
+
+    console.log(
+      `\n——— [${published.length + skipped.length + 1}/${PUBLISH_ORDER.length}] @seedprotocol/${packageName}@${version} ———\n`,
+    )
+
     try {
-      await publishPackage(packageArg)
+      await publishOne(packageName, { skipTests })
+      published.push(packageName)
     } catch (error) {
-      console.error(`\n❌ @seedprotocol/${packageArg} publish failed:`, error.message)
+      console.error(`\n❌ @seedprotocol/${packageName} publish failed:`, error.message)
+      console.error(
+        `\nStopped after publishing: ${published.length ? published.join(', ') : '(none)'}` +
+          (skipped.length ? `\nSkipped (already published): ${skipped.join(', ')}` : '') +
+          `\nRemaining: ${PUBLISH_ORDER.filter((p) => !published.includes(p) && !skipped.includes(p)).join(', ')}`,
+      )
+      console.error('Re-run `bun run publish:all` to resume; already-published packages are skipped.')
       process.exit(1)
     }
+  }
+
+  console.log('\n✅ publish:all complete.')
+  if (published.length) {
+    console.log(`   Published: ${published.join(', ')}`)
+  }
+  if (skipped.length) {
+    console.log(`   Skipped (already on npm): ${skipped.join(', ')}`)
+  }
+}
+
+function printUsage(message) {
+  if (message) {
+    console.error(`❌ Error: ${message}`)
+  }
+  console.error(`Usage: node scripts/publish-package.js [-f] [-y] [<package>|all]`)
+  console.error(`Valid packages: ${VALID_PACKAGES.join(', ')}, all`)
+  console.error(`  (omit package or pass "all" to publish every package in dependency order)`)
+  console.error(`  -f, --force  Skip running tests before build`)
+  console.error(`  -y, --yes    Skip confirmation when publishing all`)
+}
+
+function printUsageAndExit(message) {
+  printUsage(message)
+  process.exit(1)
+}
+
+async function main() {
+  const args = process.argv.slice(2)
+  const flags = new Set()
+  const positionals = []
+  for (const arg of args) {
+    if (arg === '-f' || arg === '--force' || arg === '-y' || arg === '--yes') {
+      flags.add(arg === '--force' ? '-f' : arg === '--yes' ? '-y' : arg)
+    } else if (arg.startsWith('-')) {
+      printUsageAndExit(`Unknown flag: ${arg}`)
+    } else {
+      positionals.push(arg)
+    }
+  }
+
+  const skipTests = flags.has('-f')
+  const assumeYes = flags.has('-y')
+  const packageArg = positionals[0] || 'all'
+
+  if (packageArg !== 'all' && !VALID_PACKAGES.includes(packageArg)) {
+    printUsageAndExit(`Invalid package name: ${packageArg}`)
+  }
+
+  if (packageArg === 'all') {
+    await publishAll({ skipTests, assumeYes })
+    process.exit(0)
+  }
+
+  const sdkVersion = getSdkVersion()
+  console.log(`[Publish] Target package: ${packageArg}`)
+  console.log(`[Publish] SDK version in monorepo: ${sdkVersion}`)
+  if (skipTests) {
+    console.log('[Publish] -f flag: skipping tests before build')
+  }
+
+  await ensureSinglePackageDependencies(packageArg, { skipTests })
+
+  try {
+    await publishOne(packageArg, { skipTests })
+  } catch (error) {
+    console.error(`\n❌ @seedprotocol/${packageArg} publish failed:`, error.message)
+    process.exit(1)
   }
 
   process.exit(0)
