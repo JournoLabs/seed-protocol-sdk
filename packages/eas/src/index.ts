@@ -1,6 +1,7 @@
 export * from './api.js'
 export * from './constants.js'
 export * from './domainOwnership.js'
+export * from './publishAuthorization.js'
 export * from './easPropertyCanonical.js'
 export * from './easRevokedFilter.js'
 export * from './easUid.js'

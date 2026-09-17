@@ -2,6 +2,7 @@
 
 ### Added
 
+- **Publish authorization helpers:** `PUBLISH_AUTHORIZATION_*`, `decodePublishAuthorizationData`, `assessPublishAuthorization`, and `getPublishAuthorizationFromEas` for the `seedprotocol.publishAuthorization` sidecar.
 - **Domain ownership helpers:** `DOMAIN_OWNERSHIP_SCHEMA_*`, challenge/TXT builders, `hashDomainOwnershipChallenge`, `hashDomainRegistryFingerprint`, `decodeDomainOwnershipData`, `assessDomainOwnership`, and `getDomainOwnershipFromEas` for the `seedprotocol.domainOwnership` sidecar.
 
 ## 0.5.0
