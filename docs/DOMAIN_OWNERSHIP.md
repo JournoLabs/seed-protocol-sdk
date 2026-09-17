@@ -111,4 +111,5 @@ Registrant name changes are **not** used (privacy redaction). Prefer filtering t
 ## Related
 
 - [PUBLISHING.md](./PUBLISHING.md) — publish flow and PublishedBy sidecar
+- [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md) — ManagedAccount publish/revoke automation grants
 - [ATTESTATION_REVOCATION.md](./ATTESTATION_REVOCATION.md) — Seed unpublish vs tool sidecars

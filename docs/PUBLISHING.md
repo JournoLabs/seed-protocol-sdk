@@ -29,6 +29,10 @@ You do not need to run schema setup yourself when using this flow.
 
 To prove DNS control of a domain and seal a tool-attested EAS claim, see **[DOMAIN_OWNERSHIP.md](./DOMAIN_OWNERSHIP.md)** (`createDomainOwnershipChallenge` → TXT → `verifyAndAttestDomainOwnership`). That flow is separate from Seed/Version publish.
 
+## Publish automation (ManagedAccount grants)
+
+To let an app publish/revoke on a user’s behalf with a revocable session key (without taking the user’s root key), see **[PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md)**.
+
 ## Publish modes: `patch` vs `new_version`
 
 Control this with **`publishMode`** when building payloads or starting publish.
