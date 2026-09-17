@@ -18,6 +18,20 @@ const postProcess = () => {
 }
 
 /**
+ * @rollup/plugin-typescript can leave open handles so the CLI never exits after a
+ * successful multi-config build. Force a clean exit on the final config only.
+ */
+function forceExitAfterBuildPlugin() {
+  return {
+    name: 'force-exit-after-build',
+    closeBundle() {
+      if (process.env.ROLLUP_WATCH) return
+      setTimeout(() => process.exit(0), 0)
+    },
+  }
+}
+
+/**
  * Rewrites fragile dynamic-import pattern to two-step form so consumer re-bundles
  * (e.g. Electron) don't break: replace
  *   const { x } = await import('./chunk.js').then(n => n.aR);
@@ -205,6 +219,7 @@ const config = [
         include: ['node_modules/**'],
       }),
       postProcess(),
+      forceExitAfterBuildPlugin(),
     ],
   },
 ]

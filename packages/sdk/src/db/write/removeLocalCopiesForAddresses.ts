@@ -15,6 +15,14 @@ export type RemoveLocalCopiesResult = {
   removedSeedUids: string[]
 }
 
+/** Row shape from the candidate select; explicit because `getAppDb()` is typed as `any`. */
+type CandidateSeedRow = {
+  localId: string | null
+  uid: string | null
+  publisher: string | null
+  attestationRaw: string | null
+}
+
 const emptyResult = (): RemoveLocalCopiesResult => ({
   removedSeedLocalIds: [],
   removedSeedUids: [],
@@ -49,7 +57,7 @@ export async function findLocalOnchainCopiesForAddresses(
 
   const addressSet = new Set(normalized)
 
-  const candidateRows = await appDb
+  const candidateRows = (await appDb
     .select({
       localId: seeds.localId,
       uid: seeds.uid,
@@ -57,7 +65,7 @@ export async function findLocalOnchainCopiesForAddresses(
       attestationRaw: seeds.attestationRaw,
     })
     .from(seeds)
-    .where(or(isNotNull(seeds.uid), isNotNull(seeds.attestationRaw)))
+    .where(or(isNotNull(seeds.uid), isNotNull(seeds.attestationRaw)))) as CandidateSeedRow[]
 
   const matched = candidateRows.filter((row) => {
     if (!row.localId) return false
