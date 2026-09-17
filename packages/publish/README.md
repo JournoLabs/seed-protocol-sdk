@@ -196,13 +196,19 @@ await clearCompletedPublishProcessesForSeed(item.seedLocalId)
 await deletePublishProcessById(runId) // numeric row id from `records`
 ```
 
+### Publish automation (ManagedAccount grants)
+
+Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](../../docs/PUBLISH_AUTOMATION.md).
+
+APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
+
 ### Modular executor (`useModularExecutor`) and EIP-7702
 
 When **`useModularExecutor`** is enabled, `multiPublish` is sent **from** the user’s **Thirdweb in-app modular wallet** (EIP-7702 execution mode) against their **ManagedAccount** contract. Before the first on-chain publish, `createAttestations` runs **`ensureEip7702ModularAccountReady()`**, which checks Optimism Sepolia bytecode at the modular wallet address (EIP-7702 delegation / minimal account). If bytecode is still empty and **`autoDeployEip7702ModularAccount`** is true (the default when `useModularExecutor` is on), it calls Thirdweb’s **`deploySmartAccount`** bootstrap (no-op if already upgraded). Set **`autoDeployEip7702ModularAccount: false`** to surface **`Eip7702ModularAccountPublishError`** instead of auto-deploying.
 
 **`ensureSmartWalletThenPublish`:** With **`useModularExecutor`**, the publish machine’s **`account`** and default **`dataItemSigner`** come from **`getConnectedModularAccount()`** (the modular EIP-7702 in-app wallet), not from **`resolveSmartWalletForPublish`** or the **`activeAccount`** argument (that parameter is ignored on this path for API compatibility). **`ensureEip7702ModularAccountReady()`** runs once before **`createPublish`** so EIP-7702 readiness failures surface before the publish actor starts; `createAttestations` still calls it again (no-op when already deployed).
 
-**Routing (important):** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…` — same hex as the deprecated `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` alias). The transaction **`to` / `getContract` address** is always the user’s on-chain publisher: **managed account** when `useModularExecutor` is on (`runModularExecutorPublishPrep().managedAddress`), or the **deployed publisher contract** when modular is off. **EOAs** (no contract at `address`) never use `multiPublish`; the publish machine routes them to **direct EAS** (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path even when the publisher is a deployed contract. Receipt parsing uses `modularAccountModuleContract` when configured, otherwise the managed / publisher address.
+**Routing (important):** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…` — same hex as the deprecated `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` alias). The transaction **`to` / `getContract` address** is the user’s on-chain publisher: **managed account** for interactive modular publish (`runModularExecutorPublishPrep().managedAddress`), or the **executor module** when an automation session key is detected (`routeToExecutorModule`). Non-modular publish targets the **deployed publisher contract**. **EOAs** (no contract at `address`) never use `multiPublish`; the publish machine routes them to **direct EAS** (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path even when the publisher is a deployed contract. Receipt parsing uses `modularAccountModuleContract` when configured, otherwise the managed / publisher address.
 
 **Managed account:** `runModularExecutorPublishPrep()` still ensures the **EIP-4337 managed** publishing contract exists on Optimism Sepolia (and optionally installs the executor module). That is separate from the modular wallet’s EIP-7702 upgrade.
 

@@ -63,3 +63,22 @@ describe('ensureManagedAccountEasConfigured', () => {
     expect(sendTransactionMock).toHaveBeenCalled()
   })
 })
+
+describe('assertManagedAccountEasMatchesConfig', () => {
+  test('resolves when getEas matches config', async () => {
+    const { assertManagedAccountEasMatchesConfig } = await import('./ensureManagedAccountEasConfigured')
+    await assertManagedAccountEasMatchesConfig('0xmanaged')
+    expect(encodeSetEasMock).not.toHaveBeenCalled()
+    expect(sendTransactionMock).not.toHaveBeenCalled()
+  })
+
+  test('throws without setEas when getEas mismatches', async () => {
+    readGetEasMock.mockImplementation(async () => '0x0000000000000000000000000000000000000000')
+    const { assertManagedAccountEasMatchesConfig } = await import('./ensureManagedAccountEasConfigured')
+    await expect(assertManagedAccountEasMatchesConfig('0xmanaged')).rejects.toThrow(
+      /session keys cannot call setEas/,
+    )
+    expect(encodeSetEasMock).not.toHaveBeenCalled()
+    expect(sendTransactionMock).not.toHaveBeenCalled()
+  })
+})

@@ -3,6 +3,7 @@ import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { fromThirdwebAccount } from '~/helpers/adapters/thirdwebAccount'
 import type { PublishWallet } from '~/helpers/seedSigner'
+import { getPublishConfig } from '~/config'
 import {
   getVersionsForSeedUid,
   getMetadataAttestationUidsForSeedUid,
@@ -14,8 +15,24 @@ import {
 } from '@seedprotocol/sdk'
 
 /**
+ * True when the EAS attester is the configured executor module (legacy path where the
+ * module itself was recorded as attester). ManagedAccount attesters are not blocked.
+ */
+async function isLegacyModularExecutorAttester(attester: string | null): Promise<boolean> {
+  if (!attester) return false
+  const additionalGetter = getGetAdditionalSyncAddresses()
+  if (!additionalGetter) return false
+  const additional = await additionalGetter()
+  const attesterLower = attester.toLowerCase()
+  return !!additional?.some((a: string | undefined) => a?.toLowerCase() === attesterLower)
+}
+
+/**
  * Revokes the Seed attestation and all Version and metadata attestations on EAS.
  * Prefer the registered publish wallet; fall back to Thirdweb connected account when present.
+ *
+ * When `modularAccountModuleContract` is set, `multiRevoke` is sent to the executor module
+ * so automation session keys (module-only targets) can revoke as the ManagedAccount.
  */
 export async function revokeAttestations(params: {
   seedLocalId: string
@@ -23,6 +40,7 @@ export async function revokeAttestations(params: {
   seedSchemaUid: string
 }): Promise<void> {
   const { seedLocalId, seedUid, seedSchemaUid } = params
+  const attester = await getAttesterForSeed({ seedLocalId, seedUid })
 
   let wallet: PublishWallet | null = getPublishWallet()
   if (!wallet) {
@@ -33,7 +51,6 @@ export async function revokeAttestations(params: {
       if (!account) {
         throw new Error('No wallet connected. Connect a wallet to revoke attestations.')
       }
-      const attester = await getAttesterForSeed({ seedLocalId, seedUid })
       const revokeAccount = await resolveRevokeAccount({ account, attester })
       wallet = fromThirdwebAccount(revokeAccount)
     } catch (err) {
@@ -44,17 +61,14 @@ export async function revokeAttestations(params: {
         { cause: err },
       )
     }
-  } else {
-    const attester = await getAttesterForSeed({ seedLocalId, seedUid })
-    const additionalGetter = getGetAdditionalSyncAddresses()
-    if (attester && additionalGetter) {
-      const additional = await additionalGetter()
-      const attesterLower = attester.toLowerCase()
-      if (additional?.some((a: string | undefined) => a?.toLowerCase() === attesterLower)) {
-        throw new Error(
-          'Revocation not supported for items published via the modular executor.',
-        )
-      }
+  } else if (await isLegacyModularExecutorAttester(attester)) {
+    // Registered automation / publish wallet cannot become the module attester on EAS.
+    // Prefer ManagedAccount attester + executor-routed multiRevoke (module configured).
+    const { modularAccountModuleContract } = getPublishConfig()
+    if (!modularAccountModuleContract?.trim()) {
+      throw new Error(
+        'Revocation not supported for items published via the modular executor.',
+      )
     }
   }
 

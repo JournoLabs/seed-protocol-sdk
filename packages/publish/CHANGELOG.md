@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Publish automation grants:** ManagedAccount-hosted session keys (executor-module-only `approvedTargets`), `seedprotocol.publishAuthorization` sidecar, `enrollPublishAutomation` / `revokePublishAutomation`, and `assertStorageBoundToIdentity`. See `docs/PUBLISH_AUTOMATION.md`.
+- **`prepareEasMultiRevoke`:** When `modularAccountModuleContract` is set, routes `multiRevoke` to the executor module so automation session keys can revoke as the ManagedAccount.
+- **`resolveRevokeAccount` / `revokeAttestations`:** No longer hard-block ManagedAccount attesters; legacy module-attester path attempts ManagedAccount + executor revoke when configured.
+- **Automation `multiPublish` path:** When the provided publish wallet signer is an active session key on the ManagedAccount, `createAttestations` keeps that wallet (no modular in-app bootstrap), routes `multiPublish` to the executor module (`routeToExecutorModule`), and uses read-only **`assertManagedAccountEasMatchesConfig`** (session keys cannot `setEas`).
+- Dependency: `@seedprotocol/arweave` (workspace) for SDK-resolution stability when publish loads SDK revoke/sync paths.
+
+### Added (Domain ownership)
+
 - **Domain ownership tooling:** `createDomainOwnershipChallenge`, multi-resolver DNS TXT verify, RDAP snapshot via `rdapper`, `ensureDomainOwnershipSchema` / `attestDomainOwnership` / `revokeDomainOwnership`, `verifyAndAttestDomainOwnership`, and `assessDomainOwnershipLive`. See `docs/DOMAIN_OWNERSHIP.md`.
 - Dependency: `@seedprotocol/eas`, `rdapper`.
 

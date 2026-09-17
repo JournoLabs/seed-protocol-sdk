@@ -1,11 +1,13 @@
 import type { Account } from 'thirdweb/wallets'
 import { optimismSepolia } from 'thirdweb/chains'
 import { getGetAdditionalSyncAddresses } from '@seedprotocol/sdk'
+import { getPublishConfig } from '~/config'
 import {
   getClient,
   getSmartWalletAddressForAdmin,
   isSmartWalletDeployed,
   getManagedAccountWallet,
+  getConnectedManagedAccountAddress,
 } from '~/helpers/thirdweb'
 
 /**
@@ -14,12 +16,9 @@ import {
  * with a different wallet (e.g. EOA or modular account), attempts to use the
  * ManagedAccount wallet for the revoke.
  *
- * @param account - The currently connected account
- * @param attester - The attester address from the seed (publisher or attestationRaw.attester)
- * @returns The account to use for revoke
- * @throws If `attester` equals any address from {@link getGetAdditionalSyncAddresses}
- *   (e.g. `modularAccountModuleContract` when `initPublish` registers it). Those addresses
- *   cannot revoke via the app wallet’s EAS `multiRevoke` path today.
+ * When the attester is the legacy executor module address, attempts the ManagedAccount
+ * wallet if `modularAccountModuleContract` is configured (executor-routed multiRevoke).
+ * Throws only when the module was the attester and no ManagedAccount path is available.
  */
 export async function resolveRevokeAccount(params: {
   account: Account
@@ -32,14 +31,13 @@ export async function resolveRevokeAccount(params: {
   }
 
   const additionalGetter = getGetAdditionalSyncAddresses()
+  let attesterIsExecutorModule = false
   if (additionalGetter) {
     const additional = await additionalGetter()
     const attesterLower = attester.toLowerCase()
-    if (additional?.some((a: string | undefined) => a?.toLowerCase() === attesterLower)) {
-      throw new Error(
-        'Revocation not supported for items published via the modular executor.',
-      )
-    }
+    attesterIsExecutorModule = !!additional?.some(
+      (a: string | undefined) => a?.toLowerCase() === attesterLower,
+    )
   }
 
   try {
@@ -47,8 +45,11 @@ export async function resolveRevokeAccount(params: {
     const attesterLower = attester.toLowerCase()
     const derivedLower = derivedManagedAccount.toLowerCase()
 
-    if (attesterLower === derivedLower) {
-      const deployed = await isSmartWalletDeployed(derivedManagedAccount)
+    if (attesterLower === derivedLower || attesterIsExecutorModule) {
+      const managedAddress = attesterIsExecutorModule
+        ? await getConnectedManagedAccountAddress(optimismSepolia).catch(() => derivedManagedAccount)
+        : derivedManagedAccount
+      const deployed = await isSmartWalletDeployed(managedAddress)
       if (deployed) {
         const managedAccountWallet = getManagedAccountWallet()
         await managedAccountWallet.autoConnect({
@@ -62,7 +63,20 @@ export async function resolveRevokeAccount(params: {
       }
     }
   } catch {
-    // Fall through to return account; revoke attempt may fail with AccessDenied
+    // Fall through
+  }
+
+  if (attesterIsExecutorModule) {
+    const { modularAccountModuleContract } = getPublishConfig()
+    if (!modularAccountModuleContract?.trim()) {
+      throw new Error(
+        'Revocation not supported for items published via the modular executor.',
+      )
+    }
+    // Module configured but ManagedAccount wallet unavailable
+    throw new Error(
+      'Revocation not supported for items published via the modular executor. Connect the ManagedAccount that controls the executor module.',
+    )
   }
 
   return account

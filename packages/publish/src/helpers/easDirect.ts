@@ -1,4 +1,4 @@
-import { encodeAbiParameters, parseEventLogs, type Log } from 'viem'
+import { encodeAbiParameters, encodeFunctionData, parseEventLogs, type Log } from 'viem'
 import { getPublishConfig } from '~/config'
 import { easAbi } from './abi/eas'
 import {
@@ -85,10 +85,42 @@ export function getAttestedUidsFromReceipt(
 
 /**
  * Prepares an EAS multiRevoke call for batch revocation.
+ * When `modularAccountModuleContract` is configured, targets the executor module so
+ * automation session keys (module-only approvedTargets) can revoke with ManagedAccount
+ * as the EAS attester. Otherwise targets EAS directly.
  */
 export function prepareEasMultiRevoke(requests: MultiRevocationRequest[]): SeedTxRequest {
-  void getPublishConfig() // ensure publish is initialized (eas address from config)
+  const { modularAccountModuleContract } = getPublishConfig()
+  const module = modularAccountModuleContract?.trim()
+  if (module && /^0x[0-9a-fA-F]{40}$/.test(module)) {
+    return encodeEasMultiRevokeTo(module as `0x${string}`, requests)
+  }
   return encodeEasMultiRevoke(requests)
+}
+
+/**
+ * Encode multiRevoke calldata to an arbitrary `to` (EAS or Seed executor module).
+ */
+export function encodeEasMultiRevokeTo(
+  to: `0x${string}`,
+  requests: MultiRevocationRequest[],
+): SeedTxRequest {
+  return {
+    to,
+    data: encodeFunctionData({
+      abi: easAbi,
+      functionName: 'multiRevoke',
+      args: [
+        requests.map((r) => ({
+          schema: r.schema,
+          data: r.data.map((d) => ({
+            uid: d.uid,
+            value: d.value ?? 0n,
+          })),
+        })),
+      ],
+    }),
+  }
 }
 
 export { ZERO_ADDRESS, ZERO_BYTES32 }

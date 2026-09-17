@@ -39,8 +39,10 @@ import {
   toHex32,
 } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
-import { ensureModularPublishBootstrap } from '~/helpers/ensureModularPublishBootstrap'
-import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
+import {
+  assertManagedAccountEasMatchesConfig,
+  ensureManagedAccountEasConfigured,
+} from '~/helpers/ensureManagedAccountEasConfigured'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:services:publish:actors')
@@ -57,11 +59,21 @@ type PublishRoutingInput = {
   publisherAddress: string
   modularAccountModuleContract?: string
   managedAddress?: string
+  /**
+   * When true (automation session keys), send `multiPublish` to the executor module
+   * so module-only `approvedTargets` can execute. Interactive modular publish keeps
+   * the ManagedAccount as `txTargetAddress`.
+   */
+  routeToExecutorModule?: boolean
 }
 
 type PublishRouting = {
   txTargetAddress: string
   contractAddressForEvents: string
+}
+
+function isExecutorModuleAddress(value: string | undefined): value is string {
+  return !!value && /^0x[0-9a-fA-F]{40}$/.test(value.trim())
 }
 
 export function resolvePublishRouting(input: PublishRoutingInput): PublishRouting {
@@ -70,14 +82,27 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
     publisherAddress,
     modularAccountModuleContract,
     managedAddress,
+    routeToExecutorModule,
   } = input
   if (useModularExecutor) {
     if (!managedAddress) {
       throw new Error('resolvePublishRouting: managedAddress is required when useModularExecutor is true')
     }
+    const module = modularAccountModuleContract?.trim()
+    if (routeToExecutorModule) {
+      if (!isExecutorModuleAddress(module)) {
+        throw new Error(
+          'resolvePublishRouting: modularAccountModuleContract is required when routeToExecutorModule is true',
+        )
+      }
+      return {
+        txTargetAddress: module,
+        contractAddressForEvents: module,
+      }
+    }
     return {
       txTargetAddress: managedAddress,
-      contractAddressForEvents: modularAccountModuleContract || managedAddress,
+      contractAddressForEvents: module || managedAddress,
     }
   }
   return {
@@ -277,19 +302,56 @@ export const createAttestations = fromPromise(
     const reqs = Array.isArray(requestData) ? requestData : [requestData]
 
     if (useModularExecutor) {
-      const prep = await runModularExecutorPublishPrep()
-      if (!prep.ok) {
-        throw prep.error
+      // App-held automation session keys (PUBLISH_AUTOMATION.md): keep the provided
+      // PublishWallet when it is an active session key on the ManagedAccount. Do not
+      // require a connected modular in-app wallet on the server.
+      const sessionKeyAddress = activeWallet?.signer?.address
+      let automationActive = false
+      if (address && sessionKeyAddress) {
+        const { isAutomationSessionActive } = await import(
+          '~/helpers/ensureAutomationSessionKey'
+        )
+        // Probe failures must not silently fall through to modular in-app bootstrap
+        // (that path requires a browser wallet and hides the real RPC/error).
+        automationActive = await isAutomationSessionActive(address, sessionKeyAddress)
       }
-      routing = resolvePublishRouting({
-        useModularExecutor,
-        publisherAddress: address,
-        modularAccountModuleContract,
-        managedAddress: prep.managedAddress,
-      })
-      const { ensureModularPublishBootstrap } = await import('~/helpers/ensureModularPublishBootstrap')
-      const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
-      activeWallet = fromThirdwebAccount(await ensureModularPublishBootstrap(prep.managedAddress))
+
+      if (automationActive) {
+        const module = modularAccountModuleContract?.trim()
+        if (!isExecutorModuleAddress(module)) {
+          throw new Error(
+            '@seedprotocol/publish: automation publish requires PublishConfig.modularAccountModuleContract ' +
+              '(executor module). Session keys are module-only and cannot call the ManagedAccount directly.',
+          )
+        }
+        routing = resolvePublishRouting({
+          useModularExecutor,
+          publisherAddress: address,
+          modularAccountModuleContract: module,
+          managedAddress: address,
+          routeToExecutorModule: true,
+        })
+        // Read-only: automation keys cannot setEas (not in approvedTargets).
+        await assertManagedAccountEasMatchesConfig(address)
+      } else {
+        const prep = await runModularExecutorPublishPrep()
+        if (!prep.ok) {
+          throw prep.error
+        }
+        routing = resolvePublishRouting({
+          useModularExecutor,
+          publisherAddress: address,
+          modularAccountModuleContract,
+          managedAddress: prep.managedAddress,
+        })
+        const { ensureModularPublishBootstrap } = await import(
+          '~/helpers/ensureModularPublishBootstrap'
+        )
+        const { fromThirdwebAccount } = await import('~/helpers/adapters/thirdwebAccount')
+        activeWallet = fromThirdwebAccount(
+          await ensureModularPublishBootstrap(prep.managedAddress),
+        )
+      }
     } else {
       await ensureManagedAccountEasConfigured(address, activeWallet)
     }

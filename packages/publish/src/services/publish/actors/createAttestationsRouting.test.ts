@@ -61,6 +61,32 @@ describe('resolvePublishRouting', () => {
     })
   })
 
+  test('automation route sends multiPublish to the executor module', () => {
+    const module = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const routing = resolvePublishRouting({
+      useModularExecutor: true,
+      publisherAddress: '0xabc',
+      managedAddress: '0xmanaged',
+      modularAccountModuleContract: module,
+      routeToExecutorModule: true,
+    })
+    expect(routing).toEqual({
+      txTargetAddress: module,
+      contractAddressForEvents: module,
+    })
+  })
+
+  test('automation route requires a valid executor module address', () => {
+    expect(() =>
+      resolvePublishRouting({
+        useModularExecutor: true,
+        publisherAddress: '0xabc',
+        managedAddress: '0xmanaged',
+        routeToExecutorModule: true,
+      }),
+    ).toThrow(/modularAccountModuleContract is required/)
+  })
+
   test('throws in modular mode when managedAddress missing', () => {
     expect(() =>
       resolvePublishRouting({
