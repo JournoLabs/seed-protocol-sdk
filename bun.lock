@@ -248,6 +248,7 @@
       "version": "0.5.1",
       "dependencies": {
         "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+        "@seedprotocol/arweave": "workspace:*",
         "@seedprotocol/eas": "workspace:*",
         "@seedprotocol/react": "workspace:*",
         "@seedprotocol/sdk": "workspace:*",

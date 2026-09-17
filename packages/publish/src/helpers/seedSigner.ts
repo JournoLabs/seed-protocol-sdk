@@ -76,6 +76,9 @@ export function isPublishWallet(value: unknown): value is PublishWallet {
 
 /**
  * Wrap an ethers Wallet for tests / EOA scripts (signs + sends; no AA sponsorship).
+ * Suitable for ANS-104 DataItem signing. Not a ManagedAccount session-key UserOp sender —
+ * for automation on-chain publish, use a PublishWallet whose txSender submits UserOps
+ * through the ManagedAccount (see docs/PUBLISH_AUTOMATION.md).
  */
 export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
   const address = wallet.address as Address

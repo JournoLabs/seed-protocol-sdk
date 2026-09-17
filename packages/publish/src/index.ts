@@ -126,7 +126,7 @@ export {
   ensureWalletThenPublish,
   type EnsureWalletThenPublishResult,
 } from './helpers/ensureWalletThenPublish'
-export { ensureManagedAccountEasConfigured } from './helpers/ensureManagedAccountEasConfigured'
+export { ensureManagedAccountEasConfigured, assertManagedAccountEasMatchesConfig } from './helpers/ensureManagedAccountEasConfigured'
 export {
   DOMAIN_OWNERSHIP_SCHEMA_DEF,
   DOMAIN_OWNERSHIP_SCHEMA_NAME,
@@ -153,3 +153,17 @@ export {
   type VerifyAndAttestDomainOwnershipResult,
   type AssessDomainOwnershipLiveResult,
 } from './services/domainOwnership/public'
+export {
+  PUBLISH_AUTHORIZATION_SCHEMA_DEF,
+  PUBLISH_AUTHORIZATION_SCHEMA_NAME,
+  PUBLISH_AUTHORIZATION_SCOPES,
+  getPublishAuthorizationSchemaUid,
+  ensurePublishAuthorizationSchema,
+  encodePublishAuthorizationAttestationData,
+  attestPublishAuthorization,
+  revokePublishAuthorization,
+  assessPublishAuthorizationLive,
+  type AttestPublishAuthorizationParams,
+  type AttestPublishAuthorizationResult,
+  type AssessPublishAuthorizationLiveResult,
+} from './services/publishAuthorization/public'

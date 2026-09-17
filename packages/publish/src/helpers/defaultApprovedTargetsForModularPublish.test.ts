@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { initPublish, setConfigRef } from '../config'
+import { setConfigRef, type PublishConfig } from '../config'
 import { EAS_CONTRACT_ADDRESS } from './constants'
 import { defaultApprovedTargetsForModularPublish } from './defaultApprovedTargetsForModularPublish'
 
@@ -7,12 +7,16 @@ afterEach(() => {
   setConfigRef(null)
 })
 
+function setCfg(partial: Partial<PublishConfig> & Pick<PublishConfig, 'uploadApiBaseUrl'>) {
+  setConfigRef({
+    thirdwebClientId: 'test',
+    ...partial,
+  } as PublishConfig)
+}
+
 describe('defaultApprovedTargetsForModularPublish', () => {
   test('includes managed account and EAS', () => {
-    initPublish({
-      thirdwebClientId: 'test',
-      uploadApiBaseUrl: 'https://example.com',
-    })
+    setCfg({ uploadApiBaseUrl: 'https://example.com' })
     const managed = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     const targets = defaultApprovedTargetsForModularPublish(managed)
     const lower = targets.map((a) => a.toLowerCase())
@@ -22,8 +26,7 @@ describe('defaultApprovedTargetsForModularPublish', () => {
 
   test('includes modular executor module when configured', () => {
     const moduleAddr = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-    initPublish({
-      thirdwebClientId: 'test',
+    setCfg({
       uploadApiBaseUrl: 'https://example.com',
       modularAccountModuleContract: moduleAddr,
     })

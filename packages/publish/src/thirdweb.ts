@@ -46,3 +46,28 @@ export { ensureEip7702ModularAccountReady } from './helpers/ensureEip7702Modular
 export { ensureManagedSignerSessionKey } from './helpers/ensureManagedSignerSessionKey'
 export { ensureModularPublishBootstrap } from './helpers/ensureModularPublishBootstrap'
 export { defaultApprovedTargetsForModularPublish } from './helpers/defaultApprovedTargetsForModularPublish'
+export { approvedTargetsForAutomationPublish } from './helpers/approvedTargetsForAutomationPublish'
+export {
+  ensureAutomationSessionKey,
+  removeAutomationSessionKey,
+  isAutomationSessionActive,
+} from './helpers/ensureAutomationSessionKey'
+export {
+  PUBLISH_AUTOMATION_SCOPES,
+  buildAutomationSessionKeyPermissions,
+  hashAutomationSessionKeyPermissions,
+  toThirdwebSessionKeyPermissions,
+  type AutomationSessionKeyPermissions,
+} from './helpers/automationSessionKeyPermissions'
+export {
+  enrollPublishAutomation,
+  revokePublishAutomation,
+  type EnrollPublishAutomationParams,
+  type EnrollPublishAutomationResult,
+  type RevokePublishAutomationParams,
+} from './helpers/enrollPublishAutomation'
+export {
+  assertStorageBoundToIdentity,
+  type AssertStorageBoundToIdentityParams,
+  type AssertStorageBoundToIdentityResult,
+} from './helpers/assertStorageBoundToIdentity'
