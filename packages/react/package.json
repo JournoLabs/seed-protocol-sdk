@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/react",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "description": "React hooks and components for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
