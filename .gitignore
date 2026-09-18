@@ -153,3 +153,6 @@ packages/query/dist
 packages/publish/dist
 packages/react/dist
 packages/mapping/dist
+
+# Local-only partner handoffs (not for public docs)
+docs/private/

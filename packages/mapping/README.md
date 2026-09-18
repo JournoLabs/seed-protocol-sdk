@@ -5,12 +5,14 @@ Source → Seed model property mapping helpers and a props-driven React UI.
 Use this package to:
 
 1. Parse markdown or RSS/Atom into `SourceNode[]`
-2. Author `FieldMapping` edges (manually, via `autoMap`, or via `FieldMapper`)
-3. `applyMapping` to a coerced property bag for `createItem` / publish
+2. Optionally expand URL sources with `buildResolvedSourceNodes` (extract / file candidates)
+3. Author `FieldMapping` edges (manually, via `autoMap`, or via `FieldMapper`)
+4. `applyMapping` (sync copy) or `applyMappingAsync` (host resolve callback) → property bag
 
 Mappings are an edge list: one source may fan out to multiple properties (e.g. RSS
 `link` → `importUrl` and `canonicalUrl`). Each property is exclusive — at most one
-source may map to it.
+source may map to it. Optional `resolve: 'extract' | 'file'` marks URL transforms the
+**host** performs; the package never fetches or runs Readability.
 
 ## Install
 
@@ -28,6 +30,9 @@ import {
   rssXmlToSources,
   autoMap,
   applyMapping,
+  applyMappingAsync,
+  buildResolvedSourceNodes,
+  classifyUrl,
   type TargetProperty,
   type MappingDocument,
 } from '@seedprotocol/mapping'
@@ -47,38 +52,62 @@ const doc: MappingDocument = {
 }
 ```
 
-RSS:
+RSS with resolve jobs:
 
 ```ts
-const { channel, items } = await rssXmlToSources(xml)
+const { items } = await rssXmlToSources(xml)
 const itemSources = items[0]!
+const expanded = buildResolvedSourceNodes(itemSources)
 const postTargets: TargetProperty[] = [
   { name: 'importUrl', dataType: 'String' },
   { name: 'canonicalUrl', dataType: 'String' },
+  { name: 'html', dataType: 'Html' },
+  { name: 'featureImage', dataType: 'Image' },
   { name: 'title', dataType: 'String' },
 ]
-// autoMap fans link/url sources out to matching URL-ish properties
 const mappings = autoMap(itemSources, postTargets)
-// e.g. [{ sourceId: 'rss-link', propertyName: 'importUrl' },
-//       { sourceId: 'rss-link', propertyName: 'canonicalUrl' }, ...]
-const properties = applyMapping(itemSources, mappings, postTargets)
+// link → importUrl/canonicalUrl (copy); missing body → link extract→html;
+// image URLs → featureImage with resolve:'file'
+
+// Sync preview skips resolve edges:
+const preview = applyMapping(itemSources, mappings, postTargets)
+
+// Publish path — host owns HTTP / extract / store:
+const { properties, errors } = await applyMappingAsync(
+  itemSources,
+  mappings,
+  postTargets,
+  {
+    resolve: async ({ job, url, contentType }) => {
+      if (job === 'extract') return await hostExtractHtml(url)
+      return await hostFetchAndStoreFile(url, contentType)
+    },
+  },
+)
 ```
+
+`classifyUrl({ url, contentType? })` is a pure MIME/extension classifier
+(`html` | `image` | `audio` | `video` | `unknown`). Enclosure nodes expose
+`meta.url`, `meta.contentType`, and `meta.class` (not a stringified object).
 
 ## FieldMapper UI
 
-Props-driven only — no Seed hooks or routing. The host app supplies sources/targets and handles create/navigate.
+Props-driven only — no Seed hooks or routing. Pass expanded sources so extract/file
+candidates appear in the left pane; connecting them persists `resolve` on the edge.
 
 ```tsx
 import { useState } from 'react'
 import {
   FieldMapper,
+  buildResolvedSourceNodes,
   markdownToSources,
   applyMapping,
+  applyMappingAsync,
   type FieldMapping,
 } from '@seedprotocol/mapping'
 
 function ImportMap({ markdown, targets, onSubmit }) {
-  const sources = markdownToSources(markdown)
+  const sources = buildResolvedSourceNodes(markdownToSources(markdown))
   const [mappings, setMappings] = useState<FieldMapping[]>([])
 
   return (
@@ -90,7 +119,15 @@ function ImportMap({ markdown, targets, onSubmit }) {
         onChange={setMappings}
       />
       <button
-        onClick={() => onSubmit(applyMapping(sources, mappings, targets))}
+        onClick={async () => {
+          const { properties } = await applyMappingAsync(
+            sources,
+            mappings,
+            targets,
+            { resolve: hostResolve },
+          )
+          onSubmit(properties)
+        }}
       >
         Create
       </button>
@@ -99,19 +136,21 @@ function ImportMap({ markdown, targets, onSubmit }) {
 }
 ```
 
+Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
+
 ## Relationship to `FeedFieldManifest`
 
 | Type | Package | Meaning |
 |------|---------|---------|
-| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; property exclusive) |
-| `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `html` / `text`) for `normalizeFeedItemFields` |
+| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`) |
+| `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `audio` / `video` / `file` / `html` / `text`) for display |
 
-Compose them: map external fields into a plain item, then optionally normalize roles for media/HTML display.
+Compose them: map + resolve into a plain item, then optionally normalize roles for media/HTML display. Storage stays `Image` / `File` schema types — no separate Audio/Video dataTypes.
 
 ## Phase 1 limits
 
 - Markdown: flat YAML frontmatter; `#` / `##` sections only
-- RSS: top-level item fields via `parseRssString` (no general XPath)
-- UI: self-contained dark theme; no desktop/Tailwind coupling
+- RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
+- UI: self-contained dark theme; no desktop/Tailwind coupling; no media preview player
 
 See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening.

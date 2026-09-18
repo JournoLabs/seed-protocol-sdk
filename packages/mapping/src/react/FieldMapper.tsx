@@ -7,6 +7,11 @@ import React, {
 } from 'react'
 import { applyMapping } from '../applyMapping'
 import { autoMap as defaultAutoMap } from '../autoMap'
+import {
+  normalizeMappingFromSourceId,
+  parseResolvedSourceId,
+  resolvedSourceId,
+} from '../resolvedSources'
 import type { FieldMapping, SourceNode, TargetProperty } from '../types'
 
 const CONNECTION_COLORS = [
@@ -30,6 +35,10 @@ type ConnectorPoint = {
 }
 
 export type FieldMapperProps = {
+  /**
+   * Source nodes to display. Pass `buildResolvedSourceNodes(sources)` to show
+   * extract/file candidates; connecting those nodes persists `resolve` on the edge.
+   */
   sources: SourceNode[]
   targets: TargetProperty[]
   mappings: FieldMapping[]
@@ -39,6 +48,17 @@ export type FieldMapperProps = {
   className?: string
   /** Show JSON preview of applyMapping result. Default true. */
   showPreview?: boolean
+}
+
+/** Display id for connector endpoints (derived nodes for resolve edges). */
+function displaySourceIdForMapping(
+  mapping: FieldMapping,
+  sources: SourceNode[],
+): string {
+  if (!mapping.resolve) return mapping.sourceId
+  const derived = resolvedSourceId(mapping.sourceId, mapping.resolve)
+  if (sources.some((s) => s.id === derived)) return derived
+  return mapping.sourceId
 }
 
 const DATA_TYPE_COLORS: Record<
@@ -103,7 +123,9 @@ export function FieldMapper({
     const containerRect = containerRef.current.getBoundingClientRect()
     return mappings
       .map((mapping, i) => {
-        const sourceEl = sourceRefs.current[mapping.sourceId]
+        const displayId = displaySourceIdForMapping(mapping, sources)
+        const sourceEl =
+          sourceRefs.current[displayId] ?? sourceRefs.current[mapping.sourceId]
         const propEl = propRefs.current[mapping.propertyName]
         if (!sourceEl || !propEl) return null
 
@@ -120,7 +142,7 @@ export function FieldMapper({
         }
       })
       .filter((pt): pt is ConnectorPoint => pt !== null)
-  }, [mappings, getConnectionColor])
+  }, [mappings, getConnectionColor, sources])
 
   useEffect(() => {
     const update = () => {
@@ -147,38 +169,75 @@ export function FieldMapper({
     if (!activeSource) return
     // Property exclusive: replace any edge for this property; keep other
     // edges from the active source so one source can fan out to many props.
+    // Derived @extract/@file nodes normalize to originId + resolve.
+    const edge = normalizeMappingFromSourceId(activeSource, propertyName)
     const next = mappings.filter((c) => c.propertyName !== propertyName)
-    next.push({ sourceId: activeSource, propertyName })
+    next.push(edge)
     onChange(next)
     // Keep source active so the user can attach additional properties.
   }
 
   const removeMappingsForSource = (sourceId: string) => {
-    onChange(mappings.filter((c) => c.sourceId !== sourceId))
+    const parsed = parseResolvedSourceId(sourceId)
+    onChange(
+      mappings.filter((c) => {
+        if (parsed) {
+          return !(
+            c.sourceId === parsed.originId && c.resolve === parsed.resolve
+          )
+        }
+        return c.sourceId !== sourceId
+      }),
+    )
   }
 
   const removeMappingForProp = (propertyName: string) => {
     onChange(mappings.filter((c) => c.propertyName !== propertyName))
   }
 
-  const sourceHasMapping = (sourceId: string) =>
-    mappings.some((c) => c.sourceId === sourceId)
+  const sourceHasMapping = (sourceId: string) => {
+    const parsed = parseResolvedSourceId(sourceId)
+    if (parsed) {
+      return mappings.some(
+        (c) =>
+          c.sourceId === parsed.originId && c.resolve === parsed.resolve,
+      )
+    }
+    return mappings.some((c) => c.sourceId === sourceId)
+  }
   const mappingForProp = (propName: string) =>
     mappings.find((c) => c.propertyName === propName)
 
   const isEdgeHighlighted = (mapping: FieldMapping) => {
     if (hoveredProp) return mapping.propertyName === hoveredProp
-    if (hoveredSource) return mapping.sourceId === hoveredSource
+    if (hoveredSource) {
+      const displayId = displaySourceIdForMapping(mapping, sources)
+      return (
+        mapping.sourceId === hoveredSource || displayId === hoveredSource
+      )
+    }
     return false
   }
 
   const anyEdgeHighlighted = hoveredProp != null || hoveredSource != null
 
-
-  const preview = useMemo(
-    () => applyMapping(sources, mappings, targets),
-    [sources, mappings, targets],
+  const pendingResolve = useMemo(
+    () => mappings.filter((m) => m.resolve),
+    [mappings],
   )
+
+  const preview = useMemo(() => {
+    const bag = applyMapping(sources, mappings, targets)
+    if (pendingResolve.length === 0) return bag
+    return {
+      ...bag,
+      _pendingResolve: pendingResolve.map((m) => ({
+        propertyName: m.propertyName,
+        sourceId: m.sourceId,
+        resolve: m.resolve,
+      })),
+    }
+  }, [sources, mappings, targets, pendingResolve])
 
   const runAutoMap = () => {
     const next = onAutoMap ? onAutoMap() : defaultAutoMap(sources, targets)
@@ -347,7 +406,7 @@ export function FieldMapper({
             const midX = (pt.x1 + pt.x2) / 2
             return (
               <path
-                key={`${pt.mapping.sourceId}-${pt.mapping.propertyName}`}
+                key={`${pt.mapping.sourceId}-${pt.mapping.propertyName}-${pt.mapping.resolve ?? 'copy'}`}
                 d={`M ${pt.x1} ${pt.y1} C ${midX} ${pt.y1}, ${midX} ${pt.y2}, ${pt.x2} ${pt.y2}`}
                 stroke={pt.color}
                 strokeWidth={isHi ? 3 : 2}
@@ -365,10 +424,13 @@ export function FieldMapper({
             const isActive = activeSource === source.id
             const isHi = hoveredSource === source.id || (
               hoveredProp != null &&
-              mappings.some(
-                (m) =>
-                  m.sourceId === source.id && m.propertyName === hoveredProp,
-              )
+              mappings.some((m) => {
+                const displayId = displaySourceIdForMapping(m, sources)
+                return (
+                  (m.sourceId === source.id || displayId === source.id) &&
+                  m.propertyName === hoveredProp
+                )
+              })
             )
             return (
               <div
@@ -455,7 +517,10 @@ export function FieldMapper({
                   </div>
                 </div>
                 {mapped && (
-                  <div className="fm-value">← {mapped.sourceId}</div>
+                  <div className="fm-value">
+                    ← {mapped.sourceId}
+                    {mapped.resolve ? ` (${mapped.resolve})` : ''}
+                  </div>
                 )}
               </div>
             )

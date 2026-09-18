@@ -5,7 +5,7 @@ import {
   resolveSeedIdsFromRefString,
 } from './relationSeedRef.js'
 
-export type FeedFieldRole = 'image' | 'file' | 'html' | 'text'
+export type FeedFieldRole = 'image' | 'audio' | 'video' | 'file' | 'html' | 'text'
 
 export type FeedFieldDescriptor = {
   role: FeedFieldRole
@@ -122,7 +122,7 @@ export function classifyMediaRef(
 }
 
 export type NormalizedMediaField = {
-  role: 'image' | 'file'
+  role: 'image' | 'audio' | 'video' | 'file'
   raw: string
   classification: MediaRefClassification
 }

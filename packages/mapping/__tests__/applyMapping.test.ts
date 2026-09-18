@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMapping, coerceValue } from '../src/applyMapping'
+import { applyMapping, applyMappingAsync, coerceValue } from '../src/applyMapping'
 import type { FieldMapping, SourceNode, TargetProperty } from '../src/types'
 
 const sources: SourceNode[] = [
@@ -90,5 +90,119 @@ describe('applyMapping', () => {
       importUrl: 'https://example.com/p/1',
       canonicalUrl: 'https://example.com/p/1',
     })
+  })
+
+  it('skips mappings with resolve', () => {
+    const linkSources: SourceNode[] = [
+      {
+        id: 'rss-link',
+        label: 'link',
+        kind: 'rssField',
+        value: 'https://example.com/p/1',
+      },
+    ]
+    const bag = applyMapping(
+      linkSources,
+      [
+        { sourceId: 'rss-link', propertyName: 'importUrl' },
+        {
+          sourceId: 'rss-link',
+          propertyName: 'html',
+          resolve: 'extract',
+        },
+      ],
+      [
+        { name: 'importUrl', dataType: 'String' },
+        { name: 'html', dataType: 'Html' },
+      ],
+    )
+    expect(bag).toEqual({ importUrl: 'https://example.com/p/1' })
+    expect(bag.html).toBeUndefined()
+  })
+})
+
+describe('applyMappingAsync', () => {
+  const linkSources: SourceNode[] = [
+    {
+      id: 'rss-link',
+      label: 'link',
+      kind: 'rssField',
+      value: 'https://example.com/p/1',
+      meta: { url: 'https://example.com/p/1', class: 'html' },
+    },
+    {
+      id: 'rss-enclosure-0',
+      label: 'enclosure[0]',
+      kind: 'rssField',
+      value: 'https://cdn.example/ep.mp3',
+      meta: {
+        url: 'https://cdn.example/ep.mp3',
+        contentType: 'audio/mpeg',
+        class: 'audio',
+      },
+    },
+  ]
+
+  it('resolves extract and file via host callback', async () => {
+    const result = await applyMappingAsync(
+      linkSources,
+      [
+        { sourceId: 'rss-link', propertyName: 'importUrl' },
+        {
+          sourceId: 'rss-link',
+          propertyName: 'html',
+          resolve: 'extract',
+        },
+        {
+          sourceId: 'rss-enclosure-0',
+          propertyName: 'audio',
+          resolve: 'file',
+        },
+      ],
+      [
+        { name: 'importUrl', dataType: 'String' },
+        { name: 'html', dataType: 'Html' },
+        { name: 'audio', dataType: 'File' },
+      ],
+      {
+        resolve: async (ctx) => {
+          if (ctx.job === 'extract') return '<p>Article</p>'
+          return { seedUid: '0xabc', kind: 'file' }
+        },
+      },
+    )
+    expect(result.errors).toEqual([])
+    expect(result.properties.importUrl).toBe('https://example.com/p/1')
+    expect(result.properties.html).toBe('<p>Article</p>')
+    expect(result.properties.audio).toEqual({ seedUid: '0xabc', kind: 'file' })
+  })
+
+  it('collects errors and keeps partial bag', async () => {
+    const result = await applyMappingAsync(
+      linkSources,
+      [
+        { sourceId: 'rss-link', propertyName: 'importUrl' },
+        {
+          sourceId: 'rss-link',
+          propertyName: 'html',
+          resolve: 'extract',
+        },
+      ],
+      [
+        { name: 'importUrl', dataType: 'String' },
+        { name: 'html', dataType: 'Html' },
+      ],
+      {
+        resolve: async () => {
+          throw new Error('fetch failed')
+        },
+      },
+    )
+    expect(result.properties).toEqual({
+      importUrl: 'https://example.com/p/1',
+    })
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]?.message).toBe('fetch failed')
+    expect(result.errors[0]?.resolve).toBe('extract')
   })
 })

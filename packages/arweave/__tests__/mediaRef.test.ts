@@ -65,6 +65,14 @@ describe('normalizeFeedItemFields', () => {
     expect(n.body).toEqual({ role: 'html', raw: '<p>Hi</p>' })
     expect(n.title).toEqual({ role: 'text', raw: 'T' })
   })
+
+  it('maps audio and video roles', () => {
+    const n = normalizeFeedItemFields(
+      { episode: 'https://cdn.example/ep.mp3' },
+      { episode: { role: 'audio' } },
+    )
+    expect(n.episode?.role).toBe('audio')
+  })
 })
 
 describe('getFeedItemStringField', () => {

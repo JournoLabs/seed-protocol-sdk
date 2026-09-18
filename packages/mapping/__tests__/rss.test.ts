@@ -31,6 +31,41 @@ describe('rssItemToSources', () => {
     expect(byId['rss-nested']?.value).toBe('from underscore')
     expect(byId['rss-empty']).toBeUndefined()
   })
+
+  it('exposes enclosure url + type in meta (not stringified object)', () => {
+    const sources = rssItemToSources({
+      title: 'Ep',
+      enclosure: {
+        url: 'https://cdn.example/ep.mp3',
+        type: 'audio/mpeg',
+        length: '12345',
+      },
+    })
+    const enc = sources.find((s) => s.id === 'rss-enclosure-0')
+    expect(enc?.value).toBe('https://cdn.example/ep.mp3')
+    expect(enc?.meta).toMatchObject({
+      url: 'https://cdn.example/ep.mp3',
+      contentType: 'audio/mpeg',
+      length: '12345',
+      class: 'audio',
+    })
+    expect(enc?.value.startsWith('{')).toBe(false)
+  })
+
+  it('indexes multiple enclosures', () => {
+    const sources = rssItemToSources({
+      enclosures: [
+        { url: 'https://cdn.example/a.mp3', type: 'audio/mpeg' },
+        { url: 'https://cdn.example/cover.png', type: 'image/png' },
+      ],
+    })
+    expect(sources.find((s) => s.id === 'rss-enclosure-0')?.meta?.class).toBe(
+      'audio',
+    )
+    expect(sources.find((s) => s.id === 'rss-enclosure-1')?.meta?.class).toBe(
+      'image',
+    )
+  })
 })
 
 describe('rssXmlToSources', () => {

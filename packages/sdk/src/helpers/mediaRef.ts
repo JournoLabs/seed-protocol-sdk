@@ -13,7 +13,7 @@ import {
 const logger = debug('seedSdk:helpers:mediaRef')
 
 /** Roles for feed/XML field manifests (shared with @seedprotocol/feed and @seedprotocol/react). */
-export type FeedFieldRole = 'image' | 'file' | 'html' | 'text'
+export type FeedFieldRole = 'image' | 'audio' | 'video' | 'file' | 'html' | 'text'
 
 export type FeedFieldDescriptor = {
   role: FeedFieldRole
@@ -243,7 +243,7 @@ export async function resolveMediaRef(
 }
 
 export type NormalizedMediaField = {
-  role: 'image' | 'file'
+  role: 'image' | 'audio' | 'video' | 'file'
   raw: string
   classification: MediaRefClassification
 }

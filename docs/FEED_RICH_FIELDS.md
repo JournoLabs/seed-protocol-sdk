@@ -6,7 +6,7 @@ This guide explains how to turn RSS/XML strings (feature images, content, seed r
 
 1. **Classification (sync)** — `classifyMediaRef(raw)` in `@seedprotocol/sdk` inspects a string and returns a structured kind: URL, seed UID, local seed id, Arweave transaction id, or unknown. No I/O.
 
-2. **Normalization (sync)** — `normalizeFeedItemFields(item, manifest)` maps named fields on a plain item object using a small manifest (`image`, `file`, `html`, `text` roles). For media roles it attaches the result of `classifyMediaRef`. HTML and text are passed through as strings only; **the SDK does not sanitize HTML**.
+2. **Normalization (sync)** — `normalizeFeedItemFields(item, manifest)` maps named fields on a plain item object using a small manifest (`image`, `audio`, `video`, `file`, `html`, `text` roles). For media roles it attaches the result of `classifyMediaRef`. HTML and text are passed through as strings only; **the SDK does not sanitize HTML**.
 
 3. **Resolution (async)** — `resolveMediaRef(raw)` produces a display URL when possible:
 
@@ -24,7 +24,7 @@ This guide explains how to turn RSS/XML strings (feature images, content, seed r
 | Classify / resolve / normalize | `@seedprotocol/sdk` | `classifyMediaRef`, `resolveMediaRef`, `normalizeFeedItemFields`, `getFeedItemStringField` |
 | Parse RSS/XML | `@seedprotocol/feed` | `parseRssString` (also re-exports the SDK helpers above) |
 | Publish RSS/Atom/JSON | `@seedprotocol/feed` | `createFeed`, `pickFeedItemContent`, `pickFeedItemDescription`, `feedItemRichTextContainsDataUriImage` |
-| React | `@seedprotocol/react` | `useResolvedMediaRef`, `SeedMediaImage`, `SeedMediaFile`, `SeedHtml`, `SeedJson`, `formatSeedJson`, `useNormalizedFeedItemFields` |
+| React | `@seedprotocol/react` | `useResolvedMediaRef`, `SeedMediaImage`, `SeedMediaAudio`, `SeedMediaVideo`, `SeedMediaFile`, `SeedHtml`, `SeedJson`, `formatSeedJson`, `useNormalizedFeedItemFields` |
 
 React apps do **not** need to depend on `@seedprotocol/feed` unless they parse RSS in the browser or on a server that already uses the feed package.
 
@@ -68,10 +68,14 @@ import type { FeedFieldManifest } from '@seedprotocol/sdk'
 
 const manifest: FeedFieldManifest = {
   featureImage: { role: 'image' },
+  episodeAudio: { role: 'audio' },
+  trailer: { role: 'video' },
   content: { role: 'html' },
   summary: { role: 'text' },
 }
 ```
+
+Roles `audio` and `video` normalize like `image` / `file` (classify the opaque string). Storage on Seed models remains **`File`** (or **`Image`** for images)—there are no separate Audio/Video schema dataTypes. Use `SeedMediaAudio` / `SeedMediaVideo` from `@seedprotocol/react` for browser playback of feed-style strings.
 
 If a value is ambiguous (e.g. heuristic collision), set `treatAs` on the descriptor or pass `treatAs` into `resolveMediaRef` / `useResolvedMediaRef`:
 

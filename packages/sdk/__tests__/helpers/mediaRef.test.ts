@@ -111,6 +111,24 @@ describe('normalizeFeedItemFields', () => {
     const n = normalizeFeedItemFields(item, { featureImage: { role: 'image' } })
     expect(n.featureImage?.role).toBe('image')
   })
+  it('maps audio and video roles like file/image', () => {
+    const item = {
+      episode: 'https://cdn.example/ep.mp3',
+      trailer: 'https://cdn.example/t.mp4',
+    }
+    const n = normalizeFeedItemFields(item, {
+      episode: { role: 'audio' },
+      trailer: { role: 'video' },
+    })
+    expect(n.episode?.role).toBe('audio')
+    expect(n.trailer?.role).toBe('video')
+    if (n.episode && n.episode.role === 'audio') {
+      expect(n.episode.classification).toEqual({
+        kind: 'url',
+        href: 'https://cdn.example/ep.mp3',
+      })
+    }
+  })
 })
 
 describe('getFeedItemStringField', () => {

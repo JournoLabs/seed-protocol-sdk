@@ -35,6 +35,7 @@ describe('autoMap', () => {
         label: 'featureImage',
         kind: 'rssField',
         value: 'https://example.com/a.png',
+        meta: { url: 'https://example.com/a.png', class: 'image' },
       },
     ]
     const targets: TargetProperty[] = [
@@ -46,9 +47,62 @@ describe('autoMap', () => {
     expect(mappings.find((m) => m.sourceId === 'rss-content:encoded')?.propertyName).toBe(
       'html',
     )
-    expect(mappings.find((m) => m.sourceId === 'rss-featureImage')?.propertyName).toBe(
-      'featureImage',
-    )
+    expect(mappings.find((m) => m.sourceId === 'rss-featureImage')).toEqual({
+      sourceId: 'rss-featureImage',
+      propertyName: 'featureImage',
+      resolve: 'file',
+    })
+  })
+
+  it('does not map raw link URL onto html without resolve', () => {
+    const sources: SourceNode[] = [
+      {
+        id: 'rss-link',
+        label: 'link',
+        kind: 'rssField',
+        value: 'https://example.com/p/1',
+      },
+    ]
+    const targets: TargetProperty[] = [
+      { name: 'html', dataType: 'Html' },
+      { name: 'importUrl', dataType: 'String' },
+    ]
+    const mappings = autoMap(sources, targets)
+    expect(mappings.find((m) => m.propertyName === 'importUrl')).toEqual({
+      sourceId: 'rss-link',
+      propertyName: 'importUrl',
+    })
+    expect(mappings.find((m) => m.propertyName === 'html')).toEqual({
+      sourceId: 'rss-link',
+      propertyName: 'html',
+      resolve: 'extract',
+    })
+  })
+
+  it('maps audio enclosure to File with resolve:file', () => {
+    const sources: SourceNode[] = [
+      {
+        id: 'rss-enclosure-0',
+        label: 'enclosure[0]',
+        kind: 'rssField',
+        value: 'https://cdn.example/ep.mp3',
+        meta: {
+          url: 'https://cdn.example/ep.mp3',
+          contentType: 'audio/mpeg',
+          class: 'audio',
+        },
+      },
+    ]
+    const targets: TargetProperty[] = [
+      { name: 'audio', dataType: 'File' },
+      { name: 'title', dataType: 'String' },
+    ]
+    const mappings = autoMap(sources, targets)
+    expect(mappings).toContainEqual({
+      sourceId: 'rss-enclosure-0',
+      propertyName: 'audio',
+      resolve: 'file',
+    })
   })
 
   it('does not assign the same property twice', () => {
