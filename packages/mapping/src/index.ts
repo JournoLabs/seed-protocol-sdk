@@ -40,4 +40,10 @@ export {
   type RssXmlSourcesResult,
 } from './adapters/rss'
 
-export { FieldMapper, type FieldMapperProps } from './react/FieldMapper'
+export {
+  FieldMapper,
+  connectionStrokeForIndex,
+  FIELD_MAPPER_PAIR_SLOTS,
+  type FieldMapperProps,
+  type FieldMapperTheme,
+} from './react/FieldMapper'

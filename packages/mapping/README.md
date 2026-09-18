@@ -101,7 +101,6 @@ import {
   FieldMapper,
   buildResolvedSourceNodes,
   markdownToSources,
-  applyMapping,
   applyMappingAsync,
   type FieldMapping,
 } from '@seedprotocol/mapping'
@@ -117,6 +116,9 @@ function ImportMap({ markdown, targets, onSubmit }) {
         targets={targets}
         mappings={mappings}
         onChange={setMappings}
+        theme="unstyled" // host paints via CSS; or omit for built-in dark theme
+        className="imprint-mapper"
+        // optional: connectionColors={['#…']} — else strokes use --fm-map-1…8 / --map-1…8
       />
       <button
         onClick={async () => {
@@ -135,6 +137,20 @@ function ImportMap({ markdown, targets, onSubmit }) {
   )
 }
 ```
+
+**Theming**
+
+| Prop | Behavior |
+|------|----------|
+| `theme="default"` (default) | Injects CSS variables (`--fm-ground`, `--fm-ink`, `--fm-well`, `--fm-line`, `--fm-selection`, `--fm-map-1…8`) and rules |
+| `theme="unstyled"` | No injected paint — structural classes only (`fm-card`, `fm-grid`, …) |
+| `connectionColors` | Optional stroke palette; otherwise `stroke="var(--fm-map-N, var(--map-N, currentColor))"` |
+
+**DOM hooks for host CSS**
+
+- Mapped wells expose `data-mapping-index` (source may list several, space-separated) and `data-pair={index % 8}`.
+- Connector paths use the same attrs.
+- Pending selection: `.active` / `.pending` only on the **source** waiting for a property — targets are not flooded with `.active`.
 
 Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 

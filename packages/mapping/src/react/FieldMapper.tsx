@@ -14,23 +14,18 @@ import {
 } from '../resolvedSources'
 import type { FieldMapping, SourceNode, TargetProperty } from '../types'
 
-const CONNECTION_COLORS = [
-  '#3b82f6',
-  '#8b5cf6',
-  '#ec4899',
-  '#f59e0b',
-  '#10b981',
-  '#06b6d4',
-  '#f97316',
-  '#14b8a6',
-]
+/** Number of cycling pair / map-color slots (`--fm-map-1` … `--fm-map-8`). */
+export const FIELD_MAPPER_PAIR_SLOTS = 8
+
+export type FieldMapperTheme = 'default' | 'unstyled'
 
 type ConnectorPoint = {
   x1: number
   y1: number
   x2: number
   y2: number
-  color: string
+  stroke: string
+  mappingIndex: number
   mapping: FieldMapping
 }
 
@@ -46,6 +41,16 @@ export type FieldMapperProps = {
   /** Override default autoMap heuristics. */
   onAutoMap?: () => FieldMapping[]
   className?: string
+  /**
+   * `default` injects a self-contained dark theme (CSS variables + rules).
+   * `unstyled` skips injected paint — host styles structural classes / CSS vars.
+   */
+  theme?: FieldMapperTheme
+  /**
+   * Optional connector stroke colors. When omitted, strokes use
+   * `var(--fm-map-N, var(--map-N, currentColor))` for N = 1…8.
+   */
+  connectionColors?: string[]
   /** Show JSON preview of applyMapping result. Default true. */
   showPreview?: boolean
 }
@@ -61,27 +66,20 @@ function displaySourceIdForMapping(
   return mapping.sourceId
 }
 
-const DATA_TYPE_COLORS: Record<
-  string,
-  { bg: string; border: string; text: string }
-> = {
-  String: { bg: 'rgba(59,130,246,0.12)', border: '#3b82f6', text: '#93c5fd' },
-  Text: { bg: 'rgba(59,130,246,0.12)', border: '#3b82f6', text: '#93c5fd' },
-  Number: { bg: 'rgba(16,185,129,0.12)', border: '#10b981', text: '#6ee7b7' },
-  Boolean: { bg: 'rgba(167,139,250,0.12)', border: '#a78bfa', text: '#c4b5fd' },
-  Json: { bg: 'rgba(251,191,36,0.12)', border: '#fbbf24', text: '#fcd34d' },
-  Date: { bg: 'rgba(244,114,182,0.12)', border: '#f472b6', text: '#f9a8d4' },
-  Relation: { bg: 'rgba(34,211,238,0.12)', border: '#22d3ee', text: '#67e8f9' },
+function pairSlot(index: number): number {
+  return index % FIELD_MAPPER_PAIR_SLOTS
 }
 
-function getDataTypeStyle(dataType: string) {
-  return (
-    DATA_TYPE_COLORS[dataType] ?? {
-      bg: 'rgba(148,163,184,0.12)',
-      border: '#94a3b8',
-      text: '#cbd5e1',
-    }
-  )
+/** Stroke for mapping index `i` — CSS vars by default so hosts can theme. */
+export function connectionStrokeForIndex(
+  index: number,
+  connectionColors?: string[],
+): string {
+  if (connectionColors && connectionColors.length > 0) {
+    return connectionColors[index % connectionColors.length]!
+  }
+  const n = pairSlot(index) + 1
+  return `var(--fm-map-${n}, var(--map-${n}, currentColor))`
 }
 
 function truncate(s: string, n: number): string {
@@ -89,6 +87,154 @@ function truncate(s: string, n: number): string {
   if (t.length <= n) return t
   return `${t.slice(0, n)}…`
 }
+
+const DEFAULT_THEME_CSS = `
+.seed-field-mapper {
+  --fm-ground: #0f172a;
+  --fm-ink: #e2e8f0;
+  --fm-well: #1e293b;
+  --fm-line: #334155;
+  --fm-muted: #94a3b8;
+  --fm-faint: #64748b;
+  --fm-selection: #3b82f6;
+  --fm-highlight: #f59e0b;
+  --fm-danger: #f87171;
+  --fm-map-1: #3b82f6;
+  --fm-map-2: #8b5cf6;
+  --fm-map-3: #ec4899;
+  --fm-map-4: #f59e0b;
+  --fm-map-5: #10b981;
+  --fm-map-6: #06b6d4;
+  --fm-map-7: #f97316;
+  --fm-map-8: #14b8a6;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--fm-ink);
+  background: var(--fm-ground);
+  border-radius: 12px;
+  padding: 16px;
+}
+.seed-field-mapper * { box-sizing: border-box; }
+.seed-field-mapper .fm-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.seed-field-mapper .fm-btn {
+  background: var(--fm-well);
+  border: 1px solid var(--fm-line);
+  color: var(--fm-ink);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.seed-field-mapper .fm-btn:hover { border-color: var(--fm-faint); }
+.seed-field-mapper .fm-btn-primary {
+  background: var(--fm-selection);
+  border-color: var(--fm-selection);
+}
+.seed-field-mapper .fm-meta {
+  font-size: 12px;
+  color: var(--fm-muted);
+  margin-left: auto;
+}
+.seed-field-mapper .fm-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  min-height: 240px;
+}
+.seed-field-mapper .fm-col-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fm-faint);
+  margin-bottom: 8px;
+}
+.seed-field-mapper .fm-card {
+  border: 1px solid var(--fm-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--fm-well);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.seed-field-mapper .fm-card.active,
+.seed-field-mapper .fm-card.pending {
+  border-color: var(--fm-selection);
+  box-shadow: 0 0 0 1px var(--fm-selection);
+}
+.seed-field-mapper .fm-card.mapped {
+  border-color: var(--fm-faint);
+}
+.seed-field-mapper .fm-card.highlight {
+  border-color: var(--fm-highlight);
+}
+.seed-field-mapper .fm-label {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.seed-field-mapper .fm-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--fm-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seed-field-mapper .fm-kind {
+  font-size: 10px;
+  color: var(--fm-faint);
+  margin-left: 6px;
+}
+.seed-field-mapper .fm-prop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.seed-field-mapper .fm-dtype {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--fm-line);
+  color: var(--fm-muted);
+  background: transparent;
+}
+.seed-field-mapper .fm-remove {
+  background: transparent;
+  border: none;
+  color: var(--fm-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+.seed-field-mapper .fm-remove:hover { color: var(--fm-danger); }
+.seed-field-mapper .fm-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.seed-field-mapper .fm-preview {
+  margin-top: 12px;
+  background: color-mix(in srgb, var(--fm-ground) 80%, black);
+  border: 1px solid var(--fm-line);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--fm-ink);
+  max-height: 200px;
+  overflow: auto;
+}
+`
 
 /**
  * Generic two-pane field mapper. Props-driven; no Seed hooks or routing.
@@ -100,6 +246,8 @@ export function FieldMapper({
   onChange,
   onAutoMap,
   className,
+  theme = 'default',
+  connectionColors,
   showPreview = true,
 }: FieldMapperProps) {
   const [activeSource, setActiveSource] = useState<string | null>(null)
@@ -113,10 +261,26 @@ export function FieldMapper({
   const sourceRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const propRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const getConnectionColor = useCallback(
-    (index: number) => CONNECTION_COLORS[index % CONNECTION_COLORS.length]!,
-    [],
-  )
+  const mappingIndexByProp = useMemo(() => {
+    const map = new Map<string, number>()
+    mappings.forEach((m, i) => {
+      map.set(m.propertyName, i)
+    })
+    return map
+  }, [mappings])
+
+  const mappingIndexesBySource = useMemo(() => {
+    const map = new Map<string, number[]>()
+    mappings.forEach((m, i) => {
+      const displayId = displaySourceIdForMapping(m, sources)
+      for (const key of new Set([m.sourceId, displayId])) {
+        const list = map.get(key) ?? []
+        list.push(i)
+        map.set(key, list)
+      }
+    })
+    return map
+  }, [mappings, sources])
 
   const getConnectorPoints = useCallback((): ConnectorPoint[] => {
     if (!containerRef.current) return []
@@ -137,12 +301,13 @@ export function FieldMapper({
           y1: sR.top + sR.height / 2 - containerRect.top,
           x2: pR.left - containerRect.left,
           y2: pR.top + pR.height / 2 - containerRect.top,
-          color: getConnectionColor(i),
+          stroke: connectionStrokeForIndex(i, connectionColors),
+          mappingIndex: i,
           mapping,
         }
       })
       .filter((pt): pt is ConnectorPoint => pt !== null)
-  }, [mappings, getConnectionColor, sources])
+  }, [mappings, connectionColors, sources])
 
   useEffect(() => {
     const update = () => {
@@ -244,135 +409,17 @@ export function FieldMapper({
     onChange(next)
   }
 
+  const rootClass = [
+    'seed-field-mapper',
+    theme === 'unstyled' ? 'seed-field-mapper--unstyled' : null,
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <div className={`seed-field-mapper ${className ?? ''}`.trim()}>
-      <style>{`
-        .seed-field-mapper {
-          font-family: 'DM Sans', system-ui, sans-serif;
-          color: #e2e8f0;
-          background: #0f172a;
-          border-radius: 12px;
-          padding: 16px;
-        }
-        .seed-field-mapper * { box-sizing: border-box; }
-        .seed-field-mapper .fm-toolbar {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          margin-bottom: 12px;
-          flex-wrap: wrap;
-        }
-        .seed-field-mapper .fm-btn {
-          background: #1e293b;
-          border: 1px solid #334155;
-          color: #e2e8f0;
-          border-radius: 8px;
-          padding: 6px 12px;
-          cursor: pointer;
-          font-size: 13px;
-        }
-        .seed-field-mapper .fm-btn:hover { border-color: #64748b; }
-        .seed-field-mapper .fm-btn-primary {
-          background: #2563eb;
-          border-color: #3b82f6;
-        }
-        .seed-field-mapper .fm-meta {
-          font-size: 12px;
-          color: #94a3b8;
-          margin-left: auto;
-        }
-        .seed-field-mapper .fm-grid {
-          position: relative;
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 48px;
-          min-height: 240px;
-        }
-        .seed-field-mapper .fm-col-title {
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          color: #64748b;
-          margin-bottom: 8px;
-        }
-        .seed-field-mapper .fm-card {
-          border: 1px solid #334155;
-          border-radius: 8px;
-          padding: 10px 12px;
-          margin-bottom: 8px;
-          background: #1e293b;
-          cursor: pointer;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .seed-field-mapper .fm-card.active {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 1px #3b82f6;
-        }
-        .seed-field-mapper .fm-card.mapped {
-          border-color: #475569;
-        }
-        .seed-field-mapper .fm-card.highlight {
-          border-color: #f59e0b;
-        }
-        .seed-field-mapper .fm-label {
-          font-weight: 600;
-          font-size: 13px;
-          margin-bottom: 4px;
-        }
-        .seed-field-mapper .fm-value {
-          font-family: 'JetBrains Mono', ui-monospace, monospace;
-          font-size: 11px;
-          color: #94a3b8;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .seed-field-mapper .fm-kind {
-          font-size: 10px;
-          color: #64748b;
-          margin-left: 6px;
-        }
-        .seed-field-mapper .fm-prop-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-        }
-        .seed-field-mapper .fm-dtype {
-          font-size: 10px;
-          padding: 2px 6px;
-          border-radius: 4px;
-          border: 1px solid;
-        }
-        .seed-field-mapper .fm-remove {
-          background: transparent;
-          border: none;
-          color: #94a3b8;
-          cursor: pointer;
-          font-size: 14px;
-          padding: 0 4px;
-        }
-        .seed-field-mapper .fm-remove:hover { color: #f87171; }
-        .seed-field-mapper .fm-svg {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          overflow: visible;
-        }
-        .seed-field-mapper .fm-preview {
-          margin-top: 12px;
-          background: #020617;
-          border: 1px solid #334155;
-          border-radius: 8px;
-          padding: 12px;
-          font-family: 'JetBrains Mono', ui-monospace, monospace;
-          font-size: 11px;
-          white-space: pre-wrap;
-          color: #cbd5e1;
-          max-height: 200px;
-          overflow: auto;
-        }
-      `}</style>
+    <div className={rootClass} data-theme={theme}>
+      {theme === 'default' && <style>{DEFAULT_THEME_CSS}</style>}
 
       <div className="fm-toolbar">
         <button type="button" className="fm-btn fm-btn-primary" onClick={runAutoMap}>
@@ -407,8 +454,11 @@ export function FieldMapper({
             return (
               <path
                 key={`${pt.mapping.sourceId}-${pt.mapping.propertyName}-${pt.mapping.resolve ?? 'copy'}`}
+                className="fm-connector"
+                data-mapping-index={pt.mappingIndex}
+                data-pair={pairSlot(pt.mappingIndex)}
                 d={`M ${pt.x1} ${pt.y1} C ${midX} ${pt.y1}, ${midX} ${pt.y2}, ${pt.x2} ${pt.y2}`}
-                stroke={pt.color}
+                stroke={pt.stroke}
                 strokeWidth={isHi ? 3 : 2}
                 fill="none"
                 opacity={anyEdgeHighlighted && !isHi ? 0.25 : 0.85}
@@ -421,7 +471,9 @@ export function FieldMapper({
           <div className="fm-col-title">Sources</div>
           {sources.map((source) => {
             const mapped = sourceHasMapping(source.id)
-            const isActive = activeSource === source.id
+            const isPending = activeSource === source.id
+            const indexes = mappingIndexesBySource.get(source.id) ?? []
+            const firstIndex = indexes[0]
             const isHi = hoveredSource === source.id || (
               hoveredProp != null &&
               mappings.some((m) => {
@@ -438,7 +490,14 @@ export function FieldMapper({
                 ref={(el) => {
                   sourceRefs.current[source.id] = el
                 }}
-                className={`fm-card${isActive ? ' active' : ''}${mapped ? ' mapped' : ''}${isHi ? ' highlight' : ''}`}
+                className={`fm-card${isPending ? ' active pending' : ''}${mapped ? ' mapped' : ''}${isHi ? ' highlight' : ''}`}
+                data-source-id={source.id}
+                {...(indexes.length > 0
+                  ? {
+                      'data-mapping-index': indexes.join(' '),
+                      'data-pair': String(pairSlot(firstIndex!)),
+                    }
+                  : {})}
                 onClick={() => handleSourceClick(source.id)}
                 onMouseEnter={() => setHoveredSource(source.id)}
                 onMouseLeave={() => setHoveredSource(null)}
@@ -472,18 +531,28 @@ export function FieldMapper({
           <div className="fm-col-title">Model properties</div>
           {targets.map((prop) => {
             const mapped = mappingForProp(prop.name)
-            const style = getDataTypeStyle(prop.dataType)
+            const mappingIndex = mappingIndexByProp.get(prop.name)
             const isHi =
               hoveredProp === prop.name ||
               (hoveredSource != null &&
-                mapped?.sourceId === hoveredSource)
+                mapped != null &&
+                (mapped.sourceId === hoveredSource ||
+                  displaySourceIdForMapping(mapped, sources) ===
+                    hoveredSource))
             return (
               <div
                 key={prop.name}
                 ref={(el) => {
                   propRefs.current[prop.name] = el
                 }}
-                className={`fm-card${mapped ? ' mapped' : ''}${isHi ? ' highlight' : ''}${activeSource ? ' active' : ''}`}
+                className={`fm-card${mapped ? ' mapped' : ''}${isHi ? ' highlight' : ''}`}
+                data-property-name={prop.name}
+                {...(mappingIndex != null
+                  ? {
+                      'data-mapping-index': String(mappingIndex),
+                      'data-pair': String(pairSlot(mappingIndex)),
+                    }
+                  : {})}
                 onClick={() => handlePropClick(prop.name)}
                 onMouseEnter={() => setHoveredProp(prop.name)}
                 onMouseLeave={() => setHoveredProp(null)}
@@ -491,16 +560,7 @@ export function FieldMapper({
                 <div className="fm-prop-row">
                   <div className="fm-label">{prop.name}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span
-                      className="fm-dtype"
-                      style={{
-                        background: style.bg,
-                        borderColor: style.border,
-                        color: style.text,
-                      }}
-                    >
-                      {prop.dataType}
-                    </span>
+                    <span className="fm-dtype">{prop.dataType}</span>
                     {mapped && (
                       <button
                         type="button"

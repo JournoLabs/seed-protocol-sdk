@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `FieldMapper`: `theme="default" | "unstyled"`, CSS-var connector strokes (`--fm-map-1…8` / `--map-1…8`), optional `connectionColors`, `data-mapping-index` / `data-pair` on wells and paths; pending `.active` only on the selected source.
 - `FieldMapping.resolve?: 'extract' | 'file'`; sync `applyMapping` skips resolve edges; new `applyMappingAsync` with host callback.
 - `classifyUrl`, `buildResolvedSourceNodes`, `normalizeMappingFromSourceId` for package-owned extract/file candidates.
 - RSS adapter exposes enclosure / media:content as `url` + `contentType` in `meta` (stable `rss-enclosure-N` ids).
