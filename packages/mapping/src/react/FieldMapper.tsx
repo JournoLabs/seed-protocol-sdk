@@ -145,30 +145,35 @@ export function FieldMapper({
 
   const handlePropClick = (propertyName: string) => {
     if (!activeSource) return
-    let next = [...mappings]
-    next = next.filter(
-      (c) =>
-        c.sourceId !== activeSource && c.propertyName !== propertyName,
-    )
+    // Property exclusive: replace any edge for this property; keep other
+    // edges from the active source so one source can fan out to many props.
+    const next = mappings.filter((c) => c.propertyName !== propertyName)
     next.push({ sourceId: activeSource, propertyName })
     onChange(next)
-    setActiveSource(null)
+    // Keep source active so the user can attach additional properties.
   }
 
-  const removeMapping = (sourceId: string) => {
+  const removeMappingsForSource = (sourceId: string) => {
     onChange(mappings.filter((c) => c.sourceId !== sourceId))
   }
 
-  const mappingForSource = (sourceId: string) =>
-    mappings.find((c) => c.sourceId === sourceId)
+  const removeMappingForProp = (propertyName: string) => {
+    onChange(mappings.filter((c) => c.propertyName !== propertyName))
+  }
+
+  const sourceHasMapping = (sourceId: string) =>
+    mappings.some((c) => c.sourceId === sourceId)
   const mappingForProp = (propName: string) =>
     mappings.find((c) => c.propertyName === propName)
 
-  const highlightedPair = hoveredProp
-    ? mappings.find((c) => c.propertyName === hoveredProp)
-    : hoveredSource
-      ? mappings.find((c) => c.sourceId === hoveredSource)
-      : null
+  const isEdgeHighlighted = (mapping: FieldMapping) => {
+    if (hoveredProp) return mapping.propertyName === hoveredProp
+    if (hoveredSource) return mapping.sourceId === hoveredSource
+    return false
+  }
+
+  const anyEdgeHighlighted = hoveredProp != null || hoveredSource != null
+
 
   const preview = useMemo(
     () => applyMapping(sources, mappings, targets),
@@ -325,7 +330,9 @@ export function FieldMapper({
         )}
         <span className="fm-meta">
           {mappings.length} / {targets.length} mapped
-          {activeSource ? ' · click a property' : ' · click a source'}
+          {activeSource
+            ? ' · click properties (source stays selected)'
+            : ' · click a source'}
         </span>
       </div>
 
@@ -336,9 +343,7 @@ export function FieldMapper({
           height={svgDimensions.height}
         >
           {connectorPoints.map((pt) => {
-            const isHi =
-              highlightedPair?.sourceId === pt.mapping.sourceId &&
-              highlightedPair?.propertyName === pt.mapping.propertyName
+            const isHi = isEdgeHighlighted(pt.mapping)
             const midX = (pt.x1 + pt.x2) / 2
             return (
               <path
@@ -347,7 +352,7 @@ export function FieldMapper({
                 stroke={pt.color}
                 strokeWidth={isHi ? 3 : 2}
                 fill="none"
-                opacity={highlightedPair && !isHi ? 0.25 : 0.85}
+                opacity={anyEdgeHighlighted && !isHi ? 0.25 : 0.85}
               />
             )
           })}
@@ -356,9 +361,15 @@ export function FieldMapper({
         <div>
           <div className="fm-col-title">Sources</div>
           {sources.map((source) => {
-            const mapped = mappingForSource(source.id)
+            const mapped = sourceHasMapping(source.id)
             const isActive = activeSource === source.id
-            const isHi = highlightedPair?.sourceId === source.id
+            const isHi = hoveredSource === source.id || (
+              hoveredProp != null &&
+              mappings.some(
+                (m) =>
+                  m.sourceId === source.id && m.propertyName === hoveredProp,
+              )
+            )
             return (
               <div
                 key={source.id}
@@ -379,10 +390,10 @@ export function FieldMapper({
                     <button
                       type="button"
                       className="fm-remove"
-                      aria-label="Remove mapping"
+                      aria-label="Remove all mappings for source"
                       onClick={(e) => {
                         e.stopPropagation()
-                        removeMapping(source.id)
+                        removeMappingsForSource(source.id)
                       }}
                     >
                       ×
@@ -400,7 +411,10 @@ export function FieldMapper({
           {targets.map((prop) => {
             const mapped = mappingForProp(prop.name)
             const style = getDataTypeStyle(prop.dataType)
-            const isHi = highlightedPair?.propertyName === prop.name
+            const isHi =
+              hoveredProp === prop.name ||
+              (hoveredSource != null &&
+                mapped?.sourceId === hoveredSource)
             return (
               <div
                 key={prop.name}
@@ -414,16 +428,31 @@ export function FieldMapper({
               >
                 <div className="fm-prop-row">
                   <div className="fm-label">{prop.name}</div>
-                  <span
-                    className="fm-dtype"
-                    style={{
-                      background: style.bg,
-                      borderColor: style.border,
-                      color: style.text,
-                    }}
-                  >
-                    {prop.dataType}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span
+                      className="fm-dtype"
+                      style={{
+                        background: style.bg,
+                        borderColor: style.border,
+                        color: style.text,
+                      }}
+                    >
+                      {prop.dataType}
+                    </span>
+                    {mapped && (
+                      <button
+                        type="button"
+                        className="fm-remove"
+                        aria-label="Remove mapping for property"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeMappingForProp(prop.name)
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {mapped && (
                   <div className="fm-value">← {mapped.sourceId}</div>

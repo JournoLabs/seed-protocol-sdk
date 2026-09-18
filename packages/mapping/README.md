@@ -5,8 +5,12 @@ Source → Seed model property mapping helpers and a props-driven React UI.
 Use this package to:
 
 1. Parse markdown or RSS/Atom into `SourceNode[]`
-2. Author 1:1 `FieldMapping`s (manually, via `autoMap`, or via `FieldMapper`)
+2. Author `FieldMapping` edges (manually, via `autoMap`, or via `FieldMapper`)
 3. `applyMapping` to a coerced property bag for `createItem` / publish
+
+Mappings are an edge list: one source may fan out to multiple properties (e.g. RSS
+`link` → `importUrl` and `canonicalUrl`). Each property is exclusive — at most one
+source may map to it.
 
 ## Install
 
@@ -48,7 +52,15 @@ RSS:
 ```ts
 const { channel, items } = await rssXmlToSources(xml)
 const itemSources = items[0]!
+const postTargets: TargetProperty[] = [
+  { name: 'importUrl', dataType: 'String' },
+  { name: 'canonicalUrl', dataType: 'String' },
+  { name: 'title', dataType: 'String' },
+]
+// autoMap fans link/url sources out to matching URL-ish properties
 const mappings = autoMap(itemSources, postTargets)
+// e.g. [{ sourceId: 'rss-link', propertyName: 'importUrl' },
+//       { sourceId: 'rss-link', propertyName: 'canonicalUrl' }, ...]
 const properties = applyMapping(itemSources, mappings, postTargets)
 ```
 
@@ -91,7 +103,7 @@ function ImportMap({ markdown, targets, onSubmit }) {
 
 | Type | Package | Meaning |
 |------|---------|---------|
-| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** |
+| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; property exclusive) |
 | `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `html` / `text`) for `normalizeFeedItemFields` |
 
 Compose them: map external fields into a plain item, then optionally normalize roles for media/HTML display.

@@ -21,7 +21,10 @@ export type TargetProperty = {
   dataType: string
 }
 
-/** One-to-one connection from a source node to a model property. */
+/**
+ * Source → property edge.
+ * A source may map to multiple properties; each property appears at most once.
+ */
 export type FieldMapping = {
   sourceId: string
   propertyName: string

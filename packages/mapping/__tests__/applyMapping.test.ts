@@ -64,4 +64,31 @@ describe('applyMapping', () => {
     )
     expect(bag).toEqual({})
   })
+
+  it('allows one source to populate multiple properties', () => {
+    const linkSources: SourceNode[] = [
+      {
+        id: 'rss-link',
+        label: 'link',
+        kind: 'rssField',
+        value: 'https://example.com/p/1',
+      },
+    ]
+    const urlTargets: TargetProperty[] = [
+      { name: 'importUrl', dataType: 'String' },
+      { name: 'canonicalUrl', dataType: 'String' },
+    ]
+    const bag = applyMapping(
+      linkSources,
+      [
+        { sourceId: 'rss-link', propertyName: 'importUrl' },
+        { sourceId: 'rss-link', propertyName: 'canonicalUrl' },
+      ],
+      urlTargets,
+    )
+    expect(bag).toEqual({
+      importUrl: 'https://example.com/p/1',
+      canonicalUrl: 'https://example.com/p/1',
+    })
+  })
 })

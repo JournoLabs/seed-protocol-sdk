@@ -60,4 +60,51 @@ describe('autoMap', () => {
     const mappings = autoMap(sources, targets)
     expect(mappings.filter((m) => m.propertyName === 'title')).toHaveLength(1)
   })
+
+  it('fans link out to importUrl and canonicalUrl', () => {
+    const sources: SourceNode[] = [
+      {
+        id: 'rss-link',
+        label: 'link',
+        kind: 'rssField',
+        value: 'https://example.com/p/1',
+      },
+      {
+        id: 'rss-title',
+        label: 'title',
+        kind: 'rssField',
+        value: 'Hello',
+      },
+    ]
+    const targets: TargetProperty[] = [
+      { name: 'importUrl', dataType: 'String' },
+      { name: 'canonicalUrl', dataType: 'String' },
+      { name: 'title', dataType: 'String' },
+    ]
+    const mappings = autoMap(sources, targets)
+    const linkMappings = mappings.filter((m) => m.sourceId === 'rss-link')
+    expect(linkMappings).toEqual(
+      expect.arrayContaining([
+        { sourceId: 'rss-link', propertyName: 'importUrl' },
+        { sourceId: 'rss-link', propertyName: 'canonicalUrl' },
+      ]),
+    )
+    expect(linkMappings).toHaveLength(2)
+    expect(mappings.filter((m) => m.sourceId === 'rss-title')).toEqual([
+      { sourceId: 'rss-title', propertyName: 'title' },
+    ])
+  })
+
+  it('keeps non-fan-out sources 1:1', () => {
+    const sources: SourceNode[] = [
+      { id: 'fm-title', label: 'title', kind: 'frontmatter', value: 'T' },
+    ]
+    const targets: TargetProperty[] = [
+      { name: 'title', dataType: 'String' },
+      { name: 'headline', dataType: 'String' },
+    ]
+    const mappings = autoMap(sources, targets)
+    expect(mappings).toHaveLength(1)
+    expect(mappings[0]?.propertyName).toBe('title')
+  })
 })

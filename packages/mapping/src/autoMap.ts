@@ -13,9 +13,25 @@ function namesMatch(a: string, b: string): boolean {
 }
 
 /**
+ * Sources that fan out to every unused target matching any alias.
+ * Keys are normalized source label/id fragments.
+ */
+const FAN_OUT_ALIASES: Record<string, string[]> = {
+  link: ['importurl', 'canonicalurl', 'url', 'link', 'permalink'],
+  url: ['importurl', 'canonicalurl', 'url', 'link', 'permalink'],
+}
+
+function fanOutAliasesForSource(source: SourceNode): string[] | undefined {
+  const labelKey = normalizeName(source.label)
+  const idKey = normalizeName(source.id.replace(/^rss-/, '').replace(/^fm-/, ''))
+  return FAN_OUT_ALIASES[labelKey] ?? FAN_OUT_ALIASES[idKey]
+}
+
+/**
  * Heuristic auto-map: full-document sources to body-like props,
  * then fuzzy name match for remaining sources ↔ targets.
- * Returns 1:1 mappings (each source and property used at most once).
+ * Most sources map 1:1. Known URL fields (`link` / `url`) fan out to every
+ * unused matching URL-ish property. Each property is used at most once.
  */
 export function autoMap(
   sources: SourceNode[],
@@ -49,13 +65,28 @@ export function autoMap(
     summary: ['summary', 'description', 'excerpt'],
     featureimage: ['featureimage', 'feature_image', 'image', 'cover'],
     feature_image: ['featureimage', 'feature_image', 'image', 'cover'],
-    link: ['url', 'link', 'permalink', 'slug'],
+    link: ['url', 'link', 'permalink'],
     creator: ['author', 'authors', 'creator', 'byline'],
     author: ['author', 'authors', 'creator', 'byline'],
   }
 
   for (const source of sources) {
     if (usedSources.has(source.id)) continue
+
+    const fanOutAliases = fanOutAliasesForSource(source)
+    if (fanOutAliases) {
+      for (const target of targets) {
+        if (usedProps.has(target.name)) continue
+        const matches = fanOutAliases.some((alias) =>
+          namesMatch(target.name, alias),
+        )
+        if (matches) {
+          mappings.push({ sourceId: source.id, propertyName: target.name })
+          usedProps.add(target.name)
+        }
+      }
+      continue
+    }
 
     const labelKey = normalizeName(source.label)
     const idKey = source.id.replace(/^rss-/, '').replace(/^fm-/, '')
