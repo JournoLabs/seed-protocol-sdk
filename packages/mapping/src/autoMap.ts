@@ -1,4 +1,5 @@
 import { classifyUrl, looksLikeUrl } from './classifyUrl'
+import { isRelationLookupTarget } from './relationLookup'
 import type { FieldMapping, SourceNode, TargetProperty, UrlMediaClass } from './types'
 
 const FULL_DOC_PROP_NAMES = ['text', 'content', 'body', 'fulltext', 'markdown']
@@ -295,7 +296,10 @@ export function autoMap(
 
     for (const alias of aliasKeys) {
       match = targets.find(
-        (p) => !usedProps.has(p.name) && namesMatch(p.name, alias),
+        (p) =>
+          !usedProps.has(p.name) &&
+          !isRelationLookupTarget(p) &&
+          namesMatch(p.name, alias),
       )
       if (match) break
     }
@@ -304,6 +308,7 @@ export function autoMap(
       match = targets.find(
         (p) =>
           !usedProps.has(p.name) &&
+          !isRelationLookupTarget(p) &&
           (namesMatch(p.name, source.label) || namesMatch(p.name, idKey)),
       )
     }

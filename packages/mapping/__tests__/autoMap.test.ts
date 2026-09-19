@@ -161,4 +161,42 @@ describe('autoMap', () => {
     expect(mappings).toHaveLength(1)
     expect(mappings[0]?.propertyName).toBe('title')
   })
+
+  it('does not map author string onto List of Relation authors', () => {
+    const sources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Jane Doe',
+      },
+      {
+        id: 'rss-title',
+        label: 'title',
+        kind: 'rssField',
+        value: 'Hello',
+      },
+    ]
+    const targets: TargetProperty[] = [
+      {
+        name: 'authors',
+        dataType: 'List',
+        refValueType: 'Relation',
+        ref: 'Identity',
+      },
+      { name: 'title', dataType: 'String' },
+      { name: 'byline', dataType: 'String' },
+    ]
+    const mappings = autoMap(sources, targets)
+    expect(mappings.find((m) => m.propertyName === 'authors')).toBeUndefined()
+    expect(mappings.find((m) => m.propertyName === 'title')).toEqual({
+      sourceId: 'rss-title',
+      propertyName: 'title',
+    })
+    // author may map to byline (string) via alias
+    expect(mappings.find((m) => m.propertyName === 'byline')).toEqual({
+      sourceId: 'rss-author',
+      propertyName: 'byline',
+    })
+  })
 })

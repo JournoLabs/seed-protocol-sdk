@@ -11,8 +11,9 @@ Use this package to:
 
 Mappings are an edge list: one source may fan out to multiple properties (e.g. RSS
 `link` → `importUrl` and `canonicalUrl`). Each property is exclusive — at most one
-source may map to it. Optional `resolve: 'extract' | 'file'` marks URL transforms the
-**host** performs; the package never fetches or runs Readability.
+source may map to it. Optional `resolve: 'extract' | 'file' | 'lookup'` marks
+transforms the **host** (or a persisted value map) performs; the package never
+fetches, runs Readability, or loads Seed Identity items.
 
 ## Install
 
@@ -78,13 +79,61 @@ const { properties, errors } = await applyMappingAsync(
   mappings,
   postTargets,
   {
-    resolve: async ({ job, url, contentType }) => {
-      if (job === 'extract') return await hostExtractHtml(url)
-      return await hostFetchAndStoreFile(url, contentType)
+    resolve: async ({ job, url, contentType, rawValue }) => {
+      if (job === 'extract') return await hostExtractHtml(url!)
+      if (job === 'lookup') return await hostLookupIdentity(rawValue!)
+      return await hostFetchAndStoreFile(url!, contentType)
     },
   },
 )
 ```
+
+### Relation lookup (`resolve: 'lookup'`)
+
+Map a string source (e.g. RSS `author`) onto a Relation or List-of-Relation
+target (e.g. `authors` → Identity) via a persisted dictionary and/or host callback:
+
+```ts
+const postTargets: TargetProperty[] = [
+  {
+    name: 'authors',
+    dataType: 'List',
+    refValueType: 'Relation',
+    ref: 'Identity',
+  },
+]
+
+const mappings = [
+  { sourceId: 'rss-author', propertyName: 'authors', resolve: 'lookup' as const },
+]
+
+const doc: MappingDocument = {
+  version: 1,
+  sourceKind: 'rss',
+  mappings,
+  lookups: {
+    authors: { 'Jane Doe': 'identity-seed-uid' },
+  },
+}
+
+const { properties, errors } = await applyMappingAsync(
+  itemSources,
+  mappings,
+  postTargets,
+  {
+    lookups: doc.lookups,
+    // Optional: called only when the table has no entry for the trimmed source value
+    resolve: async ({ job, rawValue }) => {
+      if (job === 'lookup') return await findOrCreateIdentity(rawValue!)
+      throw new Error(`unexpected job ${job}`)
+    },
+  },
+)
+// properties.authors === ['identity-seed-uid']
+```
+
+`autoMap` never wires a plain string onto Relation / List-of-Relation targets —
+author those edges in FieldMapper or programmatically.
 
 `classifyUrl({ url, contentType? })` is a pure MIME/extension classifier
 (`html` | `image` | `audio` | `video` | `unknown`). Enclosure nodes expose
@@ -93,7 +142,9 @@ const { properties, errors } = await applyMappingAsync(
 ## FieldMapper UI
 
 Props-driven only — no Seed hooks or routing. Pass expanded sources so extract/file
-candidates appear in the left pane; connecting them persists `resolve` on the edge.
+candidates appear in the left pane; connecting those nodes persists `resolve` on the edge.
+Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`
+and (when `onLookupsChange` is provided) shows a string → seed uid editor.
 
 ```tsx
 import { useState } from 'react'
@@ -103,11 +154,13 @@ import {
   markdownToSources,
   applyMappingAsync,
   type FieldMapping,
+  type MappingLookups,
 } from '@seedprotocol/mapping'
 
 function ImportMap({ markdown, targets, onSubmit }) {
   const sources = buildResolvedSourceNodes(markdownToSources(markdown))
   const [mappings, setMappings] = useState<FieldMapping[]>([])
+  const [lookups, setLookups] = useState<MappingLookups>({})
 
   return (
     <>
@@ -116,6 +169,8 @@ function ImportMap({ markdown, targets, onSubmit }) {
         targets={targets}
         mappings={mappings}
         onChange={setMappings}
+        lookups={lookups}
+        onLookupsChange={setLookups}
         theme="unstyled" // host paints via CSS; or omit for built-in dark theme
         className="imprint-mapper"
         // optional: connectionColors={['#…']} — else strokes use --fm-map-1…8 / --map-1…8
@@ -126,7 +181,7 @@ function ImportMap({ markdown, targets, onSubmit }) {
             sources,
             mappings,
             targets,
-            { resolve: hostResolve },
+            { resolve: hostResolve, lookups },
           )
           onSubmit(properties)
         }}
@@ -158,7 +213,7 @@ Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 
 | Type | Package | Meaning |
 |------|---------|---------|
-| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`) |
+| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`; optional `lookups`) |
 | `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `audio` / `video` / `file` / `html` / `text`) for display |
 
 Compose them: map + resolve into a plain item, then optionally normalize roles for media/HTML display. Storage stays `Image` / `File` schema types — no separate Audio/Video dataTypes.

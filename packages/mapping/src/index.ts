@@ -4,6 +4,7 @@ export type {
   TargetProperty,
   FieldMapping,
   MappingDocument,
+  MappingLookups,
   PropertyBag,
   ResolveJob,
   UrlMediaClass,
@@ -14,6 +15,12 @@ export type {
 } from './types'
 
 export { applyMapping, applyMappingAsync, coerceValue } from './applyMapping'
+export type { ApplyMappingAsyncOptions } from './applyMapping'
+export {
+  isRelationLookupTarget,
+  normalizeLookupKey,
+  shapeLookupValue,
+} from './relationLookup'
 export { autoMap } from './autoMap'
 export { classifyUrl, looksLikeUrl } from './classifyUrl'
 export type { ClassifyUrlInput } from './classifyUrl'

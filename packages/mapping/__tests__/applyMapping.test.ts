@@ -205,4 +205,135 @@ describe('applyMappingAsync', () => {
     expect(result.errors[0]?.message).toBe('fetch failed')
     expect(result.errors[0]?.resolve).toBe('extract')
   })
+
+  it('applies lookup from table onto List of Relation', async () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: '  Jane Doe  ',
+      },
+    ]
+    const result = await applyMappingAsync(
+      authorSources,
+      [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'authors',
+          resolve: 'lookup',
+        },
+      ],
+      [
+        {
+          name: 'authors',
+          dataType: 'List',
+          refValueType: 'Relation',
+          ref: 'Identity',
+        },
+      ],
+      {
+        lookups: {
+          authors: { 'Jane Doe': 'identity-uid-1' },
+        },
+      },
+    )
+    expect(result.errors).toEqual([])
+    expect(result.properties.authors).toEqual(['identity-uid-1'])
+  })
+
+  it('applies lookup onto single Relation and calls host on miss', async () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Unknown Person',
+      },
+    ]
+    const result = await applyMappingAsync(
+      authorSources,
+      [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'creator',
+          resolve: 'lookup',
+        },
+      ],
+      [{ name: 'creator', dataType: 'Relation', ref: 'Identity' }],
+      {
+        lookups: {},
+        resolve: async (ctx) => {
+          expect(ctx.job).toBe('lookup')
+          expect(ctx.rawValue).toBe('Unknown Person')
+          return 'created-uid'
+        },
+      },
+    )
+    expect(result.errors).toEqual([])
+    expect(result.properties.creator).toBe('created-uid')
+  })
+
+  it('errors when lookup misses and no resolve callback', async () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Nobody',
+      },
+    ]
+    const result = await applyMappingAsync(
+      authorSources,
+      [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'authors',
+          resolve: 'lookup',
+        },
+      ],
+      [
+        {
+          name: 'authors',
+          dataType: 'List',
+          ref: 'Identity',
+        },
+      ],
+      { lookups: {} },
+    )
+    expect(result.properties).toEqual({})
+    expect(result.errors[0]?.resolve).toBe('lookup')
+    expect(result.errors[0]?.message).toMatch(/No lookup entry/)
+  })
+
+  it('sync apply skips lookup edges and plain relation copies', () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Jane Doe',
+      },
+    ]
+    const bag = applyMapping(
+      authorSources,
+      [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'authors',
+          resolve: 'lookup',
+        },
+        { sourceId: 'rss-author', propertyName: 'byline' },
+      ],
+      [
+        {
+          name: 'authors',
+          dataType: 'List',
+          ref: 'Identity',
+        },
+        { name: 'byline', dataType: 'String' },
+      ],
+    )
+    expect(bag).toEqual({ byline: 'Jane Doe' })
+  })
 })

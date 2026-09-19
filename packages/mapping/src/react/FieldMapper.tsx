@@ -8,11 +8,20 @@ import React, {
 import { applyMapping } from '../applyMapping'
 import { autoMap as defaultAutoMap } from '../autoMap'
 import {
+  isRelationLookupTarget,
+  normalizeLookupKey,
+} from '../relationLookup'
+import {
   normalizeMappingFromSourceId,
   parseResolvedSourceId,
   resolvedSourceId,
 } from '../resolvedSources'
-import type { FieldMapping, SourceNode, TargetProperty } from '../types'
+import type {
+  FieldMapping,
+  MappingLookups,
+  SourceNode,
+  TargetProperty,
+} from '../types'
 
 /** Number of cycling pair / map-color slots (`--fm-map-1` … `--fm-map-8`). */
 export const FIELD_MAPPER_PAIR_SLOTS = 8
@@ -38,6 +47,12 @@ export type FieldMapperProps = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   onChange: (mappings: FieldMapping[]) => void
+  /**
+   * String → seed uid dictionaries for `resolve: 'lookup'` edges.
+   * Host should persist alongside `MappingDocument.lookups`.
+   */
+  lookups?: MappingLookups
+  onLookupsChange?: (lookups: MappingLookups) => void
   /** Override default autoMap heuristics. */
   onAutoMap?: () => FieldMapping[]
   className?: string
@@ -53,6 +68,22 @@ export type FieldMapperProps = {
   connectionColors?: string[]
   /** Show JSON preview of applyMapping result. Default true. */
   showPreview?: boolean
+}
+
+function parseUidInput(raw: string): string | string[] {
+  const parts = raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0]!
+  return parts
+}
+
+function formatUidValue(value: string | string[] | undefined): string {
+  if (value == null) return ''
+  if (Array.isArray(value)) return value.join(', ')
+  return value
 }
 
 /** Display id for connector endpoints (derived nodes for resolve edges). */
@@ -234,6 +265,64 @@ const DEFAULT_THEME_CSS = `
   max-height: 200px;
   overflow: auto;
 }
+.seed-field-mapper .fm-lookups {
+  margin-top: 16px;
+  border-top: 1px solid var(--fm-line);
+  padding-top: 12px;
+}
+.seed-field-mapper .fm-lookups-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fm-faint);
+  margin-bottom: 8px;
+}
+.seed-field-mapper .fm-lookup-block {
+  border: 1px solid var(--fm-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--fm-well);
+}
+.seed-field-mapper .fm-lookup-block h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.seed-field-mapper .fm-lookup-hint {
+  font-size: 11px;
+  color: var(--fm-muted);
+  margin-bottom: 8px;
+}
+.seed-field-mapper .fm-lookup-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.seed-field-mapper .fm-lookup-key {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--fm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seed-field-mapper .fm-lookup-input {
+  width: 100%;
+  background: var(--fm-ground);
+  border: 1px solid var(--fm-line);
+  border-radius: 6px;
+  color: var(--fm-ink);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  padding: 6px 8px;
+}
+.seed-field-mapper .fm-lookup-input:focus {
+  outline: none;
+  border-color: var(--fm-selection);
+}
 `
 
 /**
@@ -244,6 +333,8 @@ export function FieldMapper({
   targets,
   mappings,
   onChange,
+  lookups = {},
+  onLookupsChange,
   onAutoMap,
   className,
   theme = 'default',
@@ -260,6 +351,17 @@ export function FieldMapper({
   const containerRef = useRef<HTMLDivElement>(null)
   const sourceRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const propRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const targetsByName = useMemo(() => {
+    const map = new Map<string, TargetProperty>()
+    for (const t of targets) map.set(t.name, t)
+    return map
+  }, [targets])
+
+  const lookupMappings = useMemo(
+    () => mappings.filter((m) => m.resolve === 'lookup'),
+    [mappings],
+  )
 
   const mappingIndexByProp = useMemo(() => {
     const map = new Map<string, number>()
@@ -281,6 +383,36 @@ export function FieldMapper({
     })
     return map
   }, [mappings, sources])
+
+  const clearLookupForProperty = (propertyName: string) => {
+    if (!onLookupsChange) return
+    if (!(propertyName in lookups)) return
+    const next = { ...lookups }
+    delete next[propertyName]
+    onLookupsChange(next)
+  }
+
+  const setLookupEntry = (
+    propertyName: string,
+    sourceKey: string,
+    uidRaw: string,
+  ) => {
+    if (!onLookupsChange) return
+    const table = { ...(lookups[propertyName] ?? {}) }
+    const parsed = parseUidInput(uidRaw)
+    if (parsed === '' || (Array.isArray(parsed) && parsed.length === 0)) {
+      delete table[sourceKey]
+    } else {
+      table[sourceKey] = parsed
+    }
+    const next = { ...lookups }
+    if (Object.keys(table).length === 0) {
+      delete next[propertyName]
+    } else {
+      next[propertyName] = table
+    }
+    onLookupsChange(next)
+  }
 
   const getConnectorPoints = useCallback((): ConnectorPoint[] => {
     if (!containerRef.current) return []
@@ -335,29 +467,62 @@ export function FieldMapper({
     // Property exclusive: replace any edge for this property; keep other
     // edges from the active source so one source can fan out to many props.
     // Derived @extract/@file nodes normalize to originId + resolve.
-    const edge = normalizeMappingFromSourceId(activeSource, propertyName)
+    let edge = normalizeMappingFromSourceId(activeSource, propertyName)
+    const target = targetsByName.get(propertyName)
+    if (
+      target &&
+      isRelationLookupTarget(target) &&
+      !edge.resolve
+    ) {
+      edge = { ...edge, resolve: 'lookup' }
+    }
+    const prev = mappings.find((c) => c.propertyName === propertyName)
     const next = mappings.filter((c) => c.propertyName !== propertyName)
     next.push(edge)
     onChange(next)
+    if (
+      prev &&
+      prev.resolve === 'lookup' &&
+      edge.resolve !== 'lookup'
+    ) {
+      clearLookupForProperty(propertyName)
+    }
     // Keep source active so the user can attach additional properties.
   }
 
   const removeMappingsForSource = (sourceId: string) => {
     const parsed = parseResolvedSourceId(sourceId)
-    onChange(
-      mappings.filter((c) => {
-        if (parsed) {
-          return !(
-            c.sourceId === parsed.originId && c.resolve === parsed.resolve
-          )
-        }
-        return c.sourceId !== sourceId
-      }),
-    )
+    const removedProps: string[] = []
+    const next = mappings.filter((c) => {
+      let keep: boolean
+      if (parsed) {
+        keep = !(
+          c.sourceId === parsed.originId && c.resolve === parsed.resolve
+        )
+      } else {
+        keep = c.sourceId !== sourceId
+      }
+      if (!keep && c.resolve === 'lookup') {
+        removedProps.push(c.propertyName)
+      }
+      return keep
+    })
+    onChange(next)
+    if (onLookupsChange && removedProps.length > 0) {
+      const nextLookups = { ...lookups }
+      for (const prop of removedProps) {
+        delete nextLookups[prop]
+      }
+      onLookupsChange(nextLookups)
+    }
   }
 
   const removeMappingForProp = (propertyName: string) => {
+    const prev = mappings.find((c) => c.propertyName === propertyName)
     onChange(mappings.filter((c) => c.propertyName !== propertyName))
+    if (prev?.resolve === 'lookup') {
+      clearLookupForProperty(propertyName)
+    }
   }
 
   const sourceHasMapping = (sourceId: string) => {
@@ -560,7 +725,10 @@ export function FieldMapper({
                 <div className="fm-prop-row">
                   <div className="fm-label">{prop.name}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="fm-dtype">{prop.dataType}</span>
+                    <span className="fm-dtype">
+                      {prop.dataType}
+                      {prop.ref ? ` → ${prop.ref}` : ''}
+                    </span>
                     {mapped && (
                       <button
                         type="button"
@@ -587,6 +755,69 @@ export function FieldMapper({
           })}
         </div>
       </div>
+
+      {lookupMappings.length > 0 && onLookupsChange && (
+        <div className="fm-lookups">
+          <div className="fm-lookups-title">Relation lookups</div>
+          {lookupMappings.map((mapping) => {
+            const source = sources.find((s) => s.id === mapping.sourceId)
+            const sampleKey = normalizeLookupKey(
+              source?.value || source?.label || '',
+            )
+            const table = lookups[mapping.propertyName] ?? {}
+            const keys = new Set<string>(Object.keys(table))
+            if (sampleKey) keys.add(sampleKey)
+            const keyList = [...keys]
+            const target = targetsByName.get(mapping.propertyName)
+            return (
+              <div
+                key={`${mapping.sourceId}-${mapping.propertyName}`}
+                className="fm-lookup-block"
+              >
+                <h4>
+                  {mapping.propertyName}
+                  {target?.ref ? ` → ${target.ref}` : ''}
+                </h4>
+                <div className="fm-lookup-hint">
+                  Map source strings to seed UIDs
+                  {target?.dataType === 'List'
+                    ? ' (comma-separate for multiple)'
+                    : ''}
+                  . Host owns Identity search/create.
+                </div>
+                {keyList.length === 0 ? (
+                  <div className="fm-lookup-hint">
+                    No sample value yet — paste a source string key after
+                    connecting.
+                  </div>
+                ) : (
+                  keyList.map((key) => (
+                    <div key={key} className="fm-lookup-row">
+                      <div className="fm-lookup-key" title={key}>
+                        {key || '(empty)'}
+                      </div>
+                      <input
+                        className="fm-lookup-input"
+                        type="text"
+                        placeholder="seed uid"
+                        value={formatUidValue(table[key])}
+                        onChange={(e) =>
+                          setLookupEntry(
+                            mapping.propertyName,
+                            key,
+                            e.target.value,
+                          )
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {showPreview && previewOpen && (
         <pre className="fm-preview">{JSON.stringify(preview, null, 2)}</pre>
