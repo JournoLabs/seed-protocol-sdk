@@ -6,6 +6,21 @@ import type {
   SourceNode,
   TargetProperty,
 } from '../types'
+import type {
+  FieldMapperSlot,
+  ResolvedFieldMapperComponents,
+  ResolvedFieldMapperSlots,
+} from './fieldMapperSlots'
+import {
+  showJsonPreview,
+  showRowPreview,
+  slotClass,
+} from './fieldMapperSlots'
+import {
+  DefaultButton,
+  DefaultPill,
+  DefaultSelect,
+} from './fieldMapperControls'
 import {
   filterPropertyNames,
   originSources,
@@ -31,7 +46,9 @@ export type PropertyRowsProps = {
   defaultRows?: FieldMapperDefaultRows
   lookups?: MappingLookups
   onLookupsChange?: (lookups: MappingLookups) => void
-  showPreview?: boolean
+  slots: ResolvedFieldMapperSlots
+  classNames?: Partial<Record<FieldMapperSlot, string>>
+  ui?: ResolvedFieldMapperComponents
 }
 
 export function PropertyRows({
@@ -40,8 +57,18 @@ export function PropertyRows({
   mappings,
   mapper,
   defaultRows = 'requiredAndMapped',
-  showPreview = true,
+  slots,
+  classNames,
+  ui = {
+    Select: DefaultSelect,
+    Button: DefaultButton,
+    Pill: DefaultPill,
+  },
 }: PropertyRowsProps) {
+  const Select = ui.Select
+  const Button = ui.Button
+  const Pill = ui.Pill
+
   const [filterMode, setFilterMode] =
     useState<FieldMapperDefaultRows>(defaultRows)
   const [extraNames, setExtraNames] = useState<Set<string>>(() => new Set())
@@ -71,6 +98,8 @@ export function PropertyRows({
   }, [mappings])
 
   const { coverage, sourceOptions, addableProperties } = mapper
+  const jsonPreview = showJsonPreview(slots.preview)
+  const rowPreview = showRowPreview(slots.preview)
 
   const handleAddProperty = (name: string) => {
     mapper.addRow(name)
@@ -93,24 +122,24 @@ export function PropertyRows({
 
   return (
     <>
-      <div className="fm-toolbar">
-        <button
-          type="button"
-          className="fm-btn fm-btn-primary"
-          onClick={() => mapper.autoMap()}
-        >
-          Auto-map
-        </button>
-        {showPreview && (
-          <button
-            type="button"
+      <div className={slotClass('toolbar', classNames)}>
+        {slots.autoMap && (
+          <Button
+            className={slotClass('autoMapButton', classNames)}
+            onClick={() => mapper.autoMap()}
+          >
+            Auto-map
+          </Button>
+        )}
+        {jsonPreview && (
+          <Button
             className="fm-btn"
             onClick={() => setPreviewOpen((v) => !v)}
           >
             {previewOpen ? 'Hide preview' : 'Preview JSON'}
-          </button>
+          </Button>
         )}
-        <span className="fm-meta">
+        <span className={slotClass('coverage', classNames)}>
           {coverage.mapped} of {coverage.total} properties mapped
           {coverage.missingRequired.length > 0
             ? ` · ${coverage.missingRequired.length} required missing`
@@ -118,51 +147,57 @@ export function PropertyRows({
         </span>
       </div>
 
-      <div className="fm-filter" role="group" aria-label="Row filter">
-        <button
-          type="button"
-          className="fm-btn"
-          aria-pressed={filterMode === 'requiredAndMapped'}
-          onClick={() => setFilterMode('requiredAndMapped')}
+      {slots.filter && (
+        <div
+          className={slotClass('filter', classNames)}
+          role="group"
+          aria-label="Row filter"
         >
-          Mapped + required
-        </button>
-        <button
-          type="button"
-          className="fm-btn"
-          aria-pressed={filterMode === 'all'}
-          onClick={() => setFilterMode('all')}
-        >
-          All {targets.length} properties
-        </button>
-      </div>
+          <Button
+            className="fm-btn"
+            aria-pressed={filterMode === 'requiredAndMapped'}
+            onClick={() => setFilterMode('requiredAndMapped')}
+          >
+            Mapped + required
+          </Button>
+          <Button
+            className="fm-btn"
+            aria-pressed={filterMode === 'all'}
+            onClick={() => setFilterMode('all')}
+          >
+            All {targets.length} properties
+          </Button>
+        </div>
+      )}
 
-      <div className="fm-row-list">
+      <div className={slotClass('rowList', classNames)}>
         {visibleRows.map((row) => {
           const resolveValue = (row.mapping?.resolve ?? '') as '' | ResolveJob
           return (
             <div
               key={row.id}
-              className="fm-row"
+              className={slotClass('row', classNames)}
               data-state={row.state}
               data-property-name={row.id}
               data-required={row.target?.required ? 'true' : undefined}
               data-resolve={row.mapping?.resolve}
+              data-source-kind={row.source?.kind}
             >
               <div className="fm-row-main">
                 <div className="fm-row-prop">
-                  <div className="fm-row-prop-name">
+                  <div className={slotClass('propertyLabel', classNames)}>
                     {row.target?.name}
                     {row.target?.required ? ' *' : ''}
                   </div>
-                  <span className="fm-dtype">{row.target?.dataType}</span>
+                  <Pill className={slotClass('dataType', classNames)}>
+                    {row.target?.dataType}
+                  </Pill>
                 </div>
-                <select
-                  className="fm-select"
+                <Select
+                  className={slotClass('sourceSelect', classNames)}
                   aria-label={`Source for ${row.id}`}
                   value={row.mapping?.sourceId ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value
+                  onChange={(v) => {
                     mapper.setSource(row.id, v || null)
                   }}
                 >
@@ -172,15 +207,14 @@ export function PropertyRows({
                       {opt.label}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {row.mapping?.sourceId ? (
-                  <select
-                    className="fm-select"
+                  <Select
+                    className={slotClass('transformSelect', classNames)}
                     aria-label={`Transform for ${row.id}`}
                     value={resolveValue}
-                    onChange={(e) => {
-                      const v = e.target.value as '' | ResolveJob
-                      mapper.setTransform(row.id, v || null)
+                    onChange={(v) => {
+                      mapper.setTransform(row.id, (v as ResolveJob) || null)
                     }}
                   >
                     {TRANSFORM_OPTIONS.map((opt) => (
@@ -188,24 +222,27 @@ export function PropertyRows({
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 ) : (
-                  <span className="fm-dtype">{row.target?.dataType}</span>
+                  <Pill className={slotClass('dataType', classNames)}>
+                    {row.target?.dataType}
+                  </Pill>
                 )}
-                <button
-                  type="button"
-                  className="fm-remove"
+                <Button
+                  className={slotClass('removeButton', classNames)}
                   aria-label={`Remove mapping for ${row.id}`}
                   onClick={() => mapper.removeRow(row.id)}
                 >
                   ×
-                </button>
+                </Button>
               </div>
-              {row.preview && (
-                <div className="fm-row-preview">{row.preview}</div>
+              {rowPreview && row.preview && (
+                <div className={slotClass('preview', classNames)}>
+                  {row.preview}
+                </div>
               )}
               {row.state === 'needsResolve' && row.requiredResolve && (
-                <div className="fm-row-flag">
+                <div className={slotClass('validation', classNames)}>
                   needs {row.requiredResolve}
                 </div>
               )}
@@ -216,12 +253,11 @@ export function PropertyRows({
 
       <div style={{ marginTop: 10 }}>
         {adding ? (
-          <select
-            className="fm-select"
+          <Select
+            className={slotClass('sourceSelect', classNames)}
             aria-label="Add property mapping"
-            defaultValue=""
-            onChange={(e) => {
-              const name = e.target.value
+            value=""
+            onChange={(name) => {
               if (name) onPickAddProperty(name)
             }}
           >
@@ -232,54 +268,56 @@ export function PropertyRows({
                 {p.required ? ' *' : ''} ({p.dataType})
               </option>
             ))}
-          </select>
+          </Select>
         ) : (
-          <button
-            type="button"
-            className="fm-btn"
+          <Button
+            className={slotClass('addButton', classNames)}
             onClick={() => setAdding(true)}
             disabled={addableProperties.length === 0}
           >
             + Add mapping
-          </button>
+          </Button>
         )}
       </div>
 
-      <details
-        className="fm-inspector"
-        open={inspectorOpen}
-        onToggle={(e) =>
-          setInspectorOpen((e.target as HTMLDetailsElement).open)
-        }
-      >
-        <summary>
-          Source fields ({originSources(sources).length})
-        </summary>
-        {originSources(sources).map((source) => {
-          const used = usageBySource.get(source.id) ?? []
-          return (
-            <div key={source.id} className="fm-inspector-row">
-              <div>
-                <strong>{source.label}</strong>
-                <div className="fm-value">{truncateSample(source.value, 60)}</div>
+      {slots.inspector && (
+        <details
+          className={slotClass('inspector', classNames)}
+          open={inspectorOpen}
+          onToggle={(e) =>
+            setInspectorOpen((e.target as HTMLDetailsElement).open)
+          }
+        >
+          <summary>
+            Source fields ({originSources(sources).length})
+          </summary>
+          {originSources(sources).map((source) => {
+            const used = usageBySource.get(source.id) ?? []
+            return (
+              <div key={source.id} className="fm-inspector-row">
+                <div>
+                  <strong>{source.label}</strong>
+                  <div className="fm-value">
+                    {truncateSample(source.value, 60)}
+                  </div>
+                </div>
+                <div className="fm-value">
+                  {used.length > 0 ? `→ ${used.join(', ')}` : 'unused'}
+                </div>
+                <Button
+                  className="fm-btn"
+                  onClick={() => mapThisSource(source.id)}
+                >
+                  Map this
+                </Button>
               </div>
-              <div className="fm-value">
-                {used.length > 0 ? `→ ${used.join(', ')}` : 'unused'}
-              </div>
-              <button
-                type="button"
-                className="fm-btn"
-                onClick={() => mapThisSource(source.id)}
-              >
-                Map this
-              </button>
-            </div>
-          )
-        })}
-      </details>
+            )
+          })}
+        </details>
+      )}
 
-      {showPreview && previewOpen && (
-        <pre className="fm-preview">
+      {jsonPreview && previewOpen && (
+        <pre className={slotClass('jsonPreview', classNames)}>
           {JSON.stringify(
             Object.fromEntries(
               mappings.map((m) => [

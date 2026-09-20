@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `FieldMapper` Phase 3 theming contract: `--sfm-*` tokens (with `--fm-*` aliases), `theme="default" | "structural" | "none"` (`unstyled` shim), `classNames` / `components` / `slots`, `@layer seed-field-mapper`, document-once CSS injection, row `data-source-kind`.
+- Deprecated (still work): `theme="unstyled"`, `showPreview`, `connectionColors` — prefer `theme="none"`, `slots.preview`, and CSS map tokens.
 - `FieldMapper` row layout (Phase 1–2 of the redesign): `layout="rows" | "wires"` (default still `wires`), `rowKey="property" | "source"`, `defaultRows`, optional `TargetProperty.required` for coverage.
 - Headless `useFieldMapper` hook + shared core (`setSource` / `setTransform` / coverage / conflicts); wires UI refactored to consume the hook.
 - Rows UI: transform control on the edge (no `buildResolvedSourceNodes` in the rows path), coverage toolbar, mapped+required filter, add-mapping flow, source inspector; source mode conflict + coverage banners.

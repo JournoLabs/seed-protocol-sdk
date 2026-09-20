@@ -1,5 +1,20 @@
 import React, { useState } from 'react'
 import type { ResolveJob } from '../types'
+import type {
+  FieldMapperSlot,
+  ResolvedFieldMapperComponents,
+  ResolvedFieldMapperSlots,
+} from './fieldMapperSlots'
+import {
+  showJsonPreview,
+  showRowPreview,
+  slotClass,
+} from './fieldMapperSlots'
+import {
+  DefaultButton,
+  DefaultPill,
+  DefaultSelect,
+} from './fieldMapperControls'
 import type { UseFieldMapperResult } from './fieldMapperTypes'
 
 const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
@@ -11,13 +26,23 @@ const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
 
 export type SourceRowsProps = {
   mapper: UseFieldMapperResult
-  showPreview?: boolean
+  slots: ResolvedFieldMapperSlots
+  classNames?: Partial<Record<FieldMapperSlot, string>>
+  ui?: ResolvedFieldMapperComponents
 }
 
 export function SourceRows({
   mapper,
-  showPreview = true,
+  slots,
+  classNames,
+  ui = {
+    Select: DefaultSelect,
+    Button: DefaultButton,
+    Pill: DefaultPill,
+  },
 }: SourceRowsProps) {
+  const Select = ui.Select
+  const Button = ui.Button
   const [previewOpen, setPreviewOpen] = useState(false)
   const {
     rows,
@@ -33,26 +58,29 @@ export function SourceRows({
     autoMap,
   } = mapper
 
+  const jsonPreview = showJsonPreview(slots.preview)
+  const rowPreview = showRowPreview(slots.preview)
+
   return (
     <>
-      <div className="fm-toolbar">
-        <button
-          type="button"
-          className="fm-btn fm-btn-primary"
-          onClick={() => autoMap()}
-        >
-          Auto-map
-        </button>
-        {showPreview && (
-          <button
-            type="button"
+      <div className={slotClass('toolbar', classNames)}>
+        {slots.autoMap && (
+          <Button
+            className={slotClass('autoMapButton', classNames)}
+            onClick={() => autoMap()}
+          >
+            Auto-map
+          </Button>
+        )}
+        {jsonPreview && (
+          <Button
             className="fm-btn"
             onClick={() => setPreviewOpen((v) => !v)}
           >
             {previewOpen ? 'Hide preview' : 'Preview JSON'}
-          </button>
+          </Button>
         )}
-        <span className="fm-meta">
+        <span className={slotClass('coverage', classNames)}>
           {coverage.mapped} of {coverage.total} mapped
           {coverage.missingRequired.length > 0
             ? ` · ${coverage.missingRequired.length} required missing: ${coverage.missingRequired.join(', ')}`
@@ -73,7 +101,7 @@ export function SourceRows({
         </div>
       )}
 
-      <div className="fm-row-list">
+      <div className={slotClass('rowList', classNames)}>
         {rows.map((row) => {
           const resolveValue = (row.mapping?.resolve ?? '') as '' | ResolveJob
           const sourceValue = row.source?.id ?? row.mapping?.sourceId ?? ''
@@ -82,17 +110,19 @@ export function SourceRows({
           return (
             <div
               key={row.id}
-              className="fm-row"
+              className={slotClass('row', classNames)}
               data-state={row.state}
+              data-property-name={propertyValue || undefined}
+              data-required={row.target?.required ? 'true' : undefined}
               data-resolve={row.mapping?.resolve}
+              data-source-kind={row.source?.kind}
             >
               <div className="fm-row-main fm-row-main-source">
-                <select
-                  className="fm-select"
+                <Select
+                  className={slotClass('sourceSelect', classNames)}
                   aria-label="Source field"
                   value={sourceValue}
-                  onChange={(e) => {
-                    const v = e.target.value
+                  onChange={(v) => {
                     setSource(row.id, v || null)
                   }}
                 >
@@ -102,15 +132,14 @@ export function SourceRows({
                       {opt.label}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {sourceValue ? (
-                  <select
-                    className="fm-select"
+                  <Select
+                    className={slotClass('transformSelect', classNames)}
                     aria-label="Transform"
                     value={resolveValue}
-                    onChange={(e) => {
-                      const v = e.target.value as '' | ResolveJob
-                      setTransform(row.id, v || null)
+                    onChange={(v) => {
+                      setTransform(row.id, (v as ResolveJob) || null)
                     }}
                   >
                     {TRANSFORM_OPTIONS.map((opt) => (
@@ -118,17 +147,16 @@ export function SourceRows({
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 ) : (
                   <span className="fm-into" />
                 )}
                 <span className="fm-into">into</span>
-                <select
-                  className="fm-select"
+                <Select
+                  className={slotClass('sourceSelect', classNames)}
                   aria-label="Target property"
                   value={propertyValue}
-                  onChange={(e) => {
-                    const v = e.target.value
+                  onChange={(v) => {
                     if (v) setProperty(row.id, v)
                   }}
                 >
@@ -138,26 +166,30 @@ export function SourceRows({
                       {opt.label}
                     </option>
                   ))}
-                </select>
-                <button
-                  type="button"
-                  className="fm-remove"
+                </Select>
+                <Button
+                  className={slotClass('removeButton', classNames)}
                   aria-label="Remove row"
                   onClick={() => removeRow(row.id)}
                 >
                   ×
-                </button>
+                </Button>
               </div>
-              {row.preview && (
-                <div className="fm-row-preview">{row.preview}</div>
+              {rowPreview && row.preview && (
+                <div className={slotClass('preview', classNames)}>
+                  {row.preview}
+                </div>
               )}
               {row.state === 'needsResolve' && row.requiredResolve && (
-                <div className="fm-row-flag">
+                <div className={slotClass('validation', classNames)}>
                   needs {row.requiredResolve}
                 </div>
               )}
               {row.state === 'conflict' && (
-                <div className="fm-row-flag" style={{ color: 'var(--fm-danger)' }}>
+                <div
+                  className={slotClass('validation', classNames)}
+                  style={{ color: 'var(--fm-danger)' }}
+                >
                   property already mapped by another row
                 </div>
               )}
@@ -167,17 +199,18 @@ export function SourceRows({
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <button type="button" className="fm-btn" onClick={() => addRow()}>
+        <Button
+          className={slotClass('addButton', classNames)}
+          onClick={() => addRow()}
+        >
           + Add mapping
-        </button>
+        </Button>
       </div>
 
-      {showPreview && previewOpen && (
-        <pre className="fm-preview">
+      {jsonPreview && previewOpen && (
+        <pre className={slotClass('jsonPreview', classNames)}>
           {JSON.stringify(
-            rows
-              .filter((r) => r.mapping)
-              .map((r) => r.mapping),
+            rows.filter((r) => r.mapping).map((r) => r.mapping),
             null,
             2,
           )}

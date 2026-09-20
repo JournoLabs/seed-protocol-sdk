@@ -1,0 +1,24 @@
+---
+description: Plans must isolate work on a separate git branch and verify clean mergeability without merging
+alwaysApply: true
+---
+Plan Git Branch Rules:
+
+When writing or executing a plan, ALWAYS include and follow these git workflow requirements:
+
+1. Branch isolation
+   - Create a dedicated feature/fix branch before any plan work begins
+   - Do ALL plan implementation, commits, and verification on that branch
+   - NEVER commit plan work directly to `main`/`master` (or the repo's default base branch)
+
+2. Verification stage (required in every plan)
+   - Confirm the branch is up to date with the base branch (fetch + rebase or merge-base check as appropriate)
+   - Verify the branch can merge cleanly into the base branch (e.g. dry-run / conflict check)
+   - Run relevant tests/checks needed to show the branch is merge-ready
+   - Do NOT perform the actual merge into the base branch
+   - Leave merge/PR merge for the user (or a later explicit request)
+
+3. Plan text
+   - Explicitly state the branch name (or how it will be named)
+   - Explicitly list mergeability verification steps
+   - Explicitly state that verification must not merge

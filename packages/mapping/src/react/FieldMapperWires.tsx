@@ -17,6 +17,17 @@ import type {
   SourceNode,
   TargetProperty,
 } from '../types'
+import type {
+  FieldMapperSlot,
+  ResolvedFieldMapperComponents,
+  ResolvedFieldMapperSlots,
+} from './fieldMapperSlots'
+import { showJsonPreview, slotClass } from './fieldMapperSlots'
+import {
+  DefaultButton,
+  DefaultPill,
+  DefaultSelect,
+} from './fieldMapperControls'
 import type { UseFieldMapperResult } from './fieldMapperTypes'
 import {
   connectionStrokeForIndex,
@@ -72,8 +83,11 @@ export type FieldMapperWiresProps = {
   mapper: UseFieldMapperResult
   lookups?: MappingLookups
   onLookupsChange?: (lookups: MappingLookups) => void
+  /** @deprecated Prefer CSS map tokens. */
   connectionColors?: string[]
-  showPreview?: boolean
+  slots: ResolvedFieldMapperSlots
+  classNames?: Partial<Record<FieldMapperSlot, string>>
+  ui?: ResolvedFieldMapperComponents
 }
 
 export function FieldMapperWires({
@@ -84,8 +98,15 @@ export function FieldMapperWires({
   lookups = {},
   onLookupsChange,
   connectionColors,
-  showPreview = true,
+  slots,
+  classNames,
+  ui = {
+    Select: DefaultSelect,
+    Button: DefaultButton,
+    Pill: DefaultPill,
+  },
 }: FieldMapperWiresProps) {
+  const Button = ui.Button
   const [activeSource, setActiveSource] = useState<string | null>(null)
   const [hoveredProp, setHoveredProp] = useState<string | null>(null)
   const [hoveredSource, setHoveredSource] = useState<string | null>(null)
@@ -249,27 +270,28 @@ export function FieldMapperWires({
   }, [sources, mappings, targets, pendingResolve])
 
   const { coverage } = mapper
+  const jsonPreview = showJsonPreview(slots.preview)
 
   return (
     <>
-      <div className="fm-toolbar">
-        <button
-          type="button"
-          className="fm-btn fm-btn-primary"
-          onClick={() => mapper.autoMap()}
-        >
-          Auto-map
-        </button>
-        {showPreview && (
-          <button
-            type="button"
+      <div className={slotClass('toolbar', classNames)}>
+        {slots.autoMap && (
+          <Button
+            className={slotClass('autoMapButton', classNames)}
+            onClick={() => mapper.autoMap()}
+          >
+            Auto-map
+          </Button>
+        )}
+        {jsonPreview && (
+          <Button
             className="fm-btn"
             onClick={() => setPreviewOpen((v) => !v)}
           >
             {previewOpen ? 'Hide preview' : 'Preview JSON'}
-          </button>
+          </Button>
         )}
-        <span className="fm-meta">
+        <span className={slotClass('coverage', classNames)}>
           {coverage.mapped} / {coverage.total} mapped
           {coverage.missingRequired.length > 0
             ? ` · ${coverage.missingRequired.length} required missing`
@@ -346,9 +368,8 @@ export function FieldMapperWires({
                     <span className="fm-kind">{source.kind}</span>
                   </div>
                   {mapped && (
-                    <button
-                      type="button"
-                      className="fm-remove"
+                    <Button
+                      className={slotClass('removeButton', classNames)}
                       aria-label="Remove all mappings for source"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -356,7 +377,7 @@ export function FieldMapperWires({
                       }}
                     >
                       ×
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="fm-value">{truncate(source.value, 80)}</div>
@@ -403,9 +424,8 @@ export function FieldMapperWires({
                       {prop.ref ? ` → ${prop.ref}` : ''}
                     </span>
                     {mapped && (
-                      <button
-                        type="button"
-                        className="fm-remove"
+                      <Button
+                        className={slotClass('removeButton', classNames)}
                         aria-label="Remove mapping for property"
                         onClick={(e) => {
                           e.stopPropagation()
@@ -413,7 +433,7 @@ export function FieldMapperWires({
                         }}
                       >
                         ×
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -429,8 +449,10 @@ export function FieldMapperWires({
         </div>
       </div>
 
-      {lookupMappings.length > 0 && onLookupsChange && (
-        <div className="fm-lookups">
+      {slots.lookups === 'section' &&
+        lookupMappings.length > 0 &&
+        onLookupsChange && (
+        <div className={slotClass('lookupEditor', classNames)}>
           <div className="fm-lookups-title">Relation lookups</div>
           {lookupMappings.map((mapping) => {
             const source = sources.find((s) => s.id === mapping.sourceId)
@@ -492,8 +514,10 @@ export function FieldMapperWires({
         </div>
       )}
 
-      {showPreview && previewOpen && (
-        <pre className="fm-preview">{JSON.stringify(preview, null, 2)}</pre>
+      {jsonPreview && previewOpen && (
+        <pre className={slotClass('jsonPreview', classNames)}>
+          {JSON.stringify(preview, null, 2)}
+        </pre>
       )}
     </>
   )

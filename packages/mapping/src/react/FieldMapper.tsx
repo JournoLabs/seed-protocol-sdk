@@ -1,10 +1,21 @@
-import React from 'react'
+import React, { useEffect, useMemo } from 'react'
 import type {
   FieldMapping,
   MappingLookups,
   SourceNode,
   TargetProperty,
 } from '../types'
+import {
+  DefaultButton,
+  DefaultPill,
+  DefaultSelect,
+} from './fieldMapperControls'
+import type {
+  FieldMapperComponents,
+  FieldMapperSlot,
+  FieldMapperSlots,
+} from './fieldMapperSlots'
+import { resolveSlots, slotClass } from './fieldMapperSlots'
 import { FieldMapperWires } from './FieldMapperWires'
 import type {
   FieldMapperDefaultRows,
@@ -12,7 +23,8 @@ import type {
   FieldMapperRowKey,
 } from './fieldMapperTypes'
 import {
-  DEFAULT_THEME_CSS,
+  ensureThemeInjected,
+  resolveTheme,
   type FieldMapperTheme,
 } from './fieldMapperTheme'
 import { PropertyRows } from './PropertyRows'
@@ -22,8 +34,34 @@ import { useFieldMapper } from './useFieldMapper'
 export {
   connectionStrokeForIndex,
   FIELD_MAPPER_PAIR_SLOTS,
+  resolveTheme,
+  ensureThemeInjected,
+  buildThemeCss,
+  wrapInThemeLayer,
+  DEFAULT_THEME_CSS,
+  STRUCTURAL_THEME_CSS,
+  PAINT_THEME_CSS,
+  THEME_STYLE_ID,
+  resetThemeInjectionForTests,
   type FieldMapperTheme,
+  type ResolvedFieldMapperTheme,
 } from './fieldMapperTheme'
+
+export {
+  slotClass,
+  resolveSlots,
+  showRowPreview,
+  showJsonPreview,
+  SLOT_BASE_CLASS,
+  type FieldMapperSlot,
+  type FieldMapperSlots,
+  type ResolvedFieldMapperSlots,
+  type FieldMapperComponents,
+  type ResolvedFieldMapperComponents,
+  type FieldMapperSelectProps,
+  type FieldMapperButtonProps,
+  type FieldMapperPillProps,
+} from './fieldMapperSlots'
 
 export type { FieldMapperLayout, FieldMapperRowKey, FieldMapperDefaultRows }
 
@@ -47,16 +85,22 @@ export type FieldMapperProps = {
   onAutoMap?: () => FieldMapping[]
   className?: string
   /**
-   * `default` injects a self-contained dark theme (CSS variables + rules).
-   * `unstyled` skips injected paint — host styles structural classes / CSS vars.
+   * `default` injects structural + paint CSS.
+   * `structural` injects layout/spacing only.
+   * `none` skips injection (host styles structural classes / CSS vars).
+   * `@deprecated` Prefer `none` — `unstyled` is a shim for `none`.
    */
   theme?: FieldMapperTheme
   /**
    * Optional connector stroke colors (wires layout). When omitted, strokes use
    * `var(--fm-map-N, var(--map-N, currentColor))` for N = 1…8.
+   * @deprecated Prefer CSS `--sfm-map-*` / `--fm-map-*` / `--map-*` tokens.
    */
   connectionColors?: string[]
-  /** Show JSON preview. Default true. */
+  /**
+   * Show JSON preview. Default true.
+   * @deprecated Prefer `slots.preview` (`'row' | 'json' | 'both' | false`).
+   */
   showPreview?: boolean
   /**
    * Authoring surface. Defaults to `'wires'` for one minor; pass `'rows'` for
@@ -71,6 +115,12 @@ export type FieldMapperProps = {
   rowKey?: FieldMapperRowKey
   /** Rows shown before the filter is widened (property mode). */
   defaultRows?: FieldMapperDefaultRows
+  /** Per-slot class injection; merged with package classes, never replacing them. */
+  classNames?: Partial<Record<FieldMapperSlot, string>>
+  /** Host design-system controls. Defaults are dependency-free natives. */
+  components?: FieldMapperComponents
+  /** Include / exclude structural pieces. Replaces `showPreview`. */
+  slots?: FieldMapperSlots
 }
 
 /**
@@ -88,10 +138,13 @@ export function FieldMapper({
   className,
   theme = 'default',
   connectionColors,
-  showPreview = true,
+  showPreview,
   layout = 'wires',
   rowKey = 'property',
   defaultRows = 'requiredAndMapped',
+  classNames,
+  components,
+  slots,
 }: FieldMapperProps) {
   const mapper = useFieldMapper({
     sources,
@@ -104,24 +157,47 @@ export function FieldMapper({
     onAutoMap,
   })
 
-  const rootClass = [
-    'seed-field-mapper',
-    theme === 'unstyled' ? 'seed-field-mapper--unstyled' : null,
-    layout === 'rows' ? 'seed-field-mapper--rows' : 'seed-field-mapper--wires',
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ')
+  const resolvedTheme = resolveTheme(theme)
+  const resolvedSlots = useMemo(
+    () => resolveSlots(slots, showPreview),
+    [slots, showPreview],
+  )
+
+  const ui = useMemo(
+    () => ({
+      Select: components?.Select ?? DefaultSelect,
+      Button: components?.Button ?? DefaultButton,
+      Pill: components?.Pill ?? DefaultPill,
+    }),
+    [components],
+  )
+
+  useEffect(() => {
+    ensureThemeInjected(resolvedTheme)
+  }, [resolvedTheme])
+
+  const unstyled =
+    resolvedTheme === 'none' || theme === 'unstyled' || theme === 'none'
+
+  const rootClass = slotClass(
+    'root',
+    classNames,
+    [
+      unstyled ? 'seed-field-mapper--unstyled' : null,
+      layout === 'rows' ? 'seed-field-mapper--rows' : 'seed-field-mapper--wires',
+      className,
+    ]
+      .filter(Boolean)
+      .join(' ') || null,
+  )
 
   return (
     <div
       className={rootClass}
-      data-theme={theme}
+      data-theme={resolvedTheme}
       data-layout={layout}
       data-row-key={layout === 'rows' ? rowKey : undefined}
     >
-      {theme === 'default' && <style>{DEFAULT_THEME_CSS}</style>}
-
       {layout === 'wires' ? (
         <FieldMapperWires
           sources={sources}
@@ -131,10 +207,17 @@ export function FieldMapper({
           lookups={lookups}
           onLookupsChange={onLookupsChange}
           connectionColors={connectionColors}
-          showPreview={showPreview}
+          slots={resolvedSlots}
+          classNames={classNames}
+          ui={ui}
         />
       ) : rowKey === 'source' ? (
-        <SourceRows mapper={mapper} showPreview={showPreview} />
+        <SourceRows
+          mapper={mapper}
+          slots={resolvedSlots}
+          classNames={classNames}
+          ui={ui}
+        />
       ) : (
         <PropertyRows
           sources={sources}
@@ -144,7 +227,9 @@ export function FieldMapper({
           defaultRows={defaultRows}
           lookups={lookups}
           onLookupsChange={onLookupsChange}
-          showPreview={showPreview}
+          slots={resolvedSlots}
+          classNames={classNames}
+          ui={ui}
         />
       )}
     </div>

@@ -221,18 +221,24 @@ and (when `onLookupsChange` is provided) the wires layout shows a string → see
 
 | Prop | Behavior |
 |------|----------|
-| `theme="default"` (default) | Injects CSS variables (`--fm-ground`, `--fm-ink`, `--fm-well`, `--fm-line`, `--fm-selection`, `--fm-map-1…8`) and rules |
-| `theme="unstyled"` | No injected paint — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …) |
-| `connectionColors` | Optional stroke palette for wires; otherwise `stroke="var(--fm-map-N, var(--map-N, currentColor))"` |
+| `theme="default"` (default) | Injects structural + paint CSS once into `document.head` (`@layer seed-field-mapper`) with `--sfm-*` tokens (`--fm-*` aliases kept for one minor) |
+| `theme="structural"` | Layout / spacing only — no color paint; inherits host colors |
+| `theme="none"` | No injection — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …); keeps `seed-field-mapper--unstyled` |
+| `theme="unstyled"` | **Deprecated** shim for `none` |
+| `classNames` | Per-slot host classes merged with package classes (`root`, `toolbar`, `row`, …) |
+| `components` | Optional host `Select` / `Button` / `Pill` (defaults are native controls) |
+| `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'section' \| false`; `'row'` falls back to `'section'` until Phase 4) |
+| `showPreview` | **Deprecated** — prefer `slots.preview` |
+| `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
 
 **DOM hooks for host CSS**
 
-- Wires: mapped wells expose `data-mapping-index` / `data-pair={index % 8}`; pending `.active` only on the selected source.
-- Rows: `data-state="empty|mapped|needsResolve|conflict"`, `data-property-name`, `data-resolve`, `data-required`.
+- Wires: mapped wells expose `data-mapping-index` / `data-pair={index % 8}` (kept for host CSS); pending `.active` only on the selected source.
+- Rows: `data-state="empty|mapped|needsResolve|conflict"`, `data-property-name`, `data-resolve`, `data-required`, `data-source-kind`.
 
 Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 
-See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study.
+See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phase 3 theming contract shipped; phases 4–5 remain).
 ## Relationship to `FeedFieldManifest`
 
 | Type | Package | Meaning |
@@ -248,4 +254,4 @@ Compose them: map + resolve into a plain item, then optionally normalize roles f
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
 - UI: self-contained dark theme; `layout` still defaults to `wires` (row layout is opt-in); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout phases 3–5 (theming contract, per-row lookups, default flip).
+See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout phases 4–5 (per-row lookups, default flip). Phase 3 theming contract is shipped.
