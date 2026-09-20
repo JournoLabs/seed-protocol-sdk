@@ -166,8 +166,8 @@ Patterns worth borrowing directly:
 
 ## 4. Proposed API
 
-Additive. Existing props keep working; `layout` defaults to `wires` for one minor, then
-flips.
+Additive. Existing props keep working; `layout` defaults to `rows` (Phase 5).
+`'wires'` remains supported but deprecated.
 
 ```ts
 export type FieldMapperLayout = 'rows' | 'wires'
@@ -328,16 +328,14 @@ Each phase is independently shippable; the persisted format never changes.
 
 | Phase | Work | Verification |
 |---|---|---|
-| 1 | Extract `useFieldMapper` from `FieldMapper`; keep the wire layout rendering from it | New hook unit tests; existing tests green |
-| 2a | Add `layout="rows"` with `rowKey="property"`: row list, transform control, coverage, filter, add-flow, inspector | Row mechanics unit tests; markdown and RSS smoke |
-| 2b | Add `rowKey="source"` renderer over the same hook, plus conflict banner and coverage panel | Conflict and coverage unit tests; both modes produce identical `MappingDocument` output for the same edges |
+| 1 | Extract `useFieldMapper` from `FieldMapper`; keep the wire layout rendering from it | New hook unit tests; existing tests green — **shipped** |
+| 2a | Add `layout="rows"` with `rowKey="property"`: row list, transform control, coverage, filter, add-flow, inspector | Row mechanics unit tests; markdown and RSS smoke — **shipped** |
+| 2b | Add `rowKey="source"` renderer over the same hook, plus conflict banner and coverage panel | Conflict and coverage unit tests; both modes produce identical `MappingDocument` output for the same edges — **shipped** |
 | 3 | Theming contract: `--sfm-*` tokens, `classNames`, `data-*`, `components`, `slots`, `@layer`, deprecation shims | Token/slot tests alongside `fieldMapperTheme.test.ts` — **shipped** |
 | 4 | Per-row preview and per-row lookup editor; JSON behind a disclosure | Preview parity with `applyMapping` output — **shipped** |
-| 5 | Migrate consumers, flip `layout` default to `rows`, deprecate `wires` | Desktop `/import/map` create flow; PermaPress RSS → Post publish run |
+| 5 | Flip `layout` default to `rows`, deprecate `wires`; consumer handoff | Package default + docs; PermaPress Feed Map already on rows — **shipped** (desktop `/import/map` migration still deferred) |
 
-Neither consumer has adopted the shared component yet — `seed-protocol-desktop` still
-runs its own 1,471-line `MarkdownMapper.tsx` — so landing the redesign before the
-migration means migrating once instead of twice.
+**PermaPress** adopted property-keyed rows (`layout="rows"`, `theme="none"`) during the redesign; see [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOFF.md). **seed-protocol-desktop** still runs a local `MarkdownMapper.tsx` — migrate once onto the shared rows UI when that app is in scope.
 
 Retire `buildResolvedSourceNodes` from the *UI* path in phase 2a but keep exporting it:
 `autoMap` and existing host code depend on it, and `parseResolvedSourceId` /

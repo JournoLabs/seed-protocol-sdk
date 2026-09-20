@@ -147,12 +147,12 @@ author those edges in FieldMapper or programmatically.
 
 Props-driven only — no Seed hooks or routing. Import from `@seedprotocol/mapping/react`.
 
-Two layouts share the same persisted `FieldMapping[]`:
+Two layouts share the same persisted `FieldMapping[]`. **`layout` defaults to `"rows"`.**
 
 | `layout` | Behavior |
 |----------|----------|
-| `"wires"` (default) | Two-pane click-to-connect with SVG connectors. Pass `buildResolvedSourceNodes(sources)` so extract/file candidates appear as source cards. |
-| `"rows"` | Row-based authoring. Pass **origin** sources only — transforms are chosen per row (no `@extract`/`@file` cards). |
+| `"rows"` (default) | Row-based authoring. Pass **origin** sources only — transforms are chosen per row (no `@extract`/`@file` cards). |
+| `"wires"` (**deprecated**) | Two-pane click-to-connect with SVG connectors. Pass `buildResolvedSourceNodes(sources)` so extract/file candidates appear as source cards. Still supported for one minor. |
 
 When `layout="rows"`, `rowKey` picks orientation:
 
@@ -175,19 +175,8 @@ import {
 } from '@seedprotocol/mapping'
 import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
 
-// Wires (existing hosts)
+// Rows — property-keyed (default layout; recommended)
 <FieldMapper
-  layout="wires"
-  sources={buildResolvedSourceNodes(markdownToSources(markdown))}
-  targets={targets}
-  mappings={mappings}
-  onChange={setMappings}
-  theme="unstyled"
-/>
-
-// Rows — property-keyed (recommended for large schemas)
-<FieldMapper
-  layout="rows"
   rowKey="property"
   sources={rssItemToSources(item)} // origin sources; no buildResolvedSourceNodes
   targets={postTargets} // e.g. { name: 'html', dataType: 'Html', required: true }
@@ -198,7 +187,17 @@ import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
 />
 
 // Rows — source-keyed
-<FieldMapper layout="rows" rowKey="source" sources={itemSources} targets={targets} mappings={mappings} onChange={setMappings} />
+<FieldMapper rowKey="source" sources={itemSources} targets={targets} mappings={mappings} onChange={setMappings} />
+
+// Wires (deprecated — opt in explicitly)
+<FieldMapper
+  layout="wires"
+  sources={buildResolvedSourceNodes(markdownToSources(markdown))}
+  targets={targets}
+  mappings={mappings}
+  onChange={setMappings}
+  theme="none"
+/>
 ```
 
 Headless mechanics (same package):
@@ -235,6 +234,7 @@ under `_pendingResolve`; JSON sits behind a disclosure).
 | `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'row' \| 'section' \| false`; rows layout defaults to `'row'`, wires to `'section'`) |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
 | `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
+| `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
 
 **DOM hooks for host CSS**
 
@@ -243,7 +243,8 @@ under `_pendingResolve`; JSON sits behind a disclosure).
 
 Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 
-See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 3–4 shipped; Phase 5 remains).
+See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped). PermaPress: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md).
+
 ## Relationship to `FeedFieldManifest`
 
 | Type | Package | Meaning |
@@ -253,10 +254,10 @@ See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-
 
 Compose them: map + resolve into a plain item, then optionally normalize roles for media/HTML display. Storage stays `Image` / `File` schema types — no separate Audio/Video dataTypes.
 
-## Phase 1 limits
+## Limits
 
 - Markdown: flat YAML frontmatter; `#` / `##` sections only
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
-- UI: self-contained dark theme; `layout` still defaults to `wires` (row layout is opt-in); no desktop/Tailwind coupling; no media preview player
+- UI: self-contained dark theme (or `theme="none"` / `"structural"` for host paint); `layout` defaults to `rows` (`wires` deprecated); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout Phase 5 (default flip). Phases 3–4 (theming, per-row lookups / preview parity) are shipped.
+See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for remaining consumer work (desktop migration, npm publish), [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout study, and [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md) for PermaPress.

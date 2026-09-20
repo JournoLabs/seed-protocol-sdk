@@ -1,15 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
+- `FieldMapper` Phase 5: `layout` defaults to `'rows'`; `'wires'` is deprecated but still supported.
 - `FieldMapper` Phase 4: per-row lookup editors (`slots.lookups: 'row'`), row/JSON preview parity with sync `applyMapping` (+ `_pendingResolve`), JSON behind a `<details>` disclosure. Rows layout defaults `lookups` to `'row'`; wires keep `'section'`.
 - Shared `LookupEditor` + `buildSyncPreviewBag` / upgraded `previewForEdge` (lookup table hits, coerced copy values).
 - `FieldMapper` Phase 3 theming contract: `--sfm-*` tokens (with `--fm-*` aliases), `theme="default" | "structural" | "none"` (`unstyled` shim), `classNames` / `components` / `slots`, `@layer seed-field-mapper`, document-once CSS injection, row `data-source-kind`.
-- Deprecated (still work): `theme="unstyled"`, `showPreview`, `connectionColors` — prefer `theme="none"`, `slots.preview`, and CSS map tokens.
-- `FieldMapper` row layout (Phase 1–2 of the redesign): `layout="rows" | "wires"` (default still `wires`), `rowKey="property" | "source"`, `defaultRows`, optional `TargetProperty.required` for coverage.
+- Deprecated (still work): `layout="wires"`, `theme="unstyled"`, `showPreview`, `connectionColors` — prefer `layout="rows"`, `theme="none"`, `slots.preview`, and CSS map tokens.
+- `FieldMapper` row layout (Phase 1–2 of the redesign): `layout="rows" | "wires"`, `rowKey="property" | "source"`, `defaultRows`, optional `TargetProperty.required` for coverage.
 - Headless `useFieldMapper` hook + shared core (`setSource` / `setTransform` / coverage / conflicts); wires UI refactored to consume the hook.
 - Rows UI: transform control on the edge (no `buildResolvedSourceNodes` in the rows path), coverage toolbar, mapped+required filter, add-mapping flow, source inspector; source mode conflict + coverage banners.
 - **Breaking:** `FieldMapper` and related UI exports moved to `@seedprotocol/mapping/react`. The default entry is headless-only (no React import or required peer) so Node sidecars can load without React. Install `react` / `react-dom` only when using `/react`.
+- **Breaking:** `FieldMapper` `layout` default flipped from `'wires'` to `'rows'`. Pass `layout="wires"` explicitly if you still need the two-pane connector UI. For rows, pass origin sources only (not `buildResolvedSourceNodes`).
 - `resolve: 'lookup'` for Relation / List-of-Relation targets: persistable `MappingDocument.lookups` (string → seed uid), `applyMappingAsync` table hit + optional host callback on miss; sync apply skips lookup edges.
 - `TargetProperty.ref` / `refValueType`; `isRelationLookupTarget` helper; `autoMap` never plain-copies onto lookup-capable targets (author → authors no longer writes a string into a relation list).
 - `FieldMapper`: connecting to a lookup-capable target sets `resolve: 'lookup'`; optional `lookups` / `onLookupsChange` panel edits string → uid maps (comma-separated for multi).

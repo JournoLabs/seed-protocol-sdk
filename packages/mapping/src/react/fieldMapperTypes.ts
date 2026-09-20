@@ -6,6 +6,7 @@ import type {
   TargetProperty,
 } from '../types'
 
+/** Authoring surface. Prefer `'rows'`; `'wires'` is deprecated but still supported. */
 export type FieldMapperLayout = 'rows' | 'wires'
 
 export type FieldMapperRowKey = 'property' | 'source'

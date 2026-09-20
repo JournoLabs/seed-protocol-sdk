@@ -67,9 +67,9 @@ export type { FieldMapperLayout, FieldMapperRowKey, FieldMapperDefaultRows }
 
 export type FieldMapperProps = {
   /**
-   * Source nodes to display. For `layout="wires"`, pass
-   * `buildResolvedSourceNodes(sources)` to show extract/file candidates.
-   * For `layout="rows"`, pass origin sources — transforms are chosen per row.
+   * Source nodes to display. For `layout="rows"` (default), pass origin
+   * sources — transforms are chosen per row. For deprecated `layout="wires"`,
+   * pass `buildResolvedSourceNodes(sources)` to show extract/file candidates.
    */
   sources: SourceNode[]
   targets: TargetProperty[]
@@ -103,8 +103,8 @@ export type FieldMapperProps = {
    */
   showPreview?: boolean
   /**
-   * Authoring surface. Defaults to `'wires'` for one minor; pass `'rows'` for
-   * the row-based redesign.
+   * Authoring surface. Defaults to `'rows'`.
+   * `@deprecated` Prefer `'rows'` — `'wires'` remains supported for one minor.
    */
   layout?: FieldMapperLayout
   /**
@@ -125,7 +125,8 @@ export type FieldMapperProps = {
 
 /**
  * Generic field mapper. Props-driven; no Seed hooks or routing.
- * Default layout is wires; pass `layout="rows"` for the row-based UI.
+ * Default layout is rows; pass `layout="wires"` only if you still need the
+ * two-pane connector UI (deprecated).
  */
 export function FieldMapper({
   sources,
@@ -139,7 +140,7 @@ export function FieldMapper({
   theme = 'default',
   connectionColors,
   showPreview,
-  layout = 'wires',
+  layout = 'rows',
   rowKey = 'property',
   defaultRows = 'requiredAndMapped',
   classNames,
