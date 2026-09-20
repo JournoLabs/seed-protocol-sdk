@@ -1,5 +1,11 @@
-import React, { useState } from 'react'
-import type { ResolveJob } from '../types'
+import React, { useMemo, useState } from 'react'
+import type {
+  FieldMapping,
+  MappingLookups,
+  ResolveJob,
+  SourceNode,
+  TargetProperty,
+} from '../types'
 import type {
   FieldMapperSlot,
   ResolvedFieldMapperComponents,
@@ -15,7 +21,9 @@ import {
   DefaultPill,
   DefaultSelect,
 } from './fieldMapperControls'
+import { buildSyncPreviewBag } from './fieldMapperCore'
 import type { UseFieldMapperResult } from './fieldMapperTypes'
+import { LookupEditor } from './LookupEditor'
 
 const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
   { value: '', label: 'copy' },
@@ -25,14 +33,24 @@ const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
 ]
 
 export type SourceRowsProps = {
+  sources: SourceNode[]
+  targets: TargetProperty[]
+  mappings: FieldMapping[]
   mapper: UseFieldMapperResult
+  lookups?: MappingLookups
+  onLookupsChange?: (lookups: MappingLookups) => void
   slots: ResolvedFieldMapperSlots
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
 }
 
 export function SourceRows({
+  sources,
+  targets,
+  mappings,
   mapper,
+  lookups = {},
+  onLookupsChange,
   slots,
   classNames,
   ui = {
@@ -58,8 +76,16 @@ export function SourceRows({
     autoMap,
   } = mapper
 
+  const syncPreview = useMemo(
+    () => buildSyncPreviewBag(sources, mappings, targets),
+    [sources, mappings, targets],
+  )
+
   const jsonPreview = showJsonPreview(slots.preview)
   const rowPreview = showRowPreview(slots.preview)
+  const showRowLookups = slots.lookups === 'row' && Boolean(onLookupsChange)
+  const showSectionLookups =
+    slots.lookups === 'section' && Boolean(onLookupsChange)
 
   return (
     <>
@@ -70,14 +96,6 @@ export function SourceRows({
             onClick={() => autoMap()}
           >
             Auto-map
-          </Button>
-        )}
-        {jsonPreview && (
-          <Button
-            className="fm-btn"
-            onClick={() => setPreviewOpen((v) => !v)}
-          >
-            {previewOpen ? 'Hide preview' : 'Preview JSON'}
           </Button>
         )}
         <span className={slotClass('coverage', classNames)}>
@@ -193,6 +211,19 @@ export function SourceRows({
                   property already mapped by another row
                 </div>
               )}
+              {showRowLookups &&
+                row.mapping?.resolve === 'lookup' &&
+                row.mapping && (
+                  <LookupEditor
+                    mode="row"
+                    mappings={[row.mapping]}
+                    sources={sources}
+                    targets={targets}
+                    lookups={lookups}
+                    onLookupsChange={onLookupsChange!}
+                    classNames={classNames}
+                  />
+                )}
             </div>
           )
         })}
@@ -207,14 +238,31 @@ export function SourceRows({
         </Button>
       </div>
 
-      {jsonPreview && previewOpen && (
-        <pre className={slotClass('jsonPreview', classNames)}>
-          {JSON.stringify(
-            rows.filter((r) => r.mapping).map((r) => r.mapping),
-            null,
-            2,
-          )}
-        </pre>
+      {showSectionLookups && (
+        <LookupEditor
+          mode="section"
+          mappings={mappings}
+          sources={sources}
+          targets={targets}
+          lookups={lookups}
+          onLookupsChange={onLookupsChange!}
+          classNames={classNames}
+        />
+      )}
+
+      {jsonPreview && (
+        <details
+          className={slotClass('jsonPreview', classNames)}
+          open={previewOpen}
+          onToggle={(e) =>
+            setPreviewOpen((e.target as HTMLDetailsElement).open)
+          }
+        >
+          <summary>Preview JSON</summary>
+          <pre className="fm-preview-body">
+            {JSON.stringify(syncPreview, null, 2)}
+          </pre>
+        </details>
       )}
     </>
   )

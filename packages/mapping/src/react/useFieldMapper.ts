@@ -78,8 +78,8 @@ export function useFieldMapper({
   const propertyRows = useMemo(() => {
     // Property mode always exposes the full target list to the hook;
     // UI filter is applied by the renderer via filterPropertyNames.
-    return buildPropertyModeRows({ targets, mappings, sources })
-  }, [targets, mappings, sources])
+    return buildPropertyModeRows({ targets, mappings, sources, lookups })
+  }, [targets, mappings, sources, lookups])
 
   const sourceBuilt = useMemo(() => {
     return buildSourceModeRows({
@@ -88,8 +88,9 @@ export function useFieldMapper({
       drafts,
       sources,
       targets,
+      lookups,
     })
-  }, [mappings, edgeIds, drafts, sources, targets])
+  }, [mappings, edgeIds, drafts, sources, targets, lookups])
 
   const rows = rowKey === 'property' ? propertyRows : sourceBuilt.rows
   const conflicts =

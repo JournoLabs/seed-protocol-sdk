@@ -56,6 +56,8 @@ export {
   computeCoverage,
   buildSourceOptions,
   buildPropertyModeRows,
+  buildSyncPreviewBag,
+  previewForEdge,
   findConflicts,
   connectSourceToProperty,
 } from './react/fieldMapperCore'

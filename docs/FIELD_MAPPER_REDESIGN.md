@@ -332,7 +332,7 @@ Each phase is independently shippable; the persisted format never changes.
 | 2a | Add `layout="rows"` with `rowKey="property"`: row list, transform control, coverage, filter, add-flow, inspector | Row mechanics unit tests; markdown and RSS smoke |
 | 2b | Add `rowKey="source"` renderer over the same hook, plus conflict banner and coverage panel | Conflict and coverage unit tests; both modes produce identical `MappingDocument` output for the same edges |
 | 3 | Theming contract: `--sfm-*` tokens, `classNames`, `data-*`, `components`, `slots`, `@layer`, deprecation shims | Token/slot tests alongside `fieldMapperTheme.test.ts` — **shipped** |
-| 4 | Per-row preview and per-row lookup editor; JSON behind a disclosure | Preview parity with `applyMapping` output |
+| 4 | Per-row preview and per-row lookup editor; JSON behind a disclosure | Preview parity with `applyMapping` output — **shipped** |
 | 5 | Migrate consumers, flip `layout` default to `rows`, deprecate `wires` | Desktop `/import/map` create flow; PermaPress RSS → Post publish run |
 
 Neither consumer has adopted the shared component yet — `seed-protocol-desktop` still

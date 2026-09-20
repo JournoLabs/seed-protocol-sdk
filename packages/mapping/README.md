@@ -215,7 +215,12 @@ const mapper = useFieldMapper({
 ```
 
 Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`
-and (when `onLookupsChange` is provided) the wires layout shows a string → seed uid editor.
+and (when `onLookupsChange` is provided) shows a string → seed uid editor — per-row
+when `layout="rows"` (default `slots.lookups: 'row'`), or as a section when
+`layout="wires"` / `slots.lookups: 'section'`.
+
+Row and JSON previews match sync `applyMapping` output (pending resolve edges listed
+under `_pendingResolve`; JSON sits behind a disclosure).
 
 **Theming**
 
@@ -227,7 +232,7 @@ and (when `onLookupsChange` is provided) the wires layout shows a string → see
 | `theme="unstyled"` | **Deprecated** shim for `none` |
 | `classNames` | Per-slot host classes merged with package classes (`root`, `toolbar`, `row`, …) |
 | `components` | Optional host `Select` / `Button` / `Pill` (defaults are native controls) |
-| `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'section' \| false`; `'row'` falls back to `'section'` until Phase 4) |
+| `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'row' \| 'section' \| false`; rows layout defaults to `'row'`, wires to `'section'`) |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
 | `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
 
@@ -238,7 +243,7 @@ and (when `onLookupsChange` is provided) the wires layout shows a string → see
 
 Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 
-See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phase 3 theming contract shipped; phases 4–5 remain).
+See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 3–4 shipped; Phase 5 remains).
 ## Relationship to `FeedFieldManifest`
 
 | Type | Package | Meaning |
@@ -254,4 +259,4 @@ Compose them: map + resolve into a plain item, then optionally normalize roles f
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
 - UI: self-contained dark theme; `layout` still defaults to `wires` (row layout is opt-in); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout phases 4–5 (per-row lookups, default flip). Phase 3 theming contract is shipped.
+See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout Phase 5 (default flip). Phases 3–4 (theming, per-row lookups / preview parity) are shipped.

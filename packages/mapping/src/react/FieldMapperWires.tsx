@@ -5,8 +5,6 @@ import React, {
   useRef,
   useState,
 } from 'react'
-import { applyMapping } from '../applyMapping'
-import { normalizeLookupKey } from '../relationLookup'
 import {
   parseResolvedSourceId,
   resolvedSourceId,
@@ -28,7 +26,9 @@ import {
   DefaultPill,
   DefaultSelect,
 } from './fieldMapperControls'
+import { buildSyncPreviewBag } from './fieldMapperCore'
 import type { UseFieldMapperResult } from './fieldMapperTypes'
+import { LookupEditor } from './LookupEditor'
 import {
   connectionStrokeForIndex,
   pairSlot,
@@ -42,22 +42,6 @@ type ConnectorPoint = {
   stroke: string
   mappingIndex: number
   mapping: FieldMapping
-}
-
-function parseUidInput(raw: string): string | string[] {
-  const parts = raw
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0]!
-  return parts
-}
-
-function formatUidValue(value: string | string[] | undefined): string {
-  if (value == null) return ''
-  if (Array.isArray(value)) return value.join(', ')
-  return value
 }
 
 function displaySourceIdForMapping(
@@ -118,17 +102,6 @@ export function FieldMapperWires({
   const sourceRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const propRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const targetsByName = useMemo(() => {
-    const map = new Map<string, TargetProperty>()
-    for (const t of targets) map.set(t.name, t)
-    return map
-  }, [targets])
-
-  const lookupMappings = useMemo(
-    () => mappings.filter((m) => m.resolve === 'lookup'),
-    [mappings],
-  )
-
   const mappingIndexByProp = useMemo(() => {
     const map = new Map<string, number>()
     mappings.forEach((m, i) => {
@@ -149,28 +122,6 @@ export function FieldMapperWires({
     })
     return map
   }, [mappings, sources])
-
-  const setLookupEntry = (
-    propertyName: string,
-    sourceKey: string,
-    uidRaw: string,
-  ) => {
-    if (!onLookupsChange) return
-    const table = { ...(lookups[propertyName] ?? {}) }
-    const parsed = parseUidInput(uidRaw)
-    if (parsed === '' || (Array.isArray(parsed) && parsed.length === 0)) {
-      delete table[sourceKey]
-    } else {
-      table[sourceKey] = parsed
-    }
-    const next = { ...lookups }
-    if (Object.keys(table).length === 0) {
-      delete next[propertyName]
-    } else {
-      next[propertyName] = table
-    }
-    onLookupsChange(next)
-  }
 
   const getConnectorPoints = useCallback((): ConnectorPoint[] => {
     if (!containerRef.current) return []
@@ -251,23 +202,10 @@ export function FieldMapperWires({
 
   const anyEdgeHighlighted = hoveredProp != null || hoveredSource != null
 
-  const pendingResolve = useMemo(
-    () => mappings.filter((m) => m.resolve),
-    [mappings],
+  const preview = useMemo(
+    () => buildSyncPreviewBag(sources, mappings, targets),
+    [sources, mappings, targets],
   )
-
-  const preview = useMemo(() => {
-    const bag = applyMapping(sources, mappings, targets)
-    if (pendingResolve.length === 0) return bag
-    return {
-      ...bag,
-      _pendingResolve: pendingResolve.map((m) => ({
-        propertyName: m.propertyName,
-        sourceId: m.sourceId,
-        resolve: m.resolve,
-      })),
-    }
-  }, [sources, mappings, targets, pendingResolve])
 
   const { coverage } = mapper
   const jsonPreview = showJsonPreview(slots.preview)
@@ -281,14 +219,6 @@ export function FieldMapperWires({
             onClick={() => mapper.autoMap()}
           >
             Auto-map
-          </Button>
-        )}
-        {jsonPreview && (
-          <Button
-            className="fm-btn"
-            onClick={() => setPreviewOpen((v) => !v)}
-          >
-            {previewOpen ? 'Hide preview' : 'Preview JSON'}
           </Button>
         )}
         <span className={slotClass('coverage', classNames)}>
@@ -449,75 +379,31 @@ export function FieldMapperWires({
         </div>
       </div>
 
-      {slots.lookups === 'section' &&
-        lookupMappings.length > 0 &&
-        onLookupsChange && (
-        <div className={slotClass('lookupEditor', classNames)}>
-          <div className="fm-lookups-title">Relation lookups</div>
-          {lookupMappings.map((mapping) => {
-            const source = sources.find((s) => s.id === mapping.sourceId)
-            const sampleKey = normalizeLookupKey(
-              source?.value || source?.label || '',
-            )
-            const table = lookups[mapping.propertyName] ?? {}
-            const keys = new Set<string>(Object.keys(table))
-            if (sampleKey) keys.add(sampleKey)
-            const keyList = [...keys]
-            const target = targetsByName.get(mapping.propertyName)
-            return (
-              <div
-                key={`${mapping.sourceId}-${mapping.propertyName}`}
-                className="fm-lookup-block"
-              >
-                <h4>
-                  {mapping.propertyName}
-                  {target?.ref ? ` → ${target.ref}` : ''}
-                </h4>
-                <div className="fm-lookup-hint">
-                  Map source strings to seed UIDs
-                  {target?.dataType === 'List'
-                    ? ' (comma-separate for multiple)'
-                    : ''}
-                  . Host owns Identity search/create.
-                </div>
-                {keyList.length === 0 ? (
-                  <div className="fm-lookup-hint">
-                    No sample value yet — paste a source string key after
-                    connecting.
-                  </div>
-                ) : (
-                  keyList.map((key) => (
-                    <div key={key} className="fm-lookup-row">
-                      <div className="fm-lookup-key" title={key}>
-                        {key || '(empty)'}
-                      </div>
-                      <input
-                        className="fm-lookup-input"
-                        type="text"
-                        placeholder="seed uid"
-                        value={formatUidValue(table[key])}
-                        onChange={(e) =>
-                          setLookupEntry(
-                            mapping.propertyName,
-                            key,
-                            e.target.value,
-                          )
-                        }
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
-                  ))
-                )}
-              </div>
-            )
-          })}
-        </div>
+      {slots.lookups === 'section' && onLookupsChange && (
+        <LookupEditor
+          mode="section"
+          mappings={mappings}
+          sources={sources}
+          targets={targets}
+          lookups={lookups}
+          onLookupsChange={onLookupsChange}
+          classNames={classNames}
+        />
       )}
 
-      {jsonPreview && previewOpen && (
-        <pre className={slotClass('jsonPreview', classNames)}>
-          {JSON.stringify(preview, null, 2)}
-        </pre>
+      {jsonPreview && (
+        <details
+          className={slotClass('jsonPreview', classNames)}
+          open={previewOpen}
+          onToggle={(e) =>
+            setPreviewOpen((e.target as HTMLDetailsElement).open)
+          }
+        >
+          <summary>Preview JSON</summary>
+          <pre className="fm-preview-body">
+            {JSON.stringify(preview, null, 2)}
+          </pre>
+        </details>
       )}
     </>
   )

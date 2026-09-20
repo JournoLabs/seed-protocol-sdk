@@ -159,8 +159,8 @@ export function FieldMapper({
 
   const resolvedTheme = resolveTheme(theme)
   const resolvedSlots = useMemo(
-    () => resolveSlots(slots, showPreview),
-    [slots, showPreview],
+    () => resolveSlots(slots, showPreview, { layout }),
+    [slots, showPreview, layout],
   )
 
   const ui = useMemo(
@@ -213,7 +213,12 @@ export function FieldMapper({
         />
       ) : rowKey === 'source' ? (
         <SourceRows
+          sources={sources}
+          targets={targets}
+          mappings={mappings}
           mapper={mapper}
+          lookups={lookups}
+          onLookupsChange={onLookupsChange}
           slots={resolvedSlots}
           classNames={classNames}
           ui={ui}

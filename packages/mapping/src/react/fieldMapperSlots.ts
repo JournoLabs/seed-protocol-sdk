@@ -1,4 +1,5 @@
 import type { ComponentType, MouseEvent, ReactNode } from 'react'
+import type { FieldMapperLayout } from './fieldMapperTypes'
 
 export type FieldMapperSlot =
   | 'root'
@@ -26,8 +27,8 @@ export type FieldMapperSlots = {
   inspector?: boolean
   preview?: 'row' | 'json' | 'both' | false
   /**
-   * Lookup editor placement. `'row'` is accepted but falls back to `'section'`
-   * until Phase 4 ships per-row lookup editors.
+   * Lookup editor placement.
+   * Unspecified defaults to `'row'` when `layout === 'rows'`, otherwise `'section'`.
    */
   lookups?: 'row' | 'section' | false
 }
@@ -37,8 +38,12 @@ export type ResolvedFieldMapperSlots = {
   filter: boolean
   inspector: boolean
   preview: 'row' | 'json' | 'both' | false
-  /** Always `'section' | false` after Phase 3 resolution. */
-  lookups: 'section' | false
+  lookups: 'row' | 'section' | false
+}
+
+export type ResolveSlotsOptions = {
+  /** Used when `slots.lookups` is unspecified. */
+  layout?: FieldMapperLayout
 }
 
 export type FieldMapperSelectProps = {
@@ -112,11 +117,13 @@ export function slotClass(
 
 /**
  * Resolve slots + deprecated `showPreview` shim.
- * Default preview is `'both'` (row preview + JSON toggle) when unspecified.
+ * Default preview is `'both'` (row preview + JSON disclosure) when unspecified.
+ * Unspecified lookups: `'row'` for rows layout, `'section'` for wires.
  */
 export function resolveSlots(
   slots?: FieldMapperSlots,
   showPreview?: boolean,
+  options?: ResolveSlotsOptions,
 ): ResolvedFieldMapperSlots {
   let preview: ResolvedFieldMapperSlots['preview']
   if (slots?.preview !== undefined) {
@@ -130,9 +137,10 @@ export function resolveSlots(
   let lookups: ResolvedFieldMapperSlots['lookups']
   if (slots?.lookups === false) {
     lookups = false
+  } else if (slots?.lookups === 'row' || slots?.lookups === 'section') {
+    lookups = slots.lookups
   } else {
-    // `'row'` and `'section'` both resolve to section until Phase 4.
-    lookups = 'section'
+    lookups = options?.layout === 'rows' ? 'row' : 'section'
   }
 
   return {

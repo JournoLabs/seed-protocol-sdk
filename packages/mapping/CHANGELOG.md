@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `FieldMapper` Phase 4: per-row lookup editors (`slots.lookups: 'row'`), row/JSON preview parity with sync `applyMapping` (+ `_pendingResolve`), JSON behind a `<details>` disclosure. Rows layout defaults `lookups` to `'row'`; wires keep `'section'`.
+- Shared `LookupEditor` + `buildSyncPreviewBag` / upgraded `previewForEdge` (lookup table hits, coerced copy values).
 - `FieldMapper` Phase 3 theming contract: `--sfm-*` tokens (with `--fm-*` aliases), `theme="default" | "structural" | "none"` (`unstyled` shim), `classNames` / `components` / `slots`, `@layer seed-field-mapper`, document-once CSS injection, row `data-source-kind`.
 - Deprecated (still work): `theme="unstyled"`, `showPreview`, `connectionColors` — prefer `theme="none"`, `slots.preview`, and CSS map tokens.
 - `FieldMapper` row layout (Phase 1–2 of the redesign): `layout="rows" | "wires"` (default still `wires`), `rowKey="property" | "source"`, `defaultRows`, optional `TargetProperty.required` for coverage.

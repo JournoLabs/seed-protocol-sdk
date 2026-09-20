@@ -200,8 +200,15 @@ describe('resolveSlots shims', () => {
     expect(showJsonPreview('row')).toBe(false)
   })
 
-  it('falls back lookups row to section until Phase 4', () => {
-    expect(resolveSlots({ lookups: 'row' }).lookups).toBe('section')
+  it('honors lookups row and layout-aware defaults', () => {
+    expect(resolveSlots({ lookups: 'row' }).lookups).toBe('row')
+    expect(resolveSlots({ lookups: 'section' }).lookups).toBe('section')
     expect(resolveSlots({ lookups: false }).lookups).toBe(false)
+    expect(resolveSlots(undefined, undefined, { layout: 'wires' }).lookups).toBe(
+      'section',
+    )
+    expect(resolveSlots(undefined, undefined, { layout: 'rows' }).lookups).toBe(
+      'row',
+    )
   })
 })

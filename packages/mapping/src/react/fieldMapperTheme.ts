@@ -200,10 +200,44 @@ ${STRUCTURAL_TOKENS}
   max-height: 200px;
   overflow: auto;
 }
+.seed-field-mapper details.fm-preview {
+  font-family: var(--sfm-font-family);
+  white-space: normal;
+  max-height: none;
+  overflow: visible;
+  padding: var(--sfm-space-2) var(--sfm-space-3);
+}
+.seed-field-mapper details.fm-preview > summary {
+  cursor: pointer;
+  font-size: var(--sfm-font-size-sm);
+  list-style: disclosure-closed;
+}
+.seed-field-mapper details.fm-preview[open] > summary {
+  list-style: disclosure-open;
+  margin-bottom: var(--sfm-space-2);
+}
+.seed-field-mapper .fm-preview-body {
+  margin: 0;
+  font-family: var(--sfm-font-mono);
+  font-size: var(--sfm-font-size-sm);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
 .seed-field-mapper .fm-lookups {
   margin-top: var(--sfm-space-4);
   border-top: 1px solid;
   padding-top: var(--sfm-space-3);
+}
+.seed-field-mapper .fm-row .fm-lookups,
+.seed-field-mapper .fm-lookups--row {
+  margin-top: var(--sfm-space-2);
+  border-top: none;
+  padding-top: 0;
+}
+.seed-field-mapper .fm-row .fm-lookup-block {
+  margin-bottom: 0;
+  padding: var(--sfm-space-2);
 }
 .seed-field-mapper .fm-lookups-title {
   font-size: var(--sfm-font-size-sm);
@@ -400,6 +434,9 @@ ${PAINT_TOKENS}
   background: color-mix(in srgb, var(--sfm-color-ground) 80%, black);
   border-color: var(--sfm-color-line);
   color: var(--sfm-color-ink);
+}
+.seed-field-mapper details.fm-preview > summary {
+  color: var(--sfm-color-muted);
 }
 .seed-field-mapper .fm-lookups {
   border-color: var(--sfm-color-line);
