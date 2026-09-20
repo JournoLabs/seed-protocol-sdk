@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `FieldMapper` row layout (Phase 1–2 of the redesign): `layout="rows" | "wires"` (default still `wires`), `rowKey="property" | "source"`, `defaultRows`, optional `TargetProperty.required` for coverage.
+- Headless `useFieldMapper` hook + shared core (`setSource` / `setTransform` / coverage / conflicts); wires UI refactored to consume the hook.
+- Rows UI: transform control on the edge (no `buildResolvedSourceNodes` in the rows path), coverage toolbar, mapped+required filter, add-mapping flow, source inspector; source mode conflict + coverage banners.
+- **Breaking:** `FieldMapper` and related UI exports moved to `@seedprotocol/mapping/react`. The default entry is headless-only (no React import or required peer) so Node sidecars can load without React. Install `react` / `react-dom` only when using `/react`.
 - `resolve: 'lookup'` for Relation / List-of-Relation targets: persistable `MappingDocument.lookups` (string → seed uid), `applyMappingAsync` table hit + optional host callback on miss; sync apply skips lookup edges.
 - `TargetProperty.ref` / `refValueType`; `isRelationLookupTarget` helper; `autoMap` never plain-copies onto lookup-capable targets (author → authors no longer writes a string into a relation list).
 - `FieldMapper`: connecting to a lookup-capable target sets `resolve: 'lookup'`; optional `lookups` / `onLookupsChange` panel edits string → uid maps (comma-separated for multi).

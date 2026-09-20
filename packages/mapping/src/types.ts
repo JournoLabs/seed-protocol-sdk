@@ -35,6 +35,11 @@ export type TargetProperty = {
   ref?: string
   /** Element type for List properties (e.g. Relation, Text). */
   refValueType?: string
+  /**
+   * When true, FieldMapper coverage treats an empty mapping as missing-required.
+   * Host-supplied hint only — not part of MappingDocument.
+   */
+  required?: boolean
 }
 
 /**

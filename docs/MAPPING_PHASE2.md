@@ -8,7 +8,7 @@ Package: [`packages/mapping`](../packages/mapping)
 
 - **Headless:** `SourceNode`, `FieldMapping`, `MappingDocument`, `applyMapping`, `autoMap`
 - **Adapters:** `markdownToSources`, `rssItemToSources`, `rssXmlToSources` (`rss-parser`, field set aligned with `@seedprotocol/feed` `parseRssString`)
-- **UI:** props-driven `FieldMapper` (no `useCreateItem`, no router)
+- **UI:** props-driven `FieldMapper` via `@seedprotocol/mapping/react` (no `useCreateItem`, no router); default entry is headless-only
 - **Monorepo:** `build:mapping`, `publish:mapping`, sync-versions / publish-package wiring
 - **Not done:** npm publish, desktop migration, PermaPress feed-map UI
 
@@ -33,7 +33,7 @@ Package: [`packages/mapping`](../packages/mapping)
 
 Product context: PermaPress ADR 0089 (RSS XML fields → Post schema as first premium surface).
 
-- Author UI using `FieldMapper` + `rssXmlToSources` / `rssItemToSources`
+- Author UI using `FieldMapper` from `@seedprotocol/mapping/react` + `rssXmlToSources` / `rssItemToSources` from `@seedprotocol/mapping`
 - Persist `MappingDocument` (PermaPress-held config keyed by publication seed uid — see schema-gaps)
 - On new feed item: `applyMapping` → start publish run (no per-item confirm once map is connected)
 - Optional: after mapping, apply `FeedFieldManifest` for `featureImage` / `html` roles
@@ -50,6 +50,7 @@ Product context: PermaPress ADR 0089 (RSS XML fields → Post schema as first pr
 - Nested XML / XPath beyond flat RSS item keys
 - Saved-map CRUD APIs in SDK or apps
 - Theme tokens / light mode; Storybook or visual tests for `FieldMapper`
+- Row-based `FieldMapper` redesign — see [FIELD_MAPPER_REDESIGN.md](./FIELD_MAPPER_REDESIGN.md)
 - First **npm publish**: `bun run publish:mapping` (requires `@seedprotocol/feed@sameVersion` on npm)
 
 ### 4. First publish checklist
@@ -76,6 +77,7 @@ Phase 1 already added packages/mapping with headless core, markdown+RSS adapters
 | `packages/mapping/src/autoMap.ts` | Heuristics |
 | `packages/mapping/src/adapters/markdown.ts` | Markdown sources |
 | `packages/mapping/src/adapters/rss.ts` | RSS/XML sources |
+| `packages/mapping/src/react.ts` | `@seedprotocol/mapping/react` barrel |
 | `packages/mapping/src/react/FieldMapper.tsx` | UI |
 | `packages/mapping/README.md` | Consumer docs |
 | `docs/MAPPING_PHASE2.md` | This handoff |

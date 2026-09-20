@@ -21,7 +21,11 @@ fetches, runs Readability, or loads Seed Identity items.
 bun add @seedprotocol/mapping
 ```
 
-Peers: `react`, `react-dom`. RSS parsing uses `rss-parser` with the same custom fields as `@seedprotocol/feed` `parseRssString` (aligned, no hard dependency on the feed package barrel).
+The default entry (`@seedprotocol/mapping`) is headless — no React peer required.
+For `FieldMapper`, also install React peers and import from `@seedprotocol/mapping/react`.
+
+RSS parsing uses `rss-parser` with the same custom fields as `@seedprotocol/feed`
+`parseRssString` (aligned, no hard dependency on the feed package barrel).
 
 ## Headless API
 
@@ -141,74 +145,94 @@ author those edges in FieldMapper or programmatically.
 
 ## FieldMapper UI
 
-Props-driven only — no Seed hooks or routing. Pass expanded sources so extract/file
-candidates appear in the left pane; connecting those nodes persists `resolve` on the edge.
-Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`
-and (when `onLookupsChange` is provided) shows a string → seed uid editor.
+Props-driven only — no Seed hooks or routing. Import from `@seedprotocol/mapping/react`.
+
+Two layouts share the same persisted `FieldMapping[]`:
+
+| `layout` | Behavior |
+|----------|----------|
+| `"wires"` (default) | Two-pane click-to-connect with SVG connectors. Pass `buildResolvedSourceNodes(sources)` so extract/file candidates appear as source cards. |
+| `"rows"` | Row-based authoring. Pass **origin** sources only — transforms are chosen per row (no `@extract`/`@file` cards). |
+
+When `layout="rows"`, `rowKey` picks orientation:
+
+| `rowKey` | Behavior |
+|----------|----------|
+| `"property"` (default) | One row per target property; source + transform inside the row. Structurally property-exclusive. |
+| `"source"` | One row per edge (insertion order); conflict banner when two rows claim one property; coverage banner for missing `required` targets. |
+
+Mark targets with `required: true` so coverage / default filters surface missing fields. Default visible set for property mode is mapped + required (`defaultRows="requiredAndMapped"`).
 
 ```tsx
 import { useState } from 'react'
 import {
-  FieldMapper,
   buildResolvedSourceNodes,
   markdownToSources,
+  rssItemToSources,
   applyMappingAsync,
   type FieldMapping,
   type MappingLookups,
 } from '@seedprotocol/mapping'
+import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
 
-function ImportMap({ markdown, targets, onSubmit }) {
-  const sources = buildResolvedSourceNodes(markdownToSources(markdown))
-  const [mappings, setMappings] = useState<FieldMapping[]>([])
-  const [lookups, setLookups] = useState<MappingLookups>({})
+// Wires (existing hosts)
+<FieldMapper
+  layout="wires"
+  sources={buildResolvedSourceNodes(markdownToSources(markdown))}
+  targets={targets}
+  mappings={mappings}
+  onChange={setMappings}
+  theme="unstyled"
+/>
 
-  return (
-    <>
-      <FieldMapper
-        sources={sources}
-        targets={targets}
-        mappings={mappings}
-        onChange={setMappings}
-        lookups={lookups}
-        onLookupsChange={setLookups}
-        theme="unstyled" // host paints via CSS; or omit for built-in dark theme
-        className="imprint-mapper"
-        // optional: connectionColors={['#…']} — else strokes use --fm-map-1…8 / --map-1…8
-      />
-      <button
-        onClick={async () => {
-          const { properties } = await applyMappingAsync(
-            sources,
-            mappings,
-            targets,
-            { resolve: hostResolve, lookups },
-          )
-          onSubmit(properties)
-        }}
-      >
-        Create
-      </button>
-    </>
-  )
-}
+// Rows — property-keyed (recommended for large schemas)
+<FieldMapper
+  layout="rows"
+  rowKey="property"
+  sources={rssItemToSources(item)} // origin sources; no buildResolvedSourceNodes
+  targets={postTargets} // e.g. { name: 'html', dataType: 'Html', required: true }
+  mappings={mappings}
+  onChange={setMappings}
+  lookups={lookups}
+  onLookupsChange={setLookups}
+/>
+
+// Rows — source-keyed
+<FieldMapper layout="rows" rowKey="source" sources={itemSources} targets={targets} mappings={mappings} onChange={setMappings} />
 ```
+
+Headless mechanics (same package):
+
+```tsx
+const mapper = useFieldMapper({
+  sources,
+  targets,
+  mappings,
+  onChange: setMappings,
+  rowKey: 'property',
+})
+// mapper.rows, mapper.coverage, mapper.setSource, mapper.setTransform, …
+```
+
+Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`
+and (when `onLookupsChange` is provided) the wires layout shows a string → seed uid editor.
 
 **Theming**
 
 | Prop | Behavior |
 |------|----------|
 | `theme="default"` (default) | Injects CSS variables (`--fm-ground`, `--fm-ink`, `--fm-well`, `--fm-line`, `--fm-selection`, `--fm-map-1…8`) and rules |
-| `theme="unstyled"` | No injected paint — structural classes only (`fm-card`, `fm-grid`, …) |
-| `connectionColors` | Optional stroke palette; otherwise `stroke="var(--fm-map-N, var(--map-N, currentColor))"` |
+| `theme="unstyled"` | No injected paint — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …) |
+| `connectionColors` | Optional stroke palette for wires; otherwise `stroke="var(--fm-map-N, var(--map-N, currentColor))"` |
 
 **DOM hooks for host CSS**
 
-- Mapped wells expose `data-mapping-index` (source may list several, space-separated) and `data-pair={index % 8}`.
-- Connector paths use the same attrs.
-- Pending selection: `.active` / `.pending` only on the **source** waiting for a property — targets are not flooded with `.active`.
+- Wires: mapped wells expose `data-mapping-index` / `data-pair={index % 8}`; pending `.active` only on the selected source.
+- Rows: `data-state="empty|mapped|needsResolve|conflict"`, `data-property-name`, `data-resolve`, `data-required`.
 
 Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
 
+See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study.
 ## Relationship to `FeedFieldManifest`
 
 | Type | Package | Meaning |
@@ -222,6 +246,6 @@ Compose them: map + resolve into a plain item, then optionally normalize roles f
 
 - Markdown: flat YAML frontmatter; `#` / `##` sections only
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
-- UI: self-contained dark theme; no desktop/Tailwind coupling; no media preview player
+- UI: self-contained dark theme; `layout` still defaults to `wires` (row layout is opt-in); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening.
+See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for consumer migration and hardening, and [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for row-layout phases 3–5 (theming contract, per-row lookups, default flip).
