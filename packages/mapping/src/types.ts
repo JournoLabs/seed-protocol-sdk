@@ -22,6 +22,12 @@ export type ResolveJob = 'extract' | 'file' | 'lookup'
 export type SourceNode = {
   id: string
   label: string
+  /**
+   * Optional secondary line (e.g. origin field name for a resolved well).
+   * Prefer this over stuffing `· link` into `label`. Display-only — not
+   * part of MappingDocument.
+   */
+  subtitle?: string
   kind: SourceKind
   value: string
   meta?: Record<string, unknown>

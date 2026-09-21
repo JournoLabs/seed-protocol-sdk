@@ -295,6 +295,9 @@ export function FieldMapperWires({
                 <div className="fm-prop-row">
                   <div className="fm-label">
                     {source.label}
+                    {source.subtitle ? (
+                      <span className="fm-kind">{source.subtitle}</span>
+                    ) : null}
                     <span className="fm-kind">{source.kind}</span>
                   </div>
                   {mapped && (

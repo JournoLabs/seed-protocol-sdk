@@ -13,6 +13,7 @@ export type FieldMapperSlot =
   | 'dataType'
   | 'sourceSelect'
   | 'transformSelect'
+  | 'rowAccessory'
   | 'preview'
   | 'validation'
   | 'removeButton'
@@ -95,6 +96,7 @@ export const SLOT_BASE_CLASS: Record<FieldMapperSlot, string> = {
   dataType: 'fm-dtype',
   sourceSelect: 'fm-select',
   transformSelect: 'fm-select',
+  rowAccessory: 'fm-row-accessory',
   preview: 'fm-row-preview',
   validation: 'fm-row-flag',
   removeButton: 'fm-remove',

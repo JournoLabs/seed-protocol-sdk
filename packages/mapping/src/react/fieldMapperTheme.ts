@@ -302,7 +302,15 @@ ${STRUCTURAL_TOKENS}
   align-items: center;
 }
 .seed-field-mapper .fm-row-main-source {
-  grid-template-columns: 1fr auto auto 1fr auto;
+  grid-template-columns: 1fr auto auto 1fr auto auto;
+}
+.seed-field-mapper .fm-row-accessory {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.seed-field-mapper .fm-row-accessory:empty {
+  display: none;
 }
 .seed-field-mapper .fm-row-prop {
   display: flex;

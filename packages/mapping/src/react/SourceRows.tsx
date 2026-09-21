@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, type ReactNode } from 'react'
 import type {
   FieldMapping,
   MappingLookups,
@@ -22,7 +22,10 @@ import {
   DefaultSelect,
 } from './fieldMapperControls'
 import { buildSyncPreviewBag } from './fieldMapperCore'
-import type { UseFieldMapperResult } from './fieldMapperTypes'
+import type {
+  FieldMapperRow,
+  UseFieldMapperResult,
+} from './fieldMapperTypes'
 import { LookupEditor } from './LookupEditor'
 
 const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
@@ -42,6 +45,7 @@ export type SourceRowsProps = {
   slots: ResolvedFieldMapperSlots
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
+  renderRowAccessory?: (row: FieldMapperRow) => ReactNode
 }
 
 export function SourceRows({
@@ -58,6 +62,7 @@ export function SourceRows({
     Button: DefaultButton,
     Pill: DefaultPill,
   },
+  renderRowAccessory,
 }: SourceRowsProps) {
   const Select = ui.Select
   const Button = ui.Button
@@ -185,6 +190,9 @@ export function SourceRows({
                     </option>
                   ))}
                 </Select>
+                <div className={slotClass('rowAccessory', classNames)}>
+                  {renderRowAccessory?.(row) ?? null}
+                </div>
                 <Button
                   className={slotClass('removeButton', classNames)}
                   aria-label="Remove row"

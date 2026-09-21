@@ -30,9 +30,12 @@ export function truncateSample(s: string, n = 40): string {
 }
 
 export function formatSourceOptionLabel(source: SourceNode): string {
+  const head = source.subtitle
+    ? `${source.label} · ${source.subtitle}`
+    : source.label
   const sample = truncateSample(source.value, 36)
-  if (!sample) return source.label
-  return `${source.label} · "${sample}"`
+  if (!sample) return head
+  return `${head} · "${sample}"`
 }
 
 /** Origin sources only — rows UI does not list `@extract`/`@file` cards. */

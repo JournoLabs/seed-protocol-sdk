@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, type ReactNode } from 'react'
 import type {
   FieldMapping,
   MappingLookups,
@@ -20,6 +20,7 @@ import { FieldMapperWires } from './FieldMapperWires'
 import type {
   FieldMapperDefaultRows,
   FieldMapperLayout,
+  FieldMapperRow,
   FieldMapperRowKey,
 } from './fieldMapperTypes'
 import {
@@ -121,6 +122,12 @@ export type FieldMapperProps = {
   components?: FieldMapperComponents
   /** Include / exclude structural pieces. Replaces `showPreview`. */
   slots?: FieldMapperSlots
+  /**
+   * Optional per-row host chrome (e.g. extract/file Preview). Rendered in
+   * `.fm-row-accessory` after the transform control and before remove.
+   * Return `null` when nothing to show. Package does not fetch or preview.
+   */
+  renderRowAccessory?: (row: FieldMapperRow) => ReactNode
 }
 
 /**
@@ -146,6 +153,7 @@ export function FieldMapper({
   classNames,
   components,
   slots,
+  renderRowAccessory,
 }: FieldMapperProps) {
   const mapper = useFieldMapper({
     sources,
@@ -223,6 +231,7 @@ export function FieldMapper({
           slots={resolvedSlots}
           classNames={classNames}
           ui={ui}
+          renderRowAccessory={renderRowAccessory}
         />
       ) : (
         <PropertyRows
@@ -236,6 +245,7 @@ export function FieldMapper({
           slots={resolvedSlots}
           classNames={classNames}
           ui={ui}
+          renderRowAccessory={renderRowAccessory}
         />
       )}
     </div>

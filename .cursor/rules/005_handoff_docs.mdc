@@ -1,0 +1,22 @@
+---
+description: Handoff docs are local-only; use a gitignored filename convention and never commit them
+alwaysApply: true
+---
+Handoff Docs (local-only):
+
+Partner / integration handoffs must NOT be committed to this public repo.
+
+1. Filename convention (required)
+   - Name handoff docs `*.handoff.md` (any directory)
+   - Example: `docs/field-mapper-permapress.handoff.md`
+   - Do NOT use public-looking names like `*_HANDOFF.md` or plain `docs/*.md`
+
+2. Git ignore
+   - `*.handoff.md` is ignored via @.gitignore
+   - Optional: also place under `docs/private/` (also ignored)
+
+3. Agent behavior
+   - When writing a handoff, use the `*.handoff.md` name from the start
+   - NEVER stage, commit, or PR handoff docs
+   - If a commit/PR would include a handoff file, exclude it and warn the user
+   - If renaming an existing handoff into convention, do not force-add ignored files

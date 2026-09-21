@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/mapping",
-  "version": "0.6.0",
+  "version": "0.5.3",
   "description": "Source-to-model-property field mapping helpers and UI for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",

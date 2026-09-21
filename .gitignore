@@ -156,3 +156,5 @@ packages/mapping/dist
 
 # Local-only partner handoffs (not for public docs)
 docs/private/
+*.handoff.md
+

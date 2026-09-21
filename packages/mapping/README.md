@@ -184,6 +184,11 @@ import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
   onChange={setMappings}
   lookups={lookups}
   onLookupsChange={setLookups}
+  renderRowAccessory={(row) =>
+    row.mapping?.resolve === 'extract' || row.mapping?.resolve === 'file'
+      ? <button type="button">Preview</button>
+      : null
+  }
 />
 
 // Rows — source-keyed
@@ -229,12 +234,15 @@ under `_pendingResolve`; JSON sits behind a disclosure).
 | `theme="structural"` | Layout / spacing only — no color paint; inherits host colors |
 | `theme="none"` | No injection — structural classes only (`fm-card`, `fm-row`, `fm-grid`, …); keeps `seed-field-mapper--unstyled` |
 | `theme="unstyled"` | **Deprecated** shim for `none` |
-| `classNames` | Per-slot host classes merged with package classes (`root`, `toolbar`, `row`, …) |
+| `classNames` | Per-slot host classes merged with package classes (`root`, `toolbar`, `row`, `rowAccessory`, …) |
 | `components` | Optional host `Select` / `Button` / `Pill` (defaults are native controls) |
 | `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'row' \| 'section' \| false`; rows layout defaults to `'row'`, wires to `'section'`) |
+| `renderRowAccessory` | Optional `(row: FieldMapperRow) => ReactNode` for host chrome (e.g. extract/file **Preview**) in `.fm-row-accessory`. Unrelated to `slots.preview`. Package does not fetch. |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
 | `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
 | `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
+
+`SourceNode` may include optional `subtitle` (display-only). Prefer `subtitle` over stuffing a secondary fact into `label` (e.g. origin field name on a resolved well).
 
 **DOM hooks for host CSS**
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- `FieldMapper` `renderRowAccessory?: (row: FieldMapperRow) => ReactNode` — host chrome slot on each rows-layout row (`.fm-row-accessory` / `classNames.rowAccessory`), after the transform control and before remove. Package does not fetch or preview; hosts return `null` when idle (e.g. show **Preview** only for `resolve: 'extract' | 'file'`).
+- Optional `SourceNode.subtitle` for a secondary display line (inspector, wires card, source option labels). Prefer this over stuffing origin into `label`. Display-only — not part of `MappingDocument`.
+
 ## 0.6.0
 
 - `FieldMapper` Phase 5: `layout` defaults to `'rows'`; `'wires'` is deprecated but still supported.

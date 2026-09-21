@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, type ReactNode } from 'react'
 import type {
   FieldMapping,
   MappingLookups,
@@ -29,6 +29,7 @@ import {
 } from './fieldMapperCore'
 import type {
   FieldMapperDefaultRows,
+  FieldMapperRow,
   UseFieldMapperResult,
 } from './fieldMapperTypes'
 import { LookupEditor } from './LookupEditor'
@@ -51,6 +52,7 @@ export type PropertyRowsProps = {
   slots: ResolvedFieldMapperSlots
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
+  renderRowAccessory?: (row: FieldMapperRow) => ReactNode
 }
 
 export function PropertyRows({
@@ -68,6 +70,7 @@ export function PropertyRows({
     Button: DefaultButton,
     Pill: DefaultPill,
   },
+  renderRowAccessory,
 }: PropertyRowsProps) {
   const Select = ui.Select
   const Button = ui.Button
@@ -232,6 +235,9 @@ export function PropertyRows({
                     {row.target?.dataType}
                   </Pill>
                 )}
+                <div className={slotClass('rowAccessory', classNames)}>
+                  {renderRowAccessory?.(row) ?? null}
+                </div>
                 <Button
                   className={slotClass('removeButton', classNames)}
                   aria-label={`Remove mapping for ${row.id}`}
@@ -314,6 +320,9 @@ export function PropertyRows({
               <div key={source.id} className="fm-inspector-row">
                 <div>
                   <strong>{source.label}</strong>
+                  {source.subtitle ? (
+                    <div className="fm-value">{source.subtitle}</div>
+                  ) : null}
                   <div className="fm-value">
                     {truncateSample(source.value, 60)}
                   </div>
