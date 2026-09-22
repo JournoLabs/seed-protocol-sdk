@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
