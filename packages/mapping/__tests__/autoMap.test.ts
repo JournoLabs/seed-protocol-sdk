@@ -162,7 +162,7 @@ describe('autoMap', () => {
     expect(mappings[0]?.propertyName).toBe('title')
   })
 
-  it('does not map author string onto List of Relation authors', () => {
+  it('maps author onto List of Relation authors with resolve:lookup and no entries', () => {
     const sources: SourceNode[] = [
       {
         id: 'rss-author',
@@ -188,12 +188,30 @@ describe('autoMap', () => {
       { name: 'byline', dataType: 'String' },
     ]
     const mappings = autoMap(sources, targets)
-    expect(mappings.find((m) => m.propertyName === 'authors')).toBeUndefined()
+    expect(mappings.find((m) => m.propertyName === 'authors')).toEqual({
+      sourceId: 'rss-author',
+      propertyName: 'authors',
+      resolve: 'lookup',
+    })
+    expect(mappings.find((m) => m.propertyName === 'authors')?.lookup).toBeUndefined()
     expect(mappings.find((m) => m.propertyName === 'title')).toEqual({
       sourceId: 'rss-title',
       propertyName: 'title',
     })
-    // author may map to byline (string) via alias
+    expect(mappings.find((m) => m.propertyName === 'byline')).toBeUndefined()
+  })
+
+  it('maps author onto string byline when no relation authors target exists', () => {
+    const sources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Jane Doe',
+      },
+    ]
+    const targets: TargetProperty[] = [{ name: 'byline', dataType: 'String' }]
+    const mappings = autoMap(sources, targets)
     expect(mappings.find((m) => m.propertyName === 'byline')).toEqual({
       sourceId: 'rss-author',
       propertyName: 'byline',

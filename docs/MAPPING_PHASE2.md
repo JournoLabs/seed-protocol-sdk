@@ -41,8 +41,9 @@ checklist: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOF
 
 **Remaining for PermaPress**
 
-- [ ] Bump `@seedprotocol/mapping` to published `0.6.0` (off local `link:`)
+- [ ] Bump `@seedprotocol/mapping` to published `0.7.0` (off local `link:`)
 - [ ] Smoke: auto-map → save draft → publish run with extract/file resolve
+- [ ] Relation lookup: persist `lookup.entries` on the authors edge; host `renderLookup`
 
 ### 3. Hardening (as needed)
 

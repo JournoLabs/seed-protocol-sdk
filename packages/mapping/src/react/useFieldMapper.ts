@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { autoMap as defaultAutoMap } from '../autoMap'
-import type { FieldMapping, ResolveJob, TargetProperty } from '../types'
+import { stripLookup } from '../relationLookup'
+import type {
+  FieldMapping,
+  LookupEntry,
+  ResolveJob,
+  TargetProperty,
+} from '../types'
 import {
+  applyLookupEntriesToMappings,
   attachLookupIfNeeded,
   buildPropertyModeRows,
   buildPropertyOptions,
@@ -349,15 +356,63 @@ export function useFieldMapper({
     ],
   )
 
+  const setLookupEntries = useCallback(
+    (rowId: string, entries: LookupEntry[]) => {
+      const next = applyLookupEntriesToMappings(
+        mappings,
+        rowKey,
+        rowId,
+        edgeIds,
+        entries,
+      )
+      if (!next) return
+      onChange(next)
+      if (!onLookupsChange) return
+      const edge =
+        rowKey === 'property'
+          ? next.find((m) => m.propertyName === rowId)
+          : next[edgeIds.indexOf(rowId)]
+      if (!edge) return
+      const table = Object.fromEntries(
+        (edge.lookup?.entries ?? []).map((e) => [e.value, e.ref]),
+      )
+      const merged = { ...lookups }
+      if (Object.keys(table).length === 0) {
+        delete merged[edge.propertyName]
+      } else {
+        merged[edge.propertyName] = table
+      }
+      onLookupsChange(merged)
+    },
+    [mappings, rowKey, edgeIds, onChange, onLookupsChange, lookups],
+  )
+
   const setTransform = useCallback(
     (rowId: string, resolve: ResolveJob | null) => {
+      const nextEdge = (
+        prev: FieldMapping,
+        nextResolve: ResolveJob | null,
+      ): FieldMapping => {
+        if (!nextResolve) {
+          return {
+            sourceId: prev.sourceId,
+            propertyName: prev.propertyName,
+          }
+        }
+        if (nextResolve === 'lookup') {
+          return { ...prev, resolve: nextResolve }
+        }
+        return stripLookup({
+          sourceId: prev.sourceId,
+          propertyName: prev.propertyName,
+          resolve: nextResolve,
+        })
+      }
+
       if (rowKey === 'property') {
         const prev = mappings.find((m) => m.propertyName === rowId)
         if (!prev) return
-        const edge: FieldMapping = resolve
-          ? { ...prev, resolve }
-          : { sourceId: prev.sourceId, propertyName: prev.propertyName }
-        onChange(upsertPropertyMapping(mappings, edge))
+        onChange(upsertPropertyMapping(mappings, nextEdge(prev, resolve)))
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([rowId])
         }
@@ -367,11 +422,8 @@ export function useFieldMapper({
       const edgeIndex = edgeIds.indexOf(rowId)
       if (edgeIndex >= 0) {
         const prev = mappings[edgeIndex]!
-        const edge: FieldMapping = resolve
-          ? { ...prev, resolve }
-          : { sourceId: prev.sourceId, propertyName: prev.propertyName }
         const next = [...mappings]
-        next[edgeIndex] = edge
+        next[edgeIndex] = nextEdge(prev, resolve)
         onChange(next)
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([prev.propertyName])
@@ -449,6 +501,7 @@ export function useFieldMapper({
     setSource,
     setProperty,
     setTransform,
+    setLookupEntries,
     addRow,
     removeRow,
     autoMap,

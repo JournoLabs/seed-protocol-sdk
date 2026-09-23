@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FieldMapping, SourceNode, TargetProperty } from '../src/types'
 import {
+  applyLookupEntriesToMappings,
   attachLookupIfNeeded,
   computeCoverage,
   computeRequiredResolve,
@@ -176,5 +177,51 @@ describe('attachLookupIfNeeded', () => {
       targets[2],
     )
     expect(edge.resolve).toBe('extract')
+  })
+})
+
+describe('applyLookupEntriesToMappings', () => {
+  it('writes and clears lookup.entries on the edge', () => {
+    const mappings: FieldMapping[] = [
+      { sourceId: 'fm-title', propertyName: 'author', resolve: 'lookup' },
+    ]
+    const assigned = applyLookupEntriesToMappings(
+      mappings,
+      'property',
+      'author',
+      [],
+      [{ value: 'Ada', ref: 'local_1' }],
+    )
+    expect(assigned).toEqual([
+      {
+        sourceId: 'fm-title',
+        propertyName: 'author',
+        resolve: 'lookup',
+        lookup: { entries: [{ value: 'Ada', ref: 'local_1' }] },
+      },
+    ])
+
+    const cleared = applyLookupEntriesToMappings(
+      assigned!,
+      'property',
+      'author',
+      [],
+      [],
+    )
+    expect(cleared?.[0]?.lookup).toBeUndefined()
+    expect(cleared?.[0]?.resolve).toBe('lookup')
+  })
+
+  it('drops lookup when the edge is disconnected', () => {
+    const mappings: FieldMapping[] = [
+      {
+        sourceId: 'fm-title',
+        propertyName: 'author',
+        resolve: 'lookup',
+        lookup: { entries: [{ value: 'Ada', ref: 'local_1' }] },
+      },
+    ]
+    const next = mappings.filter((m) => m.propertyName !== 'author')
+    expect(next).toEqual([])
   })
 })

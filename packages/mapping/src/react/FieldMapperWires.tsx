@@ -27,7 +27,10 @@ import {
   DefaultSelect,
 } from './fieldMapperControls'
 import { buildSyncPreviewBag } from './fieldMapperCore'
-import type { UseFieldMapperResult } from './fieldMapperTypes'
+import type {
+  FieldMapperLookupRow,
+  UseFieldMapperResult,
+} from './fieldMapperTypes'
 import { LookupEditor } from './LookupEditor'
 import {
   connectionStrokeForIndex,
@@ -67,6 +70,7 @@ export type FieldMapperWiresProps = {
   mapper: UseFieldMapperResult
   lookups?: MappingLookups
   onLookupsChange?: (lookups: MappingLookups) => void
+  renderLookup?: (row: FieldMapperLookupRow) => React.ReactNode
   /** @deprecated Prefer CSS map tokens. */
   connectionColors?: string[]
   slots: ResolvedFieldMapperSlots
@@ -79,8 +83,8 @@ export function FieldMapperWires({
   targets,
   mappings,
   mapper,
-  lookups = {},
   onLookupsChange,
+  renderLookup,
   connectionColors,
   slots,
   classNames,
@@ -382,14 +386,37 @@ export function FieldMapperWires({
         </div>
       </div>
 
-      {slots.lookups === 'section' && onLookupsChange && (
+      {slots.lookups === 'section' &&
+        renderLookup &&
+        mapper.rows
+          .filter((row) => row.mapping?.resolve === 'lookup')
+          .map((row) => (
+            <div
+              key={row.id}
+              className={slotClass('lookupEditor', classNames)}
+            >
+              {renderLookup({
+                ...row,
+                sampleValue: row.sampleValue ?? '',
+                onLookupChange: (entries) =>
+                  mapper.setLookupEntries(row.id, entries),
+              })}
+            </div>
+          ))}
+      {slots.lookups === 'section' && !renderLookup && onLookupsChange && (
         <LookupEditor
           mode="section"
           mappings={mappings}
           sources={sources}
           targets={targets}
-          lookups={lookups}
-          onLookupsChange={onLookupsChange}
+          onLookupChange={(mapping, entries) => {
+            const row = mapper.rows.find(
+              (r) =>
+                r.mapping?.sourceId === mapping.sourceId &&
+                r.mapping?.propertyName === mapping.propertyName,
+            )
+            if (row) mapper.setLookupEntries(row.id, entries)
+          }}
           classNames={classNames}
         />
       )}

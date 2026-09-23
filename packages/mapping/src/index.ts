@@ -3,6 +3,7 @@ export type {
   SourceNode,
   TargetProperty,
   FieldMapping,
+  LookupEntry,
   MappingDocument,
   MappingLookups,
   PropertyBag,
@@ -19,7 +20,12 @@ export type { ApplyMappingAsyncOptions } from './applyMapping'
 export {
   isRelationLookupTarget,
   normalizeLookupKey,
+  sampleValueFromSource,
+  lookupEntriesFromMapping,
+  lookupRefFromEntries,
+  resolveLookupMapped,
   shapeLookupValue,
+  withLookupEntries,
 } from './relationLookup'
 export { autoMap } from './autoMap'
 export { classifyUrl, looksLikeUrl } from './classifyUrl'

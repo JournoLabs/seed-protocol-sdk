@@ -48,20 +48,33 @@ export type TargetProperty = {
   required?: boolean
 }
 
+/** One origin string → opaque host ref for `resolve: 'lookup'`. */
+export type LookupEntry = {
+  /** Trimmed origin source string (e.g. RSS author). */
+  value: string
+  /** Opaque host-stable id (`seedLocalId` or `seedUid`). Package does not interpret it. */
+  ref: string
+}
+
 /**
  * Source → property edge.
  * A source may map to multiple properties; each property appears at most once.
- * When `resolve` is set, async apply transforms the value; sync apply skips the edge.
+ * `resolve: 'extract' | 'file'` is applied by `applyMappingAsync` via a host callback.
+ * `resolve: 'lookup'` is applied from `lookup.entries` (sync and async).
  */
 export type FieldMapping = {
   sourceId: string
   propertyName: string
   resolve?: ResolveJob
+  /** Stored string → ref assignments for `resolve: 'lookup'`. Omit or empty = unassigned. */
+  lookup?: { entries: LookupEntry[] }
 }
 
 /**
  * Per-property string → seed uid (or uid list) dictionary for `resolve: 'lookup'`.
  * Keys are trimmed source values.
+ *
+ * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback only.
  */
 export type MappingLookups = Record<string, Record<string, string | string[]>>
 
@@ -70,7 +83,10 @@ export type MappingDocument = {
   version: 1
   sourceKind: 'markdown' | 'rss' | 'xml'
   mappings: FieldMapping[]
-  /** Optional relation value maps keyed by property name. */
+  /**
+   * Optional relation value maps keyed by property name.
+   * @deprecated Prefer `FieldMapping.lookup.entries` on each lookup edge.
+   */
   lookups?: MappingLookups
 }
 

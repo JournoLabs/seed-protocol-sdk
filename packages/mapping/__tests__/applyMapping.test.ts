@@ -206,7 +206,39 @@ describe('applyMappingAsync', () => {
     expect(result.errors[0]?.resolve).toBe('extract')
   })
 
-  it('applies lookup from table onto List of Relation', async () => {
+  const authorsTarget: TargetProperty = {
+    name: 'authors',
+    dataType: 'List',
+    refValueType: 'Relation',
+    ref: 'Identity',
+  }
+
+  it('applies lookup from edge entries onto List of Relation', async () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: '  Jane Doe  ',
+      },
+    ]
+    const result = await applyMappingAsync(
+      authorSources,
+      [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'authors',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'Jane Doe', ref: 'identity-uid-1' }] },
+        },
+      ],
+      [authorsTarget],
+    )
+    expect(result.errors).toEqual([])
+    expect(result.properties.authors).toEqual(['identity-uid-1'])
+  })
+
+  it('falls back to deprecated document lookups', async () => {
     const authorSources: SourceNode[] = [
       {
         id: 'rss-author',
@@ -224,14 +256,7 @@ describe('applyMappingAsync', () => {
           resolve: 'lookup',
         },
       ],
-      [
-        {
-          name: 'authors',
-          dataType: 'List',
-          refValueType: 'Relation',
-          ref: 'Identity',
-        },
-      ],
+      [authorsTarget],
       {
         lookups: {
           authors: { 'Jane Doe': 'identity-uid-1' },
@@ -242,7 +267,7 @@ describe('applyMappingAsync', () => {
     expect(result.properties.authors).toEqual(['identity-uid-1'])
   })
 
-  it('applies lookup onto single Relation and calls host on miss', async () => {
+  it('does not call host resolve on lookup miss', async () => {
     const authorSources: SourceNode[] = [
       {
         id: 'rss-author',
@@ -251,6 +276,7 @@ describe('applyMappingAsync', () => {
         value: 'Unknown Person',
       },
     ]
+    let called = false
     const result = await applyMappingAsync(
       authorSources,
       [
@@ -262,19 +288,18 @@ describe('applyMappingAsync', () => {
       ],
       [{ name: 'creator', dataType: 'Relation', ref: 'Identity' }],
       {
-        lookups: {},
-        resolve: async (ctx) => {
-          expect(ctx.job).toBe('lookup')
-          expect(ctx.rawValue).toBe('Unknown Person')
+        resolve: async () => {
+          called = true
           return 'created-uid'
         },
       },
     )
-    expect(result.errors).toEqual([])
-    expect(result.properties.creator).toBe('created-uid')
+    expect(called).toBe(false)
+    expect(result.properties).toEqual({})
+    expect(result.errors[0]?.message).toBe('No lookup entry for "Unknown Person"')
   })
 
-  it('errors when lookup misses and no resolve callback', async () => {
+  it('errors when lookup misses', async () => {
     const authorSources: SourceNode[] = [
       {
         id: 'rss-author',
@@ -292,27 +317,20 @@ describe('applyMappingAsync', () => {
           resolve: 'lookup',
         },
       ],
-      [
-        {
-          name: 'authors',
-          dataType: 'List',
-          ref: 'Identity',
-        },
-      ],
-      { lookups: {} },
+      [authorsTarget],
     )
     expect(result.properties).toEqual({})
     expect(result.errors[0]?.resolve).toBe('lookup')
-    expect(result.errors[0]?.message).toMatch(/No lookup entry/)
+    expect(result.errors[0]?.message).toBe('No lookup entry for "Nobody"')
   })
 
-  it('sync apply skips lookup edges and plain relation copies', () => {
+  it('sync apply emits refs from lookup entries and skips plain relation copies', () => {
     const authorSources: SourceNode[] = [
       {
         id: 'rss-author',
         label: 'author',
         kind: 'rssField',
-        value: 'Jane Doe',
+        value: 'Mira Chen',
       },
     ]
     const bag = applyMapping(
@@ -322,18 +340,37 @@ describe('applyMappingAsync', () => {
           sourceId: 'rss-author',
           propertyName: 'authors',
           resolve: 'lookup',
+          lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
         },
         { sourceId: 'rss-author', propertyName: 'byline' },
       ],
+      [authorsTarget, { name: 'byline', dataType: 'String' }],
+    )
+    expect(bag).toEqual({ authors: ['local_1'], byline: 'Mira Chen' })
+  })
+
+  it('sync apply omits unmatched lookup values and never writes the raw string', () => {
+    const authorSources: SourceNode[] = [
+      {
+        id: 'rss-author',
+        label: 'author',
+        kind: 'rssField',
+        value: 'Sam Ortiz',
+      },
+    ]
+    const bag = applyMapping(
+      authorSources,
       [
         {
-          name: 'authors',
-          dataType: 'List',
-          ref: 'Identity',
+          sourceId: 'rss-author',
+          propertyName: 'authors',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'Mira Chen', ref: 'local_1' }] },
         },
-        { name: 'byline', dataType: 'String' },
       ],
+      [authorsTarget],
     )
-    expect(bag).toEqual({ byline: 'Jane Doe' })
+    expect(bag).toEqual({})
+    expect(bag.authors).toBeUndefined()
   })
 })

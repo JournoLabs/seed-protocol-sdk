@@ -1,5 +1,6 @@
 import type {
   FieldMapping,
+  LookupEntry,
   MappingLookups,
   ResolveJob,
   SourceNode,
@@ -28,6 +29,7 @@ export type FieldMapperRowState =
   | 'empty'
   | 'mapped'
   | 'needsResolve'
+  | 'needsLookup'
   | 'conflict'
 
 export type FieldMapperRow = {
@@ -36,11 +38,17 @@ export type FieldMapperRow = {
   target?: TargetProperty
   mapping?: FieldMapping
   source?: SourceNode
+  /** Normalized origin sample string for the current source. */
+  sampleValue: string
   /** Sync preview, or a description of what the host resolver will produce. */
   preview: string
   /** Transform this edge needs to yield a usable value, if any. */
   requiredResolve: ResolveJob | null
   state: FieldMapperRowState
+}
+
+export type FieldMapperLookupRow = FieldMapperRow & {
+  onLookupChange: (entries: LookupEntry[]) => void
 }
 
 export type FieldMapperCoverage = {
@@ -54,7 +62,14 @@ export type UseFieldMapperArgs = {
   targets: TargetProperty[]
   mappings: FieldMapping[]
   onChange: (mappings: FieldMapping[]) => void
+  /**
+   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback for preview.
+   */
   lookups?: MappingLookups
+  /**
+   * @deprecated Prefer `setLookupEntries` / `renderLookup`. Still clears the
+   * document-level table when a lookup edge is removed.
+   */
   onLookupsChange?: (lookups: MappingLookups) => void
   rowKey?: FieldMapperRowKey
   onAutoMap?: () => FieldMapping[]
@@ -71,6 +86,8 @@ export type UseFieldMapperResult = {
   setSource: (rowId: string, sourceId: string | null) => void
   setProperty: (rowId: string, propertyName: string) => void
   setTransform: (rowId: string, resolve: ResolveJob | null) => void
+  /** Write `lookup.entries` on the edge for this row. Empty list omits `lookup`. */
+  setLookupEntries: (rowId: string, entries: LookupEntry[]) => void
   addRow: (propertyName?: string) => void
   removeRow: (rowId: string) => void
   autoMap: () => void

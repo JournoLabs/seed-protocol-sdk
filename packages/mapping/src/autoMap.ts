@@ -296,10 +296,7 @@ export function autoMap(
 
     for (const alias of aliasKeys) {
       match = targets.find(
-        (p) =>
-          !usedProps.has(p.name) &&
-          !isRelationLookupTarget(p) &&
-          namesMatch(p.name, alias),
+        (p) => !usedProps.has(p.name) && namesMatch(p.name, alias),
       )
       if (match) break
     }
@@ -308,7 +305,6 @@ export function autoMap(
       match = targets.find(
         (p) =>
           !usedProps.has(p.name) &&
-          !isRelationLookupTarget(p) &&
           (namesMatch(p.name, source.label) || namesMatch(p.name, idKey)),
       )
     }
@@ -330,6 +326,14 @@ export function autoMap(
           sourceId: source.id,
           propertyName: match.name,
           resolve: 'file',
+        })
+        usedProps.add(match.name)
+        usedSources.add(source.id)
+      } else if (isRelationLookupTarget(match)) {
+        mappings.push({
+          sourceId: source.id,
+          propertyName: match.name,
+          resolve: 'lookup',
         })
         usedProps.add(match.name)
         usedSources.add(source.id)

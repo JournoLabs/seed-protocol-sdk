@@ -23,6 +23,7 @@ import {
 } from './fieldMapperControls'
 import { buildSyncPreviewBag } from './fieldMapperCore'
 import type {
+  FieldMapperLookupRow,
   FieldMapperRow,
   UseFieldMapperResult,
 } from './fieldMapperTypes'
@@ -46,6 +47,7 @@ export type SourceRowsProps = {
   classNames?: Partial<Record<FieldMapperSlot, string>>
   ui?: ResolvedFieldMapperComponents
   renderRowAccessory?: (row: FieldMapperRow) => ReactNode
+  renderLookup?: (row: FieldMapperLookupRow) => ReactNode
 }
 
 export function SourceRows({
@@ -53,7 +55,6 @@ export function SourceRows({
   targets,
   mappings,
   mapper,
-  lookups = {},
   onLookupsChange,
   slots,
   classNames,
@@ -63,6 +64,7 @@ export function SourceRows({
     Pill: DefaultPill,
   },
   renderRowAccessory,
+  renderLookup,
 }: SourceRowsProps) {
   const Select = ui.Select
   const Button = ui.Button
@@ -88,9 +90,12 @@ export function SourceRows({
 
   const jsonPreview = showJsonPreview(slots.preview)
   const rowPreview = showRowPreview(slots.preview)
-  const showRowLookups = slots.lookups === 'row' && Boolean(onLookupsChange)
+  const showRowLookups =
+    slots.lookups === 'row' && (Boolean(renderLookup) || Boolean(onLookupsChange))
   const showSectionLookups =
-    slots.lookups === 'section' && Boolean(onLookupsChange)
+    slots.lookups === 'section' &&
+    !renderLookup &&
+    Boolean(onLookupsChange)
 
   return (
     <>
@@ -211,6 +216,11 @@ export function SourceRows({
                   needs {row.requiredResolve}
                 </div>
               )}
+              {row.state === 'needsLookup' && (
+                <div className={slotClass('validation', classNames)}>
+                  needs lookup
+                </div>
+              )}
               {row.state === 'conflict' && (
                 <div
                   className={slotClass('validation', classNames)}
@@ -221,17 +231,28 @@ export function SourceRows({
               )}
               {showRowLookups &&
                 row.mapping?.resolve === 'lookup' &&
-                row.mapping && (
+                row.mapping &&
+                (renderLookup ? (
+                  <div className={slotClass('lookupEditor', classNames)}>
+                    {renderLookup({
+                      ...row,
+                      sampleValue: row.sampleValue ?? '',
+                      onLookupChange: (entries) =>
+                        mapper.setLookupEntries(row.id, entries),
+                    })}
+                  </div>
+                ) : (
                   <LookupEditor
                     mode="row"
                     mappings={[row.mapping]}
                     sources={sources}
                     targets={targets}
-                    lookups={lookups}
-                    onLookupsChange={onLookupsChange!}
+                    onLookupChange={(_mapping, entries) =>
+                      mapper.setLookupEntries(row.id, entries)
+                    }
                     classNames={classNames}
                   />
-                )}
+                ))}
             </div>
           )
         })}
@@ -252,8 +273,14 @@ export function SourceRows({
           mappings={mappings}
           sources={sources}
           targets={targets}
-          lookups={lookups}
-          onLookupsChange={onLookupsChange!}
+          onLookupChange={(mapping, entries) => {
+            const match = mapper.rows.find(
+              (r) =>
+                r.mapping?.sourceId === mapping.sourceId &&
+                r.mapping?.propertyName === mapping.propertyName,
+            )
+            if (match) mapper.setLookupEntries(match.id, entries)
+          }}
           classNames={classNames}
         />
       )}

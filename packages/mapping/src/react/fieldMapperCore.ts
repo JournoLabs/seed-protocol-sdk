@@ -2,8 +2,11 @@ import { applyMapping, coerceValue } from '../applyMapping'
 import { looksLikeUrl } from '../classifyUrl'
 import {
   isRelationLookupTarget,
-  normalizeLookupKey,
+  resolveLookupMapped,
+  sampleValueFromSource,
   shapeLookupValue,
+  stripLookup,
+  withLookupEntries,
 } from '../relationLookup'
 import {
   normalizeMappingFromSourceId,
@@ -11,6 +14,7 @@ import {
 } from '../resolvedSources'
 import type {
   FieldMapping,
+  LookupEntry,
   MappingLookups,
   ResolveJob,
   SourceNode,
@@ -92,12 +96,13 @@ export type PreviewForEdgeOptions = {
   target?: TargetProperty
   lookups?: MappingLookups
   propertyName?: string
+  mapping?: FieldMapping
 }
 
 /**
  * Sync row preview aligned with `applyMapping` / lookup tables.
  * `extract`/`file` stay descriptive (sync apply skips them).
- * `lookup` shows a table hit when present; otherwise a pending placeholder.
+ * `lookup` shows a stored-entry hit when present; otherwise a pending placeholder.
  * Plain copy shows the coerced value when a target is known.
  */
 export function previewForEdge(
@@ -113,20 +118,23 @@ export function previewForEdge(
     return `‹file stored from ${truncateSample(source.value, 48)}›`
   }
   if (resolve === 'lookup') {
-    const propertyName = options?.propertyName ?? options?.target?.name
-    const key = normalizeLookupKey(source.value || source.label)
-    const table = propertyName ? options?.lookups?.[propertyName] : undefined
-    if (table && Object.prototype.hasOwnProperty.call(table, key)) {
-      const fromTable = table[key]!
+    const raw = source.value || source.label
+    const mapping = options?.mapping ?? {
+      sourceId: source.id,
+      propertyName: options?.propertyName ?? options?.target?.name ?? '',
+      resolve: 'lookup' as const,
+    }
+    const mapped = resolveLookupMapped(mapping, raw, options?.lookups)
+    if (mapped !== undefined) {
       const shaped = options?.target
-        ? shapeLookupValue(fromTable, options.target)
-        : fromTable
+        ? shapeLookupValue(mapped, options.target)
+        : mapped
       if (Array.isArray(shaped)) {
         return truncateSample(shaped.join(', '), 80)
       }
       return truncateSample(String(shaped), 80)
     }
-    return `‹lookup uid for "${truncateSample(source.value, 48)}"›`
+    return `‹lookup ref for "${truncateSample(source.value, 48)}"›`
   }
   // Sync apply skips plain copies onto relation targets.
   if (options?.target && isRelationLookupTarget(options.target)) {
@@ -161,7 +169,9 @@ export function buildSyncPreviewBag(
     string,
     unknown
   >
-  const pendingResolve = mappings.filter((m) => m.resolve)
+  const pendingResolve = mappings.filter(
+    (m) => m.resolve && m.resolve !== 'lookup',
+  )
   if (pendingResolve.length === 0) return bag
   return {
     ...bag,
@@ -177,12 +187,23 @@ export function rowState(args: {
   mapping?: FieldMapping
   requiredResolve: ResolveJob | null
   conflict?: boolean
+  sampleValue?: string
+  lookups?: MappingLookups
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
   if (!args.mapping?.sourceId || !args.mapping.propertyName) return 'empty'
   const actual = args.mapping.resolve ?? null
   if (args.requiredResolve && actual !== args.requiredResolve) {
     return 'needsResolve'
+  }
+  if (actual === 'lookup') {
+    const sample = args.sampleValue ?? ''
+    if (
+      !sample ||
+      resolveLookupMapped(args.mapping, sample, args.lookups) === undefined
+    ) {
+      return 'needsLookup'
+    }
   }
   return 'mapped'
 }
@@ -226,11 +247,38 @@ export function attachLookupIfNeeded(
   edge: FieldMapping,
   target: TargetProperty | undefined,
 ): FieldMapping {
-  if (edge.resolve) return edge
-  if (target && isRelationLookupTarget(target)) {
-    return { ...edge, resolve: 'lookup' }
+  if (edge.resolve) {
+    return edge.resolve === 'lookup' ? edge : stripLookup(edge)
   }
-  return edge
+  if (target && isRelationLookupTarget(target)) {
+    return { ...stripLookup(edge), resolve: 'lookup' }
+  }
+  return stripLookup(edge)
+}
+
+export function applyLookupEntriesToMappings(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  entries: LookupEntry[],
+): FieldMapping[] | null {
+  if (rowKey === 'property') {
+    const index = mappings.findIndex((m) => m.propertyName === rowId)
+    if (index < 0) return null
+    const prev = mappings[index]!
+    if (prev.resolve !== 'lookup') return null
+    const next = [...mappings]
+    next[index] = withLookupEntries(prev, entries)
+    return next
+  }
+  const edgeIndex = edgeIds.indexOf(rowId)
+  if (edgeIndex < 0) return null
+  const prev = mappings[edgeIndex]
+  if (!prev || prev.resolve !== 'lookup') return null
+  const next = [...mappings]
+  next[edgeIndex] = withLookupEntries(prev, entries)
+  return next
 }
 
 export function upsertPropertyMapping(
@@ -336,16 +384,19 @@ export function buildPropertyModeRows(args: {
       ? sourceById.get(mapping.sourceId)
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
-    const state = rowState({ mapping, requiredResolve })
+    const sampleValue = sampleValueFromSource(source)
+    const state = rowState({ mapping, requiredResolve, sampleValue, lookups })
     return {
       id: target.name,
       target,
       mapping,
       source,
+      sampleValue,
       preview: previewForEdge(source, mapping?.resolve, {
         target,
         lookups,
         propertyName: target.name,
+        mapping,
       }),
       requiredResolve,
       state,
@@ -425,6 +476,7 @@ export function buildSourceModeRows(args: {
       r.mapping && r.mapping.sourceId && r.mapping.propertyName
         ? r.mapping
         : r.mapping
+    const sampleValue = sampleValueFromSource(r.source)
     const state = rowState({
       mapping:
         mapping && mapping.sourceId && mapping.propertyName
@@ -432,6 +484,8 @@ export function buildSourceModeRows(args: {
           : undefined,
       requiredResolve,
       conflict: conflicts.has(r.id),
+      sampleValue,
+      lookups,
     })
     // Drafts with only source or only property stay empty
     const effectiveState =
@@ -449,10 +503,12 @@ export function buildSourceModeRows(args: {
       target: r.target,
       mapping: complete,
       source: r.source,
+      sampleValue,
       preview: previewForEdge(r.source, complete?.resolve, {
         target: r.target,
         lookups,
         propertyName: complete?.propertyName,
+        mapping: complete,
       }),
       requiredResolve,
       state: effectiveState,

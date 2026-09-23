@@ -162,6 +162,40 @@ describe('buildPropertyModeRows', () => {
     })
     const author = rows.find((r) => r.id === 'author')!
     expect(author.preview).toBe('seed:identity/ada')
+    expect(author.sampleValue).toBe('Ada')
+    expect(author.state).toBe('mapped')
+  })
+
+  it('shows edge lookup hits and needsLookup when unassigned', () => {
+    const assigned = buildPropertyModeRows({
+      targets,
+      sources,
+      mappings: [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+          lookup: { entries: [{ value: 'Ada', ref: 'seed:identity/ada' }] },
+        },
+      ],
+    })
+    expect(assigned.find((r) => r.id === 'author')?.preview).toBe(
+      'seed:identity/ada',
+    )
+    expect(assigned.find((r) => r.id === 'author')?.state).toBe('mapped')
+
+    const unassigned = buildPropertyModeRows({
+      targets,
+      sources,
+      mappings: [
+        {
+          sourceId: 'rss-author',
+          propertyName: 'author',
+          resolve: 'lookup',
+        },
+      ],
+    })
+    expect(unassigned.find((r) => r.id === 'author')?.state).toBe('needsLookup')
   })
 })
 
@@ -181,7 +215,7 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
 
   it('shows lookup placeholder until table hit', () => {
     expect(previewForEdge(sources[2], 'lookup', { target: targets[3] })).toMatch(
-      /‹lookup uid/,
+      /‹lookup ref/,
     )
     expect(
       previewForEdge(sources[2], 'lookup', {
@@ -192,7 +226,7 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
     ).toBe('uid-1')
   })
 
-  it('builds applyMapping bag with _pendingResolve', () => {
+  it('puts lookup hits in the bag and only pending extract/file', () => {
     const bag = buildSyncPreviewBag(
       sources,
       [
@@ -201,16 +235,23 @@ describe('previewForEdge / buildSyncPreviewBag', () => {
           sourceId: 'rss-author',
           propertyName: 'author',
           resolve: 'lookup',
+          lookup: { entries: [{ value: 'Ada', ref: 'uid-1' }] },
+        },
+        {
+          sourceId: 'rss-link',
+          propertyName: 'html',
+          resolve: 'extract',
         },
       ],
       targets,
     )
     expect(bag.title).toBe('The grid held, barely')
+    expect(bag.author).toBe('uid-1')
     expect(bag._pendingResolve).toEqual([
       {
-        propertyName: 'author',
-        sourceId: 'rss-author',
-        resolve: 'lookup',
+        propertyName: 'html',
+        sourceId: 'rss-link',
+        resolve: 'extract',
       },
     ])
   })

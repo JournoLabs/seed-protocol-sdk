@@ -7,12 +7,12 @@ Use this package to:
 1. Parse markdown or RSS/Atom into `SourceNode[]`
 2. Optionally expand URL sources with `buildResolvedSourceNodes` (extract / file candidates)
 3. Author `FieldMapping` edges (manually, via `autoMap`, or via `FieldMapper`)
-4. `applyMapping` (sync copy) or `applyMappingAsync` (host resolve callback) → property bag
+4. `applyMapping` (sync copy + stored lookup) or `applyMappingAsync` (host extract/file callback) → property bag
 
 Mappings are an edge list: one source may fan out to multiple properties (e.g. RSS
 `link` → `importUrl` and `canonicalUrl`). Each property is exclusive — at most one
-source may map to it. Optional `resolve: 'extract' | 'file' | 'lookup'` marks
-transforms the **host** (or a persisted value map) performs; the package never
+source may map to it. `resolve: 'extract' | 'file'` is applied by the host callback.
+`resolve: 'lookup'` is a stored string → ref table on the edge — the package never
 fetches, runs Readability, or loads Seed Identity items.
 
 ## Install
@@ -74,7 +74,7 @@ const mappings = autoMap(itemSources, postTargets)
 // link → importUrl/canonicalUrl (copy); missing body → link extract→html;
 // image URLs → featureImage with resolve:'file'
 
-// Sync preview skips resolve edges:
+// Sync preview applies lookup entries; extract/file stay pending:
 const preview = applyMapping(itemSources, mappings, postTargets)
 
 // Publish path — host owns HTTP / extract / store:
@@ -95,7 +95,8 @@ const { properties, errors } = await applyMappingAsync(
 ### Relation lookup (`resolve: 'lookup'`)
 
 Map a string source (e.g. RSS `author`) onto a Relation or List-of-Relation
-target (e.g. `authors` → Identity) via a persisted dictionary and/or host callback:
+target (e.g. `authors` → Identity) via **stored entries on the edge**. Use Seed
+model vocabulary — not a `multiple` flag:
 
 ```ts
 const postTargets: TargetProperty[] = [
@@ -108,36 +109,40 @@ const postTargets: TargetProperty[] = [
 ]
 
 const mappings = [
-  { sourceId: 'rss-author', propertyName: 'authors', resolve: 'lookup' as const },
+  {
+    sourceId: 'rss-author',
+    propertyName: 'authors',
+    resolve: 'lookup' as const,
+    lookup: {
+      entries: [{ value: 'Jane Doe', ref: 'identity-seed-uid' }],
+    },
+  },
 ]
 
 const doc: MappingDocument = {
   version: 1,
   sourceKind: 'rss',
   mappings,
-  lookups: {
-    authors: { 'Jane Doe': 'identity-seed-uid' },
-  },
 }
+
+// Sync apply emits refs from stored entries (extract/file still skipped):
+const bag = applyMapping(itemSources, mappings, postTargets)
+// bag.authors === ['identity-seed-uid']
 
 const { properties, errors } = await applyMappingAsync(
   itemSources,
   mappings,
   postTargets,
-  {
-    lookups: doc.lookups,
-    // Optional: called only when the table has no entry for the trimmed source value
-    resolve: async ({ job, rawValue }) => {
-      if (job === 'lookup') return await findOrCreateIdentity(rawValue!)
-      throw new Error(`unexpected job ${job}`)
-    },
-  },
 )
-// properties.authors === ['identity-seed-uid']
+// Unmatched values are omitted from the bag and listed in errors[].
+// Do not fetch identities inside apply — persist the assignment, then apply.
 ```
 
-`autoMap` never wires a plain string onto Relation / List-of-Relation targets —
-author those edges in FieldMapper or programmatically.
+`autoMap` pairs alias matches such as `author` → `authors` with
+`resolve: 'lookup'` and **empty** entries. It never invents refs.
+
+`MappingDocument.lookups` / `applyMappingAsync({ lookups })` remain a read-only
+fallback for 0.6.0 documents. Prefer `FieldMapping.lookup.entries`.
 
 `classifyUrl({ url, contentType? })` is a pure MIME/extension classifier
 (`html` | `image` | `audio` | `video` | `unknown`). Enclosure nodes expose
@@ -171,7 +176,6 @@ import {
   rssItemToSources,
   applyMappingAsync,
   type FieldMapping,
-  type MappingLookups,
 } from '@seedprotocol/mapping'
 import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
 
@@ -182,13 +186,19 @@ import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
   targets={postTargets} // e.g. { name: 'html', dataType: 'Html', required: true }
   mappings={mappings}
   onChange={setMappings}
-  lookups={lookups}
-  onLookupsChange={setLookups}
+  slots={{ lookups: 'row', preview: 'row' }}
   renderRowAccessory={(row) =>
     row.mapping?.resolve === 'extract' || row.mapping?.resolve === 'file'
       ? <button type="button">Preview</button>
       : null
   }
+  renderLookup={(row) => (
+    <IdentityLookup
+      sampleValue={row.sampleValue}
+      entries={row.mapping?.lookup?.entries ?? []}
+      onChange={row.onLookupChange}
+    />
+  )}
 />
 
 // Rows — source-keyed
@@ -218,13 +228,13 @@ const mapper = useFieldMapper({
 // mapper.rows, mapper.coverage, mapper.setSource, mapper.setTransform, …
 ```
 
-Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`
-and (when `onLookupsChange` is provided) shows a string → seed uid editor — per-row
-when `layout="rows"` (default `slots.lookups: 'row'`), or as a section when
-`layout="wires"` / `slots.lookups: 'section'`.
+Connecting a source to a Relation / List-of-Relation target sets `resolve: 'lookup'`.
+Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Without
+`renderLookup`, `onLookupsChange` still enables the package uid-text fallback.
+`lookups` / `onLookupsChange` are deprecated — persist `lookup.entries` on the edge.
 
-Row and JSON previews match sync `applyMapping` output (pending resolve edges listed
-under `_pendingResolve`; JSON sits behind a disclosure).
+Row and JSON previews match sync `applyMapping` output. Lookup hits appear in the
+bag; only extract/file stay under `_pendingResolve`. JSON sits behind a disclosure.
 
 **Theming**
 
@@ -238,6 +248,7 @@ under `_pendingResolve`; JSON sits behind a disclosure).
 | `components` | Optional host `Select` / `Button` / `Pill` (defaults are native controls) |
 | `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'row' \| 'section' \| false`; rows layout defaults to `'row'`, wires to `'section'`) |
 | `renderRowAccessory` | Optional `(row: FieldMapperRow) => ReactNode` for host chrome (e.g. extract/file **Preview**) in `.fm-row-accessory`. Unrelated to `slots.preview`. Package does not fetch. |
+| `renderLookup` | Optional `(row: FieldMapperLookupRow) => ReactNode` for host lookup chrome on `resolve: 'lookup'` rows. Package does not fetch or list identities. |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
 | `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
 | `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
@@ -247,9 +258,9 @@ under `_pendingResolve`; JSON sits behind a disclosure).
 **DOM hooks for host CSS**
 
 - Wires: mapped wells expose `data-mapping-index` / `data-pair={index % 8}` (kept for host CSS); pending `.active` only on the selected source.
-- Rows: `data-state="empty|mapped|needsResolve|conflict"`, `data-property-name`, `data-resolve`, `data-required`, `data-source-kind`.
+- Rows: `data-state="empty|mapped|needsResolve|needsLookup|conflict"`, `data-property-name`, `data-resolve`, `data-required`, `data-source-kind`.
 
-Sync `applyMapping` preview lists pending resolve edges under `_pendingResolve`.
+Sync `applyMapping` preview lists pending **extract/file** edges under `_pendingResolve`. Lookup refs from stored entries appear in the bag.
 
 See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped). PermaPress: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md).
 
@@ -257,7 +268,7 @@ See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-
 
 | Type | Package | Meaning |
 |------|---------|---------|
-| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`; optional `lookups`) |
+| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`; optional `lookup.entries`) |
 | `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `audio` / `video` / `file` / `html` / `text`) for display |
 
 Compose them: map + resolve into a plain item, then optionally normalize roles for media/HTML display. Storage stays `Image` / `File` schema types — no separate Audio/Video dataTypes.

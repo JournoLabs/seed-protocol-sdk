@@ -1,6 +1,7 @@
 import {
   isRelationLookupTarget,
   normalizeLookupKey,
+  resolveLookupMapped,
   shapeLookupValue,
 } from './relationLookup'
 import { resolveMappingSource } from './resolvedSources'
@@ -90,40 +91,51 @@ function classFromSource(source: SourceNode): UrlMediaClass | undefined {
   return undefined
 }
 
-function lookupFromTable(
+function applyLookupEdge(
+  mapping: FieldMapping,
+  source: SourceNode,
+  target: TargetProperty,
   lookups: MappingLookups | undefined,
-  propertyName: string,
-  rawKey: string,
-): string | string[] | undefined {
-  if (!lookups) return undefined
-  const table = lookups[propertyName]
-  if (!table) return undefined
-  if (Object.prototype.hasOwnProperty.call(table, rawKey)) {
-    return table[rawKey]
+): { value: string | string[] } | { unmatched: string } {
+  const rawValue = normalizeLookupKey(source.value || source.label)
+  const mapped = resolveLookupMapped(mapping, rawValue, lookups)
+  if (mapped === undefined) {
+    return { unmatched: rawValue }
   }
-  return undefined
+  return { value: shapeLookupValue(mapped, target) }
 }
 
 /**
  * Apply field mappings to produce a property bag for createItem / publish.
  * Missing sources or unknown target properties are skipped (no throw).
- * Mappings with `resolve` are skipped — use `applyMappingAsync` with a host callback.
+ * `resolve: 'extract' | 'file'` edges are skipped — use `applyMappingAsync`.
+ * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups).
  */
 export function applyMapping(
   sources: SourceNode[],
   mappings: FieldMapping[],
   targets: TargetProperty[],
+  options?: { lookups?: MappingLookups },
 ): PropertyBag {
   const byId = new Map(sources.map((s) => [s.id, s]))
   const byName = new Map(targets.map((t) => [t.name, t]))
   const properties: PropertyBag = {}
 
   for (const mapping of mappings) {
-    if (mapping.resolve) continue
+    if (mapping.resolve && mapping.resolve !== 'lookup') continue
 
     const source = byId.get(mapping.sourceId)
     const target = byName.get(mapping.propertyName)
     if (!source || !target) continue
+
+    if (mapping.resolve === 'lookup') {
+      const result = applyLookupEdge(mapping, source, target, options?.lookups)
+      if ('value' in result) {
+        properties[mapping.propertyName] = result.value
+      }
+      continue
+    }
+
     // Never copy a raw string onto relation / list-of-relation targets.
     if (isRelationLookupTarget(target)) continue
 
@@ -135,16 +147,19 @@ export function applyMapping(
 }
 
 export type ApplyMappingAsyncOptions = {
-  /** Required for extract/file edges and lookup misses. */
+  /** Required for extract/file edges. Not called for lookup. */
   resolve?: ResolveCallback
-  /** String → seed uid dictionaries keyed by property name. */
+  /**
+   * String → seed uid dictionaries keyed by property name.
+   * @deprecated Prefer `FieldMapping.lookup.entries`. Read as a fallback only.
+   */
   lookups?: MappingLookups
 }
 
 /**
- * Async apply: copy+coerce plain edges; for `resolve` edges call the host
- * callback (or apply lookups for `lookup`) then coerce. Partial success —
- * failed resolve edges are listed in `errors` and omitted from `properties`.
+ * Async apply: copy+coerce plain edges; apply lookup entries; for extract/file
+ * call the host callback then coerce. Partial success — failed resolve edges
+ * are listed in `errors` and omitted from `properties`.
  */
 export async function applyMappingAsync(
   sources: SourceNode[],
@@ -181,63 +196,15 @@ export async function applyMappingAsync(
         continue
       }
 
-      const rawValue = normalizeLookupKey(source.value || source.label)
-      const fromTable = lookupFromTable(
-        options.lookups,
-        mapping.propertyName,
-        rawValue,
-      )
-
-      if (fromTable !== undefined) {
-        properties[mapping.propertyName] = shapeLookupValue(fromTable, target)
-        continue
-      }
-
-      if (!options.resolve) {
+      const result = applyLookupEdge(mapping, source, target, options.lookups)
+      if ('value' in result) {
+        properties[mapping.propertyName] = result.value
+      } else {
         errors.push({
           sourceId: mapping.sourceId,
           propertyName: mapping.propertyName,
           resolve: 'lookup',
-          message: `No lookup entry for "${rawValue}" and no resolve callback`,
-        })
-        continue
-      }
-
-      const ctx: ResolveContext = {
-        job: 'lookup',
-        source,
-        target,
-        rawValue,
-      }
-
-      try {
-        const resolved = await options.resolve(ctx)
-        if (resolved == null) {
-          errors.push({
-            sourceId: mapping.sourceId,
-            propertyName: mapping.propertyName,
-            resolve: 'lookup',
-            message: `Lookup returned empty for "${rawValue}"`,
-          })
-          continue
-        }
-        if (typeof resolved === 'string' || Array.isArray(resolved)) {
-          properties[mapping.propertyName] = shapeLookupValue(
-            resolved as string | string[],
-            target,
-          )
-        } else {
-          properties[mapping.propertyName] = coerceResolved(
-            resolved,
-            target.dataType,
-          )
-        }
-      } catch (err) {
-        errors.push({
-          sourceId: mapping.sourceId,
-          propertyName: mapping.propertyName,
-          resolve: 'lookup',
-          message: err instanceof Error ? err.message : String(err),
+          message: `No lookup entry for "${result.unmatched}"`,
         })
       }
       continue

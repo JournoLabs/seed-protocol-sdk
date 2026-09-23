@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.
+- `applyMapping` (sync) applies lookup entries and emits refs. Unmatched values are omitted. `applyMappingAsync` reports unmatched on `errors[]` and no longer calls the host `resolve` callback for lookup.
+- `autoMap` pairs alias matches such as `author` → List-of-Relation `authors` with `resolve: 'lookup'` and no invented refs.
+- `FieldMapper` `renderLookup?: (row: FieldMapperLookupRow) => ReactNode` — host picker on lookup rows (same split as `renderRowAccessory`). Package uid editor is a fallback only.
+- `useFieldMapper.setLookupEntries`. Row `sampleValue` and `data-state="needsLookup"` when the current sample has no matching entry.
+- `TargetProperty` stays Seed-accurate (`List` + `refValueType: 'Relation'` + `ref`). No `multiple` flag.
+- `MappingDocument.lookups` / `lookups` + `onLookupsChange` are deprecated read/write fallbacks for 0.6.0 documents.
+- `_pendingResolve` is extract/file only; lookup hits appear in the preview bag.
+
 ## 0.6.1
 
 - `FieldMapper` `renderRowAccessory?: (row: FieldMapperRow) => ReactNode` — host chrome slot on each rows-layout row (`.fm-row-accessory` / `classNames.rowAccessory`), after the transform control and before remove. Package does not fetch or preview; hosts return `null` when idle (e.g. show **Preview** only for `resolve: 'extract' | 'file'`).

@@ -3,8 +3,10 @@
 Design study and implementation spec for the `@seedprotocol/mapping` React UI.
 Companion to [MAPPING_PHASE2.md](./MAPPING_PHASE2.md).
 
-**Scope:** UI only. `FieldMapping`, `MappingDocument`, `MappingLookups`, `applyMapping`,
-`applyMappingAsync`, and `autoMap` are unchanged — no persisted-format migration.
+**Scope:** Originally UI only. As of `@seedprotocol/mapping@0.7.0`, lookup persist
+moved onto the edge (`FieldMapping.lookup.entries`). `MappingDocument.lookups` is
+a deprecated read fallback. `applyMapping` / `autoMap` apply stored lookup refs.
+The rest of the redesign (rows, theming, extract/file) is unchanged.
 
 ## 1. Why the two-pane layout stopped working
 

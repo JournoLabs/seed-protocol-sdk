@@ -20,6 +20,7 @@ import { FieldMapperWires } from './FieldMapperWires'
 import type {
   FieldMapperDefaultRows,
   FieldMapperLayout,
+  FieldMapperLookupRow,
   FieldMapperRow,
   FieldMapperRowKey,
 } from './fieldMapperTypes'
@@ -80,7 +81,14 @@ export type FieldMapperProps = {
    * String → seed uid dictionaries for `resolve: 'lookup'` edges.
    * Host should persist alongside `MappingDocument.lookups`.
    */
+  /**
+   * @deprecated Prefer `FieldMapping.lookup.entries` + `renderLookup`.
+   * Still accepted as a read fallback for preview / LookupEditor.
+   */
   lookups?: MappingLookups
+  /**
+   * @deprecated Prefer `renderLookup`. Enables the package uid editor fallback.
+   */
   onLookupsChange?: (lookups: MappingLookups) => void
   /** Override default autoMap heuristics. */
   onAutoMap?: () => FieldMapping[]
@@ -128,6 +136,11 @@ export type FieldMapperProps = {
    * Return `null` when nothing to show. Package does not fetch or preview.
    */
   renderRowAccessory?: (row: FieldMapperRow) => ReactNode
+  /**
+   * Host lookup chrome on `resolve: 'lookup'` rows (Identity picker, etc.).
+   * When set, the package uid editor is not mounted. Return `null` when idle.
+   */
+  renderLookup?: (row: FieldMapperLookupRow) => ReactNode
 }
 
 /**
@@ -154,6 +167,7 @@ export function FieldMapper({
   components,
   slots,
   renderRowAccessory,
+  renderLookup,
 }: FieldMapperProps) {
   const mapper = useFieldMapper({
     sources,
@@ -215,6 +229,7 @@ export function FieldMapper({
           mapper={mapper}
           lookups={lookups}
           onLookupsChange={onLookupsChange}
+          renderLookup={renderLookup}
           connectionColors={connectionColors}
           slots={resolvedSlots}
           classNames={classNames}
@@ -232,6 +247,7 @@ export function FieldMapper({
           classNames={classNames}
           ui={ui}
           renderRowAccessory={renderRowAccessory}
+          renderLookup={renderLookup}
         />
       ) : (
         <PropertyRows
@@ -246,6 +262,7 @@ export function FieldMapper({
           classNames={classNames}
           ui={ui}
           renderRowAccessory={renderRowAccessory}
+          renderLookup={renderLookup}
         />
       )}
     </div>

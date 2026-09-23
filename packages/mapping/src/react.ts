@@ -45,6 +45,7 @@ export {
 export type {
   FieldMapperOption,
   FieldMapperRow,
+  FieldMapperLookupRow,
   FieldMapperRowState,
   FieldMapperCoverage,
   UseFieldMapperArgs,
