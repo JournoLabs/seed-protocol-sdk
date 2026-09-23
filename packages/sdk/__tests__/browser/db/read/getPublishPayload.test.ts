@@ -50,6 +50,12 @@ describe('getPublishPayload integration (browser)', () => {
     expect(Array.isArray(result[0].listOfAttestations)).toBe(true)
     // Item was just created; basic properties have no uid yet, so we must get at least one property attestation
     expect(result[0].listOfAttestations.length).toBeGreaterThanOrEqual(1)
+    expect(result[0].listOfAttestations.some((a) => a._propertyName === 'title')).toBe(true)
+    expect(
+      result[0].listOfAttestations.every(
+        (a) => typeof a._propertyName === 'string' && a._propertyName !== '',
+      ),
+    ).toBe(true)
   }, 30000)
 
   it('returns attestation for title when item has title set (regression: missing ItemProperty attestation)', async () => {

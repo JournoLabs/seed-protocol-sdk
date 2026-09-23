@@ -50,6 +50,12 @@ testDescribe('getPublishPayload integration', () => {
       listOfAttestations: expect.any(Array),
     })
     expect(result[0].listOfAttestations.length).toBeGreaterThanOrEqual(1)
+    expect(result[0].listOfAttestations.some((a) => a._propertyName === 'title')).toBe(true)
+    expect(
+      result[0].listOfAttestations.every(
+        (a) => typeof a._propertyName === 'string' && a._propertyName !== '',
+      ),
+    ).toBe(true)
   }, 30000)
 
   it('with relation: returns multiple payloads and propertiesToUpdate on relation payload', async () => {
@@ -62,6 +68,12 @@ testDescribe('getPublishPayload integration', () => {
     const mainPayload = result.find((p) => p.localId === postItem.seedLocalId)
     expect(mainPayload).toBeDefined()
     expect(mainPayload!.listOfAttestations).toBeDefined()
+    expect(mainPayload!.listOfAttestations.some((a) => a._propertyName === 'title')).toBe(true)
+    expect(
+      mainPayload!.listOfAttestations.every(
+        (a) => typeof a._propertyName === 'string' && a._propertyName !== '',
+      ),
+    ).toBe(true)
     const relationPayload = result.find((p) => p.localId === authorItem.seedLocalId || p.propertiesToUpdate?.length)
     if (relationPayload?.propertiesToUpdate?.length) {
       expect(relationPayload.propertiesToUpdate.some((u: any) => u.publishLocalId === postItem.seedLocalId)).toBe(true)

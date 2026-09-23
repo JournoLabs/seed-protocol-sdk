@@ -561,6 +561,8 @@ const processBasicProperties = async (
           data: encodedData,
         } as AttestationRequestData,
       ],
+      // Always set so persist can match metadata rows that lack schemaUid
+      _propertyName: basicProperty.propertyName,
     }
 
     // For relation/image properties with seedLocalId, store resolution hints for resolvePublishPayloadValues

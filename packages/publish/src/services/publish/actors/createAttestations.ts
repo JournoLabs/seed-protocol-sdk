@@ -27,7 +27,7 @@ import {
   seedUidFromSeedPublished,
   versionUidFromCreatedAttestationEvents,
   uidsFromSeedPublished,
-  listCreatedAttestationPairsFromReceipt,
+  listPropertyAttestationPairsFromReceipt,
   type CreatedAttestationPair,
 } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
@@ -172,27 +172,39 @@ function consumeIfSchemaMatches(
 }
 
 /**
- * Walk CreatedAttestation event order (per request: optional seed, version, then property schemas)
+ * Walk receipt attestation order (per request: optional seed, version, then property schemas)
  * and persist property attestation UIDs onto metadata rows.
  */
 async function persistPropertyMetadataUidsFromContractReceipt(params: {
   receipt: ReceiptLike
   normalizedRequests: any[]
   useModularExecutor: boolean
+  contractAddressForEvents: string
 }): Promise<void> {
-  const { receipt, normalizedRequests, useModularExecutor } = params
-  const allPairs = listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)
-  if (!allPairs.length) return
+  const { receipt, normalizedRequests, useModularExecutor, contractAddressForEvents } = params
+  const { easContractAddress } = getPublishConfig()
+  const flattenedList = normalizedRequests.flatMap((r) => r.listOfAttestations ?? [])
+  const allPairs = listPropertyAttestationPairsFromReceipt({
+    receipt,
+    useModularExecutor,
+    easContractAddress,
+    contractAddressForEvents,
+    listOfAttestations: flattenedList,
+  })
+  if (!allPairs.length) {
+    logger('persistPropertyMetadataUidsFromContractReceipt: no property attestation pairs')
+    return
+  }
   const attMs = await attestationMsFromReceipt(receipt)
   let offset = 0
   for (const req of normalizedRequests) {
     const list = req.listOfAttestations ?? []
-    if (!list.length) continue
     const hadNewSeed = !req.seedUid || toHex32(req.seedUid) === ZERO_BYTES32
     if (hadNewSeed) {
       offset = consumeIfSchemaMatches(allPairs, offset, req.seedSchemaUid)
     }
     offset = consumeIfSchemaMatches(allPairs, offset, req.versionSchemaUid)
+    if (!list.length) continue
     const n = list.length
     const slice = allPairs.slice(offset, offset + n)
     offset += n
@@ -203,11 +215,18 @@ async function persistPropertyMetadataUidsFromContractReceipt(params: {
         ? toHex32(req.versionUid)
         : undefined
     if (!versionUidRow) {
-      versionUidRow = versionUidFromCreatedAttestationEvents(
-        receipt,
-        req.versionSchemaUid,
-        useModularExecutor,
-      )
+      versionUidRow =
+        versionUidFromCreatedAttestationEvents(
+          receipt,
+          req.versionSchemaUid,
+          useModularExecutor,
+        ) ??
+        uidsFromSeedPublished(
+          receipt,
+          contractAddressForEvents,
+          n,
+          useModularExecutor,
+        ).versionUid
     }
     await applyPropertyAttestationUidsFromPublish({
       seedLocalId: req.localId,
@@ -424,6 +443,7 @@ export const createAttestations = fromPromise(
           receipt,
           normalizedRequests: [normalizedOne],
           useModularExecutor,
+          contractAddressForEvents: routing.contractAddressForEvents,
         })
       }
 
@@ -479,6 +499,7 @@ export const createAttestations = fromPromise(
         receipt,
         normalizedRequests: payloadForContract,
         useModularExecutor,
+        contractAddressForEvents: routing.contractAddressForEvents,
       })
 
       const firstRequest = normalizedRequests[0]
