@@ -1,11 +1,12 @@
 import { ItemData } from '@/types'
-import { and, eq, gt, inArray, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
+import { and, eq, gt, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
 import { batchLatestPublishedVersionBySeedLocalIds } from './batchLatestPublishedVersionBySeedLocalIds'
 import { getAddressesForItemsFilter } from '@/helpers/db'
+import { publisherInAddressListSql } from '@/helpers/ownership'
 import { ZERO_BYTES32 } from '@/helpers/constants'
 
 type GetItemsDataProps = {
@@ -53,20 +54,10 @@ export const getItemsData: GetItemsData = async ({
 
   if (addressFilter === 'owned') {
     const ownedAddresses = await getAddressesForItemsFilter('owned')
-    if (ownedAddresses.length > 0) {
-      conditions.push(
-        or(
-          inArray(seeds.publisher, ownedAddresses),
-          isNull(seeds.publisher)
-        ) as SQL
-      )
-    }
+    conditions.push(publisherInAddressListSql(seeds.publisher, ownedAddresses))
   } else if (addressFilter === 'watched') {
     const watchedAddresses = await getAddressesForItemsFilter('watched')
-    if (watchedAddresses.length === 0) {
-      return []
-    }
-    conditions.push(inArray(seeds.publisher, watchedAddresses) as SQL)
+    conditions.push(publisherInAddressListSql(seeds.publisher, watchedAddresses))
   }
 
   if (deleted) {

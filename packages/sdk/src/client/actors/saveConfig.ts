@@ -5,6 +5,7 @@ import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
+import { normalizeAddressList } from '@/helpers/addresses'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
@@ -51,8 +52,8 @@ export const saveConfig = fromCallback<
       }
       
       const endpointsValueString = JSON.stringify(endpoints)
-      const owned = ownedAddresses ?? addresses ?? []
-      const watched = watchedAddresses ?? []
+      const owned = normalizeAddressList(ownedAddresses ?? addresses ?? [])
+      const watched = normalizeAddressList(watchedAddresses ?? [])
       const addressesValueString = JSON.stringify({ owned, watched })
 
       // TODO: Figure out how to define on conflict with multiple rows added
@@ -69,9 +70,8 @@ export const saveConfig = fromCallback<
           },
         })
 
-      if (owned.length > 0 || watched.length > 0) {
-        await appDb
-          .insert(appState)
+      await appDb
+        .insert(appState)
         .values({
           key: 'addresses',
           value: addressesValueString,
@@ -82,7 +82,6 @@ export const saveConfig = fromCallback<
             value: addressesValueString,
           },
         })
-      }
 
       await appDb
         .insert(appState)

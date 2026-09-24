@@ -79,7 +79,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         .select({ publisher: versions.publisher })
         .from(versions)
         .where(eq(versions.localId, versionLocalId))
-      expect(row?.publisher).toBe(testPublisher)
+      expect(row?.publisher).toBe(testPublisher.toLowerCase())
     } finally {
       setGetPublisherForNewSeeds(null)
     }
@@ -127,7 +127,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         .select({ publisher: metadata.publisher })
         .from(metadata)
         .where(eq(metadata.localId, result.localId!))
-      expect(row?.publisher).toBe(testPublisher)
+      expect(row?.publisher).toBe(testPublisher.toLowerCase())
     } finally {
       setGetPublisherForNewSeeds(null)
     }

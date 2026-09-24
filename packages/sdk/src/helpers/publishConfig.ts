@@ -88,9 +88,10 @@ export function getRevokeExecutor(): RevokeExecutor | null {
 }
 
 /**
- * Optional getter for additional addresses to include when syncing from EAS and ownership checks.
- * When using the modular executor with `modularAccountModuleContract`, the publish package registers
- * that module address so sync/ownership align if the on-chain attester matches the module.
+ * Optional getter for extra EAS indexer attesters (e.g. a legacy executor module).
+ * Used for EAS sync and legacy revoke only — never merged into the owned set,
+ * `isItemOwned`, or `addressFilter: 'owned'`. The user's smart/managed account
+ * belongs in `owned` / `publisherAddress`, not here.
  */
 export type GetAdditionalSyncAddresses = () => Promise<string[]>
 

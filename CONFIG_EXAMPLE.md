@@ -19,7 +19,7 @@ await ClientManager.init({
     },
     filesDir: '.seed' // Directory where .seed data is stored
   },
-  addresses: ['0x...'] // Ethereum addresses
+  addresses: { owned: ['0x...'], watched: [] } // or legacy `['0x...']` (owned only)
 })
 ```
 

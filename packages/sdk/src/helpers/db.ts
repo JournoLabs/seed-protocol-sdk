@@ -23,6 +23,7 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
+import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -1615,20 +1616,18 @@ export const savePropertyToDb = async (
   }
 }
 
-type NormalizedAddressConfig = { owned: string[]; watched: string[] }
-
 function parseAddressConfig(value: string | null): NormalizedAddressConfig | null {
   if (!value) return null
   try {
     const parsed = JSON.parse(value)
     if (Array.isArray(parsed)) {
-      return { owned: parsed, watched: [] }
+      return normalizeAddressConfig(parsed)
     }
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.owned)) {
-      return {
+      return normalizeAddressConfig({
         owned: parsed.owned,
         watched: Array.isArray(parsed.watched) ? parsed.watched : [],
-      }
+      })
     }
     return null
   } catch {
@@ -1647,29 +1646,14 @@ export const getWatchedAddressesFromDb = async (): Promise<string[]> => {
 }
 
 /**
- * Returns addresses for useItems/getItemsData addressFilter.
- * Encapsulates owned (with additional sync addresses) and watched logic.
+ * Returns persisted owned or watched addresses for list filters.
+ * Does not include `getAdditionalSyncAddresses` (those are extra EAS indexers).
  */
 export const getAddressesForItemsFilter = async (
   addressFilter: 'owned' | 'watched',
 ): Promise<string[]> => {
   if (addressFilter === 'owned') {
-    const { getGetAdditionalSyncAddresses } = await import('@/helpers/publishConfig')
-    let ownedAddresses = await getOwnedAddressesFromDb()
-    const additionalGetter = getGetAdditionalSyncAddresses()
-    if (additionalGetter) {
-      const additional = await additionalGetter()
-      if (additional?.length) {
-        const seen = new Set(ownedAddresses.map((a) => a.toLowerCase()))
-        for (const addr of additional) {
-          if (addr && !seen.has(addr.toLowerCase())) {
-            seen.add(addr.toLowerCase())
-            ownedAddresses = [...ownedAddresses, addr]
-          }
-        }
-      }
-    }
-    return ownedAddresses
+    return getOwnedAddressesFromDb()
   }
   return getWatchedAddressesFromDb()
 }

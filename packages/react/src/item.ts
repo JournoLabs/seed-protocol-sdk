@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import {
   createNewItem,
   getAddressesForItemsFilter,
+  publisherInAddressListSql,
   Item,
   eventEmitter,
   EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
@@ -17,7 +18,7 @@ import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
-import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
@@ -326,21 +327,10 @@ export const useItems: UseItems = ({
     if (modelName) {
       conditions.push(eq(seeds.type, toSnakeCase(modelName)))
     }
-    if (addressFilter === 'owned') {
-      if (addressesForFilter && addressesForFilter.length > 0) {
-        conditions.push(
-          or(
-            inArray(seeds.publisher, addressesForFilter),
-            isNull(seeds.publisher)
-          ) as any
-        )
-      }
-    } else if (addressFilter === 'watched') {
-      if (addressesForFilter && addressesForFilter.length > 0) {
-        conditions.push(inArray(seeds.publisher, addressesForFilter) as any)
-      } else {
-        conditions.push(sql`1=0` as any)
-      }
+    if (addressFilter === 'owned' || addressFilter === 'watched') {
+      conditions.push(
+        publisherInAddressListSql(seeds.publisher, addressesForFilter ?? []) as any,
+      )
     }
     if (deleted) {
       conditions.push(

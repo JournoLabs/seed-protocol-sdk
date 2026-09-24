@@ -8,6 +8,7 @@ import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
 import { normalizeDataType } from '@/helpers/property'
+import { normalizePublisher } from '@/helpers/addresses'
 
 type UpdateMetadata = (
   metadataValues: Partial<MetadataType>,
@@ -25,6 +26,7 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
 
   // Publisher is immutable once set: do not overwrite existing publisher
   if (rest.publisher != null && rest.publisher !== '') {
+    rest.publisher = normalizePublisher(rest.publisher) ?? rest.publisher
     const [row] = await appDb
       .select({ publisher: metadata.publisher })
       .from(metadata)

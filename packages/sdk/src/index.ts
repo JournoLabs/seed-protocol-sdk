@@ -110,7 +110,14 @@ export {
   normalizeBytes32Hex,
 } from '@seedprotocol/eas'
 export type { AttestationLikeForCanonical } from '@seedprotocol/eas'
-export { isItemOwned } from './helpers/ownership'
+export {
+  isItemOwned,
+  isLocalUnsealedDraft,
+  publisherIsInOwnedSet,
+  isSeedRowOwned,
+  publisherInAddressListSql,
+  ownedPublisherSql,
+} from './helpers/ownership'
 
 export {
   SeedModels,
@@ -154,6 +161,13 @@ export { applyArweaveL1TransactionIdLocal } from './db/write/applyArweaveL1Trans
 
 export { getSegmentedItemProperties } from './helpers/getSegmentedItemProperties'
 export { getAddressesForItemsFilter } from './helpers/db'
+export { claimUnpublishedDrafts } from './db/write/claimUnpublishedDrafts'
+export {
+  normalizeHexAddress,
+  normalizeAddressList,
+  normalizePublisher,
+  normalizeAddressConfig,
+} from './helpers/addresses'
 
 export { getArweaveUrlForTransaction } from './helpers'
 export {

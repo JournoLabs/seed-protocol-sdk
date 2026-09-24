@@ -97,7 +97,7 @@ testDescribe('updateSeedUid and persistSeedUid', () => {
       const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'b'.repeat(64) })
       const db = BaseDb.getAppDb()
       const [row] = await db.select({ publisher: seeds.publisher }).from(seeds).where(eq(seeds.localId, seedLocalId))
-      expect(row?.publisher).toBe(testPublisher)
+      expect(row?.publisher).toBe(testPublisher.toLowerCase())
     } finally {
       setGetPublisherForNewSeeds(null)
     }

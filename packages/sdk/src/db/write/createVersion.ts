@@ -2,6 +2,7 @@ import { generateId } from '@/helpers'
 import { versions } from '@/seedSchema'
 import { BaseDb } from '../Db/BaseDb'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
+import { normalizePublisher } from '@/helpers/addresses'
 
 type CreateVersionProps = {
   seedLocalId?: string
@@ -21,7 +22,7 @@ export const createVersion: CreateVersion = async ({
 
   const newVersionLocalId = generateId()
 
-  const publisher = await getPublisherForNewSeedsWithTimeout()
+  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
 
   await appDb.insert(versions).values({
     localId: newVersionLocalId,
@@ -30,7 +31,7 @@ export const createVersion: CreateVersion = async ({
     seedUid: seedUid ?? null,
     seedType,
     uid: uid ?? null,
-    ...(publisher != null && publisher !== '' && { publisher }),
+    ...(publisher && { publisher }),
   })
 
   return newVersionLocalId

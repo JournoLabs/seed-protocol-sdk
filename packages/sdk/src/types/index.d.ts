@@ -42,8 +42,13 @@ export interface SeedConfig {
 }
 /**
  * Address configuration for owned vs watched wallets.
- * - owned: addresses the user controls (create, edit, publish)
+ * - owned: addresses the user controls (EOA + smart/managed account). Persisted lowercased.
  * - watched: addresses to browse (read-only, sync from EAS)
+ *
+ * `owned` is not the publisher stamp. New seeds are stamped with the publish
+ * session `publisherAddress` (usually the managed account). Extra EAS indexers
+ * belong in `setAdditionalSyncAddresses`, not `owned`.
+ *
  * Legacy: string[] is treated as owned only.
  */
 export type AddressConfiguration = {

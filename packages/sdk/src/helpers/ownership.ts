@@ -1,17 +1,22 @@
 import type { IItem } from '@/interfaces/IItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { eq, or } from 'drizzle-orm'
+import { eq, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
-import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
+import { isPlaceholderUid } from '@/helpers/easUid'
+import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
 
 const READ_ONLY_ERROR = 'Item is read-only: you do not own this item'
 
 type ItemLike = { seedLocalId?: string; seedUid?: string }
 
-type SeedRow = { publisher: string | null; attestationRaw: string | null; uid: string | null }
+export type SeedOwnershipRow = {
+  publisher: string | null
+  attestationRaw?: string | null
+  uid?: string | null
+}
 
-async function getSeedRowForItem(item: ItemLike): Promise<SeedRow | null> {
+async function getSeedRowForItem(item: ItemLike): Promise<SeedOwnershipRow | null> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return null
 
@@ -35,7 +40,7 @@ async function getSeedRowForItem(item: ItemLike): Promise<SeedRow | null> {
 }
 
 /** Resolve publisher from seed row: `publisher` column, else `attestationRaw.attester`. */
-export function resolvePublisherFromSeedRow(row: SeedRow): string | null {
+export function resolvePublisherFromSeedRow(row: SeedOwnershipRow): string | null {
   if (row.publisher) return row.publisher
   if (row.attestationRaw) {
     try {
@@ -49,40 +54,80 @@ export function resolvePublisherFromSeedRow(row: SeedRow): string | null {
 }
 
 /**
- * Checks if the current user owns the item (publisher is in owned addresses).
- * Locally created items (no publisher, no attestationRaw) are considered owned.
- * Includes getAdditionalSyncAddresses (e.g. `modularAccountModuleContract` when configured)
- * so ownership aligns with EAS sync when the publisher/attester matches those addresses.
+ * Local draft that has never been attested: no publisher, no real uid, no attestationRaw.
+ */
+export function isLocalUnsealedDraft(row: SeedOwnershipRow): boolean {
+  const publisher = row.publisher
+  if (publisher != null && publisher !== '') return false
+  if (!isPlaceholderUid(row.uid)) return false
+  if (row.attestationRaw != null && row.attestationRaw !== '') return false
+  return true
+}
+
+/** Case-insensitive membership in the persisted owned set. */
+export function publisherIsInOwnedSet(
+  publisher: string | null | undefined,
+  ownedAddresses: readonly string[],
+): boolean {
+  if (publisher == null || publisher === '') return false
+  const ownedSet = new Set(normalizeAddressList(ownedAddresses))
+  return ownedSet.has(normalizeHexAddress(publisher))
+}
+
+/**
+ * Shared ownership predicate.
+ * - Session has owned addresses: only a publisher in that set is owned (null is never owned).
+ * - Session has no owned addresses: local unsealed drafts are owned so pre-connect authoring works.
+ */
+export function isSeedRowOwned(
+  row: SeedOwnershipRow,
+  ownedAddresses: readonly string[],
+): boolean {
+  const publisher = resolvePublisherFromSeedRow(row)
+  if (ownedAddresses.length === 0) {
+    return isLocalUnsealedDraft({ ...row, publisher: publisher ?? row.publisher })
+  }
+  return publisherIsInOwnedSet(publisher, ownedAddresses)
+}
+
+/**
+ * SQL for `addressFilter: 'owned' | 'watched'`. Empty list → no rows (`1=0`).
+ * Compares `lower(publisher)` so checksummed rows match persisted lowercase owned.
+ */
+export function publisherInAddressListSql(
+  column: typeof seeds.publisher,
+  addresses: readonly string[],
+): SQL {
+  const normalized = normalizeAddressList(addresses)
+  if (normalized.length === 0) {
+    return sql`1=0`
+  }
+  return inArray(sql<string>`lower(${column})`, normalized) as SQL
+}
+
+/** Owned-list SQL on `seeds.publisher`. */
+export function ownedPublisherSql(ownedAddresses: readonly string[]): SQL {
+  return publisherInAddressListSql(seeds.publisher, ownedAddresses)
+}
+
+/**
+ * Checks if the current user owns the item (publisher is in persisted owned addresses).
+ *
+ * When the session has owned addresses, only a matching publisher is owned —
+ * `publisher IS NULL` is not treated as owned. Call `claimUnpublishedDrafts`
+ * after connect to stamp local drafts.
+ *
+ * When owned is empty, local unsealed drafts (no publisher, no real uid, no
+ * attestationRaw) are still owned so create/edit works before a wallet is connected.
+ *
+ * Does not include `getAdditionalSyncAddresses` (those are extra EAS indexers,
+ * not wallets the user controls).
  */
 export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean> {
   const row = await getSeedRowForItem(item)
   if (!row) return false
-
-  const publisher = resolvePublisherFromSeedRow(row)
-  if (!publisher) {
-    if (!row.uid && !row.attestationRaw) {
-      return true
-    }
-    return false
-  }
-
-  let addressesToCheck = await getOwnedAddressesFromDb()
-  const additionalGetter = getGetAdditionalSyncAddresses()
-  if (additionalGetter) {
-    const additional = await additionalGetter()
-    if (additional?.length) {
-      const seen = new Set(addressesToCheck.map((a) => a.toLowerCase()))
-      for (const addr of additional) {
-        if (addr && !seen.has(addr.toLowerCase())) {
-          seen.add(addr.toLowerCase())
-          addressesToCheck = [...addressesToCheck, addr]
-        }
-      }
-    }
-  }
-
-  const ownedSet = new Set(addressesToCheck.map((a) => a.toLowerCase()))
-  return ownedSet.has(publisher.toLowerCase())
+  const ownedAddresses = await getOwnedAddressesFromDb()
+  return isSeedRowOwned(row, ownedAddresses)
 }
 
 /**

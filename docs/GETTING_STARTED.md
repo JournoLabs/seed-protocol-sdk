@@ -27,9 +27,26 @@ await client.init({
     endpoints: { /* your EAS endpoint */ },
     filesDir: '.seed',
   },
-  addresses: ['0x...'], // optional
+  addresses: { owned: ['0x...'], watched: [] }, // optional; legacy `['0x...']` is owned only
 })
 ```
+
+### Address session
+
+Three different address lists, do not mix them:
+
+- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only. An empty owned list returns no rows (it does not skip the filter).
+- **`publisherAddress`** — who new seeds/versions/metadata are stamped with (usually the managed account). Set via the publish wallet session, not by putting the module contract in `owned`.
+- **`getAdditionalSyncAddresses`** — extra EAS indexers (legacy executor module). Used for sync and revoke only, never for ownership.
+
+After connect, stamp leftover local drafts:
+
+```typescript
+await client.setAddresses({ owned: [eoa, managedAccount] })
+await client.claimUnpublishedDrafts(publisherAddress) // automatic if you use setPublishWallet
+```
+
+`claimUnpublishedDrafts` only updates unsealed rows (no real uid, no `attestationRaw`). Sealed rows are left alone.
 
 ---
 

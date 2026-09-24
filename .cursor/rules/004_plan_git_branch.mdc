@@ -1,5 +1,5 @@
 ---
-description: Plans must isolate work on a separate git branch and verify clean mergeability without merging
+description: Plans must isolate work on a dedicated git branch, commit finished work there, and verify clean mergeability without merging
 alwaysApply: true
 ---
 Plan Git Branch Rules:
@@ -11,14 +11,22 @@ When writing or executing a plan, ALWAYS include and follow these git workflow r
    - Do ALL plan implementation, commits, and verification on that branch
    - NEVER commit plan work directly to `main`/`master` (or the repo's default base branch)
 
-2. Verification stage (required in every plan)
+2. Commit finished work (required before a plan is done)
+   - After implementation, commit all plan work to the created branch
+   - Do not leave plan changes unstaged or uncommitted
+   - A plan is not finished until its work is committed on the work branch
+   - Plan-finish commits do not wait for a separate "please commit" request
+   - Follow normal commit safety (no secrets, no hook-skip, no force-push)
+
+3. Verification stage (required in every plan)
    - Confirm the branch is up to date with the base branch (fetch + rebase or merge-base check as appropriate)
    - Verify the branch can merge cleanly into the base branch (e.g. dry-run / conflict check)
    - Run relevant tests/checks needed to show the branch is merge-ready
    - Do NOT perform the actual merge into the base branch
    - Leave merge/PR merge for the user (or a later explicit request)
 
-3. Plan text
+4. Plan text
    - Explicitly state the branch name (or how it will be named)
+   - Explicitly state that finished work will be committed on that branch
    - Explicitly list mergeability verification steps
    - Explicitly state that verification must not merge

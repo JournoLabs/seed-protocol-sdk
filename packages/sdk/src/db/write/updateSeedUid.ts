@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
+import { normalizePublisher } from '@/helpers/addresses'
 
 type UpdateSeedUidProps = {
   seedLocalId: string
@@ -26,7 +27,8 @@ export const updateSeedUid = async ({
 
   const appDb = BaseDb.getAppDb()
 
-  let shouldSetPublisher = publisher != null && publisher !== ''
+  const normalizedPublisher = normalizePublisher(publisher)
+  let shouldSetPublisher = normalizedPublisher != null
   if (shouldSetPublisher) {
     const [row] = await appDb
       .select({ publisher: seeds.publisher })
@@ -42,7 +44,7 @@ export const updateSeedUid = async ({
     .update(seeds)
     .set({
       uid: seedUid,
-      ...(shouldSetPublisher && { publisher }),
+      ...(shouldSetPublisher && { publisher: normalizedPublisher }),
       ...(attestationCreatedAt != null && { attestationCreatedAt }),
       updatedAt: Date.now(),
     })

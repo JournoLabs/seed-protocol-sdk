@@ -29,6 +29,7 @@ import {
   findLocalOnchainCopiesForAddresses,
   hardDeleteLocalSeedsByLocalIds,
 } from '@/db/write/removeLocalCopiesForAddresses'
+import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
 
 const logger               = debug('seedSdk:client')
@@ -172,6 +173,15 @@ const clientInstance = {
   getWatchedAddresses: async () => {
     ensureInitialized();
     return getWatchedAddressesFromDb();
+  },
+  /**
+   * Stamp local seeds/versions/metadata that have no publisher and no real uid.
+   * Sealed rows (real EAS uid or attestationRaw) are left unchanged.
+   * Use after `setAddresses` on connect; `setPublishWallet` does this automatically.
+   */
+  claimUnpublishedDrafts: async (publisher: string) => {
+    ensureInitialized()
+    return claimUnpublishedDrafts(publisher)
   },
   /**
    * Hard-delete local on-chain seed copies for the given publisher addresses.

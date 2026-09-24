@@ -20,6 +20,15 @@ export declare const ClientManager: {
     getOwnedAddresses: () => Promise<any>;
     getWatchedAddresses: () => Promise<any>;
     /**
+     * Stamp local seeds/versions/metadata that have no publisher and no real uid.
+     * Sealed rows (real EAS uid or attestationRaw) are left unchanged.
+     */
+    claimUnpublishedDrafts: (publisher: string) => Promise<{
+        seeds: number;
+        versions: number;
+        metadata: number;
+    }>;
+    /**
      * Hard-delete local on-chain seed copies for the given publisher addresses.
      * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.
      */
@@ -48,6 +57,15 @@ export declare const getClient: () => {
     }>;
     getOwnedAddresses: () => Promise<any>;
     getWatchedAddresses: () => Promise<any>;
+    /**
+     * Stamp local seeds/versions/metadata that have no publisher and no real uid.
+     * Sealed rows (real EAS uid or attestationRaw) are left unchanged.
+     */
+    claimUnpublishedDrafts: (publisher: string) => Promise<{
+        seeds: number;
+        versions: number;
+        metadata: number;
+    }>;
     /**
      * Hard-delete local on-chain seed copies for the given publisher addresses.
      * Drafts (no uid / attestationRaw) are kept. Chain is untouched; reconnect can rehydrate via syncFromEas.

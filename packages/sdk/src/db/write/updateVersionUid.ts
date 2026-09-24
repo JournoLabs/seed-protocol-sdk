@@ -2,6 +2,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { eq, desc } from 'drizzle-orm'
 import { isPlaceholderUid } from '@/helpers/easUid'
+import { normalizePublisher } from '@/helpers/addresses'
 
 type UpdateVersionUidProps = {
   seedLocalId: string
@@ -40,7 +41,8 @@ export const updateVersionUid = async ({
   )
   if (!toUpdate?.localId) return
 
-  let shouldSetPublisher = publisher != null && publisher !== ''
+  const normalizedPublisher = normalizePublisher(publisher)
+  let shouldSetPublisher = normalizedPublisher != null
   if (shouldSetPublisher && toUpdate.publisher != null && toUpdate.publisher !== '') {
     shouldSetPublisher = false
   }
@@ -49,7 +51,7 @@ export const updateVersionUid = async ({
     .update(versions)
     .set({
       uid: versionUid,
-      ...(shouldSetPublisher && { publisher }),
+      ...(shouldSetPublisher && { publisher: normalizedPublisher }),
       ...(attestationCreatedAt != null && { attestationCreatedAt }),
       updatedAt: Date.now(),
     })

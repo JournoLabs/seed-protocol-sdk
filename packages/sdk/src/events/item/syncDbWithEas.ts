@@ -29,6 +29,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema, PropertyType } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
+import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
@@ -138,7 +139,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
       uid: seed.id,
       schemaUid: seed.schemaId,
       type: seed.schema.schemaNames[0].name,
-      publisher: seed.attester,
+      publisher: seed.attester ? normalizeHexAddress(seed.attester) : seed.attester,
       createdAt: Date.now(),
       attestationCreatedAt: seed.timeCreated * 1000,
       attestationRaw,
@@ -214,7 +215,9 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
     const seedLocalId = seedUidToLocalId.get(seedUid!)
     const seedType = seedUidToModelType.get(seedUid!)
     const attestationRaw = escapeSqliteString(JSON.stringify(version))
-    const publisher = escapeSqliteString(version.attester ?? '')
+    const publisher = escapeSqliteString(
+      version.attester ? normalizeHexAddress(version.attester) : '',
+    )
 
     const valuesString = `('${versionLocalId}', '${version.id}', '${seedUid}', '${seedLocalId}', '${seedType}', ${Date.now()}, ${version.timeCreated * 1000}, '${attestationRaw}', '${publisher}')`
 
@@ -542,7 +545,9 @@ const saveEasPropertiesToDbBody = async ({
         : null
     const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
 
-    const publisher = escapeSqliteString(property.attester ?? '')
+    const publisher = escapeSqliteString(
+      property.attester ? normalizeHexAddress(property.attester) : '',
+    )
     const valuesString = `('${propertyLocalId}', '${property.id}', 
                          '${property.schemaId}', ${propertyIdSql}, '${propertyName}', 
                          '${propertyValue}', '${easDataType}', '${versionUid}', 

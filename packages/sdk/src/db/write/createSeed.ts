@@ -3,6 +3,7 @@ import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
+import { normalizePublisher } from '@/helpers/addresses'
 
 type CreateSeedProps = {
   type: string
@@ -19,7 +20,7 @@ export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<st
 
   const newSeedLocalId = generateId()
 
-  const publisher = await getPublisherForNewSeedsWithTimeout()
+  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
 
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,
@@ -27,7 +28,7 @@ export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<st
     uid: seedUid,
     createdAt: Date.now(),
     schemaUid: schemaUid || null,
-    ...(publisher != null && publisher !== '' && { publisher }),
+    ...(publisher && { publisher }),
   })
 
   return newSeedLocalId

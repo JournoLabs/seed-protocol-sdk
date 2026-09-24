@@ -36,6 +36,10 @@ export async function setPublishWallet(
   if (next.publisherAddress) owned.add(next.publisherAddress.toLowerCase())
   try {
     await seedClient.setAddresses({ owned: [...owned] })
+    const claimAs = next.publisherAddress ?? next.signer.address
+    if (claimAs) {
+      await seedClient.claimUnpublishedDrafts(claimAs)
+    }
   } catch (err) {
     console.warn('[publishWalletRegistry] Failed to set seed client addresses:', err)
   }

@@ -3,6 +3,7 @@ import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
 import { getPropertyIdForModelAndName } from '@/helpers/db'
 import { PropertyType } from '@/types'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
+import { normalizePublisher } from '@/helpers/addresses'
 import { BaseDb } from '../Db/BaseDb'
 import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
@@ -40,8 +41,8 @@ export const createMetadata: CreateMetadata = async (
 
   metadataValues.localId = generateId()
 
-  const publisher = await getPublisherForNewSeedsWithTimeout()
-  if (publisher != null && publisher !== '') {
+  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  if (publisher) {
     metadataValues.publisher = publisher
   }
 
