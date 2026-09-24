@@ -81,6 +81,25 @@ export {
 } from './helpers/contracts'
 
 export {
+  estimatePublishCost,
+  combinePublishCostEstimate,
+  getCachedTokenPrices,
+  getCachedMarketRates,
+  resetMarketRateCache,
+  resetTokenPriceCache,
+  watchPublishCost,
+  PUBLISH_GAS_HEURISTICS,
+  heuristicPublishGas,
+} from './services/publishCost'
+export type {
+  PublishCostEstimate,
+  EstimatePublishCostOptions,
+  WatchPublishCostOptions,
+  WatchPublishCostHandle,
+  MarketRates,
+  TokenPrices,
+} from './services/publishCost'
+export {
   ensureEasSchemasForItem,
 } from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
@@ -96,6 +115,7 @@ export {
   usePublishProcessesState,
   usePublishProcessesStateForSeed,
   usePublishProcessById,
+  usePublishCostEstimate,
   clearCompletedPublishProcesses,
   clearCompletedPublishProcessesForSeed,
   clearAllPublishProcesses,
@@ -106,6 +126,7 @@ export {
   getArweaveTransactionIds,
   getEasPayload,
 } from './hooks'
+export type { UsePublishCostEstimateResult } from './hooks'
 export type { PublishProcessRecord, PublishProcessStatus } from './hooks/useItemPublishStatus'
 export { useArweaveL1Finalize } from './hooks/useArweaveL1Finalize'
 export type { ArweaveL1FinalizeJobRow } from './hooks/useArweaveL1Finalize'

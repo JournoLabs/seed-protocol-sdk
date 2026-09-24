@@ -37,6 +37,15 @@ export class NodeFileManager implements IFileManager {
     return await fsAsync.access(filePath).then(() => true).catch(() => false)
   }
 
+  async getFileSize(filePath: string): Promise<number | null> {
+    try {
+      const stat = await fsAsync.stat(filePath)
+      return stat.size
+    } catch {
+      return null
+    }
+  }
+
   async listImageFiles(): Promise<string[]> {
     return this.listFiles('images')
   }

@@ -100,6 +100,11 @@ export abstract class BaseFileManager {
     return BaseFileManager.requireImpl().pathExists(filePath)
   }
 
+  /** File size in bytes, or null if the path does not exist / cannot be stated. */
+  static getFileSize(filePath: string): Promise<number | null> {
+    return BaseFileManager.requireImpl().getFileSize(filePath)
+  }
+
   /**
    * Returns a list of filenames in the given directory (e.g. 'images', 'files').
    */

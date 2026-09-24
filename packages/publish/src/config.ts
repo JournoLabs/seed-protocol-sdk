@@ -170,6 +170,11 @@ export interface PublishConfig {
   signDataItems?: (
     uploads: import('./services/publish/helpers/getPublishUploadData').PublishUploadData[]
   ) => Promise<ArweaveDataItemInfoResult[]>
+  /**
+   * Optional USD spot prices for publish cost estimates. When unset, Coinbase ETH-USD / AR-USD spots are used.
+   * Results are cached for 60s.
+   */
+  getTokenPrices?: () => Promise<{ ethUsd: number; arUsd: number }>
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */

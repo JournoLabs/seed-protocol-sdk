@@ -215,6 +215,16 @@ export class BrowserFileManager implements IFileManager {
     }
   }
 
+  async getFileSize(filePath: string): Promise<number | null> {
+    try {
+      const zenfs = await this.getFs()
+      const stat = await zenfs.promises.stat(filePath)
+      return typeof stat?.size === 'number' ? stat.size : null
+    } catch {
+      return null
+    }
+  }
+
   async createDirIfNotExists(filePath: string): Promise<void> {
     if (!(await this.pathExists(filePath))) {
       try {

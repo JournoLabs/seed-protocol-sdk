@@ -18,6 +18,7 @@ export declare abstract class BaseFileManager {
     static resizeImage({ filePath, width, height }: ResizeImageParams): Promise<void>;
     static resizeAllImages({ width, height }: ResizeAllImagesParams): Promise<void>;
     static pathExists(filePath: string): Promise<boolean>;
+    static getFileSize(filePath: string): Promise<number | null>;
     static listFiles(dir: string): Promise<string[]>;
     static listImageFiles(): Promise<string[]>;
     static createDirIfNotExists(filePath: string): Promise<void>;

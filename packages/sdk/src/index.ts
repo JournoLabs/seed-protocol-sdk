@@ -226,6 +226,13 @@ export {
   itemHasPublishUploadCandidates,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
+export {
+  summarizePublishWork,
+  shouldAttestProperty,
+  estimateDataUriByteLength,
+  type PublishWorkSummary,
+  type SummarizePublishWorkOptions,
+} from './db/read/summarizePublishWork'
 
 export {
   prepareHtmlEmbeddedImagesForPublish,

@@ -28,6 +28,8 @@ export interface IFileManager {
   resizeImage(params: ResizeImageParams): Promise<void>
   resizeAllImages(params: ResizeAllImagesParams): Promise<void>
   pathExists(filePath: string): Promise<boolean>
+  /** File size in bytes, or null if the path does not exist / cannot be stated. */
+  getFileSize(filePath: string): Promise<number | null>
   listFiles(dir: string): Promise<string[]>
   listImageFiles(): Promise<string[]>
   createDirIfNotExists(filePath: string): Promise<void>
