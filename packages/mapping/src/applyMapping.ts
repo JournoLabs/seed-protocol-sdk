@@ -108,7 +108,8 @@ function applyLookupEdge(
 /**
  * Apply field mappings to produce a property bag for createItem / publish.
  * Missing sources or unknown target properties are skipped (no throw).
- * `resolve: 'extract' | 'file'` edges are skipped — use `applyMappingAsync`.
+ * `resolve: 'extract' | 'file' | 'derive' | 'assemble'` edges are skipped.
+ * Use `applyMappingAsync` for extract/file. Derive/assemble stay host-applied.
  * `resolve: 'lookup'` is applied from stored entries (or deprecated document lookups).
  */
 export function applyMapping(
@@ -124,7 +125,7 @@ export function applyMapping(
   for (const mapping of mappings) {
     if (mapping.resolve && mapping.resolve !== 'lookup') continue
 
-    const source = byId.get(mapping.sourceId)
+    const source = mapping.sourceId ? byId.get(mapping.sourceId) : undefined
     const target = byName.get(mapping.propertyName)
     if (!source || !target) continue
 
@@ -158,7 +159,8 @@ export type ApplyMappingAsyncOptions = {
 
 /**
  * Async apply: copy+coerce plain edges; apply lookup entries; for extract/file
- * call the host callback then coerce. Partial success — failed resolve edges
+ * call the host callback then coerce. `derive` / `assemble` are skipped —
+ * host apply stays host-owned. Partial success — failed resolve edges
  * are listed in `errors` and omitted from `properties`.
  */
 export async function applyMappingAsync(
@@ -175,8 +177,14 @@ export async function applyMappingAsync(
     const target = byName.get(mapping.propertyName)
     if (!target) continue
 
+    if (mapping.resolve === 'derive' || mapping.resolve === 'assemble') {
+      continue
+    }
+
     if (!mapping.resolve) {
-      const source = sources.find((s) => s.id === mapping.sourceId)
+      const source = mapping.sourceId
+        ? sources.find((s) => s.id === mapping.sourceId)
+        : undefined
       if (!source) continue
       if (isRelationLookupTarget(target)) continue
       const raw = source.value || source.label
@@ -185,7 +193,9 @@ export async function applyMappingAsync(
     }
 
     if (mapping.resolve === 'lookup') {
-      const source = sources.find((s) => s.id === mapping.sourceId)
+      const source = mapping.sourceId
+        ? sources.find((s) => s.id === mapping.sourceId)
+        : undefined
       if (!source) {
         errors.push({
           sourceId: mapping.sourceId,

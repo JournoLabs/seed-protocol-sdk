@@ -8,6 +8,8 @@ export type {
   MappingLookups,
   PropertyBag,
   ResolveJob,
+  DeriveSpec,
+  AssembleSpec,
   UrlMediaClass,
   ResolveContext,
   ResolveCallback,
@@ -16,6 +18,16 @@ export type {
 } from './types'
 
 export { applyMapping, applyMappingAsync, coerceValue } from './applyMapping'
+export {
+  isPresentEdge,
+  omitEmptySourceId,
+  applyResolveToEdge,
+  withPreservedExtras,
+  withDeriveSpec,
+  withAssembleBlocks,
+  clearSourceKeepDerive,
+  isDeriveKeepOnClear,
+} from './edgeMapping'
 export type { ApplyMappingAsyncOptions } from './applyMapping'
 export {
   isRelationLookupTarget,

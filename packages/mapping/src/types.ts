@@ -16,7 +16,20 @@ export type UrlMediaClass =
   | 'unknown'
 
 /** Host-resolved transform applied before coerce. */
-export type ResolveJob = 'extract' | 'file' | 'lookup'
+export type ResolveJob = 'extract' | 'file' | 'lookup' | 'derive' | 'assemble'
+
+/** Write this property from another mapped property. Host owns apply. */
+export type DeriveSpec = {
+  /** Source property name (e.g. `title`). Package does not interpret it. */
+  from: string
+  /** When a mapped origin is empty, still derive. */
+  fallback?: boolean
+}
+
+/** Include named blocks when assembling stored HTML. Host owns apply and names. */
+export type AssembleSpec = {
+  blocks: string[]
+}
 
 /** A mappable value from markdown, RSS, or XML. */
 export type SourceNode = {
@@ -61,13 +74,19 @@ export type LookupEntry = {
  * A source may map to multiple properties; each property appears at most once.
  * `resolve: 'extract' | 'file'` is applied by `applyMappingAsync` via a host callback.
  * `resolve: 'lookup'` is applied from `lookup.entries` (sync and async).
+ * `resolve: 'derive' | 'assemble'` are host-applied; sync/async apply skip them.
+ * Derive-only edges omit `sourceId`.
  */
 export type FieldMapping = {
-  sourceId: string
+  sourceId?: string
   propertyName: string
   resolve?: ResolveJob
   /** Stored string → ref assignments for `resolve: 'lookup'`. Omit or empty = unassigned. */
   lookup?: { entries: LookupEntry[] }
+  /** Optional derive spec. Legal on `resolve: 'derive'` or as copy fallback. */
+  derive?: DeriveSpec
+  /** Named blocks for `resolve: 'assemble'`. Host-owned names. */
+  assemble?: AssembleSpec
 }
 
 /**
@@ -110,7 +129,7 @@ export type ResolveContext = {
 export type ResolveCallback = (ctx: ResolveContext) => Promise<unknown>
 
 export type ApplyMappingError = {
-  sourceId: string
+  sourceId?: string
   propertyName: string
   resolve?: ResolveJob
   message: string

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- `ResolveJob` adds `'derive' | 'assemble'`. `FieldMapping.sourceId` is optional so a derive-only edge is legal.
+- Persist `derive?: { from: string; fallback?: boolean }` and `assemble?: { blocks: string[] }` on the edge. Mutators pass them through, including copy + `derive` fallback. Empty `sourceId` is omitted.
+- Coverage and `data-state` treat source-less `resolve: 'derive'` as mapped. `resolve: 'assemble'` does not flag `needs extract`.
+- `useFieldMapper.setAssembleBlocks` / `setDerive`. Clearing a source on a derive edge keeps a derive-only mapping.
+- `FieldMapper` `transformOptions` and `renderRowExpansion`. Default transform list still copy / extract / file / lookup; **assemble** is offered on `Html` targets; the current resolve is always listed.
+- Sync and async `applyMapping` skip derive/assemble (host apply stays host-owned). Package does not slugify or assemble HTML.
+- `resolvedSourceId` only suffixes `extract` / `file`.
+- Package `autoMap` is unchanged: it does not inject derive-only slug or default html to assemble.
+
 ## 0.7.0
 
 - Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.

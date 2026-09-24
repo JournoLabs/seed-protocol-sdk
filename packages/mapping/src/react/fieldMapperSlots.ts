@@ -20,6 +20,7 @@ export type FieldMapperSlot =
   | 'addButton'
   | 'inspector'
   | 'lookupEditor'
+  | 'rowExpansion'
   | 'jsonPreview'
 
 export type FieldMapperSlots = {
@@ -103,6 +104,7 @@ export const SLOT_BASE_CLASS: Record<FieldMapperSlot, string> = {
   addButton: 'fm-btn',
   inspector: 'fm-inspector',
   lookupEditor: 'fm-lookups',
+  rowExpansion: 'fm-row-expansion',
   jsonPreview: 'fm-preview',
 }
 

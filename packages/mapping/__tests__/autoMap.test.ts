@@ -199,6 +199,9 @@ describe('autoMap', () => {
       propertyName: 'title',
     })
     expect(mappings.find((m) => m.propertyName === 'byline')).toBeUndefined()
+    expect(mappings.some((m) => m.resolve === 'derive' || m.resolve === 'assemble')).toBe(
+      false,
+    )
   })
 
   it('maps author onto string byline when no relation authors target exists', () => {

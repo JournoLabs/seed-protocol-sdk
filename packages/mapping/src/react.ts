@@ -48,6 +48,8 @@ export type {
   FieldMapperLookupRow,
   FieldMapperRowState,
   FieldMapperCoverage,
+  FieldMapperTransformOption,
+  FieldMapperTransformOptions,
   UseFieldMapperArgs,
   UseFieldMapperResult,
 } from './react/fieldMapperTypes'
@@ -62,3 +64,10 @@ export {
   findConflicts,
   connectSourceToProperty,
 } from './react/fieldMapperCore'
+
+export {
+  defaultTransformOptions,
+  resolveTransformOptions,
+  showTransformSelect,
+  isTransformSelectDisabled,
+} from './react/fieldMapperTransforms'

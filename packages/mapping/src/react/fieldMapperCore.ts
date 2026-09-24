@@ -1,6 +1,12 @@
 import { applyMapping, coerceValue } from '../applyMapping'
 import { looksLikeUrl } from '../classifyUrl'
 import {
+  isPresentEdge,
+  withAssembleBlocks,
+  withDeriveSpec,
+  withPreservedExtras,
+} from '../edgeMapping'
+import {
   isRelationLookupTarget,
   resolveLookupMapped,
   sampleValueFromSource,
@@ -13,6 +19,7 @@ import {
   parseResolvedSourceId,
 } from '../resolvedSources'
 import type {
+  DeriveSpec,
   FieldMapping,
   LookupEntry,
   MappingLookups,
@@ -110,6 +117,15 @@ export function previewForEdge(
   resolve: ResolveJob | undefined,
   options?: PreviewForEdgeOptions,
 ): string {
+  if (resolve === 'derive') {
+    const from = options?.mapping?.derive?.from
+    return from ? `‹derive from ${from}›` : '‹derive›'
+  }
+  if (resolve === 'assemble') {
+    const blocks = options?.mapping?.assemble?.blocks
+    if (blocks?.length) return `‹assemble ${blocks.join(', ')}›`
+    return '‹assemble›'
+  }
   if (!source) return ''
   if (resolve === 'extract') {
     return `‹extract HTML from ${truncateSample(source.value, 48)}›`
@@ -191,10 +207,12 @@ export function rowState(args: {
   lookups?: MappingLookups
 }): FieldMapperRowState {
   if (args.conflict) return 'conflict'
-  if (!args.mapping?.sourceId || !args.mapping.propertyName) return 'empty'
+  if (!args.mapping || !isPresentEdge(args.mapping)) return 'empty'
   const actual = args.mapping.resolve ?? null
   if (args.requiredResolve && actual !== args.requiredResolve) {
-    return 'needsResolve'
+    if (!(actual === 'assemble' && args.requiredResolve === 'extract')) {
+      return 'needsResolve'
+    }
   }
   if (actual === 'lookup') {
     const sample = args.sampleValue ?? ''
@@ -214,7 +232,7 @@ export function computeCoverage(
   mappings: FieldMapping[],
 ): FieldMapperCoverage {
   const mappedProps = new Set(
-    mappings.filter((m) => m.sourceId && m.propertyName).map((m) => m.propertyName),
+    mappings.filter(isPresentEdge).map((m) => m.propertyName),
   )
   const missingRequired = targets
     .filter((t) => t.required && !mappedProps.has(t.name))
@@ -254,6 +272,55 @@ export function attachLookupIfNeeded(
     return { ...stripLookup(edge), resolve: 'lookup' }
   }
   return stripLookup(edge)
+}
+
+export function applyAssembleBlocksToMappings(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  blocks: string[],
+): FieldMapping[] | null {
+  const index =
+    rowKey === 'property'
+      ? mappings.findIndex((m) => m.propertyName === rowId)
+      : edgeIds.indexOf(rowId)
+  if (index < 0) return null
+  const prev = mappings[index]
+  if (!prev || prev.resolve !== 'assemble') return null
+  const next = [...mappings]
+  next[index] = withAssembleBlocks(prev, blocks)
+  return next
+}
+
+export function applyDeriveToMappings(
+  mappings: FieldMapping[],
+  rowKey: 'property' | 'source',
+  rowId: string,
+  edgeIds: string[],
+  spec: DeriveSpec | null,
+): FieldMapping[] | null {
+  if (rowKey === 'property') {
+    const index = mappings.findIndex((m) => m.propertyName === rowId)
+    if (index >= 0) {
+      const next = [...mappings]
+      next[index] = withDeriveSpec(mappings[index]!, spec)
+      return next
+    }
+    if (!spec) return null
+    return upsertPropertyMapping(mappings, {
+      propertyName: rowId,
+      resolve: 'derive',
+      derive: spec,
+    })
+  }
+  const edgeIndex = edgeIds.indexOf(rowId)
+  if (edgeIndex < 0) return null
+  const prev = mappings[edgeIndex]
+  if (!prev) return null
+  const next = [...mappings]
+  next[edgeIndex] = withDeriveSpec(prev, spec)
+  return next
 }
 
 export function applyLookupEntriesToMappings(
@@ -318,7 +385,7 @@ export function connectSourceToProperty(
   edge = attachLookupIfNeeded(edge, targetsByName.get(propertyName))
 
   // Prefer origin source id even when host passed only resolved nodes
-  if (!sources.some((s) => s.id === edge.sourceId)) {
+  if (edge.sourceId && !sources.some((s) => s.id === edge.sourceId)) {
     const origin = originSources(sources).find((s) => s.id === edge.sourceId)
     if (!origin && sources.some((s) => s.id === sourceId)) {
       // keep normalized edge as-is
@@ -326,6 +393,7 @@ export function connectSourceToProperty(
   }
 
   const prev = mappings.find((m) => m.propertyName === propertyName)
+  edge = withPreservedExtras(edge, prev)
   const next = upsertPropertyMapping(mappings, edge)
   const clearedLookupProps: string[] = []
   if (prev?.resolve === 'lookup' && edge.resolve !== 'lookup') {
@@ -344,7 +412,9 @@ export function removeMappingsForSourceId(
     let keep: boolean
     if (parsed) {
       keep = !(
-        c.sourceId === parsed.originId && c.resolve === parsed.resolve
+        Boolean(c.sourceId) &&
+        c.sourceId === parsed.originId &&
+        c.resolve === parsed.resolve
       )
     } else {
       keep = c.sourceId !== sourceId
@@ -380,7 +450,7 @@ export function buildPropertyModeRows(args: {
 
   return list.map((target) => {
     const mapping = byName.get(target.name)
-    const source = mapping
+    const source = mapping?.sourceId
       ? sourceById.get(mapping.sourceId)
       : undefined
     const requiredResolve = computeRequiredResolve(source, target)
@@ -438,7 +508,7 @@ export function buildSourceModeRows(args: {
       id,
       propertyName: mapping.propertyName,
       mapping,
-      source: sourceById.get(mapping.sourceId),
+      source: mapping.sourceId ? sourceById.get(mapping.sourceId) : undefined,
       target: targetsByName.get(mapping.propertyName),
     })
   }
@@ -473,15 +543,14 @@ export function buildSourceModeRows(args: {
   const rows: FieldMapperRow[] = edgeRows.map((r) => {
     const requiredResolve = computeRequiredResolve(r.source, r.target)
     const mapping =
-      r.mapping && r.mapping.sourceId && r.mapping.propertyName
+      r.mapping && r.mapping.propertyName
         ? r.mapping
         : r.mapping
     const sampleValue = sampleValueFromSource(r.source)
+    const complete =
+      mapping && isPresentEdge(mapping) ? mapping : undefined
     const state = rowState({
-      mapping:
-        mapping && mapping.sourceId && mapping.propertyName
-          ? mapping
-          : undefined,
+      mapping: complete,
       requiredResolve,
       conflict: conflicts.has(r.id),
       sampleValue,
@@ -489,14 +558,11 @@ export function buildSourceModeRows(args: {
     })
     // Drafts with only source or only property stay empty
     const effectiveState =
-      !mapping?.sourceId || !mapping?.propertyName
+      !complete
         ? conflicts.has(r.id)
           ? 'conflict'
           : 'empty'
         : state
-
-    const complete =
-      mapping && mapping.sourceId && mapping.propertyName ? mapping : undefined
 
     return {
       id: r.id,

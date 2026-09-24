@@ -31,16 +31,15 @@ import type {
   FieldMapperDefaultRows,
   FieldMapperLookupRow,
   FieldMapperRow,
+  FieldMapperTransformOptions,
   UseFieldMapperResult,
 } from './fieldMapperTypes'
+import {
+  isTransformSelectDisabled,
+  resolveTransformOptions,
+  showTransformSelect,
+} from './fieldMapperTransforms'
 import { LookupEditor } from './LookupEditor'
-
-const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
-  { value: '', label: 'copy' },
-  { value: 'extract', label: 'extract' },
-  { value: 'file', label: 'file' },
-  { value: 'lookup', label: 'lookup' },
-]
 
 export type PropertyRowsProps = {
   sources: SourceNode[]
@@ -55,6 +54,8 @@ export type PropertyRowsProps = {
   ui?: ResolvedFieldMapperComponents
   renderRowAccessory?: (row: FieldMapperRow) => ReactNode
   renderLookup?: (row: FieldMapperLookupRow) => ReactNode
+  renderRowExpansion?: (row: FieldMapperRow) => ReactNode
+  transformOptions?: FieldMapperTransformOptions
 }
 
 export function PropertyRows({
@@ -73,6 +74,8 @@ export function PropertyRows({
   },
   renderRowAccessory,
   renderLookup,
+  renderRowExpansion,
+  transformOptions,
 }: PropertyRowsProps) {
   const Select = ui.Select
   const Button = ui.Button
@@ -99,6 +102,7 @@ export function PropertyRows({
   const usageBySource = useMemo(() => {
     const map = new Map<string, string[]>()
     for (const m of mappings) {
+      if (!m.sourceId) continue
       const list = map.get(m.sourceId) ?? []
       list.push(m.propertyName)
       map.set(m.sourceId, list)
@@ -185,6 +189,8 @@ export function PropertyRows({
       <div className={slotClass('rowList', classNames)}>
         {visibleRows.map((row) => {
           const resolveValue = (row.mapping?.resolve ?? '') as '' | ResolveJob
+          const transformOpts = resolveTransformOptions(row, transformOptions)
+          const showTransform = showTransformSelect(row, transformOpts)
           return (
             <div
               key={row.id}
@@ -220,17 +226,22 @@ export function PropertyRows({
                     </option>
                   ))}
                 </Select>
-                {row.mapping?.sourceId ? (
+                {showTransform ? (
                   <Select
                     className={slotClass('transformSelect', classNames)}
                     aria-label={`Transform for ${row.id}`}
                     value={resolveValue}
+                    disabled={isTransformSelectDisabled(row)}
                     onChange={(v) => {
                       mapper.setTransform(row.id, (v as ResolveJob) || null)
                     }}
                   >
-                    {TRANSFORM_OPTIONS.map((opt) => (
-                      <option key={opt.label} value={opt.value}>
+                    {transformOpts.map((opt) => (
+                      <option
+                        key={opt.label}
+                        value={opt.value}
+                        disabled={opt.disabled}
+                      >
                         {opt.label}
                       </option>
                     ))}
@@ -290,6 +301,9 @@ export function PropertyRows({
                     classNames={classNames}
                   />
                 ))}
+              <div className={slotClass('rowExpansion', classNames)}>
+                {renderRowExpansion?.(row) ?? null}
+              </div>
             </div>
           )
         })}

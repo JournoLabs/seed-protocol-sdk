@@ -23,6 +23,7 @@ import type {
   FieldMapperLookupRow,
   FieldMapperRow,
   FieldMapperRowKey,
+  FieldMapperTransformOptions,
 } from './fieldMapperTypes'
 import {
   ensureThemeInjected,
@@ -141,6 +142,16 @@ export type FieldMapperProps = {
    * When set, the package uid editor is not mounted. Return `null` when idle.
    */
   renderLookup?: (row: FieldMapperLookupRow) => ReactNode
+  /**
+   * Host expansion under a row (e.g. assemble stack). Return `null` when idle.
+   * Independent of `renderLookup` / `renderRowAccessory`.
+   */
+  renderRowExpansion?: (row: FieldMapperRow) => ReactNode
+  /**
+   * Override the per-row transform list. Defaults are copy / extract / file /
+   * lookup, plus assemble on Html targets, plus the current resolve if missing.
+   */
+  transformOptions?: FieldMapperTransformOptions
 }
 
 /**
@@ -168,6 +179,8 @@ export function FieldMapper({
   slots,
   renderRowAccessory,
   renderLookup,
+  renderRowExpansion,
+  transformOptions,
 }: FieldMapperProps) {
   const mapper = useFieldMapper({
     sources,
@@ -248,6 +261,8 @@ export function FieldMapper({
           ui={ui}
           renderRowAccessory={renderRowAccessory}
           renderLookup={renderLookup}
+          renderRowExpansion={renderRowExpansion}
+          transformOptions={transformOptions}
         />
       ) : (
         <PropertyRows
@@ -263,6 +278,8 @@ export function FieldMapper({
           ui={ui}
           renderRowAccessory={renderRowAccessory}
           renderLookup={renderLookup}
+          renderRowExpansion={renderRowExpansion}
+          transformOptions={transformOptions}
         />
       )}
     </div>

@@ -327,6 +327,12 @@ ${STRUCTURAL_TOKENS}
   font-family: var(--sfm-font-mono);
   font-size: var(--sfm-font-size-sm);
 }
+.seed-field-mapper .fm-row-expansion {
+  margin-top: 8px;
+}
+.seed-field-mapper .fm-row-expansion:empty {
+  display: none;
+}
 .seed-field-mapper .fm-row-flag {
   font-size: var(--sfm-font-size-sm);
   margin-top: var(--sfm-space-1);

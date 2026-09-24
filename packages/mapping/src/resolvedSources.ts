@@ -90,9 +90,9 @@ export function normalizeMappingFromSourceId(
  * Stable display id for a derived resolve candidate.
  */
 export function resolvedSourceId(originId: string, job: ResolveJob): string {
-  return job === 'extract'
-    ? `${originId}${RESOLVE_EXTRACT_SUFFIX}`
-    : `${originId}${RESOLVE_FILE_SUFFIX}`
+  if (job === 'extract') return `${originId}${RESOLVE_EXTRACT_SUFFIX}`
+  if (job === 'file') return `${originId}${RESOLVE_FILE_SUFFIX}`
+  return originId
 }
 
 /**
@@ -164,6 +164,7 @@ export function resolveMappingSource(
   mapping: FieldMapping,
 ): SourceNode | undefined {
   const byId = new Map(sources.map((s) => [s.id, s]))
+  if (!mapping.sourceId) return undefined
   const direct = byId.get(mapping.sourceId)
   if (direct) return direct
   if (mapping.resolve) {

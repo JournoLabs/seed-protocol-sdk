@@ -14,6 +14,9 @@ Mappings are an edge list: one source may fan out to multiple properties (e.g. R
 source may map to it. `resolve: 'extract' | 'file'` is applied by the host callback.
 `resolve: 'lookup'` is a stored string → ref table on the edge — the package never
 fetches, runs Readability, or loads Seed Identity items.
+`resolve: 'derive' | 'assemble'` are host-applied transforms persisted on the edge
+(`derive.from` is a property name; `assemble.blocks` is a host-owned string list).
+A derive-only edge may omit `sourceId`. Sync and async `applyMapping` skip these jobs.
 
 ## Install
 
@@ -199,6 +202,14 @@ import { FieldMapper, useFieldMapper } from '@seedprotocol/mapping/react'
       onChange={row.onLookupChange}
     />
   )}
+  renderRowExpansion={(row) =>
+    row.mapping?.resolve === 'assemble' ? <AssembleStack row={row} /> : null
+  }
+  transformOptions={(row, defaults) =>
+    row.target?.name === 'slug'
+      ? [...defaults, { value: 'derive', label: 'from title' }]
+      : defaults
+  }
 />
 
 // Rows — source-keyed
@@ -234,7 +245,13 @@ Pass `renderLookup` to paint the host picker (Identity, etc.) on that row. Witho
 `lookups` / `onLookupsChange` are deprecated — persist `lookup.entries` on the edge.
 
 Row and JSON previews match sync `applyMapping` output. Lookup hits appear in the
-bag; only extract/file stay under `_pendingResolve`. JSON sits behind a disclosure.
+bag; extract/file/derive/assemble stay under `_pendingResolve`. JSON sits behind a disclosure.
+
+`derive` and `assemble` are first-class resolve words. The package persists the
+keys and treats a source-less derive edge as mapped. Hosts own apply (`slugify`,
+named-block HTML) and product labels (e.g. **from title** via `transformOptions`).
+Do not invent a leftover source named “from title”. Package `autoMap` does not
+default html to assemble.
 
 **Theming**
 
@@ -249,6 +266,8 @@ bag; only extract/file stay under `_pendingResolve`. JSON sits behind a disclosu
 | `slots` | Toggle chrome: `autoMap`, `filter`, `inspector`, `preview` (`'row' \| 'json' \| 'both' \| false`), `lookups` (`'row' \| 'section' \| false`; rows layout defaults to `'row'`, wires to `'section'`) |
 | `renderRowAccessory` | Optional `(row: FieldMapperRow) => ReactNode` for host chrome (e.g. extract/file **Preview**) in `.fm-row-accessory`. Unrelated to `slots.preview`. Package does not fetch. |
 | `renderLookup` | Optional `(row: FieldMapperLookupRow) => ReactNode` for host lookup chrome on `resolve: 'lookup'` rows. Package does not fetch or list identities. |
+| `renderRowExpansion` | Optional `(row: FieldMapperRow) => ReactNode` under the row (e.g. host assemble stack) in `.fm-row-expansion`. |
+| `transformOptions` | Optional `(row, defaults) => options` to add or relabel transforms (e.g. **from title** on slug). Defaults: copy / extract / file / lookup, plus assemble on `Html` targets. |
 | `showPreview` | **Deprecated** — prefer `slots.preview` |
 | `connectionColors` | **Deprecated** optional stroke palette for wires; prefer `--sfm-map-*` / `--fm-map-*` / `--map-*` |
 | `layout="wires"` | **Deprecated** — prefer `layout="rows"` (now the default) |
@@ -260,7 +279,7 @@ bag; only extract/file stay under `_pendingResolve`. JSON sits behind a disclosu
 - Wires: mapped wells expose `data-mapping-index` / `data-pair={index % 8}` (kept for host CSS); pending `.active` only on the selected source.
 - Rows: `data-state="empty|mapped|needsResolve|needsLookup|conflict"`, `data-property-name`, `data-resolve`, `data-required`, `data-source-kind`.
 
-Sync `applyMapping` preview lists pending **extract/file** edges under `_pendingResolve`. Lookup refs from stored entries appear in the bag.
+Sync `applyMapping` preview lists pending **extract/file/derive/assemble** edges under `_pendingResolve`. Lookup refs from stored entries appear in the bag.
 
 See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped). PermaPress: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md).
 
@@ -268,7 +287,7 @@ See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-
 
 | Type | Package | Meaning |
 |------|---------|---------|
-| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id → **model property name** (1→N edges; optional `resolve`; optional `lookup.entries`) |
+| `FieldMapping` / `MappingDocument` | `@seedprotocol/mapping` | Source id (optional) → **model property name** (1→N edges; optional `resolve`; optional `lookup.entries` / `derive` / `assemble`) |
 | `FeedFieldManifest` | `@seedprotocol/sdk` | Property/key → **role** (`image` / `audio` / `video` / `file` / `html` / `text`) for display |
 
 Compose them: map + resolve into a plain item, then optionally normalize roles for media/HTML display. Storage stays `Image` / `File` schema types — no separate Audio/Video dataTypes.

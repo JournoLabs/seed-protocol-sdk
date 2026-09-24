@@ -1,4 +1,5 @@
 import type {
+  DeriveSpec,
   FieldMapping,
   LookupEntry,
   MappingLookups,
@@ -23,6 +24,12 @@ export type FieldMapperOption = {
   sample?: string
   kind?: string
   dataType?: string
+}
+
+export type FieldMapperTransformOption = {
+  value: '' | ResolveJob
+  label: string
+  disabled?: boolean
 }
 
 export type FieldMapperRowState =
@@ -50,6 +57,11 @@ export type FieldMapperRow = {
 export type FieldMapperLookupRow = FieldMapperRow & {
   onLookupChange: (entries: LookupEntry[]) => void
 }
+
+export type FieldMapperTransformOptions = (
+  row: FieldMapperRow,
+  defaults: FieldMapperTransformOption[],
+) => FieldMapperTransformOption[]
 
 export type FieldMapperCoverage = {
   mapped: number
@@ -88,6 +100,10 @@ export type UseFieldMapperResult = {
   setTransform: (rowId: string, resolve: ResolveJob | null) => void
   /** Write `lookup.entries` on the edge for this row. Empty list omits `lookup`. */
   setLookupEntries: (rowId: string, entries: LookupEntry[]) => void
+  /** Write `assemble.blocks` on an assemble edge. */
+  setAssembleBlocks: (rowId: string, blocks: string[]) => void
+  /** Write or clear `derive` on the edge. Creates a derive-only edge in property mode when missing. */
+  setDerive: (rowId: string, spec: DeriveSpec | null) => void
   addRow: (propertyName?: string) => void
   removeRow: (rowId: string) => void
   autoMap: () => void

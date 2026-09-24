@@ -1,13 +1,21 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { autoMap as defaultAutoMap } from '../autoMap'
-import { stripLookup } from '../relationLookup'
+import {
+  applyResolveToEdge,
+  clearSourceKeepDerive,
+  isDeriveKeepOnClear,
+  withPreservedExtras,
+} from '../edgeMapping'
 import type {
+  DeriveSpec,
   FieldMapping,
   LookupEntry,
   ResolveJob,
   TargetProperty,
 } from '../types'
 import {
+  applyAssembleBlocksToMappings,
+  applyDeriveToMappings,
   applyLookupEntriesToMappings,
   attachLookupIfNeeded,
   buildPropertyModeRows,
@@ -139,6 +147,13 @@ export function useFieldMapper({
       if (rowKey === 'property') {
         if (!sourceId) {
           const prev = mappings.find((m) => m.propertyName === rowId)
+          if (prev && isDeriveKeepOnClear(prev)) {
+            onChange(
+              upsertPropertyMapping(mappings, clearSourceKeepDerive(prev)),
+            )
+            if (prev.resolve === 'lookup') applyLookupClears([rowId])
+            return
+          }
           onChange(mappings.filter((m) => m.propertyName !== rowId))
           if (prev?.resolve === 'lookup') applyLookupClears([rowId])
           return
@@ -173,6 +188,15 @@ export function useFieldMapper({
       if (edgeIndex >= 0) {
         if (!sourceId) {
           const prev = mappings[edgeIndex]
+          if (prev && isDeriveKeepOnClear(prev)) {
+            const next = [...mappings]
+            next[edgeIndex] = clearSourceKeepDerive(prev)
+            onChange(next)
+            if (prev.resolve === 'lookup') {
+              applyLookupClears([prev.propertyName])
+            }
+            return
+          }
           const next = mappings.filter((_, i) => i !== edgeIndex)
           onChange(next)
           if (prev?.resolve === 'lookup') {
@@ -187,6 +211,7 @@ export function useFieldMapper({
           propertyName: prev.propertyName,
         }
         edge = attachLookupIfNeeded(edge, target)
+        edge = withPreservedExtras(edge, prev)
         if (!edge.resolve) {
           const source = originSources(sources).find((s) => s.id === sourceId)
           const required = computeRequiredResolve(source, target)
@@ -227,15 +252,23 @@ export function useFieldMapper({
             resolve,
           }
         })
-        const complete = updated.filter((d) => d.sourceId && d.propertyName)
+        const complete = updated.filter(
+          (d) =>
+            d.propertyName &&
+            (d.sourceId || d.resolve === 'derive'),
+        )
         const incomplete = updated.filter(
-          (d) => !(d.sourceId && d.propertyName),
+          (d) =>
+            !(
+              d.propertyName &&
+              (d.sourceId || d.resolve === 'derive')
+            ),
         )
         if (complete.length > 0) {
           onChange([
             ...mappings,
             ...complete.map((d) => ({
-              sourceId: d.sourceId!,
+              ...(d.sourceId ? { sourceId: d.sourceId } : {}),
               propertyName: d.propertyName!,
               ...(d.resolve ? { resolve: d.resolve } : {}),
             })),
@@ -271,10 +304,11 @@ export function useFieldMapper({
           (s) => s.id === prev.sourceId,
         )
         let edge: FieldMapping = {
-          sourceId: prev.sourceId,
+          ...(prev.sourceId ? { sourceId: prev.sourceId } : {}),
           propertyName,
         }
         edge = attachLookupIfNeeded(edge, target)
+        edge = withPreservedExtras(edge, prev)
         if (!edge.resolve) {
           const required = computeRequiredResolve(source, target)
           if (required) edge = { ...edge, resolve: required }
@@ -327,15 +361,21 @@ export function useFieldMapper({
         })
 
         const complete = updated.filter(
-          (d) => d.sourceId && d.propertyName,
+          (d) =>
+            d.propertyName &&
+            (d.sourceId || d.resolve === 'derive'),
         )
         const incomplete = updated.filter(
-          (d) => !(d.sourceId && d.propertyName),
+          (d) =>
+            !(
+              d.propertyName &&
+              (d.sourceId || d.resolve === 'derive')
+            ),
         )
 
         if (complete.length > 0) {
           const promoted: FieldMapping[] = complete.map((d) => ({
-            sourceId: d.sourceId!,
+            ...(d.sourceId ? { sourceId: d.sourceId } : {}),
             propertyName: d.propertyName!,
             ...(d.resolve ? { resolve: d.resolve } : {}),
           }))
@@ -387,32 +427,50 @@ export function useFieldMapper({
     [mappings, rowKey, edgeIds, onChange, onLookupsChange, lookups],
   )
 
+  const setAssembleBlocks = useCallback(
+    (rowId: string, blocks: string[]) => {
+      const next = applyAssembleBlocksToMappings(
+        mappings,
+        rowKey,
+        rowId,
+        edgeIds,
+        blocks,
+      )
+      if (next) onChange(next)
+    },
+    [mappings, rowKey, edgeIds, onChange],
+  )
+
+  const setDerive = useCallback(
+    (rowId: string, spec: DeriveSpec | null) => {
+      const next = applyDeriveToMappings(
+        mappings,
+        rowKey,
+        rowId,
+        edgeIds,
+        spec,
+      )
+      if (next) onChange(next)
+    },
+    [mappings, rowKey, edgeIds, onChange],
+  )
+
   const setTransform = useCallback(
     (rowId: string, resolve: ResolveJob | null) => {
-      const nextEdge = (
-        prev: FieldMapping,
-        nextResolve: ResolveJob | null,
-      ): FieldMapping => {
-        if (!nextResolve) {
-          return {
-            sourceId: prev.sourceId,
-            propertyName: prev.propertyName,
-          }
-        }
-        if (nextResolve === 'lookup') {
-          return { ...prev, resolve: nextResolve }
-        }
-        return stripLookup({
-          sourceId: prev.sourceId,
-          propertyName: prev.propertyName,
-          resolve: nextResolve,
-        })
-      }
-
       if (rowKey === 'property') {
         const prev = mappings.find((m) => m.propertyName === rowId)
-        if (!prev) return
-        onChange(upsertPropertyMapping(mappings, nextEdge(prev, resolve)))
+        if (!prev) {
+          if (resolve === 'derive') {
+            onChange(
+              upsertPropertyMapping(mappings, {
+                propertyName: rowId,
+                resolve: 'derive',
+              }),
+            )
+          }
+          return
+        }
+        onChange(upsertPropertyMapping(mappings, applyResolveToEdge(prev, resolve)))
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([rowId])
         }
@@ -423,7 +481,7 @@ export function useFieldMapper({
       if (edgeIndex >= 0) {
         const prev = mappings[edgeIndex]!
         const next = [...mappings]
-        next[edgeIndex] = nextEdge(prev, resolve)
+        next[edgeIndex] = applyResolveToEdge(prev, resolve)
         onChange(next)
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([prev.propertyName])
@@ -431,13 +489,37 @@ export function useFieldMapper({
         return
       }
 
-      setDrafts((prev) =>
-        prev.map((d) =>
+      setDrafts((prevDrafts) => {
+        const updated = prevDrafts.map((d) =>
           d.id === rowId
             ? { ...d, resolve: resolve ?? undefined }
             : d,
-        ),
-      )
+        )
+        const complete = updated.filter(
+          (d) =>
+            d.propertyName &&
+            (d.sourceId || d.resolve === 'derive'),
+        )
+        const incomplete = updated.filter(
+          (d) =>
+            !(
+              d.propertyName &&
+              (d.sourceId || d.resolve === 'derive')
+            ),
+        )
+        if (complete.length > 0) {
+          onChange([
+            ...mappings,
+            ...complete.map((d) => ({
+              ...(d.sourceId ? { sourceId: d.sourceId } : {}),
+              propertyName: d.propertyName!,
+              ...(d.resolve ? { resolve: d.resolve } : {}),
+            })),
+          ])
+          return incomplete
+        }
+        return updated
+      })
     },
     [rowKey, mappings, edgeIds, onChange, applyLookupClears],
   )
@@ -502,6 +584,8 @@ export function useFieldMapper({
     setProperty,
     setTransform,
     setLookupEntries,
+    setAssembleBlocks,
+    setDerive,
     addRow,
     removeRow,
     autoMap,

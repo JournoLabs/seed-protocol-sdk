@@ -22,6 +22,9 @@ describe('resolvedSources', () => {
       resolve: 'file',
     })
     expect(parseResolvedSourceId('rss-link')).toBeNull()
+    expect(resolvedSourceId('rss-link', 'lookup')).toBe('rss-link')
+    expect(resolvedSourceId('rss-link', 'derive')).toBe('rss-link')
+    expect(resolvedSourceId('rss-link', 'assemble')).toBe('rss-link')
   })
 
   it('normalizes derived source ids to FieldMapping with resolve', () => {

@@ -25,16 +25,15 @@ import { buildSyncPreviewBag } from './fieldMapperCore'
 import type {
   FieldMapperLookupRow,
   FieldMapperRow,
+  FieldMapperTransformOptions,
   UseFieldMapperResult,
 } from './fieldMapperTypes'
+import {
+  isTransformSelectDisabled,
+  resolveTransformOptions,
+  showTransformSelect,
+} from './fieldMapperTransforms'
 import { LookupEditor } from './LookupEditor'
-
-const TRANSFORM_OPTIONS: { value: '' | ResolveJob; label: string }[] = [
-  { value: '', label: 'copy' },
-  { value: 'extract', label: 'extract' },
-  { value: 'file', label: 'file' },
-  { value: 'lookup', label: 'lookup' },
-]
 
 export type SourceRowsProps = {
   sources: SourceNode[]
@@ -48,6 +47,8 @@ export type SourceRowsProps = {
   ui?: ResolvedFieldMapperComponents
   renderRowAccessory?: (row: FieldMapperRow) => ReactNode
   renderLookup?: (row: FieldMapperLookupRow) => ReactNode
+  renderRowExpansion?: (row: FieldMapperRow) => ReactNode
+  transformOptions?: FieldMapperTransformOptions
 }
 
 export function SourceRows({
@@ -65,6 +66,8 @@ export function SourceRows({
   },
   renderRowAccessory,
   renderLookup,
+  renderRowExpansion,
+  transformOptions,
 }: SourceRowsProps) {
   const Select = ui.Select
   const Button = ui.Button
@@ -135,6 +138,8 @@ export function SourceRows({
           const sourceValue = row.source?.id ?? row.mapping?.sourceId ?? ''
           const propertyValue =
             row.target?.name ?? row.mapping?.propertyName ?? ''
+          const transformOpts = resolveTransformOptions(row, transformOptions)
+          const showTransform = showTransformSelect(row, transformOpts)
           return (
             <div
               key={row.id}
@@ -161,17 +166,22 @@ export function SourceRows({
                     </option>
                   ))}
                 </Select>
-                {sourceValue ? (
+                {showTransform ? (
                   <Select
                     className={slotClass('transformSelect', classNames)}
                     aria-label="Transform"
                     value={resolveValue}
+                    disabled={isTransformSelectDisabled(row)}
                     onChange={(v) => {
                       setTransform(row.id, (v as ResolveJob) || null)
                     }}
                   >
-                    {TRANSFORM_OPTIONS.map((opt) => (
-                      <option key={opt.label} value={opt.value}>
+                    {transformOpts.map((opt) => (
+                      <option
+                        key={opt.label}
+                        value={opt.value}
+                        disabled={opt.disabled}
+                      >
                         {opt.label}
                       </option>
                     ))}
@@ -253,6 +263,9 @@ export function SourceRows({
                     classNames={classNames}
                   />
                 ))}
+              <div className={slotClass('rowExpansion', classNames)}>
+                {renderRowExpansion?.(row) ?? null}
+              </div>
             </div>
           )
         })}

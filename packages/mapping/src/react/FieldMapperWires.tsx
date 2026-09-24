@@ -51,6 +51,7 @@ function displaySourceIdForMapping(
   mapping: FieldMapping,
   sources: SourceNode[],
 ): string {
+  if (!mapping.sourceId) return ''
   if (!mapping.resolve) return mapping.sourceId
   const derived = resolvedSourceId(mapping.sourceId, mapping.resolve)
   if (sources.some((s) => s.id === derived)) return derived
@@ -117,6 +118,7 @@ export function FieldMapperWires({
   const mappingIndexesBySource = useMemo(() => {
     const map = new Map<string, number[]>()
     mappings.forEach((m, i) => {
+      if (!m.sourceId) return
       const displayId = displaySourceIdForMapping(m, sources)
       for (const key of new Set([m.sourceId, displayId])) {
         const list = map.get(key) ?? []
@@ -132,6 +134,7 @@ export function FieldMapperWires({
     const containerRect = containerRef.current.getBoundingClientRect()
     return mappings
       .map((mapping, i) => {
+        if (!mapping.sourceId) return null
         const displayId = displaySourceIdForMapping(mapping, sources)
         const sourceEl =
           sourceRefs.current[displayId] ?? sourceRefs.current[mapping.sourceId]
