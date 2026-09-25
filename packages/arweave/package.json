@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/arweave",
-  "version": "0.6.0",
+  "version": "0.6.3",
   "description": "Arweave gateway client and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",

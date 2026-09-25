@@ -1,6 +1,6 @@
 {
   "name": "seed-protocol-sdk-monorepo",
-  "version": "0.6.0",
+  "version": "0.6.3",
   "author": "Keith Axline <keith@journodao.xyz>",
   "devDependencies": {
     "@seedprotocol/vite": "workspace:*",
