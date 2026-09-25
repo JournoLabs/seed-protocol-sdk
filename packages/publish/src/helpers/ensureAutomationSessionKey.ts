@@ -7,7 +7,7 @@ import {
 import { optimismSepolia } from 'thirdweb/chains'
 import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
-import { waitForPublishReceipt } from './chainClient'
+import { isContractDeployed, waitForPublishReceipt } from './chainClient'
 import { readIsActiveSigner } from './contracts'
 import {
   buildAutomationSessionKeyPermissions,
@@ -138,12 +138,20 @@ export async function removeAutomationSessionKey(params: {
   }
 }
 
-/** True when `sessionKeyAddress` is an active signer on the ManagedAccount. */
+/**
+ * True when `sessionKeyAddress` is an active signer on the ManagedAccount.
+ * Returns `false` when the ManagedAccount has no bytecode (undeployed ≠ unauthorized).
+ * Throws when bytecode or `isActiveSigner` cannot be read on a live account (RPC / decode),
+ * so unattended automation does not silently fall through to in-app bootstrap.
+ */
 export async function isAutomationSessionActive(
   managedAddress: string,
   sessionKeyAddress: string,
 ): Promise<boolean> {
   try {
+    if (!(await isContractDeployed(managedAddress))) {
+      return false
+    }
     return await readIsActiveSigner(
       managedAddress as Address,
       sessionKeyAddress as Address,

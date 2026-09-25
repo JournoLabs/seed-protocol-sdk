@@ -142,7 +142,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 
 ### `@seedprotocol/publish/thirdweb`
 
-- `approvedTargetsForAutomationPublish`, `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `isAutomationSessionActive`
+- `approvedTargetsForAutomationPublish`, `ensureAutomationSessionKey`, `removeAutomationSessionKey`, `isAutomationSessionActive` (`false` when the ManagedAccount has no bytecode; throws if a deployed account’s `isActiveSigner` read fails)
 - `enrollPublishAutomation`, `revokePublishAutomation`
 - `assertStorageBoundToIdentity`
 - `buildAutomationSessionKeyPermissions`, `hashAutomationSessionKeyPermissions`
