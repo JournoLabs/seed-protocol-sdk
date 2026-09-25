@@ -30,6 +30,7 @@ export enum ClientManagerState {
   ADD_MODELS_TO_DB = 'addModelsToDb',
   PROCESS_SCHEMA_FILES = 'processSchemaFiles',
   IDLE = 'idle',
+  INIT_FAILED = 'initFailed',
 }
 
 export enum ClientManagerEvents {
@@ -39,6 +40,7 @@ export enum ClientManagerEvents {
   DB_READY = 'dbReady',
   SAVE_CONFIG_SUCCESS = 'saveConfigSuccess',
   SAVE_APP_STATE_SUCCESS = 'saveAppStateSuccess',
+  SAVE_APP_STATE_ERROR = 'saveAppStateError',
   SET_ADDRESSES = 'setAddresses',
   ADD_MODELS_TO_STORE_SUCCESS = 'addModelsToStoreSuccess',
   ADD_MODELS_TO_DB_SUCCESS = 'addModelsToDbSuccess',

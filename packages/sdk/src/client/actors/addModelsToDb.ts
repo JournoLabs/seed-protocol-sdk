@@ -176,7 +176,10 @@ export const addModelsToDb = fromCallback<
         logger('[client/actors] [addModelsToDb] Continuing despite error in test environment')
         sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS })
       } else {
-        throw error
+        sendBack({
+          type: 'error',
+          error: error instanceof Error ? error : new Error(String(error)),
+        })
       }
     })
 

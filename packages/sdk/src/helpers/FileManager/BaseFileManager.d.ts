@@ -4,8 +4,14 @@ export declare abstract class BaseFileManager {
     private static initializing;
     private static workingDir;
     private static _impl;
+    private static initializePromise;
     static configure(impl: IFileManager): void;
     private static requireImpl;
+    /**
+     * Clears FS init flags so a later call can retry. Used after a failed init
+     * and by tests. Does not unmount or delete any files.
+     */
+    static resetInitializationState(): void;
     static initializeFileSystem(workingDir?: string): Promise<void>;
     static getWorkingDir(): string;
     /**

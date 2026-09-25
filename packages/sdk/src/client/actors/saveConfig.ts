@@ -138,7 +138,10 @@ export const saveConfig = fromCallback<
         logger('[internal/actors] [saveConfig] Sending success despite error in test environment')
         sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })
       } else {
-        throw error
+        sendBack({
+          type: 'error',
+          error: error instanceof Error ? error : new Error(String(error)),
+        })
       }
     })
 

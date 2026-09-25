@@ -100,6 +100,30 @@ describe('SeedClientGate', () => {
     )
   })
 
+  it('does not restart init when client.init is called again after ready', async () => {
+    render(
+      <SeedClientGate initConfig={initConfig}>
+        <div data-testid="gated-content">App Content</div>
+      </SeedClientGate>,
+      { container, wrapper: SeedProviderWrapper }
+    )
+
+    await waitFor(
+      () => {
+        expect(client.isInitialized()).toBe(true)
+      },
+      { timeout: 60000 }
+    )
+
+    const before = client.getService().getSnapshot()
+    await client.init(initConfig)
+    const after = client.getService().getSnapshot()
+
+    expect(after.value).toBe(before.value)
+    expect(after.context.isInitialized).toBe(true)
+    expect(after.context.initError).toBeUndefined()
+  })
+
   it('renders custom loading component when provided', async () => {
     render(
       <SeedClientGate

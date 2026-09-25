@@ -795,6 +795,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // Also dedupe XState and Seed packages: two xstate copies cause Object.assign _version errors;
           // two @seedprotocol/sdk copies leave BaseDb facade / Db.appDb on different module instances
           // ("App DB not found", undefined.$with on PostsPage).
+          // Two @zenfs copies leave configureSingle / WebAccess on different module instances
+          // and can remount OPFS against a stale handle.
           dedupe: Array.from(
             new Set([
               ...(existingResolve.dedupe ?? []),
@@ -807,6 +809,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
               '@seedprotocol/react',
               '@seedprotocol/publish',
               '@seedprotocol/feed',
+              '@zenfs/core',
+              '@zenfs/dom',
             ])
           ),
         },

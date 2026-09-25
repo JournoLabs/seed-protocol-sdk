@@ -72,7 +72,12 @@ SaveAppStateInput
             value,
           })
         } else {
-          throw error
+          sendBack({
+            type: 'saveAppStateError',
+            error: error instanceof Error ? error : new Error(String(error)),
+            key,
+            value,
+          })
         }
       })
     

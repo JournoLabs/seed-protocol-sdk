@@ -28,6 +28,7 @@ const {
   ADD_MODELS_TO_STORE,
   ADD_MODELS_TO_DB,
   IDLE,
+  INIT_FAILED,
 } = ClientManagerState
 
 const {
@@ -37,6 +38,7 @@ const {
   DB_READY,
   SAVE_CONFIG_SUCCESS,
   SAVE_APP_STATE_SUCCESS,
+  SAVE_APP_STATE_ERROR,
   SET_ADDRESSES,
   ADD_MODELS_TO_STORE_SUCCESS,
   ADD_MODELS_TO_DB_SUCCESS,
@@ -100,6 +102,26 @@ function emitAddressesPersistedIfAddressesKey(event: {
   eventEmitter.emit(ADDRESSES_PERSISTED_EVENT, payload)
 }
 
+function errorFromEvent(event: unknown, fallbackMessage: string): Error {
+  const error = (event as { error?: unknown })?.error
+  if (error instanceof Error) {
+    return error
+  }
+  return new Error(String(error ?? fallbackMessage))
+}
+
+function assignInitError(fallbackMessage: string) {
+  return assign(({ event }) => ({
+    initError: errorFromEvent(event, fallbackMessage),
+    isInitialized: false,
+  }))
+}
+
+const failInit = (fallbackMessage: string) => ({
+  target: INIT_FAILED,
+  actions: assignInitError(fallbackMessage),
+})
+
 export const clientManagerMachine = setup({
   types: {
     context: {} as ClientManagerContext,
@@ -133,6 +155,7 @@ export const clientManagerMachine = setup({
       actions: assign({
         isInitialized: false,
         initError: undefined,
+        saveError: undefined,
       }),
     },
   },
@@ -149,16 +172,7 @@ export const clientManagerMachine = setup({
         [PLATFORM_CLASSES_READY]: {
           target: FILE_SYSTEM_INIT,
         },
-        error: {
-          actions: assign(({ event }) => {
-            const error = (event as any).error instanceof Error 
-              ? (event as any).error 
-              : new Error(String((event as any).error || 'Platform classes initialization failed'))
-            return {
-              initError: error,
-            }
-          }),
-        },
+        error: failInit('Platform classes initialization failed'),
       },
       invoke: {
         src: 'platformClassesInit',
@@ -166,6 +180,7 @@ export const clientManagerMachine = setup({
           event: event as InitEvent, 
           context 
         }),
+        onError: failInit('Platform classes initialization failed'),
       },
     },
     [FILE_SYSTEM_INIT]: {
@@ -173,19 +188,12 @@ export const clientManagerMachine = setup({
         [FILE_SYSTEM_READY]: {
           target: DB_INIT,
         },
-        error: {
-          target: IDLE,
-          actions: assign(({ event }) => {
-            const error = (event as { error?: Error }).error instanceof Error
-              ? (event as { error?: Error }).error
-              : new Error(String((event as { error?: unknown }).error ?? 'File system initialization failed'))
-            return { initError: error }
-          }),
-        },
+        error: failInit('File system initialization failed'),
       },
       invoke: {
         src: 'fileSystemInit',
         input: ({ context }) => ({ context }),
+        onError: failInit('File system initialization failed'),
       },
     },
     [DB_INIT]: {
@@ -193,10 +201,12 @@ export const clientManagerMachine = setup({
         [DB_READY]: {
           target: SAVE_CONFIG,
         },
+        error: failInit('Database initialization failed'),
       },
       invoke: {
         src: 'dbInit',
         input: ({ context }) => ({ context }),
+        onError: failInit('Database initialization failed'),
       },
     },
     [SAVE_CONFIG]: {
@@ -204,10 +214,12 @@ export const clientManagerMachine = setup({
         [SAVE_CONFIG_SUCCESS]: {
           target: PROCESS_SCHEMA_FILES,
         },
+        error: failInit('Saving config failed'),
       },
       invoke: {
         src: 'saveConfig',
         input: ({ context }) => ({ context }),
+        onError: failInit('Saving config failed'),
       },
     },
     [PROCESS_SCHEMA_FILES]: {
@@ -215,19 +227,12 @@ export const clientManagerMachine = setup({
         [PROCESS_SCHEMA_FILES_SUCCESS]: {
           target: ADD_MODELS_TO_STORE,
         },
-        error: {
-          target: IDLE,
-          actions: assign(({ event }) => {
-            const error = (event as any).error instanceof Error
-              ? (event as any).error
-              : new Error(String((event as any).error || 'Schema processing failed'))
-            return { initError: error }
-          }),
-        },
+        error: failInit('Schema processing failed'),
       },
       invoke: {
         src: 'processSchemaFiles',
         input: ({ context }) => ({ context }),
+        onError: failInit('Schema processing failed'),
       },
     },
     [ADD_MODELS_TO_STORE]: {
@@ -235,10 +240,12 @@ export const clientManagerMachine = setup({
         [ADD_MODELS_TO_STORE_SUCCESS]: {
           target: ADD_MODELS_TO_DB,
         },
+        error: failInit('Adding models to store failed'),
       },
       invoke: {
         src: 'addModelsToStore',
         input: ({ context }) => ({ context }),
+        onError: failInit('Adding models to store failed'),
       },
     },
     [ADD_MODELS_TO_DB]: {
@@ -246,10 +253,27 @@ export const clientManagerMachine = setup({
         [ADD_MODELS_TO_DB_SUCCESS]: {
           target: IDLE,
         },
+        error: failInit('Adding models to database failed'),
       },
       invoke: {
         src: 'addModelsToDb',
         input: ({ context }) => ({ context }),
+        onError: failInit('Adding models to database failed'),
+      },
+    },
+    [INIT_FAILED]: {
+      entry: assign({
+        isInitialized: false,
+      }),
+      on: {
+        init: {
+          target: PLATFORM_CLASSES_INIT,
+          actions: assign({
+            isInitialized: false,
+            initError: undefined,
+            saveError: undefined,
+          }),
+        },
       },
     },
     [IDLE]: {
@@ -259,9 +283,10 @@ export const clientManagerMachine = setup({
       on: {
         [SAVE_APP_STATE_SUCCESS]: {
           actions: [
-            assign(({ event }) => {
+            assign(() => {
               return {
                 isSaving: false,
+                saveError: undefined,
               }
             }),
             ({ context, event }) =>
@@ -274,6 +299,12 @@ export const clientManagerMachine = setup({
                 event as { key?: string; value?: unknown },
               ),
           ],
+        },
+        [SAVE_APP_STATE_ERROR]: {
+          actions: assign(({ event }) => ({
+            isSaving: false,
+            saveError: errorFromEvent(event, 'Failed to save app state'),
+          })),
         },
         [SET_ADDRESSES]: {
           actions: [
@@ -291,6 +322,7 @@ export const clientManagerMachine = setup({
                 ownedAddresses: normalized.owned,
                 watchedAddresses: normalized.watched,
                 isSaving: true,
+                saveError: undefined,
               }
             })
           ],
@@ -299,6 +331,8 @@ export const clientManagerMachine = setup({
           target: PLATFORM_CLASSES_INIT,
           actions: assign({
             isInitialized: false,
+            initError: undefined,
+            saveError: undefined,
           }),
         },
       },

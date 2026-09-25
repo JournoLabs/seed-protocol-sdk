@@ -51,5 +51,6 @@ export type ClientManagerContext = {
     dbConfig?: import('@/types').DbConfig;
     schemaFile?: string;
     initError?: Error | string;
+    saveError?: Error | string;
 };
 //# sourceMappingURL=machines.d.ts.map

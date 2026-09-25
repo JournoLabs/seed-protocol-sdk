@@ -36,7 +36,7 @@ FromCallbackInput<ClientManagerContext>
     .catch((error) => {
       logger('Error in dbInit:', error)
       sendBack({ 
-        type: 'ERROR', 
+        type: 'error', 
         error: error instanceof Error ? error : new Error(String(error))
       })
     })

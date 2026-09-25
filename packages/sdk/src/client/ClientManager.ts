@@ -6,6 +6,8 @@ import { clientManagerMachine }   from '@/client/clientManagerMachine'
 // import { appState }               from '@/seedSchema'
 // import { eq }                     from 'drizzle-orm'
 import { CLIENT_NOT_INITIALIZED } from '@/helpers/constants'
+import { ClientManagerState } from '@/client/constants'
+import { createCoalescedAsync } from '@/client/coalesceInit'
 import { BaseDb }           from '@/db/Db/BaseDb'
 import { appState, models } from '@/seedSchema'
 import { eq }               from 'drizzle-orm'
@@ -74,7 +76,7 @@ const clientInstance = {
     // ensureInitialized();
     return clientManager;
   },
-  init: async (options: any) => {
+  init: createCoalescedAsync(async (options: any) => {
     // If the actor is stopped (e.g., from a previous failed test), restart it
     const snapshot = clientManager.getSnapshot()
     const currentState = snapshot.value as string
@@ -111,6 +113,7 @@ const clientInstance = {
           filesDir: undefined,
           dbConfig: undefined,
           initError: undefined,
+          saveError: undefined,
         }
       })
       // Wait a moment for the context update to be processed
@@ -134,15 +137,12 @@ const clientInstance = {
     }
     try {
       await waitFor(clientManager, (snapshot) => {
-        // Check for errors in context (for cases where error is set but state hasn't transitioned yet)
-        if (snapshot.context.initError) {
-          const error = snapshot.context.initError instanceof Error 
-            ? snapshot.context.initError 
-            : new Error(String(snapshot.context.initError))
-          throw error
-        }
-        return snapshot.context.isInitialized
+        return snapshot.context.isInitialized || snapshot.context.initError != null
       }, { timeout: 120000 });
+      const initError = clientManager.getSnapshot().context.initError
+      if (initError) {
+        throw initError instanceof Error ? initError : new Error(String(initError))
+      }
     } catch (error: any) {
       // Ensure we never throw undefined
       if (error === undefined || error === null) {
@@ -152,12 +152,23 @@ const clientInstance = {
     }
     // Wire `@seedprotocol/query` local source once DB is ready
     registerSeedQueryLocalSource({ force: true })
-  },
+  }, () => {
+    const snapshot = clientManager.getSnapshot()
+    return (
+      snapshot.value === ClientManagerState.IDLE &&
+      snapshot.context.isInitialized === true &&
+      !snapshot.context.initError
+    )
+  }),
   setAddresses: async (addresses: AddressConfiguration) => {
     ensureInitialized();
     logger('setAddresses', addresses);
     clientManager.send({ type: 'setAddresses', addresses });
     await waitFor(clientManager, (snapshot) => !snapshot.context.isSaving, { timeout: 10000 });
+    const saveError = clientManager.getSnapshot().context.saveError
+    if (saveError) {
+      throw saveError instanceof Error ? saveError : new Error(String(saveError))
+    }
     logger('setAddresses success', addresses);
   },
   getAddresses: async () => {

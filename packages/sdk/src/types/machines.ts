@@ -67,4 +67,5 @@ export type ClientManagerContext = {
   schemaFile?: string
   schema?: string | SchemaFileFormat
   initError?: Error | string
+  saveError?: Error | string
 }

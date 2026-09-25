@@ -11,6 +11,7 @@ export abstract class BaseFileManager {
   private static initializing = false
   private static workingDir: string | undefined
   private static _impl: IFileManager | null = null
+  private static initializePromise: Promise<void> | null = null
 
   static configure(impl: IFileManager): void {
     if (!impl) {
@@ -30,14 +31,39 @@ export abstract class BaseFileManager {
     return BaseFileManager._impl
   }
 
-  static async initializeFileSystem(workingDir?: string): Promise<void> {
-    if (this.initializing || this.fileSystemInitialized) {
+  /**
+   * Clears FS init flags so a later call can retry. Used after a failed init
+   * and by tests. Does not unmount or delete any files.
+   */
+  static resetInitializationState(): void {
+    this.fileSystemInitialized = false
+    this.initializing = false
+    this.initializePromise = null
+    this.workingDir = undefined
+  }
+
+  static initializeFileSystem(workingDir?: string): Promise<void> {
+    if (this.fileSystemInitialized) {
       return Promise.resolve()
     }
+    if (this.initializePromise) {
+      return this.initializePromise
+    }
+
     this.initializing = true
+    const pending = this.runInitializeFileSystem(workingDir).finally(() => {
+      this.initializing = false
+      if (this.initializePromise === pending) {
+        this.initializePromise = null
+      }
+    })
+    this.initializePromise = pending
+    return pending
+  }
+
+  private static async runInitializeFileSystem(workingDir?: string): Promise<void> {
     await BaseFileManager.requireImpl().initializeFileSystem(workingDir)
     this.fileSystemInitialized = true
-    this.initializing = false
     this.workingDir = workingDir
   }
 

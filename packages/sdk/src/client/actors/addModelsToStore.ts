@@ -30,7 +30,15 @@ export const addModelsToStore = fromCallback<
 
   }
 
-  _addModelsToStore().then(() => {
-    sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS })
-  })
+  _addModelsToStore()
+    .then(() => {
+      sendBack({ type: ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS })
+    })
+    .catch((error) => {
+      logger('[client/actors] [addModelsToStore] Error:', error)
+      sendBack({
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      })
+    })
 })

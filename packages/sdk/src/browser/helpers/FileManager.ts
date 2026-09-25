@@ -98,6 +98,15 @@ const pathCompat = {
   },
 }
 
+/** Chromium OPFS: a directory/file handle is stale (reload, other tab, leftover sync access handle). */
+function isStaleOpfsHandleError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'InvalidStateError') {
+    return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('state cached in an interface object')
+}
+
 /** OPFS / ZenFS can throw NotReadableError while a file is still settling after write. */
 function isTransientOpfsReadError(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'NotReadableError') {
@@ -141,29 +150,32 @@ export class BrowserFileManager implements IFileManager {
     }
   }
 
-  async initializeFileSystem(workingDir?: string): Promise<void> {
+  async initializeFileSystem(_workingDir?: string): Promise<void> {
 
     const zenfs = await this.getFs()
     const zenfsDomMod = await import('@zenfs/dom')
     const { WebAccess } = zenfsDomMod
     const {configureSingle} = zenfs
 
-    const handle = await navigator.storage.getDirectory()
-    // await configure({
-    //   mounts: {
-    //     '/': {
-    //       backend: WebAccess,
-    //       handle,
-    //     },
-    //   },
-    //   disableUpdateOnRead: true,
-    //   onlySyncOnClose: true,
-    // })
-    await configureSingle({
-      backend: WebAccess,
-      handle,
-    })
-    // Cache is already set in getFs(), so no need to set it again
+    const configureRoot = async () => {
+      const handle = await navigator.storage.getDirectory()
+      await configureSingle({
+        backend: WebAccess,
+        handle,
+      })
+    }
+
+    try {
+      await configureRoot()
+    } catch (error) {
+      if (!isStaleOpfsHandleError(error)) {
+        throw error
+      }
+      // Leftover sync-access handles can make the first walk throw. Retry once
+      // without deleting OPFS data; BaseFileManager resets flags if this still fails.
+      await sleep(50)
+      await configureRoot()
+    }
   }
 
   async downloadAllFiles( {
