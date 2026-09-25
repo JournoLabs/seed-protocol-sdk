@@ -4,6 +4,7 @@ import {
   INTERNAL_PROPERTY_NAMES,
   PROPERTY_NAMES_EXEMPT_FROM_ID_SUFFIX_STRIP,
 } from '@/helpers/constants'
+import { getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
 import {
   getAlternatePropertyNameForInstanceLookup,
   resolveStorageNameToSchemaName,
@@ -263,6 +264,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       'latestVersionUid',
       'publishedVersionUid',
       'publishedVersionLocalId',
+      'revokedAt',
     ] as const
 
     const keysFromInitial = (Object.keys(initialValues) as Array<string & keyof Partial<T>>).filter(
@@ -606,19 +608,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           },
           
           getOwnPropertyDescriptor(target, prop: string | symbol) {
-            // Handle tracked properties
+            let invent: { value: unknown } | undefined
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
               const context = target._getSnapshotContext()
               if (prop in context) {
-                return {
-                  enumerable: true,
-                  configurable: true,
-                  value: (context as any)[prop],
-                  writable: true,
-                }
+                invent = { value: (context as any)[prop] }
               }
             }
-            return Reflect.getOwnPropertyDescriptor(target, prop)
+            return getInvariantSafePropertyDescriptor(target, prop, invent)
           },
         }) as Item<any>
 
@@ -810,19 +807,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       },
       
       getOwnPropertyDescriptor(target, prop: string | symbol) {
-        // Handle tracked properties
+        let invent: { value: unknown } | undefined
         if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
           const context = target._getSnapshotContext()
           if (prop in context) {
-            return {
-              enumerable: true,
-              configurable: true,
-              value: (context as any)[prop],
-              writable: true,
-            }
+            invent = { value: (context as any)[prop] }
           }
         }
-        return Reflect.getOwnPropertyDescriptor(target, prop)
+        return getInvariantSafePropertyDescriptor(target, prop, invent)
       },
     }) as Item<any>
     
@@ -1206,6 +1198,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
       },
       enumerable: true,
+      configurable: true,
     })
     state.definedPropertyNames.add(propertyName)
   }

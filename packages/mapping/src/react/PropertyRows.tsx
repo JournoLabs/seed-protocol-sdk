@@ -131,6 +131,16 @@ export function PropertyRows({
     setAdding(false)
   }
 
+  const handleRemoveRow = (rowId: string) => {
+    mapper.removeRow(rowId)
+    setExtraNames((prev) => {
+      if (!prev.has(rowId)) return prev
+      const next = new Set(prev)
+      next.delete(rowId)
+      return next
+    })
+  }
+
   const mapThisSource = (sourceId: string) => {
     setPendingSourceId(sourceId)
     setAdding(true)
@@ -257,7 +267,7 @@ export function PropertyRows({
                 <Button
                   className={slotClass('removeButton', classNames)}
                   aria-label={`Remove mapping for ${row.id}`}
-                  onClick={() => mapper.removeRow(row.id)}
+                  onClick={() => handleRemoveRow(row.id)}
                 >
                   ×
                 </Button>

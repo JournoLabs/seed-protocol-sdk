@@ -82,6 +82,8 @@ export const INTERNAL_PROPERTY_NAMES = [
   '_markedForDeletion',
   // SDK-internal: wallet address of attester; never publish as property attestation
   'publisher',
+  // SDK-internal: Unix timestamp when attestations were revoked; never a schema field
+  'revokedAt',
 ]
 
 export const VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA =

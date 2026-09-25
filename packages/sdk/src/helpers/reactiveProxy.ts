@@ -26,6 +26,33 @@ export type Proxied<T> = {
   [K in keyof T]: T[K]
 } & T
 
+export type InventedPropertyDescriptor = {
+  value: unknown
+  writable?: boolean
+}
+
+/**
+ * Proxy [[GetOwnProperty]] that stays compatible with the target.
+ * Never overrides an own descriptor, never invents on a non-extensible target,
+ * and never promotes a prototype accessor to an own descriptor.
+ */
+export function getInvariantSafePropertyDescriptor(
+  target: object,
+  prop: string | symbol,
+  invent?: InventedPropertyDescriptor,
+): PropertyDescriptor | undefined {
+  const own = Reflect.getOwnPropertyDescriptor(target, prop)
+  if (own) return own
+  if (!invent) return undefined
+  if (!Object.isExtensible(target)) return undefined
+  return {
+    enumerable: true,
+    configurable: true,
+    value: invent.value,
+    writable: invent.writable ?? true,
+  }
+}
+
 /**
  * Creates a reactive Proxy that intercepts property access and assignment
  * to read from and write to an actor service's context.
@@ -106,18 +133,14 @@ export function createReactiveProxy<T extends object>(config: ProxyConfig<T>): P
     },
     
     getOwnPropertyDescriptor(target, prop: string | symbol) {
+      let invent: InventedPropertyDescriptor | undefined
       if (typeof prop === 'string' && trackedPropsSet.has(prop)) {
         const context = getContext(instance)
         if (prop in context) {
-          return {
-            enumerable: true,
-            configurable: true,
-            value: context[prop],
-            writable: true,
-          }
+          invent = { value: context[prop] }
         }
       }
-      return Reflect.getOwnPropertyDescriptor(target, prop)
+      return getInvariantSafePropertyDescriptor(target, prop, invent)
     }
   })
   

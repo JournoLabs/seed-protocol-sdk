@@ -1,6 +1,6 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
 import { modelMachine, ModelMachineContext } from './service/modelMachine'
-import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import { createReactiveProxy, getInvariantSafePropertyDescriptor } from '@/helpers/reactiveProxy'
 import { Item } from '@/Item/Item'
 import { ModelValues } from '@/types'
 import type { CreateWaitOptions } from '@/types'
@@ -674,39 +674,27 @@ export class Model {
       getOwnPropertyDescriptor(target, prop: string | symbol) {
         // Handle 'name' as an alias for 'modelName'
         if (prop === 'name') {
-          const context = target._getSnapshotContext()
-          return {
-            enumerable: true,
-            configurable: true,
-            value: context.modelName,
-            writable: true,
-          }
+          return getInvariantSafePropertyDescriptor(target, prop, {
+            value: target._getSnapshotContext().modelName,
+          })
         }
         
         // Handle 'id' property - returns the modelFileId
         if (prop === 'id') {
-          const context = target._getSnapshotContext()
-          return {
-            enumerable: true,
-            configurable: true,
-            value: context.id, // id is now the schemaFileId (string)
+          return getInvariantSafePropertyDescriptor(target, prop, {
+            value: target._getSnapshotContext().id, // id is now the schemaFileId (string)
             writable: false, // id is read-only
-          }
+          })
         }
         
-        // Handle tracked properties
+        let invent: { value: unknown } | undefined
         if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
           const context = target._getSnapshotContext()
           if (prop in context) {
-            return {
-              enumerable: true,
-              configurable: true,
-              value: (context as any)[prop],
-              writable: true,
-            }
+            invent = { value: (context as any)[prop] }
           }
         }
-        return Reflect.getOwnPropertyDescriptor(target, prop)
+        return getInvariantSafePropertyDescriptor(target, prop, invent)
       },
     }) as Model
     

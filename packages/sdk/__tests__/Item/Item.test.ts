@@ -1328,6 +1328,46 @@ testDescribe('Item Integration Tests', () => {
         expect(prop.propertyName).toBeDefined()
       })
     })
+
+    it('getOwnPropertyDescriptor on revokedAt does not throw', async () => {
+      const schemaName = 'Test Schema Item Proxy GOPD'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(
+        model.getService(),
+        (snapshot) => snapshot.value === 'idle',
+        { timeout: 5000 }
+      )
+
+      const item = await Item.create({
+        modelName: 'TestPost',
+        title: 'GOPD Test',
+      })
+      await waitForItemIdle(item)
+
+      expect(() => Object.getOwnPropertyDescriptor(item, 'revokedAt')).not.toThrow()
+      expect(item.revokedAt).toBeUndefined()
+
+      const withRevoked = await Item.create({
+        modelName: 'TestPost',
+        title: 'GOPD Revoked',
+        revokedAt: 1_700_000_000,
+      } as any)
+      await waitForItemIdle(withRevoked)
+
+      expect(() => Object.getOwnPropertyDescriptor(withRevoked, 'revokedAt')).not.toThrow()
+      expect(Object.getOwnPropertyDescriptor(withRevoked, 'revokedAt')?.configurable).not.toBe(false)
+    })
   })
 
   describe('Item.publisher', () => {

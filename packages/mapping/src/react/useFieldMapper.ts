@@ -53,9 +53,24 @@ export function useFieldMapper({
     () => new Set(),
   )
   const [drafts, setDrafts] = useState<SourceModeDraft[]>([])
+  const mappingsRef = useRef(mappings)
+  const mappingsPropRef = useRef(mappings)
+  if (mappingsPropRef.current !== mappings) {
+    mappingsPropRef.current = mappings
+    mappingsRef.current = mappings
+  }
   const edgeIdsRef = useRef<string[]>([])
-  edgeIdsRef.current = syncEdgeIds(edgeIdsRef.current, mappings.length)
+  edgeIdsRef.current = syncEdgeIds(edgeIdsRef.current, mappingsRef.current.length)
   const edgeIds = edgeIdsRef.current
+
+  const commitMappings = useCallback(
+    (next: FieldMapping[]) => {
+      mappingsRef.current = next
+      edgeIdsRef.current = syncEdgeIds(edgeIdsRef.current, next.length)
+      onChange(next)
+    },
+    [onChange],
+  )
 
   const applyLookupClears = useCallback(
     (props: string[]) => {
@@ -114,52 +129,53 @@ export function useFieldMapper({
   const connect = useCallback(
     (sourceId: string, propertyName: string) => {
       const result = connectSourceToProperty(
-        mappings,
+        mappingsRef.current,
         sources,
         targets,
         sourceId,
         propertyName,
       )
-      onChange(result.mappings)
+      commitMappings(result.mappings)
       applyLookupClears(result.clearedLookupProps)
     },
-    [mappings, sources, targets, onChange, applyLookupClears],
+    [sources, targets, commitMappings, applyLookupClears],
   )
 
   const removeBySource = useCallback(
     (sourceId: string) => {
-      const result = removeMappingsForSourceId(mappings, sourceId)
-      onChange(result.mappings)
+      const result = removeMappingsForSourceId(mappingsRef.current, sourceId)
+      commitMappings(result.mappings)
       applyLookupClears(result.clearedLookupProps)
     },
-    [mappings, onChange, applyLookupClears],
+    [commitMappings, applyLookupClears],
   )
 
   const autoMap = useCallback(() => {
     const next = onAutoMap ? onAutoMap() : defaultAutoMap(sources, targets)
-    onChange(next)
+    commitMappings(next)
     setDrafts([])
     setExtraPropertyNames(new Set())
-  }, [onAutoMap, sources, targets, onChange])
+  }, [onAutoMap, sources, targets, commitMappings])
 
   const setSource = useCallback(
     (rowId: string, sourceId: string | null) => {
+      const current = mappingsRef.current
       if (rowKey === 'property') {
         if (!sourceId) {
-          const prev = mappings.find((m) => m.propertyName === rowId)
+          const prev = current.find((m) => m.propertyName === rowId)
           if (prev && isDeriveKeepOnClear(prev)) {
-            onChange(
-              upsertPropertyMapping(mappings, clearSourceKeepDerive(prev)),
+            commitMappings(
+              upsertPropertyMapping(current, clearSourceKeepDerive(prev)),
             )
             if (prev.resolve === 'lookup') applyLookupClears([rowId])
             return
           }
-          onChange(mappings.filter((m) => m.propertyName !== rowId))
+          commitMappings(current.filter((m) => m.propertyName !== rowId))
           if (prev?.resolve === 'lookup') applyLookupClears([rowId])
           return
         }
         const result = connectSourceToProperty(
-          mappings,
+          current,
           sources,
           targets,
           sourceId,
@@ -173,38 +189,38 @@ export function useFieldMapper({
           const required = computeRequiredResolve(source, target)
           if (required) {
             edge = { ...edge, resolve: required }
-            onChange(upsertPropertyMapping(result.mappings, edge))
+            commitMappings(upsertPropertyMapping(result.mappings, edge))
             applyLookupClears(result.clearedLookupProps)
             return
           }
         }
-        onChange(result.mappings)
+        commitMappings(result.mappings)
         applyLookupClears(result.clearedLookupProps)
         return
       }
 
       // source mode
-      const edgeIndex = edgeIds.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
       if (edgeIndex >= 0) {
         if (!sourceId) {
-          const prev = mappings[edgeIndex]
+          const prev = current[edgeIndex]
           if (prev && isDeriveKeepOnClear(prev)) {
-            const next = [...mappings]
+            const next = [...current]
             next[edgeIndex] = clearSourceKeepDerive(prev)
-            onChange(next)
+            commitMappings(next)
             if (prev.resolve === 'lookup') {
               applyLookupClears([prev.propertyName])
             }
             return
           }
-          const next = mappings.filter((_, i) => i !== edgeIndex)
-          onChange(next)
+          const next = current.filter((_, i) => i !== edgeIndex)
+          commitMappings(next)
           if (prev?.resolve === 'lookup') {
             applyLookupClears([prev.propertyName])
           }
           return
         }
-        const prev = mappings[edgeIndex]!
+        const prev = current[edgeIndex]!
         const target = targets.find((t) => t.name === prev.propertyName)
         let edge: FieldMapping = {
           sourceId,
@@ -217,9 +233,9 @@ export function useFieldMapper({
           const required = computeRequiredResolve(source, target)
           if (required) edge = { ...edge, resolve: required }
         }
-        const next = [...mappings]
+        const next = [...current]
         next[edgeIndex] = edge
-        onChange(next)
+        commitMappings(next)
         if (prev.resolve === 'lookup' && edge.resolve !== 'lookup') {
           applyLookupClears([prev.propertyName])
         }
@@ -265,8 +281,8 @@ export function useFieldMapper({
             ),
         )
         if (complete.length > 0) {
-          onChange([
-            ...mappings,
+          commitMappings([
+            ...mappingsRef.current,
             ...complete.map((d) => ({
               ...(d.sourceId ? { sourceId: d.sourceId } : {}),
               propertyName: d.propertyName!,
@@ -280,12 +296,10 @@ export function useFieldMapper({
     },
     [
       rowKey,
-      mappings,
       sources,
       targets,
-      onChange,
+      commitMappings,
       applyLookupClears,
-      edgeIds,
     ],
   )
 
@@ -296,9 +310,10 @@ export function useFieldMapper({
         return
       }
 
-      const edgeIndex = edgeIds.indexOf(rowId)
+      const current = mappingsRef.current
+      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
       if (edgeIndex >= 0) {
-        const prev = mappings[edgeIndex]!
+        const prev = current[edgeIndex]!
         const target = targets.find((t) => t.name === propertyName)
         const source = originSources(sources).find(
           (s) => s.id === prev.sourceId,
@@ -313,9 +328,9 @@ export function useFieldMapper({
           const required = computeRequiredResolve(source, target)
           if (required) edge = { ...edge, resolve: required }
         }
-        const next = [...mappings]
+        const next = [...current]
         next[edgeIndex] = edge
-        onChange(next)
+        commitMappings(next)
         if (prev.resolve === 'lookup' && edge.resolve !== 'lookup') {
           applyLookupClears([prev.propertyName])
         }
@@ -379,7 +394,7 @@ export function useFieldMapper({
             propertyName: d.propertyName!,
             ...(d.resolve ? { resolve: d.resolve } : {}),
           }))
-          onChange([...mappings, ...promoted])
+          commitMappings([...mappingsRef.current, ...promoted])
           return incomplete
         }
         return updated
@@ -387,11 +402,9 @@ export function useFieldMapper({
     },
     [
       rowKey,
-      edgeIds,
-      mappings,
       targets,
       sources,
-      onChange,
+      commitMappings,
       applyLookupClears,
     ],
   )
@@ -399,19 +412,19 @@ export function useFieldMapper({
   const setLookupEntries = useCallback(
     (rowId: string, entries: LookupEntry[]) => {
       const next = applyLookupEntriesToMappings(
-        mappings,
+        mappingsRef.current,
         rowKey,
         rowId,
-        edgeIds,
+        edgeIdsRef.current,
         entries,
       )
       if (!next) return
-      onChange(next)
+      commitMappings(next)
       if (!onLookupsChange) return
       const edge =
         rowKey === 'property'
           ? next.find((m) => m.propertyName === rowId)
-          : next[edgeIds.indexOf(rowId)]
+          : next[edgeIdsRef.current.indexOf(rowId)]
       if (!edge) return
       const table = Object.fromEntries(
         (edge.lookup?.entries ?? []).map((e) => [e.value, e.ref]),
@@ -424,45 +437,46 @@ export function useFieldMapper({
       }
       onLookupsChange(merged)
     },
-    [mappings, rowKey, edgeIds, onChange, onLookupsChange, lookups],
+    [rowKey, commitMappings, onLookupsChange, lookups],
   )
 
   const setAssembleBlocks = useCallback(
     (rowId: string, blocks: string[]) => {
       const next = applyAssembleBlocksToMappings(
-        mappings,
+        mappingsRef.current,
         rowKey,
         rowId,
-        edgeIds,
+        edgeIdsRef.current,
         blocks,
       )
-      if (next) onChange(next)
+      if (next) commitMappings(next)
     },
-    [mappings, rowKey, edgeIds, onChange],
+    [rowKey, commitMappings],
   )
 
   const setDerive = useCallback(
     (rowId: string, spec: DeriveSpec | null) => {
       const next = applyDeriveToMappings(
-        mappings,
+        mappingsRef.current,
         rowKey,
         rowId,
-        edgeIds,
+        edgeIdsRef.current,
         spec,
       )
-      if (next) onChange(next)
+      if (next) commitMappings(next)
     },
-    [mappings, rowKey, edgeIds, onChange],
+    [rowKey, commitMappings],
   )
 
   const setTransform = useCallback(
     (rowId: string, resolve: ResolveJob | null) => {
+      const current = mappingsRef.current
       if (rowKey === 'property') {
-        const prev = mappings.find((m) => m.propertyName === rowId)
+        const prev = current.find((m) => m.propertyName === rowId)
         if (!prev) {
           if (resolve === 'derive') {
-            onChange(
-              upsertPropertyMapping(mappings, {
+            commitMappings(
+              upsertPropertyMapping(current, {
                 propertyName: rowId,
                 resolve: 'derive',
               }),
@@ -470,19 +484,19 @@ export function useFieldMapper({
           }
           return
         }
-        onChange(upsertPropertyMapping(mappings, applyResolveToEdge(prev, resolve)))
+        commitMappings(upsertPropertyMapping(current, applyResolveToEdge(prev, resolve)))
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([rowId])
         }
         return
       }
 
-      const edgeIndex = edgeIds.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
       if (edgeIndex >= 0) {
-        const prev = mappings[edgeIndex]!
-        const next = [...mappings]
+        const prev = current[edgeIndex]!
+        const next = [...current]
         next[edgeIndex] = applyResolveToEdge(prev, resolve)
-        onChange(next)
+        commitMappings(next)
         if (prev.resolve === 'lookup' && resolve !== 'lookup') {
           applyLookupClears([prev.propertyName])
         }
@@ -508,8 +522,8 @@ export function useFieldMapper({
             ),
         )
         if (complete.length > 0) {
-          onChange([
-            ...mappings,
+          commitMappings([
+            ...mappingsRef.current,
             ...complete.map((d) => ({
               ...(d.sourceId ? { sourceId: d.sourceId } : {}),
               propertyName: d.propertyName!,
@@ -521,7 +535,7 @@ export function useFieldMapper({
         return updated
       })
     },
-    [rowKey, mappings, edgeIds, onChange, applyLookupClears],
+    [rowKey, commitMappings, applyLookupClears],
   )
 
   const addRow = useCallback(
@@ -545,9 +559,10 @@ export function useFieldMapper({
 
   const removeRow = useCallback(
     (rowId: string) => {
+      const current = mappingsRef.current
       if (rowKey === 'property') {
-        const prev = mappings.find((m) => m.propertyName === rowId)
-        onChange(mappings.filter((m) => m.propertyName !== rowId))
+        const prev = current.find((m) => m.propertyName === rowId)
+        commitMappings(current.filter((m) => m.propertyName !== rowId))
         if (prev?.resolve === 'lookup') applyLookupClears([rowId])
         setExtraPropertyNames((prevSet) => {
           if (!prevSet.has(rowId)) return prevSet
@@ -558,10 +573,10 @@ export function useFieldMapper({
         return
       }
 
-      const edgeIndex = edgeIds.indexOf(rowId)
+      const edgeIndex = edgeIdsRef.current.indexOf(rowId)
       if (edgeIndex >= 0) {
-        const prev = mappings[edgeIndex]
-        onChange(mappings.filter((_, i) => i !== edgeIndex))
+        const prev = current[edgeIndex]
+        commitMappings(current.filter((_, i) => i !== edgeIndex))
         if (prev?.resolve === 'lookup') {
           applyLookupClears([prev.propertyName])
         }
@@ -570,7 +585,7 @@ export function useFieldMapper({
 
       setDrafts((prev) => prev.filter((d) => d.id !== rowId))
     },
-    [rowKey, mappings, edgeIds, onChange, applyLookupClears],
+    [rowKey, commitMappings, applyLookupClears],
   )
 
   return {
