@@ -13,6 +13,7 @@ import { SQLocalDrizzle } from 'sqlocal/drizzle'
 import {} from 'sqlocal'
 import * as drizzleFiles from './drizzleFiles'
 import { journalJson, snapshotJson } from './drizzleFiles'
+import { createSqlocalDrizzle, raceSqlocalStartup } from './createSqlocalDrizzle'
 import { Observable, distinctUntilChanged } from 'rxjs'
 const logger = debug('seedSdk:browser:db:Db')
 
@@ -66,14 +67,19 @@ export class BrowserDb implements IDb {
       await BaseFileManager.waitForFileWithContent(journalFilePath, 100, 5000)
       logger('[Db.prepareDb] journal file is ready')
 
-      // Initialize SQLocalDrizzle with reactive: true to enable reactive queries
-      const sqlocalDrizzle = new SQLocalDrizzle({
-        databasePath: `${this.filesDir}/db/seed.db`,
-        reactive: true  // Enable reactive queries
-      })
-      
+      // Initialize SQLocalDrizzle with reactive: true to enable reactive queries.
+      // Blob-wrap sqlocal's HTTPS module worker so Chrome profiles that kill
+      // `new Worker(https://…/worker-HASH.js, { type: 'module' })` as an entry
+      // still reach connect via `import` of the same URL.
+      const { instance: sqlocalDrizzle, workerFailed } = createSqlocalDrizzle(
+        () => new SQLocalDrizzle({
+          databasePath: `${this.filesDir}/db/seed.db`,
+          reactive: true,
+        }),
+      )
+
       const { driver, batchDriver } = sqlocalDrizzle
-      
+
       // Store SQLocalDrizzle instance for reactive queries
       this.sqlocalInstance = sqlocalDrizzle
 
@@ -90,12 +96,14 @@ export class BrowserDb implements IDb {
 
       logger('[Db.prepareDb] database prepared')
 
-      await this.runMigrations(db)
+      await raceSqlocalStartup((async () => {
+        await this.runMigrations(db)
 
-      this.appDb = db
+        this.appDb = db
 
-      const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
-      await backfillMetadataPropertyIds()
+        const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
+        await backfillMetadataPropertyIds()
+      })(), workerFailed)
 
       return this.appDb
     } catch (error) {

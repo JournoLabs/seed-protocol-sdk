@@ -100,6 +100,8 @@ export default defineConfig({
             'client/schemaFileInit.test.ts',
             'helpers/easDirect.test.ts',
             'feed/**',
+            // Mocks global Worker; run as a Node unit test only
+            'browser/db/createSqlocalDrizzle.test.ts',
           ],
           hookTimeout: 90000,
           testTimeout: 30000,
