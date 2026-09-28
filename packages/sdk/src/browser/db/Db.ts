@@ -1,10 +1,8 @@
 import { BaseDb } from "@/db/Db/BaseDb";
 import { IDb } from "@/interfaces/IDb";
 import debug from "debug";
-import { sql } from "drizzle-orm";
-import { readMigrationFiles } from "drizzle-orm/migrator";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
-import { migrate as drizzleMigrate } from "drizzle-orm/sqlite-proxy/migrator";
+import { applyEmbeddedMigrations, getEmbeddedMigrations } from "./embeddedMigrations"
 import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
 import * as schema from '@/seedSchema'
@@ -263,30 +261,12 @@ export class BrowserDb implements IDb {
   /** Internal migration runner. Used by prepareDb before appDb is set. */
   private async runMigrations(
     db: SqliteRemoteDatabase<Record<string, unknown>>,
-    pathToDbDir?: string
+    _pathToDbDir?: string
   ): Promise<void> {
-    const migrationsFolder = pathToDbDir ?? `${this.filesDir}/db`
-
     try {
-      logger('[Db.runMigrations] calling readMigrationFiles')
-      const migrations = readMigrationFiles({
-        migrationsFolder,
-      })
-      logger('[Db.runMigrations] migrations', migrations)
-
-      await drizzleMigrate(
-        db,
-        async (queriesToRun) => {
-          logger('queriesToRun', queriesToRun)
-          for (const query of queriesToRun) {
-            logger('query', query)
-            await db.run(sql.raw(query))
-          }
-        },
-        {
-          migrationsFolder,
-        },
-      )
+      const migrations = getEmbeddedMigrations()
+      logger('[Db.runMigrations] embedded migrations', migrations.length)
+      await applyEmbeddedMigrations(db, migrations)
       logger('[Db.runMigrations] migrations completed')
     } catch (error) {
       logger('[Db.runMigrations] error', JSON.stringify(error))

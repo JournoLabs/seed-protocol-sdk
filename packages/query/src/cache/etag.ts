@@ -1,10 +1,11 @@
-import { createHash } from 'crypto'
+import { sha256 } from '@noble/hashes/sha256'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
 
 /**
- * Generate an ETag from a string value (MD5, first 16 hex chars, quoted).
+ * Generate an ETag from a string value (SHA-256, first 16 hex chars, quoted).
  */
 export function generateETag(value: string): string {
-  const hash = createHash('md5').update(value).digest('hex')
+  const hash = bytesToHex(sha256(utf8ToBytes(value)))
   return `"${hash.substring(0, 16)}"`
 }
 

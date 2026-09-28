@@ -1,4 +1,4 @@
-import type { Plugin, UserConfig } from 'vite'
+import type { ConfigEnv, Plugin, PreviewServer, UserConfig, ViteDevServer } from 'vite'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -35,9 +35,24 @@ export interface SeedVitePluginOptions {
    * Whether to automatically include vite-plugin-node-polyfills with sensible defaults.
    * The SDK depends on that package and aliases its injected shim imports to absolute
    * paths, so consuming apps do not need to install vite-plugin-node-polyfills themselves.
+   * Default include list omits `stream` and `crypto` (those pull stream-browserify and
+   * break Vite SSR / React Router prerender). Use `false` for Framework Mode / prerender.
    * @default true
    */
   includeNodePolyfills?: boolean
+
+  /**
+   * Cross-origin isolation headers for sqlocal / SharedArrayBuffer / OPFS.
+   * Applied in configureServer and configurePreviewServer, including writeHead,
+   * because Vite `server.headers` is not copied onto Framework-Mode HTML responses.
+   * Set `false` to disable. Pass `{ coop, coep, corp }` to override values.
+   * @default true (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`)
+   */
+  isolationHeaders?: boolean | {
+    coop?: string
+    coep?: string
+    corp?: string
+  }
 }
 
 // Node.js globals that are undefined in browsers and will throw at runtime.
@@ -132,6 +147,49 @@ const EAS_OPTIMIZE_INCLUDES = [
   '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk',
   '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
 ] as const
+
+/** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
+const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
+
+const DEFAULT_ISOLATION_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+} as const
+
+function resolveIsolationHeaders(
+  option: SeedVitePluginOptions['isolationHeaders'],
+): Record<string, string> | null {
+  if (option === false) return null
+  const overrides = typeof option === 'object' && option ? option : {}
+  return {
+    'Cross-Origin-Opener-Policy': overrides.coop ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Opener-Policy'],
+    'Cross-Origin-Embedder-Policy': overrides.coep ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy'],
+    'Cross-Origin-Resource-Policy': overrides.corp ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Resource-Policy'],
+  }
+}
+
+function applyIsolationHeaderMiddleware(
+  server: ViteDevServer | PreviewServer,
+  headers: Record<string, string>,
+): void {
+  server.middlewares.use((_req, res, next) => {
+    const apply = () => {
+      for (const [key, value] of Object.entries(headers)) {
+        if (!res.getHeader(key)) {
+          res.setHeader(key, value)
+        }
+      }
+    }
+    const originalWriteHead = res.writeHead.bind(res)
+    res.writeHead = ((...args: Parameters<typeof res.writeHead>) => {
+      apply()
+      return originalWriteHead(...args)
+    }) as typeof res.writeHead
+    apply()
+    next()
+  })
+}
 
 type AliasEntry = { find: string | RegExp; replacement: string }
 
@@ -655,7 +713,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     autoInit = false,
     debug = false,
     includeNodePolyfills = true,
+    isolationHeaders: isolationHeadersOption,
   } = options
+
+  const isolationHeaders = resolveIsolationHeaders(isolationHeadersOption)
+  let htmlNodeEnv = 'production'
 
   const log = (...args: unknown[]) => {
     if (debug) console.log('[seed-vite-plugin]', ...args)
@@ -692,7 +754,10 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
     },
 
-    config(userConfig) {
+    config(userConfig, env) {
+      if (env?.mode) {
+        htmlNodeEnv = env.mode
+      }
       const aliasEntries: AliasEntry[] = []
       for (const mod of fsModules) {
         const isPromises = mod.includes('promises')
@@ -760,6 +825,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           ...(existingOptimize?.include ?? []),
           ...resolvableOptimizeIncludes,
           ...EAS_OPTIMIZE_INCLUDES,
+          ...CJS_OPTIMIZE_INCLUDES,
         ],
         // Keep `global` shim in optimizer Rolldown options; top-level Vite `define`
         // can be rejected by Rolldown in some consumer setups.
@@ -780,10 +846,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         define: {
           ...(userConfig.define ?? {}),
           global: 'globalThis',
-          // process is referenced by path-browserify (drizzle migrator's node:path dep)
-          // and other CJS modules. Point at globalThis.process which is set by the
-          // synchronous inline shim script injected into index.html before any modules load.
-          'process.env.NODE_ENV': JSON.stringify('production'),
+          // process is referenced by path-browserify and other CJS modules.
+          // Point at globalThis.process which is set by the synchronous inline
+          // shim script injected into index.html before any modules load.
+          // Do not define process.env.NODE_ENV — Vite already sets it from mode,
+          // and forcing "production" during `vite serve` compiles out React Refresh.
           'process.browser': 'true',
           'process.platform': '"browser"',
         },
@@ -815,6 +882,24 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           ),
         },
         optimizeDeps,
+        ...(isolationHeaders
+          ? {
+              server: {
+                ...(userConfig.server ?? {}),
+                headers: {
+                  ...(userConfig.server?.headers ?? {}),
+                  ...isolationHeaders,
+                },
+              },
+              preview: {
+                ...(userConfig.preview ?? {}),
+                headers: {
+                  ...(userConfig.preview?.headers ?? {}),
+                  ...isolationHeaders,
+                },
+              },
+            }
+          : {}),
       }
     },
   }
@@ -909,6 +994,14 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const mainPlugin: Plugin = {
     name: 'seed-protocol:main',
     enforce: 'post',
+
+    configureServer(server) {
+      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+    },
+
+    configurePreviewServer(server) {
+      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+    },
 
     config(userConfig) {
       const existingBuild = userConfig.build ?? {}
@@ -1044,10 +1137,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // global and process are guaranteed to exist when CJS wrappers evaluate.
       // vite-plugin-node-polyfills injects polyfills via module imports, which
       // resolve too late for @rollup/plugin-commonjs-generated wrapper code.
+      const nodeEnvLiteral = JSON.stringify(htmlNodeEnv)
       const shimScript = `<script>
 (function(){
   if(typeof globalThis.global==='undefined')globalThis.global=globalThis;
-  if(typeof globalThis.process==='undefined')globalThis.process={env:{NODE_ENV:'production'},browser:true,version:'v18.0.0',versions:{},platform:'browser',cwd:function(){return'/'},nextTick:function(fn){setTimeout(fn,0)}};
+  if(typeof globalThis.process==='undefined')globalThis.process={env:{NODE_ENV:${nodeEnvLiteral}},browser:true,version:'v18.0.0',versions:{},platform:'browser',cwd:function(){return'/'},nextTick:function(fn){setTimeout(fn,0)}};
 })();
 </script>`
 
@@ -1114,7 +1208,7 @@ if (!window.__seedFsReady) {
       // Let fs be handled by @zenfs/core instead of polyfills
       exclude: ['readline',],
       // Common set of browser-friendly polyfills used by many deps
-      include: ['path', 'crypto', 'stream', 'util', 'buffer', 'events', 'string_decoder',],
+      include: ['path', 'buffer', 'events', 'string_decoder', 'util'],
       globals: {
         Buffer: true,
         global: true,

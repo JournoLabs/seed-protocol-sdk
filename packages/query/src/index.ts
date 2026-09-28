@@ -58,6 +58,7 @@ export {
 export type {
   CachedCollectionData,
   CachedItemData,
+  PersistentCache,
   QueryCacheConfig,
   QueryCacheStats,
 } from './cache/index.js'

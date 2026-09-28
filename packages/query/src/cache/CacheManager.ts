@@ -1,19 +1,33 @@
 import type { GetSeedResult, SeedRecord } from '../types.js'
-import { FileCache } from './FileCache.js'
 import { MemoryCache } from './MemoryCache.js'
 import type {
   CachedCollectionData,
   CachedItemData,
+  PersistentCache,
   QueryCacheConfig,
   QueryCacheStats,
 } from './types.js'
 
+type PersistentCacheFactory = (config: QueryCacheConfig) => PersistentCache | null
+
+let persistentCacheFactory: PersistentCacheFactory = () => null
+
 /**
- * Unified query cache: memory → disk for collections and items.
+ * Node entry (`index.node.ts`) registers FileCache here so the browser
+ * graph never statically imports `fs` / `path`.
+ */
+export function configurePersistentCacheFactory(
+  factory: PersistentCacheFactory,
+): void {
+  persistentCacheFactory = factory
+}
+
+/**
+ * Unified query cache: memory, with optional persistent (disk) layer.
  */
 export class CacheManager {
   private memoryCache: MemoryCache
-  private fileCache: FileCache
+  private persistent: PersistentCache | null
   private config: QueryCacheConfig
   private stats: QueryCacheStats = {
     hits: 0,
@@ -22,10 +36,14 @@ export class CacheManager {
     errors: 0,
   }
 
-  constructor(config: QueryCacheConfig) {
+  constructor(config: QueryCacheConfig, persistent?: PersistentCache | null) {
     this.config = config
     this.memoryCache = new MemoryCache(config)
-    this.fileCache = new FileCache(config)
+    if (persistent === undefined) {
+      this.persistent = persistentCacheFactory(config)
+    } else {
+      this.persistent = persistent
+    }
   }
 
   get enabled(): boolean {
@@ -48,7 +66,7 @@ export class CacheManager {
         return cached
       }
 
-      cached = await this.fileCache.getCollection(schemaName)
+      cached = (await this.persistent?.getCollection(schemaName)) ?? null
       if (cached) {
         this.memoryCache.setCollection(schemaName, cached.items)
         this.stats.hits++
@@ -75,7 +93,7 @@ export class CacheManager {
 
     try {
       const cached = this.memoryCache.setCollection(schemaName, items)
-      await this.fileCache.setCollection(schemaName, cached)
+      await this.persistent?.setCollection(schemaName, cached)
       return cached
     } catch (error) {
       console.error(
@@ -100,7 +118,7 @@ export class CacheManager {
         return cached
       }
 
-      cached = await this.fileCache.getItem(seedUid, optionsKey)
+      cached = (await this.persistent?.getItem(seedUid, optionsKey)) ?? null
       if (cached) {
         this.memoryCache.setItem(cached.record, optionsKey)
         this.stats.hits++
@@ -124,7 +142,7 @@ export class CacheManager {
 
     try {
       const cached = this.memoryCache.setItem(record, optionsKey)
-      await this.fileCache.setItem(cached)
+      await this.persistent?.setItem(cached)
       return cached
     } catch (error) {
       console.error(
@@ -148,12 +166,12 @@ export class CacheManager {
 
   async clearCollection(schemaName: string): Promise<void> {
     this.memoryCache.clearCollection(schemaName)
-    await this.fileCache.clearCollection(schemaName)
+    await this.persistent?.clearCollection(schemaName)
   }
 
   async clearAll(): Promise<void> {
     this.memoryCache.clearAll()
-    await this.fileCache.clearAll()
+    await this.persistent?.clearAll()
   }
 
   async withRefreshLock<T>(

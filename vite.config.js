@@ -2,12 +2,8 @@
 
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
-// import { viteStaticCopy } from 'vite-plugin-static-copy'
-// import { apiRoutes } from './vite/plugin/api'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import react from '@vitejs/plugin-react'
 import tsConfigPaths from 'vite-tsconfig-paths'
-// import { dts } from 'rollup-plugin-dts'
 import { playwright } from '@vitest/browser-playwright'
 import Inspect from 'vite-plugin-inspect'
 import { configDefaults } from 'vitest/config'
@@ -34,16 +30,6 @@ export default defineConfig({
           react(),
           tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
           ...seedVitePlugin({ autoInit: false, debug: false }),
-          nodePolyfills({
-            exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
-            include: ['crypto', 'stream', 'util', 'path',],
-            globals: {
-              Buffer: true,
-              global: true,
-              process: true,
-            },
-            protocolImports: true,
-          }),
         ],
         resolve: {
           alias: {
@@ -54,9 +40,6 @@ export default defineConfig({
             'fs/promises': '@zenfs/core/promises',
             'node:fs': '@zenfs/core',
             'node:fs/promises': '@zenfs/core/promises',
-            // Ensure path modules are aliased to path-browserify in browser environment
-            'path': 'path-browserify',
-            'node:path': 'path-browserify',
           },
         },
         optimizeDeps: {
@@ -121,16 +104,6 @@ export default defineConfig({
           react(),
           tsConfigPaths({ projects: ['./packages/react/tsconfig.json', './packages/sdk/tsconfig.json'] }),
           ...seedVitePlugin({ autoInit: false, debug: false }),
-          nodePolyfills({
-            exclude: ['readline', 'readline/promises', 'fs', 'fs/promises', 'node:fs', 'node:fs/promises'],
-            include: ['crypto', 'stream', 'util', 'path'],
-            globals: {
-              Buffer: true,
-              global: true,
-              process: true,
-            },
-            protocolImports: true,
-          }),
         ],
         resolve: {
           alias: {
@@ -139,8 +112,6 @@ export default defineConfig({
             'fs/promises': '@zenfs/core/promises',
             'node:fs': '@zenfs/core',
             'node:fs/promises': '@zenfs/core/promises',
-            'path': 'path-browserify',
-            'node:path': 'path-browserify',
           },
         },
         optimizeDeps: {

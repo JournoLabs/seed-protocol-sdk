@@ -42,6 +42,16 @@ export type QueryCacheStats = {
   errors: number
 }
 
+/** Optional disk (or other) layer under CacheManager. Browser graphs omit this. */
+export type PersistentCache = {
+  getCollection(schemaName: string): Promise<CachedCollectionData | null>
+  setCollection(schemaName: string, data: CachedCollectionData): Promise<void>
+  getItem(seedUid: string, optionsKey: string): Promise<CachedItemData | null>
+  setItem(data: CachedItemData): Promise<void>
+  clearCollection(schemaName: string): Promise<void>
+  clearAll(): Promise<void>
+}
+
 function includeCode(include?: ChangelogInclude): string {
   if (!include || include === 'data') return ''
   if (include === 'data+changelog') return 'i1'

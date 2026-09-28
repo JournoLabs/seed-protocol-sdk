@@ -1,5 +1,11 @@
 import type { QueryCacheConfig } from './types.js'
 
+function env(): Record<string, string | undefined> {
+  const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env
+  return processEnv ?? {}
+}
+
 /**
  * Load query cache configuration from environment variables.
  *
@@ -13,19 +19,20 @@ import type { QueryCacheConfig } from './types.js'
  * CACHE_ENABLED is explicitly true.
  */
 export function loadQueryCacheConfig(): QueryCacheConfig {
-  const ttl = parseInt(process.env.CACHE_TTL || '3600', 10)
-  const cacheDir = process.env.CACHE_DIR || './cache'
+  const e = env()
+  const ttl = parseInt(e.CACHE_TTL || '3600', 10)
+  const cacheDir = e.CACHE_DIR || './cache'
 
   const cacheDisabledByEnvVar =
-    process.env.CACHE_ENABLED === 'false' ||
-    process.env.CACHE_ENABLED === '0' ||
-    process.env.CACHE_ENABLED === 'no' ||
-    process.env.CACHE_ENABLED === 'off'
+    e.CACHE_ENABLED === 'false' ||
+    e.CACHE_ENABLED === '0' ||
+    e.CACHE_ENABLED === 'no' ||
+    e.CACHE_ENABLED === 'off'
   const cacheEnabledByEnvVar =
-    process.env.CACHE_ENABLED === 'true' ||
-    process.env.CACHE_ENABLED === '1' ||
-    process.env.CACHE_ENABLED === 'yes'
-  const isDev = process.env.NODE_ENV === 'development'
+    e.CACHE_ENABLED === 'true' ||
+    e.CACHE_ENABLED === '1' ||
+    e.CACHE_ENABLED === 'yes'
+  const isDev = e.NODE_ENV === 'development'
 
   let enabled: boolean
   if (cacheDisabledByEnvVar) {
@@ -38,11 +45,8 @@ export function loadQueryCacheConfig(): QueryCacheConfig {
     enabled = true
   }
 
-  const backgroundRefresh = process.env.CACHE_BACKGROUND_REFRESH === 'true'
-  const refreshInterval = parseInt(
-    process.env.CACHE_REFRESH_INTERVAL || '300',
-    10,
-  )
+  const backgroundRefresh = e.CACHE_BACKGROUND_REFRESH === 'true'
+  const refreshInterval = parseInt(e.CACHE_REFRESH_INTERVAL || '300', 10)
 
   return {
     ttl,

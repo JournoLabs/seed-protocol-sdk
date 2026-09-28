@@ -1,11 +1,18 @@
-import * as sha3 from 'js-sha3'
+import { sha3_256 } from '@noble/hashes/sha3'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
 
-const { sha3_256 } = sha3
+type HashInput = string | Uint8Array | ArrayBuffer
+
+function toBytes(data: HashInput): Uint8Array {
+  if (typeof data === 'string') return utf8ToBytes(data)
+  if (data instanceof Uint8Array) return data
+  return new Uint8Array(data)
+}
 
 export const getContentHash = async (
-  data: sha3.Message
+  data: HashInput
 ): Promise<string> => {
-  return sha3_256(data)
+  return bytesToHex(sha3_256(toBytes(data)))
 }
 
 /**
@@ -14,5 +21,5 @@ export const getContentHash = async (
  * Used for schema/model/property IDs to prevent duplicates across runs.
  */
 export const getDeterministicId = (seed: string): string => {
-  return sha3_256(seed).slice(0, 10)
+  return bytesToHex(sha3_256(utf8ToBytes(seed))).slice(0, 10)
 }

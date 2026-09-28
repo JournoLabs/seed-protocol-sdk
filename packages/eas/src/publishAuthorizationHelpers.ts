@@ -1,4 +1,4 @@
-import { keccak256 } from 'js-sha3'
+import { keccak256Hex } from './keccak.js'
 import { normalizeBytes32Hex } from './easUid.js'
 import { checksumAddress } from './utils.js'
 
@@ -138,5 +138,5 @@ export function assessPublishAuthorization(params: {
 
 /** Re-export keccak helper used by tests / fingerprinting (permissions hash lives in publish). */
 export function hashPublishAuthorizationMaterial(material: string): `0x${string}` {
-  return ('0x' + keccak256(new TextEncoder().encode(material))) as `0x${string}`
+  return ('0x' + keccak256Hex(new TextEncoder().encode(material))) as `0x${string}`
 }

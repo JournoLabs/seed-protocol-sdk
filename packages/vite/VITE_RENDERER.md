@@ -20,13 +20,14 @@ Recommended: **Vite 8** and **@vitejs/plugin-react 6** (aligned with this monore
 
 ## What the plugin configures automatically
 
-- **Node polyfills** (`vite-plugin-node-polyfills`) with browser-safe defaults (optional via `includeNodePolyfills: false`). The SDK depends on that package and rewrites its injected shim imports (`…/shims/buffer`, `…/shims/global`, `…/shims/process`) plus `buffer` / `process` / `global` (and `node:` variants) to absolute paths from the SDK install. Those aliases are applied to both normal `resolve.alias` and Vite 8’s Rolldown `optimizeDeps` graph, so apps do **not** need to install `vite-plugin-node-polyfills` themselves (even when it is nested under `@seedprotocol/sdk`).
+- **Node polyfills** (`vite-plugin-node-polyfills`) with browser-safe defaults (optional via `includeNodePolyfills: false`). Default `include` is `path`, `buffer`, `events`, `string_decoder`, `util` — **not** `stream` or `crypto` (those pull `stream-browserify` and break Vite SSR / React Router SPA prerender). Use `includeNodePolyfills: false` for Framework Mode / prerender. The SDK aliases injected shim imports (`…/shims/buffer`, `…/shims/global`, `…/shims/process`) plus `buffer` / `process` / `global` (and `node:` variants) to absolute paths from the SDK install.
+- **Cross-origin isolation headers** (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`) on the Vite dev and preview servers, including `writeHead` (Framework-Mode HTML handlers ignore `server.headers` alone). Opt out with `isolationHeaders: false`. Production hosts must set the same headers themselves.
 - **FS aliases** (`fs` → `@zenfs/core`, etc.) and **ZenFS stable ESM entrypoints** (`@zenfs/core`, `@zenfs/core/path`, `@zenfs/dom`).
 - **`nanoid-dictionary`** → `dist/dictionary.esm.js` (avoids broken UMD `browser` field with namespace imports).
 - **`debug` interop shim** so `import debug from 'debug'` works in the renderer.
-- **`optimizeDeps.include`** for fragile deps: `debug`, `random`, `seedrandom`, `@georgedoescode/generative-utils`, `nanoid-dictionary`, plus ZenFS/stream/viem helpers when installed.
+- **`optimizeDeps.include`** for fragile deps: `debug`, `pluralize`, `random`, `seedrandom`, `@georgedoescode/generative-utils`, `nanoid-dictionary`, nested eas-sdk, plus ZenFS/viem helpers when installed.
 - **SDK dist CommonJS** handling and **FileManager** import-shape fix (`path-browserify` default → `import * as path from 'path'`).
-- **Inline `global` / `process` shims** in `index.html` for early CJS wrapper evaluation.
+- **Inline `global` / `process` shims** in `index.html` for early CJS wrapper evaluation. `process.env.NODE_ENV` follows Vite `mode` (not hardcoded `"production"`), so React Refresh works during `vite serve`.
 
 Initialize ZenFS in your app entry (default `autoInit: false`):
 
@@ -53,7 +54,8 @@ After upgrading:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `includeNodePolyfills` | `true` | Add `vite-plugin-node-polyfills` (SDK dependency) with defaults and absolute shim aliases |
+| `includeNodePolyfills` | `true` | Add `vite-plugin-node-polyfills` (no `stream`/`crypto`). Set `false` for React Router Framework Mode / prerender |
+| `isolationHeaders` | `true` | Dev/preview COOP/COEP/CORP (writeHead-safe). `false` to disable, or `{ coop, coep, corp }` to override. Default COEP is `credentialless` |
 | `autoInit` | `false` | Inject ZenFS init script into `index.html` (usually prefer manual init) |
 | `fsModules` | `fs`, `fs/promises`, `node:fs`, … | Extra modules aliased to ZenFS |
 | `debug` | `false` | Plugin diagnostic logging (not the `debug` npm package) |
@@ -65,4 +67,6 @@ After upgrading:
 - **`does not provide an export named 'default'`** for `…/shims/process/dist/index.cjs?import` (or buffer/global): the SDK must alias shims to the ESM `index.js` build, not the CJS `index.cjs` from `require.resolve`. Upgrade/rebuild the SDK and clear `.vite`.
 - **`does not provide an export named 'default'`** for `debug` or similar: ensure `...seedVitePlugin()` is in `plugins`, clear `.vite` cache, and confirm the SDK version includes the debug shim.
 - **ZenFS / dictionary errors**: confirm `@zenfs/core`, `@zenfs/dom`, and `nanoid-dictionary` are installed (SDK optional deps / your app dependencies).
-- **Still need a one-off alias**: open an issue; prefer fixing defaults in `@seedprotocol/sdk/vite` over per-app patches.
+- **React Refresh / `injectIntoGlobalHook is not a function`**: an older plugin hardcoded `process.env.NODE_ENV` to `"production"` in dev. Upgrade `@seedprotocol/vite` and do not overlay a restore-NODE_ENV plugin.
+- **`module is not defined` during SPA prerender**: set `includeNodePolyfills: false`. Do not alias `crypto` → `crypto-browserify` (that pulls `stream`).
+- **Production OPFS / SQLite WASM**: the plugin only covers Vite `serve` / `preview`. Set `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (or `require-corp`) on the HTML document at the host (nginx, Netlify `_headers`, etc.). Framework-Mode HTML handlers need those headers on `writeHead`, not only `server.headers`.

@@ -7,6 +7,7 @@ import {
   resetQueryCacheManager,
   buildAssembleOptionsKey,
 } from '../src/cache/index.js'
+import { FileCache } from '../src/cache/FileCache.js'
 import type { CacheManager } from '../src/cache/CacheManager.js'
 import type { SeedRecord } from '../src/types.js'
 
@@ -50,11 +51,16 @@ describe('CacheManager collection + item', () => {
 
   beforeEach(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'query-cache-'))
-    cache = createQueryCacheManager({
+    const config = {
       enabled: true,
       ttl: 3600,
       cacheDir,
-    })
+    }
+    cache = createQueryCacheManager(config, new FileCache({
+      ...config,
+      backgroundRefresh: false,
+      refreshInterval: 300,
+    }))
   })
 
   afterEach(async () => {
@@ -76,11 +82,14 @@ describe('CacheManager collection + item', () => {
   })
 
   it('expires collection after TTL', async () => {
-    const short = createQueryCacheManager({
+    const shortConfig = {
       enabled: true,
       ttl: 1,
       cacheDir,
-    })
+      backgroundRefresh: false,
+      refreshInterval: 300,
+    }
+    const short = createQueryCacheManager(shortConfig, new FileCache(shortConfig))
     await short.setCollection('post', [makeRecord('0xa', 100)])
     expect(await short.getCollection('post')).not.toBeNull()
 
@@ -159,5 +168,14 @@ describe('CacheManager collection + item', () => {
     })
     await disabled.setCollection('post', [makeRecord('0xa', 1)])
     expect(await disabled.getCollection('post')).toBeNull()
+  })
+
+  it('memory-only manager still stores collections without FileCache', async () => {
+    const memoryOnly = createQueryCacheManager(
+      { enabled: true, ttl: 3600, cacheDir },
+      null,
+    )
+    await memoryOnly.setCollection('post', [makeRecord('0xa', 100)])
+    expect(await memoryOnly.getCollection('post')).not.toBeNull()
   })
 })

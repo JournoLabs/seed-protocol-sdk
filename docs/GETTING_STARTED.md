@@ -247,7 +247,7 @@ async function main() {
 
 The browser build stores files under the [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (via ZenFS). Two integration notes:
 
-1. **Cross-origin isolation** — If you use SQLite WASM, `SharedArrayBuffer`, or similar, serve your app with cross-origin isolation headers (for example `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, or the equivalents your stack supports). Without them, behavior can differ from environments that set those headers (e.g. some Vite/Electron setups).
+1. **Cross-origin isolation** — SQLite WASM / `SharedArrayBuffer` need the document to be cross-origin isolated. `seedVitePlugin()` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (plus `Cross-Origin-Resource-Policy: same-origin`) on the Vite **dev and preview** servers, including `writeHead` so React Router Framework Mode HTML still gets them. Production hosts must set the same headers themselves (nginx, Netlify `_headers`, etc.). Use `COEP: require-corp` if your WASM stack requires it. Opt out in Vite with `isolationHeaders: false`.
 
 2. **Concurrent access** — Avoid reading the same OPFS path while another context still has it open for writing, or before a writer has finished closing/flushing. The SDK retries a narrow class of transient read errors (`NotReadableError` / Chromium’s “permission problems … reference” wording) and `waitForFileWithContent` keeps polling until timeout, but coordinating writers and readers in your app still reduces flakes.
 

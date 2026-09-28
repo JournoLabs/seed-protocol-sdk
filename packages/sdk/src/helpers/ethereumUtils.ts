@@ -1,4 +1,5 @@
-import { keccak256 } from 'js-sha3'
+import { keccak_256 } from '@noble/hashes/sha3'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils'
 
 /** EIP-55 checksum for a 20-byte hex address (with or without 0x prefix). */
 export function checksumAddress(address: string): string {
@@ -6,7 +7,7 @@ export function checksumAddress(address: string): string {
   if (addr.length !== 40 || !/^[0-9a-f]+$/.test(addr)) {
     return address
   }
-  const hash = keccak256(addr)
+  const hash = bytesToHex(keccak_256(utf8ToBytes(addr)))
   let result = '0x'
   for (let i = 0; i < 40; i++) {
     result += parseInt(hash[i]!, 16) >= 8 ? addr[i]!.toUpperCase() : addr[i]!

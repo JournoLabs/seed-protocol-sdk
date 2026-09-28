@@ -1,4 +1,4 @@
-import { keccak256 } from 'js-sha3'
+import { keccak256Hex } from './keccak.js'
 import { normalizeBytes32Hex } from './easUid.js'
 import { checksumAddress } from './utils.js'
 
@@ -140,7 +140,7 @@ export function hashDomainOwnershipChallenge(params: {
   const claimer = normalizeClaimer(params.claimer)
   const scope = (params.scope ?? DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE).trim()
   const material = `${domain}|${claimer}|${params.token}|${scope}`
-  return ('0x' + keccak256(utf8Bytes(material))) as `0x${string}`
+  return ('0x' + keccak256Hex(utf8Bytes(material))) as `0x${string}`
 }
 
 /**
@@ -155,7 +155,7 @@ export function hashDomainRegistryFingerprint(
     creationDate: (input.creationDate ?? '').trim(),
     registrarIanaId: (input.registrarIanaId ?? '').trim(),
   }
-  return ('0x' + keccak256(utf8Bytes(JSON.stringify(payload)))) as `0x${string}`
+  return ('0x' + keccak256Hex(utf8Bytes(JSON.stringify(payload)))) as `0x${string}`
 }
 
 function asBytes32(value: unknown): `0x${string}` {

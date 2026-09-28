@@ -1,4 +1,4 @@
-import { keccak256 } from 'js-sha3'
+import { keccak256Hex } from './keccak.js'
 
 export const toSnakeCase = (str: string): string =>
   str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
@@ -9,7 +9,7 @@ export function checksumAddress(address: string): string {
   if (addr.length !== 40 || !/^[0-9a-f]+$/.test(addr)) {
     return address
   }
-  const hash = keccak256(addr)
+  const hash = keccak256Hex(addr)
   let result = '0x'
   for (let i = 0; i < 40; i++) {
     result += parseInt(hash[i]!, 16) >= 8 ? addr[i]!.toUpperCase() : addr[i]!
