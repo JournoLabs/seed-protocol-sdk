@@ -15,6 +15,8 @@ import {
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 import debug from 'debug'
+import { ensureImageLocal } from '@/helpers/ensureImageLocal'
+import { ImageSize } from '@/helpers/constants'
 import { downloadTransactionIdWithDedupe } from '@/events/files/download'
 import {
   readHtmlBodyForStorageSeedPropertyValue,
@@ -354,11 +356,12 @@ export const loadOrCreateProperty = fromCallback<
     if (isImage && metadataRecord.refResolvedValue) {
       try {
         const dir = (metadataRecord.localStorageDir ?? '/images').replace(/^\//, '')
-        let filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
-        if (!filePath) {
-          await downloadTransactionIdWithDedupe(metadataRecord.refResolvedValue)
-          filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
-        }
+        await ensureImageLocal({
+          transactionId: metadataRecord.refResolvedValue,
+          fileName: metadataRecord.refResolvedValue,
+          widths: [ImageSize.EXTRA_SMALL],
+        })
+        const filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
         if (filePath) {
           const file = await BaseFileManager.readFile(filePath)
           const freshBlobUrl = URL.createObjectURL(file)

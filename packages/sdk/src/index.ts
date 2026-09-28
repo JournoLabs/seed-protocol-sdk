@@ -97,6 +97,15 @@ export type {
   NormalizedFeedFieldValue,
 } from './helpers/mediaRef'
 export {
+  ensureImageLocal,
+  closestImageSize,
+  normalizeArweaveTxIdForEnsure,
+} from './helpers/ensureImageLocal'
+export type {
+  EnsureImageLocalParams,
+  EnsureImageLocalResult,
+} from './helpers/ensureImageLocal'
+export {
   isEasAttestationExplorerUrl,
   resolveSeedRssImageRelationRef,
   resolveSeedRssImageRelationFromItem,

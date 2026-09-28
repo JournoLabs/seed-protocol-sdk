@@ -9,6 +9,8 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseFileManager, getMetadataPropertyNamesForQuery } from '@/helpers'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { normalizeDataType } from '@/helpers/property'
+import { ensureImageLocal } from '@/helpers/ensureImageLocal'
+import { ImageSize } from '@/helpers/constants'
 import { downloadTransactionIdWithDedupe } from '@/events/files/download'
 import {
   readHtmlBodyForStorageSeedPropertyValue,
@@ -187,11 +189,12 @@ export const hydrateFromDb = fromCallback<
 
       if (refResolvedValue) {
         try {
-          let filePath = await resolveMatchingFilePath(dir, refResolvedValue)
-          if (!filePath) {
-            await downloadTransactionIdWithDedupe(refResolvedValue)
-            filePath = await resolveMatchingFilePath(dir, refResolvedValue)
-          }
+          await ensureImageLocal({
+            transactionId: refResolvedValue,
+            fileName: refResolvedValue,
+            widths: [ImageSize.EXTRA_SMALL],
+          })
+          const filePath = await resolveMatchingFilePath(dir, refResolvedValue)
 
           localStorageDir = `/${dir}`
           if (filePath) {

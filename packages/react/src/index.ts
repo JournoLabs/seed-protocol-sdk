@@ -33,6 +33,7 @@ export {
   mergeSeedQueryDefaults,
 } from './queryClient'
 export { SeedImage } from './SeedImage'
+export type { SeedImageProps } from './SeedImage'
 export { SeedMediaImage } from './SeedMediaImage'
 export type { SeedMediaImageProps } from './SeedMediaImage'
 export { SeedMediaFile } from './SeedMediaFile'
@@ -49,4 +50,9 @@ export { formatSeedJson } from './formatSeedJson'
 export type { FormatSeedJsonOptions } from './formatSeedJson'
 export { useResolvedMediaRef } from './useResolvedMediaRef'
 export type { UseResolvedMediaRefParams, UseResolvedMediaRefReturn } from './useResolvedMediaRef'
+export { useEnsureLocalImage } from './useEnsureLocalImage'
+export type {
+  UseEnsureLocalImageParams,
+  UseEnsureLocalImageReturn,
+} from './useEnsureLocalImage'
 export { useNormalizedFeedItemFields } from './useNormalizedFeedItemFields'

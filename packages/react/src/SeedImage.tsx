@@ -3,6 +3,7 @@ import debug                                                                    
 import { BaseFileManager } from '@seedprotocol/sdk'
 import { useItemProperty } from "./itemProperty"
 import { ItemProperty } from '@seedprotocol/sdk'
+import { useEnsureLocalImage } from './useEnsureLocalImage'
 
 const logger = debug('seedSdk:react:SeedImage')
 
@@ -44,16 +45,27 @@ function matchFileNameWithoutExtension(fileName: string, targetName: string): bo
   return regex.test(nameWithoutExt);
 }
 
-type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement> & {
+export type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement> & {
   imageProperty: ItemProperty<any>
   alt?: string
   width?: number
   height?: number
   /** Optional filename override when property hasn't resolved yet (e.g. in tests) */
   filename?: string
+  /**
+   * When true (default), ensure the image exists locally (download from Arweave +
+   * create needed size variants) before / while rendering.
+   */
+  ensure?: boolean
 }
 
-const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...props }: SeedImageProps): React.ReactNode => {
+const SeedImageInner = ({
+  imageProperty,
+  width,
+  filename: filenameOverride,
+  ensure = true,
+  ...props
+}: SeedImageProps): React.ReactNode => {
   const [sizedContentUrl, setSizedContentUrl] = useState<string | undefined>()
   const [originalContentUrl, setOriginalContentUrl] = useState<string | undefined>()
 
@@ -68,6 +80,13 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
 
   // Resolved filename: explicit override, or from property
   const resolvedFilename = filenameOverride ?? (property?.refResolvedValue ?? property?.value) as string | undefined
+
+  const { status: ensureStatus, gatewayHref } = useEnsureLocalImage({
+    imageProperty: property ?? imageProperty,
+    filename: filenameOverride,
+    width,
+    enabled: ensure,
+  })
 
   // Get display URL: value (blob URL or filename from ItemProperty.value getter), or resolvedFilename
   const rawValue = property?.value
@@ -119,7 +138,7 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
     return () => {
       cancelled = true
     }
-  }, [resolvedFilename, rawValue, blobPreviewUrl, property?.localStoragePath])
+  }, [resolvedFilename, rawValue, blobPreviewUrl, property?.localStoragePath, ensureStatus])
 
   useEffect(() => {
     if (!width || !resolvedFilename) {
@@ -134,7 +153,10 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
           : BaseFileManager.getFilesPath('images')
         const itemsInDir = fs.readdirSync(baseDir, {withFileTypes: true})
         const widthDirs = itemsInDir.filter((item: { isDirectory: () => boolean }) => item.isDirectory())
-        const availableWidths = widthDirs.map((dir: { name: string }) => parseInt(dir.name))
+        const availableWidths = widthDirs.map((dir: { name: string }) => parseInt(dir.name)).filter((n: number) => !Number.isNaN(n))
+        if (availableWidths.length === 0) {
+          return
+        }
         const closestWidth = availableWidths.reduce((prev: number, curr: number) => {
           return (Math.abs(curr - width) < Math.abs(prev - width) ? curr : prev)
         }, availableWidths[0])
@@ -184,17 +206,23 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
     }
 
     _getSizedContentUrl()
-  }, [property, width, srcUrl, resolvedFilename])
+  }, [property, width, srcUrl, resolvedFilename, ensureStatus])
 
-  // Render img when we have a content URL, or when we have filename (show placeholder while loading)
+  // Render img when we have a content URL, filename, or progressive gateway href
   const isBlobUrl = (s: unknown) => typeof s === 'string' && s.startsWith('blob:')
   const hasContentUrl = !!sizedContentUrl || !!originalContentUrl || !!blobPreviewUrl || (!!srcUrl && isBlobUrl(srcUrl))
-  if (!hasContentUrl && !resolvedFilename) {
+  if (!hasContentUrl && !resolvedFilename && !gatewayHref) {
     return null
   }
 
-  // Placeholder 1x1 transparent GIF while loading (ensures img exists for a11y and tests)
-  const imgSrc = sizedContentUrl || originalContentUrl || blobPreviewUrl || (isBlobUrl(srcUrl) ? srcUrl : undefined) || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+  // Prefer local sized/original/blob; while ensuring, fall back to gateway then transparent GIF
+  const imgSrc =
+    sizedContentUrl ||
+    originalContentUrl ||
+    blobPreviewUrl ||
+    (isBlobUrl(srcUrl) ? srcUrl : undefined) ||
+    (ensure && !hasContentUrl ? gatewayHref : undefined) ||
+    'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
   return (
     <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...props} />
@@ -204,5 +232,7 @@ const SeedImageInner = ({ imageProperty, width, filename: filenameOverride, ...p
 export const SeedImage = React.memo(SeedImageInner, (prev, next) =>
   prev.imageProperty === next.imageProperty &&
   prev.width === next.width &&
-  prev.filename === next.filename
+  prev.height === next.height &&
+  prev.filename === next.filename &&
+  prev.ensure === next.ensure
 )

@@ -46,6 +46,16 @@ export * from './publishConfig'
 export * from './metadataPropertyNames'
 export * from './relationSeedRef'
 export * from './mediaRef'
+export {
+  ensureImageLocal,
+  closestImageSize,
+  normalizeArweaveTxIdForEnsure,
+  resetEnsureImageLocalInFlightForTests,
+} from './ensureImageLocal'
+export type {
+  EnsureImageLocalParams,
+  EnsureImageLocalResult,
+} from './ensureImageLocal'
 export { generateId } from './generateId'
 const logger = debug('seedSdk:shared:helpers')
 

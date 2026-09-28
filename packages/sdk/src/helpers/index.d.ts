@@ -5,6 +5,8 @@ export * from './QueryClient/BaseQueryClient';
 export * from './FileManager/BaseFileManager';
 export { waitForEntityIdle } from './waitForEntityIdle';
 export * from './publishConfig';
+export { ensureImageLocal, closestImageSize, normalizeArweaveTxIdForEnsure, resetEnsureImageLocalInFlightForTests, } from './ensureImageLocal';
+export type { EnsureImageLocalParams, EnsureImageLocalResult, } from './ensureImageLocal';
 export declare const generateId: () => string;
 export declare const toSnakeCase: (str: string) => string;
 export declare const identifyString: (str: string) => "json" | "text" | "base64" | "html" | "markdown" | undefined;
