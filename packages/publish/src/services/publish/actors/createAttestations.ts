@@ -247,7 +247,12 @@ async function persistPropertyMetadataUidsFromContractReceipt(params: {
 }
 
 export const createAttestations = fromPromise(
-  async ({ input: { context } }: PublishInput): Promise<{ easPayload: unknown }> => {
+  async ({
+    input: { context },
+  }: PublishInput): Promise<{
+    easPayload: unknown
+    publishedBatch: PublishMachineContext['publishedBatch']
+  }> => {
     const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []

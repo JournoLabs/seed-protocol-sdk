@@ -112,7 +112,12 @@ type NormalizedRequest = {
 }
 
 export const createAttestationsDirectToEas = fromPromise(
-  async ({ input: { context, event } }: PublishInput): Promise<{ easPayload: unknown }> => {
+  async ({
+    input: { context, event },
+  }: PublishInput): Promise<{
+    easPayload: unknown
+    publishedBatch: PublishMachineContext['publishedBatch']
+  }> => {
     const { address, account, wallet } = context
     const arweaveTransactions = context.arweaveTransactions ?? []
     const publishUploads = context.publishUploads ?? []
