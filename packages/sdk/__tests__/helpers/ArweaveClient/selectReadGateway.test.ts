@@ -3,9 +3,12 @@ import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import {
   ensureReadGatewaySelected,
   invalidateReadGatewayCache,
+  isReadGatewayKnownHealthy,
+  getLastHealthyReadGatewayHost,
   probeGateway,
   resetArweaveReadGatewayForTests,
   selectFirstHealthyReadGateway,
+  isGatewayHostCircuitOpen,
 } from '@/helpers/ArweaveClient/selectReadGateway'
 import {
   DEFAULT_ARWEAVE_HOST,
@@ -39,6 +42,7 @@ describe('getDefaultArweaveReadGatewayHostsOrdered', () => {
 
 describe('probeGateway / selectFirstHealthyReadGateway', () => {
   beforeEach(() => {
+    resetArweaveReadGatewayForTests()
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL) => {
@@ -53,6 +57,7 @@ describe('probeGateway / selectFirstHealthyReadGateway', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    resetArweaveReadGatewayForTests()
   })
 
   it('probeGateway returns true for JSON /info', async () => {
@@ -62,6 +67,26 @@ describe('probeGateway / selectFirstHealthyReadGateway', () => {
   it('selectFirstHealthyReadGateway returns first healthy host', async () => {
     const h = await selectFirstHealthyReadGateway(['a.example', 'b.example'], 'https')
     expect(h).toBe('a.example')
+  })
+
+  it('selectFirstHealthyReadGateway skips hosts with an open circuit', async () => {
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s.includes('a.example')) {
+        throw new Error('ECONNRESET')
+      }
+      return new Response(JSON.stringify({ network: 'arweave.mainnet' }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = await selectFirstHealthyReadGateway(['a.example', 'b.example'], 'https')
+    expect(first).toBe('b.example')
+    expect(isGatewayHostCircuitOpen('a.example')).toBe(true)
+
+    fetchMock.mockClear()
+    const second = await selectFirstHealthyReadGateway(['a.example', 'b.example'], 'https')
+    expect(second).toBe('b.example')
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('a.example'))).toBe(false)
   })
 })
 
@@ -93,6 +118,8 @@ describe('ensureReadGatewaySelected', () => {
     const host = await ensureReadGatewaySelected()
     expect(host).toBe('arweave.net')
     expect(BaseArweaveClient.getHost()).toBe('arweave.net')
+    expect(isReadGatewayKnownHealthy()).toBe(true)
+    expect(getLastHealthyReadGatewayHost()).toBe('arweave.net')
   })
 
   it('does not fetch when read gateway is locked', async () => {
@@ -104,5 +131,34 @@ describe('ensureReadGatewaySelected', () => {
     const host = await ensureReadGatewaySelected()
     expect(host).toBe('locked.example.com')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('marks selection unhealthy when all probes fail and keeps last healthy host', async () => {
+    const okFetch = vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s.includes('arweave.net')) {
+        return new Response(JSON.stringify({ network: 'arweave.mainnet' }), { status: 200 })
+      }
+      return new Response('not json', { status: 200 })
+    })
+    vi.stubGlobal('fetch', okFetch)
+    await ensureReadGatewaySelected()
+    expect(getLastHealthyReadGatewayHost()).toBe('arweave.net')
+
+    invalidateReadGatewayCache()
+    const failFetch = vi.fn(async () => {
+      throw new Error('ECONNRESET')
+    })
+    vi.stubGlobal('fetch', failFetch)
+
+    const host = await ensureReadGatewaySelected()
+    expect(host).toBe('arweave.net')
+    expect(isReadGatewayKnownHealthy()).toBe(false)
+    expect(getLastHealthyReadGatewayHost()).toBe('arweave.net')
+
+    failFetch.mockClear()
+    // Unhealthy cache should prevent immediate re-probe
+    await ensureReadGatewaySelected()
+    expect(failFetch).not.toHaveBeenCalled()
   })
 })

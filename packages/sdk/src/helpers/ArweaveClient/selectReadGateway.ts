@@ -4,4 +4,12 @@ export {
   resetArweaveReadGatewayForTests,
   probeGateway,
   selectFirstHealthyReadGateway,
+  isReadGatewayKnownHealthy,
+  getLastHealthyReadGatewayHost,
+  isGatewayHostCircuitOpen,
+  recordGatewayHostSuccess,
+  recordGatewayHostFailure,
+  normalizeGatewayHostKey,
+  resetGatewayCircuitBreakerForTests,
+  configureGatewayCircuitBreaker,
 } from '@seedprotocol/arweave'

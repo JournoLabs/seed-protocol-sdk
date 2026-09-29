@@ -5,6 +5,9 @@ import {
   getDefaultArweaveReadGatewayHostsOrdered,
   getReadGatewayHostsForConfig,
   getResolvedSeedGatewayEndpoints,
+  isGatewayHostCircuitOpen,
+  recordGatewayHostFailure,
+  recordGatewayHostSuccess,
 } from '@seedprotocol/arweave'
 import sizeOf from 'image-size'
 import type { ImageMetadata } from '../types'
@@ -43,16 +46,21 @@ export class ArweaveImageService {
 
     const protocol = resolved?.arweaveProtocol ?? 'https'
 
-    // Try each gateway until one succeeds
+    // Try each gateway until one succeeds (skip hosts with an open circuit)
     for (const gateway of gatewayHosts) {
+      const host = gateway.trim().replace(/\/$/, '')
+      if (!host) continue
+      if (isGatewayHostCircuitOpen(host)) {
+        continue
+      }
       try {
-        const host = gateway.trim().replace(/\/$/, '')
         const url = `${protocol}://${host}/${transactionId}`
-        const metadata = await this.getImageMetadata(url)
+        const metadata = await this.getImageMetadata(url, host)
         if (metadata.isImage) {
           return metadata
         }
       } catch (error) {
+        recordGatewayHostFailure(host)
         // Log but continue to next gateway
         console.warn(`Failed to fetch from gateway ${gateway} for transaction ${transactionId}:`, error)
         continue
@@ -69,18 +77,31 @@ export class ArweaveImageService {
   /**
    * Get image metadata from a URL
    */
-  async getImageMetadata(url: string): Promise<ImageMetadata> {
+  async getImageMetadata(url: string, hostHint?: string): Promise<ImageMetadata> {
+    const host =
+      hostHint ??
+      (() => {
+        try {
+          return new URL(url).host
+        } catch {
+          return url
+        }
+      })()
+
     try {
       // First, try HEAD request to check Content-Type (more efficient)
       const headResponse = await this.fetchWithTimeout(url, { method: 'HEAD' })
-      
+
       if (!headResponse.ok) {
+        // HTTP error from a reachable host — do not trip the circuit
         return { isImage: false, url }
       }
 
+      recordGatewayHostSuccess(host)
+
       const contentType = headResponse.headers.get('content-type') || ''
       const contentLength = headResponse.headers.get('content-length')
-      
+
       // Check if it's an image based on Content-Type
       if (!this.isImageContentType(contentType)) {
         return {
@@ -94,7 +115,7 @@ export class ArweaveImageService {
       // If it's an image, fetch first few KB to extract dimensions
       const rangeResponse = await this.fetchWithTimeout(url, {
         headers: {
-          'Range': 'bytes=0-8192', // First 8KB should be enough for most image headers
+          Range: 'bytes=0-8192', // First 8KB should be enough for most image headers
         },
       })
 
@@ -117,6 +138,7 @@ export class ArweaveImageService {
         format,
       }
     } catch (error) {
+      recordGatewayHostFailure(host)
       console.warn(`Error fetching image metadata from ${url}:`, error)
       return { isImage: false, url }
     }
@@ -160,7 +182,7 @@ export class ArweaveImageService {
    */
   private isImageContentType(contentType: string): boolean {
     if (!contentType) return false
-    
+
     const normalized = (contentType.toLowerCase().split(';')[0] ?? '').trim()
     return normalized.startsWith('image/')
   }
