@@ -27,6 +27,7 @@ import {
   seedUidFromSeedPublished,
   versionUidFromCreatedAttestationEvents,
   uidsFromSeedPublished,
+  listCreatedAttestationPairsFromReceipt,
   listPropertyAttestationPairsFromReceipt,
   type CreatedAttestationPair,
 } from './seedUidHelpers'
