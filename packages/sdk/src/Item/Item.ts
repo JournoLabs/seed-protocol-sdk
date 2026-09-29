@@ -69,14 +69,16 @@ let modelImportPromise: Promise<typeof import('@/Model/Model')> | null = null
 
 const getModel = (): typeof import('@/Model/Model').Model => {
   if (!ModelClass) {
-    // Start loading Model if not already started
+    // Start loading Model if not already started.
+    // Use async/await so rollup's two-step dynamic-import rewrite can neutralize
+    // the fragile `import(...).then(n => n.X)` chunk-namespace pattern.
     if (!modelImportPromise) {
-      modelImportPromise = import('@/Model/Model')
-      // Try to get Model synchronously if already loaded
-      // This works because Model imports Item, so Model is initialized when Item runs
-      modelImportPromise.then(module => {
-        ModelClass = module.Model
-      }).catch(() => {
+      modelImportPromise = (async () => {
+        const mod = await import('@/Model/Model')
+        ModelClass = mod.Model
+        return mod
+      })()
+      modelImportPromise.catch(() => {
         // If import fails, ModelClass remains null
       })
     }

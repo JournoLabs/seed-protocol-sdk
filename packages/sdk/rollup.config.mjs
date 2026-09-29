@@ -52,6 +52,12 @@ function twoStepDynamicImportPlugin() {
   // Promise form (no await): const x = import('...').then(function (n) { return n.X; }) - rewrite to async IIFE
   const PROMISE_FUNC = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)/gm
   const PROMISE_ARROW = /^(\s*)const\s+(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)/gm
+  // Assignment form: x = import('...').then(function (n) { return n.X; })
+  const ASSIGN_PROMISE_FUNC = /^(\s*)(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)/gm
+  const ASSIGN_PROMISE_ARROW = /^(\s*)(\w+)\s*=\s*import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)/gm
+  // Bare expression (possibly chained): import('...').then(function (n) { return n.X; })
+  const BARE_PROMISE_FUNC = /^(\s*)import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)/gm
+  const BARE_PROMISE_ARROW = /^(\s*)import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)/gm
   // Assignment: Foo = (await import('...').then(function (n) { return n.aB; })).Foo
   const AWAIT_THEN_PROP_FUNC = /^(\s*)(\w+)\s*=\s*\(await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*function\s*\(\s*n\s*\)\s*\{\s*return\s+n\.([\w$]+)\s*;\s*\}\s*\)\)\.\2\s*;/gm
   const AWAIT_THEN_PROP_ARROW = /^(\s*)(\w+)\s*=\s*\(await\s+import\s*\(\s*('[^']+')\s*\)\s*\.then\s*\(\s*n\s*=>\s*n\.([\w$]+)\s*\)\)\.\2\s*;/gm
@@ -84,6 +90,26 @@ function twoStepDynamicImportPlugin() {
         changed = true
         const i = chunkIndex++
         return `${indent}const ${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(ASSIGN_PROMISE_FUNC, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(ASSIGN_PROMISE_ARROW, (_match, indent, lhs, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}${lhs} = (async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(BARE_PROMISE_FUNC, (_match, indent, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}(async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
+      })
+      magicString.replaceAll(BARE_PROMISE_ARROW, (_match, indent, importPath, exportName) => {
+        changed = true
+        const i = chunkIndex++
+        return `${indent}(async () => { const _mod_${i} = await import(${importPath}); return _mod_${i}.${exportName}; })()`
       })
       magicString.replaceAll(AWAIT_THEN_PROP_FUNC, (_match, indent, lhs, importPath, exportName) => {
         changed = true

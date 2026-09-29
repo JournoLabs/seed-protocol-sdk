@@ -110,16 +110,12 @@ function errorFromEvent(event: unknown, fallbackMessage: string): Error {
   return new Error(String(error ?? fallbackMessage))
 }
 
-function assignInitError(fallbackMessage: string) {
-  return assign(({ event }) => ({
-    initError: errorFromEvent(event, fallbackMessage),
-    isInitialized: false,
-  }))
-}
-
 const failInit = (fallbackMessage: string) => ({
   target: INIT_FAILED,
-  actions: assignInitError(fallbackMessage),
+  actions: {
+    type: "assignInitError" as const,
+    params: { fallbackMessage },
+  },
 })
 
 export const clientManagerMachine = setup({
@@ -136,6 +132,12 @@ export const clientManagerMachine = setup({
     addModelsToStore,
     addModelsToDb,
     processSchemaFiles,
+  },
+  actions: {
+    assignInitError: assign(({ event }, params: { fallbackMessage: string }) => ({
+      initError: errorFromEvent(event, params.fallbackMessage),
+      isInitialized: false,
+    })),
   },
 }).createMachine({
   id: MachineIds.CLIENT_MANAGER,

@@ -44,31 +44,6 @@ import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
 /** Parent Html property `propertyValue` after publish (66-char seed uid). */
 const HTML_PROP_SEED_UID_RE = /^0x[a-fA-F0-9]{64}$/
 
-// Lazy import helper to break circular dependency for synchronous Model access
-// Since Model.getByName() is synchronous and Model imports ItemProperty (via Item),
-// Model is already initialized when ItemProperty constructor runs
-let ModelClass: typeof import('@/Model/Model').Model | null = null
-let modelImportPromise: Promise<typeof import('@/Model/Model')> | null = null
-
-// Start loading Model at module load time (non-blocking)
-modelImportPromise = import('@/Model/Model').then(module => {
-  ModelClass = module.Model
-  return module
-}).catch(() => {
-  // If import fails, ModelClass remains null
-  // Return a default module structure to maintain type consistency
-  return {} as typeof import('@/Model/Model')
-})
-
-const getModel = (): typeof import('@/Model/Model').Model => {
-  if (!ModelClass) {
-    // Model should already be loaded because Model imports Item, which imports ItemProperty
-    // If it's not loaded, this indicates a timing issue
-    throw new Error('Model class not available. This may indicate a circular dependency or timing issue.')
-  }
-  return ModelClass
-}
-
 /**
  * Fallback: resolve propertyRecordSchema from schema JSON in DB when Model is not in cache/DB.
  * Used when syncSchemaFromSource failed (e.g. validation error) but schema exists in DB from a previous run.
