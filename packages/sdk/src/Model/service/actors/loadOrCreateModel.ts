@@ -7,6 +7,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { eq, and } from 'drizzle-orm'
 import { generateId } from '@/helpers'
+import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
 
 const logger = debug('seedSdk:model:actors:loadOrCreateModel')
@@ -294,8 +295,6 @@ export const loadOrCreateModel = fromCallback<
     let finalModelName = modelName
     if (db) {
       // Check if this is an internal schema (Seed Protocol)
-      const constantsMod = await import('../../../helpers/constants')
-      const { isInternalSchema } = constantsMod
       const isInternal = isInternalSchema(schemaName)
       
       // Only skip duplicate check if:

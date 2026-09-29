@@ -1,5 +1,6 @@
 import { BaseFileManager } from '../helpers/FileManager/BaseFileManager'
 import { isNode } from '../helpers/environment'
+import { isInternalSchema, INTERNAL_SCHEMA_IDS } from '../helpers/constants'
 import { JsonImportSchema, SchemaFileFormat } from '../types/import'
 import { Static } from '@sinclair/typebox'
 import { ModelPropertyDataTypes, normalizeDataType, TProperty } from '@/helpers/property'
@@ -689,8 +690,6 @@ export async function importJsonSchema(
   }
 
   // Check if this is an internal SDK schema (should not create files in app directory)
-  const constantsMod = await import('../helpers/constants')
-  const { isInternalSchema, INTERNAL_SCHEMA_IDS } = constantsMod
   const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
   
   if (isInternal) {

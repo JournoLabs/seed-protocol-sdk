@@ -1,5 +1,23 @@
 import type { AttestationRequestData } from '@ethereum-attestation-service/eas-sdk'
 
+// Top-level re-export (not mid-file import + export): Rollup with
+// external `@seedprotocol/arweave` otherwise emits a side-effect-only import
+// and an unbound Object.freeze namespace when this module is dynamically imported.
+export {
+  DEFAULT_ARWEAVE_HOST,
+  DEFAULT_SEED_FEED_HYPER_KEY,
+  DEFAULT_SEED_GATEWAY_HYPER_KEY,
+  DEFAULT_GATEWAY_SIDECAR_HOST,
+  DEFAULT_GATEWAY_SIDECAR_PORT,
+  DEFAULT_ARWEAVE_GRAPHQL_URL,
+  DEFAULT_ARWEAVE_GATEWAYS,
+  getDefaultArweaveReadGatewayHostsOrdered,
+  getArweaveReadGatewayHostsForPrimary,
+  mergePrimaryHostWithDefaults,
+  resolveArweaveHostFromEnv,
+  isKnownArweaveGatewayHostname,
+} from '@seedprotocol/arweave'
+
 // Define zero constants ourselves since they're not exported from eas-sdk in newer versions
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 export const ZERO_BYTES = '0x'
@@ -119,36 +137,6 @@ export enum SeedModels {
 // Internal SDK schema that should not be created in app's files directory
 export const SEED_PROTOCOL_SCHEMA_NAME = 'Seed Protocol'
 export const INTERNAL_SCHEMA_IDS = ['SEEDPROTOCOL'] as const
-
-import {
-  DEFAULT_ARWEAVE_HOST,
-  DEFAULT_SEED_FEED_HYPER_KEY,
-  DEFAULT_SEED_GATEWAY_HYPER_KEY,
-  DEFAULT_GATEWAY_SIDECAR_HOST,
-  DEFAULT_GATEWAY_SIDECAR_PORT,
-  DEFAULT_ARWEAVE_GRAPHQL_URL,
-  DEFAULT_ARWEAVE_GATEWAYS,
-  getDefaultArweaveReadGatewayHostsOrdered,
-  getArweaveReadGatewayHostsForPrimary,
-  mergePrimaryHostWithDefaults,
-  resolveArweaveHostFromEnv,
-  isKnownArweaveGatewayHostname,
-} from '@seedprotocol/arweave'
-
-export {
-  DEFAULT_ARWEAVE_HOST,
-  DEFAULT_SEED_FEED_HYPER_KEY,
-  DEFAULT_SEED_GATEWAY_HYPER_KEY,
-  DEFAULT_GATEWAY_SIDECAR_HOST,
-  DEFAULT_GATEWAY_SIDECAR_PORT,
-  DEFAULT_ARWEAVE_GRAPHQL_URL,
-  DEFAULT_ARWEAVE_GATEWAYS,
-  getDefaultArweaveReadGatewayHostsOrdered,
-  getArweaveReadGatewayHostsForPrimary,
-  mergePrimaryHostWithDefaults,
-  resolveArweaveHostFromEnv,
-  isKnownArweaveGatewayHostname,
-}
 
 /** Fired after `syncDbWithEas` persists EAS seeds/versions/metadata to SQLite (see `Item.rehydrateCachedItemsFromDbAfterEasSync`). */
 export const EAS_SEED_DATA_SYNCED_TO_DB_EVENT = 'easSeedDataSyncedToDb' as const
