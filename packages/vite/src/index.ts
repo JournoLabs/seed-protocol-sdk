@@ -35,8 +35,10 @@ export interface SeedVitePluginOptions {
    * Whether to automatically include vite-plugin-node-polyfills with sensible defaults.
    * The SDK depends on that package and aliases its injected shim imports to absolute
    * paths, so consuming apps do not need to install vite-plugin-node-polyfills themselves.
-   * Default include list omits `stream` and `crypto` (those pull stream-browserify and
-   * break Vite SSR / React Router prerender). Use `false` for Framework Mode / prerender.
+   * Default include list omits full `stream`/`crypto` polyfills (those pull
+   * stream-browserify and break Vite SSR / React Router prerender). A minimal
+   * `stream` stub is still aliased so sax/rss-parser do not warn. Use `false`
+   * for Framework Mode / prerender.
    * @default true
    */
   includeNodePolyfills?: boolean
@@ -127,6 +129,7 @@ const DEFAULT_FS_MODULES = [
 const SDK_DIST_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ARWEAVE_SHIM_FILE = path.join(SDK_DIST_DIR, 'arweave-default-shim.js')
 const DEBUG_SHIM_FILE = path.join(SDK_DIST_DIR, 'debug-default-shim.js')
+const STREAM_SHIM_FILE = path.join(SDK_DIST_DIR, 'stream-default-shim.js')
 
 /** Fragile renderer deps pre-bundled for stable CJS/ESM interop (aligned with permapress). */
 const FRAGILE_RENDERER_OPTIMIZE_INCLUDES = [
@@ -611,12 +614,29 @@ function addRendererCompatibilityAliases(aliasEntries: AliasEntry[]): void {
       replacement: debugBrowserEntry,
     })
   }
+
+  // Minimal stream stub (not stream-browserify) so sax/rss-parser init is quiet.
+  if (fs.existsSync(STREAM_SHIM_FILE)) {
+    aliasEntries.push(
+      { find: /^stream$/, replacement: STREAM_SHIM_FILE },
+      { find: /^node:stream$/, replacement: STREAM_SHIM_FILE },
+    )
+  }
 }
 
 /** Object-form aliases for optimizeDeps pre-bundle (debug shim subpath). */
 function debugShimOptimizeAliasObject(): Record<string, string> {
   const debugBrowserEntry = resolvePackageFile('debug', 'src/browser.js')
   return debugBrowserEntry ? { 'debug/src/browser.js': debugBrowserEntry } : {}
+}
+
+/** Object-form aliases so optimizeDeps prebundles (rss-parser → sax) use our stream stub. */
+function streamShimOptimizeAliasObject(): Record<string, string> {
+  if (!fs.existsSync(STREAM_SHIM_FILE)) return {}
+  return {
+    stream: STREAM_SHIM_FILE,
+    'node:stream': STREAM_SHIM_FILE,
+  }
 }
 
 type OptimizeDepsConfig = NonNullable<UserConfig['optimizeDeps']>
@@ -809,6 +829,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
 
       const existingOptimize = userConfig.optimizeDeps
       const debugOptimizeAliases = debugShimOptimizeAliasObject()
+      const streamOptimizeAliases = streamShimOptimizeAliasObject()
 
       const optimizeDeps: UserConfig['optimizeDeps'] = {
         ...omitDeprecatedOptimizeDepsKeys(existingOptimize),
@@ -833,6 +854,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           define: { global: 'globalThis' },
           alias: {
             ...debugOptimizeAliases,
+            ...streamOptimizeAliases,
             ...polyfillShimAliasObj,
           },
         }),

@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import {
   DOMAIN_OWNERSHIP_CHALLENGE_TTL_MS,
   DOMAIN_OWNERSHIP_METHOD,
@@ -27,12 +26,18 @@ export type DomainOwnershipChallenge = {
   digHint: string
 }
 
+function randomBytes(size: number): Uint8Array {
+  const bytes = new Uint8Array(size)
+  crypto.getRandomValues(bytes)
+  return bytes
+}
+
 function base64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '')
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
 /**

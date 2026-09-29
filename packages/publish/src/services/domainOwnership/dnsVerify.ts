@@ -1,4 +1,3 @@
-import { promises as dnsPromises } from 'node:dns'
 import {
   buildDomainOwnershipTxtValue,
   parseDomainOwnershipTxtValue,
@@ -21,7 +20,9 @@ export type VerifyDomainOwnershipDnsResult = {
 type DohAnswer = { name?: string; type?: number; data?: string; TTL?: number }
 type DohResponse = { Status?: number; AD?: boolean; Answer?: DohAnswer[] }
 
+/** Node-only DNS; dynamically imported so browser bundles never top-level-import `node:dns`. */
 async function lookupNodeDns(name: string): Promise<DnsTxtLookupResult> {
+  const { promises: dnsPromises } = await import('node:dns')
   const records = await dnsPromises.resolveTxt(name)
   const values = records.map((chunks) => chunks.join(''))
   return { source: 'node:dns', values }
@@ -50,11 +51,17 @@ async function lookupDoh(
   }
 }
 
-const DEFAULT_LOOKUPS: Array<(name: string) => Promise<DnsTxtLookupResult>> = [
-  (name) => lookupNodeDns(name),
-  (name) => lookupDoh(name, 'cloudflare-doh', 'https://cloudflare-dns.com/dns-query'),
-  (name) => lookupDoh(name, 'google-doh', 'https://dns.google/resolve'),
-]
+function defaultLookups(): Array<(name: string) => Promise<DnsTxtLookupResult>> {
+  const lookups: Array<(name: string) => Promise<DnsTxtLookupResult>> = [
+    (name) => lookupDoh(name, 'cloudflare-doh', 'https://cloudflare-dns.com/dns-query'),
+    (name) => lookupDoh(name, 'google-doh', 'https://dns.google/resolve'),
+  ]
+  // Skip node:dns in DOM runtimes (Vite externalizes it and top-level/eager use crashes).
+  if (typeof document === 'undefined') {
+    lookups.unshift((name) => lookupNodeDns(name))
+  }
+  return lookups
+}
 
 function valuesMatchExpected(values: string[], expected: string): boolean {
   const expectedParsed = parseDomainOwnershipTxtValue(expected)
@@ -111,7 +118,7 @@ export async function verifyDomainOwnershipDns(
     }
   }
 
-  const lookupFns = options?.lookups ?? DEFAULT_LOOKUPS
+  const lookupFns = options?.lookups ?? defaultLookups()
   const quorum = options?.quorum ?? 2
   const lookups: DnsTxtLookupResult[] = []
   const matchedSources: string[] = []

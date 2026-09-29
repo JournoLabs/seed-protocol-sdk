@@ -50,6 +50,11 @@ describe('seedVitePlugin renderer hardening', () => {
     expect(fs.existsSync(shimPath)).toBe(true)
   })
 
+  it('exposes stream stub shim next to plugin sources', () => {
+    const shimPath = path.join(vitePluginSrcDir, 'stream-default-shim.js')
+    expect(fs.existsSync(shimPath)).toBe(true)
+  })
+
   it('merges renderer compatibility aliases and optimizeDeps includes', () => {
     const configPlugin = getConfigPlugin()
     const result = configPlugin.config!({ resolve: { alias: [] }, optimizeDeps: {} })
@@ -63,6 +68,8 @@ describe('seedVitePlugin renderer hardening', () => {
 
     expect(aliasKeys.some((k) => k.includes('nanoid-dictionary'))).toBe(true)
     expect(aliasKeys.some((k) => k === '^debug$')).toBe(true)
+    expect(aliasKeys.some((k) => k === '^stream$')).toBe(true)
+    expect(aliasKeys.some((k) => k === '^node:stream$')).toBe(true)
 
     const zenfsCoreIndex = path.join(
       process.cwd(),
@@ -91,6 +98,12 @@ describe('seedVitePlugin renderer hardening', () => {
     expect(result?.optimizeDeps?.esbuildOptions).toBeUndefined()
     expect(result?.optimizeDeps?.rollupOptions).toBeUndefined()
     expect(result?.optimizeDeps?.rolldownOptions?.transform?.define?.global).toBe('globalThis')
+    expect(result?.optimizeDeps?.rolldownOptions?.resolve?.alias?.stream).toMatch(
+      /stream-default-shim\.js$/,
+    )
+    expect(result?.optimizeDeps?.rolldownOptions?.resolve?.alias?.['node:stream']).toMatch(
+      /stream-default-shim\.js$/,
+    )
   })
 
   it('merges legacy optimizeDeps.esbuildOptions.define into rolldownOptions', () => {
