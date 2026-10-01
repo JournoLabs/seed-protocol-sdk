@@ -41,7 +41,11 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
       try {
         const publishWallet = wallet ?? account
         if (publishWallet) {
-          await ensureEasSchemasForItem(item, publishWallet as import('~/helpers/seedSigner').PublishWallet)
+          await ensureEasSchemasForItem(
+            item,
+            publishWallet as import('~/helpers/seedSigner').PublishWallet,
+            { managedAddress: typeof address === 'string' ? address : undefined },
+          )
         }
 
         const validation = await (validateItemForPublish as any)(item, [], {

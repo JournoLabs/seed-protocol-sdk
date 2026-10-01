@@ -102,6 +102,7 @@ await item.unpublish() // with setPublishWallet(onChainWallet) / initPublish con
 1. Executor module installed; session key enrolled with module-only `approvedTargets`
 2. ManagedAccount `getEas` already matches publish config (automation keys cannot `setEas`)
 3. `PublishWallet.txSender` can submit ManagedAccount UserOps signed by the session key
+4. EAS schemas for the item’s models and properties are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. While the owner wallet is connected (the same wallet used for `enrollPublishAutomation`), call `ensureEasSchemasForItem(item, userWallet)` once. After those schemas exist, unattended publish only reads the registry. A missing schema fails before the UserOp with `schema "…" is not registered; automation keys can't register schemas`.
 
 Readers should treat **EAS attester (ManagedAccount)** as authorship. Bind Arweave owners with:
 
@@ -154,6 +155,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - [ ] Store `authorization.uid` + session key securely; rotate by revoke + re-enroll
 - [ ] Set grant `expiresAt` when appropriate
 - [ ] Ensure ManagedAccount `getEas` matches publish config before unattended publish (automation keys cannot `setEas`)
+- [ ] Register content schemas once with the owner wallet via `ensureEasSchemasForItem` (automation keys cannot register schemas)
 - [ ] Use a UserOp-capable `PublishWallet` for on-chain txs; `fromEthersWallet` is fine for DataItem signing only
 - [ ] Use `assertStorageBoundToIdentity` (or equivalent) before treating Arweave owners as the identity
 - [ ] Expose “Disconnect automation” → `revokePublishAutomation`

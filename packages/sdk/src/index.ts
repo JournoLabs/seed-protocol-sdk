@@ -1,5 +1,6 @@
 export {
   ModelPropertyDataTypes,
+  normalizeDataType,
 } from './Schema'
 
 // Internal exports for @seedprotocol/react
