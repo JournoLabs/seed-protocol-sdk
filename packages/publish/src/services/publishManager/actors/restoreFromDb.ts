@@ -7,7 +7,14 @@ import { subscribe } from './subscribe'
 const RESTORE_DB_WAIT_MS = 60_000
 const RESTORE_DB_POLL_MS = 2_000
 
-async function waitForDb(maxWaitMs: number): Promise<boolean> {
+function envMs(name: string, fallback: number): number {
+  const raw = typeof process !== 'undefined' ? process.env[name] : undefined
+  if (raw == null || raw === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
+async function waitForDb(maxWaitMs: number, pollMs: number): Promise<boolean> {
   const deadline = Date.now() + maxWaitMs
   while (Date.now() < deadline) {
     try {
@@ -15,7 +22,7 @@ async function waitForDb(maxWaitMs: number): Promise<boolean> {
     } catch {
       // Db facade not configured yet
     }
-    await new Promise((r) => setTimeout(r, RESTORE_DB_POLL_MS))
+    await new Promise((r) => setTimeout(r, pollMs))
   }
   return false
 }
@@ -123,15 +130,16 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
       // BaseDb is configured by platformClassesInit when client.init() runs.
       // PublishManager starts on module load, which can happen before client.init().
       // Wait for DB to be ready before attempting restore (poll every 2s, up to 60s).
-      const dbReady = await waitForDb(RESTORE_DB_WAIT_MS)
+      const dbReady = await waitForDb(
+        envMs('SEED_PUBLISH_RESTORE_WAIT_MS', RESTORE_DB_WAIT_MS),
+        envMs('SEED_PUBLISH_RESTORE_POLL_MS', RESTORE_DB_POLL_MS),
+      )
       if (!dbReady) {
-        sendBack({ type: 'RESTORE_FROM_DB_DONE', publishProcesses: newPublishProcesses, subscriptions: newSubscriptions })
         return { newPublishProcesses, newSubscriptions }
       }
 
       const db = BaseDb.getAppDb()
       if (!db) {
-        sendBack({ type: 'RESTORE_FROM_DB_DONE', publishProcesses: newPublishProcesses, subscriptions: newSubscriptions })
         return { newPublishProcesses, newSubscriptions }
       }
 
@@ -185,14 +193,27 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
       return { newPublishProcesses, newSubscriptions }
     }
 
-    _restoreFromDb().then((result) => {
-      if (!result) return
-      const { newPublishProcesses, newSubscriptions } = result
-      sendBack({
-        type: 'RESTORE_FROM_DB_DONE',
-        publishProcesses: newPublishProcesses,
-        subscriptions: newSubscriptions,
-      })
+    const empty = () => ({
+      newPublishProcesses: new Map<string, import('xstate').ActorRef<any, any>>(),
+      newSubscriptions: new Map<string, import('xstate').ActorRef<any, EventObject>>(),
     })
+
+    _restoreFromDb()
+      .then((result) => {
+        const { newPublishProcesses, newSubscriptions } = result ?? empty()
+        sendBack({
+          type: 'RESTORE_FROM_DB_DONE',
+          publishProcesses: newPublishProcesses,
+          subscriptions: newSubscriptions,
+        })
+      })
+      .catch(() => {
+        const { newPublishProcesses, newSubscriptions } = empty()
+        sendBack({
+          type: 'RESTORE_FROM_DB_DONE',
+          publishProcesses: newPublishProcesses,
+          subscriptions: newSubscriptions,
+        })
+      })
   }
 )

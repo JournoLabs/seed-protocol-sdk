@@ -70,6 +70,29 @@ Steps performed:
 2. `addSessionKey` with module-only `approvedTargets`.
 3. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 
+## Server / Node
+
+A browser `thirdwebClientId` is usually locked to app origins. From a server, Thirdweb RPC and the bundler return 401 until `initPublish` includes `thirdwebSecretKey`. Schema reads go through a separate viem client: pass a public `rpcUrl`, or pass `thirdwebClientId` and `thirdwebSecretKey` together so those reads send `x-secret-key`. The secret does not build the RPC URL by itself.
+
+`fromThirdwebAccount(account, { client })` uses a client you already created. Other contract calls still use `getClient()`, which reads `thirdwebSecretKey` / `thirdwebClientId` from `initPublish`.
+
+Node does not start `PublishManager` on import. `await PublishManager.ready()` starts it and resolves when the machine value is `active` (`snapshot.status` is not that signal). `createPublish` returns a promise of the spawned actor (`undefined` if it did not start). That promise settles when the process is spawned. `getPublish` keeps the last finished actor, including a fast failure, until the next publish of that seed.
+
+eas-sdk 2.10’s ESM build named-imports CommonJS `lodash`, which Node rejects. Start the process with `node --import @seedprotocol/sdk/node-eas-lodash`. The hook loads `lodash-es` (the ESM package) for those eas-sdk imports only.
+
+```ts
+initPublish({
+  thirdwebClientId: process.env.THIRDWEB_CLIENT_ID,
+  thirdwebSecretKey: process.env.THIRDWEB_SECRET_KEY,
+  rpcUrl: process.env.RPC_URL,
+  uploadApiBaseUrl: process.env.UPLOAD_API_BASE_URL,
+  useModularExecutor: true,
+  modularAccountModuleContract: '0xYourExecutorModule',
+})
+
+await PublishManager.ready()
+```
+
 ## Unattended publish / revoke
 
 On-chain publish/revoke for automation keys must go through the **ManagedAccount as a UserOp**, with call target = **executor module only** (`modularAccountModuleContract`). `createAttestations` detects an active session key on the ManagedAddress, keeps your provided `PublishWallet`, and routes `multiPublish` to that module (same pattern as `prepareEasMultiRevoke`).
@@ -88,7 +111,8 @@ const dataItemWallet = fromEthersWallet(automationWallet)
 // fromEthersWallet alone sends plain EOA txs and is not sufficient for AA session-key UserOps.
 const onChainWallet: PublishWallet = /* session-key UserOp PublishWallet */
 
-PublishManager.createPublish(item, managedAddress, onChainWallet, {
+await PublishManager.ready()
+const actor = await PublishManager.createPublish(item, managedAddress, onChainWallet, {
   dataItemSigner: dataItemWallet.signer,
 })
 

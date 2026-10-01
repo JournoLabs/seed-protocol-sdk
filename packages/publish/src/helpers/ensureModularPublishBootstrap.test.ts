@@ -45,6 +45,7 @@ mock.module('./ensureManagedSignerSessionKey', () => ({
 
 mock.module('./ensureManagedAccountEasConfigured', () => ({
   ensureManagedAccountEasConfigured: (...args: unknown[]) => ensureManagedAccountEasConfiguredMock(...args),
+  assertManagedAccountEasMatchesConfig: async () => {},
 }))
 
 mock.module('./ensureEip7702ModularAccountReady', () => ({

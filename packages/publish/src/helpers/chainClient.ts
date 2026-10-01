@@ -1,4 +1,5 @@
 import { createPublicClient, http, type Address, type Hex, type PublicClient } from 'viem'
+import { getPublishConfig } from '../config'
 import { getPublishRpcUrl, getPublishViemChain } from './chainConfig'
 
 type PublishPublicClient = PublicClient
@@ -6,12 +7,23 @@ type PublishPublicClient = PublicClient
 let _client: PublishPublicClient | null = null
 let _clientKey: string | null = null
 
+function publishRpcFetchOptions(): { headers: { 'x-secret-key': string } } | undefined {
+  try {
+    const secret = getPublishConfig().thirdwebSecretKey
+    if (!secret) return undefined
+    return { headers: { 'x-secret-key': secret } }
+  } catch {
+    return undefined
+  }
+}
+
 function createPublishPublicClient(): PublishPublicClient {
   const chain = getPublishViemChain()
   const rpcUrl = getPublishRpcUrl()
+  const fetchOptions = publishRpcFetchOptions()
   return createPublicClient({
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, fetchOptions ? { fetchOptions } : undefined),
   })
 }
 
@@ -21,7 +33,13 @@ function createPublishPublicClient(): PublishPublicClient {
 export function getPublishPublicClient(): PublishPublicClient {
   const chain = getPublishViemChain()
   const rpcUrl = getPublishRpcUrl()
-  const key = `${chain.id}:${rpcUrl}`
+  let secret = ''
+  try {
+    secret = getPublishConfig().thirdwebSecretKey ?? ''
+  } catch {
+    secret = ''
+  }
+  const key = `${chain.id}:${rpcUrl}:${secret ? '1' : '0'}:${secret}`
   if (!_client || _clientKey !== key) {
     _clientKey = key
     _client = createPublishPublicClient()

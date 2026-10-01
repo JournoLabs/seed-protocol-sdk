@@ -26,6 +26,6 @@ export function getPublishRpcUrl(): string {
     return `https://${chainId}.rpc.thirdweb.com/${config.thirdwebClientId}`
   }
   throw new Error(
-    '@seedprotocol/publish: rpcUrl is required when thirdwebClientId is not set. Pass rpcUrl in initPublish / PublishProvider config.',
+    '@seedprotocol/publish: rpcUrl is required when thirdwebClientId is not set. A thirdwebSecretKey authenticates Thirdweb RPC but does not build this URL. Pass rpcUrl or thirdwebClientId in initPublish / PublishProvider config.',
   )
 }

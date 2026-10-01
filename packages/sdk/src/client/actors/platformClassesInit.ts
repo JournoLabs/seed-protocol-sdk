@@ -16,6 +16,7 @@ import {
 } from "@/helpers";
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
+import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
@@ -59,9 +60,11 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       return
     }
 
-    const { config, addresses } = options
+    const { addresses } = options
+    const config = normalizeSeedConfigEndpoints(options.config)
 
-    // Validate required endpoints - this should happen early in the initialization process
+    // Validate required endpoints - this should happen early in the initialization process.
+    // Node fills these from filesDir; browser callers still pass them.
     if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
       throw new Error('Config must include endpoints with filePaths and files')
     }

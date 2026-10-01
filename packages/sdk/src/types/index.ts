@@ -43,7 +43,11 @@ export interface DbConfig {
 }
 
 export interface SeedConfig {
-  readonly endpoints: Endpoints
+  /**
+   * Persisted file path labels. On Node, both fields default to `filesDir` when omitted.
+   * Browser init still requires them.
+   */
+  readonly endpoints?: Endpoints
   models?: Record<string, Model>
   arweaveDomain?: string
   /** Upload API origin (HTTP / hybrid fallback). */

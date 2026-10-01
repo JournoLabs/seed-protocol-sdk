@@ -12,6 +12,8 @@ The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `ge
 
 `uploadApiBaseUrl` is required. Provide either `rpcUrl` or `thirdwebClientId` (RPC falls back to Thirdweb’s edge when only the client id is set).
 
+From Node, a domain-locked client id returns 401. Set `thirdwebSecretKey` (server only) so Thirdweb RPC and the bundler authenticate, and either pass a public `rpcUrl` or pass `thirdwebClientId` together with that secret (`x-secret-key` is attached to viem reads). A secret key alone does not build the viem RPC URL. Call `await PublishManager.ready()` before `createPublish`; that promise is the spawned actor, not the finished publish. eas-sdk’s ESM build named-imports CommonJS `lodash`. Load it with `node --import @seedprotocol/sdk/node-eas-lodash`, which redirects that import to `lodash-es`.
+
 Thirdweb is an **optional** peer. Core publish uses `SeedSigner` + `SeedTxSender` (`PublishWallet`). Import ConnectButton / in-app wallets from `@seedprotocol/publish/thirdweb`.
 
 ### Recipe 1: EIP-1193 + EOA (no Thirdweb)

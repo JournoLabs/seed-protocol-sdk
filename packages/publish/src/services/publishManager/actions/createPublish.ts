@@ -11,6 +11,7 @@ import { ethers } from 'ethers'
 import { publishMachine } from '../../publish'
 import { subscribe } from '../actors/subscribe'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
+import { settleCreatePublish } from '../createPublishResult'
 
 function coerceWallet(account: unknown): PublishWallet | undefined {
   if (!account) return undefined
@@ -46,12 +47,14 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     address?: string
     account?: unknown
     options?: import('~/config').CreatePublishOptions
+    createToken?: number
   }
-  const { item, address, account, options } = ev
+  const { item, address, account, options, createToken } = ev
 
   const hasAddress = address != null && typeof address === 'string' && address.trim().length > 0
   if (!hasAddress) {
     console.warn('[createPublish] No valid wallet address; skipping spawn.')
+    settleCreatePublish(createToken, undefined)
     return
   }
 
@@ -59,6 +62,7 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     const { publishProcesses } = context
     if (publishProcesses && publishProcesses.has(item.seedLocalId)) {
       console.warn(`Publish process with seedLocalId "${item.seedLocalId}" already exists.`)
+      settleCreatePublish(createToken, undefined)
       return context
     }
     const publishRunId =
@@ -98,10 +102,14 @@ export const createPublish = enqueueActions(({ event, enqueue }) => {
     })
 
     publishProcesses.set(item.seedLocalId, publishProcess)
+    const settledPublishes = new Map(context.settledPublishes)
+    settledPublishes.delete(item.seedLocalId)
+    settleCreatePublish(createToken, publishProcess)
 
     return {
       ...context,
       publishProcesses,
+      settledPublishes,
     }
   })
 

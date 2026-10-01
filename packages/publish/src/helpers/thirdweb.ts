@@ -1,4 +1,5 @@
-import { createThirdwebClient, deploySmartAccount, getContract, } from 'thirdweb'
+import { deploySmartAccount, getContract, } from 'thirdweb'
+import { getClient } from './publishThirdwebClient'
 import { createWallet, Account, inAppWallet, type Wallet, } from 'thirdweb/wallets'
 import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
@@ -105,20 +106,7 @@ async function connectManagedAccountWallet(chain: Chain = optimismSepolia) {
   return managedAccountWallet
 }
 
-let _client: ReturnType<typeof createThirdwebClient> | null = null
-
-export function getClient() {
-  if (!_client) {
-    const { thirdwebClientId } = getPublishConfig()
-    if (!thirdwebClientId) {
-      throw new Error(
-        '@seedprotocol/publish/thirdweb: thirdwebClientId is required. Pass it in initPublish / PublishProvider config.',
-      )
-    }
-    _client = createThirdwebClient({ clientId: thirdwebClientId })
-  }
-  return _client
-}
+export { getClient } from './publishThirdwebClient'
 
 export const wallets = [
   // embeddedWallet(),

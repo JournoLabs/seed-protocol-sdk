@@ -429,7 +429,7 @@ export function createTestConfig(overrides: Partial<SeedConstructorOptions> = {}
     mergedConfig.filesDir = overrides.config.endpoints.files
   } else if (!mergedConfig.filesDir) {
     // Fallback: use endpoints.files if filesDir wasn't set
-    mergedConfig.filesDir = mergedConfig.endpoints.files
+    mergedConfig.filesDir = mergedConfig.endpoints?.files
   }
   
   return {

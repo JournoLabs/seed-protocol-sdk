@@ -1,4 +1,4 @@
-import { prepareTransaction, sendTransaction, defineChain } from 'thirdweb'
+import { prepareTransaction, sendTransaction, defineChain, type ThirdwebClient } from 'thirdweb'
 import type { Account } from 'thirdweb/wallets'
 import { optimismSepolia as thirdwebOptimismSepolia } from 'thirdweb/chains'
 import type { Address, Hex } from 'viem'
@@ -25,10 +25,22 @@ function resolveThirdwebChain() {
   })
 }
 
+export type FromThirdwebAccountOptions = {
+  /**
+   * Thirdweb client for `prepareTransaction`. A Thirdweb Account does not carry a client.
+   * Pass the secret-key client from the server, or omit this to use `getClient()`.
+   */
+  client?: ThirdwebClient
+}
+
 /**
  * Wrap a Thirdweb Account so AA gas sponsorship still flows through thirdweb `sendTransaction`.
  */
-export function fromThirdwebAccount(account: Account): PublishWallet {
+export function fromThirdwebAccount(
+  account: Account,
+  options?: FromThirdwebAccountOptions,
+): PublishWallet {
+  const explicitClient = options?.client
   const address = account.address as Address
   const signer = brandSigner({
     address,
@@ -40,10 +52,10 @@ export function fromThirdwebAccount(account: Account): PublishWallet {
   const txSender = brandTxSender({
     address,
     sendTransaction: async (tx) => {
-      const { getClient } = await import('../thirdweb')
+      const client = explicitClient ?? (await import('../publishThirdwebClient')).getClient()
       const chain = resolveThirdwebChain()
       const transaction = prepareTransaction({
-        client: getClient(),
+        client,
         chain,
         to: tx.to,
         data: tx.data,
@@ -62,6 +74,7 @@ export function fromThirdwebAccount(account: Account): PublishWallet {
  */
 export function asThirdwebPublishWallet(
   accountOrWallet: Account | SeedSigner | PublishWallet,
+  options?: FromThirdwebAccountOptions,
 ): PublishWallet {
   if (isPublishWallet(accountOrWallet)) return accountOrWallet
   if (isSeedSigner(accountOrWallet)) {
@@ -69,7 +82,7 @@ export function asThirdwebPublishWallet(
       '@seedprotocol/publish/thirdweb: SeedSigner alone cannot send sponsored txs. Pass fromThirdwebAccount(account) or a PublishWallet.',
     )
   }
-  return fromThirdwebAccount(accountOrWallet)
+  return fromThirdwebAccount(accountOrWallet, options)
 }
 
 /** @deprecated Prefer {@link asThirdwebPublishWallet}; kept for call-site migration. */

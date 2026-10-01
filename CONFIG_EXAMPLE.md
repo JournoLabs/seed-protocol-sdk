@@ -11,9 +11,7 @@ import { ClientManager } from '@seedprotocol/sdk'
 
 await ClientManager.init({
   config: {
-    endpoints: {
-      // Your EAS endpoint configuration
-    },
+    endpoints: { filePaths: '/files', files: '.seed' }, // optional on Node when filesDir is set
     models: {
       // Your model definitions
     },
@@ -63,9 +61,7 @@ import { ClientManager } from '@seedprotocol/sdk'
 
 await ClientManager.init({
   config: {
-    endpoints: {
-      eas: 'https://your-eas-endpoint.com'
-    },
+    endpoints: { filePaths: '/files', files: '.seed' },
     models: {
       Post: PostModel,
       User: UserModel
@@ -87,7 +83,7 @@ await ClientManager.init({
 ```typescript
 await ClientManager.init({
   config: {
-    endpoints: { /* ... */ },
+    endpoints: { filePaths: '/files', files: '.seed' },
     models: { /* ... */ },
     filesDir: '.seed',
     dbConfig: {
@@ -103,7 +99,7 @@ await ClientManager.init({
 ```typescript
 await ClientManager.init({
   config: {
-    endpoints: { /* ... */ },
+    endpoints: { filePaths: '/files', files: '.seed' },
     models: { /* ... */ },
     filesDir: '.seed'
     // dbConfig is optional - defaults will be used:
@@ -136,7 +132,7 @@ In browser environments, the database is automatically configured using OPFS (Or
 // Browser - same API, but dbConfig.dbUrl is not used
 await ClientManager.init({
   config: {
-    endpoints: { /* ... */ },
+    endpoints: { filePaths: '/files', files: '.seed' },
     models: { /* ... */ },
     filesDir: '.seed' // Virtual path in OPFS
   },
@@ -163,6 +159,7 @@ await ClientManager.init({
   config: {
     // ... your existing config
     filesDir: '.seed',
+    endpoints: { filePaths: '/files', files: '.seed' }, // optional on Node when filesDir is set
     dbConfig: {
       dbUrl: '.seed/db/seed.db',      // Previously: `${dotSeedDir}/db/seed.db`
       schemaDir: '.seed/schema',      // Previously: `${dotSeedDir}/schema`

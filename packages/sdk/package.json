@@ -27,7 +27,9 @@
     "node": ">= 20 <= 24"
   },
   "files": [
-    "dist"
+    "dist",
+    "src/node/easLodashRegister.js",
+    "src/node/easLodashHook.js"
   ],
   "scripts": {
     "build": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
@@ -140,6 +142,7 @@
         "default": "./dist/vite.cjs"
       }
     },
+    "./node-eas-lodash": "./src/node/easLodashRegister.js",
     "./package.json": "./package.json"
   },
   "devDependencies": {

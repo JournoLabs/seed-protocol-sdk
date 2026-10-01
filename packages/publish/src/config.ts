@@ -42,14 +42,25 @@ export interface PublishConfig {
   /**
    * Thirdweb client id — only required when using `@seedprotocol/publish/thirdweb`.
    * When set without `rpcUrl`, the public client falls back to Thirdweb’s RPC edge.
+   * Browser client ids are usually locked to app origins; Node servers should also set
+   * `thirdwebSecretKey` or those RPC and bundler calls return 401.
    */
   thirdwebClientId?: string
+  /**
+   * Thirdweb secret key for server-side clients. Sent as `x-secret-key` on viem reads
+   * of the Thirdweb RPC URL, and passed to `createThirdwebClient` for sends.
+   * Do not ship this to the browser. It does not replace `rpcUrl` or `thirdwebClientId`
+   * when building the viem RPC URL.
+   */
+  thirdwebSecretKey?: string
   /**
    * Viem chain for reads and adapters. Defaults to Optimism Sepolia.
    */
   chain?: Chain
   /**
    * JSON-RPC URL for the publish chain. Required when `thirdwebClientId` is unset.
+   * Prefer a public chain RPC from Node. A domain-locked client id in the default
+   * Thirdweb URL returns 401 unless `thirdwebSecretKey` is also set.
    */
   rpcUrl?: string
   /**

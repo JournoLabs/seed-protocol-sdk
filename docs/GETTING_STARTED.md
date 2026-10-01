@@ -17,15 +17,15 @@ bun add @seedprotocol/sdk
 
 ## Prerequisites
 
-- Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (endpoints, `filesDir`, optional `dbConfig`, optional `schemaFile`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details.
+- Initialize the SDK client before using Schema, Model, or Item APIs. Pass your config (`filesDir`, optional `endpoints`, optional `dbConfig`, optional `schemaFile`) to `client.init()`. See [CONFIG_EXAMPLE.md](../CONFIG_EXAMPLE.md) for configuration details. On Node, `filesDir` alone is enough: `endpoints.filePaths` and `endpoints.files` default to it. Browser init still requires `endpoints`.
 
 ```typescript
 import { client } from '@seedprotocol/sdk'
 
 await client.init({
   config: {
-    endpoints: { /* your EAS endpoint */ },
     filesDir: '.seed',
+    endpoints: { filePaths: '/files', files: '.seed' }, // optional on Node when filesDir is set
   },
   addresses: { owned: ['0x...'], watched: [] }, // optional; legacy `['0x...']` is owned only
 })
@@ -216,8 +216,8 @@ import { client, Schema, Model } from '@seedprotocol/sdk'
 async function main() {
   await client.init({
     config: {
-      endpoints: { /* your EAS endpoint */ },
       filesDir: '.seed',
+      endpoints: { filePaths: '/files', files: '.seed' }, // optional on Node when filesDir is set
     },
   })
 
