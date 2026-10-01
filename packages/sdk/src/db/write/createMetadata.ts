@@ -1,6 +1,6 @@
 import { metadata, MetadataType } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
-import { getPropertyIdForModelAndName } from '@/helpers/db'
+import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
 import { PropertyType } from '@/types'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
 import { normalizePublisher } from '@/helpers/addresses'
@@ -144,31 +144,46 @@ export const createMetadata: CreateMetadata = async (
     }
   }
 
-  // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup
+  // Resolve property_id for FK: prefer explicit value, then propertyRecordSchema.id, else lookup.
+  // propertyRecordSchema.id is the integer properties.id only when built from a DB row; from schema
+  // files and Model it is the schemaFileId string, which must be looked up (Number() gives NaN).
   if (metadataValues.propertyId == null) {
-    if (propertyRecordSchema?.id != null) {
-      metadataValues.propertyId =
-        typeof propertyRecordSchema.id === 'number'
-          ? propertyRecordSchema.id
-          : Number(propertyRecordSchema.id)
-    } else if (
-      metadataValues.propertyName &&
-      (metadataValues.modelName || metadataValues.modelType)
-    ) {
-      const modelKey = metadataValues.modelName ?? metadataValues.modelType!
-      metadataValues.propertyId =
-        (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName)) ?? undefined
+    const schemaId = propertyRecordSchema?.id as unknown
+    const modelKey = metadataValues.modelName ?? metadataValues.modelType ?? undefined
+    if (typeof schemaId === 'number' && Number.isInteger(schemaId)) {
+      metadataValues.propertyId = schemaId
+    } else if (modelKey) {
+      if (typeof schemaId === 'string' && schemaId) {
+        metadataValues.propertyId =
+          (await getPropertyIdForSchemaFileId(modelKey, schemaId)) ?? undefined
+      }
+      if (metadataValues.propertyId == null && metadataValues.propertyName) {
+        metadataValues.propertyId =
+          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName)) ?? undefined
+      }
     }
   }
 
-  const inserted = await appDb
-    .insert(metadata)
-    .values({
-      ...metadataValues,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    .returning()
+  let inserted: MetadataType[]
+  try {
+    inserted = await appDb
+      .insert(metadata)
+      .values({
+        ...metadataValues,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .returning()
+  } catch (error) {
+    // Drizzle's message is the full SQL; the driver error that explains it is only on `cause`.
+    const cause = (error as { cause?: unknown })?.cause
+    const reason = cause instanceof Error ? cause.message : cause != null ? String(cause) : undefined
+    throw new Error(
+      `Failed to insert metadata for property ${metadataValues.propertyName}` +
+        (reason ? `: ${reason}` : `: ${error instanceof Error ? error.message : String(error)}`),
+      { cause: error },
+    )
+  }
 
   if (!inserted || inserted.length === 0) {
     throw new Error(`Failed to insert metadata record for property ${metadataValues.propertyName}`)

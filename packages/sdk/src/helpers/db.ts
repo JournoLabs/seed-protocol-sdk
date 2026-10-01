@@ -29,6 +29,31 @@ import { normalizeDataType } from '@/helpers/property'
 const logger = debug('seedSdk:helpers:db')
 
 /**
+ * Resolve property_id (integer properties.id) from a property's schemaFileId (the string `id` in
+ * schema files and propertyRecordSchema). Scoped to the model since schemaFileIds are per schema file.
+ * @returns properties.id or null if not found
+ */
+export async function getPropertyIdForSchemaFileId(
+  modelNameOrType: string,
+  schemaFileId: string,
+): Promise<number | null> {
+  const db = BaseDb.getAppDb()
+  if (!db || !modelNameOrType || !schemaFileId) return null
+  const rows = await db
+    .select({ id: properties.id })
+    .from(properties)
+    .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+    .where(
+      and(
+        eq(modelsTable.name, upperFirst(camelCase(modelNameOrType))),
+        eq(properties.schemaFileId, schemaFileId),
+      ),
+    )
+    .limit(1)
+  return rows[0]?.id ?? null
+}
+
+/**
  * Resolve property_id from model name/type and property name.
  * Handles property name variants (e.g. htmlId -> html, avatarImageIds -> avatarImages).
  * @param modelNameOrType - Model name (PascalCase) or model type (snake_case)
@@ -95,25 +120,10 @@ export async function migrateMetadataForPropertyRename(
     return 0
   }
 
-  const normalizedModelName = upperFirst(camelCase(modelName))
-
   // Find the property row by schemaFileId (preferred) or by name
   let propertyId: number | null = null
   if (propertySchemaFileId) {
-    const rows = await db
-      .select({ id: properties.id })
-      .from(properties)
-      .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
-      .where(
-        and(
-          eq(modelsTable.name, normalizedModelName),
-          eq(properties.schemaFileId, propertySchemaFileId),
-        ),
-      )
-      .limit(1)
-    if (rows.length > 0 && rows[0].id != null) {
-      propertyId = rows[0].id
-    }
+    propertyId = await getPropertyIdForSchemaFileId(modelName, propertySchemaFileId)
   }
   if (propertyId == null) {
     propertyId = await getPropertyIdForModelAndName(modelName, oldPropertyName)

@@ -8,6 +8,10 @@ import {
   waitForPropertyInstances,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { createMetadata } from '@/db/write/createMetadata'
+import { BaseDb } from '@/db/Db/BaseDb'
+import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
+import { and, eq } from 'drizzle-orm'
 
 // Html saves in Node: saveHtml used to throw from NodeFileManager.getContentUrlFromPath, and
 // ItemProperty.save() resolved anyway, so raw HTML reached publish encoding.
@@ -37,10 +41,9 @@ testDescribe('Html property saves in Node', () => {
     return { item, html: html! }
   }
 
-  // Repro for permapress #11: createMetadata coerces the schemaFileId string in
-  // propertyRecordSchema.id with Number() -> NaN -> better-sqlite3 RangeError on property_id.
-  // Flip to it() once createMetadata resolves property_id by model + name.
-  it.fails('stores html as a storage seed and save() resolves', async () => {
+  // permapress #11: createMetadata used Number(propertyRecordSchema.id) on the schemaFileId string
+  // -> NaN property_id -> better-sqlite3 RangeError, surfaced only as "Failed query: insert into metadata".
+  it('stores html as a storage seed and save() resolves', async () => {
     const { html } = await createPost()
     html.value = '<p>Hello from Node</p>'
     await html.save()
@@ -84,4 +87,42 @@ testDescribe('Html property saves in Node', () => {
       expect.objectContaining({ field: 'bodyHtml' }),
     ])
   }, 30000)
+
+  describe('createMetadata property_id resolution', () => {
+    const getBodyHtmlRow = async () => {
+      const rows = await BaseDb.getAppDb()!
+        .select({ id: properties.id, schemaFileId: properties.schemaFileId })
+        .from(properties)
+        .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
+        .where(and(eq(modelsTable.name, 'Post'), eq(properties.name, 'bodyHtml')))
+        .limit(1)
+      expect(rows[0]).toBeDefined()
+      return rows[0]!
+    }
+    const insert = (propertyRecordSchema: any) =>
+      createMetadata(
+        { propertyName: 'bodyHtmlId', propertyValue: 'abcdefghij', seedLocalId: 'zyxwvutsrq', modelName: 'Post' },
+        propertyRecordSchema,
+        { skipValidation: true },
+      )
+
+    it('resolves a schemaFileId string to properties.id', async () => {
+      const row = await getBodyHtmlRow()
+      expect(row.schemaFileId).toBeTruthy()
+      const inserted = await insert({ id: row.schemaFileId, dataType: 'Html' })
+      expect(inserted.propertyId).toBe(row.id)
+    })
+
+    it('uses an integer id as properties.id', async () => {
+      const row = await getBodyHtmlRow()
+      const inserted = await insert({ id: row.id, dataType: 'Html' })
+      expect(inserted.propertyId).toBe(row.id)
+    })
+
+    it('falls back to model + property name for an unknown schemaFileId', async () => {
+      const row = await getBodyHtmlRow()
+      const inserted = await insert({ id: 'notARealId', dataType: 'Html' })
+      expect(inserted.propertyId).toBe(row.id)
+    })
+  })
 })
