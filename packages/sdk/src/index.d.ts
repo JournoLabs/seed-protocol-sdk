@@ -1,4 +1,4 @@
-export { ModelPropertyDataTypes, } from './Schema';
+export { ModelPropertyDataTypes, normalizeDataType, } from './Schema';
 export { eventEmitter } from './eventBus';
 export { ADDRESSES_PERSISTED_EVENT, LOCAL_COPIES_REMOVED_EVENT, parseAddressesPersistedPayload, } from './client/events';
 export type { AddressesPersistedPayload, LocalCopiesRemovedPayload } from './client/events';

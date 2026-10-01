@@ -102,6 +102,7 @@ export type {
 export {
   ensureEasSchemasForItem,
 } from './services/publish/helpers/ensureEasSchemas'
+export type { EnsureEasSchemasOptions } from './services/publish/helpers/ensureEasSchemas'
 export { publishMachine } from './services/publish'
 export { PublishManager } from './services/publishManager'
 export {

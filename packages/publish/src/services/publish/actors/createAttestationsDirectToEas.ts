@@ -152,7 +152,7 @@ export const createAttestationsDirectToEas = fromPromise(
     const publishWallet = resolvePublishWallet(context)
     const txSender = publishWallet.txSender
 
-    await ensureEasSchemasForItem(item, publishWallet)
+    await ensureEasSchemasForItem(item, publishWallet, { managedAddress: address })
 
     const uploadDataWithTxIds: Array<PublishUpload & { txId: string }> = arweaveTransactions.map(
       (arweaveTransaction: ArweaveTransactionInfo, i: number) => {

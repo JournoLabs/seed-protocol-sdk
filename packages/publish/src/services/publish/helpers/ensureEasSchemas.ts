@@ -2,6 +2,8 @@ import {
   getSegmentedItemProperties,
   getRelatedItemsForPublish,
   INTERNAL_DATA_TYPES,
+  ModelPropertyDataTypes,
+  normalizeDataType,
   getEasSchemaForItemProperty,
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
@@ -43,9 +45,9 @@ async function getModelNamesForItem(item: IItem<any>): Promise<Set<string>> {
   }
 
   for (const prop of itemImageProperties) {
-    const dataType = prop.propertyDef?.dataType
-    if (dataType === 'File') modelNames.add('File')
-    else if (dataType === 'Html') modelNames.add('Html')
+    const dataType = normalizeDataType(prop.propertyDef?.dataType)
+    if (dataType === ModelPropertyDataTypes.File) modelNames.add('File')
+    else if (dataType === ModelPropertyDataTypes.Html) modelNames.add('Html')
     else modelNames.add('Image')
   }
 
@@ -62,15 +64,66 @@ async function sendAndWait(txSender: SeedTxSender, tx: Parameters<SeedTxSender['
   await waitForPublishReceipt(result.transactionHash)
 }
 
+export type EnsureEasSchemasOptions = {
+  /**
+   * ManagedAccount address. When `account` is an active automation session key on this
+   * account, missing schemas throw instead of being registered (session keys cannot call
+   * SchemaRegistry or EAS).
+   */
+  managedAddress?: string
+}
+
+type EnsureEasSchemasRunOptions = EnsureEasSchemasOptions & {
+  blockSchemaRegistration?: boolean
+}
+
+function easTypeForDataType(dataType: string | undefined): string {
+  const key = normalizeDataType(dataType)
+  return (
+    (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[key]?.eas ?? 'string'
+  )
+}
+
+function throwIfAutomationCannotRegister(blockSchemaRegistration: boolean, schemaDef: string): void {
+  if (!blockSchemaRegistration) return
+  throw new Error(
+    `schema "${schemaDef}" is not registered; automation keys can't register schemas. Call ensureEasSchemasForItem with the owner wallet first.`,
+  )
+}
+
+async function resolveBlockSchemaRegistration(
+  account: PublishWallet | SeedTxSender,
+  options: EnsureEasSchemasRunOptions | undefined,
+): Promise<boolean> {
+  if (typeof options?.blockSchemaRegistration === 'boolean') {
+    return options.blockSchemaRegistration
+  }
+  const managedAddress = options?.managedAddress?.trim()
+  if (!managedAddress || !isPublishWallet(account)) return false
+  const { isAutomationSessionActive } = await import('~/helpers/ensureAutomationSessionKey')
+  return isAutomationSessionActive(managedAddress, account.signer.address)
+}
+
 /**
  * Ensures EAS schemas exist for each item property and each model used by the item.
  * If a schema is not found on-chain or in the indexer, registers it via SchemaRegistry
  * and creates a name attestation (Schema #1) so EASSCAN displays it.
+ * Automation session keys cannot register; a missing schema throws before any UserOp.
  */
 export async function ensureEasSchemasForItem(
   item: IItem<any>,
   account: PublishWallet | SeedTxSender,
+  options?: EnsureEasSchemasOptions,
 ): Promise<void> {
+  await ensureEasSchemasForItemResolved(item, account, options)
+}
+
+async function ensureEasSchemasForItemResolved(
+  item: IItem<any>,
+  account: PublishWallet | SeedTxSender,
+  options?: EnsureEasSchemasRunOptions,
+): Promise<void> {
+  const blockSchemaRegistration = await resolveBlockSchemaRegistration(account, options)
   const sender: SeedTxSender = isPublishWallet(account)
     ? account.txSender
     : isSeedTxSender(account)
@@ -113,6 +166,8 @@ export async function ensureEasSchemasForItem(
       setSchemaUidForModel({ modelName, schemaUid })
       continue
     }
+
+    throwIfAutomationCannotRegister(blockSchemaRegistration, schemaDef)
 
     try {
       await sendAndWait(
@@ -160,6 +215,7 @@ export async function ensureEasSchemasForItem(
     !registeredSchemaUids.has(storageSchemaUid) &&
     (modelNames.has('Image') || modelNames.has('File') || modelNames.has('Html'))
   ) {
+    throwIfAutomationCannotRegister(blockSchemaRegistration, storageSchemaDef)
     try {
       await sendAndWait(
         sender,
@@ -188,9 +244,7 @@ export async function ensureEasSchemasForItem(
   for (const property of allProperties) {
     if (!property.propertyDef) continue
 
-    const easDataTypeRaw =
-      (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[property.propertyDef.dataType]?.eas ??
-      'string'
+    const easDataTypeRaw = easTypeForDataType(property.propertyDef.dataType)
     const prop = property as { storagePropertyName?: string; propertyName: string }
     const nameForEas =
       prop.storagePropertyName && prop.storagePropertyName.length > 0
@@ -250,6 +304,8 @@ export async function ensureEasSchemasForItem(
       continue
     }
 
+    throwIfAutomationCannotRegister(blockSchemaRegistration, schemaDef)
+
     try {
       await sendAndWait(
         sender,
@@ -285,6 +341,9 @@ export async function ensureEasSchemasForItem(
 
   const relatedItems = await getRelatedItemsForPublish(item)
   for (const relatedItem of relatedItems) {
-    await ensureEasSchemasForItem(relatedItem as IItem<any>, sender)
+    await ensureEasSchemasForItemResolved(relatedItem as IItem<any>, account, {
+      managedAddress: options?.managedAddress,
+      blockSchemaRegistration,
+    })
   }
 }

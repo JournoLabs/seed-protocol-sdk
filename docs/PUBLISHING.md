@@ -119,6 +119,8 @@ EAS schemas must be:
 
 If a schema is registered but has no naming attestation, attestations will work but EASSCAN will not show a friendly name. The publish package's `ensureEasSchemasForItem` handles both steps.
 
+Property `dataType` values are matched case-insensitively (`html` and `Html` both use the `bytes32` schema). Automation session keys cannot register or name schemas. If a schema is missing, unattended publish fails before the UserOp and tells you to call `ensureEasSchemasForItem` once with the owner ManagedAccount wallet. See [PUBLISH_AUTOMATION.md](./PUBLISH_AUTOMATION.md).
+
 ## Tool PublishedBy sidecar
 
 Publishing tools (e.g. Permapress) can seal a **PublishedBy** attestation from a **tool-controlled wallet** after the author’s Seed/Version/property batch lands. This is a sidecar claim — not part of the author’s `multiPublish` / direct EAS batch — so ownership and revoke for the Seed stay with the author.
