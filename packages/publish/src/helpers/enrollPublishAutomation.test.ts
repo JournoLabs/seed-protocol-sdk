@@ -106,6 +106,25 @@ describe('enrollPublishAutomation', () => {
         sessionKeyAddress: '0xsession',
       }),
     ).rejects.toMatchObject({ code: 'EXECUTOR_MODULE_NOT_INSTALLED' })
+    expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
+  })
+
+  test('enrolls session key when the ManagedAccount is a legacy Router account', async () => {
+    getInstalledModulesMock.mockImplementationOnce(async () => {
+      throw new Error('execution reverted: Router: function does not exist.')
+    })
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    const result = await enrollPublishAutomation({
+      managedAddress: '0xmanaged',
+      sessionKeyAddress: '0xsession',
+    })
+    expect(ensureAutomationSessionKeyMock).toHaveBeenCalledWith({
+      managedAddress: '0xmanaged',
+      sessionKeyAddress: '0xsession',
+      expiresAt: undefined,
+    })
+    expect(attestPublishAuthorizationMock).toHaveBeenCalled()
+    expect(result.authorization.uid).toMatch(/^0x/)
   })
 })
 

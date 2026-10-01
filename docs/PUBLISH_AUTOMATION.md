@@ -31,7 +31,7 @@ Automation session key ──ANS-104──► Arweave
 1. `initPublish` / `PublishProvider` with:
    - `useModularExecutor: true` (typical)
    - **`modularAccountModuleContract`** set to the Seed executor module
-2. User’s ManagedAccount is **ModularCore** (module install must succeed). Enrollment **fails loudly** if the module cannot be installed.
+2. ModularCore ManagedAccounts get the executor module installed during enroll. Legacy Router ManagedAccounts (the default Thirdweb `ManagedAccountFactory`) cannot install modules; enroll continues and the module-only session key is the grant. Enrollment still fails if a ModularCore account does not end up with the module installed.
 3. App generates and stores a session keypair offline; only the **address** is passed into enroll.
 
 ## Enroll
@@ -66,7 +66,7 @@ const { authorization } = await enrollPublishAutomation({
 
 Steps performed:
 
-1. Ensure executor module installed on ManagedAccount (fail if not ModularCore).
+1. Install the executor module when the ManagedAccount is ModularCore. Legacy Router accounts skip this step.
 2. `addSessionKey` with module-only `approvedTargets`.
 3. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 

@@ -109,13 +109,11 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
     }
   } catch (cause) {
     if (cause instanceof ManagedAccountPublishError) throw cause
+    // Legacy ManagedAccount (ERC-7504 Router) has no ModularCore install API.
+    // Non-admin signers may only execute/executeBatch to approvedTargets, so the
+    // module-only session key added next is the grant.
     if (isRouterNonModularCoreAccountError(cause)) {
-      throw new ManagedAccountPublishError(
-        'ManagedAccount is not ModularCore; cannot install the executor module required for automation grants.',
-        'EXECUTOR_MODULE_NOT_INSTALLED',
-        managedAddress,
-        cause,
-      )
+      return
     }
     throw new ManagedAccountPublishError(
       'Could not verify executor module installation for publish automation.',
@@ -127,8 +125,10 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
 }
 
 /**
- * Enroll an app automation key: install executor module → add module-only session key →
- * attest PublishAuthorization sidecar (ManagedAccount attester).
+ * Enroll an app automation key: install the executor module when the account is ModularCore,
+ * add a module-only session key, then attest the PublishAuthorization sidecar
+ * (ManagedAccount attester). Legacy Router ManagedAccounts skip module install; their
+ * session-key target check is the grant.
  */
 export async function enrollPublishAutomation(
   params: EnrollPublishAutomationParams,
