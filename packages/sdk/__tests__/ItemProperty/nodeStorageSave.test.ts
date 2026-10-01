@@ -5,12 +5,15 @@ import { validateItemForPublish } from '@/db/read/getPublishPayload'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
+  createPublishedTestAuthor,
   waitForPropertyInstances,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { createMetadata } from '@/db/write/createMetadata'
+import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
+import { metadata } from '@/seedSchema/MetadataSchema'
 import { and, eq } from 'drizzle-orm'
 
 // Html saves in Node: saveHtml used to throw from NodeFileManager.getContentUrlFromPath, and
@@ -68,16 +71,105 @@ testDescribe('Html property saves in Node', () => {
     await expect(html.save()).rejects.toThrow(/Failed to save property bodyHtml: Not implemented/)
   }, 30000)
 
-  it('publish validation rejects raw html that never went through the save pipeline', async () => {
-    // Item.create writes initial values straight to metadata (createNewItem), skipping saveHtml.
-    const author = await Item.create({ modelName: 'Author', name: 'Raw Html Author' })
-    await waitForEntityIdle(author, { timeout: 10_000 })
+  it('Item.create runs raw html through the save pipeline', async () => {
+    const author = await createPublishedTestAuthor()
     const item = await Item.create({
+      modelName: 'Post',
+      title: 'Created with html',
+      author: author.seedLocalId,
+      bodyHtml: '<p>raw</p>',
+    } as any)
+    const ctx = (item.allProperties['bodyHtml']!.getService().getSnapshot() as any).context
+    expect(ctx.refSeedType).toBe('html')
+    expect(ctx.propertyValue).not.toContain('<p>')
+    const filePath = BaseFileManager.getFilesPath('html', ctx.refResolvedValue)
+    expect(await BaseFileManager.readFileAsString(filePath)).toBe('<p>raw</p>')
+
+    const result = await validateItemForPublish(item)
+    expect(result.errors.filter((e) => e.code === 'publish_storage_value_not_saved')).toEqual([])
+  }, 30000)
+
+  it('Item.create stores an array List value as a JSON id list that publishes', async () => {
+    const author = await createPublishedTestAuthor()
+    const tags = []
+    for (const label of ['one', 'two']) {
+      const tag = await Item.create({ modelName: 'Tag', label } as any)
+      tags.push(tag)
+    }
+    const item = await Item.create({
+      modelName: 'Post',
+      title: 'Array list',
+      author: author.seedLocalId,
+      tagIds: tags.map((t) => t.seedLocalId),
+    } as any)
+    const rows = await BaseDb.getAppDb()!
+      .select({ propertyValue: metadata.propertyValue })
+      .from(metadata)
+      .where(and(eq(metadata.seedLocalId, item.seedLocalId!), eq(metadata.propertyName, 'tagIds')))
+    expect(rows.map((r: { propertyValue: string | null }) => r.propertyValue)).toContain(JSON.stringify(tags.map((t) => t.seedLocalId)))
+
+    const result = await validateItemForPublish(item)
+    expect(result.errors).toEqual([])
+  }, 30000)
+
+  it('Item.create runs a raw image value through the save pipeline', async () => {
+    const author = await createPublishedTestAuthor()
+    // 1x1 transparent PNG
+    const png =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+    const item = await Item.create({
+      modelName: 'Post',
+      title: 'With image',
+      author: author.seedLocalId,
+      coverImage: png,
+    } as any)
+    const ctx = (item.allProperties['coverImage']!.getService().getSnapshot() as any).context
+    expect(ctx.propertyValue).not.toContain('data:')
+    const result = await validateItemForPublish(item)
+    expect(result.errors.filter((e) => e.code === 'publish_storage_value_not_saved')).toEqual([])
+  }, 30000)
+
+  it('Item.create rejects when an html value fails to save', async () => {
+    vi.spyOn(BaseFileManager, 'getContentUrlFromPath').mockRejectedValueOnce(new Error('disk gone'))
+    await expect(
+      Item.create({ modelName: 'Post', title: 'Will fail', bodyHtml: '<p>x</p>' } as any),
+    ).rejects.toThrow(/Item\.create: failed to save Post\.bodyHtml .*disk gone/)
+  }, 30000)
+
+  it('assigning item.<html property> saves through the pipeline', async () => {
+    const { item, html } = await createPost()
+    ;(item as any).bodyHtml = '<p>assigned</p>'
+    await html.save()
+    const ctx = (html.getService().getSnapshot() as any).context
+    expect(ctx.refSeedType).toBe('html')
+    expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', ctx.refResolvedValue))).toBe(
+      '<p>assigned</p>',
+    )
+  }, 30000)
+
+  it('save() waits for the schema to resolve when the property has none yet', async () => {
+    const { html } = await createPost()
+    // Simulate a property instance created before its schema loaded.
+    html.getService().send({ type: 'updateContext', propertyRecordSchema: undefined })
+    html.value = '<p>late schema</p>'
+    await html.save()
+    const ctx = (html.getService().getSnapshot() as any).context
+    expect(ctx.refSeedType).toBe('html')
+    expect(await BaseFileManager.readFileAsString(BaseFileManager.getFilesPath('html', ctx.refResolvedValue))).toBe(
+      '<p>late schema</p>',
+    )
+  }, 30000)
+
+  it('publish validation rejects raw html written without the save pipeline', async () => {
+    // createNewItem is the low-level writer: it stores initial values verbatim.
+    const author = await createPublishedTestAuthor()
+    const { seedLocalId } = await createNewItem({
       modelName: 'Post',
       title: 'Raw html post',
       author: author.seedLocalId,
       bodyHtml: '<p>raw</p>',
     })
+    const item = (await Item.find({ modelName: 'Post', seedLocalId })) as Item<any>
     await waitForEntityIdle(item, { timeout: 10_000 })
     await waitForPropertyInstances(item)
 

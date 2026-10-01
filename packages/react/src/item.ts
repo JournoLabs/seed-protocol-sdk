@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import {
-  createNewItem,
   getAddressesForItemsFilter,
   publisherInAddressListSql,
   Item,
@@ -461,8 +460,8 @@ export const useCreateItem = (): UseCreateItemReturn => {
 
       try {
         const data = itemData ?? {}
-        const { seedLocalId } = await createNewItem({ modelName, ...data })
-        const newItem = await Item.find({ modelName, seedLocalId })
+        // Item.create runs File/Image/Html values through their save pipeline; createNewItem stores them raw.
+        const newItem = await Item.create({ modelName, ...data } as Parameters<typeof Item.create>[0])
         return (newItem ?? undefined) as Item<any> | undefined
       } catch (err) {
         logger('[useCreateItem] Error creating item:', err)

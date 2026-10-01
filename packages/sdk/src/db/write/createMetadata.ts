@@ -66,7 +66,10 @@ export const createMetadata: CreateMetadata = async (
 
   // Convert propertyValue to string if it's not already (metadata table expects text)
   if (metadataValues.propertyValue !== undefined && metadataValues.propertyValue !== null) {
-    if (typeof metadataValues.propertyValue !== 'string') {
+    if (Array.isArray(metadataValues.propertyValue)) {
+      // List values: JSON array is the storage format (String() would give legacy comma-separated ids)
+      metadataValues.propertyValue = JSON.stringify(metadataValues.propertyValue)
+    } else if (typeof metadataValues.propertyValue !== 'string') {
       metadataValues.propertyValue = String(metadataValues.propertyValue)
     }
   }

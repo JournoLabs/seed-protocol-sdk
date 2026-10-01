@@ -45,6 +45,8 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
+import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import {
@@ -105,6 +107,16 @@ const getModel = (): typeof import('@/Model/Model').Model => {
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
+/** Raw File/Image/Html content (not already a storage seed reference) needs ItemProperty.save(). */
+function needsStorageSavePipeline(dataType: string | undefined, value: unknown): boolean {
+  if (value == null || value === '') return false
+  const isStorageType =
+    isDataType(dataType, ModelPropertyDataTypes.File) ||
+    isDataType(dataType, ModelPropertyDataTypes.Image) ||
+    isDataType(dataType, ModelPropertyDataTypes.Html)
+  return isStorageType && !isStorageSeedRef(value)
+}
+
 const TRACKED_PROPERTIES = [
   'seedLocalId',
   'seedUid',
@@ -645,6 +657,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     
     // Get property names directly from database to make Item independent from Model
     let propertyNames: string[] = []
+    const dataTypeByPropertyName = new Map<string, string>()
     const db = BaseDb.getAppDb()
     if (db && props.modelName) {
       // Query properties table directly by model name
@@ -680,15 +693,21 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await db
-          .select({ name: propertiesTable.name })
+          .select({ name: propertiesTable.name, dataType: propertiesTable.dataType })
           .from(propertiesTable)
           .where(eq(propertiesTable.modelId, modelRecords[0].id))
         
         propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
+        for (const r of propertyRecords) {
+          if (r.name && r.dataType) dataTypeByPropertyName.set(r.name, r.dataType)
+        }
       }
     }
     
     const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    // File/Image/Html values that are raw content (html string, data URI, URL, File) must go through
+    // the property's save pipeline to become storage seeds; createNewItem would store them verbatim.
+    const pipelineValues: Array<[string, unknown]> = []
     
     // Only include properties that are in the model schema
     // Exclude modelInstance, modelName, and schemaName as they're metadata, not item properties
@@ -698,6 +717,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         continue
       }
       if (propertyNames.length === 0 || propertyNames.includes(key)) {
+        if (needsStorageSavePipeline(dataTypeByPropertyName.get(key), value)) {
+          pipelineValues.push([key, value])
+          continue
+        }
         // If we couldn't get property names from DB, include all properties
         // Type assertion: we've filtered out modelInstance above, so value should be a valid property value
         modelPropertyData[key] = value as any
@@ -706,6 +729,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
     props.seedLocalId = seedLocalId
     props.latestVersionLocalId = versionLocalId
+    // Don't seed property instances with raw storage content: the value setter skips unchanged
+    // values, so savePipelineValues would never trigger a save.
+    for (const [key] of pipelineValues) {
+      delete (props as Record<string, unknown>)[key]
+    }
     // Item no longer needs modelInstance - it loads properties from database independently
     // Exclude latestVersionUid from props as it has incompatible types (string vs VersionsType)
     const { latestVersionUid, ...propsWithoutVersionUid } = props
@@ -821,7 +849,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }) as Item<any>
     
     this.registerItemInInstanceCache(proxiedInstance)
-    if (!waitForReady) return proxiedInstance
+    // Storage values must be saved before returning, so wait for readiness even when not requested.
+    if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
     try {
       await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
     } catch (err) {
@@ -832,7 +861,57 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
       throw err
     }
+    await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     return proxiedInstance
+  }
+
+  /**
+   * Run each File/Image/Html initial value through its ItemProperty save pipeline (sequentially, to
+   * avoid SQLite write contention). Rejects on the first failure; the item itself has been created.
+   */
+  private static async savePipelineValues(
+    item: Item<any>,
+    pipelineValues: Array<[string, unknown]>,
+    timeout: number,
+  ): Promise<void> {
+    for (const [propertyName, value] of pipelineValues) {
+      const property = await this.waitForPropertyInstance(item, propertyName, timeout)
+      if (!property) {
+        throw new Error(
+          `Item.create: property ${item.modelName}.${propertyName} did not load for item ${item.seedLocalId}; value was not saved`,
+        )
+      }
+      property.value = value
+      try {
+        await property.save()
+      } catch (error) {
+        throw new Error(
+          `Item.create: failed to save ${item.modelName}.${propertyName} for item ${item.seedLocalId}: ` +
+            (error instanceof Error ? error.message : String(error)),
+          { cause: error },
+        )
+      }
+    }
+  }
+
+  private static async waitForPropertyInstance(
+    item: Item<any>,
+    propertyName: string,
+    timeout: number,
+  ): Promise<IItemProperty | undefined> {
+    const find = (ctx: any) => {
+      const instances = ctx?.propertyInstances as Map<string, IItemProperty> | undefined
+      const altKey = getAlternatePropertyNameForInstanceLookup(propertyName)
+      return instances?.get(propertyName) ?? (altKey ? instances?.get(altKey) : undefined)
+    }
+    const existing = find(item.getService().getSnapshot().context)
+    if (existing) return existing
+    try {
+      const snap = await waitFor(item.getService(), (s: any) => !!find(s.context), { timeout })
+      return find(snap.context)
+    } catch {
+      return undefined
+    }
   }
 
   /**

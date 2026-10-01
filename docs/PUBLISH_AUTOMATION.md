@@ -93,6 +93,34 @@ initPublish({
 await PublishManager.ready()
 ```
 
+### Creating items in Node
+
+Pass every value to `Item.create`. Text, Number, Boolean, Date, Json, Relation and List values are written as given. Html, Image and File values go through the property's save pipeline before `Item.create` resolves: Html is written to `files/html` and the property's value becomes the storage seed id that publish uploads to Arweave. A value that is already a storage seed id (local id or `0x` uid) is kept as is. Types are matched case-insensitively, so a schema with `"list"` or `"html"` works without mapping.
+
+```ts
+const post = await Item.create({
+  modelName: 'Post',
+  title,
+  slug,
+  html,                                  // raw HTML string
+  authors: authorItems.map((a) => a.seedLocalId),
+})
+```
+
+`Item.create` rejects if any Html, Image or File value fails to save. The error names the property and the item's `seedLocalId`. The item itself already exists at that point.
+
+To change a value later, assign it and await the save. `ItemProperty.save()` rejects with the save error, or with `ItemPropertySaveValidationError` when the value fails the schema's validation rules.
+
+```ts
+const htmlProperty = post.allProperties['html']
+htmlProperty.value = updatedHtml
+await htmlProperty.save()
+```
+
+`post.html = updatedHtml` also starts a save, but returns nothing to await. Use the property when the next step depends on the save.
+
+`createNewItem` is the low-level writer and stores values verbatim. Don't pass it Html, Image or File content. Publish validation rejects such an item with `publish_storage_value_not_saved`.
+
 ## Unattended publish / revoke
 
 On-chain publish/revoke for automation keys must go through the **ManagedAccount as a UserOp**, with call target = **executor module only** (`modularAccountModuleContract`). `createAttestations` detects an active session key on the ManagedAddress, keeps your provided `PublishWallet`, and routes `multiPublish` to that module (same pattern as `prepareEasMultiRevoke`).

@@ -44,3 +44,14 @@ export function resolveSeedIdsFromRefString(s: string): { seedLocalId?: string; 
   }
   return {}
 }
+
+/**
+ * Storage seed local id (nanoid) or 0x uid. Stricter than resolveSeedIdsFromRefString, which accepts
+ * any 10-char string (so a 10-char html snippet like "<p>raw</p>" would pass as a local id).
+ */
+const STORAGE_SEED_REF = /^(?:[A-Za-z0-9_-]{10,21}|0x[0-9a-fA-F]{64})$/
+
+/** True when a File/Image/Html value is already a storage seed reference rather than raw content. */
+export function isStorageSeedRef(value: unknown): boolean {
+  return typeof value === 'string' && STORAGE_SEED_REF.test(value.trim())
+}

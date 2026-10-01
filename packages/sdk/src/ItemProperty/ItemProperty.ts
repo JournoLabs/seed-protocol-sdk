@@ -125,7 +125,8 @@ const resolvePropertyRecordSchemaFromModel = async (
       // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
       const schemaProp = await resolvePropertyRecordSchemaFromSchemaData(modelName, propertyName, modelType)
       if (schemaProp) {
-        return schemaProp
+        // Schema JSON uses file shape ({ type: 'Html' }); callers read dataType.
+        return normalizePropertyRecordSchema(schemaProp)
       }
       return undefined
     }
@@ -208,6 +209,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   protected readonly _alias: string | undefined
   protected _subscription: Subscription
   protected _dataType: string | undefined
+  /** Set while the value setter resolves a missing schema before sending `save`; save() awaits it. */
+  protected _pendingSchemaSave: Promise<boolean> | undefined
   protected _schemaUid: string | undefined
 
   constructor(initialValues: Partial<CreatePropertyInstanceProps>) {
@@ -1353,14 +1356,19 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)
     if (!context.propertyRecordSchema) {
       const { modelName, propertyName, modelType } = context as { modelName?: string; propertyName?: string; modelType?: string }
-      void resolvePropertyRecordSchemaFromModel(modelName ?? '', propertyName ?? '', modelType).then(
+      const pending = resolvePropertyRecordSchemaFromModel(modelName ?? '', propertyName ?? '', modelType).then(
         (schema) => {
-          if (schema) {
-            this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
-            this._service.send({ type: 'save', newValue: value })
-          }
-        }
+          if (!schema) return false
+          this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
+          this._service.send({ type: 'save', newValue: value })
+          return true
+        },
+        () => false,
       )
+      this._pendingSchemaSave = pending
+      void pending.finally(() => {
+        if (this._pendingSchemaSave === pending) this._pendingSchemaSave = undefined
+      })
     } else {
       this._service.send({
         type: 'save',
@@ -1391,6 +1399,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       seedLocalId: ctx?.seedLocalId ?? undefined,
       seedUid: ctx?.seedUid ?? undefined,
     })
+    // Without this, save() would see `idle` before the deferred `save` event and resolve unsaved.
+    if (this._pendingSchemaSave && !(await this._pendingSchemaSave)) {
+      throw new Error(
+        `Failed to save property ${ctx?.propertyName}: no schema found for ${ctx?.modelName}.${ctx?.propertyName}`,
+      )
+    }
     const settled = await waitFor(
       this._service,
       (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',

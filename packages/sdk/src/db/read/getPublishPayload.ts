@@ -23,6 +23,7 @@ import { getCorrectId } from '@/helpers'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import {
+  isStorageSeedRef,
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
@@ -70,12 +71,6 @@ function addValidationError(
 ): void {
   ctx.errors.push({ field: field ?? '', message, code })
 }
-
-/**
- * Storage seed local id (nanoid) or 0x uid. Stricter than resolveSeedIdsFromRefString, which accepts
- * any 10-char string (so a 10-char html snippet like "<p>raw</p>" would pass as a local id).
- */
-const STORAGE_SEED_REF = /^(?:[A-Za-z0-9_-]{10,21}|0x[0-9a-fA-F]{64})$/
 
 /** File/Image/Html value is raw content instead of a storage seed id, so it was never saved/uploaded. */
 function addStorageValueNotSavedError(
@@ -434,7 +429,7 @@ const processBasicProperties = async (
     // save pipeline never ran or failed (e.g. createNewItem with raw html), so it was never uploaded.
     // Relation/image properties are appended to the basic list after processRelationOrImageProperty,
     // so this one check covers both paths.
-    if (isFileImageHtml && typeof value === 'string' && !STORAGE_SEED_REF.test(value.trim())) {
+    if (isFileImageHtml && typeof value === 'string' && !isStorageSeedRef(value)) {
       addStorageValueNotSavedError(ctx, basicProperty.propertyName, propertyDef?.dataType, value)
       continue
     }
