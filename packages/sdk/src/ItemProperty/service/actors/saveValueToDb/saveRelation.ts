@@ -6,6 +6,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { getDataTypeFromString, toMetadataPropertyName } from '@/helpers'
+import { isDataType } from '@/helpers/property'
 // Dynamic import to break circular dependency: schema/index -> ... -> saveRelation -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
 
@@ -58,7 +59,7 @@ export const saveRelation = fromCallback<
       newValueType = 'file'
     }
 
-    if (propertyRecordSchema.dataType === ModelPropertyDataTypes.Image) {
+    if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Image)) {
       sendBack({
         type: 'saveImage',
         newValue,

@@ -9,6 +9,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { eq } from 'drizzle-orm'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 const logger = debug('seedSdk:schema:actors:writeModelsToDb')
 
@@ -111,7 +112,7 @@ export const writeModelsToDb = fromCallback<
                     }
                     
                     // Handle List type
-                    if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
+                    if (isDataType(schemaProp.dataType, ModelPropertyDataTypes.List) && schemaProp.refValueType) {
                       jsonProp.refValueType = schemaProp.refValueType
                       if (schemaProp.ref || schemaProp.refModelName) {
                         jsonProp.ref = schemaProp.refModelName || schemaProp.ref

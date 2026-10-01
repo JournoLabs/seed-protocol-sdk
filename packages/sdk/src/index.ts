@@ -1,5 +1,6 @@
 export {
   ModelPropertyDataTypes,
+  isDataType,
   normalizeDataType,
 } from './Schema'
 
@@ -53,7 +54,7 @@ export type { IItem, IItemProperty } from './interfaces'
 export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
-export { ItemProperty } from './ItemProperty/ItemProperty'
+export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
 export { ModelProperty } from './ModelProperty/ModelProperty'
 export { Schema } from './Schema/Schema'
 // Note: SchemaAllOptions type is available from './Schema/Schema'

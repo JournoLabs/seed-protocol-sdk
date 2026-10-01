@@ -491,7 +491,10 @@ export class ModelProperty {
     if (rawType) {
       propertyWithId.dataType = normalizeDataType(rawType) as ModelPropertyDataTypes
     }
-    
+    if (typeof propertyWithId.refValueType === 'string') {
+      propertyWithId.refValueType = normalizeDataType(propertyWithId.refValueType) as ModelPropertyDataTypes
+    }
+
     // Ensure id (schemaFileId) is set correctly
     // Priority: _propertyFileId > id (if string) > generate new
     // If id is a number (old format), use _propertyFileId instead

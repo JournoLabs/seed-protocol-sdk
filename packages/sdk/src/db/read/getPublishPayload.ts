@@ -35,7 +35,7 @@ import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models, properties } from '@/seedSchema'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { IItem } from '@/interfaces'
 import debug from 'debug'
 import { encodeBytes32String } from '@/helpers/ethereumUtils'
@@ -69,6 +69,29 @@ function addValidationError(
   code = 'publish_validation',
 ): void {
   ctx.errors.push({ field: field ?? '', message, code })
+}
+
+/**
+ * Storage seed local id (nanoid) or 0x uid. Stricter than resolveSeedIdsFromRefString, which accepts
+ * any 10-char string (so a 10-char html snippet like "<p>raw</p>" would pass as a local id).
+ */
+const STORAGE_SEED_REF = /^(?:[A-Za-z0-9_-]{10,21}|0x[0-9a-fA-F]{64})$/
+
+/** File/Image/Html value is raw content instead of a storage seed id, so it was never saved/uploaded. */
+function addStorageValueNotSavedError(
+  ctx: PublishValidationContext,
+  propertyName: string,
+  dataType: string | undefined,
+  value: string,
+): void {
+  addValidationError(
+    ctx,
+    `Invalid value for property: ${propertyName}. Expected a storage seed id ` +
+      `(${normalizeDataType(dataType)} content must be saved through the property before publishing), ` +
+      `got ${value.length > 40 ? `${value.slice(0, 40)}…` : value}.`,
+    propertyName,
+    'publish_storage_value_not_saved',
+  )
 }
 
 function isStorageTransactionPropertyName(name: string | undefined): boolean {
@@ -405,6 +428,15 @@ const processBasicProperties = async (
       if (!allowStorageTxAttestation) {
         continue
       }
+    }
+
+    // File/Image/Html values must be a storage seed id by now. Raw content means the property's
+    // save pipeline never ran or failed (e.g. createNewItem with raw html), so it was never uploaded.
+    // Relation/image properties are appended to the basic list after processRelationOrImageProperty,
+    // so this one check covers both paths.
+    if (isFileImageHtml && typeof value === 'string' && !STORAGE_SEED_REF.test(value.trim())) {
+      addStorageValueNotSavedError(ctx, basicProperty.propertyName, propertyDef?.dataType, value)
+      continue
     }
 
     const propertyData = await getPropertyData(basicProperty, ctx)
@@ -1509,7 +1541,7 @@ export const getPublishPayload = async (
             and(
               eq(properties.modelId, modelRows[0].id),
               eq(properties.name, relProp.propertyName),
-              eq(properties.dataType, 'Relation'),
+              sql`lower(${properties.dataType}) = 'relation'`,
             ),
           )
           .limit(1)

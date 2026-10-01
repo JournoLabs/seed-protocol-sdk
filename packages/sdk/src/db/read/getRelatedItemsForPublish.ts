@@ -5,6 +5,7 @@ import {
 } from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { IItem } from '@/interfaces'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 /**
  * Collects all items that will be in the publish payload (main item + related items from
@@ -36,16 +37,15 @@ export async function getRelatedItemsForPublish(
     if (!context) return
     let value = (context as { propertyValue?: unknown }).propertyValue
     // File/Image/Html/Json: fallback to metadata when propertyValue is empty (e.g. schema-loaded before metadata)
+    const isStorageSeedType = (t: string | undefined) =>
+      isDataType(t, ModelPropertyDataTypes.File) ||
+      isDataType(t, ModelPropertyDataTypes.Image) ||
+      isDataType(t, ModelPropertyDataTypes.Html) ||
+      isDataType(t, ModelPropertyDataTypes.Json)
     const isStorageSeed =
-      prop.propertyDef?.dataType === 'File' ||
-      prop.propertyDef?.dataType === 'Image' ||
-      prop.propertyDef?.dataType === 'Html' ||
-      prop.propertyDef?.dataType === 'Json' ||
-      (prop.propertyDef?.dataType === 'Relation' &&
-        (prop.propertyDef?.refValueType === 'File' ||
-          prop.propertyDef?.refValueType === 'Image' ||
-          prop.propertyDef?.refValueType === 'Html' ||
-          prop.propertyDef?.refValueType === 'Json'))
+      isStorageSeedType(prop.propertyDef?.dataType) ||
+      (isDataType(prop.propertyDef?.dataType, ModelPropertyDataTypes.Relation) &&
+        isStorageSeedType(prop.propertyDef?.refValueType))
     if (!value && prop.propertyName && isStorageSeed) {
       const ctx = context as { seedLocalId?: string; seedUid?: string }
       if (ctx.seedLocalId || ctx.seedUid) {

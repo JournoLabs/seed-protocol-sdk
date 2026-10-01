@@ -5,6 +5,7 @@ import { FromCallbackInput } from '@/types/machines'
 import { PropertyMachineContext } from '@/types/property'
 import { getStorageTransactionIdForSeedUid } from '@/db/read/getStorageTransactionIdForSeedUid'
 import { getRelationValueData } from '@/db/read/getRelationValueData'
+import { isDataType } from '@/helpers/property'
 // Dynamic import to break circular dependency: schema/index -> ... -> resolveRelatedValue -> schema/index
 // import { ModelPropertyDataTypes } from '@/schema'
 
@@ -121,7 +122,7 @@ export const resolveRelatedValue = fromCallback<
       if (
         refResolvedValue &&
         propertyRecordSchema &&
-        propertyRecordSchema.dataType === ModelPropertyDataTypes.Relation &&
+        isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Relation) &&
         propertyValueFromDb &&
         typeof propertyValueFromDb === 'string' &&
         propertyValueFromDb.length === 10 &&

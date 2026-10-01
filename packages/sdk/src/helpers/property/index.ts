@@ -45,6 +45,52 @@ export function normalizeDataType(value: string | undefined): string {
   return DATA_TYPE_LOWER_MAP[lower] ?? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
 }
 
+/**
+ * Case-insensitive dataType check. Use instead of `dataType === 'List'` so schemas
+ * (or existing DB rows) with lowercase types like "list" still match.
+ */
+export function isDataType(
+  value: string | null | undefined,
+  expected: ModelPropertyDataTypes | `${ModelPropertyDataTypes}`,
+): boolean {
+  if (!value) return false
+  return normalizeDataType(value) === expected
+}
+
+/**
+ * Normalize a property definition to the internal shape ItemProperty reads (`dataType`,
+ * `refValueType`, `ref`, `storageType`, ...). Accepts schema-file shape (`type`, `model`,
+ * `items`, `storage`) and any casing. Mirrors the conversion in imports/json createModelFromJson
+ * for the fallback paths that read schema-file properties directly.
+ */
+export function normalizePropertyRecordSchema<T>(def: T): T {
+  if (!def || typeof def !== 'object') return def
+  const src = def as Record<string, any>
+  const out: Record<string, any> = { ...src }
+
+  const rawType = src.dataType ?? src.type
+  if (typeof rawType === 'string' && rawType) out.dataType = normalizeDataType(rawType)
+
+  const ref = src.ref ?? src.refModelName ?? src.items?.model ?? src.model
+  if (ref && !out.ref) out.ref = ref
+  if (ref && !out.refModelName) out.refModelName = ref
+
+  const rawRefValueType = src.refValueType ?? src.items?.type
+  if (typeof rawRefValueType === 'string' && rawRefValueType) {
+    out.refValueType = normalizeDataType(rawRefValueType)
+  } else if (out.dataType === ModelPropertyDataTypes.List && ref) {
+    out.refValueType = ModelPropertyDataTypes.Relation
+  }
+
+  if (src.storage && typeof src.storage === 'object' && !out.storageType) {
+    out.storageType = src.storage.type === 'ItemStorage' ? 'ItemStorage' : 'PropertyStorage'
+    if (src.storage.path !== undefined && out.localStorageDir === undefined) out.localStorageDir = src.storage.path
+    if (src.storage.extension !== undefined && out.filenameSuffix === undefined) out.filenameSuffix = src.storage.extension
+  }
+
+  return out as T
+}
+
 export const TPropertyDataType = Type.Union([
   Type.Literal(ModelPropertyDataTypes.Text),
   Type.Literal(ModelPropertyDataTypes.Number),

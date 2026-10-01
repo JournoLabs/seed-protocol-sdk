@@ -57,6 +57,7 @@ export const propertyMachine = setup({
       actions: assign({
         isSaving: true,
         _saveError: undefined,
+        _saveValidationErrors: undefined,
       }),
       target: '.saving',
     },

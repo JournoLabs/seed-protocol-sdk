@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import type { IFileManager } from '@/helpers/FileManager/IFileManager'
 import path from 'path'
+import { pathToFileURL } from 'url'
 
 export class NodeFileManager implements IFileManager {
   async getFs() {
@@ -13,8 +14,9 @@ export class NodeFileManager implements IFileManager {
     return fs
   }
 
-  async getContentUrlFromPath(_path: string): Promise<string | undefined> {
-    throw new Error('Not implemented')
+  /** Node has no blob URLs; a file:// URL keeps refResolvedDisplayValue meaningful for server callers. */
+  async getContentUrlFromPath(filePath: string): Promise<string | undefined> {
+    return pathToFileURL(path.resolve(filePath)).href
   }
 
   async initializeFileSystem(_workingDir?: string): Promise<void> {

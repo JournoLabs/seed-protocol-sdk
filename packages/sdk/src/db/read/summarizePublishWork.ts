@@ -116,7 +116,7 @@ export function shouldAttestProperty(
 }
 
 function getStorageDirForDataType(dataType: string): string {
-  switch (dataType) {
+  switch (normalizeDataType(dataType)) {
     case 'Image':
       return BaseFileManager.getFilesPath('images')
     case 'File':

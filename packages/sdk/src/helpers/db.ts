@@ -24,6 +24,7 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
+import { normalizeDataType } from '@/helpers/property'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -1082,7 +1083,7 @@ export const addModelsToDb = async (
       const propertyData: Partial<NewPropertyRecord> = {
         name: propertyName,
         modelId: modelRecord.id!,
-        dataType: propertyValues.dataType,
+        dataType: normalizeDataType(propertyValues.dataType),
         schemaFileId: propertyFileId || null,
         required: propertyValues.required ?? false,
       }
@@ -1109,7 +1110,7 @@ export const addModelsToDb = async (
       }
 
       if (propertyValues.refValueType) {
-        propertyData.refValueType = propertyValues.refValueType
+        propertyData.refValueType = normalizeDataType(propertyValues.refValueType)
       } else {
         // If refValueType is not set, ensure it's null
         propertyData.refValueType = null
@@ -1327,7 +1328,7 @@ export const loadModelsFromDbForSchema = async (
         // Note: This is a simplified reconstruction - full property schemas
         // (like Relation details, List configs, etc.) should come from schemaData
         const propertyData: any = {
-          dataType: prop.dataType,
+          dataType: normalizeDataType(prop.dataType ?? undefined),
         }
 
         if (prop.schemaFileId) {
@@ -1349,7 +1350,7 @@ export const loadModelsFromDbForSchema = async (
         }
 
         if (prop.refValueType) {
-          propertyData.refValueType = prop.refValueType
+          propertyData.refValueType = normalizeDataType(prop.refValueType ?? undefined)
         }
 
         modelProperties[prop.name] = propertyData
@@ -1550,7 +1551,7 @@ export const savePropertyToDb = async (
   const propertyData: Partial<NewPropertyRecord> = {
     name: property.name,
     modelId: modelRecord.id!,
-    dataType: property.dataType || '',
+    dataType: normalizeDataType(property.dataType),
   }
   
   // Preserve schemaFileId if we have it
@@ -1576,7 +1577,7 @@ export const savePropertyToDb = async (
   }
 
   if (property.refValueType) {
-    propertyData.refValueType = property.refValueType
+    propertyData.refValueType = normalizeDataType(property.refValueType)
   } else {
     // If refValueType is not set, ensure it's null
     propertyData.refValueType = null
@@ -1971,7 +1972,7 @@ export async function writePropertyToDb(
   const propertyData: Partial<NewPropertyRecord> = {
     name: data.name,
     modelId: data.modelId,
-    dataType: data.dataType || '',
+    dataType: normalizeDataType(data.dataType),
     schemaFileId: propertyFileId,
     isEdited: isEdited, // Persist isEdited flag
   }
@@ -1996,7 +1997,7 @@ export async function writePropertyToDb(
   }
   
   if (data.refValueType) {
-    propertyData.refValueType = data.refValueType
+    propertyData.refValueType = normalizeDataType(data.refValueType)
   } else {
     // If refValueType is not set, ensure it's null
     propertyData.refValueType = null

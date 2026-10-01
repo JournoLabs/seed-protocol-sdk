@@ -184,6 +184,12 @@ const createItemPropertyInstances = async (
       }
     }
 
+    // Fallbacks above may return schema-file shape ({ type, model, items }); normalize to dataType/ref/refValueType.
+    const { normalizePropertyRecordSchema } = await import('../../../helpers/property')
+    propertySchemas = Object.fromEntries(
+      Object.entries(propertySchemas).map(([name, def]) => [name, normalizePropertyRecordSchema(def)]),
+    )
+
     // Collapse rows that map to the same instance key (e.g. authorIdentityIds + authors -> authors).
     // ItemProperty.create cache does not sync propertyValue on hit; processing order would otherwise
     // let an empty "authors" row overwrite a populated storage row.

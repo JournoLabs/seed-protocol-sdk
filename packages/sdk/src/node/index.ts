@@ -16,7 +16,7 @@ export {
 
 // Core classes
 export { Item } from '../Item/Item'
-export { ItemProperty } from '../ItemProperty/ItemProperty'
+export { ItemProperty, ItemPropertySaveValidationError } from '../ItemProperty/ItemProperty'
 
 // Node.js specific exports
 export { FileManager } from './helpers/FileManager'

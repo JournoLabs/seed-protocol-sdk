@@ -13,6 +13,7 @@ import { models as modelsTable, properties as propertiesTable } from '@/seedSche
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
 import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 const logger = debug('seedSdk:schema:actors:loadOrCreateSchema')
 
@@ -254,7 +255,7 @@ export const loadOrCreateSchema = fromCallback<
                         
                         // Handle List type (case-insensitive refValueType)
                         const listRefValueType = getRefValueType(schemaProp as Record<string, unknown>)
-                        if (schemaProp.dataType === 'List' && listRefValueType) {
+                        if (isDataType(schemaProp.dataType, ModelPropertyDataTypes.List) && listRefValueType) {
                           jsonProp.refValueType = listRefValueType
                           if (schemaProp.ref || schemaProp.refModelName) {
                             jsonProp.ref = schemaProp.refModelName || schemaProp.ref
@@ -414,7 +415,7 @@ export const loadOrCreateSchema = fromCallback<
                           }
                           
                           // Handle List type (support both refValueType and legacy items, case-insensitive)
-                          if (schemaProp.dataType === 'List' || schemaProp.type === 'List') {
+                          if (isDataType(schemaProp.dataType, ModelPropertyDataTypes.List) || isDataType(schemaProp.type, ModelPropertyDataTypes.List)) {
                             const refValueType = getRefValueType(schemaProp as Record<string, unknown>)
                             if (refValueType) {
                               jsonProp.refValueType = refValueType

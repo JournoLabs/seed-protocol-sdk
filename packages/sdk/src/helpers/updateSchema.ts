@@ -7,7 +7,7 @@ import { createModelsFromJson, loadSchemaFromFile } from '@/imports/json'
 import { schemas, SchemaType } from '@/seedSchema/SchemaSchema'
 import { Static } from '@sinclair/typebox'
 import { TProperty } from '@/Schema'
-import { ModelPropertyDataTypes } from '@/helpers/property'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable, modelSchemas } from '@/seedSchema'
 import { eq, desc, and } from 'drizzle-orm'
@@ -307,7 +307,7 @@ export async function convertPropertyToSchemaUpdate(
   }
 
   // Handle Relation type
-  if (property.dataType === ModelPropertyDataTypes.Relation) {
+  if (isDataType(property.dataType, ModelPropertyDataTypes.Relation)) {
     if (property.ref) {
       updates.model = property.ref
     } else if (property.refModelId) {
@@ -320,7 +320,7 @@ export async function convertPropertyToSchemaUpdate(
   }
 
   // Handle List type
-  if (property.dataType === ModelPropertyDataTypes.List) {
+  if (isDataType(property.dataType, ModelPropertyDataTypes.List)) {
     if (property.refValueType) {
       updates.refValueType = property.refValueType
       if (property.ref) {
@@ -461,7 +461,7 @@ export async function updateModelProperties(
             if (property.model === modelUpdate.oldName) {
               property.model = modelUpdate.newName
             }
-            if (property.ref === modelUpdate.oldName && (property.type === 'List' || property.dataType === 'List')) {
+            if (property.ref === modelUpdate.oldName && (isDataType(property.type, ModelPropertyDataTypes.List) || isDataType(property.dataType, ModelPropertyDataTypes.List))) {
               property.ref = modelUpdate.newName
             }
             // Legacy: items.model
@@ -889,7 +889,7 @@ export async function deleteModelFromSchema(
           if (property.model === modelName) {
             delete property.model
           }
-          if (property.ref === modelName && (property.type === 'List' || property.dataType === 'List')) {
+          if (property.ref === modelName && (isDataType(property.type, ModelPropertyDataTypes.List) || isDataType(property.dataType, ModelPropertyDataTypes.List))) {
             delete property.ref
           }
           if (property.items?.model === modelName) {

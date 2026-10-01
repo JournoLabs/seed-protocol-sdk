@@ -293,7 +293,23 @@ export type CreateItemWithBasicPropertiesOnlyOptions = {
 }
 
 /**
- * Create a Post item with only basic properties set (no relation, list, image).
+ * Post.author is a required relation. Fixtures that are not about relations point it at an Author
+ * marked published (seeds.uid set) so getPublishPayload validates and adds no Author payload.
+ */
+export async function createPublishedTestAuthor(): Promise<ItemClass<any>> {
+  const author = await Item.create({ modelName: 'Author', name: 'Published Test Author' })
+  await waitForItemIdle(author)
+  const db = BaseDb.getAppDb()
+  if (!db) throw new Error('Database not available')
+  const uid = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  await db.update(seeds).set({ uid, updatedAt: Date.now() }).where(eq(seeds.localId, author.seedLocalId!))
+  // getItem can return the cached instance, so its context needs the uid too.
+  author.getService().send({ type: 'updateContext', seedUid: uid })
+  return author
+}
+
+/**
+ * Create a Post item with only basic properties set (no list, image), pointing at a published author.
  */
 export async function createItemWithBasicPropertiesOnly(
   options: CreateItemWithBasicPropertiesOnlyOptions = {}
@@ -304,17 +320,21 @@ export async function createItemWithBasicPropertiesOnly(
     payload = '{"key":"value"}',
     isPublished = true,
     publishedOn = '2025-01-15T00:00:00.000Z',
-    bodyHtml = '<p>Hello</p>',
+    // Html must go through ItemProperty.save() to become a storage seed; Item.create writes raw values
+    // that publish validation rejects. Leave unset unless a test is about that.
+    bodyHtml,
     attachment = '',
   } = options
+  const author = await createPublishedTestAuthor()
   const item = await Item.create({
     modelName: 'Post',
+    author: author.seedLocalId,
     title,
     count,
     payload,
     isPublished,
     publishedOn,
-    bodyHtml,
+    ...(bodyHtml ? { bodyHtml } : {}),
     ...(attachment ? { attachment } : {}),
   })
   await waitForItemIdle(item)
@@ -367,8 +387,10 @@ export async function createItemWithList(
     tagItems.push(tagItem)
   }
   const tagIds = tagItems.map((t) => t.seedLocalId)
+  const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    author: author.seedLocalId,
     title: postTitle,
     tagIds: JSON.stringify(tagIds),
   })
@@ -388,8 +410,10 @@ export async function createItemWithImage(
   options: CreateItemWithImageOptions = {}
 ): Promise<{ postItem: ItemClass<any> }> {
   const { postTitle = 'Post with image' } = options
+  const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    author: author.seedLocalId,
     title: postTitle,
     coverImage: '', // Empty or placeholder; getPublishPayload may skip or handle
   })
@@ -423,8 +447,10 @@ export async function createItemWithImageAndUploadedTx(
   })
   await waitForItemIdle(imageItem)
   await waitForPropertyInstances(imageItem)
+  const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    author: author.seedLocalId,
     title: postTitle,
     coverImage: imageItem.seedLocalId,
   })
@@ -506,7 +532,7 @@ export async function createItemWithAllPropertyTypes(
     payload: basicOverrides.payload ?? '{}',
     isPublished: basicOverrides.isPublished ?? false,
     publishedOn: basicOverrides.publishedOn ?? new Date().toISOString(),
-    bodyHtml: basicOverrides.bodyHtml ?? '<p>x</p>',
+    ...(basicOverrides.bodyHtml ? { bodyHtml: basicOverrides.bodyHtml } : {}),
     author: authorItem.seedLocalId,
     tagIds: JSON.stringify(tagIds),
     coverImage: '',

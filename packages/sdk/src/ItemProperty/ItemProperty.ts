@@ -39,7 +39,12 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
+import {
+  ModelPropertyDataTypes,
+  isDataType,
+  normalizeDataType,
+  normalizePropertyRecordSchema,
+} from '@/helpers/property'
 
 /** Parent Html property `propertyValue` after publish (66-char seed uid). */
 const HTML_PROP_SEED_UID_RE = /^0x[a-fA-F0-9]{64}$/
@@ -171,6 +176,17 @@ const itemPropertyInstanceState = new WeakMap<ItemProperty<any>, {
   schemaLiveQuerySubscription: { unsubscribe: () => void } | null // LiveQuery subscription for properties table (schema changes)
 }>()
 
+/** Thrown by ItemProperty.save() when the value failed validation (enum, pattern, minLength, maxLength). */
+export class ItemPropertySaveValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly validationErrors: import('@/Schema/validation').ValidationError[],
+  ) {
+    super(message)
+    this.name = 'ItemPropertySaveValidationError'
+  }
+}
+
 type ItemPropertyFindProps = {
   propertyName: string
   propertyLocalId?: string
@@ -196,6 +212,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   constructor(initialValues: Partial<CreatePropertyInstanceProps>) {
     const { modelName, propertyName, propertyValue, seedLocalId, seedUid, versionLocalId, versionUid, storageTransactionId, schemaUid, refResolvedValue, refResolvedDisplayValue, localStorageDir, refSeedType } = initialValues
+    // Fallback schema sources can hand us schema-file shape ({ type: 'html' }); everything below reads dataType.
+    const propertyRecordSchema = normalizePropertyRecordSchema(initialValues.propertyRecordSchema)
 
     if (!modelName) {
       throw new Error('Model name is required')
@@ -218,7 +236,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       storageTransactionId,
       // propertyRecordSchema will be loaded from database via loadOrCreateProperty actor
       // or can be provided in initialValues if available
-      propertyRecordSchema: initialValues.propertyRecordSchema,
+      propertyRecordSchema,
       schemaUid,
       isSaving: false,
       isRelation: false,
@@ -233,19 +251,16 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     // Property schema will be loaded from database via loadOrCreateProperty actor
     // For now, use propertyRecordSchema from initialValues if provided
-    const propertyRecordSchema = initialValues.propertyRecordSchema
     if (propertyRecordSchema) {
-      this._dataType = propertyRecordSchema.dataType
+      this._dataType = normalizeDataType(propertyRecordSchema.dataType)
 
       serviceInput.propertyRecordSchema = propertyRecordSchema
 
-      // Use string literals to avoid circular dependency in constructor
-      // ModelPropertyDataTypes values are stable string constants
-      if (propertyRecordSchema.dataType === 'Relation') {
+      if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Relation)) {
         this._isRelation = true
       }
 
-        if (propertyRecordSchema.dataType === 'List') {
+        if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.List)) {
         this._isList = true
         const listRef =
           propertyRecordSchema.ref ||
@@ -313,11 +328,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
         const isImage =
           propertyRecordSchema &&
-          propertyRecordSchema.dataType === ModelPropertyDataTypes.Image
+          isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Image)
 
         const isFile =
           propertyRecordSchema &&
-          propertyRecordSchema.dataType === ModelPropertyDataTypes.File
+          isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.File)
 
         const isItemStorage = 
           propertyRecordSchema &&
@@ -805,13 +820,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
             })
 
             // Update instance fields to match new schema (mirror constructor logic)
-            this._dataType = propertyRecordSchema.dataType
-            if (propertyRecordSchema.dataType === 'Relation') {
+            this._dataType = normalizeDataType(propertyRecordSchema.dataType)
+            if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.Relation)) {
               ;(this as any)._isRelation = true
             } else {
               ;(this as any)._isRelation = false
             }
-            if (propertyRecordSchema.dataType === 'List') {
+            if (isDataType(propertyRecordSchema.dataType, ModelPropertyDataTypes.List)) {
               ;(this as any)._isList = true
               ;(this as any)._isRelation = !!(propertyRecordSchema.ref)
             } else {
@@ -895,11 +910,11 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       // but cached instance doesn't (e.g. Item constructor created from schema first, then loadOrCreateItem
       // has metadata with refResolvedValue - we must not lose display data).
       const ctx = (instance as ItemProperty<any>)._getSnapshotContext()
-      const incomingSchema = props.propertyRecordSchema
+      const incomingSchema = normalizePropertyRecordSchema(props.propertyRecordSchema)
       if (incomingSchema && !ctx.propertyRecordSchema) {
-        ;(instance as ItemProperty<any>)._dataType = incomingSchema.dataType
-        ;(instance as any)._isRelation = incomingSchema.dataType === 'Relation'
-        ;(instance as any)._isList = incomingSchema.dataType === 'List'
+        ;(instance as ItemProperty<any>)._dataType = normalizeDataType(incomingSchema.dataType)
+        ;(instance as any)._isRelation = isDataType(incomingSchema.dataType, ModelPropertyDataTypes.Relation)
+        ;(instance as any)._isList = isDataType(incomingSchema.dataType, ModelPropertyDataTypes.List)
         ;(instance as ItemProperty<any>)._service.send({
           type: 'updateContext',
           propertyRecordSchema: incomingSchema,
@@ -1296,7 +1311,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     return this._getSnapshot().value
   }
 
-  /** Validation errors from last failed save (enum, pattern, minLength, maxLength). Cleared on successful save. */
+  /** Validation errors from last failed save (enum, pattern, minLength, maxLength). Cleared when the next save starts. */
   get saveValidationErrors(): import('@/Schema/validation').ValidationError[] {
     return this._getSnapshotContext()._saveValidationErrors ?? []
   }
@@ -1376,13 +1391,26 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       seedLocalId: ctx?.seedLocalId ?? undefined,
       seedUid: ctx?.seedUid ?? undefined,
     })
-    await waitFor(
+    const settled = await waitFor(
       this._service,
       (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
       {
         timeout: 10_000,
       },
     )
+    const { _saveError: saveError, _saveValidationErrors: validationErrors, propertyName } =
+      settled.context
+    if (saveError) {
+      const error = new Error(`Failed to save property ${propertyName}: ${saveError.message}`)
+      if (saveError.name) error.name = saveError.name
+      throw error
+    }
+    if (validationErrors?.length) {
+      throw new ItemPropertySaveValidationError(
+        `Invalid value for property ${propertyName}: ${validationErrors.map((e) => e.message).join('; ')}`,
+        validationErrors,
+      )
+    }
     const canonicalId = ctx?.seedLocalId ?? ctx?.seedUid
     if (canonicalId) {
       eventEmitter.emit('itemProperty.saved', { seedLocalId: ctx.seedLocalId, seedUid: ctx.seedUid })

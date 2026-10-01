@@ -10,6 +10,7 @@ import { createModelFromJson } from '@/imports/json'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { eq, desc } from 'drizzle-orm'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 export type AddModelsMachineContext = {
   schemaContext: SchemaMachineContext
@@ -458,7 +459,7 @@ export const addModelsMachine = setup({
               }
               
               // Handle List type
-              if (schemaProp.dataType === 'List' && schemaProp.refValueType) {
+              if (isDataType(schemaProp.dataType, ModelPropertyDataTypes.List) && schemaProp.refValueType) {
                 jsonProp.refValueType = schemaProp.refValueType
                 if (schemaProp.ref || schemaProp.refModelName) {
                   jsonProp.ref = schemaProp.refModelName || schemaProp.ref

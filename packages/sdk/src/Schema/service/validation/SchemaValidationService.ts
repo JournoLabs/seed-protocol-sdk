@@ -1,6 +1,6 @@
 import { Value } from '@sinclair/typebox/value'
 import { TProperty } from '@/Schema'
-import { ModelPropertyDataTypes, TPropertyDataType, normalizeDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, TPropertyDataType, isDataType, normalizeDataType } from '@/helpers/property'
 import { ValidationResult, ValidationError, ValidationRules, DEFAULT_TEXT_MAX_LENGTH } from '@/Schema/validation'
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
@@ -314,6 +314,7 @@ export class SchemaValidationService {
     validationRules?: ValidationRules,
     refValueType?: ModelPropertyDataTypes | string
   ): ValidationResult {
+    dataType = normalizeDataType(dataType) as ModelPropertyDataTypes
     const errors: ValidationError[] = []
     const warnings: ValidationError[] = []
 
@@ -559,7 +560,7 @@ export class SchemaValidationService {
     }
 
     // Validate List: requires refValueType; ref (model) required only when refValueType === 'Relation' (case-insensitive)
-    if (propertyDefinition.type === 'List' || (propertyDefinition as any).dataType === 'List') {
+    if (isDataType(propertyDefinition.type, ModelPropertyDataTypes.List) || isDataType((propertyDefinition as any).dataType, ModelPropertyDataTypes.List)) {
       const rawRefValueType = (propertyDefinition as any).refValueType ?? (propertyDefinition as any).items?.type ?? (propertyDefinition as any).refvaluetype
       const refValueType = rawRefValueType ? normalizeDataType(String(rawRefValueType)) : undefined
       if (!refValueType || String(refValueType).trim() === '') {

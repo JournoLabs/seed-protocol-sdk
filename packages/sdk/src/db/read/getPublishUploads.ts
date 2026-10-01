@@ -14,7 +14,7 @@ import { PublishUpload } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
-import { ModelPropertyDataTypes } from '@/helpers/property'
+import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -86,7 +86,7 @@ export const prepareArweaveTransaction = async (
 
 
 const getStorageDirForDataType = (dataType: string): string => {
-  switch (dataType) {
+  switch (normalizeDataType(dataType)) {
     case 'Image':
       return BaseFileManager.getFilesPath('images')
     case 'File':
@@ -147,7 +147,7 @@ const getStorageSeedUploads = async (
       itemProperty.propertyDef?.dataType ??
       'Image'
 
-    if (dataType === ModelPropertyDataTypes.Html) {
+    if (isDataType(dataType, ModelPropertyDataTypes.Html)) {
       if (options?.deferHtmlStorageSeedLocalIds?.includes(seedLocalId)) {
         continue
       }
