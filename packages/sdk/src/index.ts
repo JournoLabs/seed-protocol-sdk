@@ -78,6 +78,11 @@ export {
 } from './eas'
 
 export { getCorrectId, generateId } from './helpers'
+export {
+  isPublishedSeedRef,
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+} from './helpers/relationSeedRef'
 export { withExcludeRevokedFilter } from '@seedprotocol/eas'
 export {
   classifyMediaRef,
