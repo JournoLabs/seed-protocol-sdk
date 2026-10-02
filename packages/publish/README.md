@@ -124,6 +124,7 @@ initPublish({
 - **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
 - `ensureEasSchemasForItem` registers any missing schema on the chain on first publish, including Seed's Version schema and EAS's "Name a Schema" schema.
 - SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer.
+- The SDK's local database remembers which chain its attestations came from. Pointing an existing database at a different chain fails at init, sync or publish with a chain-mismatch error rather than mixing data from two chains. Use a separate `filesDir` / database per chain. Databases created before this check are treated as Optimism Sepolia.
 
 The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, `schemaRegistryAddress`, `thirdwebAccountFactoryAddress`, `easChain`).
 

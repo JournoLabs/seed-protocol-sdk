@@ -1,3 +1,4 @@
+import { getEasChainDeployment, getEasReadChainId } from '@seedprotocol/eas';
 import type { FeedConfig } from './types';
 
 /**
@@ -83,8 +84,9 @@ export function resetSiteConfig(): void {
  * Load feed configuration from environment variables
  *
  * Environment variables:
- * - FEED_ITEM_URL_BASE: Base URL for attestation links (e.g. https://optimism-sepolia.easscan.org or https://easscan.org).
- *   When set, item links use {base}/attestation/view/{uid}. Default: 'https://easscan.org'. Set to override.
+ * - FEED_ITEM_URL_BASE: Base URL for attestation links (e.g. https://base.easscan.org).
+ *   Item links use {base}/attestation/view/{uid}. Default: the EAS explorer of the configured
+ *   chain (`EAS_CHAIN_ID`, or the SDK / publish chain in-process), else 'https://easscan.org'.
  * - FEED_ITEM_URL_PATH: Path segment for attestation links (default: 'attestation/view').
  *   Only used when FEED_ITEM_URL_BASE is set.
  * - FEED_SITE_URL: Site URL for fallback when FEED_ITEM_URL_BASE is unset (default: 'https://seedprotocol.io').
@@ -101,7 +103,10 @@ export function loadFeedConfig(): {
   pageSize: number;
   richTextDataUriImages: 'omit_items' | 'include_items';
 } {
-  const itemUrlBase = process.env.FEED_ITEM_URL_BASE?.trim() || 'https://optimism-sepolia.easscan.org';
+  const itemUrlBase =
+    process.env.FEED_ITEM_URL_BASE?.trim() ||
+    getEasChainDeployment(getEasReadChainId())?.explorerUrl ||
+    'https://easscan.org';
   const itemUrlPath =
     process.env.FEED_ITEM_URL_PATH?.trim() || 'attestation/view';
   const siteUrl =

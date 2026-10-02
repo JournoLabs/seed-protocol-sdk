@@ -92,6 +92,10 @@ export {
   type EasChainDeployment,
 } from '@seedprotocol/eas'
 export {
+  assertLocalDbChain,
+  EAS_CHAIN_ID_APP_STATE_KEY,
+} from './helpers/localDbChain'
+export {
   classifyMediaRef,
   resolveMediaRef,
   normalizeFeedItemFields,

@@ -6,6 +6,7 @@ import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
 import { normalizeAddressList } from '@/helpers/addresses'
+import { loadLocalDbChain } from '@/helpers/localDbChain'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
@@ -115,6 +116,9 @@ export const saveConfig = fromCallback<
         await persistKey('gatewaySidecarPort', String(gatewaySidecarPort))
       }
       await persistKey('gatewayProxyBaseUrl', gatewayProxyBaseUrl)
+
+      // Throws when the DB holds attestations from a different chain than the one configured.
+      await loadLocalDbChain()
     } catch (error: any) {
       logger('[internal/actors] [saveConfig] Error saving config:', error)
       // In test environments, continue anyway

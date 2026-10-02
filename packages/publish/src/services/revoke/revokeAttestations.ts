@@ -12,6 +12,7 @@ import {
   VERSION_SCHEMA_UID,
   isValidEasAttestationUid,
   getGetAdditionalSyncAddresses,
+  assertLocalDbChain,
 } from '@seedprotocol/sdk'
 
 /**
@@ -61,6 +62,8 @@ export async function revokeAttestations(params: {
   seedSchemaUid: string
 }): Promise<void> {
   const { seedLocalId, seedUid, seedSchemaUid } = params
+  // Revoking on one chain must not update revokedAt for a seed attested on another.
+  await assertLocalDbChain()
   const attester = await getAttesterForSeed({ seedLocalId, seedUid })
   let legacyModuleAttester = false
 

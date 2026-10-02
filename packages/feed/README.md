@@ -49,9 +49,8 @@ When a custom primary gateway is configured, `ar.seedprotocol.io` is omitted fro
 
 Item links in the feed can point to EASScan attestation pages. Set these environment variables:
 
-- `FEED_ITEM_URL_BASE` - Base URL for attestation links. Item URLs use `{base}/attestation/view/{uid}`. Default: `https://easscan.org`. Set to override.
-  - **Testnet**: `https://optimism-sepolia.easscan.org`
-  - **Mainnet**: `https://easscan.org` (default)
+- `EAS_CHAIN_ID` - Chain the feed reads attestations from (e.g. `8453` for Base). Sets both the EAS indexer and the default explorer for item links. Default: `11155420` (Optimism Sepolia).
+- `FEED_ITEM_URL_BASE` - Base URL for attestation links. Item URLs use `{base}/attestation/view/{uid}`. Default: the EAS explorer of `EAS_CHAIN_ID` (e.g. `https://base.easscan.org`), or `https://easscan.org` for chains without a known explorer.
 - `FEED_ITEM_URL_PATH` - Path segment (default: `attestation/view`). Only used when `FEED_ITEM_URL_BASE` is set.
 - `FEED_SITE_URL` - Site URL for fallback when `FEED_ITEM_URL_BASE` is unset (default: `https://seedprotocol.io`).
 
@@ -61,9 +60,10 @@ Item links in the feed can point to EASScan attestation pages. Set these environ
 # Arweave gateway for feed media / relation URLs
 ARWEAVE_HOST=arweave.net
 
-# Default: item links use https://easscan.org/attestation/view/{uid}
-# Override for testnet:
-FEED_ITEM_URL_BASE=https://optimism-sepolia.easscan.org
+# Read Base attestations; item links default to https://base.easscan.org/attestation/view/{uid}
+EAS_CHAIN_ID=8453
+# Optional override for item links:
+# FEED_ITEM_URL_BASE=https://base.easscan.org
 FEED_ITEM_URL_PATH=attestation/view
 ```
 

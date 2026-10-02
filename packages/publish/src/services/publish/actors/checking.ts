@@ -5,7 +5,7 @@ import { EventObject, fromCallback } from 'xstate'
 import { isContractDeployed } from '~/helpers/chainClient'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
-import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
+import { assertLocalDbChain, isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 
@@ -40,6 +40,9 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
       activePublishProcesses.add(item.seedLocalId)
 
       try {
+        // The local DB must hold data from the chain we are about to attest on.
+        await assertLocalDbChain()
+
         const publishWallet = wallet ?? account
         if (publishWallet) {
           await ensureEasSchemasForItem(

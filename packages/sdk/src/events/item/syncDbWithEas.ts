@@ -44,6 +44,7 @@ import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPrope
 import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 import { scheduleBulkFilesDownloadFromEasSync } from '@/events/files/download'
 import { eventEmitter } from '@/eventBus'
+import { assertLocalDbChain } from '@/helpers/localDbChain'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 
 const relationValuesToExclude = [
@@ -664,6 +665,9 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   if (!addresses || addresses.length === 0) {
     return
   }
+
+  // Never mix attestations from two chains in one local DB.
+  await assertLocalDbChain()
 
   const appDb = BaseDb.getAppDb()
 

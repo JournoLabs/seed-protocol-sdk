@@ -3,10 +3,11 @@ import {
   configureEasReadChain,
   getEasEndpoint,
   getEasReadChainId,
+  isEasReadChainConfigured,
   resetEasReadChain,
 } from '../src/easEndpoint'
 
-const ENV_KEYS = ['EAS_ENDPOINT', 'NEXT_PUBLIC_EAS_ENDPOINT'] as const
+const ENV_KEYS = ['EAS_ENDPOINT', 'NEXT_PUBLIC_EAS_ENDPOINT', 'EAS_CHAIN_ID', 'NEXT_PUBLIC_EAS_CHAIN_ID'] as const
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]))
 
 function clearEnv() {
@@ -61,5 +62,27 @@ describe('EAS read chain', () => {
     expect(() => getEasEndpoint()).toThrow(/No EAS indexer is known for chain 999999/)
     configureEasReadChain('sdk', { chainId: 999_999, indexerUrl: 'https://custom.invalid/graphql' })
     expect(getEasEndpoint()).toBe('https://custom.invalid/graphql')
+  })
+
+  it('reads start on the local DB chain; configured chains must match it', () => {
+    clearEnv()
+    configureEasReadChain('localDb', { chainId: 8453 })
+    expect(getEasReadChainId()).toBe(8453)
+    expect(isEasReadChainConfigured()).toBe(false)
+    expect(() => configureEasReadChain('publish', { chainId: 10 })).toThrow(
+      /local database holds attestations from chain 8453, but the app is configured for chain 10/,
+    )
+    configureEasReadChain('sdk', { chainId: 8453 })
+    expect(isEasReadChainConfigured()).toBe(true)
+  })
+
+  it('EAS_CHAIN_ID sets the chain below explicit config', () => {
+    clearEnv()
+    process.env.EAS_CHAIN_ID = '8453'
+    expect(getEasReadChainId()).toBe(8453)
+    expect(isEasReadChainConfigured()).toBe(true)
+    expect(getEasEndpoint()).toBe('https://base.easscan.org/graphql')
+    configureEasReadChain('publish', { chainId: 10 })
+    expect(getEasReadChainId()).toBe(10)
   })
 })
