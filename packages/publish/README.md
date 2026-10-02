@@ -125,6 +125,8 @@ initPublish({
 - `ensureEasSchemasForItem` registers any missing schema on the chain on first publish, including Seed's Version schema and EAS's "Name a Schema" schema.
 - SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer.
 - The SDK's local database remembers which chain its attestations came from. Pointing an existing database at a different chain fails at init, sync or publish with a chain-mismatch error rather than mixing data from two chains. Use a separate `filesDir` / database per chain. Databases created before this check are treated as Optimism Sepolia.
+- Before the first publish or revoke, `verifyPublishChain()` checks that the RPC reports `chain.id` and that EAS, the SchemaRegistry and any configured factory / executor module have code on the chain. It throws `PublishChainConfigError` listing every problem. Call it at startup to fail earlier.
+- While `@seedprotocol/publish` is loaded but `initPublish` hasn't run, SDK EAS sync waits (up to 30s) for the publish chain instead of syncing the default chain. Set `SeedConfig.eas.chainId` to skip the wait.
 
 The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, `schemaRegistryAddress`, `thirdwebAccountFactoryAddress`, `easChain`).
 

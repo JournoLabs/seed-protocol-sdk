@@ -4,6 +4,7 @@ import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { fromThirdwebAccount } from '~/helpers/adapters/thirdwebAccount'
 import type { PublishWallet } from '~/helpers/seedSigner'
 import { getPublishConfig } from '~/config'
+import { verifyPublishChain } from '~/helpers/verifyPublishChain'
 import {
   getVersionsForSeedUid,
   getMetadataAttestationUidsForSeedUid,
@@ -64,6 +65,7 @@ export async function revokeAttestations(params: {
   const { seedLocalId, seedUid, seedSchemaUid } = params
   // Revoking on one chain must not update revokedAt for a seed attested on another.
   await assertLocalDbChain()
+  await verifyPublishChain()
   const attester = await getAttesterForSeed({ seedLocalId, seedUid })
   let legacyModuleAttester = false
 

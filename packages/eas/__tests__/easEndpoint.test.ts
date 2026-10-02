@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configureEasReadChain,
+  expectEasReadChain,
   getEasEndpoint,
   getEasReadChainId,
   isEasReadChainConfigured,
+  isEasReadChainSettled,
   resetEasReadChain,
+  whenEasReadChainSettled,
 } from '../src/easEndpoint'
 
 const ENV_KEYS = ['EAS_ENDPOINT', 'NEXT_PUBLIC_EAS_ENDPOINT', 'EAS_CHAIN_ID', 'NEXT_PUBLIC_EAS_CHAIN_ID'] as const
@@ -84,5 +87,37 @@ describe('EAS read chain', () => {
     expect(getEasEndpoint()).toBe('https://base.easscan.org/graphql')
     configureEasReadChain('publish', { chainId: 10 })
     expect(getEasReadChainId()).toBe(10)
+  })
+
+  it('is settled immediately when nothing announced a pending chain', async () => {
+    clearEnv()
+    expect(isEasReadChainSettled()).toBe(true)
+    await expect(whenEasReadChainSettled(10)).resolves.toBe(true)
+  })
+
+  it('waits for an announced publish chain, then settles', async () => {
+    clearEnv()
+    expectEasReadChain('publish')
+    expect(isEasReadChainSettled()).toBe(false)
+    const waiting = whenEasReadChainSettled(5_000)
+    configureEasReadChain('publish', { chainId: 8453 })
+    await expect(waiting).resolves.toBe(true)
+  })
+
+  it('a recorded local DB chain or explicit SDK chain settles without publish', () => {
+    clearEnv()
+    expectEasReadChain('publish')
+    configureEasReadChain('localDb', { chainId: 8453 })
+    expect(isEasReadChainSettled()).toBe(true)
+    resetEasReadChain()
+    expectEasReadChain('publish')
+    configureEasReadChain('sdk', { chainId: 8453 })
+    expect(isEasReadChainSettled()).toBe(true)
+  })
+
+  it('times out to false when the announced source never configures', async () => {
+    clearEnv()
+    expectEasReadChain('publish')
+    await expect(whenEasReadChainSettled(20)).resolves.toBe(false)
   })
 })

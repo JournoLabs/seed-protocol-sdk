@@ -5,6 +5,7 @@ export {
 } from './helpers/constants'
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 export { getPublishChainName } from './helpers/chainConfig'
+export { verifyPublishChain, PublishChainConfigError } from './helpers/verifyPublishChain'
 export {
   EAS_CHAIN_DEPLOYMENTS,
   getEasChainDeployment,

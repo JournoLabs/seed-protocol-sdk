@@ -78,7 +78,7 @@ export const EAS_CHAIN_DEPLOYMENTS: Readonly<Record<number, EasChainDeployment>>
     name: 'Arbitrum Sepolia',
     easContractAddress: '0x2521021fc8BF070473E1e1801D3c7B4aB701E1dE',
     schemaRegistryAddress: '0x45CB6Fa0870a8Af06796Ac15915619a0f22cd475',
-    ...easscan('arbitrum-sepolia'),
+    // No public easscan indexer found for this chain; set SeedConfig.eas.indexerUrl.
     testnet: true,
   },
   137: {

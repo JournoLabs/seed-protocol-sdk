@@ -2,13 +2,14 @@ import { describe, it, expect, afterAll, beforeEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
-import { configureEasReadChain, getEasReadChainId, resetEasReadChain } from '@seedprotocol/eas'
+import { configureEasReadChain, expectEasReadChain, getEasReadChainId, resetEasReadChain } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { appState, seeds } from '@/seedSchema'
 import {
   assertLocalDbChain,
   EAS_CHAIN_ID_APP_STATE_KEY,
   loadLocalDbChain,
+  waitForEasReadChain,
 } from '@/helpers/localDbChain'
 
 // Own in-memory DB: the shared client harness reuses a DB whose file a previous test file
@@ -100,5 +101,23 @@ testDescribe('local DB chain', () => {
   it('init leaves an empty DB unrecorded when no chain is configured', async () => {
     await loadLocalDbChain()
     expect(await recordedChainId()).toBeUndefined()
+  })
+
+  it('sync waits for initPublish when publish is loaded, and warns if it never comes', async () => {
+    expectEasReadChain('publish')
+    const waiting = waitForEasReadChain(5_000)
+    configureEasReadChain('publish', { chainId: 8453 })
+    await waiting
+    expect(getEasReadChainId()).toBe(8453)
+
+    resetEasReadChain()
+    expectEasReadChain('publish')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await waitForEasReadChain(10)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Set SeedConfig.eas.chainId'))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

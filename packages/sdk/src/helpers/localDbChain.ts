@@ -4,6 +4,7 @@ import {
   configureEasReadChain,
   getEasReadChainId,
   isEasReadChainConfigured,
+  whenEasReadChainSettled,
 } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { appState, seeds } from '@/seedSchema'
@@ -61,6 +62,20 @@ async function resolveLocalDbChainId(appDb: AppDb): Promise<number | undefined> 
     return LEGACY_CHAIN_ID
   }
   return undefined
+}
+
+/** How long EAS sync waits for `initPublish` to set the chain before using the current one. */
+export const EAS_CHAIN_SETTLE_TIMEOUT_MS = 30_000
+
+/**
+ * Wait until the read chain is known before syncing. Only waits when `@seedprotocol/publish`
+ * is loaded but `initPublish` has not run, and no chain is configured or recorded locally.
+ */
+export async function waitForEasReadChain(timeoutMs = EAS_CHAIN_SETTLE_TIMEOUT_MS): Promise<void> {
+  if (await whenEasReadChainSettled(timeoutMs)) return
+  console.warn(
+    `[Seed Protocol] EAS sync waited ${Math.round(timeoutMs / 1000)}s for initPublish to set the chain and is continuing on chain ${getEasReadChainId()}. Set SeedConfig.eas.chainId to skip the wait.`,
+  )
 }
 
 /**

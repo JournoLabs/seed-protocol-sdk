@@ -9,6 +9,7 @@ import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
 import {
   configureEasReadChain,
+  expectEasReadChain,
   resolveEasChainDeployment,
   type EasChainDeployment,
 } from '@seedprotocol/eas'
@@ -16,6 +17,10 @@ import { MANAGED_ACCOUNT_FACTORY_ADDRESSES } from './helpers/constants'
 import { ethers } from 'ethers'
 import { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 import { getPublishWallet } from './helpers/publishWalletRegistry'
+
+// initPublish will set the chain. Until then the SDK's EAS sync waits instead of reading the
+// default chain into a local DB that publish is about to point elsewhere.
+expectEasReadChain('publish')
 
 /** Serialized upload item for Arweave signing (input to callback or used internally with JWK) */
 export interface SerializedPublishUpload {

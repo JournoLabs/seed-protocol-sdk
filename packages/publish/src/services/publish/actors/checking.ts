@@ -8,6 +8,7 @@ import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { assertLocalDbChain, isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
+import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
 
 const activePublishProcesses = new Set<string>()
 
@@ -42,6 +43,8 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
       try {
         // The local DB must hold data from the chain we are about to attest on.
         await assertLocalDbChain()
+        // RPC chain id and contract deployments; cached after the first success.
+        await verifyPublishChain()
 
         const publishWallet = wallet ?? account
         if (publishWallet) {

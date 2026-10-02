@@ -24,6 +24,9 @@ export interface EasReadChainSetting {
 }
 
 const settings: Record<EasReadChainSource, EasReadChainSetting> = { sdk: {}, publish: {}, localDb: {} }
+/** Sources that have announced they will configure a chain (e.g. publish, at import). */
+const expectedSources = new Set<EasReadChainSource>()
+const settledListeners = new Set<() => void>()
 let warnedEnvOverride = false
 
 function readEnvEndpoint(): string | undefined {
@@ -67,6 +70,48 @@ export function configureEasReadChain(source: EasReadChainSource, setting: EasRe
     }
   }
   settings[source] = { ...setting }
+  if (isEasReadChainSettled()) {
+    for (const listener of [...settledListeners]) listener()
+  }
+}
+
+/**
+ * Announce that `source` will configure the chain later (e.g. `@seedprotocol/publish` calls
+ * this when loaded, before `initPublish` runs). Until it does, {@link isEasReadChainSettled}
+ * is false unless a chain is otherwise known, so EAS sync waits instead of reading the default.
+ */
+export function expectEasReadChain(source: EasReadChainSource): void {
+  expectedSources.add(source)
+}
+
+/**
+ * True when reads can start: a chain was set explicitly (SDK config, publish or `EAS_CHAIN_ID`),
+ * the local DB recorded one, or no source that announced itself is still pending.
+ */
+export function isEasReadChainSettled(): boolean {
+  if (isEasReadChainConfigured() || settings.localDb.chainId !== undefined) return true
+  for (const source of expectedSources) {
+    if (settings[source].chainId === undefined) return false
+  }
+  return true
+}
+
+/**
+ * Resolves once {@link isEasReadChainSettled} is true. Resolves `false` after `timeoutMs`
+ * when it never settles (the caller then proceeds on the current chain).
+ */
+export function whenEasReadChainSettled(timeoutMs: number): Promise<boolean> {
+  if (isEasReadChainSettled()) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const done = (settled: boolean) => {
+      clearTimeout(timer)
+      settledListeners.delete(onSettled)
+      resolve(settled)
+    }
+    const onSettled = () => done(true)
+    const timer = setTimeout(() => done(false), timeoutMs)
+    settledListeners.add(onSettled)
+  })
 }
 
 function chainMismatchMessage(ids: Partial<Record<EasReadChainSource, number>>): string {
@@ -94,6 +139,8 @@ export function resetEasReadChain(): void {
   settings.sdk = {}
   settings.publish = {}
   settings.localDb = {}
+  expectedSources.clear()
+  settledListeners.clear()
   warnedEnvOverride = false
 }
 
