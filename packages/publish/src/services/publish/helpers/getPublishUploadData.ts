@@ -9,8 +9,11 @@ import {
   getCorrectId,
   getSegmentedItemProperties,
   htmlEmbeddedImageCoPublish,
+  isPublishedSeedRef,
   Item,
   ModelPropertyDataTypes,
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
 } from '@seedprotocol/sdk'
 import type { IItem, IItemProperty, TransactionTag } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
@@ -364,12 +367,21 @@ export const getPublishUploadData = async (
     const context = 'context' in snapshot ? snapshot.context : null
     if (!context) continue
 
-    const propertyValue = (context as { propertyValue?: string }).propertyValue
+    const propertyValue = (context as { propertyValue?: unknown }).propertyValue
     if (!propertyValue || relationProperty.uid) continue
 
-    const { localId: seedLocalId, uid: seedUid } = getCorrectId(propertyValue)
+    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(
+      normalizeRelationPropertyValue(propertyValue) ?? '',
+    )
+    if (!seedLocalId && !seedUid) {
+      throw new Error(
+        `Invalid relation value for ${relationProperty.propertyName}: expected local seed id or 0x uid`,
+      )
+    }
     const relatedItem = await Item.find({ seedLocalId, seedUid } as Parameters<typeof Item.find>[0])
     if (!relatedItem) {
+      // Related seed referenced by attested uid with no local copy: already published, nothing to upload.
+      if (isPublishedSeedRef(propertyValue)) continue
       throw new Error(`No relatedItem found for ${relationProperty.propertyName}`)
     }
     uploads = await getPublishUploadData(relatedItem, uploads, relationProperty, options)

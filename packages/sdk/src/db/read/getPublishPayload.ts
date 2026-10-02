@@ -24,6 +24,7 @@ import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import {
   isStorageSeedRef,
+  isPublishedSeedRef,
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
@@ -782,7 +783,8 @@ const processRelationOrImageProperty = async (
 
   // When related item not found (e.g. different DB, not yet created)
   if (!relatedItem) {
-    if (isRequired) {
+    // An attested uid with no local copy is already published; the parent attests the uid as-is.
+    if (isRequired && !isPublishedSeedRef(normalizedRef)) {
       addValidationError(
         ctx,
         `No related item found for required relation: ${relationOrImageProperty.propertyName}. ` +
@@ -1148,9 +1150,12 @@ const processListProperty = async (
     })
 
     if (!relatedItem) {
-      console.error(
-        `No related item found for list property: ${listProperty.propertyName}`,
-      )
+      // An attested uid with no local copy is already published; the list attests the uid as-is.
+      if (!isPublishedSeedRef(idStr)) {
+        console.error(
+          `No related item found for list property: ${listProperty.propertyName}`,
+        )
+      }
       continue
     }
 

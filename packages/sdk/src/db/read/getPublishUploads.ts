@@ -1,5 +1,6 @@
 import { BaseFileManager } from '@/helpers'
 import {
+  isPublishedSeedRef,
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
@@ -386,6 +387,8 @@ export async function itemHasPublishUploadCandidates(
     })
 
     if (!relatedItem) {
+      // Related seed referenced by attested uid with no local copy: already published, nothing to upload.
+      if (isPublishedSeedRef(propertyValue)) continue
       throw new Error(
         `No relatedItem found for ${relationProperty.propertyName}`,
       )
@@ -587,6 +590,8 @@ export const getPublishUploads = async (
     })
 
     if (!relatedItem) {
+      // Related seed referenced by attested uid with no local copy: already published, nothing to upload.
+      if (isPublishedSeedRef(propertyValue)) continue
       throw new Error(
         `No relatedItem found for ${relationProperty.propertyName}`,
       )

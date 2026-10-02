@@ -30,6 +30,11 @@ export { models, versions, seeds, metadata, appState, config, modelUids } from '
 
 // Helper exports
 export { getCorrectId } from '../helpers'
+export {
+  isPublishedSeedRef,
+  normalizeRelationPropertyValue,
+  resolveSeedIdsFromRefString,
+} from '../helpers/relationSeedRef'
 
 // Import exports
 export * from '../imports'
