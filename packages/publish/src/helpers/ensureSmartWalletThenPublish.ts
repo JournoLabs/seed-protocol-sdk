@@ -1,6 +1,5 @@
 import type { Item } from '@seedprotocol/sdk'
 import type { Account } from 'thirdweb/wallets'
-import { optimismSepolia } from 'thirdweb/chains'
 import {
   getConnectedManagedAccountAddress,
   getConnectedModularAccount,
@@ -13,6 +12,8 @@ import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
+import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishChainName } from './chainConfig'
 
 export type EnsureSmartWalletResult =
   | { outcome: 'started' }
@@ -23,8 +24,8 @@ export type EnsureSmartWalletResult =
 const MSG_NO_ACCOUNT_MODULAR =
   'A connected wallet is required for publishing with the modular executor. Connect your wallet and try again.'
 
-const MSG_MANAGED_UNAVAILABLE =
-  'Could not connect the managed publishing account on Optimism Sepolia. Reconnect with the same sign-in method and try again.'
+const MSG_MANAGED_UNAVAILABLE = () =>
+  `Could not connect the managed publishing account on ${getPublishChainName()}. Reconnect with the same sign-in method and try again.`
 
 function coerceDataItemSigner(
   signer: CreatePublishOptions['dataItemSigner'] | Account | SeedSigner | PublishWallet | undefined,
@@ -63,12 +64,12 @@ export async function ensureSmartWalletThenPublish(
 
     let managedAddress: string
     try {
-      managedAddress = await getConnectedManagedAccountAddress(optimismSepolia)
+      managedAddress = await getConnectedManagedAccountAddress(getPublishThirdwebChain())
     } catch (cause) {
       return {
         outcome: 'managed_not_ready',
         error: new ManagedAccountPublishError(
-          MSG_MANAGED_UNAVAILABLE,
+          MSG_MANAGED_UNAVAILABLE(),
           'MANAGED_ACCOUNT_UNAVAILABLE',
           undefined,
           cause,

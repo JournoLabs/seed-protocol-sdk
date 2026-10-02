@@ -21,11 +21,12 @@ import { fromThirdwebAccount } from "../helpers/adapters/thirdwebAccount"
 import { setPublishWallet, clearPublishWallet } from "../helpers/publishWalletRegistry"
 import { usePublishConfig } from "./PublishConfigContext"
 import { getPublishConfig } from "../config"
-import { optimismSepolia } from "thirdweb/chains"
 import type { Account, Wallet } from "thirdweb/wallets"
 import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
 import { PublishManager } from "../services/publishManager"
+import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
+import { DEFAULT_PUBLISH_CHAIN } from '../helpers/defaultChain'
 
 /** Session flag so we do not force autoConnect after an explicit UI disconnect (survives reload). */
 const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
@@ -65,7 +66,7 @@ async function ensureExecutorModulesForConnect(
     try {
       syncPublishInAppAuthToken()
       const mw = getManagedAccountWallet()
-      await mw.autoConnect({ client: getClient(), chain: optimismSepolia })
+      await mw.autoConnect({ client: getClient(), chain: getPublishThirdwebChain(config.chain ?? DEFAULT_PUBLISH_CHAIN) })
       const ma = mw.getAccount()
       if (!ma) {
         return
@@ -86,6 +87,7 @@ async function ensureExecutorModulesForConnect(
 
 const ConnectButton: FC = () => {
   const config = usePublishConfig()
+  const thirdwebChain = getPublishThirdwebChain(config.chain ?? DEFAULT_PUBLISH_CHAIN)
   const wallet = useActiveWallet()
   const activeAccount = useActiveAccount()
   const connectionStatus = useActiveWalletConnectionStatus()
@@ -131,11 +133,11 @@ const ConnectButton: FC = () => {
     reloadAutoConnectRetried.current = true
 
     void (config.useModularExecutor ? getModularAccountWallet() : getManagedAccountWallet())
-      .autoConnect({ client: getClient(), chain: optimismSepolia })
+      .autoConnect({ client: getClient(), chain: thirdwebChain })
       .catch(() => {
         /* no session or iframe not ready; Connect UI can still sign in */
       })
-  }, [connectionStatus, isAutoConnecting, config.useModularExecutor])
+  }, [connectionStatus, isAutoConnecting, config.useModularExecutor, thirdwebChain])
 
   const syncActiveWalletToSeed = useCallback(
     async (activeWallet: Wallet) => {
@@ -153,7 +155,7 @@ const ConnectButton: FC = () => {
           activeWallet.getAdminAccount?.()?.address ?? account.address
         const tryManaged = async () => {
           try {
-            return await getConnectedManagedAccountAddress(optimismSepolia)
+            return await getConnectedManagedAccountAddress(thirdwebChain)
           } catch {
             try {
               return await getSmartWalletAddressForAdmin(adminAddress)
@@ -259,8 +261,8 @@ const ConnectButton: FC = () => {
       client={getClient()}
       wallets={getWalletsForConnectButton()}
       autoConnect={true}
-      chain={optimismSepolia}
-      chains={[ optimismSepolia, ]}
+      chain={thirdwebChain}
+      chains={[ thirdwebChain, ]}
       onConnect={handleConnect}
       onDisconnect={handleDisconnect}
       theme={darkTheme({

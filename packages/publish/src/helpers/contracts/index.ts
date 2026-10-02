@@ -14,11 +14,7 @@ import { easAbi } from '../abi/eas'
 import { schemaRegistryAbi } from '../abi/schemaRegistry'
 import type { SeedTxRequest } from '../seedSigner'
 import { getPublishPublicClient } from '../chainClient'
-import {
-  SCHEMA_REGISTRY_ADDRESS,
-  THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
-} from '../constants'
-import { getPublishConfig } from '../../config'
+import { getPublishConfig, requireManagedAccountFactoryAddress } from '../../config'
 
 export type MultiPublishRequest = {
   localId: string
@@ -190,10 +186,8 @@ export async function readFactoryGetAddress(
   adminSigner: Address,
   data: Hex = '0x',
 ): Promise<Address> {
-  const { thirdwebAccountFactoryAddress } = getPublishConfig()
   return getPublishPublicClient().readContract({
-    address: (thirdwebAccountFactoryAddress ||
-      THIRDWEB_ACCOUNT_FACTORY_ADDRESS) as Address,
+    address: requireManagedAccountFactoryAddress() as Address,
     abi: managedAccountFactoryAbi,
     functionName: 'getAddress',
     args: [adminSigner, data],
@@ -204,10 +198,8 @@ export function encodeCreateAccount(
   admin: Address,
   data: Hex = '0x',
 ): SeedTxRequest {
-  const { thirdwebAccountFactoryAddress } = getPublishConfig()
   return {
-    to: (thirdwebAccountFactoryAddress ||
-      THIRDWEB_ACCOUNT_FACTORY_ADDRESS) as Address,
+    to: requireManagedAccountFactoryAddress() as Address,
     data: encodeFunctionData({
       abi: managedAccountFactoryAbi,
       functionName: 'createAccount',
@@ -317,7 +309,7 @@ const ZERO_BYTES32 = '0x' + '0'.repeat(64)
 
 export async function readSchemaRecord(uid: string): Promise<SchemaRecord | null> {
   const result = await getPublishPublicClient().readContract({
-    address: SCHEMA_REGISTRY_ADDRESS as Address,
+    address: getPublishConfig().schemaRegistryAddress as Address,
     abi: schemaRegistryAbi,
     functionName: 'getSchema',
     args: [uid as Hex],
@@ -337,7 +329,7 @@ export function encodeRegisterSchema(params: {
   revocable: boolean
 }): SeedTxRequest {
   return {
-    to: SCHEMA_REGISTRY_ADDRESS as Address,
+    to: getPublishConfig().schemaRegistryAddress as Address,
     data: encodeFunctionData({
       abi: schemaRegistryAbi,
       functionName: 'register',

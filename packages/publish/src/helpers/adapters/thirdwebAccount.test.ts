@@ -16,6 +16,7 @@ mock.module('thirdweb', () => ({
 
 mock.module('thirdweb/chains', () => ({
   optimismSepolia: { id: 11155420, name: 'OP Sepolia' },
+  defineChain: (chain: unknown) => chain,
 }))
 
 const { setConfigRef } = await import('../../config')

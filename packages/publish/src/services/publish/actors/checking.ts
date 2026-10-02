@@ -7,6 +7,7 @@ import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
+import { getPublishChainName } from '../../../helpers/chainConfig'
 
 const activePublishProcesses = new Set<string>()
 
@@ -74,7 +75,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
           sendBack({
             type: 'checkingFailed',
             error: new Error(
-              'Could not verify whether the publisher is a deployed contract on Optimism Sepolia. Check your RPC connection and retry.',
+              `Could not verify whether the publisher is a deployed contract on ${getPublishChainName()}. Check your RPC connection and retry.`,
               { cause },
             ),
           })

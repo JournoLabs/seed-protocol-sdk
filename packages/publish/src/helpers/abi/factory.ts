@@ -1,4 +1,4 @@
-/** Thirdweb ManagedAccount factory (0x76f47…) on Optimism Sepolia. */
+/** Thirdweb ManagedAccount factory ABI (see `MANAGED_ACCOUNT_FACTORY_ADDRESSES` for deployments). */
 export const managedAccountFactoryAbi = [
   {
     type: 'function',

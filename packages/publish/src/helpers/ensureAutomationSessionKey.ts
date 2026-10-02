@@ -4,7 +4,6 @@ import {
   removeSessionKey,
   shouldUpdateSessionKey,
 } from 'thirdweb/extensions/erc4337'
-import { optimismSepolia } from 'thirdweb/chains'
 import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
 import { isContractDeployed, waitForPublishReceipt } from './chainClient'
@@ -14,21 +13,23 @@ import {
   toThirdwebSessionKeyPermissions,
 } from './automationSessionKeyPermissions'
 import { getClient, getManagedAccountWallet } from './thirdweb'
+import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishChainName } from './chainConfig'
 
-const MSG_UNAVAILABLE =
-  'Could not connect the managed publishing account to authorize an automation session key on Optimism Sepolia. Reconnect and try again.'
-const MSG_ACTIVATION_FAILED =
-  'Could not authorize the automation session key on your publishing account on Optimism Sepolia.'
-const MSG_REMOVAL_FAILED =
-  'Could not remove the automation session key from your publishing account on Optimism Sepolia.'
+const MSG_UNAVAILABLE = () =>
+  `Could not connect the managed publishing account to authorize an automation session key on ${getPublishChainName()}. Reconnect and try again.`
+const MSG_ACTIVATION_FAILED = () =>
+  `Could not authorize the automation session key on your publishing account on ${getPublishChainName()}.`
+const MSG_REMOVAL_FAILED = () =>
+  `Could not remove the automation session key from your publishing account on ${getPublishChainName()}.`
 
 async function getManagedAccountForSessionKeyAdmin(managedAddress: string) {
   const managedWallet = getManagedAccountWallet()
-  await managedWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
   const managedAccount = managedWallet.getAccount()
   if (!managedAccount) {
     throw new ManagedAccountPublishError(
-      MSG_UNAVAILABLE,
+      MSG_UNAVAILABLE(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
     )
@@ -51,7 +52,7 @@ export async function ensureAutomationSessionKey(params: {
 
   const accountContract = getContract({
     client: getClient(),
-    chain: optimismSepolia,
+    chain: getPublishThirdwebChain(),
     address: managedAddress,
   })
   const permissions = toThirdwebSessionKeyPermissions(
@@ -67,7 +68,7 @@ export async function ensureAutomationSessionKey(params: {
     })
   } catch (cause) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
       cause,
@@ -86,7 +87,7 @@ export async function ensureAutomationSessionKey(params: {
       await waitForPublishReceipt(result.transactionHash as `0x${string}`)
     } catch (cause) {
       throw new ManagedAccountPublishError(
-        MSG_ACTIVATION_FAILED,
+        MSG_ACTIVATION_FAILED(),
         'MODULAR_SIGNER_ACTIVATION_FAILED',
         managedAddress,
         cause,
@@ -97,7 +98,7 @@ export async function ensureAutomationSessionKey(params: {
   const active = await isAutomationSessionActive(managedAddress, sessionKeyAddress)
   if (!active) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
     )
@@ -116,7 +117,7 @@ export async function removeAutomationSessionKey(params: {
 
   const accountContract = getContract({
     client: getClient(),
-    chain: optimismSepolia,
+    chain: getPublishThirdwebChain(),
     address: managedAddress,
   })
 
@@ -130,7 +131,7 @@ export async function removeAutomationSessionKey(params: {
     await waitForPublishReceipt(result.transactionHash as `0x${string}`)
   } catch (cause) {
     throw new ManagedAccountPublishError(
-      MSG_REMOVAL_FAILED,
+      MSG_REMOVAL_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
       cause,
@@ -158,7 +159,7 @@ export async function isAutomationSessionActive(
     )
   } catch (cause) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
       cause,

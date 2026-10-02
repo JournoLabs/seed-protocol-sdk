@@ -1,11 +1,11 @@
 import type { Account } from 'thirdweb/wallets'
-import { optimismSepolia } from 'thirdweb/chains'
 import { getPublishConfig } from '../config'
 import { isManagedAccountPublishError } from '../errors'
 import { ensureEip7702ModularAccountReady } from './ensureEip7702ModularAccountReady'
 import { ensureManagedAccountEasConfigured } from './ensureManagedAccountEasConfigured'
 import { ensureManagedSignerSessionKey } from './ensureManagedSignerSessionKey'
 import { getClient, getModularAccountWallet } from './thirdweb'
+import { getPublishThirdwebChain } from './thirdwebChain'
 
 /**
  * One-time modular publish bootstrap before `multiPublish`:
@@ -13,7 +13,7 @@ import { getClient, getModularAccountWallet } from './thirdweb'
  */
 export async function ensureModularPublishBootstrap(managedAddress: string): Promise<Account> {
   const modularAccountWallet = getModularAccountWallet()
-  await modularAccountWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+  await modularAccountWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
   const modularAccount = modularAccountWallet.getAccount()
   if (!modularAccount) {
     throw new Error('Failed to get modular account')

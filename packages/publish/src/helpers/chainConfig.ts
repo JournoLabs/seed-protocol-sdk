@@ -29,3 +29,8 @@ export function getPublishRpcUrl(): string {
     '@seedprotocol/publish: rpcUrl is required when thirdwebClientId is not set. A thirdwebSecretKey authenticates Thirdweb RPC but does not build this URL. Pass rpcUrl or thirdwebClientId in initPublish / PublishProvider config.',
   )
 }
+
+/** Display name of the publish chain for user-facing messages. */
+export function getPublishChainName(): string {
+  return getPublishViemChain().name
+}

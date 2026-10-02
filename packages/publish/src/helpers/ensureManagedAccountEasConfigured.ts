@@ -9,9 +9,10 @@ import {
   type PublishWallet,
   type SeedTxSender,
 } from './seedSigner'
+import { getPublishChainName } from './chainConfig'
 
-const MSG_SET_EAS =
-  'Could not verify or set the EAS contract address on your publishing account on Optimism Sepolia.'
+const MSG_SET_EAS = () =>
+  `Could not verify or set the EAS contract address on your publishing account on ${getPublishChainName()}.`
 const MSG_EAS_MISMATCH =
   'ManagedAccount EAS pointer does not match publish config. Configure EAS with the user’s ManagedAccount wallet before automation publish (session keys cannot call setEas).'
 
@@ -37,7 +38,7 @@ async function readCurrentEas(managedAddress: string): Promise<string> {
     const raw = await readGetEas(managedAddress as Address)
     return normAddr(typeof raw === 'string' ? raw : String(raw))
   } catch (cause) {
-    throw new ManagedAccountPublishError(MSG_SET_EAS, 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
+    throw new ManagedAccountPublishError(MSG_SET_EAS(), 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
   }
 }
 
@@ -82,6 +83,6 @@ export async function ensureManagedAccountEasConfigured(
     const result = await txSender.sendTransaction(tx)
     await waitForPublishReceipt(result.transactionHash)
   } catch (cause) {
-    throw new ManagedAccountPublishError(MSG_SET_EAS, 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
+    throw new ManagedAccountPublishError(MSG_SET_EAS(), 'MANAGED_ACCOUNT_SET_EAS_FAILED', managedAddress, cause)
   }
 }

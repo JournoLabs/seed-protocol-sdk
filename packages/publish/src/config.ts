@@ -7,10 +7,8 @@ import {
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
-import {
-  THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
-  EAS_CONTRACT_ADDRESS,
-} from './helpers/constants'
+import { resolveEasChainDeployment, type EasChainDeployment } from '@seedprotocol/eas'
+import { MANAGED_ACCOUNT_FACTORY_ADDRESSES } from './helpers/constants'
 import { ethers } from 'ethers'
 import { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 import { getPublishWallet } from './helpers/publishWalletRegistry'
@@ -54,9 +52,21 @@ export interface PublishConfig {
    */
   thirdwebSecretKey?: string
   /**
-   * Viem chain for reads and adapters. Defaults to Optimism Sepolia.
+   * Viem chain for reads, writes and wallet connection. Defaults to Optimism Sepolia.
+   * Any EVM chain with EAS deployed works. Chains in `EAS_CHAIN_DEPLOYMENTS` (`@seedprotocol/eas`)
+   * resolve contract addresses automatically; others need {@link easContractAddress} and
+   * {@link schemaRegistryAddress}.
    */
   chain?: Chain
+  /** EAS contract on {@link chain}. Defaults to the known deployment for `chain.id`. */
+  easContractAddress?: string
+  /** EAS SchemaRegistry on {@link chain}. Defaults to the known deployment for `chain.id`. */
+  schemaRegistryAddress?: string
+  /**
+   * Thirdweb ManagedAccount factory on {@link chain}. Only used by managed / modular account flows.
+   * Built in for Optimism Sepolia; required on other chains when those flows are enabled.
+   */
+  managedAccountFactoryAddress?: string
   /**
    * JSON-RPC URL for the publish chain. Required when `thirdwebClientId` is unset.
    * Prefer a public chain RPC from Node. A domain-locked client id in the default
@@ -121,14 +131,14 @@ export interface PublishConfig {
   useModularExecutor?: boolean
   /**
    * When true (and `useModularExecutor`), attempts to deploy / bootstrap the modular in-app wallet’s
-   * EIP-7702 smart account on Optimism Sepolia via Thirdweb’s `deploySmartAccount` when bytecode is still empty.
+   * EIP-7702 smart account on the publish chain via Thirdweb’s `deploySmartAccount` when bytecode is still empty.
    * When **undefined** and `useModularExecutor` is true, defaults to **true**. Set explicitly to **false** to surface
    * an error instead of auto-deploying.
    */
   autoDeployEip7702ModularAccount?: boolean
   /**
    * When true (and `useModularExecutor`), attempts to deploy the ManagedAccount via the factory
-   * if it is not yet deployed on Optimism Sepolia. Default: false (surface `managed_not_ready` instead).
+   * if it is not yet deployed on the publish chain. Default: false (surface `managed_not_ready` instead).
    */
   autoDeployManagedAccount?: boolean
   /**
@@ -253,6 +263,8 @@ export function getConfigRef(): PublishConfig | null {
  * For React apps, you can alternatively pass config to PublishProvider.
  */
 export function initPublish(c: PublishConfig): void {
+  // Fail fast on chains without a known EAS deployment and no address overrides.
+  resolvePublishEasChain(c)
   setConfigRef(c)
   setGetPublisherForNewSeeds(async () => {
     const wallet = getPublishWallet()
@@ -276,13 +288,20 @@ export function initPublish(c: PublishConfig): void {
 export const configurePublish = initPublish
 
 export interface ResolvedPublishConfig extends PublishConfig {
-  thirdwebAccountFactoryAddress: string
+  /**
+   * ManagedAccount factory on the publish chain, or undefined when none is known for this chain.
+   * Use {@link requireManagedAccountFactoryAddress} where a factory is mandatory.
+   */
+  thirdwebAccountFactoryAddress: string | undefined
   uploadApiBaseUrl: string
   /** Resolved verification origin (defaults to uploadApiBaseUrl). */
   arweaveUploadVerificationBaseUrl: string
   /** Resolved GraphQL endpoint for L1 tx resolution (defaults to DEFAULT_ARWEAVE_GRAPHQL_URL). */
   arweaveGraphqlUrl: string
   easContractAddress: string
+  schemaRegistryAddress: string
+  /** EAS deployment for the publish chain (addresses, indexer and explorer URLs). */
+  easChain: EasChainDeployment
   useIntegerLocalIds: boolean
   useDirectEas: boolean
   modularAccountModuleData: string
@@ -294,7 +313,7 @@ export interface ResolvedPublishConfig extends PublishConfig {
    * Resolved: when `useModularExecutor` is true, defaults to true unless explicitly false.
    */
   autoDeployEip7702ModularAccount: boolean
-  /** Resolved viem chain (defaults to Optimism Sepolia). */
+  /** Resolved viem chain (defaults to Optimism Sepolia; see `DEFAULT_PUBLISH_CHAIN`). */
   chain: Chain
   /** Resolved account mode for non-Thirdweb senders. */
   accountMode: PublishAccountMode
@@ -320,12 +339,16 @@ export function getPublishConfig(): ResolvedPublishConfig {
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL
   const useModularExecutor = config.useModularExecutor ?? false
   const chain = config.chain ?? DEFAULT_PUBLISH_CHAIN
+  const easChain = resolvePublishEasChain(config)
   const accountMode: PublishAccountMode =
     config.accountMode ?? (config.bundlerUrl ? 'eip7702' : 'eoa')
   return {
     ...config,
-    thirdwebAccountFactoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
-    easContractAddress: EAS_CONTRACT_ADDRESS,
+    thirdwebAccountFactoryAddress:
+      config.managedAccountFactoryAddress ?? MANAGED_ACCOUNT_FACTORY_ADDRESSES[chain.id],
+    easContractAddress: easChain.easContractAddress,
+    schemaRegistryAddress: easChain.schemaRegistryAddress,
+    easChain,
     useIntegerLocalIds: config.useIntegerLocalIds ?? false,
     useDirectEas: config.useDirectEas ?? false,
     modularAccountModuleData: config.modularAccountModuleData ?? '0x',
@@ -338,6 +361,37 @@ export function getPublishConfig(): ResolvedPublishConfig {
     chain,
     accountMode,
   }
+}
+
+/**
+ * EAS deployment for the configured chain, with {@link PublishConfig.easContractAddress} /
+ * {@link PublishConfig.schemaRegistryAddress} overrides applied.
+ */
+export function resolvePublishEasChain(config: PublishConfig): EasChainDeployment {
+  const chain = config.chain ?? DEFAULT_PUBLISH_CHAIN
+  try {
+    return resolveEasChainDeployment(chain.id, {
+      name: chain.name,
+      easContractAddress: config.easContractAddress as `0x${string}` | undefined,
+      schemaRegistryAddress: config.schemaRegistryAddress as `0x${string}` | undefined,
+    })
+  } catch (error) {
+    throw new Error(
+      `@seedprotocol/publish: ${chain.name} (chain ${chain.id}) has no known EAS deployment. Pass easContractAddress and schemaRegistryAddress in initPublish / PublishProvider config.`,
+      { cause: error },
+    )
+  }
+}
+
+/** ManagedAccount factory for the publish chain; throws when none is configured. */
+export function requireManagedAccountFactoryAddress(): string {
+  const { thirdwebAccountFactoryAddress, chain } = getPublishConfig()
+  if (!thirdwebAccountFactoryAddress) {
+    throw new Error(
+      `@seedprotocol/publish: no ManagedAccount factory is known for ${chain.name} (chain ${chain.id}). Pass managedAccountFactoryAddress in publish config, or use the EOA / direct EAS path.`,
+    )
+  }
+  return thirdwebAccountFactoryAddress
 }
 
 /** @internal Exported for unit tests. */

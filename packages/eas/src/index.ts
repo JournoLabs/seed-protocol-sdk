@@ -1,4 +1,5 @@
 export * from './api.js'
+export * from './chains.js'
 export * from './constants.js'
 export * from './domainOwnership.js'
 export * from './publishAuthorization.js'

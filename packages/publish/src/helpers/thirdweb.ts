@@ -5,17 +5,16 @@ import { useActiveAccount } from 'thirdweb/react'
 import { ThirdwebContract, } from 'thirdweb/contract'
 import { useEffect, useRef, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
-import { optimismSepolia, } from 'thirdweb/chains'
 import type { Address, Hex } from 'viem'
 import debug from 'debug'
-import { getPublishConfig } from '../config'
+import { getPublishConfig, requireManagedAccountFactoryAddress } from '../config'
 import {
   isContractDeployed,
   pollSmartWalletDeployed as pollDeployed,
 } from './chainClient'
 import { encodeCreateAccount, readFactoryGetAddress } from './contracts'
 import type { PublishWallet } from './seedSigner'
-import { THIRDWEB_ACCOUNT_FACTORY_ADDRESS } from './constants'
+import { getPublishThirdwebChain } from './thirdwebChain'
 
 const logger = debug('permaPress:helpers:thirdweb')
 
@@ -99,7 +98,7 @@ export function syncPublishInAppAuthToken(): {
   }
 }
 
-async function connectManagedAccountWallet(chain: Chain = optimismSepolia) {
+async function connectManagedAccountWallet(chain: Chain = getPublishThirdwebChain()) {
   syncPublishInAppAuthToken()
   const managedAccountWallet = getManagedAccountWallet()
   await managedAccountWallet.autoConnect({ client: getClient(), chain })
@@ -158,7 +157,7 @@ export const useActiveSmartWalletContract = () => {
 
     setContract(getContract({
       client: getClient(),
-      chain   : optimismSepolia,
+      chain   : getPublishThirdwebChain(),
       address : account.address,
     },),)
 
@@ -230,12 +229,12 @@ export const ExternalWalletsForDeploy = [
 export const deploySmartWalletContract = async ( localAccount: Account, ) => {
   const accountContract = getContract({
     client: getClient(),
-    chain   : optimismSepolia,
+    chain   : getPublishThirdwebChain(),
     address : localAccount.address,
   },)
   const result = await deploySmartAccount({
     smartAccount    : localAccount,
-    chain           : optimismSepolia,
+    chain           : getPublishThirdwebChain(),
     client          : getClient(),
     accountContract,
   },)
@@ -272,12 +271,12 @@ export const appMetadata = {
  * Connects the managed account wallet (EIP4337 in-app wallet) and returns its address.
  * Use this when you need the connected managed account address for publish flows.
  *
- * @param chain - The chain to connect to (defaults to optimismSepolia)
+ * @param chain - The chain to connect to (defaults to the publish chain)
  * @returns The connected managed account's address
  * @throws Error if the managed account cannot be connected or retrieved
  */
 export async function getConnectedManagedAccountAddress(
-  chain: Chain = optimismSepolia
+  chain: Chain = getPublishThirdwebChain()
 ): Promise<string> {
   const managedAccountWallet = await connectManagedAccountWallet(chain)
   const managedAccount = managedAccountWallet.getAccount()
@@ -294,7 +293,7 @@ export async function getConnectedManagedAccountAddress(
 export async function getConnectedAccount(): Promise<Account | null> {
   try {
     const wallet = getModularAccountWallet()
-    await wallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+    await wallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
     const account = wallet.getAccount()
     return account ?? null
   } catch {
@@ -303,7 +302,7 @@ export async function getConnectedAccount(): Promise<Account | null> {
 }
 
 /**
- * Same as {@link getConnectedAccount}: the in-app modular wallet (EIP-7702) on Optimism Sepolia.
+ * Same as {@link getConnectedAccount}: the in-app modular wallet (EIP-7702) on the publish chain.
  * Prefer this name at modular publish entry points for clarity.
  */
 export async function getConnectedModularAccount(): Promise<Account | null> {
@@ -328,8 +327,8 @@ export const getManagedAccountWallet = () => {
     executionMode: {
       mode: 'EIP4337',
       smartAccount: {
-        chain: optimismSepolia,
-        factoryAddress: THIRDWEB_ACCOUNT_FACTORY_ADDRESS,
+        chain: getPublishThirdwebChain(),
+        factoryAddress: requireManagedAccountFactoryAddress(),
         gasless: true,
       },
     },

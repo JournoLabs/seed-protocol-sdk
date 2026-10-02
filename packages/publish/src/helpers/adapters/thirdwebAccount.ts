@@ -1,6 +1,5 @@
-import { prepareTransaction, sendTransaction, defineChain, type ThirdwebClient } from 'thirdweb'
+import { prepareTransaction, sendTransaction, type ThirdwebClient } from 'thirdweb'
 import type { Account } from 'thirdweb/wallets'
-import { optimismSepolia as thirdwebOptimismSepolia } from 'thirdweb/chains'
 import type { Address, Hex } from 'viem'
 import {
   brandSigner,
@@ -10,20 +9,7 @@ import {
   type PublishWallet,
   type SeedSigner,
 } from '../seedSigner'
-import { getPublishViemChain } from '../chainConfig'
-
-function resolveThirdwebChain() {
-  const viemChain = getPublishViemChain()
-  if (viemChain.id === thirdwebOptimismSepolia.id) {
-    return thirdwebOptimismSepolia
-  }
-  return defineChain({
-    id: viemChain.id,
-    name: viemChain.name,
-    nativeCurrency: viemChain.nativeCurrency,
-    rpc: viemChain.rpcUrls.default.http[0] ?? '',
-  })
-}
+import { getPublishThirdwebChain } from '../thirdwebChain'
 
 export type FromThirdwebAccountOptions = {
   /**
@@ -53,7 +39,7 @@ export function fromThirdwebAccount(
     address,
     sendTransaction: async (tx) => {
       const client = explicitClient ?? (await import('../publishThirdwebClient')).getClient()
-      const chain = resolveThirdwebChain()
+      const chain = getPublishThirdwebChain()
       const transaction = prepareTransaction({
         client,
         chain,

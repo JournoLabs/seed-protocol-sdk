@@ -1,16 +1,16 @@
 import { getContract, sendTransaction } from 'thirdweb'
 import { getInstalledModules, installModule } from 'thirdweb/modules'
-import { optimismSepolia } from 'thirdweb/chains'
 import type { Account } from 'thirdweb/wallets'
 import { encodeAbiParameters } from 'viem'
 import { waitForPublishReceipt, isContractDeployed } from './chainClient'
 import { getClient } from './thirdweb'
-import { EAS_CONTRACT_ADDRESS } from './constants'
-import type { PublishConfig } from '../config'
+import { getPublishConfig, type PublishConfig } from '../config'
 import { isRouterNonModularCoreAccountError, ManagedAccountPublishError } from '../errors'
+import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishChainName } from './chainConfig'
 
-const MODULE_INSTALL_MSG =
-  'The executor module could not be installed on your publishing account on Optimism Sepolia. Reconnect and try again, or contact support if this persists.'
+const MODULE_INSTALL_MSG = () =>
+  `The executor module could not be installed on your publishing account on ${getPublishChainName()}. Reconnect and try again, or contact support if this persists.`
 
 /**
  * Ensures `modularAccountModuleContract` is installed on `contractAddress` when that contract
@@ -26,7 +26,7 @@ export async function ensureExecutorModuleInstalled(
 
   const accountContract = getContract({
     client: getClient(),
-    chain: optimismSepolia,
+    chain: getPublishThirdwebChain(),
     address: contractAddress,
   })
 
@@ -46,7 +46,7 @@ export async function ensureExecutorModuleInstalled(
     const tx = installModule({
       contract: accountContract,
       moduleContract: modularAccountModuleContract,
-      data: encodeAbiParameters([{ type: 'address' }], [EAS_CONTRACT_ADDRESS]),
+      data: encodeAbiParameters([{ type: 'address' }], [getPublishConfig().easContractAddress as `0x${string}`]),
     })
     const result = await sendTransaction({ transaction: tx, account })
     await waitForPublishReceipt(result.transactionHash as `0x${string}`)
@@ -55,7 +55,7 @@ export async function ensureExecutorModuleInstalled(
       return
     }
     throw new ManagedAccountPublishError(
-      MODULE_INSTALL_MSG,
+      MODULE_INSTALL_MSG(),
       'EXECUTOR_MODULE_NOT_INSTALLED',
       contractAddress,
       cause,

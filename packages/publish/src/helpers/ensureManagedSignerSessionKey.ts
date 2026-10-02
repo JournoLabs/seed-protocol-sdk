@@ -1,17 +1,18 @@
 import { getContract, sendTransaction } from 'thirdweb'
 import { addSessionKey, shouldUpdateSessionKey } from 'thirdweb/extensions/erc4337'
-import { optimismSepolia } from 'thirdweb/chains'
 import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
 import { waitForPublishReceipt } from './chainClient'
 import { readIsActiveSigner } from './contracts'
 import { defaultApprovedTargetsForModularPublish } from './defaultApprovedTargetsForModularPublish'
 import { getClient, getManagedAccountWallet } from './thirdweb'
+import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishChainName } from './chainConfig'
 
-const MSG_UNAVAILABLE =
-  'Could not connect the managed publishing account to authorize the modular signer on Optimism Sepolia. Reconnect and try again.'
-const MSG_ACTIVATION_FAILED =
-  'Could not authorize the modular wallet as a session signer on your publishing account on Optimism Sepolia.'
+const MSG_UNAVAILABLE = () =>
+  `Could not connect the managed publishing account to authorize the modular signer on ${getPublishChainName()}. Reconnect and try again.`
+const MSG_ACTIVATION_FAILED = () =>
+  `Could not authorize the modular wallet as a session signer on your publishing account on ${getPublishChainName()}.`
 
 /**
  * Ensures the modular (EIP-7702) wallet is an active session signer on the ManagedAccount.
@@ -24,11 +25,11 @@ export async function ensureManagedSignerSessionKey(params: {
 }): Promise<void> {
   const { managedAddress, signerAddress } = params
   const managedWallet = getManagedAccountWallet()
-  await managedWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
   const managedAccount = managedWallet.getAccount()
   if (!managedAccount) {
     throw new ManagedAccountPublishError(
-      MSG_UNAVAILABLE,
+      MSG_UNAVAILABLE(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
     )
@@ -36,7 +37,7 @@ export async function ensureManagedSignerSessionKey(params: {
 
   const accountContract = getContract({
     client: getClient(),
-    chain: optimismSepolia,
+    chain: getPublishThirdwebChain(),
     address: managedAddress,
   })
   const permissions = {
@@ -53,7 +54,7 @@ export async function ensureManagedSignerSessionKey(params: {
     })
   } catch (cause) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
       cause,
@@ -72,7 +73,7 @@ export async function ensureManagedSignerSessionKey(params: {
       await waitForPublishReceipt(result.transactionHash as `0x${string}`)
     } catch (cause) {
       throw new ManagedAccountPublishError(
-        MSG_ACTIVATION_FAILED,
+        MSG_ACTIVATION_FAILED(),
         'MODULAR_SIGNER_ACTIVATION_FAILED',
         managedAddress,
         cause,
@@ -85,7 +86,7 @@ export async function ensureManagedSignerSessionKey(params: {
     active = await readIsActiveSigner(managedAddress as Address, signerAddress as Address)
   } catch (cause) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
       cause,
@@ -94,7 +95,7 @@ export async function ensureManagedSignerSessionKey(params: {
 
   if (!active) {
     throw new ManagedAccountPublishError(
-      MSG_ACTIVATION_FAILED,
+      MSG_ACTIVATION_FAILED(),
       'MODULAR_SIGNER_ACTIVATION_FAILED',
       managedAddress,
     )

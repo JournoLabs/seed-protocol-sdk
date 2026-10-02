@@ -1,7 +1,9 @@
 /**
  * Constants for the publish package.
  */
-/** EAS Schema Registry on Optimism Sepolia (chain 11155420) */
+/**
+ * @deprecated OP Stack predeploy; wrong on non-OP chains. Use `getPublishConfig().schemaRegistryAddress`.
+ */
 export const SCHEMA_REGISTRY_ADDRESS =
   '0x4200000000000000000000000000000000000020' as const
 
@@ -9,11 +11,23 @@ export const SCHEMA_REGISTRY_ADDRESS =
 export const EAS_SCHEMA_NAME_ATTESTATION_UID =
   '0x44d562ac1d7cd77e232978687fea027ace48f719cf1d58c7888e509663bb87fc' as const
 
-/** Thirdweb ManagedAccount factory on Optimism Sepolia (chain 11155420) */
+/**
+ * Thirdweb ManagedAccount factories Seed Protocol has deployed, keyed by chain id.
+ * Chains not listed here need `PublishConfig.managedAccountFactoryAddress` for managed / modular flows.
+ */
+export const MANAGED_ACCOUNT_FACTORY_ADDRESSES: Readonly<Record<number, `0x${string}`>> = {
+  11155420: '0x76f47d88bfaf670f5208911181fcdc0e160cb16d',
+}
+
+/**
+ * @deprecated Optimism Sepolia only. Use `getPublishConfig().thirdwebAccountFactoryAddress`.
+ */
 export const THIRDWEB_ACCOUNT_FACTORY_ADDRESS =
   '0x76f47d88bfaf670f5208911181fcdc0e160cb16d' as const
 
-/** EAS contract address on Optimism Sepolia (chain 11155420) */
+/**
+ * @deprecated OP Stack predeploy; wrong on non-OP chains. Use `getPublishConfig().easContractAddress`.
+ */
 export const EAS_CONTRACT_ADDRESS =
   '0x4200000000000000000000000000000000000021' as const
 

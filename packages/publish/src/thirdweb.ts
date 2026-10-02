@@ -26,6 +26,8 @@ export {
   useLocalWalletAccount,
 } from './helpers/thirdweb'
 
+export { getPublishThirdwebChain } from './helpers/thirdwebChain'
+
 export { default as ConnectButton } from './react/ConnectButton'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider.thirdweb'
 export type { PublishProviderProps } from './react/PublishProvider'

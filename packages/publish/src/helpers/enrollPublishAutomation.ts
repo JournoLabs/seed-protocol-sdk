@@ -1,7 +1,6 @@
 import type { Account } from 'thirdweb/wallets'
 import { getContract } from 'thirdweb'
 import { getInstalledModules } from 'thirdweb/modules'
-import { optimismSepolia } from 'thirdweb/chains'
 import type { PublishWallet } from './seedSigner'
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
@@ -18,6 +17,7 @@ import {
   type AttestPublishAuthorizationResult,
 } from '../services/publishAuthorization'
 import { getClient, getManagedAccountWallet } from './thirdweb'
+import { getPublishThirdwebChain } from './thirdwebChain'
 
 export type EnrollPublishAutomationParams = {
   managedAddress: string
@@ -48,7 +48,7 @@ export type RevokePublishAutomationParams = {
 
 async function connectManagedAccount(managedAddress: string): Promise<Account> {
   const managedWallet = getManagedAccountWallet()
-  await managedWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
   const account = managedWallet.getAccount()
   if (!account) {
     throw new ManagedAccountPublishError(
@@ -93,7 +93,7 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
   try {
     const accountContract = getContract({
       client: getClient(),
-      chain: optimismSepolia,
+      chain: getPublishThirdwebChain(),
       address: managedAddress,
     })
     const installed = await getInstalledModules({ contract: accountContract })

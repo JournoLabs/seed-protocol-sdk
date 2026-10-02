@@ -1,5 +1,4 @@
 import type { Account } from 'thirdweb/wallets'
-import { optimismSepolia } from 'thirdweb/chains'
 import { getGetAdditionalSyncAddresses } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import {
@@ -9,6 +8,7 @@ import {
   getManagedAccountWallet,
   getConnectedManagedAccountAddress,
 } from '~/helpers/thirdweb'
+import { getPublishThirdwebChain } from './thirdwebChain'
 
 /**
  * Resolves which account to use for revoking attestations.
@@ -47,14 +47,14 @@ export async function resolveRevokeAccount(params: {
 
     if (attesterLower === derivedLower || attesterIsExecutorModule) {
       const managedAddress = attesterIsExecutorModule
-        ? await getConnectedManagedAccountAddress(optimismSepolia).catch(() => derivedManagedAccount)
+        ? await getConnectedManagedAccountAddress(getPublishThirdwebChain()).catch(() => derivedManagedAccount)
         : derivedManagedAccount
       const deployed = await isSmartWalletDeployed(managedAddress)
       if (deployed) {
         const managedAccountWallet = getManagedAccountWallet()
         await managedAccountWallet.autoConnect({
           client: getClient(),
-          chain: optimismSepolia,
+          chain: getPublishThirdwebChain(),
         })
         const managedAccount = managedAccountWallet.getAccount()
         if (managedAccount) {

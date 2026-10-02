@@ -1,5 +1,4 @@
 import { getPublishConfig } from '../config'
-import { EAS_CONTRACT_ADDRESS } from './constants'
 
 function uniqueAddressesLower(addresses: string[]): `0x${string}`[] {
   const set = new Set<string>()
@@ -13,7 +12,7 @@ function uniqueAddressesLower(addresses: string[]): `0x${string}`[] {
 /** Allowlisted call targets for modular session signers: managed account, EAS, optional executor module. */
 export function defaultApprovedTargetsForModularPublish(managedAddress: string): `0x${string}`[] {
   const cfg = getPublishConfig()
-  const extra: string[] = [managedAddress, EAS_CONTRACT_ADDRESS]
+  const extra: string[] = [managedAddress, cfg.easContractAddress]
   if (cfg.modularAccountModuleContract?.trim()) {
     extra.push(cfg.modularAccountModuleContract.trim())
   }

@@ -105,6 +105,27 @@ function App() {
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
+### Choosing a chain
+
+Publishing works on any EVM chain with [EAS](https://github.com/ethereum-attestation-service/eas-contracts#deployments) deployed. Pass a viem `chain`; it defaults to Optimism Sepolia. The same chain drives viem reads, transaction routing and the Thirdweb wallet / ConnectButton.
+
+```ts
+import { base } from 'viem/chains'
+
+initPublish({
+  uploadApiBaseUrl: import.meta.env.VITE_UPLOAD_API_BASE_URL,
+  rpcUrl: import.meta.env.VITE_RPC_URL,
+  chain: base,
+})
+```
+
+- **Known chains** (`EAS_CHAIN_DEPLOYMENTS`: Ethereum, Sepolia, Optimism, Optimism Sepolia, Base, Base Sepolia, Arbitrum One / Sepolia, Polygon, Scroll, Linea) resolve the EAS and SchemaRegistry addresses automatically.
+- **Other chains** need `easContractAddress` and `schemaRegistryAddress`; `initPublish` throws without them. These options also override the built-in addresses on known chains.
+- **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
+- Model and property schemas are registered on the chain on first publish (`ensureEasSchemasForItem`). The SDK's EAS indexer endpoint is configured separately (`EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT`); point it at the same chain's easscan GraphQL (`getEasChainDeployment(chain.id).indexerUrl`).
+
+The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, `schemaRegistryAddress`, `thirdwebAccountFactoryAddress`, `easChain`).
+
 ### useIntegerLocalIds
 
 When using the new contract that expects `uint256` localIdIndex/publishLocalIdIndex instead of string localId/publishLocalId (gas-efficient), set `useIntegerLocalIds: true`:
@@ -206,13 +227,13 @@ APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/
 
 ### Modular executor (`useModularExecutor`) and EIP-7702
 
-When **`useModularExecutor`** is enabled, `multiPublish` is sent **from** the user’s **Thirdweb in-app modular wallet** (EIP-7702 execution mode) against their **ManagedAccount** contract. Before the first on-chain publish, `createAttestations` runs **`ensureEip7702ModularAccountReady()`**, which checks Optimism Sepolia bytecode at the modular wallet address (EIP-7702 delegation / minimal account). If bytecode is still empty and **`autoDeployEip7702ModularAccount`** is true (the default when `useModularExecutor` is on), it calls Thirdweb’s **`deploySmartAccount`** bootstrap (no-op if already upgraded). Set **`autoDeployEip7702ModularAccount: false`** to surface **`Eip7702ModularAccountPublishError`** instead of auto-deploying.
+When **`useModularExecutor`** is enabled, `multiPublish` is sent **from** the user’s **Thirdweb in-app modular wallet** (EIP-7702 execution mode) against their **ManagedAccount** contract. Before the first on-chain publish, `createAttestations` runs **`ensureEip7702ModularAccountReady()`**, which checks bytecode on the publish chain at the modular wallet address (EIP-7702 delegation / minimal account). If bytecode is still empty and **`autoDeployEip7702ModularAccount`** is true (the default when `useModularExecutor` is on), it calls Thirdweb’s **`deploySmartAccount`** bootstrap (no-op if already upgraded). Set **`autoDeployEip7702ModularAccount: false`** to surface **`Eip7702ModularAccountPublishError`** instead of auto-deploying.
 
 **`ensureSmartWalletThenPublish`:** With **`useModularExecutor`**, the publish machine’s **`account`** and default **`dataItemSigner`** come from **`getConnectedModularAccount()`** (the modular EIP-7702 in-app wallet), not from **`resolveSmartWalletForPublish`** or the **`activeAccount`** argument (that parameter is ignored on this path for API compatibility). **`ensureEip7702ModularAccountReady()`** runs once before **`createPublish`** so EIP-7702 readiness failures surface before the publish actor starts; `createAttestations` still calls it again (no-op when already deployed).
 
 **Routing (important):** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…` — same hex as the deprecated `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` alias). The transaction **`to` / `getContract` address** is the user’s on-chain publisher: **managed account** for interactive modular publish (`runModularExecutorPublishPrep().managedAddress`), or the **executor module** when an automation session key is detected (`routeToExecutorModule`). Non-modular publish targets the **deployed publisher contract**. **EOAs** (no contract at `address`) never use `multiPublish`; the publish machine routes them to **direct EAS** (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path even when the publisher is a deployed contract. Receipt parsing uses `modularAccountModuleContract` when configured, otherwise the managed / publisher address.
 
-**Managed account:** `runModularExecutorPublishPrep()` still ensures the **EIP-4337 managed** publishing contract exists on Optimism Sepolia (and optionally installs the executor module). That is separate from the modular wallet’s EIP-7702 upgrade.
+**Managed account:** `runModularExecutorPublishPrep()` still ensures the **EIP-4337 managed** publishing contract exists on the publish chain (and optionally installs the executor module). That is separate from the modular wallet’s EIP-7702 upgrade.
 
 Before the first `multiPublish` on that path, `createAttestations` runs **`ensureModularPublishBootstrap`**, which:
 

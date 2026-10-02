@@ -1,4 +1,3 @@
-import { optimismSepolia } from 'thirdweb/chains'
 import {
   deploySmartWalletContract,
   getClient,
@@ -14,18 +13,20 @@ import {
 import { getPublishConfig } from '../config'
 import { isManagedAccountPublishError, ManagedAccountPublishError, stringifyUnderlyingCause } from '../errors'
 import { ensureExecutorModuleInstalled } from './ensureExecutorModule'
+import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishChainName } from './chainConfig'
 
-const MSG_UNAVAILABLE =
-  'Could not connect the managed publishing account on Optimism Sepolia. Reconnect with the same sign-in method and try again.'
+const MSG_UNAVAILABLE = () =>
+  `Could not connect the managed publishing account on ${getPublishChainName()}. Reconnect with the same sign-in method and try again.`
 
-const MSG_NOT_DEPLOYED =
-  'Your publishing smart account is not deployed on Optimism Sepolia yet. Complete wallet setup, enable autoDeployManagedAccount in config if appropriate, then try again.'
+const MSG_NOT_DEPLOYED = () =>
+  `Your publishing smart account is not deployed on ${getPublishChainName()} yet. Complete wallet setup, enable autoDeployManagedAccount in config if appropriate, then try again.`
 
-const MSG_NOT_DEPLOYED_AFTER_ATTEMPT =
-  'The managed account could not be confirmed on Optimism Sepolia after deployment. Wait a moment and retry, or check your network connection.'
+const MSG_NOT_DEPLOYED_AFTER_ATTEMPT = () =>
+  `The managed account could not be confirmed on ${getPublishChainName()} after deployment. Wait a moment and retry, or check your network connection.`
 
-const MSG_FAILED_DEPLOY =
-  'Automatic deployment of the managed publishing account failed on Optimism Sepolia. Retry or deploy the account through your wallet provider.'
+const MSG_FAILED_DEPLOY = () =>
+  `Automatic deployment of the managed publishing account failed on ${getPublishChainName()}. Retry or deploy the account through your wallet provider.`
 
 export type EnsureManagedAccountReadyResult =
   | { kind: 'skip' }
@@ -45,7 +46,7 @@ export async function ensureManagedAccountReady(): Promise<EnsureManagedAccountR
 
   let managedAddress: string
   try {
-    managedAddress = await getConnectedManagedAccountAddress(optimismSepolia)
+    managedAddress = await getConnectedManagedAccountAddress(getPublishThirdwebChain())
   } catch (cause) {
     return { kind: 'unavailable', cause }
   }
@@ -60,10 +61,10 @@ export async function ensureManagedAccountReady(): Promise<EnsureManagedAccountR
 async function getManagedAccountSigningAccount() {
   syncPublishInAppAuthToken()
   const managedWallet = getManagedAccountWallet()
-  await managedWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
   const acc = managedWallet.getAccount()
   if (!acc) {
-    throw new ManagedAccountPublishError(MSG_UNAVAILABLE, 'MANAGED_ACCOUNT_UNAVAILABLE')
+    throw new ManagedAccountPublishError(MSG_UNAVAILABLE(), 'MANAGED_ACCOUNT_UNAVAILABLE')
   }
   return acc
 }
@@ -107,7 +108,7 @@ export async function tryDeployManagedAccount(managedAddress: string): Promise<v
       const modularAccount = await getConnectedModularAccount()
       if (modularAccount) {
         const modularWallet = getModularAccountWallet()
-        await modularWallet.autoConnect({ client: getClient(), chain: optimismSepolia })
+        await modularWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
         const adminAddress =
           modularWallet.getAdminAccount?.()?.address ?? modularAccount.address
         await deployManagedAccountViaFactory({
@@ -124,12 +125,12 @@ export async function tryDeployManagedAccount(managedAddress: string): Promise<v
     if (await pollSmartWalletDeployed(managedAddress, pollAttempts)) {
       return
     }
-    throw new ManagedAccountPublishError(MSG_FAILED_DEPLOY, 'MANAGED_ACCOUNT_NOT_DEPLOYED', managedAddress, cause)
+    throw new ManagedAccountPublishError(MSG_FAILED_DEPLOY(), 'MANAGED_ACCOUNT_NOT_DEPLOYED', managedAddress, cause)
   }
 
   if (!(await pollSmartWalletDeployed(managedAddress))) {
     throw new ManagedAccountPublishError(
-      MSG_NOT_DEPLOYED_AFTER_ATTEMPT,
+      MSG_NOT_DEPLOYED_AFTER_ATTEMPT(),
       'MANAGED_ACCOUNT_NOT_DEPLOYED',
       managedAddress,
     )
@@ -157,7 +158,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
   if (state.kind === 'unavailable') {
     return {
       ok: false,
-      error: new ManagedAccountPublishError(MSG_UNAVAILABLE, 'MANAGED_ACCOUNT_UNAVAILABLE', undefined, state.cause),
+      error: new ManagedAccountPublishError(MSG_UNAVAILABLE(), 'MANAGED_ACCOUNT_UNAVAILABLE', undefined, state.cause),
     }
   }
 
@@ -169,7 +170,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
         const err =
           isManagedAccountPublishError(e)
             ? e
-            : new ManagedAccountPublishError(MSG_FAILED_DEPLOY, 'MANAGED_ACCOUNT_NOT_DEPLOYED', state.managedAddress, e)
+            : new ManagedAccountPublishError(MSG_FAILED_DEPLOY(), 'MANAGED_ACCOUNT_NOT_DEPLOYED', state.managedAddress, e)
         return { ok: false, error: err }
       }
       state = await ensureManagedAccountReady()
@@ -177,7 +178,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
         return {
           ok: false,
           error: new ManagedAccountPublishError(
-            MSG_NOT_DEPLOYED_AFTER_ATTEMPT,
+            MSG_NOT_DEPLOYED_AFTER_ATTEMPT(),
             'MANAGED_ACCOUNT_NOT_DEPLOYED',
             state.kind === 'not_deployed' ? state.managedAddress : undefined,
           ),
@@ -186,7 +187,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
     } else {
       return {
         ok: false,
-        error: new ManagedAccountPublishError(MSG_NOT_DEPLOYED, 'MANAGED_ACCOUNT_NOT_DEPLOYED', state.managedAddress),
+        error: new ManagedAccountPublishError(MSG_NOT_DEPLOYED(), 'MANAGED_ACCOUNT_NOT_DEPLOYED', state.managedAddress),
       }
     }
   }
@@ -203,7 +204,7 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
         return {
           ok: false,
           error: new ManagedAccountPublishError(
-            'Executor module setup failed on Optimism Sepolia.',
+            `Executor module setup failed on ${getPublishChainName()}.`,
             'EXECUTOR_MODULE_NOT_INSTALLED',
             state.managedAddress,
             e,

@@ -48,7 +48,7 @@ export function stringifyUnderlyingCause(u: unknown, maxLen = 700): string {
 }
 
 /**
- * Thrown or returned when the managed publishing account (Optimism Sepolia) is missing,
+ * Thrown or returned when the managed publishing account (on the publish chain) is missing,
  * unreachable, missing the executor module for the modular executor path, or EAS
  * pointer setup (`getEas` / `setEas`) fails, or modular session-signer activation fails.
  */
