@@ -31,7 +31,7 @@ Automation session key ──ANS-104──► Arweave
 1. `initPublish` / `PublishProvider` with:
    - `useModularExecutor: true` (typical)
    - **`modularAccountModuleContract`** set to the Seed executor module
-2. ModularCore ManagedAccounts get the executor module installed during enroll. Legacy Router ManagedAccounts (the default Thirdweb `ManagedAccountFactory`) cannot install modules; enroll continues and the module-only session key is the grant. Enrollment still fails if a ModularCore account does not end up with the module installed.
+2. The executor module must be able to act for the ManagedAccount: `isInitialized(account)` is true and `getEAS(account)` matches `easContractAddress`. ModularCore ManagedAccounts get the module installed during enroll. Legacy Router ManagedAccounts (the default Thirdweb `ManagedAccountFactory`) can't use the module yet, so enroll rejects them with `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding a session key.
 3. App generates and stores a session keypair offline; only the **address** is passed into enroll.
 
 ## Enroll
@@ -66,9 +66,10 @@ const { authorization } = await enrollPublishAutomation({
 
 Steps performed:
 
-1. Install the executor module when the ManagedAccount is ModularCore. Legacy Router accounts skip this step.
-2. `addSessionKey` with module-only `approvedTargets`.
-3. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
+1. Install the executor module when the ManagedAccount is ModularCore.
+2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain.
+3. `addSessionKey` with module-only `approvedTargets`.
+4. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 
 ## Server / Node
 
@@ -123,7 +124,14 @@ await htmlProperty.save()
 
 ## Unattended publish / revoke
 
-On-chain publish/revoke for automation keys must go through the **ManagedAccount as a UserOp**, with call target = **executor module only** (`modularAccountModuleContract`). `createAttestations` detects an active session key on the ManagedAddress, keeps your provided `PublishWallet`, and routes `multiPublish` to that module (same pattern as `prepareEasMultiRevoke`).
+On-chain publish/revoke for automation keys must go through the **ManagedAccount as a UserOp**, with call target = **executor module only** (`modularAccountModuleContract`). `createAttestations` detects an active session key on the ManagedAddress, keeps your provided `PublishWallet`, and routes `multiPublish` to that module. `revokeAttestations` does the same for `multiRevoke` when the wallet is an automation key on the seed's attester. Other revokes, including `revokePublishAutomation`, go to EAS directly.
+
+Before each automation UserOp, the SDK:
+
+1. Checks that the module can act for the account (`AUTOMATION_UNSUPPORTED_ACCOUNT` if not).
+2. Simulates the call from the ManagedAccount with `eth_call`. A call that would revert, or a simulation that can't run, throws `AUTOMATION_PREFLIGHT_FAILED` with the decoded revert reason, and nothing is sent.
+
+The deployed executor module has no `multiRevoke` yet, so automation revokes currently fail at step 2.
 
 ```ts
 import { PublishManager, fromEthersWallet } from '@seedprotocol/publish'
@@ -151,8 +159,8 @@ await item.unpublish() // with setPublishWallet(onChainWallet) / initPublish con
 
 **Prerequisites for unattended `multiPublish`:**
 
-1. Executor module installed; session key enrolled with module-only `approvedTargets`
-2. ManagedAccount `getEas` already matches publish config (automation keys cannot `setEas`)
+1. Executor module installed and initialized for the ManagedAccount; session key enrolled with module-only `approvedTargets`
+2. The module's `getEAS(account)` already matches publish config (automation keys cannot change it)
 3. `PublishWallet.txSender` can submit ManagedAccount UserOps signed by the session key
 4. EAS schemas for the item’s models and properties are already registered. Automation keys cannot call SchemaRegistry or EAS, so they cannot register or name a missing schema. While the owner wallet is connected (the same wallet used for `enrollPublishAutomation`), call `ensureEasSchemasForItem(item, userWallet)` once. After those schemas exist, unattended publish only reads the registry. A missing schema fails before the UserOp with `schema "…" is not registered; automation keys can't register schemas`.
 
@@ -192,6 +200,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 
 - `ensurePublishAuthorizationSchema`, `attestPublishAuthorization`, `revokePublishAuthorization`
 - `assessPublishAuthorizationLive`
+- `assertExecutorModuleReadyForAccount` (check an account before offering enrollment), `simulateCallFromAccount`
 
 ### `@seedprotocol/publish/thirdweb`
 
@@ -206,7 +215,7 @@ Removes the session key on-chain, then revokes the sidecar. After revoke, the ke
 - [ ] Call `enrollPublishAutomation` only with the **user’s** ManagedAccount wallet connected
 - [ ] Store `authorization.uid` + session key securely; rotate by revoke + re-enroll
 - [ ] Set grant `expiresAt` when appropriate
-- [ ] Ensure ManagedAccount `getEas` matches publish config before unattended publish (automation keys cannot `setEas`)
+- [ ] Handle `AUTOMATION_UNSUPPORTED_ACCOUNT` from enroll (e.g. legacy Router accounts) and `AUTOMATION_PREFLIGHT_FAILED` from publish / revoke
 - [ ] Register content schemas once with the owner wallet via `ensureEasSchemasForItem` (automation keys cannot register schemas)
 - [ ] Use a UserOp-capable `PublishWallet` for on-chain txs; `fromEthersWallet` is fine for DataItem signing only
 - [ ] Use `assertStorageBoundToIdentity` (or equivalent) before treating Arweave owners as the identity

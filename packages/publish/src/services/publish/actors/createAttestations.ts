@@ -11,7 +11,11 @@ import {
   isContractDeployed,
 } from '~/helpers/chainClient'
 import { runModularExecutorPublishPrep } from '~/helpers/ensureManagedAccountReady'
-import { encodeMultiPublish } from '~/helpers/contracts'
+import { encodeExecutorMultiPublish, encodeMultiPublish } from '~/helpers/contracts'
+import {
+  assertExecutorModuleReadyForAccount,
+  simulateCallFromAccount,
+} from '~/helpers/executorModuleReadiness'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import type { PublishWallet } from '~/helpers/seedSigner'
@@ -40,10 +44,7 @@ import {
   toHex32,
 } from './publishRequestNormalize'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
-import {
-  assertManagedAccountEasMatchesConfig,
-  ensureManagedAccountEasConfigured,
-} from '~/helpers/ensureManagedAccountEasConfigured'
+import { ensureManagedAccountEasConfigured } from '~/helpers/ensureManagedAccountEasConfigured'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:services:publish:actors')
@@ -297,6 +298,7 @@ export const createAttestations = fromPromise(
       publisherAddress: address,
     })
     let activeWallet: PublishWallet = resolvePublishWallet(context)
+    let routeToExecutorModule = false
 
     await ensureEasSchemasForItem(item, activeWallet, { managedAddress: address })
 
@@ -356,8 +358,9 @@ export const createAttestations = fromPromise(
           managedAddress: address,
           routeToExecutorModule: true,
         })
-        // Read-only: automation keys cannot setEas (not in approvedTargets).
-        await assertManagedAccountEasMatchesConfig(address)
+        routeToExecutorModule = true
+        // Read-only: automation keys cannot set up the module or its EAS (not in approvedTargets).
+        await assertExecutorModuleReadyForAccount(address)
       } else {
         const prep = await runModularExecutorPublishPrep()
         if (!prep.ok) {
@@ -379,6 +382,22 @@ export const createAttestations = fromPromise(
       }
     } else {
       await ensureManagedAccountEasConfigured(address, activeWallet)
+    }
+
+    // The executor module takes a different multiPublish struct than the ManagedAccount
+    // extension. Automation calls are simulated first so a call that would revert is never sent.
+    const sendPublishTx = async (requests: any[]) => {
+      const to = routing.txTargetAddress as Address
+      if (!routeToExecutorModule) {
+        return activeWallet.txSender.sendTransaction(encodeMultiPublish(to, requests, 5_000_000n))
+      }
+      const tx = encodeExecutorMultiPublish(to, requests, 5_000_000n)
+      await simulateCallFromAccount({
+        managedAddress: address,
+        tx,
+        action: 'multiPublish via the executor module',
+      })
+      return activeWallet.txSender.sendTransaction(tx)
     }
 
     const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)
@@ -403,13 +422,7 @@ export const createAttestations = fromPromise(
         const byLocalIdSingle = new Map([[normalizedOne.localId, normalizedOne]])
         applyPropertiesToUpdatePlaceholders([normalizedOne], byLocalIdSingle)
 
-        const tx = encodeMultiPublish(
-          routing.txTargetAddress as Address,
-          [normalizedOne] as any,
-          5_000_000n,
-        )
-
-        const result = await activeWallet.txSender.sendTransaction(tx)
+        const result = await sendPublishTx([normalizedOne])
 
         const receipt = await waitForPublishReceipt(result.transactionHash)
         if (!receipt) {
@@ -480,13 +493,7 @@ export const createAttestations = fromPromise(
       applyPropertiesToUpdatePlaceholders(normalizedRequests, byLocalId)
 
       const payloadForContract = Array.isArray(requestData) ? normalizedRequests : [normalizedRequests[0]]
-      const tx = encodeMultiPublish(
-        routing.txTargetAddress as Address,
-        payloadForContract as any,
-        5_000_000n,
-      )
-
-      const result = await activeWallet.txSender.sendTransaction(tx)
+      const result = await sendPublishTx(payloadForContract)
 
       const receipt = await waitForPublishReceipt(result.transactionHash)
       if (!receipt) {

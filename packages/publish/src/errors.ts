@@ -17,6 +17,8 @@ export type ManagedAccountPublishErrorCode =
   | 'EXECUTOR_MODULE_NOT_INSTALLED'
   | 'MANAGED_ACCOUNT_SET_EAS_FAILED'
   | 'MODULAR_SIGNER_ACTIVATION_FAILED'
+  | 'AUTOMATION_UNSUPPORTED_ACCOUNT'
+  | 'AUTOMATION_PREFLIGHT_FAILED'
 
 /**
  * Best-effort string for RPC / thirdweb / viem failures that are not plain `Error`

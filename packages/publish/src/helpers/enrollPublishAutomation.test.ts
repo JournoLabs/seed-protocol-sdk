@@ -18,6 +18,7 @@ const revokePublishAuthorizationMock = mock(async () => {})
 const getInstalledModulesMock = mock(async () => [
   { implementation: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
 ])
+const assertExecutorModuleReadyMock = mock(async () => {})
 
 mock.module('../config', () => ({
   getPublishConfig: () => ({
@@ -46,6 +47,12 @@ mock.module('thirdweb/modules', () => ({
 mock.module('./ensureExecutorModule', () => ({
   ensureExecutorModuleInstalled: (...args: unknown[]) =>
     ensureExecutorModuleInstalledMock(...args),
+}))
+
+mock.module('./executorModuleReadiness', () => ({
+  assertExecutorModuleReadyForAccount: (...args: unknown[]) =>
+    assertExecutorModuleReadyMock(...args),
+  simulateCallFromAccount: mock(async () => {}),
 }))
 
 mock.module('./ensureAutomationSessionKey', () => ({
@@ -78,6 +85,8 @@ afterEach(() => {
   attestPublishAuthorizationMock.mockClear()
   revokePublishAuthorizationMock.mockClear()
   getInstalledModulesMock.mockClear()
+  assertExecutorModuleReadyMock.mockClear()
+  assertExecutorModuleReadyMock.mockImplementation(async () => {})
   getAccountMock.mockImplementation(() => managedAccount)
   getInstalledModulesMock.mockImplementation(async () => [
     { implementation: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
@@ -92,6 +101,7 @@ describe('enrollPublishAutomation', () => {
       sessionKeyAddress: '0xsession',
     })
     expect(ensureExecutorModuleInstalledMock).toHaveBeenCalled()
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged')
     expect(ensureAutomationSessionKeyMock).toHaveBeenCalled()
     expect(attestPublishAuthorizationMock).toHaveBeenCalled()
     expect(result.authorization.uid).toMatch(/^0x/)
@@ -109,7 +119,31 @@ describe('enrollPublishAutomation', () => {
     expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
   })
 
-  test('enrolls session key when the ManagedAccount is a legacy Router account', async () => {
+  test('refuses a legacy Router account before adding the session key', async () => {
+    getInstalledModulesMock.mockImplementationOnce(async () => {
+      throw new Error('execution reverted: Router: function does not exist.')
+    })
+    const { ManagedAccountPublishError } = await import('../errors')
+    assertExecutorModuleReadyMock.mockImplementationOnce(async () => {
+      throw new ManagedAccountPublishError(
+        'legacy Router account',
+        'AUTOMATION_UNSUPPORTED_ACCOUNT',
+        '0xmanaged',
+      )
+    })
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    await expect(
+      enrollPublishAutomation({
+        managedAddress: '0xmanaged',
+        sessionKeyAddress: '0xsession',
+      }),
+    ).rejects.toMatchObject({ code: 'AUTOMATION_UNSUPPORTED_ACCOUNT' })
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged')
+    expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
+    expect(attestPublishAuthorizationMock).not.toHaveBeenCalled()
+  })
+
+  test('enrolls a Router account once the executor module can act for it', async () => {
     getInstalledModulesMock.mockImplementationOnce(async () => {
       throw new Error('execution reverted: Router: function does not exist.')
     })
@@ -118,12 +152,7 @@ describe('enrollPublishAutomation', () => {
       managedAddress: '0xmanaged',
       sessionKeyAddress: '0xsession',
     })
-    expect(ensureAutomationSessionKeyMock).toHaveBeenCalledWith({
-      managedAddress: '0xmanaged',
-      sessionKeyAddress: '0xsession',
-      expiresAt: undefined,
-    })
-    expect(attestPublishAuthorizationMock).toHaveBeenCalled()
+    expect(ensureAutomationSessionKeyMock).toHaveBeenCalled()
     expect(result.authorization.uid).toMatch(/^0x/)
   })
 })

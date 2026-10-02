@@ -7,6 +7,7 @@ import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
 import { isRouterNonModularCoreAccountError, ManagedAccountPublishError } from '../errors'
 import { ensureExecutorModuleInstalled } from './ensureExecutorModule'
+import { assertExecutorModuleReadyForAccount } from './executorModuleReadiness'
 import {
   ensureAutomationSessionKey,
   removeAutomationSessionKey,
@@ -109,26 +110,30 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
     }
   } catch (cause) {
     if (cause instanceof ManagedAccountPublishError) throw cause
-    // Legacy ManagedAccount (ERC-7504 Router) has no ModularCore install API.
-    // Non-admin signers may only execute/executeBatch to approvedTargets, so the
-    // module-only session key added next is the grant.
-    if (isRouterNonModularCoreAccountError(cause)) {
-      return
+    // Legacy Router accounts have no ModularCore install API. Whether the module can act for
+    // them is decided below by what the module reports, not by the account type.
+    if (!isRouterNonModularCoreAccountError(cause)) {
+      throw new ManagedAccountPublishError(
+        'Could not verify executor module installation for publish automation.',
+        'EXECUTOR_MODULE_NOT_INSTALLED',
+        managedAddress,
+        cause,
+      )
     }
-    throw new ManagedAccountPublishError(
-      'Could not verify executor module installation for publish automation.',
-      'EXECUTOR_MODULE_NOT_INSTALLED',
-      managedAddress,
-      cause,
-    )
   }
+
+  // The session key may only call the module, so refuse to enroll unless the module can act
+  // for this account. Otherwise every automation publish would revert.
+  await assertExecutorModuleReadyForAccount(managedAddress)
 }
 
 /**
  * Enroll an app automation key: install the executor module when the account is ModularCore,
  * add a module-only session key, then attest the PublishAuthorization sidecar
- * (ManagedAccount attester). Legacy Router ManagedAccounts skip module install; their
- * session-key target check is the grant.
+ * (ManagedAccount attester).
+ *
+ * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding the session
+ * key when the executor module cannot act for the account (e.g. legacy Router ManagedAccounts)
  */
 export async function enrollPublishAutomation(
   params: EnrollPublishAutomationParams,

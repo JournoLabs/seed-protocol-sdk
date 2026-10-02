@@ -1,0 +1,138 @@
+import { BaseError, decodeErrorResult, zeroAddress, type Address, type Hex } from 'viem'
+import { getPublishConfig } from '../config'
+import { ManagedAccountPublishError } from '../errors'
+import { easAbi } from './abi/eas'
+import { executorModuleAbi } from './abi/executor'
+import { getPublishPublicClient } from './chainClient'
+import {
+  readExecutorModuleEas,
+  readExecutorModuleIsInitialized,
+  readGetEas,
+} from './contracts'
+import type { SeedTxRequest } from './seedSigner'
+
+const MSG_LEGACY_ROUTER =
+  'This ManagedAccount is a legacy Router account. The Seed executor module cannot act for it, so publish automation is not available for this account yet.'
+const MSG_NOT_INITIALIZED =
+  'The Seed executor module is not initialized for this ManagedAccount, so automation session keys cannot publish or revoke through it.'
+const MSG_EAS_MISMATCH =
+  'The Seed executor module is configured with a different EAS contract for this ManagedAccount than publish config. Automation session keys cannot change it.'
+const MSG_READ_FAILED = 'Could not read the Seed executor module state for this ManagedAccount.'
+
+function requireModuleAddress(): Address {
+  const module = getPublishConfig().modularAccountModuleContract?.trim()
+  if (!module || !/^0x[0-9a-fA-F]{40}$/.test(module)) {
+    throw new Error(
+      '@seedprotocol/publish: publish automation requires PublishConfig.modularAccountModuleContract (executor module).',
+    )
+  }
+  return module as Address
+}
+
+/** True when the account answers `getEas()`, i.e. a legacy Router account with the Seed extension. */
+async function isLegacyRouterAccount(managedAddress: Address): Promise<boolean> {
+  try {
+    await readGetEas(managedAddress)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Checks that the executor module can act for `managedAddress`: the module is initialized for
+ * the account and points at the configured EAS. Checks what the module reports rather than the
+ * account type, so any account the module has been set up for passes.
+ *
+ * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` when it cannot
+ */
+export async function assertExecutorModuleReadyForAccount(managedAddress: string): Promise<void> {
+  const module = requireModuleAddress()
+  const account = managedAddress as Address
+
+  let initialized: boolean
+  let moduleEas: Address
+  try {
+    initialized = await readExecutorModuleIsInitialized(module, account)
+    moduleEas = initialized ? await readExecutorModuleEas(module, account) : zeroAddress
+  } catch (cause) {
+    throw new ManagedAccountPublishError(
+      MSG_READ_FAILED,
+      'AUTOMATION_UNSUPPORTED_ACCOUNT',
+      managedAddress,
+      cause,
+    )
+  }
+
+  if (!initialized) {
+    const message = (await isLegacyRouterAccount(account)) ? MSG_LEGACY_ROUTER : MSG_NOT_INITIALIZED
+    throw new ManagedAccountPublishError(message, 'AUTOMATION_UNSUPPORTED_ACCOUNT', managedAddress)
+  }
+
+  const expected = getPublishConfig().easContractAddress?.toLowerCase()
+  if (expected && moduleEas.toLowerCase() !== expected) {
+    throw new ManagedAccountPublishError(MSG_EAS_MISMATCH, 'AUTOMATION_UNSUPPORTED_ACCOUNT', managedAddress)
+  }
+}
+
+function findRevertData(err: unknown): Hex | undefined {
+  if (!(err instanceof BaseError)) return undefined
+  const withData = err.walk((e) => {
+    const data = (e as { data?: unknown }).data
+    return typeof data === 'string' && data.startsWith('0x') && data.length > 2
+  }) as { data?: Hex } | null
+  return withData?.data
+}
+
+function isRevert(err: unknown): boolean {
+  if (findRevertData(err)) return true
+  const msg = err instanceof BaseError ? `${err.shortMessage} ${err.details}` : String(err)
+  return /revert/i.test(msg)
+}
+
+function describeRevert(data: Hex | undefined): string {
+  if (!data) {
+    return 'reverted with no data. The target likely has no matching function (for example, the executor module has no multiRevoke) or the account cannot run executor calls'
+  }
+  try {
+    const decoded = decodeErrorResult({ abi: [...executorModuleAbi, ...easAbi], data })
+    const args = decoded.args?.length ? `(${decoded.args.map(String).join(', ')})` : ''
+    return `reverted with ${decoded.errorName}${args}`
+  } catch {
+    return `reverted with data ${data}`
+  }
+}
+
+/**
+ * Simulates `tx` as a call from `managedAddress` (the call the account makes when it executes a
+ * UserOp) and throws before anything is sent if it would revert. Also throws when the
+ * simulation itself cannot run, so automation never submits a UserOp it could not check.
+ *
+ * @throws ManagedAccountPublishError `AUTOMATION_PREFLIGHT_FAILED`
+ */
+export async function simulateCallFromAccount(params: {
+  managedAddress: string
+  tx: SeedTxRequest
+  /** Short description for the error message, e.g. "multiPublish via the executor module". */
+  action: string
+}): Promise<void> {
+  const { managedAddress, tx, action } = params
+  try {
+    await getPublishPublicClient().call({
+      account: managedAddress as Address,
+      to: tx.to,
+      data: tx.data,
+      value: tx.value,
+    })
+  } catch (cause) {
+    const reason = isRevert(cause)
+      ? describeRevert(findRevertData(cause))
+      : 'could not be simulated'
+    throw new ManagedAccountPublishError(
+      `Simulated ${action} from ${managedAddress} ${reason}; nothing was sent.`,
+      'AUTOMATION_PREFLIGHT_FAILED',
+      managedAddress,
+      cause,
+    )
+  }
+}

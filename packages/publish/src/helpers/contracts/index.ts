@@ -9,6 +9,7 @@ import {
   publisherReadWriteAbi,
 } from '../abi/publisher'
 import { managedAccountFactoryAbi } from '../abi/factory'
+import { executorModuleAbi } from '../abi/executor'
 import { easAbi } from '../abi/eas'
 import { schemaRegistryAbi } from '../abi/schemaRegistry'
 import type { SeedTxRequest } from '../seedSigner'
@@ -87,6 +88,71 @@ export function encodeMultiPublishInteger(
     }),
     gas,
   }
+}
+
+/**
+ * Encode `multiPublish` for the SeedProtocolExecutor module. Takes the same request shape as
+ * {@link encodeMultiPublish} and maps each `publishLocalId` to its index in `requests`.
+ * Entries whose `publishLocalId` is not in `requests` are dropped, matching the extension,
+ * whose string comparison finds no request for them.
+ */
+export function encodeExecutorMultiPublish(
+  to: Address,
+  requests: MultiPublishRequest[],
+  gas?: bigint,
+): SeedTxRequest {
+  const indexByLocalId = new Map<string, bigint>()
+  requests.forEach((r, i) => {
+    if (r.localId) indexByLocalId.set(r.localId, BigInt(i))
+  })
+  const executorRequests = requests.map((r) => ({
+    localId: r.localId,
+    seedUid: r.seedUid,
+    versionUid: r.versionUid,
+    seedSchemaUid: r.seedSchemaUid,
+    versionSchemaUid: r.versionSchemaUid,
+    seedIsRevocable: r.seedIsRevocable,
+    listOfAttestations: r.listOfAttestations,
+    propertiesToUpdate: (r.propertiesToUpdate ?? []).flatMap((pu) => {
+      const publishIndex = pu.publishLocalId ? indexByLocalId.get(pu.publishLocalId) : undefined
+      return publishIndex === undefined
+        ? []
+        : [{ publishIndex, propertySchemaUid: pu.propertySchemaUid }]
+    }),
+  }))
+  return {
+    to,
+    data: encodeFunctionData({
+      abi: executorModuleAbi,
+      functionName: 'multiPublish',
+      args: [executorRequests],
+    }),
+    gas,
+  }
+}
+
+export async function readExecutorModuleIsInitialized(
+  moduleAddress: Address,
+  account: Address,
+): Promise<boolean> {
+  return getPublishPublicClient().readContract({
+    address: moduleAddress,
+    abi: executorModuleAbi,
+    functionName: 'isInitialized',
+    args: [account],
+  })
+}
+
+export async function readExecutorModuleEas(
+  moduleAddress: Address,
+  account: Address,
+): Promise<Address> {
+  return getPublishPublicClient().readContract({
+    address: moduleAddress,
+    abi: executorModuleAbi,
+    functionName: 'getEAS',
+    args: [account],
+  })
 }
 
 export function encodeSetEas(to: Address, eas: Address): SeedTxRequest {

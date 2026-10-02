@@ -84,18 +84,26 @@ export function getAttestedUidsFromReceipt(
 }
 
 /**
- * Prepares an EAS multiRevoke call for batch revocation.
- * When `modularAccountModuleContract` is configured, targets the executor module so
- * automation session keys (module-only approvedTargets) can revoke with ManagedAccount
- * as the EAS attester. Otherwise targets EAS directly.
+ * Prepares an EAS multiRevoke call for batch revocation. Targets EAS directly, which works for
+ * the attester and for a ManagedAccount executing as itself.
+ *
+ * Pass `viaExecutorModule: true` only for automation session keys (module-only approvedTargets).
+ * The call then targets `modularAccountModuleContract`, and throws if it is not configured.
  */
-export function prepareEasMultiRevoke(requests: MultiRevocationRequest[]): SeedTxRequest {
-  const { modularAccountModuleContract } = getPublishConfig()
-  const module = modularAccountModuleContract?.trim()
-  if (module && /^0x[0-9a-fA-F]{40}$/.test(module)) {
-    return encodeEasMultiRevokeTo(module as `0x${string}`, requests)
+export function prepareEasMultiRevoke(
+  requests: MultiRevocationRequest[],
+  options: { viaExecutorModule?: boolean } = {},
+): SeedTxRequest {
+  if (!options.viaExecutorModule) {
+    return encodeEasMultiRevoke(requests)
   }
-  return encodeEasMultiRevoke(requests)
+  const module = getPublishConfig().modularAccountModuleContract?.trim()
+  if (!module || !/^0x[0-9a-fA-F]{40}$/.test(module)) {
+    throw new Error(
+      '@seedprotocol/publish: revoking via the executor module requires PublishConfig.modularAccountModuleContract',
+    )
+  }
+  return encodeEasMultiRevokeTo(module as `0x${string}`, requests)
 }
 
 /**
