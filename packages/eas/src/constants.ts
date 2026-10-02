@@ -3,6 +3,9 @@ export const ZERO_BYTES = '0x'
 export const ZERO_BYTES32 =
   '0x0000000000000000000000000000000000000000000000000000000000000000'
 
+/**
+ * @deprecated Evaluated once at import and ignores SDK / publish chain config. Use `getEasEndpoint()`.
+ */
 export const EAS_ENDPOINT =
   (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_EAS_ENDPOINT) ||
   (typeof process !== 'undefined' && process.env?.EAS_ENDPOINT) ||

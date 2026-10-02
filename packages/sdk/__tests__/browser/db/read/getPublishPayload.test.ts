@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
-import { VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA } from '@/helpers/constants'
+import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
 import { setupTestEnvironment, teardownTestEnvironment } from '../../../test-utils/client-init'
 import {
@@ -43,7 +43,7 @@ describe('getPublishPayload integration (browser)', () => {
       localId: item.seedLocalId,
       seedIsRevocable: true,
       seedSchemaUid: expect.any(String),
-      versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+      versionSchemaUid: VERSION_SCHEMA_UID,
       listOfAttestations: expect.any(Array),
     })
     expect(result[0].listOfAttestations).toBeDefined()

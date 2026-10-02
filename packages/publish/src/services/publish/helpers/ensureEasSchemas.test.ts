@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { brandSigner, brandTxSender, type PublishWallet } from '../../../helpers/seedSigner'
 
@@ -29,6 +29,10 @@ const SESSION = '0x2222222222222222222222222222222222222222' as `0x${string}`
 function schemaUid(schema: string): string {
   return SchemaRegistry.getSchemaUID(schema, RESOLVER, true).toLowerCase()
 }
+
+const NAME_SCHEMA_DEF = 'bytes32 schemaId,string name'
+const VERSION_SCHEMA_DEF = 'bytes32 version'
+const BASE_SCHEMA_UIDS = [schemaUid(NAME_SCHEMA_DEF), schemaUid(VERSION_SCHEMA_DEF)]
 
 const harness = {
   automationActive: false,
@@ -96,11 +100,19 @@ mock.module('~/helpers/chainClient', () => ({
   waitForPublishReceipt: async () => ({ status: 'success' as const }),
 }))
 
+mock.module('~/helpers/chainConfig', () => ({
+  getPublishViemChain: () => ({ id: 11155420, name: 'OP Sepolia' }),
+}))
+
 mock.module('~/helpers/ensureAutomationSessionKey', () => ({
   isAutomationSessionActive: async () => harness.automationActive,
 }))
 
-const { ensureEasSchemasForItem } = await import('./ensureEasSchemas')
+const { ensureEasSchemasForItem, resetEnsuredBaseSchemas } = await import('./ensureEasSchemas')
+
+beforeEach(() => {
+  resetEnsuredBaseSchemas()
+})
 
 function wallet(): PublishWallet {
   return {
@@ -125,6 +137,7 @@ describe('ensureEasSchemasForItem', () => {
     harness.imageProperties = [{ propertyName: 'html', propertyDef: { dataType: 'html' } }]
     harness.basicProperties = []
     harness.knownUids = new Set([
+      ...BASE_SCHEMA_UIDS,
       schemaUid('bytes32 post'),
       schemaUid('bytes32 html'),
       schemaUid('string storage_transaction_id'),
@@ -146,7 +159,7 @@ describe('ensureEasSchemasForItem', () => {
     harness.automationActive = true
     harness.imageProperties = []
     harness.basicProperties = [{ propertyName: 'title', propertyDef: { dataType: 'text' } }]
-    harness.knownUids = new Set([schemaUid('bytes32 post')])
+    harness.knownUids = new Set([...BASE_SCHEMA_UIDS, schemaUid('bytes32 post')])
     sendTransaction.mockClear()
     registerSchema.mockClear()
 
@@ -163,7 +176,7 @@ describe('ensureEasSchemasForItem', () => {
     harness.automationActive = false
     harness.imageProperties = []
     harness.basicProperties = [{ propertyName: 'title', propertyDef: { dataType: 'text' } }]
-    harness.knownUids = new Set([schemaUid('bytes32 post')])
+    harness.knownUids = new Set([...BASE_SCHEMA_UIDS, schemaUid('bytes32 post')])
     sendTransaction.mockClear()
     registerSchema.mockClear()
 
@@ -171,5 +184,42 @@ describe('ensureEasSchemasForItem', () => {
 
     expect(registerSchema).toHaveBeenCalled()
     expect(sendTransaction).toHaveBeenCalled()
+  })
+
+  test('registers the naming and Version schemas on a chain that lacks them', async () => {
+    harness.automationActive = false
+    harness.imageProperties = []
+    harness.basicProperties = []
+    harness.knownUids = new Set([schemaUid('bytes32 post')])
+    getSchemaRecord.mockClear()
+    registerSchema.mockClear()
+    sendTransaction.mockClear()
+
+    await ensureEasSchemasForItem(postItem() as never, wallet())
+
+    const registered = registerSchema.mock.calls.map((call) => ((call as unknown[])[0] as { schema: string }).schema)
+    expect(registered).toEqual([NAME_SCHEMA_DEF, VERSION_SCHEMA_DEF])
+    // register name schema, register Version, name Version
+    expect(sendTransaction).toHaveBeenCalledTimes(3)
+
+    // Cached per chain: a second publish does not re-read the base schemas.
+    getSchemaRecord.mockClear()
+    await ensureEasSchemasForItem(postItem() as never, wallet())
+    const lookedUp = getSchemaRecord.mock.calls.map((call) => String(call[0]).toLowerCase())
+    expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[0])
+    expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[1])
+  })
+
+  test('an automation key fails before sending when a base schema is missing', async () => {
+    harness.automationActive = true
+    harness.imageProperties = []
+    harness.basicProperties = []
+    harness.knownUids = new Set([schemaUid(NAME_SCHEMA_DEF), schemaUid('bytes32 post')])
+    sendTransaction.mockClear()
+
+    await expect(
+      ensureEasSchemasForItem(postItem() as never, wallet(), { managedAddress: MANAGED }),
+    ).rejects.toThrow(`schema "${VERSION_SCHEMA_DEF}" is not registered`)
+    expect(sendTransaction).not.toHaveBeenCalled()
   })
 })

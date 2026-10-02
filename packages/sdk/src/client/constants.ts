@@ -112,6 +112,10 @@ export const INTERNAL_SERVICE_SNAPSHOT = 'internalServiceSnapshot'
 
 export const BROWSER_FS_TOP_DIR = 'app-files'
 
+/**
+ * @deprecated Evaluated once at import and ignores `SeedConfig.eas` / publish chain config.
+ * Use `getEasEndpoint()` from `@seedprotocol/eas`.
+ */
 export const EAS_ENDPOINT =
                ENV.NEXT_PUBLIC_EAS_ENDPOINT ||
                ENV.EAS_ENDPOINT ||

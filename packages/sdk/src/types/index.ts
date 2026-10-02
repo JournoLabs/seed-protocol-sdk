@@ -54,6 +54,16 @@ export interface SeedConfig {
   uploadApiBaseUrl?: string
   /** Gateway + upload transport (`http-gateway` default). */
   gateway?: import('./gateway').SeedGatewayConfig
+  /**
+   * EAS chain the SDK reads from (sync, schema lookups). Defaults to Optimism Sepolia, or to
+   * `PublishConfig.chain` when `@seedprotocol/publish` is initialized. Must match the publish chain.
+   */
+  eas?: {
+    /** Chain id. Known chains (`EAS_CHAIN_DEPLOYMENTS`) resolve their easscan indexer automatically. */
+    chainId?: number
+    /** EAS indexer GraphQL endpoint. Overrides the chain default and the `EAS_ENDPOINT` env var. */
+    indexerUrl?: string
+  }
   filesDir?: string
   dbConfig?: DbConfig
   /** Path to schema JSON file (e.g. 'schema.json'). Node: relative to process.cwd(); Browser: relative to working dir */

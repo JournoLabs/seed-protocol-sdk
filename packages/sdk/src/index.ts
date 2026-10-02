@@ -85,6 +85,13 @@ export {
 } from './helpers/relationSeedRef'
 export { withExcludeRevokedFilter } from '@seedprotocol/eas'
 export {
+  EAS_CHAIN_DEPLOYMENTS,
+  getEasChainDeployment,
+  getEasEndpoint,
+  getEasReadChainId,
+  type EasChainDeployment,
+} from '@seedprotocol/eas'
+export {
   classifyMediaRef,
   resolveMediaRef,
   normalizeFeedItemFields,
@@ -138,6 +145,8 @@ export {
 export {
   SeedModels,
   INTERNAL_DATA_TYPES,
+  VERSION_SCHEMA_UID,
+  VERSION_SCHEMA_DEF,
   VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
   DEFAULT_ARWEAVE_HOST,
   DEFAULT_SEED_FEED_HYPER_KEY,

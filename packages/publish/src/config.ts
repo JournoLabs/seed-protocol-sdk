@@ -7,7 +7,11 @@ import {
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
-import { resolveEasChainDeployment, type EasChainDeployment } from '@seedprotocol/eas'
+import {
+  configureEasReadChain,
+  resolveEasChainDeployment,
+  type EasChainDeployment,
+} from '@seedprotocol/eas'
 import { MANAGED_ACCOUNT_FACTORY_ADDRESSES } from './helpers/constants'
 import { ethers } from 'ethers'
 import { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
@@ -264,7 +268,10 @@ export function getConfigRef(): PublishConfig | null {
  */
 export function initPublish(c: PublishConfig): void {
   // Fail fast on chains without a known EAS deployment and no address overrides.
-  resolvePublishEasChain(c)
+  const easChain = resolvePublishEasChain(c)
+  // Point SDK reads (EAS sync, schema lookups) at the chain we publish to. Throws when
+  // SeedConfig.eas.chainId names a different chain.
+  configureEasReadChain('publish', { chainId: easChain.chainId, indexerUrl: easChain.indexerUrl })
   setConfigRef(c)
   setGetPublisherForNewSeeds(async () => {
     const wallet = getPublishWallet()

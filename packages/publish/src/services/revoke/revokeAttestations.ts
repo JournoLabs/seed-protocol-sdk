@@ -9,7 +9,7 @@ import {
   getMetadataAttestationUidsForSeedUid,
   getAttesterForSeed,
   updateSeedRevokedAt,
-  VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+  VERSION_SCHEMA_UID,
   isValidEasAttestationUid,
   getGetAdditionalSyncAddresses,
 } from '@seedprotocol/sdk'
@@ -137,7 +137,7 @@ export async function revokeAttestations(params: {
 
   if (versionUids.length > 0) {
     requests.push({
-      schema: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA as `0x${string}`,
+      schema: VERSION_SCHEMA_UID as `0x${string}`,
       data: versionUids.map((uid: string) => ({ uid: uid as `0x${string}` })),
     })
   }

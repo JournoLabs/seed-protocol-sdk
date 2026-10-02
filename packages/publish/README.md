@@ -122,7 +122,8 @@ initPublish({
 - **Known chains** (`EAS_CHAIN_DEPLOYMENTS`: Ethereum, Sepolia, Optimism, Optimism Sepolia, Base, Base Sepolia, Arbitrum One / Sepolia, Polygon, Scroll, Linea) resolve the EAS and SchemaRegistry addresses automatically.
 - **Other chains** need `easContractAddress` and `schemaRegistryAddress`; `initPublish` throws without them. These options also override the built-in addresses on known chains.
 - **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
-- Model and property schemas are registered on the chain on first publish (`ensureEasSchemasForItem`). The SDK's EAS indexer endpoint is configured separately (`EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT`); point it at the same chain's easscan GraphQL (`getEasChainDeployment(chain.id).indexerUrl`).
+- `ensureEasSchemasForItem` registers any missing schema on the chain on first publish, including Seed's Version schema and EAS's "Name a Schema" schema.
+- SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer.
 
 The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, `schemaRegistryAddress`, `thirdwebAccountFactoryAddress`, `easChain`).
 

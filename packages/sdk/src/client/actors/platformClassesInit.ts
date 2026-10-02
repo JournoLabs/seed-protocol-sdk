@@ -14,6 +14,7 @@ import {
   seedGatewayConfigFromSeedConfig,
   setResolvedSeedGatewayEndpoints,
 } from "@/helpers";
+import { configureEasReadChain } from '@seedprotocol/eas'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
@@ -89,7 +90,10 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       return
     }
     
-    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile, schema, gateway, uploadApiBaseUrl } = config
+    const { models, endpoints, arweaveDomain, dbConfig, filesDir, schemaFile, schema, gateway, uploadApiBaseUrl, eas } = config
+    if (eas) {
+      configureEasReadChain('sdk', { chainId: eas.chainId, indexerUrl: eas.indexerUrl })
+    }
     const gatewayConfig = seedGatewayConfigFromSeedConfig({
       ...config,
       arweaveDomain,

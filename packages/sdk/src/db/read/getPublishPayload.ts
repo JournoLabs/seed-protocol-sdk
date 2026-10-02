@@ -4,7 +4,7 @@ import {
   defaultAttestationData,
   INTERNAL_DATA_TYPES,
   INTERNAL_PROPERTY_NAMES,
-  VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+  VERSION_SCHEMA_UID,
   ZERO_BYTES32,
 } from '@/helpers/constants'
 import {
@@ -856,7 +856,7 @@ const processRelationOrImageProperty = async (
   let publishPayload: PublishPayload = {
     localId: relatedItem.seedLocalId,
     seedIsRevocable: true,
-    versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+    versionSchemaUid: VERSION_SCHEMA_UID,
     seedUid: seedUid || ZERO_BYTES32,
     seedSchemaUid,
     versionUid,
@@ -1012,7 +1012,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
     let publishPayload: PublishPayload = {
       localId: relatedItem.seedLocalId,
       seedIsRevocable: true,
-      versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+      versionSchemaUid: VERSION_SCHEMA_UID,
       seedUid: relatedItem.seedUid || ZERO_BYTES32,
       seedSchemaUid,
       versionUid,
@@ -1218,7 +1218,7 @@ const processListProperty = async (
     let publishPayload: PublishPayload = {
       localId: relatedItem.seedLocalId,
       seedIsRevocable: true,
-      versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+      versionSchemaUid: VERSION_SCHEMA_UID,
       seedUid: seedUid || ZERO_BYTES32,
       seedSchemaUid,
       versionUid,
@@ -1500,7 +1500,7 @@ export const getPublishPayload = async (
     seedUid: item.seedUid || ZERO_BYTES32,
     seedIsRevocable: true,
     seedSchemaUid: itemSchemaUid,
-    versionSchemaUid: VERSION_SCHEMA_UID_OPTIMISM_SEPOLIA,
+    versionSchemaUid: VERSION_SCHEMA_UID,
     versionUid,
     listOfAttestations: [],
     propertiesToUpdate: [],
