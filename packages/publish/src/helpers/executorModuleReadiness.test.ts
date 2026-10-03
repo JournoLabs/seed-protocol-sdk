@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { encodeErrorResult, HttpRequestError, RawContractError } from 'viem'
 import { executorModuleAbi } from './abi/executor'
+import { seedErrorsAbi } from './abi/seedErrors'
 
 const MODULE = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const ACCOUNT = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -147,6 +148,36 @@ describe('simulateCallFromAccount', () => {
     ).rejects.toMatchObject({
       code: 'AUTOMATION_PREFLIGHT_FAILED',
       message: expect.stringContaining('could not be simulated'),
+    })
+  })
+
+  test('lets the send go ahead when the simulation cannot run and it is not required', async () => {
+    callMock.mockImplementation(async () => {
+      throw new HttpRequestError({ url: 'https://rpc.example', details: 'fetch failed' })
+    })
+    const { simulateCallFromAccount } = await import('./executorModuleReadiness')
+    await expect(
+      simulateCallFromAccount({ managedAddress: ACCOUNT, tx, action: 'multiPublish', requireSimulation: false }),
+    ).resolves.toBeUndefined()
+  })
+
+  test('still throws a revert, with the given code, when the simulation is not required', async () => {
+    const data = encodeErrorResult({ abi: seedErrorsAbi, errorName: 'UnknownPublishLocalId', args: ['abc'] })
+    callMock.mockImplementation(async () => {
+      throw new RawContractError({ data })
+    })
+    const { simulateCallFromAccount } = await import('./executorModuleReadiness')
+    await expect(
+      simulateCallFromAccount({
+        managedAddress: ACCOUNT,
+        tx,
+        action: 'multiPublish',
+        code: 'PUBLISH_PREFLIGHT_FAILED',
+        requireSimulation: false,
+      }),
+    ).rejects.toMatchObject({
+      code: 'PUBLISH_PREFLIGHT_FAILED',
+      message: expect.stringContaining('reverted with UnknownPublishLocalId(abc)'),
     })
   })
 })

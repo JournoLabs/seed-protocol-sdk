@@ -11,6 +11,7 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
+import { describeFailedUserOp } from '../describeRevert'
 
 export type CreatePermissionlessTxSenderOptions = {
   signer: SeedSigner
@@ -117,14 +118,12 @@ export async function createPermissionlessTxSender(
   return brandTxSender({
     address: (simpleAccount.address ?? address) as Address,
     sendTransaction: async (tx: SeedTxRequest) => {
+      let receipt: UserOpReceiptLike
       try {
-        const hash = (await smartAccountClient.sendTransaction({
-          to: tx.to,
-          data: tx.data,
-          value: tx.value ?? 0n,
-          gas: tx.gas,
-        })) as Hash
-        return { transactionHash: hash as Hex }
+        const userOpHash = await smartAccountClient.sendUserOperation({
+          calls: [{ to: tx.to, data: tx.data, value: tx.value ?? 0n }],
+        })
+        receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         throw new Error(
@@ -132,6 +131,25 @@ export async function createPermissionlessTxSender(
           { cause: err },
         )
       }
+      return { transactionHash: assertUserOpSucceeded(receipt) }
     },
   })
+}
+
+type UserOpReceiptLike = { success: boolean; reason?: string; receipt: { transactionHash: Hash } }
+
+/**
+ * Returns the transaction hash of a successful UserOp, and throws for a failed one. The
+ * bundle transaction itself succeeds when a UserOp in it fails, so its receipt alone would
+ * pass a failed publish off as a success.
+ * @internal Exported for unit tests.
+ */
+export function assertUserOpSucceeded(receipt: UserOpReceiptLike): Hex {
+  const txHash = receipt.receipt.transactionHash as Hex
+  if (receipt.success) return txHash
+  const reason = receipt.reason
+  if (reason && !/^0x[0-9a-f]*$/i.test(reason)) {
+    throw new Error(`The publish UserOp in transaction ${txHash} failed: ${reason}`)
+  }
+  throw new Error(describeFailedUserOp(txHash, reason as Hex | undefined))
 }

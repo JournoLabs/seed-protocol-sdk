@@ -16,6 +16,7 @@ import {
   assertExecutorModuleReadyForAccount,
   simulateCallFromAccount,
 } from '~/helpers/executorModuleReadiness'
+import { explainUserOpError } from '~/helpers/describeRevert'
 import { waitForPublishReceipt } from '~/helpers/chainClient'
 import { resolvePublishWallet } from '~/helpers/resolvePublishWallet'
 import type { PublishWallet } from '~/helpers/seedSigner'
@@ -385,19 +386,30 @@ export const createAttestations = fromPromise(
     }
 
     // The executor module takes a different multiPublish struct than the ManagedAccount
-    // extension. Automation calls are simulated first so a call that would revert is never sent.
+    // extension. Every publish is simulated from the sending account first, so a call that would
+    // revert is never sent and its decoded reason is reported. Automation also refuses to send
+    // when the simulation cannot run; other routes go ahead.
     const sendPublishTx = async (requests: any[]) => {
       const to = routing.txTargetAddress as Address
-      if (!routeToExecutorModule) {
-        return activeWallet.txSender.sendTransaction(encodeMultiPublish(to, requests, 5_000_000n))
+      const tx = routeToExecutorModule
+        ? encodeExecutorMultiPublish(to, requests, 5_000_000n)
+        : encodeMultiPublish(to, requests, 5_000_000n)
+      await simulateCallFromAccount(
+        routeToExecutorModule
+          ? { managedAddress: address, tx, action: 'multiPublish via the executor module' }
+          : {
+              managedAddress: activeWallet.txSender.address,
+              tx,
+              action: 'multiPublish',
+              code: 'PUBLISH_PREFLIGHT_FAILED',
+              requireSimulation: false,
+            },
+      )
+      try {
+        return await activeWallet.txSender.sendTransaction(tx)
+      } catch (err) {
+        throw explainUserOpError(err)
       }
-      const tx = encodeExecutorMultiPublish(to, requests, 5_000_000n)
-      await simulateCallFromAccount({
-        managedAddress: address,
-        tx,
-        action: 'multiPublish via the executor module',
-      })
-      return activeWallet.txSender.sendTransaction(tx)
     }
 
     const needsSequential = reqs.length > 1 && hasCrossPayloadUnresolved(reqs)

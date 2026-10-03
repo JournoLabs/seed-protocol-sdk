@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { entryPoint06Address, entryPoint08Address } from 'viem/account-abstraction'
-import { assertBundlerSupportsEntryPoint08 } from './permissionlessTxSender'
+import { encodeErrorResult } from 'viem'
+import { seedErrorsAbi } from '../abi/seedErrors'
+import { assertBundlerSupportsEntryPoint08, assertUserOpSucceeded } from './permissionlessTxSender'
 
 let entryPoints: unknown = []
 const server = Bun.serve({
@@ -28,5 +30,30 @@ describe('assertBundlerSupportsEntryPoint08', () => {
     entryPoints = undefined
     await expect(assertBundlerSupportsEntryPoint08(url)).resolves.toBeUndefined()
     await expect(assertBundlerSupportsEntryPoint08('http://127.0.0.1:1')).resolves.toBeUndefined()
+  })
+})
+
+describe('assertUserOpSucceeded', () => {
+  const transactionHash = `0x${'cd'.repeat(32)}` as const
+
+  test('returns the transaction hash of a successful UserOp', () => {
+    expect(assertUserOpSucceeded({ success: true, receipt: { transactionHash } })).toBe(transactionHash)
+  })
+
+  test('throws for a failed UserOp even though the bundle transaction succeeded', () => {
+    expect(() => assertUserOpSucceeded({ success: false, receipt: { transactionHash } })).toThrow(
+      /ran out of gas/,
+    )
+  })
+
+  test('decodes the revert reason', () => {
+    const reason = encodeErrorResult({
+      abi: seedErrorsAbi,
+      errorName: 'Unauthorized',
+      args: ['0x1111111111111111111111111111111111111111'],
+    })
+    expect(() => assertUserOpSucceeded({ success: false, reason, receipt: { transactionHash } })).toThrow(
+      /reverted with Unauthorized\(0x1111/,
+    )
   })
 })

@@ -1,14 +1,13 @@
-import { BaseError, decodeErrorResult, parseEther, zeroAddress, type Address, type Hex } from 'viem'
+import { BaseError, parseEther, zeroAddress, type Address } from 'viem'
 import { getPublishConfig } from '../config'
-import { ManagedAccountPublishError } from '../errors'
-import { easAbi } from './abi/eas'
-import { executorModuleAbi } from './abi/executor'
+import { ManagedAccountPublishError, type ManagedAccountPublishErrorCode } from '../errors'
 import { getPublishPublicClient } from './chainClient'
 import {
   readExecutorModuleEas,
   readExecutorModuleIsInitialized,
   readSeedExecutorRouter,
 } from './contracts'
+import { describeRevert, findRevertData, isRevert } from './describeRevert'
 import type { SeedTxRequest } from './seedSigner'
 
 const MSG_LEGACY_ROUTER =
@@ -73,34 +72,6 @@ export async function assertExecutorModuleReadyForAccount(managedAddress: string
   }
 }
 
-function findRevertData(err: unknown): Hex | undefined {
-  if (!(err instanceof BaseError)) return undefined
-  const withData = err.walk((e) => {
-    const data = (e as { data?: unknown }).data
-    return typeof data === 'string' && data.startsWith('0x') && data.length > 2
-  }) as { data?: Hex } | null
-  return withData?.data
-}
-
-function isRevert(err: unknown): boolean {
-  if (findRevertData(err)) return true
-  const msg = err instanceof BaseError ? `${err.shortMessage} ${err.details}` : String(err)
-  return /revert/i.test(msg)
-}
-
-function describeRevert(data: Hex | undefined): string {
-  if (!data) {
-    return 'reverted with no data. The target likely has no matching function or the account cannot run executor calls'
-  }
-  try {
-    const decoded = decodeErrorResult({ abi: [...executorModuleAbi, ...easAbi], data })
-    const args = decoded.args?.length ? `(${decoded.args.map(String).join(', ')})` : ''
-    return `reverted with ${decoded.errorName}${args}`
-  } catch {
-    return `reverted with data ${data}`
-  }
-}
-
 /** True when a call failed because the caller can't cover gas fees, not because it reverted. */
 function isInsufficientFunds(err: unknown): boolean {
   const msg = err instanceof BaseError ? `${err.shortMessage} ${err.details} ${err.message}` : String(err)
@@ -109,18 +80,22 @@ function isInsufficientFunds(err: unknown): boolean {
 
 /**
  * Simulates `tx` as a call from `managedAddress` (the call the account makes when it executes a
- * UserOp) and throws before anything is sent if it would revert. Also throws when the
- * simulation itself cannot run, so automation never submits a UserOp it could not check.
+ * UserOp) and throws before anything is sent if it would revert. By default also throws when
+ * the simulation itself cannot run, so automation never submits a UserOp it could not check.
  *
- * @throws ManagedAccountPublishError `AUTOMATION_PREFLIGHT_FAILED`
+ * @throws ManagedAccountPublishError `code` (default `AUTOMATION_PREFLIGHT_FAILED`)
  */
 export async function simulateCallFromAccount(params: {
+  /** The account that sends `tx`. */
   managedAddress: string
   tx: SeedTxRequest
   /** Short description for the error message, e.g. "multiPublish via the executor module". */
   action: string
+  code?: ManagedAccountPublishErrorCode
+  /** False to let the send go ahead when the simulation cannot run (only a revert throws). */
+  requireSimulation?: boolean
 }): Promise<void> {
-  const { managedAddress, tx, action } = params
+  const { managedAddress, tx, action, code = 'AUTOMATION_PREFLIGHT_FAILED', requireSimulation = true } = params
   const call = (withBalance: boolean) =>
     getPublishPublicClient().call({
       account: managedAddress as Address,
@@ -141,12 +116,12 @@ export async function simulateCallFromAccount(params: {
       await call(true)
     }
   } catch (cause) {
-    const reason = isRevert(cause)
-      ? describeRevert(findRevertData(cause))
-      : 'could not be simulated'
+    const reverted = isRevert(cause)
+    if (!reverted && !requireSimulation) return
+    const reason = reverted ? describeRevert(findRevertData(cause)) : 'could not be simulated'
     throw new ManagedAccountPublishError(
       `Simulated ${action} from ${managedAddress} ${reason}; nothing was sent.`,
-      'AUTOMATION_PREFLIGHT_FAILED',
+      code,
       managedAddress,
       cause,
     )

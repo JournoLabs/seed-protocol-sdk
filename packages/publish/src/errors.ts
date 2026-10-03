@@ -19,6 +19,7 @@ export type ManagedAccountPublishErrorCode =
   | 'MODULAR_SIGNER_ACTIVATION_FAILED'
   | 'AUTOMATION_UNSUPPORTED_ACCOUNT'
   | 'AUTOMATION_PREFLIGHT_FAILED'
+  | 'PUBLISH_PREFLIGHT_FAILED'
 
 /**
  * Best-effort string for RPC / thirdweb / viem failures that are not plain `Error`
