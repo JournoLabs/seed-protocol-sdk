@@ -74,6 +74,25 @@ describe('in-app wallets follow publish config', () => {
     expect(getManagedAccountWallet()).not.toBe(first)
   })
 
+  test('EIP-7702 follows thirdweb.sponsorGas on a hosted chain', () => {
+    setConfigRef({ uploadApiBaseUrl: 'https://example.com', thirdweb: { sponsorGas: false } })
+    const modular = getModularAccountWallet() as unknown as { options: InAppOptions }
+    expect(modular.options.executionMode).toEqual({ mode: 'EIP7702', sponsorGas: false })
+  })
+
+  test('a local chain rejects EIP-7702 and a missing bundler with a clear error', () => {
+    setConfigRef({ ...twinConfig, thirdweb: { bundlerUrl: 'http://127.0.0.1:4337', sponsorGas: false } })
+    expect(() => getModularAccountWallet()).toThrow(/modularWalletMode to 'EOA'/)
+    setConfigRef({ ...twinConfig, thirdweb: { modularWalletMode: 'EOA' } })
+    expect(() => getManagedAccountWallet()).toThrow(/thirdweb\.bundlerUrl/)
+  })
+
+  test('a fork that keeps a public chain id is local when its RPC is loopback', () => {
+    const { chain: _twin, ...rest } = twinConfig
+    setConfigRef({ ...rest, rpcUrl: 'http://localhost:8545', thirdweb: {} })
+    expect(() => getModularAccountWallet()).toThrow(/is local/)
+  })
+
   test('ConnectButton gets wallets for the config it passes, before the ref is set', () => {
     setConfigRef(null)
     const [wallet] = getWalletsForConnectButton(twinConfig) as unknown as Array<{ options: InAppOptions }>

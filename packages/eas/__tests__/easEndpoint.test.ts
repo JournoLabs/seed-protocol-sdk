@@ -59,6 +59,18 @@ describe('EAS read chain', () => {
     expect(getEasEndpoint()).toBe('https://sdk.invalid/graphql')
   })
 
+  it('throws when the env URL is another chain\'s known indexer', () => {
+    clearEnv()
+    process.env.NEXT_PUBLIC_EAS_ENDPOINT = 'https://optimism-sepolia.easscan.org/graphql/'
+    configureEasReadChain('publish', { chainId: 31337 })
+    expect(() => getEasEndpoint()).toThrow(/indexer for chain 11155420, but Seed reads EAS on chain 31337/)
+    configureEasReadChain('sdk', { indexerUrl: 'http://localhost:4000/graphql' })
+    expect(getEasEndpoint()).toBe('http://localhost:4000/graphql')
+    resetEasReadChain()
+    configureEasReadChain('publish', { chainId: 11155420 })
+    expect(getEasEndpoint()).toBe('https://optimism-sepolia.easscan.org/graphql/')
+  })
+
   it('requires an indexer for unknown chains', () => {
     clearEnv()
     configureEasReadChain('sdk', { chainId: 999_999 })

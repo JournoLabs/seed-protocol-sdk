@@ -193,23 +193,17 @@ export async function runModularExecutorPublishPrep(): Promise<ModularExecutorPu
   }
 
   if (state.kind === 'ready') {
+    // Interactive publishing is a UserOp from the account itself and does not use the executor,
+    // so installing it here is best-effort; enrollPublishAutomation requires it.
     if (config.modularAccountModuleContract) {
       try {
         const signingAccount = await getManagedAccountSigningAccount()
         await ensureExecutorModuleInstalled(state.managedAddress, signingAccount, config)
       } catch (e) {
-        if (isManagedAccountPublishError(e)) {
-          return { ok: false, error: e }
-        }
-        return {
-          ok: false,
-          error: new ManagedAccountPublishError(
-            `Executor module setup failed on ${getPublishChainName()}.`,
-            'EXECUTOR_MODULE_NOT_INSTALLED',
-            state.managedAddress,
-            e,
-          ),
-        }
+        console.warn(
+          `[@seedprotocol/publish] Executor module setup failed on ${getPublishChainName()}; publishing continues, but publish automation needs it.`,
+          e,
+        )
       }
     }
 

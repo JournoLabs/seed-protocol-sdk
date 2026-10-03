@@ -1,4 +1,4 @@
-import { DEFAULT_EAS_CHAIN_ID, getEasChainDeployment } from './chains.js'
+import { DEFAULT_EAS_CHAIN_ID, EAS_CHAIN_DEPLOYMENTS, getEasChainDeployment } from './chains.js'
 
 /**
  * Which EAS chain / indexer the read side (sync, schema lookups) talks to.
@@ -13,7 +13,8 @@ import { DEFAULT_EAS_CHAIN_ID, getEasChainDeployment } from './chains.js'
  * processes without SDK or publish config (e.g. a feed server); the default is Optimism Sepolia.
  *
  * Indexer URL precedence: SDK `indexerUrl` > `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env >
- * the configured chain's known indexer > Optimism Sepolia.
+ * the configured chain's known indexer > Optimism Sepolia. An env URL that is another chain's
+ * known indexer throws, so a leftover env var cannot make reads follow the wrong chain.
  */
 export type EasReadChainSource = 'sdk' | 'publish' | 'localDb'
 
@@ -163,6 +164,12 @@ export function getEasEndpoint(): string {
   const knownIndexer = getEasChainDeployment(chainId)?.indexerUrl
   const env = readEnvEndpoint()
   if (env) {
+    const envChainId = chainIdOfKnownIndexer(env)
+    if (envChainId !== undefined && envChainId !== chainId) {
+      throw new Error(
+        `Seed Protocol chain mismatch: EAS_ENDPOINT / NEXT_PUBLIC_EAS_ENDPOINT (${env}) is the indexer for chain ${envChainId}, but Seed reads EAS on chain ${chainId}. Unset it, point it at chain ${chainId}'s indexer, or set SeedConfig.eas.indexerUrl.`,
+      )
+    }
     if (knownIndexer && knownIndexer !== env && chainId !== DEFAULT_EAS_CHAIN_ID && !warnedEnvOverride) {
       warnedEnvOverride = true
       console.warn(
@@ -179,4 +186,17 @@ export function getEasEndpoint(): string {
     )
   }
   return url
+}
+
+function normalizeUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '').toLowerCase()
+}
+
+/** Chain whose known easscan indexer is `url`, if any. */
+function chainIdOfKnownIndexer(url: string): number | undefined {
+  const target = normalizeUrl(url)
+  for (const [id, deployment] of Object.entries(EAS_CHAIN_DEPLOYMENTS)) {
+    if (deployment.indexerUrl && normalizeUrl(deployment.indexerUrl) === target) return Number(id)
+  }
+  return undefined
 }

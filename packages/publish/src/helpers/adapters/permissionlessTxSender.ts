@@ -40,12 +40,41 @@ function seedSignerToLocalAccount(signer: SeedSigner): LocalAccount {
 }
 
 /**
+ * Throws when the bundler lists its EntryPoints and v0.8 is not among them (e.g. a local twin's
+ * v0.6 bundler, which belongs in `PublishConfig.thirdweb.bundlerUrl`). Bundlers that do not
+ * answer `eth_supportedEntryPoints` are let through.
+ * @internal Exported for unit tests.
+ */
+export async function assertBundlerSupportsEntryPoint08(bundlerUrl: string): Promise<void> {
+  let supported: unknown
+  try {
+    const res = await fetch(bundlerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_supportedEntryPoints', params: [] }),
+    })
+    supported = ((await res.json()) as { result?: unknown }).result
+  } catch {
+    return
+  }
+  if (!Array.isArray(supported)) return
+  const list = supported.map((a) => String(a).toLowerCase())
+  if (list.includes(entryPoint08Address.toLowerCase())) return
+  throw new Error(
+    `@seedprotocol/publish: PublishConfig.bundlerUrl (${bundlerUrl}) does not support EntryPoint v0.8 (it lists ${list.join(', ') || 'none'}). ` +
+      `The top-level bundlerUrl is only for the permissionless EIP-7702 sender. For Thirdweb in-app wallets (e.g. a local twin's bundler), set PublishConfig.thirdweb.bundlerUrl instead.`,
+  )
+}
+
+/**
  * Sponsored EIP-7702 `SeedTxSender` via permissionless `to7702SimpleSmartAccount`.
+ * @throws when `bundlerUrl` reports no EntryPoint v0.8 support
  */
 export async function createPermissionlessTxSender(
   options: CreatePermissionlessTxSenderOptions,
 ): Promise<SeedTxSender> {
   const { signer, bundlerUrl, paymasterUrl } = options
+  await assertBundlerSupportsEntryPoint08(bundlerUrl)
   const chain = getPublishViemChain()
   const rpcUrl = getPublishRpcUrl()
   const address = signer.address as Address

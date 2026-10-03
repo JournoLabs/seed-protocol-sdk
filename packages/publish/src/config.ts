@@ -47,21 +47,23 @@ export type PublishAccountMode = 'eoa' | 'eip7702'
 
 export interface ThirdwebWalletOptions {
   /**
-   * Bundler for the managed (EIP-4337) smart account's UserOps. Defaults to Thirdweb's hosted
-   * bundler for the chain.
+   * Bundler for the managed (EIP-4337, EntryPoint v0.6) smart account's UserOps. Defaults to
+   * Thirdweb's hosted bundler for the chain; required on a local chain. This is the bundler a
+   * local twin uses, not the top-level {@link PublishConfig.bundlerUrl}.
    */
   bundlerUrl?: string
   /**
-   * Sponsor the managed smart account's gas through Thirdweb's paymaster. Default `true`.
-   * Set `false` where Thirdweb's paymaster is unavailable (local chains); the account then pays
-   * its own gas and must hold ETH.
+   * Sponsor gas through Thirdweb: the managed smart account's UserOps and, in `'EIP7702'` mode,
+   * the in-app EOA's transactions. Default `true`. Set `false` where Thirdweb's paymaster is
+   * unavailable (local chains); the accounts then pay their own gas and must hold ETH.
    */
   sponsorGas?: boolean
   /**
    * How the user's in-app EOA (the managed account's admin) sends its own transactions, such as
-   * installing the Seed executor: `'EIP7702'` (default) is gas-sponsored through Thirdweb;
-   * `'EOA'` sends plain transactions and needs ETH. Use `'EOA'` where Thirdweb's EIP-7702
-   * service is unavailable (local chains). The address is the same either way.
+   * installing the Seed executor: `'EIP7702'` (default) goes through Thirdweb's hosted EIP-7702
+   * service (gas-sponsored per `sponsorGas`); `'EOA'` sends plain transactions and needs ETH.
+   * A local chain requires `'EOA'`: the wallet throws for `'EIP7702'` there. The address is the
+   * same either way.
    */
   modularWalletMode?: 'EIP7702' | 'EOA'
 }
@@ -111,8 +113,10 @@ export interface PublishConfig {
    */
   thirdweb?: ThirdwebWalletOptions
   /**
-   * ERC-4337 / EIP-7702 bundler URL for permissionless `SeedTxSender` (gasless path).
-   * Not used by Thirdweb wallets; see {@link ThirdwebWalletOptions.bundlerUrl}.
+   * EntryPoint v0.8 bundler for the permissionless EIP-7702 `SeedTxSender` used by non-Thirdweb
+   * wallets. Setting it switches `accountMode` to `eip7702`. Not used by Thirdweb wallets: a local
+   * twin's (v0.6) bundler goes in {@link ThirdwebWalletOptions.bundlerUrl}. A bundler that
+   * reports no v0.8 support is rejected when the sender is created.
    */
   bundlerUrl?: string
   /**

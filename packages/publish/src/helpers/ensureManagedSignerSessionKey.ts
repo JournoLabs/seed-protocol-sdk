@@ -18,6 +18,11 @@ const MSG_ACTIVATION_FAILED = () =>
  * Ensures the modular (EIP-7702) wallet is an active session signer on the ManagedAccount.
  * If permissions are missing or stale, sends `addSessionKey` signed by the managed EIP-4337 wallet.
  * Session-key AA extensions remain on Thirdweb; verification uses viem.
+ *
+ * The key may call only the Seed executor module ({@link defaultApprovedTargetsForModularPublish}).
+ *
+ * @deprecated Interactive publishing is a UserOp from the ManagedAccount itself and needs no
+ * session key. For server-held keys use `enrollPublishAutomation`.
  */
 export async function ensureManagedSignerSessionKey(params: {
   managedAddress: string

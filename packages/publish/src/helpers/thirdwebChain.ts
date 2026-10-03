@@ -40,3 +40,19 @@ export function getPublishThirdwebChain(source?: { chain?: ViemChain; rpcUrl?: s
   cached = { key, chain }
   return chain
 }
+
+const LOCAL_CHAIN_IDS = new Set([31337, 1337])
+
+/**
+ * True for a dev chain (Anvil / Hardhat ids) or any chain reached through a loopback or `.localhost`
+ * RPC, such as a fork. Thirdweb's hosted bundler, paymaster and EIP-7702 relayer cannot reach these.
+ */
+export function isLocalThirdwebChain(chain: Pick<ThirdwebChain, 'id' | 'rpc'>): boolean {
+  if (LOCAL_CHAIN_IDS.has(chain.id)) return true
+  try {
+    const host = new URL(chain.rpc).hostname.replace(/^\[|\]$/g, '')
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost')
+  } catch {
+    return false
+  }
+}

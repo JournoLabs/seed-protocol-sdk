@@ -1,7 +1,7 @@
 import { getPublishConfig } from '../config'
 
 /**
- * Allowlisted call targets for **automation** session keys on a ManagedAccount.
+ * Allowlisted call targets for session keys on a ManagedAccount.
  * Returns only the configured Seed executor module — never the ManagedAccount or raw EAS
  * (those would allow `setEas` / arbitrary attestations).
  *
@@ -11,8 +11,8 @@ export function approvedTargetsForAutomationPublish(): `0x${string}`[] {
   const module = getPublishConfig().modularAccountModuleContract?.trim()
   if (!module || !/^0x[0-9a-fA-F]{40}$/.test(module)) {
     throw new Error(
-      '@seedprotocol/publish: automation session keys require PublishConfig.modularAccountModuleContract ' +
-        '(executor module only). Do not use defaultApprovedTargetsForModularPublish for server-held keys.',
+      '@seedprotocol/publish: session keys require PublishConfig.modularAccountModuleContract ' +
+        '(their only approved target is the Seed executor module).',
     )
   }
   return [module.toLowerCase() as `0x${string}`]

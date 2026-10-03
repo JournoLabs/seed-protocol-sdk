@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setConfigRef, type PublishConfig } from '../config'
-import { EAS_CONTRACT_ADDRESS } from './constants'
 import { defaultApprovedTargetsForModularPublish } from './defaultApprovedTargetsForModularPublish'
 
 afterEach(() => {
@@ -15,24 +14,15 @@ function setCfg(partial: Partial<PublishConfig> & Pick<PublishConfig, 'uploadApi
 }
 
 describe('defaultApprovedTargetsForModularPublish', () => {
-  test('includes the managed account and never EAS', () => {
-    setCfg({ uploadApiBaseUrl: 'https://example.com' })
+  test('grants only the executor module, never the managed account', () => {
+    const moduleAddr = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     const managed = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-    const targets = defaultApprovedTargetsForModularPublish(managed)
-    const lower = targets.map((a) => a.toLowerCase())
-    expect(lower).toContain(managed.toLowerCase())
-    expect(lower).not.toContain(EAS_CONTRACT_ADDRESS.toLowerCase())
+    setCfg({ uploadApiBaseUrl: 'https://example.com', modularAccountModuleContract: moduleAddr })
+    expect(defaultApprovedTargetsForModularPublish(managed)).toEqual([moduleAddr])
   })
 
-  test('includes modular executor module when configured', () => {
-    const moduleAddr = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-    setCfg({
-      uploadApiBaseUrl: 'https://example.com',
-      modularAccountModuleContract: moduleAddr,
-    })
-    const targets = defaultApprovedTargetsForModularPublish(
-      '0xcccccccccccccccccccccccccccccccccccccccc',
-    )
-    expect(targets.map((a) => a.toLowerCase())).toContain(moduleAddr.toLowerCase())
+  test('throws when no executor module is configured', () => {
+    setCfg({ uploadApiBaseUrl: 'https://example.com' })
+    expect(() => defaultApprovedTargetsForModularPublish()).toThrow(/modularAccountModuleContract/)
   })
 })

@@ -14,7 +14,7 @@ function setCfg(partial: Partial<PublishConfig> & Pick<PublishConfig, 'uploadApi
   } as PublishConfig)
 }
 
-describe('prepareEasMultiRevoke routing', () => {
+describe('prepareEasMultiRevoke', () => {
   test('targets EAS when no executor module is configured', () => {
     setCfg({ uploadApiBaseUrl: 'https://example.com' })
     const tx = prepareEasMultiRevoke([
@@ -32,28 +32,5 @@ describe('prepareEasMultiRevoke routing', () => {
       { schema: `0x${'11'.repeat(32)}`, data: [{ uid: `0x${'22'.repeat(32)}` }] },
     ])
     expect(tx.to.toLowerCase()).toBe(EAS_CONTRACT_ADDRESS.toLowerCase())
-  })
-
-  test('targets executor module when viaExecutorModule is set', () => {
-    const moduleAddr = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-    setCfg({
-      uploadApiBaseUrl: 'https://example.com',
-      modularAccountModuleContract: moduleAddr,
-    })
-    const tx = prepareEasMultiRevoke(
-      [{ schema: `0x${'11'.repeat(32)}`, data: [{ uid: `0x${'22'.repeat(32)}` }] }],
-      { viaExecutorModule: true },
-    )
-    expect(tx.to.toLowerCase()).toBe(moduleAddr.toLowerCase())
-  })
-
-  test('viaExecutorModule throws when no executor module is configured', () => {
-    setCfg({ uploadApiBaseUrl: 'https://example.com' })
-    expect(() =>
-      prepareEasMultiRevoke(
-        [{ schema: `0x${'11'.repeat(32)}`, data: [{ uid: `0x${'22'.repeat(32)}` }] }],
-        { viaExecutorModule: true },
-      ),
-    ).toThrow(/modularAccountModuleContract/)
   })
 })

@@ -1,5 +1,4 @@
-import { encodeAbiParameters, encodeFunctionData, parseEventLogs, type Log } from 'viem'
-import { getPublishConfig } from '~/config'
+import { encodeAbiParameters, parseEventLogs, type Log } from 'viem'
 import { easAbi } from './abi/eas'
 import {
   encodeEasAttest,
@@ -84,51 +83,12 @@ export function getAttestedUidsFromReceipt(
 }
 
 /**
- * Prepares an EAS multiRevoke call for batch revocation. Targets EAS directly, which works for
- * the attester and for a ManagedAccount executing as itself.
- *
- * Pass `viaExecutorModule: true` only for automation session keys (module-only approvedTargets).
- * The call then targets `modularAccountModuleContract`, and throws if it is not configured.
+ * Prepares an EAS multiRevoke call for batch revocation. Targets EAS directly; only the attester
+ * (an EOA, or a ManagedAccount executing as itself) can revoke. The Seed executor module has no
+ * revoke path.
  */
-export function prepareEasMultiRevoke(
-  requests: MultiRevocationRequest[],
-  options: { viaExecutorModule?: boolean } = {},
-): SeedTxRequest {
-  if (!options.viaExecutorModule) {
-    return encodeEasMultiRevoke(requests)
-  }
-  const module = getPublishConfig().modularAccountModuleContract?.trim()
-  if (!module || !/^0x[0-9a-fA-F]{40}$/.test(module)) {
-    throw new Error(
-      '@seedprotocol/publish: revoking via the executor module requires PublishConfig.modularAccountModuleContract',
-    )
-  }
-  return encodeEasMultiRevokeTo(module as `0x${string}`, requests)
-}
-
-/**
- * Encode multiRevoke calldata to an arbitrary `to` (EAS or Seed executor module).
- */
-export function encodeEasMultiRevokeTo(
-  to: `0x${string}`,
-  requests: MultiRevocationRequest[],
-): SeedTxRequest {
-  return {
-    to,
-    data: encodeFunctionData({
-      abi: easAbi,
-      functionName: 'multiRevoke',
-      args: [
-        requests.map((r) => ({
-          schema: r.schema,
-          data: r.data.map((d) => ({
-            uid: d.uid,
-            value: d.value ?? 0n,
-          })),
-        })),
-      ],
-    }),
-  }
+export function prepareEasMultiRevoke(requests: MultiRevocationRequest[]): SeedTxRequest {
+  return encodeEasMultiRevoke(requests)
 }
 
 export { ZERO_ADDRESS, ZERO_BYTES32 }

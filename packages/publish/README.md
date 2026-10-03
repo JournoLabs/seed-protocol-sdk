@@ -123,7 +123,7 @@ initPublish({
 - **Other chains** need `easContractAddress` and `schemaRegistryAddress`; `initPublish` throws without them. These options also override the built-in addresses on known chains.
 - **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
 - `ensureEasSchemasForItem` registers missing model and property schemas on first publish. The base schemas (Version and EAS's "Name a Schema") are registered by the protocol for each supported chain (seed-protocol `seed:ensure-schemas`); if one is missing, publishing fails before sending anything.
-- SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer.
+- SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer, but one set to another chain's known easscan indexer throws (`SeedConfig.eas.indexerUrl` takes precedence over both).
 - The SDK's local database remembers which chain its attestations came from. Pointing an existing database at a different chain fails at init, sync or publish with a chain-mismatch error rather than mixing data from two chains. Use a separate `filesDir` / database per chain. Databases created before this check are treated as Optimism Sepolia.
 - Before the first publish or revoke, `verifyPublishChain()` checks that the RPC reports `chain.id` and that EAS, the SchemaRegistry and any configured factory / executor module have code on the chain. It throws `PublishChainConfigError` listing every problem. Call it at startup to fail earlier.
 - While `@seedprotocol/publish` is loaded but `initPublish` hasn't run, SDK EAS sync waits (up to 30s) for the publish chain instead of syncing the default chain. Set `SeedConfig.eas.chainId` to skip the wait.
@@ -150,6 +150,8 @@ initPublish({
 // SDK
 client.init({ config: { ...config, eas: twin.eas, filesDir: `.seed-${twin.chain.id}` } })
 ```
+
+Configuring the twin by hand instead: the twin's bundler goes in `thirdweb.bundlerUrl`, not the top-level `bundlerUrl`. That one feeds the permissionless EIP-7702 sender, needs an EntryPoint v0.8 bundler (the twin's is v0.6) and is rejected when the bundler reports no v0.8 support. On a local chain (31337 / 1337, or a loopback RPC), the Thirdweb wallets throw for `modularWalletMode: 'EIP7702'` and for a missing `thirdweb.bundlerUrl`, since Thirdweb's hosted services can't reach it.
 
 Fund both the ManagedAccount and the in-app EOA before publishing: `bun run twin:fund <managedAddress> <eoaAddress>` in `seed-protocol`. Each `twin:up` resets the chain, so clear the local Seed DB (`filesDir`) and browser storage too.
 
@@ -259,14 +261,16 @@ APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/
 With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 - **Managed wallet** (`getManagedAccountWallet`, EIP-4337): the user's **ManagedAccount** smart account, created by the ManagedAccount factory with the user's in-app EOA as admin. It is the attester, and it publishes.
-- **Modular wallet** (`getModularAccountWallet`): that same in-app EOA. It signs DataItems and sends the few **admin-only** transactions, such as `installSeedExecutor`. `thirdweb.modularWalletMode` picks gas-sponsored EIP-7702 (default) or a plain funded EOA (`'EOA'`); the address is the same either way.
+- **Modular wallet** (`getModularAccountWallet`): that same in-app EOA. It signs DataItems and sends the few **admin-only** transactions, such as `installSeedExecutor`. `thirdweb.modularWalletMode` picks EIP-7702 through Thirdweb (default; gas-sponsored unless `thirdweb.sponsorGas` is `false`) or a plain funded EOA (`'EOA'`); the address is the same either way.
 
 **Publishing.** `createAttestations` sends interactive `multiPublish` as a **UserOp from the managed smart account**, calling the account itself (`execute(account, multiPublish)`). The Seed extension accepts that self-call; direct calls from session keys or other non-admins revert with `Unauthorized`. Before the first publish, `ensureModularPublishBootstrap`:
 
 1. Connects the managed wallet and checks it is the publishing account.
 2. Checks the account's `getEas()` against `easContractAddress`. Current Seed extensions fix EAS at deployment, so a mismatch is a config error. Only pre-rollout accounts that report no EAS get `setEas`, sent by the admin EOA.
 
-**Executor.** `runModularExecutorPublishPrep()` ensures the ManagedAccount is deployed and, when `modularAccountModuleContract` is set, that the Seed executor is installed: `installSeedExecutor()` from the admin EOA on Router accounts with the `SeedExecutorRouterExtension`, `installModule` on ModularCore accounts.
+**Executor.** `runModularExecutorPublishPrep()` ensures the ManagedAccount is deployed and, when `modularAccountModuleContract` is set, tries to install the Seed executor: `installSeedExecutor()` from the admin EOA on Router accounts with the `SeedExecutorRouterExtension`, `installModule` on ModularCore accounts. Interactive publishing doesn't use the executor, so a failed install (for example, `modularAccountModuleContract` naming a different executor than the one the account's extension pins) only logs a warning. `enrollPublishAutomation` requires the install and fails with `EXECUTOR_MODULE_NOT_INSTALLED`.
+
+**Session keys** may only target the executor (`approvedTargetsForAutomationPublish`). `ensureManagedSignerSessionKey` and `defaultApprovedTargetsForModularPublish` are deprecated: interactive publishing needs no session key, and both now grant the executor only, never the account (which would allow any self-call) or EAS.
 
 **Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](../../docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
 

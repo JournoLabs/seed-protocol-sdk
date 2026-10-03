@@ -14,7 +14,7 @@ Modular-account-as-identity is **out of scope** for this version.
 
 - On-chain policy: Thirdweb session key on the ManagedAccount with `approvedTargets` = **executor module only** (`modularAccountModuleContract`). Not the ManagedAccount itself, not raw EAS (those allow `setEas` / arbitrary attestations).
 - Discoverability: revocable EAS sidecar `seedprotocol.publishAuthorization`, attested by the ManagedAccount, recipient = session key.
-- **Publish can change canonical heads** (patch / `new_version`). A live grant may supersede prior property attestations. Scope is publish + revoke only — not key rotation, `setEas`, or adding other signers.
+- **Publish can change canonical heads** (patch / `new_version`). A live grant may supersede prior property attestations. On-chain, the key can only publish through the executor — not revoke, rotate keys or add other signers. (The sidecar's `scopes` string still reads `publish,revoke`; it is part of the permissions hash, so changing it is a coordinated change with existing grants.)
 
 ```text
 User (owner)
@@ -155,9 +155,7 @@ const actor = await PublishManager.createPublish(item, managedAddress, onChainWa
   dataItemSigner: dataItemWallet.signer,
 })
 
-// Unpublish uses the registered revoke executor + prepareEasMultiRevoke
-// (targets the executor module when modularAccountModuleContract is set)
-await item.unpublish() // with setPublishWallet(onChainWallet) / initPublish configured
+// Unpublish is owner-only: it throws for an automation key. Run it with the user's wallet.
 ```
 
 **Prerequisites for unattended `multiPublish`:**

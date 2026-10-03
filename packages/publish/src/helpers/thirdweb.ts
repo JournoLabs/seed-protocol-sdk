@@ -21,7 +21,7 @@ import {
 } from './chainClient'
 import { encodeCreateAccount, readFactoryGetAddress } from './contracts'
 import type { PublishWallet } from './seedSigner'
-import { getPublishThirdwebChain } from './thirdwebChain'
+import { getPublishThirdwebChain, isLocalThirdwebChain } from './thirdwebChain'
 
 const logger = debug('permaPress:helpers:thirdweb')
 
@@ -345,6 +345,11 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
   const chain = getPublishThirdwebChain(cfg ?? undefined)
   const factoryAddress = cfg ? managedAccountFactoryFor(cfg) : requireManagedAccountFactoryAddress()
   const { bundlerUrl, sponsorGas } = resolveThirdwebWalletOptions(cfg)
+  if (!bundlerUrl && isLocalThirdwebChain(chain)) {
+    throw new Error(
+      `@seedprotocol/publish: chain ${chain.id} is local, so Thirdweb's hosted bundler cannot reach it. Set PublishConfig.thirdweb.bundlerUrl to the chain's bundler (seedTwinConfig does this for the twin).`,
+    )
+  }
   const key = [chain.id, chain.rpc, factoryAddress, bundlerUrl ?? '', sponsorGas].join('|').toLowerCase()
   if (_managedInAppWallet?.key !== key) {
     _managedInAppWallet = {
@@ -372,18 +377,32 @@ let _modularInAppWallet: { key: string; wallet: Wallet } | null = null
 /**
  * The user's in-app EOA (same login and storage as {@link getManagedAccountWallet}), which is
  * the ManagedAccount's admin. Sends admin-only transactions such as `installSeedExecutor`.
- * `PublishConfig.thirdweb.modularWalletMode` picks sponsored EIP-7702 (default) or a plain EOA.
+ * `PublishConfig.thirdweb.modularWalletMode` picks EIP-7702 (default; gas-sponsored unless
+ * `thirdweb.sponsorGas` is false) or a plain EOA.
+ *
+ * @throws for EIP-7702 on a local chain: Thirdweb runs 7702 through its hosted bundler, which
+ * cannot reach it, sponsored or not.
  */
 export const getModularAccountWallet = (config?: PublishConfig) => {
-  const { modularWalletMode } = resolveThirdwebWalletOptions(config ?? getConfigRef())
-  if (_modularInAppWallet?.key !== modularWalletMode) {
+  const cfg = config ?? getConfigRef()
+  const { modularWalletMode, sponsorGas } = resolveThirdwebWalletOptions(cfg)
+  if (modularWalletMode === 'EIP7702') {
+    const chain = getPublishThirdwebChain(cfg ?? undefined)
+    if (isLocalThirdwebChain(chain)) {
+      throw new Error(
+        `@seedprotocol/publish: chain ${chain.id} is local, and Thirdweb's EIP-7702 mode needs its hosted bundler, which cannot reach it. Set PublishConfig.thirdweb.modularWalletMode to 'EOA' and fund the in-app EOA (seedTwinConfig does this for the twin).`,
+      )
+    }
+  }
+  const key = `${modularWalletMode}|${sponsorGas}`
+  if (_modularInAppWallet?.key !== key) {
     _modularInAppWallet = {
-      key: modularWalletMode,
+      key,
       wallet: inAppWallet({
         storage: getSharedPublishInAppWalletStorage(),
         auth: { options: [...IN_APP_AUTH_OPTIONS] },
         executionMode:
-          modularWalletMode === 'EOA' ? { mode: 'EOA' } : { mode: 'EIP7702', sponsorGas: true },
+          modularWalletMode === 'EOA' ? { mode: 'EOA' } : { mode: 'EIP7702', sponsorGas },
       }),
     }
   }
