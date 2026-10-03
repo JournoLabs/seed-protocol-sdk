@@ -408,7 +408,7 @@ export const createAttestations = fromPromise(
       try {
         return await activeWallet.txSender.sendTransaction(tx)
       } catch (err) {
-        throw explainUserOpError(err)
+        throw explainUserOpError(err, activeWallet.txSender.address)
       }
     }
 

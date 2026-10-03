@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeErrorResult, encodeErrorResult, type Hex } from 'viem'
 import { seedErrorsAbi } from './abi/seedErrors'
+import { isManagedAccountPublishError, type ManagedAccountPublishError } from '../errors'
 import { describeFailedUserOp, describeRevert, explainUserOpError } from './describeRevert'
 
 const TX = `0x${'ab'.repeat(32)}`
+const SENDER = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const unknownLocalId = encodeErrorResult({
   abi: seedErrorsAbi,
   errorName: 'UnknownPublishLocalId',
@@ -52,24 +54,28 @@ describe('describeFailedUserOp', () => {
 })
 
 describe('explainUserOpError', () => {
-  test('explains thirdweb\'s bare "UserOp failed at txHash", keeping it as the cause', () => {
+  test('explains thirdweb\'s bare "UserOp failed at txHash" as USEROP_FAILED_NO_REASON', () => {
     const original = new Error(`UserOp failed at txHash: ${TX}`)
-    const explained = explainUserOpError(original) as Error
+    const explained = explainUserOpError(original, SENDER) as ManagedAccountPublishError
+    expect(isManagedAccountPublishError(explained)).toBe(true)
+    expect(explained.code).toBe('USEROP_FAILED_NO_REASON')
     expect(explained.message).toContain('ran out of gas')
     expect(explained.message).toContain(TX)
-    expect(explained.cause).toBe(original)
+    expect(explained.managedAddress).toBe(SENDER)
+    expect(explained.underlyingCause).toBe(original)
   })
 
   test('finds the message further down the cause chain', () => {
     const original = new Error('send failed', { cause: new Error(`UserOp failed at txHash: ${TX}`) })
-    expect((explainUserOpError(original) as Error).message).toContain('ran out of gas')
+    expect(explainUserOpError(original)).toMatchObject({ code: 'USEROP_FAILED_NO_REASON' })
   })
 
   test('names a custom error thirdweb could not decode', () => {
     const original = thirdwebUndecodedError(unknownLocalId)
-    const explained = explainUserOpError(original) as Error
+    const explained = explainUserOpError(original) as ManagedAccountPublishError
+    expect(explained.code).toBe('USEROP_REVERTED')
     expect(explained.message).toContain('reverted with UnknownPublishLocalId')
-    expect(explained.cause).toBe(original)
+    expect(explained.underlyingCause).toBe(original)
   })
 
   test('leaves other errors alone', () => {

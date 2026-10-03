@@ -20,6 +20,8 @@ export type ManagedAccountPublishErrorCode =
   | 'AUTOMATION_UNSUPPORTED_ACCOUNT'
   | 'AUTOMATION_PREFLIGHT_FAILED'
   | 'PUBLISH_PREFLIGHT_FAILED'
+  | 'USEROP_FAILED_NO_REASON'
+  | 'USEROP_REVERTED'
 
 /**
  * Best-effort string for RPC / thirdweb / viem failures that are not plain `Error`

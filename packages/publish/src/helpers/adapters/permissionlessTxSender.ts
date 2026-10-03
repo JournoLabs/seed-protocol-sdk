@@ -11,7 +11,8 @@ import {
   type SeedTxSender,
 } from '../seedSigner'
 import { getPublishRpcUrl, getPublishViemChain } from '../chainConfig'
-import { describeFailedUserOp } from '../describeRevert'
+import { ManagedAccountPublishError } from '../../errors'
+import { userOpFailureError } from '../describeRevert'
 
 export type CreatePermissionlessTxSenderOptions = {
   signer: SeedSigner
@@ -131,7 +132,7 @@ export async function createPermissionlessTxSender(
           { cause: err },
         )
       }
-      return { transactionHash: assertUserOpSucceeded(receipt) }
+      return { transactionHash: assertUserOpSucceeded(receipt, simpleAccount.address) }
     },
   })
 }
@@ -142,14 +143,19 @@ type UserOpReceiptLike = { success: boolean; reason?: string; receipt: { transac
  * Returns the transaction hash of a successful UserOp, and throws for a failed one. The
  * bundle transaction itself succeeds when a UserOp in it fails, so its receipt alone would
  * pass a failed publish off as a success.
+ * @throws ManagedAccountPublishError `USEROP_REVERTED` or `USEROP_FAILED_NO_REASON`
  * @internal Exported for unit tests.
  */
-export function assertUserOpSucceeded(receipt: UserOpReceiptLike): Hex {
+export function assertUserOpSucceeded(receipt: UserOpReceiptLike, sender?: string): Hex {
   const txHash = receipt.receipt.transactionHash as Hex
   if (receipt.success) return txHash
   const reason = receipt.reason
   if (reason && !/^0x[0-9a-f]*$/i.test(reason)) {
-    throw new Error(`The publish UserOp in transaction ${txHash} failed: ${reason}`)
+    throw new ManagedAccountPublishError(
+      `The publish UserOp in transaction ${txHash} failed: ${reason}`,
+      'USEROP_REVERTED',
+      sender,
+    )
   }
-  throw new Error(describeFailedUserOp(txHash, reason as Hex | undefined))
+  throw userOpFailureError({ txHash, revertData: reason as Hex | undefined, sender })
 }

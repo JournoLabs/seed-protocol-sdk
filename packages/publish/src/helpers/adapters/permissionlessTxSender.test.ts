@@ -42,7 +42,10 @@ describe('assertUserOpSucceeded', () => {
 
   test('throws for a failed UserOp even though the bundle transaction succeeded', () => {
     expect(() => assertUserOpSucceeded({ success: false, receipt: { transactionHash } })).toThrow(
-      /ran out of gas/,
+      expect.objectContaining({
+        code: 'USEROP_FAILED_NO_REASON',
+        message: expect.stringContaining('ran out of gas'),
+      }),
     )
   })
 
@@ -53,7 +56,10 @@ describe('assertUserOpSucceeded', () => {
       args: ['0x1111111111111111111111111111111111111111'],
     })
     expect(() => assertUserOpSucceeded({ success: false, reason, receipt: { transactionHash } })).toThrow(
-      /reverted with Unauthorized\(0x1111/,
+      expect.objectContaining({
+        code: 'USEROP_REVERTED',
+        message: expect.stringMatching(/reverted with Unauthorized\(0x1111/),
+      }),
     )
   })
 })

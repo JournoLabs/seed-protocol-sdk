@@ -2,6 +2,7 @@ import { BaseError, decodeErrorResult, toFunctionSelector, type Abi, type Hex } 
 import { easAbi } from './abi/eas'
 import { executorModuleAbi } from './abi/executor'
 import { seedErrorsAbi } from './abi/seedErrors'
+import { ManagedAccountPublishError } from '../errors'
 
 /** Every error a publish call can revert with. `Error(string)` and `Panic` decode without it. */
 const publishErrorsAbi = [...seedErrorsAbi, ...executorModuleAbi, ...easAbi] as Abi
@@ -52,6 +53,26 @@ export function describeFailedUserOp(txHash: string, revertData?: Hex): string {
   )
 }
 
+/**
+ * Error for a UserOp that failed in transaction `txHash`: `USEROP_REVERTED` with revert data,
+ * `USEROP_FAILED_NO_REASON` (usually out of gas) without.
+ */
+export function userOpFailureError(params: {
+  txHash: string
+  revertData?: Hex
+  sender?: string
+  cause?: unknown
+}): ManagedAccountPublishError {
+  const { txHash, revertData, sender, cause } = params
+  const reverted = !!revertData && revertData !== '0x'
+  return new ManagedAccountPublishError(
+    describeFailedUserOp(txHash, revertData),
+    reverted ? 'USEROP_REVERTED' : 'USEROP_FAILED_NO_REASON',
+    sender,
+    cause,
+  )
+}
+
 function errorChain(err: unknown): unknown[] {
   const chain: unknown[] = []
   for (let cur = err; cur && chain.length < 6; cur = (cur as { cause?: unknown }).cause) chain.push(cur)
@@ -72,25 +93,29 @@ function errorNameForSelector(selector: string): string | undefined {
 }
 
 /**
- * Turns the two unhelpful errors a failed thirdweb UserOp produces into readable ones, keeping
- * the original as `cause`; returns anything else unchanged.
+ * Turns the two unhelpful errors a failed thirdweb UserOp produces into ManagedAccountPublishErrors,
+ * keeping the original as `underlyingCause`; returns anything else unchanged.
  * - "UserOp failed at txHash: 0x…": no revert reason was logged, usually out of gas.
+ *   `USEROP_FAILED_NO_REASON`.
  * - viem's AbiErrorSignatureNotFoundError: thirdweb decodes the logged revert reason without
  *   an ABI, so every custom error fails to decode. Names the error from its selector.
+ *   `USEROP_REVERTED`.
  */
-export function explainUserOpError(err: unknown): unknown {
+export function explainUserOpError(err: unknown, sender?: string): unknown {
   for (const e of errorChain(err)) {
     const message = String((e as { message?: unknown }).message ?? '')
     const failed = message.match(/UserOp failed at txHash: (0x[0-9a-f]{64})/i)
-    if (failed) return new Error(describeFailedUserOp(failed[1]!), { cause: err })
+    if (failed) return userOpFailureError({ txHash: failed[1]!, sender, cause: err })
 
     const signature = (e as { name?: unknown; signature?: unknown }).signature
     if ((e as { name?: unknown }).name === 'AbiErrorSignatureNotFoundError' && typeof signature === 'string') {
       const name = errorNameForSelector(signature)
       if (name) {
-        return new Error(
+        return new ManagedAccountPublishError(
           `The publish transaction reverted with ${name} (its arguments were not decoded).`,
-          { cause: err },
+          'USEROP_REVERTED',
+          sender,
+          err,
         )
       }
     }
