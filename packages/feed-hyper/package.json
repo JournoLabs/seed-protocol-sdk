@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed-hyper",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "Hyperdrive / Hyperswarm distribution for Seed Protocol feeds",
   "type": "module",
   "main": "./dist/index.js",
