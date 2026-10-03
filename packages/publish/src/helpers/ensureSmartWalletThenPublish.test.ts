@@ -13,6 +13,7 @@ const resolveSmartWalletForPublishMock = mock(() => Promise.resolve({ needsDeplo
 const ensureEip7702ModularAccountReadyMock = mock(() => Promise.resolve())
 
 mock.module('../config', () => ({
+  getConfigRef: () => null,
   getPublishConfig: () => cfg,
 }))
 

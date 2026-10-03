@@ -7,14 +7,14 @@ import { getPublishPublicClient } from './chainClient'
 import {
   readExecutorModuleEas,
   readExecutorModuleIsInitialized,
-  readGetEas,
+  readSeedExecutorRouter,
 } from './contracts'
 import type { SeedTxRequest } from './seedSigner'
 
 const MSG_LEGACY_ROUTER =
-  'This ManagedAccount is a legacy Router account. The Seed executor module cannot act for it, so publish automation is not available for this account yet.'
+  'This ManagedAccount predates the Seed executor router extension, so the Seed executor cannot act for it and publish automation is not available for this account.'
 const MSG_NOT_INITIALIZED =
-  'The Seed executor module is not initialized for this ManagedAccount, so automation session keys cannot publish or revoke through it.'
+  'The Seed executor is not installed for this ManagedAccount, so automation session keys cannot publish through it. The account admin installs it (installSeedExecutor), which enrollPublishAutomation does.'
 const MSG_EAS_MISMATCH =
   'The Seed executor module is configured with a different EAS contract for this ManagedAccount than publish config. Automation session keys cannot change it.'
 const MSG_READ_FAILED = 'Could not read the Seed executor module state for this ManagedAccount.'
@@ -29,14 +29,12 @@ function requireModuleAddress(): Address {
   return module as Address
 }
 
-/** True when the account answers `getEas()`, i.e. a legacy Router account with the Seed extension. */
-async function isLegacyRouterAccount(managedAddress: Address): Promise<boolean> {
-  try {
-    await readGetEas(managedAddress)
-    return true
-  } catch {
-    return false
-  }
+/**
+ * True for a Router account without the `SeedExecutorRouterExtension`: it cannot run the
+ * executor at all, as opposed to an account where the executor is just not installed yet.
+ */
+async function lacksExecutorRouterExtension(managedAddress: Address): Promise<boolean> {
+  return (await readSeedExecutorRouter(managedAddress)) === null
 }
 
 /**
@@ -65,7 +63,7 @@ export async function assertExecutorModuleReadyForAccount(managedAddress: string
   }
 
   if (!initialized) {
-    const message = (await isLegacyRouterAccount(account)) ? MSG_LEGACY_ROUTER : MSG_NOT_INITIALIZED
+    const message = (await lacksExecutorRouterExtension(account)) ? MSG_LEGACY_ROUTER : MSG_NOT_INITIALIZED
     throw new ManagedAccountPublishError(message, 'AUTOMATION_UNSUPPORTED_ACCOUNT', managedAddress)
   }
 
@@ -92,7 +90,7 @@ function isRevert(err: unknown): boolean {
 
 function describeRevert(data: Hex | undefined): string {
   if (!data) {
-    return 'reverted with no data. The target likely has no matching function (for example, the executor module has no multiRevoke) or the account cannot run executor calls'
+    return 'reverted with no data. The target likely has no matching function or the account cannot run executor calls'
   }
   try {
     const decoded = decodeErrorResult({ abi: [...executorModuleAbi, ...easAbi], data })

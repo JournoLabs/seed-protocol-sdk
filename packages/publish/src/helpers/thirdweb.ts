@@ -7,7 +7,14 @@ import { useEffect, useRef, useState, } from 'react'
 import type { Chain } from 'thirdweb/chains'
 import type { Address, Hex } from 'viem'
 import debug from 'debug'
-import { getPublishConfig, requireManagedAccountFactoryAddress } from '../config'
+import {
+  getConfigRef,
+  getPublishConfig,
+  requireManagedAccountFactoryAddress,
+  resolveThirdwebWalletOptions,
+  type PublishConfig,
+} from '../config'
+import { MANAGED_ACCOUNT_FACTORY_ADDRESSES } from './constants'
 import {
   isContractDeployed,
   pollSmartWalletDeployed as pollDeployed,
@@ -309,148 +316,82 @@ export async function getConnectedModularAccount(): Promise<Account | null> {
   return getConnectedAccount()
 }
 
-/** Single instance so Thirdweb session, Connect UI, and `autoConnect` share one wallet object. */
-let _managedInAppWallet: Wallet | null = null
-
-export const getManagedAccountWallet = () => {
-  if (!_managedInAppWallet) {
-    _managedInAppWallet = inAppWallet({
-    storage: getSharedPublishInAppWalletStorage(),
-    auth: {
-      options: [
-        "farcaster",
-        "email",
-        "passkey",
-        "phone",
-      ],
-    },
-    executionMode: {
-      mode: 'EIP4337',
-      smartAccount: {
-        chain: getPublishThirdwebChain(),
-        factoryAddress: requireManagedAccountFactoryAddress(),
-        gasless: true,
-      },
-    },
-     // executionMode: {
-      //   mode: 'EIP4337',
-      //   smartAccount: {
-      //     chain: optimismSepolia,
-      //     factoryAddress: thirdwebAccountFactoryAddress,
-      //     gasless: true,
-      //     overrides: {
-      //       // Custom paymaster that passes through but lets you modify the UserOp
-      //       paymaster: async (userOp) => {
-
-      //         const hexifyBigInts: any = (obj: any) => {
-      //           if (typeof obj === "bigint") return `0x${obj.toString(16)}`;
-      //           if (Array.isArray(obj)) return obj.map(hexifyBigInts);
-      //           if (obj && typeof obj === "object") {
-      //             return Object.fromEntries(
-      //               Object.entries(obj).map(([k, v]) => [k, hexifyBigInts(v)])
-      //             );
-      //           }
-      //           return obj;
-      //         };
-
-      //         const chainIdHex = `0x${optimismSepolia.id.toString(16)}`;
-
-      //         // Increase callGasLimit before sending to paymaster
-      //         const modifiedUserOp = hexifyBigInts({
-      //           ...userOp,
-      //           callGasLimit: BigInt(8000000), // Double it, or set a fixed value
-      //         });
-
-      //         console.log("[SmartWallet Paymaster]", getPublishConfig().thirdwebClientId);
-              
-      //         // Call thirdweb's default paymaster endpoint
-      //         const response = await fetch(
-      //           `https://${optimismSepolia.id}.bundler.thirdweb.com/v2`,
-      //           {
-      //             method: "POST",
-      //             headers: { 
-      //               "Content-Type": "application/json",
-      //               "X-Client-Id": getPublishConfig().thirdwebClientId,
-      //             },
-      //             body: JSON.stringify({
-      //               id: 1,
-      //               jsonrpc: "2.0",
-      //               method: "pm_sponsorUserOperation",
-      //               params: [modifiedUserOp, '0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789', chainIdHex],
-      //             }),
-      //           }
-      //         );
-              
-      //         const data = await response.json();
-      //         console.log("[SmartWallet Paymaster Response]", data);
-      //         return {
-      //           paymasterAndData: data.result.paymasterAndData,
-      //           preVerificationGas: data.result.preVerificationGas,
-      //           verificationGasLimit: data.result.verificationGasLimit,
-      //           callGasLimit: data.result.callGasLimit,
-      //         };
-      //       },
-      //       execute: (accountContract, transaction) => {
-      //         // Log the gas that was set on the transaction
-      //         console.log("[SmartWallet Execute]", {
-      //           gas: transaction.gas,
-      //           to: transaction.to,
-      //           dataLength: transaction.data?.length,
-      //         });
-        
-      //         // Return the default execute call — don't change behavior,
-      //         // just observe what's being passed through
-      //         return prepareContractCall({
-      //           contract: accountContract,
-      //           method: "function execute(address, uint256, bytes)",
-      //           params: [
-      //             transaction.to ?? "",
-      //             transaction.value ?? 0n,
-      //             transaction.data ?? "0x",
-      //           ],
-      //           gas: transaction.gas, // Pass through whatever was set
-      //         });
-      //       },
-      //     },
-      //   }
-      // }
-    })
+function managedAccountFactoryFor(config: PublishConfig): string {
+  const chainId = getPublishThirdwebChain(config).id
+  const factory = config.managedAccountFactoryAddress ?? MANAGED_ACCOUNT_FACTORY_ADDRESSES[chainId]
+  if (!factory) {
+    throw new Error(
+      `@seedprotocol/publish: no ManagedAccount factory is known for chain ${chainId}. Pass managedAccountFactoryAddress in publish config, or use the EOA / direct EAS path.`,
+    )
   }
-  return _managedInAppWallet
+  return factory
 }
 
-/** Single instance (pairs with {@link getManagedAccountWallet} for two execution modes, same Thirdweb client). */
-let _modularInAppWallet: Wallet | null = null
+const IN_APP_AUTH_OPTIONS = ['farcaster', 'email', 'passkey', 'phone'] as const
 
-export const getModularAccountWallet = () => {
-  if (!_modularInAppWallet) {
-    _modularInAppWallet = inAppWallet({
-    storage: getSharedPublishInAppWalletStorage(),
-    auth: {
-      options: [
-        "farcaster",
-        "email",
-        "passkey",
-        "phone",
-      ],
-    },
-    executionMode: {
-      mode: 'EIP7702',
-      sponsorGas: true,
-      
-    },
-    })
+/**
+ * One instance per settings so Thirdweb session, Connect UI and `autoConnect` share a wallet
+ * object. Rebuilt when the chain, RPC, factory or `PublishConfig.thirdweb` change
+ * (e.g. `PublishProvider` applies config after first render).
+ */
+let _managedInAppWallet: { key: string; wallet: Wallet } | null = null
+
+/**
+ * Managed (EIP-4337) in-app wallet: the user's ManagedAccount smart account, admin = the
+ * user's in-app EOA. Publishes are UserOps from this account.
+ */
+export const getManagedAccountWallet = (config?: PublishConfig) => {
+  const cfg = config ?? getConfigRef()
+  const chain = getPublishThirdwebChain(cfg ?? undefined)
+  const factoryAddress = cfg ? managedAccountFactoryFor(cfg) : requireManagedAccountFactoryAddress()
+  const { bundlerUrl, sponsorGas } = resolveThirdwebWalletOptions(cfg)
+  const key = [chain.id, chain.rpc, factoryAddress, bundlerUrl ?? '', sponsorGas].join('|').toLowerCase()
+  if (_managedInAppWallet?.key !== key) {
+    _managedInAppWallet = {
+      key,
+      wallet: inAppWallet({
+        storage: getSharedPublishInAppWalletStorage(),
+        auth: { options: [...IN_APP_AUTH_OPTIONS] },
+        executionMode: {
+          mode: 'EIP4337',
+          smartAccount: {
+            chain,
+            factoryAddress,
+            sponsorGas,
+            ...(bundlerUrl ? { overrides: { bundlerUrl } } : {}),
+          },
+        },
+      }),
+    }
   }
-  return _modularInAppWallet
+  return _managedInAppWallet.wallet
 }
 
-let _walletsForConnectButton: Wallet[] | null = null
+let _modularInAppWallet: { key: string; wallet: Wallet } | null = null
 
-export const getWalletsForConnectButton = () => {
-  if (!_walletsForConnectButton) {
-    _walletsForConnectButton = getPublishConfig().useModularExecutor
-      ? [getModularAccountWallet()]
-      : [getManagedAccountWallet()]
+/**
+ * The user's in-app EOA (same login and storage as {@link getManagedAccountWallet}), which is
+ * the ManagedAccount's admin. Sends admin-only transactions such as `installSeedExecutor`.
+ * `PublishConfig.thirdweb.modularWalletMode` picks sponsored EIP-7702 (default) or a plain EOA.
+ */
+export const getModularAccountWallet = (config?: PublishConfig) => {
+  const { modularWalletMode } = resolveThirdwebWalletOptions(config ?? getConfigRef())
+  if (_modularInAppWallet?.key !== modularWalletMode) {
+    _modularInAppWallet = {
+      key: modularWalletMode,
+      wallet: inAppWallet({
+        storage: getSharedPublishInAppWalletStorage(),
+        auth: { options: [...IN_APP_AUTH_OPTIONS] },
+        executionMode:
+          modularWalletMode === 'EOA' ? { mode: 'EOA' } : { mode: 'EIP7702', sponsorGas: true },
+      }),
+    }
   }
-  return _walletsForConnectButton
+  return _modularInAppWallet.wallet
+}
+
+/** Wallets for `ConnectButton`; pass the context config so the first render uses it. */
+export const getWalletsForConnectButton = (config?: PublishConfig) => {
+  const cfg = config ?? getConfigRef() ?? undefined
+  return cfg?.useModularExecutor ? [getModularAccountWallet(cfg)] : [getManagedAccountWallet(cfg)]
 }

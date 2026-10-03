@@ -26,7 +26,6 @@ import type { PublishConfig } from "../config"
 import { ensureExecutorModuleInstalled } from "../helpers/ensureExecutorModule"
 import { PublishManager } from "../services/publishManager"
 import { getPublishThirdwebChain } from '../helpers/thirdwebChain'
-import { DEFAULT_PUBLISH_CHAIN } from '../helpers/defaultChain'
 
 /** Session flag so we do not force autoConnect after an explicit UI disconnect (survives reload). */
 const USER_DISCONNECTED_SESSION_KEY = "seedProtocol:publish:userChoseWalletDisconnect"
@@ -66,7 +65,7 @@ async function ensureExecutorModulesForConnect(
     try {
       syncPublishInAppAuthToken()
       const mw = getManagedAccountWallet()
-      await mw.autoConnect({ client: getClient(), chain: getPublishThirdwebChain(config.chain ?? DEFAULT_PUBLISH_CHAIN) })
+      await mw.autoConnect({ client: getClient(), chain: getPublishThirdwebChain(config) })
       const ma = mw.getAccount()
       if (!ma) {
         return
@@ -87,7 +86,7 @@ async function ensureExecutorModulesForConnect(
 
 const ConnectButton: FC = () => {
   const config = usePublishConfig()
-  const thirdwebChain = getPublishThirdwebChain(config.chain ?? DEFAULT_PUBLISH_CHAIN)
+  const thirdwebChain = getPublishThirdwebChain(config)
   const wallet = useActiveWallet()
   const activeAccount = useActiveAccount()
   const connectionStatus = useActiveWalletConnectionStatus()
@@ -259,7 +258,7 @@ const ConnectButton: FC = () => {
   return (
     <ConnectButtonThirdweb
       client={getClient()}
-      wallets={getWalletsForConnectButton()}
+      wallets={getWalletsForConnectButton(config)}
       autoConnect={true}
       chain={thirdwebChain}
       chains={[ thirdwebChain, ]}

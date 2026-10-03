@@ -5,9 +5,11 @@ import {
   getPublishConfig,
   initPublish,
   requireManagedAccountFactoryAddress,
+  resolveThirdwebWalletOptions,
   setConfigRef,
   type PublishConfig,
 } from './config'
+import { getPublishThirdwebChain } from './helpers/thirdwebChain'
 import { encodeEasMultiRevoke, encodeRegisterSchema } from './helpers/contracts'
 import { getPublishChainName } from './helpers/chainConfig'
 
@@ -85,3 +87,55 @@ describe('publish chain resolution', () => {
     expect(cfg.easChain.name).toBe('Custom EAS Chain')
   })
 })
+
+const twinChain = { ...customChain, id: 31337, name: 'Seed twin' } as Chain
+
+describe('thirdweb chain and wallet options', () => {
+  test('thirdweb uses rpcUrl when set, so Seed and Thirdweb reach the same node', () => {
+    setCfg({
+      chain: twinChain,
+      rpcUrl: 'http://127.0.0.1:8545',
+      easContractAddress: OP_EAS,
+      schemaRegistryAddress: OP_REGISTRY,
+    })
+    const chain = getPublishThirdwebChain()
+    expect(chain.id).toBe(31337)
+    expect(chain.rpc).toBe('http://127.0.0.1:8545')
+  })
+
+  test('without rpcUrl, OP Sepolia keeps Thirdweb\'s RPC edge', () => {
+    setConfigRef({ uploadApiBaseUrl: 'https://example.com', thirdwebClientId: 't' })
+    expect(getPublishThirdwebChain().rpc).toContain('thirdweb')
+  })
+
+  test('rpcUrl also applies on OP Sepolia (e.g. a fork that keeps its chain id)', () => {
+    setCfg({ rpcUrl: 'http://127.0.0.1:8545' })
+    const chain = getPublishThirdwebChain()
+    expect(chain.id).toBe(11155420)
+    expect(chain.rpc).toBe('http://127.0.0.1:8545')
+  })
+
+  test('an explicit source wins over the config ref (first React render)', () => {
+    setConfigRef(null)
+    expect(getPublishThirdwebChain({ chain: twinChain, rpcUrl: 'http://127.0.0.1:8545' }).id).toBe(31337)
+  })
+
+  test('wallet option defaults suit Thirdweb-hosted chains', () => {
+    expect(resolveThirdwebWalletOptions(undefined)).toEqual({
+      bundlerUrl: undefined,
+      sponsorGas: true,
+      modularWalletMode: 'EIP7702',
+    })
+    expect(
+      resolveThirdwebWalletOptions({
+        thirdweb: { bundlerUrl: ' http://127.0.0.1:4337 ', sponsorGas: false, modularWalletMode: 'EOA' },
+      }),
+    ).toEqual({ bundlerUrl: 'http://127.0.0.1:4337', sponsorGas: false, modularWalletMode: 'EOA' })
+  })
+
+  test('thirdweb.bundlerUrl does not switch accountMode (unlike bundlerUrl)', () => {
+    setCfg({ thirdweb: { bundlerUrl: 'http://127.0.0.1:4337' } })
+    expect(getPublishConfig().accountMode).toBe('eoa')
+  })
+})
+

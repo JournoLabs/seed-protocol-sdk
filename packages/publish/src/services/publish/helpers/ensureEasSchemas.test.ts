@@ -186,40 +186,32 @@ describe('ensureEasSchemasForItem', () => {
     expect(sendTransaction).toHaveBeenCalled()
   })
 
-  test('registers the naming and Version schemas on a chain that lacks them', async () => {
+  test('fails without sending when a base schema is missing, and does not register it', async () => {
     harness.automationActive = false
     harness.imageProperties = []
     harness.basicProperties = []
-    harness.knownUids = new Set([schemaUid('bytes32 post')])
-    getSchemaRecord.mockClear()
-    registerSchema.mockClear()
+    harness.knownUids = new Set([schemaUid(NAME_SCHEMA_DEF), schemaUid('bytes32 post')])
     sendTransaction.mockClear()
+    registerSchema.mockClear()
+
+    await expect(ensureEasSchemasForItem(postItem() as never, wallet())).rejects.toThrow(
+      `"${VERSION_SCHEMA_DEF}" (${schemaUid(VERSION_SCHEMA_DEF)}) not registered on chain 11155420`,
+    )
+    expect(registerSchema).not.toHaveBeenCalled()
+    expect(sendTransaction).not.toHaveBeenCalled()
+  })
+
+  test('checks the base schemas once per chain', async () => {
+    harness.automationActive = false
+    harness.imageProperties = []
+    harness.basicProperties = []
+    harness.knownUids = new Set([...BASE_SCHEMA_UIDS, schemaUid('bytes32 post')])
 
     await ensureEasSchemasForItem(postItem() as never, wallet())
-
-    const registered = registerSchema.mock.calls.map((call) => ((call as unknown[])[0] as { schema: string }).schema)
-    expect(registered).toEqual([NAME_SCHEMA_DEF, VERSION_SCHEMA_DEF])
-    // register name schema, register Version, name Version
-    expect(sendTransaction).toHaveBeenCalledTimes(3)
-
-    // Cached per chain: a second publish does not re-read the base schemas.
     getSchemaRecord.mockClear()
     await ensureEasSchemasForItem(postItem() as never, wallet())
     const lookedUp = getSchemaRecord.mock.calls.map((call) => String(call[0]).toLowerCase())
     expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[0])
     expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[1])
-  })
-
-  test('an automation key fails before sending when a base schema is missing', async () => {
-    harness.automationActive = true
-    harness.imageProperties = []
-    harness.basicProperties = []
-    harness.knownUids = new Set([schemaUid(NAME_SCHEMA_DEF), schemaUid('bytes32 post')])
-    sendTransaction.mockClear()
-
-    await expect(
-      ensureEasSchemasForItem(postItem() as never, wallet(), { managedAddress: MANAGED }),
-    ).rejects.toThrow(`schema "${VERSION_SCHEMA_DEF}" is not registered`)
-    expect(sendTransaction).not.toHaveBeenCalled()
   })
 })

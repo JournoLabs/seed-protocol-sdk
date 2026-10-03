@@ -107,7 +107,7 @@ You can optionally pass `queryClient` or `queryClientRef` to customize the Seed 
 
 ### Choosing a chain
 
-Publishing works on any EVM chain with [EAS](https://github.com/ethereum-attestation-service/eas-contracts#deployments) deployed. Pass a viem `chain`; it defaults to Optimism Sepolia. The same chain drives viem reads, transaction routing and the Thirdweb wallet / ConnectButton.
+Publishing works on any EVM chain with [EAS](https://github.com/ethereum-attestation-service/eas-contracts#deployments) deployed. Pass a viem `chain`; it defaults to Optimism Sepolia. The same chain drives viem reads, transaction routing and the Thirdweb wallet / ConnectButton. When `rpcUrl` is set, Thirdweb uses it too, so Seed's checks and Thirdweb's calls always reach the same node.
 
 ```ts
 import { base } from 'viem/chains'
@@ -122,13 +122,52 @@ initPublish({
 - **Known chains** (`EAS_CHAIN_DEPLOYMENTS`: Ethereum, Sepolia, Optimism, Optimism Sepolia, Base, Base Sepolia, Arbitrum One / Sepolia, Polygon, Scroll, Linea) resolve the EAS and SchemaRegistry addresses automatically.
 - **Other chains** need `easContractAddress` and `schemaRegistryAddress`; `initPublish` throws without them. These options also override the built-in addresses on known chains.
 - **Managed / modular account flows** (Thirdweb ManagedAccount, `useModularExecutor`) need a ManagedAccount factory on the chain. One is built in for Optimism Sepolia only (`MANAGED_ACCOUNT_FACTORY_ADDRESSES`); elsewhere pass `managedAccountFactoryAddress` and an executor module you have deployed. The EOA / direct EAS path needs neither.
-- `ensureEasSchemasForItem` registers any missing schema on the chain on first publish, including Seed's Version schema and EAS's "Name a Schema" schema.
+- `ensureEasSchemasForItem` registers missing model and property schemas on first publish. The base schemas (Version and EAS's "Name a Schema") are registered by the protocol for each supported chain (seed-protocol `seed:ensure-schemas`); if one is missing, publishing fails before sending anything.
 - SDK reads (EAS sync, schema lookups) follow the publish chain's easscan indexer automatically. For a chain without a known indexer, or a self-hosted one, set `SeedConfig.eas.indexerUrl`. If the SDK sets `eas.chainId`, it must match `chain.id` or init throws. The `EAS_ENDPOINT` / `NEXT_PUBLIC_EAS_ENDPOINT` env vars still override the chain's default indexer.
 - The SDK's local database remembers which chain its attestations came from. Pointing an existing database at a different chain fails at init, sync or publish with a chain-mismatch error rather than mixing data from two chains. Use a separate `filesDir` / database per chain. Databases created before this check are treated as Optimism Sepolia.
 - Before the first publish or revoke, `verifyPublishChain()` checks that the RPC reports `chain.id` and that EAS, the SchemaRegistry and any configured factory / executor module have code on the chain. It throws `PublishChainConfigError` listing every problem. Call it at startup to fail earlier.
 - While `@seedprotocol/publish` is loaded but `initPublish` hasn't run, SDK EAS sync waits (up to 30s) for the publish chain instead of syncing the default chain. Set `SeedConfig.eas.chainId` to skip the wait.
 
 The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, `schemaRegistryAddress`, `thirdwebAccountFactoryAddress`, `easChain`).
+
+### Local OP Sepolia twin
+
+The protocol's twin (`seed-protocol`: `bun run twin:up`) is an OP Sepolia fork on chain **31337** with a local bundler (no paymaster) and EAS indexer. Thirdweb's hosted paymaster and EIP-7702 service can't reach it, so the wallets need the `thirdweb` settings below. Read addresses from `seed-protocol/.twin/twin.json`; they change with each deploy.
+
+```ts
+import { defineChain } from 'viem'
+import twin from '../seed-protocol/.twin/twin.json'
+
+const twinChain = defineChain({
+  id: 31337,
+  name: 'Seed twin (OP Sepolia fork)',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: ['http://127.0.0.1:8545'] } },
+  testnet: true,
+})
+
+initPublish({
+  uploadApiBaseUrl: 'http://localhost:3000', // your seed-protocol-server
+  thirdwebClientId, // login stays hosted; allow the local origin
+  chain: twinChain,
+  rpcUrl: 'http://127.0.0.1:8545',
+  easContractAddress: twin.contracts.eas,
+  schemaRegistryAddress: twin.contracts.schemaRegistry,
+  managedAccountFactoryAddress: twin.contracts.managedAccountFactory,
+  modularAccountModuleContract: twin.contracts.seedProtocolExecutor,
+  useModularExecutor: true,
+  thirdweb: {
+    bundlerUrl: 'http://127.0.0.1:4337',
+    sponsorGas: false, // no paymaster: the ManagedAccount pays its own gas
+    modularWalletMode: 'EOA', // no EIP-7702 service: the admin EOA sends plain txs
+  },
+})
+
+// SDK
+client.init({ config: { ...config, eas: { chainId: 31337, indexerUrl: 'http://localhost:4000/graphql' }, filesDir: '.seed-31337' } })
+```
+
+Fund both the ManagedAccount and the in-app EOA before publishing: `bun run twin:fund <managedAddress> <eoaAddress>` in `seed-protocol`. Each `twin:up` resets the chain, so clear the local Seed DB (`filesDir`) and browser storage too.
 
 ### useIntegerLocalIds
 
@@ -229,25 +268,27 @@ Apps can enroll a server-held session key to publish/revoke on a user’s Manage
 
 APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
 
-### Modular executor (`useModularExecutor`) and EIP-7702
+### Modular executor (`useModularExecutor`)
 
-When **`useModularExecutor`** is enabled, `multiPublish` is sent **from** the user’s **Thirdweb in-app modular wallet** (EIP-7702 execution mode) against their **ManagedAccount** contract. Before the first on-chain publish, `createAttestations` runs **`ensureEip7702ModularAccountReady()`**, which checks bytecode on the publish chain at the modular wallet address (EIP-7702 delegation / minimal account). If bytecode is still empty and **`autoDeployEip7702ModularAccount`** is true (the default when `useModularExecutor` is on), it calls Thirdweb’s **`deploySmartAccount`** bootstrap (no-op if already upgraded). Set **`autoDeployEip7702ModularAccount: false`** to surface **`Eip7702ModularAccountPublishError`** instead of auto-deploying.
+With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
-**`ensureSmartWalletThenPublish`:** With **`useModularExecutor`**, the publish machine’s **`account`** and default **`dataItemSigner`** come from **`getConnectedModularAccount()`** (the modular EIP-7702 in-app wallet), not from **`resolveSmartWalletForPublish`** or the **`activeAccount`** argument (that parameter is ignored on this path for API compatibility). **`ensureEip7702ModularAccountReady()`** runs once before **`createPublish`** so EIP-7702 readiness failures surface before the publish actor starts; `createAttestations` still calls it again (no-op when already deployed).
+- **Managed wallet** (`getManagedAccountWallet`, EIP-4337): the user's **ManagedAccount** smart account, created by the ManagedAccount factory with the user's in-app EOA as admin. It is the attester, and it publishes.
+- **Modular wallet** (`getModularAccountWallet`): that same in-app EOA. It signs DataItems and sends the few **admin-only** transactions, such as `installSeedExecutor`. `thirdweb.modularWalletMode` picks gas-sponsored EIP-7702 (default) or a plain funded EOA (`'EOA'`); the address is the same either way.
 
-**Routing (important):** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…` — same hex as the deprecated `SEED_PROTOCOL_CONTRACT_ADDRESS_OP_SEPOLIA` alias). The transaction **`to` / `getContract` address** is the user’s on-chain publisher: **managed account** for interactive modular publish (`runModularExecutorPublishPrep().managedAddress`), or the **executor module** when an automation session key is detected (`routeToExecutorModule`). Non-modular publish targets the **deployed publisher contract**. **EOAs** (no contract at `address`) never use `multiPublish`; the publish machine routes them to **direct EAS** (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path even when the publisher is a deployed contract. Receipt parsing uses `modularAccountModuleContract` when configured, otherwise the managed / publisher address.
+**Publishing.** `createAttestations` sends interactive `multiPublish` as a **UserOp from the managed smart account**, calling the account itself (`execute(account, multiPublish)`). The Seed extension accepts that self-call; direct calls from session keys or other non-admins revert with `Unauthorized`. Before the first publish, `ensureModularPublishBootstrap`:
 
-**Managed account:** `runModularExecutorPublishPrep()` still ensures the **EIP-4337 managed** publishing contract exists on the publish chain (and optionally installs the executor module). That is separate from the modular wallet’s EIP-7702 upgrade.
+1. Connects the managed wallet and checks it is the publishing account.
+2. Checks the account's `getEas()` against `easContractAddress`. Current Seed extensions fix EAS at deployment, so a mismatch is a config error. Only pre-rollout accounts that report no EAS get `setEas`, sent by the admin EOA.
 
-Before the first `multiPublish` on that path, `createAttestations` runs **`ensureModularPublishBootstrap`**, which:
+**Executor.** `runModularExecutorPublishPrep()` ensures the ManagedAccount is deployed and, when `modularAccountModuleContract` is set, that the Seed executor is installed: `installSeedExecutor()` from the admin EOA on Router accounts with the `SeedExecutorRouterExtension`, `installModule` on ModularCore accounts.
 
-1. Provisions the modular wallet as a **session signer** on the ManagedAccount (`ensureManagedSignerSessionKey` — `addSessionKey` signed by the managed EIP-4337 wallet when needed).
-2. Ensures the ManagedAccount EAS pointer matches config (`ensureManagedAccountEasConfigured`).
-3. Falls back to **`ensureEip7702ModularAccountReady`** only when session-key setup fails and `autoDeployEip7702ModularAccount` is enabled.
+**Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](../../docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
 
-**Diagnostic helper:** **`defaultApprovedTargetsForModularPublish(managedAddress)`** remains exported for apps that build custom permission flows.
+**Routing:** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…`). The transaction `to` is the managed account for interactive publish, or the executor module for automation keys. Non-modular publish targets the deployed publisher contract. **EOAs** (no contract at `address`) never use `multiPublish`; they attest on EAS directly (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path.
 
-**Resolved config:** Use **`getPublishConfig()`** after `initPublish` / `PublishProvider` for **`autoDeployEip7702ModularAccount`** and other resolved defaults—not only `usePublishConfig()`, which returns the raw `PublishConfig` object.
+**`ensureSmartWalletThenPublish`:** with `useModularExecutor`, the default `dataItemSigner` comes from `getConnectedModularAccount()`; the `activeAccount` argument is ignored on this path.
+
+**Resolved config:** use **`getPublishConfig()`** after `initPublish` / `PublishProvider` for resolved defaults, not only `usePublishConfig()`, which returns the raw `PublishConfig`.
 
 ## Development
 

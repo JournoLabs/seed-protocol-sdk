@@ -8,9 +8,11 @@ const EAS = '0x4200000000000000000000000000000000000021'
 
 const isInitializedMock = mock(async () => true)
 const moduleEasMock = mock(async () => EAS)
-const getEasMock = mock(async (): Promise<string> => {
-  throw new Error('execution reverted')
-})
+/** `getSeedExecutor()` on the account; null = no SeedExecutorRouterExtension. */
+const routerMock = mock(async (): Promise<{ executor: string; eas: string } | null> => ({
+  executor: MODULE,
+  eas: EAS,
+}))
 const callMock = mock(async () => ({ data: '0x' }))
 
 mock.module('../config', () => ({
@@ -25,7 +27,7 @@ mock.module('../config', () => ({
 mock.module('./contracts', () => ({
   readExecutorModuleIsInitialized: (...args: unknown[]) => isInitializedMock(...(args as [])),
   readExecutorModuleEas: (...args: unknown[]) => moduleEasMock(...(args as [])),
-  readGetEas: (...args: unknown[]) => getEasMock(...(args as [])),
+  readSeedExecutorRouter: (...args: unknown[]) => routerMock(...(args as [])),
 }))
 
 mock.module('./chainClient', () => ({
@@ -37,10 +39,8 @@ afterEach(() => {
   isInitializedMock.mockImplementation(async () => true)
   moduleEasMock.mockReset()
   moduleEasMock.mockImplementation(async () => EAS)
-  getEasMock.mockReset()
-  getEasMock.mockImplementation(async () => {
-    throw new Error('execution reverted')
-  })
+  routerMock.mockReset()
+  routerMock.mockImplementation(async () => ({ executor: MODULE, eas: EAS }))
   callMock.mockReset()
   callMock.mockImplementation(async () => ({ data: '0x' }))
 })
@@ -51,22 +51,22 @@ describe('assertExecutorModuleReadyForAccount', () => {
     await expect(assertExecutorModuleReadyForAccount(ACCOUNT)).resolves.toBeUndefined()
   })
 
-  test('names legacy Router accounts when the module is not initialized', async () => {
+  test('names Router accounts without the executor router extension', async () => {
     isInitializedMock.mockImplementation(async () => false)
-    getEasMock.mockImplementation(async () => EAS)
+    routerMock.mockImplementation(async () => null)
     const { assertExecutorModuleReadyForAccount } = await import('./executorModuleReadiness')
     await expect(assertExecutorModuleReadyForAccount(ACCOUNT)).rejects.toMatchObject({
       code: 'AUTOMATION_UNSUPPORTED_ACCOUNT',
-      message: expect.stringContaining('legacy Router account'),
+      message: expect.stringContaining('predates the Seed executor router extension'),
     })
   })
 
-  test('rejects other accounts the module is not initialized for', async () => {
+  test('tells Router accounts with the extension to install the executor', async () => {
     isInitializedMock.mockImplementation(async () => false)
     const { assertExecutorModuleReadyForAccount } = await import('./executorModuleReadiness')
     await expect(assertExecutorModuleReadyForAccount(ACCOUNT)).rejects.toMatchObject({
       code: 'AUTOMATION_UNSUPPORTED_ACCOUNT',
-      message: expect.stringContaining('not initialized'),
+      message: expect.stringContaining('installSeedExecutor'),
     })
   })
 

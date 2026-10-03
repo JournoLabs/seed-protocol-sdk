@@ -113,6 +113,13 @@ export const publisherReadWriteAbi = [
     inputs: [{ name: 'signer', type: 'address' }],
     outputs: [{ type: 'bool' }],
   },
+  {
+    type: 'function',
+    name: 'isAdmin',
+    stateMutability: 'view',
+    inputs: [{ name: 'signer', type: 'address' }],
+    outputs: [{ type: 'bool' }],
+  },
 ] as const
 
 /** Extension / ManagedAccount publisher events. */

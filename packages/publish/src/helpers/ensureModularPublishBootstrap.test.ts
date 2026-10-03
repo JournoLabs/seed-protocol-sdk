@@ -1,111 +1,85 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 
-const modularAccount = { address: '0xmodular0000000000000000000000000000000001' }
-const cfg = { autoDeployEip7702ModularAccount: true }
+const MANAGED = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const ADMIN = '0xadadadadadadadadadadadadadadadadadadadad'
 
-const ensureManagedSignerSessionKeyMock = mock(() => Promise.resolve())
-const ensureManagedAccountEasConfiguredMock = mock(() => Promise.resolve())
-const ensureEip7702ModularAccountReadyMock = mock(() => Promise.resolve())
+let managedAccount: { address: string } | undefined = { address: MANAGED }
+const autoConnectMock = mock(() => Promise.resolve())
+const ensureManagedAccountEasConfiguredMock = mock(
+  async (_managed: string, _sender: unknown): Promise<void> => {},
+)
+const getManagedAccountAdminMock = mock(async () => ({ address: ADMIN }))
 
 mock.module('../config', () => ({
-  getPublishConfig: () => cfg,
-}))
-
-mock.module('./adapters/thirdwebAccount', () => ({
-  fromThirdwebAccount: (account: { address: string }) => {
-    const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
-    const SEED_TX_SENDER_BRAND = Symbol.for('seedprotocol.SeedTxSender')
-    const address = account.address as `0x${string}`
-    return {
-      signer: Object.assign(
-        { address, signMessage: async () => '0x' as `0x${string}` },
-        { [SEED_SIGNER_BRAND]: true as const },
-      ),
-      txSender: Object.assign(
-        {
-          address,
-          sendTransaction: async () => ({ transactionHash: '0x' as `0x${string}` }),
-        },
-        { [SEED_TX_SENDER_BRAND]: true as const },
-      ),
-    }
-  },
+  getConfigRef: () => null,
+  getPublishConfig: () => ({}),
 }))
 
 mock.module('./thirdweb', () => ({
   getClient: () => ({}),
-  getModularAccountWallet: () => ({
-    autoConnect: mock(() => Promise.resolve()),
-    getAccount: () => modularAccount,
+  syncPublishInAppAuthToken: () => ({}),
+  getManagedAccountWallet: () => ({
+    autoConnect: autoConnectMock,
+    getAccount: () => managedAccount,
   }),
 }))
-mock.module('./ensureManagedSignerSessionKey', () => ({
-  ensureManagedSignerSessionKey: (...args: unknown[]) => ensureManagedSignerSessionKeyMock(...args),
+
+mock.module('./managedAccountAdmin', () => ({
+  getManagedAccountAdmin: (...args: unknown[]) => getManagedAccountAdminMock(...(args as [])),
 }))
 
 mock.module('./ensureManagedAccountEasConfigured', () => ({
-  ensureManagedAccountEasConfigured: (...args: unknown[]) => ensureManagedAccountEasConfiguredMock(...args),
+  ensureManagedAccountEasConfigured: (...args: unknown[]) =>
+    ensureManagedAccountEasConfiguredMock(...(args as [string, unknown])),
   assertManagedAccountEasMatchesConfig: async () => {},
 }))
 
-mock.module('./ensureEip7702ModularAccountReady', () => ({
-  ensureEip7702ModularAccountReady: (...args: unknown[]) => ensureEip7702ModularAccountReadyMock(...args),
+mock.module('./adapters/thirdwebAccount', () => ({
+  fromThirdwebAccount: (account: { address: string }) => ({
+    signer: { address: account.address },
+    txSender: { address: account.address, sendTransaction: async () => ({ transactionHash: '0x' }) },
+  }),
 }))
 
+const { ensureModularPublishBootstrap } = await import('./ensureModularPublishBootstrap')
+
 afterEach(() => {
-  cfg.autoDeployEip7702ModularAccount = true
-  ensureManagedSignerSessionKeyMock.mockClear()
+  managedAccount = { address: MANAGED }
+  autoConnectMock.mockClear()
   ensureManagedAccountEasConfiguredMock.mockClear()
-  ensureEip7702ModularAccountReadyMock.mockClear()
-  ensureManagedSignerSessionKeyMock.mockImplementation(() => Promise.resolve())
-  ensureManagedAccountEasConfiguredMock.mockImplementation(() => Promise.resolve())
-  ensureEip7702ModularAccountReadyMock.mockImplementation(() => Promise.resolve())
+  ensureManagedAccountEasConfiguredMock.mockImplementation(async () => {})
+  getManagedAccountAdminMock.mockClear()
 })
 
 describe('ensureModularPublishBootstrap', () => {
-  test('runs signer activation then EAS config and returns modular account', async () => {
-    const { ensureModularPublishBootstrap } = await import('./ensureModularPublishBootstrap')
-    const account = await ensureModularPublishBootstrap('0xmanaged')
-    expect(account).toBe(modularAccount)
-    expect(ensureManagedSignerSessionKeyMock).toHaveBeenCalledWith({
-      managedAddress: '0xmanaged',
-      signerAddress: modularAccount.address,
+  test('returns the managed smart account and checks EAS without connecting the admin', async () => {
+    const account = await ensureModularPublishBootstrap(MANAGED)
+    expect(account.address).toBe(MANAGED)
+    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledTimes(1)
+    expect(getManagedAccountAdminMock).not.toHaveBeenCalled()
+  })
+
+  test('the legacy setEas fallback sends from the admin EOA', async () => {
+    ensureManagedAccountEasConfiguredMock.mockImplementation(async (_managed, sender) => {
+      const wallet = await (sender as () => Promise<{ txSender: { address: string } }>)()
+      expect(wallet.txSender.address).toBe(ADMIN)
     })
-    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith(
-      '0xmanaged',
-      expect.objectContaining({
-        signer: expect.objectContaining({ address: modularAccount.address }),
-        txSender: expect.objectContaining({ address: modularAccount.address }),
-      }),
-    )
-    expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
+    await ensureModularPublishBootstrap(MANAGED)
+    expect(getManagedAccountAdminMock).toHaveBeenCalledWith(MANAGED)
   })
 
-  test('falls back to EIP-7702 when signer activation fails and auto-deploy is on', async () => {
-    const { ManagedAccountPublishError } = await import('../errors')
-    ensureManagedSignerSessionKeyMock.mockImplementationOnce(() =>
-      Promise.reject(
-        new ManagedAccountPublishError('activation failed', 'MODULAR_SIGNER_ACTIVATION_FAILED', '0xmanaged'),
-      ),
-    )
-    const { ensureModularPublishBootstrap } = await import('./ensureModularPublishBootstrap')
-    await ensureModularPublishBootstrap('0xmanaged')
-    expect(ensureEip7702ModularAccountReadyMock).toHaveBeenCalledTimes(1)
-    expect(ensureManagedAccountEasConfiguredMock).toHaveBeenCalledWith(
-      '0xmanaged',
-      expect.objectContaining({
-        signer: expect.objectContaining({ address: modularAccount.address }),
-      }),
-    )
+  test('rejects a connected managed account that is not the publishing account', async () => {
+    managedAccount = { address: '0x1111111111111111111111111111111111111111' }
+    await expect(ensureModularPublishBootstrap(MANAGED)).rejects.toMatchObject({
+      code: 'MANAGED_ACCOUNT_UNAVAILABLE',
+    })
+    expect(ensureManagedAccountEasConfiguredMock).not.toHaveBeenCalled()
   })
 
-  test('rethrows signer activation when auto-deploy EIP-7702 is off', async () => {
-    cfg.autoDeployEip7702ModularAccount = false
-    const { ManagedAccountPublishError } = await import('../errors')
-    const err = new ManagedAccountPublishError('activation failed', 'MODULAR_SIGNER_ACTIVATION_FAILED', '0xmanaged')
-    ensureManagedSignerSessionKeyMock.mockImplementationOnce(() => Promise.reject(err))
-    const { ensureModularPublishBootstrap } = await import('./ensureModularPublishBootstrap')
-    await expect(ensureModularPublishBootstrap('0xmanaged')).rejects.toBe(err)
-    expect(ensureEip7702ModularAccountReadyMock).not.toHaveBeenCalled()
+  test('fails when the managed wallet is not connected', async () => {
+    managedAccount = undefined
+    await expect(ensureModularPublishBootstrap(MANAGED)).rejects.toMatchObject({
+      code: 'MANAGED_ACCOUNT_UNAVAILABLE',
+    })
   })
 })

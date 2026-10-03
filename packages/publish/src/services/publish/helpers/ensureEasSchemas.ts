@@ -30,7 +30,7 @@ const NAME_SCHEMA_DEF = 'bytes32 schemaId,string name'
 /** Version attestation schema; UID matches the SDK's `VERSION_SCHEMA_UID`. */
 const VERSION_SCHEMA_DEF = 'bytes32 version'
 
-/** Chain ids where the base schemas are known to be registered (avoids re-reading every publish). */
+/** Chain ids where the base schemas were found (avoids re-reading every publish). */
 const chainsWithBaseSchemas = new Set<number>()
 
 /** @internal Tests only. */
@@ -107,46 +107,33 @@ function throwIfAutomationCannotRegister(blockSchemaRegistration: boolean, schem
 }
 
 /**
- * Registers the Seed-wide schemas every publish depends on when the chain lacks them:
- * "Name a Schema" (needed to name every other schema) and Version. Their UIDs are the same on
- * every chain, but a newly configured chain may not have them registered yet.
+ * Checks the Seed-wide schemas every publish depends on: "Name a Schema" (used to name every other
+ * schema) and Version. Their UIDs are the same on every chain. The protocol registers them on each
+ * supported chain (seed-protocol `seed:ensure-schemas`); the SDK does not, so a missing one is a
+ * chain setup problem and fails before anything is sent.
  */
-async function ensureBaseSchemas(sender: SeedTxSender, blockSchemaRegistration: boolean): Promise<void> {
+async function assertBaseSchemas(): Promise<void> {
   const chainId = getPublishViemChain().id
   if (chainsWithBaseSchemas.has(chainId)) return
-
-  if (!(await getSchemaRecord(EAS_SCHEMA_NAME_ATTESTATION_UID))) {
-    throwIfAutomationCannotRegister(blockSchemaRegistration, NAME_SCHEMA_DEF)
-    try {
-      await sendAndWait(
-        sender,
-        registerSchema({ schema: NAME_SCHEMA_DEF, resolverAddress: RESOLVER_ADDRESS, revocable: REVOCABLE }),
-      )
-    } catch (err) {
-      throw new Error(
-        `Failed to register the EAS "Name a Schema" schema: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-  }
 
   const versionSchemaUid = SchemaRegistry.getSchemaUID(
     VERSION_SCHEMA_DEF,
     RESOLVER_ADDRESS as `0x${string}`,
     REVOCABLE,
   )
-  if (!(await getSchemaRecord(versionSchemaUid))) {
-    throwIfAutomationCannotRegister(blockSchemaRegistration, VERSION_SCHEMA_DEF)
-    try {
-      await sendAndWait(
-        sender,
-        registerSchema({ schema: VERSION_SCHEMA_DEF, resolverAddress: RESOLVER_ADDRESS, revocable: REVOCABLE }),
-      )
-      await sendAndWait(sender, prepareNameSchemaAttestation({ schemaUid: versionSchemaUid, schemaName: 'version' }))
-    } catch (err) {
-      throw new Error(
-        `Failed to register the EAS Version schema: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
+  const required: Array<[def: string, uid: string]> = [
+    [NAME_SCHEMA_DEF, EAS_SCHEMA_NAME_ATTESTATION_UID],
+    [VERSION_SCHEMA_DEF, versionSchemaUid],
+  ]
+  const missing: string[] = []
+  for (const [def, uid] of required) {
+    if (!(await getSchemaRecord(uid))) missing.push(`"${def}" (${uid})`)
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Seed base schema${missing.length > 1 ? 's' : ''} ${missing.join(' and ')} not registered on chain ${chainId}. ` +
+        'The protocol registers base schemas for each supported chain (seed-protocol: bun run seed:ensure-schemas).',
+    )
   }
 
   chainsWithBaseSchemas.add(chainId)
@@ -194,7 +181,7 @@ async function ensureEasSchemasForItemResolved(
             '@seedprotocol/publish: ensureEasSchemasForItem requires a PublishWallet or SeedTxSender',
           )
         })()
-  await ensureBaseSchemas(sender, blockSchemaRegistration)
+  await assertBaseSchemas()
 
   const { itemBasicProperties, itemRelationProperties, itemImageProperties, itemListProperties } =
     await getSegmentedItemProperties(item)

@@ -10,6 +10,7 @@ import {
 } from '../abi/publisher'
 import { managedAccountFactoryAbi } from '../abi/factory'
 import { executorModuleAbi } from '../abi/executor'
+import { MODULE_TYPE_EXECUTOR, seedExecutorRouterAbi } from '../abi/seedExecutorRouter'
 import { easAbi } from '../abi/eas'
 import { schemaRegistryAbi } from '../abi/schemaRegistry'
 import type { SeedTxRequest } from '../seedSigner'
@@ -151,6 +152,46 @@ export async function readExecutorModuleEas(
   })
 }
 
+/**
+ * The executor and EAS pinned by the account's `SeedExecutorRouterExtension`, or `null` when the
+ * account has no such extension (pre-rollout Router accounts, ModularCore accounts).
+ */
+export async function readSeedExecutorRouter(
+  account: Address,
+): Promise<{ executor: Address; eas: Address } | null> {
+  try {
+    const [executor, eas] = await getPublishPublicClient().readContract({
+      address: account,
+      abi: seedExecutorRouterAbi,
+      functionName: 'getSeedExecutor',
+    })
+    return { executor, eas }
+  } catch {
+    return null
+  }
+}
+
+/** Whether the router extension reports `executor` installed on `account`. */
+export async function readSeedExecutorInstalled(account: Address, executor: Address): Promise<boolean> {
+  return getPublishPublicClient().readContract({
+    address: account,
+    abi: seedExecutorRouterAbi,
+    functionName: 'isModuleInstalled',
+    args: [MODULE_TYPE_EXECUTOR, executor, '0x'],
+  })
+}
+
+/**
+ * `installSeedExecutor()` on `account`. Admin-only: send it from the account's admin EOA
+ * directly; a self-call via `execute` (what smart-account wallets send) is rejected.
+ */
+export function encodeInstallSeedExecutor(account: Address): SeedTxRequest {
+  return {
+    to: account,
+    data: encodeFunctionData({ abi: seedExecutorRouterAbi, functionName: 'installSeedExecutor' }),
+  }
+}
+
 export function encodeSetEas(to: Address, eas: Address): SeedTxRequest {
   return {
     to,
@@ -178,6 +219,15 @@ export async function readIsActiveSigner(
     address: managedAddress,
     abi: publisherReadWriteAbi,
     functionName: 'isActiveSigner',
+    args: [signer],
+  })
+}
+
+export async function readIsAdmin(managedAddress: Address, signer: Address): Promise<boolean> {
+  return getPublishPublicClient().readContract({
+    address: managedAddress,
+    abi: publisherReadWriteAbi,
+    functionName: 'isAdmin',
     args: [signer],
   })
 }

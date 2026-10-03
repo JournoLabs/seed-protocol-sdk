@@ -15,13 +15,13 @@ function setCfg(partial: Partial<PublishConfig> & Pick<PublishConfig, 'uploadApi
 }
 
 describe('defaultApprovedTargetsForModularPublish', () => {
-  test('includes managed account and EAS', () => {
+  test('includes the managed account and never EAS', () => {
     setCfg({ uploadApiBaseUrl: 'https://example.com' })
     const managed = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     const targets = defaultApprovedTargetsForModularPublish(managed)
     const lower = targets.map((a) => a.toLowerCase())
     expect(lower).toContain(managed.toLowerCase())
-    expect(lower).toContain(EAS_CONTRACT_ADDRESS.toLowerCase())
+    expect(lower).not.toContain(EAS_CONTRACT_ADDRESS.toLowerCase())
   })
 
   test('includes modular executor module when configured', () => {

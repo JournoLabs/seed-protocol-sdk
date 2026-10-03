@@ -45,6 +45,27 @@ export interface ArweaveDataItemInfoResult {
 
 export type PublishAccountMode = 'eoa' | 'eip7702'
 
+export interface ThirdwebWalletOptions {
+  /**
+   * Bundler for the managed (EIP-4337) smart account's UserOps. Defaults to Thirdweb's hosted
+   * bundler for the chain.
+   */
+  bundlerUrl?: string
+  /**
+   * Sponsor the managed smart account's gas through Thirdweb's paymaster. Default `true`.
+   * Set `false` where Thirdweb's paymaster is unavailable (local chains); the account then pays
+   * its own gas and must hold ETH.
+   */
+  sponsorGas?: boolean
+  /**
+   * How the user's in-app EOA (the managed account's admin) sends its own transactions, such as
+   * installing the Seed executor: `'EIP7702'` (default) is gas-sponsored through Thirdweb;
+   * `'EOA'` sends plain transactions and needs ETH. Use `'EOA'` where Thirdweb's EIP-7702
+   * service is unavailable (local chains). The address is the same either way.
+   */
+  modularWalletMode?: 'EIP7702' | 'EOA'
+}
+
 export interface PublishConfig {
   /**
    * Thirdweb client id — only required when using `@seedprotocol/publish/thirdweb`.
@@ -80,10 +101,18 @@ export interface PublishConfig {
    * JSON-RPC URL for the publish chain. Required when `thirdwebClientId` is unset.
    * Prefer a public chain RPC from Node. A domain-locked client id in the default
    * Thirdweb URL returns 401 unless `thirdwebSecretKey` is also set.
+   * Thirdweb wallets and contract calls use it too; without it they use Thirdweb's RPC edge.
    */
   rpcUrl?: string
   /**
+   * Thirdweb in-app wallet settings (`@seedprotocol/publish/thirdweb`). Defaults suit Thirdweb-hosted
+   * chains; a local chain (e.g. the OP Sepolia twin) needs `bundlerUrl`, `sponsorGas: false` and
+   * `modularWalletMode: 'EOA'`.
+   */
+  thirdweb?: ThirdwebWalletOptions
+  /**
    * ERC-4337 / EIP-7702 bundler URL for permissionless `SeedTxSender` (gasless path).
+   * Not used by Thirdweb wallets; see {@link ThirdwebWalletOptions.bundlerUrl}.
    */
   bundlerUrl?: string
   /**
@@ -329,6 +358,26 @@ export interface ResolvedPublishConfig extends PublishConfig {
   chain: Chain
   /** Resolved account mode for non-Thirdweb senders. */
   accountMode: PublishAccountMode
+  /** Resolved Thirdweb wallet settings (defaults applied). */
+  thirdweb: ResolvedThirdwebWalletOptions
+}
+
+export type ResolvedThirdwebWalletOptions = {
+  bundlerUrl: string | undefined
+  sponsorGas: boolean
+  modularWalletMode: 'EIP7702' | 'EOA'
+}
+
+/** Applies defaults to {@link PublishConfig.thirdweb}. */
+export function resolveThirdwebWalletOptions(
+  config: Pick<PublishConfig, 'thirdweb'> | null | undefined,
+): ResolvedThirdwebWalletOptions {
+  const tw = config?.thirdweb ?? {}
+  return {
+    bundlerUrl: tw.bundlerUrl?.trim() || undefined,
+    sponsorGas: tw.sponsorGas ?? true,
+    modularWalletMode: tw.modularWalletMode ?? 'EIP7702',
+  }
 }
 
 /**
@@ -372,6 +421,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
     autoDeployEip7702ModularAccount: resolveAutoDeployEip7702ModularAccount(config, useModularExecutor),
     chain,
     accountMode,
+    thirdweb: resolveThirdwebWalletOptions(config),
   }
 }
 

@@ -9,10 +9,14 @@ function uniqueAddressesLower(addresses: string[]): `0x${string}`[] {
   return [...set].sort().map((x) => x as `0x${string}`)
 }
 
-/** Allowlisted call targets for modular session signers: managed account, EAS, optional executor module. */
+/**
+ * Allowlisted call targets for modular session signers: the managed account (`multiPublish`) and
+ * the executor module when configured. Never EAS: a direct EAS target would bypass the Seed
+ * extension's forced revocability.
+ */
 export function defaultApprovedTargetsForModularPublish(managedAddress: string): `0x${string}`[] {
   const cfg = getPublishConfig()
-  const extra: string[] = [managedAddress, cfg.easContractAddress]
+  const extra: string[] = [managedAddress]
   if (cfg.modularAccountModuleContract?.trim()) {
     extra.push(cfg.modularAccountModuleContract.trim())
   }

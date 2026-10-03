@@ -1,10 +1,8 @@
 import type { Account } from 'thirdweb/wallets'
-import { getContract } from 'thirdweb'
-import { getInstalledModules } from 'thirdweb/modules'
 import type { PublishWallet } from './seedSigner'
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
-import { isRouterNonModularCoreAccountError, ManagedAccountPublishError } from '../errors'
+import { ManagedAccountPublishError } from '../errors'
 import { ensureExecutorModuleInstalled } from './ensureExecutorModule'
 import { assertExecutorModuleReadyForAccount } from './executorModuleReadiness'
 import {
@@ -90,50 +88,18 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
     )
   }
 
-  try {
-    const accountContract = getContract({
-      client: getClient(),
-      chain: getPublishThirdwebChain(),
-      address: managedAddress,
-    })
-    const installed = await getInstalledModules({ contract: accountContract })
-    const want = moduleAddr.toLowerCase()
-    const ok = installed.some(
-      (m: { implementation: string }) => m.implementation?.toLowerCase() === want,
-    )
-    if (!ok) {
-      throw new ManagedAccountPublishError(
-        'Executor module is not installed on the ManagedAccount (ModularCore required for automation grants).',
-        'EXECUTOR_MODULE_NOT_INSTALLED',
-        managedAddress,
-      )
-    }
-  } catch (cause) {
-    if (cause instanceof ManagedAccountPublishError) throw cause
-    // Legacy Router accounts have no ModularCore install API. Whether the module can act for
-    // them is decided below by what the module reports, not by the account type.
-    if (!isRouterNonModularCoreAccountError(cause)) {
-      throw new ManagedAccountPublishError(
-        'Could not verify executor module installation for publish automation.',
-        'EXECUTOR_MODULE_NOT_INSTALLED',
-        managedAddress,
-        cause,
-      )
-    }
-  }
-
   // The session key may only call the module, so refuse to enroll unless the module can act
   // for this account. Otherwise every automation publish would revert.
   await assertExecutorModuleReadyForAccount(managedAddress)
 }
 
 /**
- * Enroll an app automation key: install the executor module when the account is ModularCore,
- * add a module-only session key, then attest the PublishAuthorization sidecar
- * (ManagedAccount attester).
+ * Enroll an app automation key: install the Seed executor (`installSeedExecutor` on Router
+ * accounts with the executor router extension, `installModule` on ModularCore), add an
+ * executor-only session key, then attest the PublishAuthorization sidecar (ManagedAccount attester).
  *
  * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding the session
- * key when the executor module cannot act for the account (e.g. legacy Router ManagedAccounts)
+ * key when the executor cannot act for the account (e.g. Router accounts without the extension)
  */
 export async function enrollPublishAutomation(
   params: EnrollPublishAutomationParams,

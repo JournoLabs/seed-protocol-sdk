@@ -13,6 +13,7 @@ const sendTransactionMock = mock(async () => ({ transactionHash: `0x${'cd'.repea
 const waitForPublishReceiptMock = mock(async () => ({ status: 'success' }))
 
 mock.module('../config', () => ({
+  getConfigRef: () => null,
   getPublishConfig: () => ({
     modularAccountModuleContract: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   }),

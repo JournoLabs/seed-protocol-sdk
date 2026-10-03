@@ -1,39 +1,42 @@
 import type { Account } from 'thirdweb/wallets'
-import { getPublishConfig } from '../config'
-import { isManagedAccountPublishError } from '../errors'
-import { ensureEip7702ModularAccountReady } from './ensureEip7702ModularAccountReady'
+import { ManagedAccountPublishError } from '../errors'
+import { fromThirdwebAccount } from './adapters/thirdwebAccount'
+import { getPublishChainName } from './chainConfig'
 import { ensureManagedAccountEasConfigured } from './ensureManagedAccountEasConfigured'
-import { ensureManagedSignerSessionKey } from './ensureManagedSignerSessionKey'
-import { getClient, getModularAccountWallet } from './thirdweb'
+import { getManagedAccountAdmin } from './managedAccountAdmin'
+import { getClient, getManagedAccountWallet, syncPublishInAppAuthToken } from './thirdweb'
 import { getPublishThirdwebChain } from './thirdwebChain'
 
 /**
- * One-time modular publish bootstrap before `multiPublish`:
- * session signer on managed account → EAS pointer → optional EIP-7702 fallback.
+ * Returns the account that sends interactive `multiPublish`: the user's managed (EIP-4337) smart
+ * account. Its UserOps execute `multiPublish` on the account itself, a self-call the Seed
+ * extension accepts; session keys and other non-admin callers are rejected with `Unauthorized`.
+ *
+ * Also checks the account's EAS pointer. Only pre-rollout accounts that report no EAS get
+ * `setEas`, sent by the admin EOA.
  */
 export async function ensureModularPublishBootstrap(managedAddress: string): Promise<Account> {
-  const modularAccountWallet = getModularAccountWallet()
-  await modularAccountWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
-  const modularAccount = modularAccountWallet.getAccount()
-  if (!modularAccount) {
-    throw new Error('Failed to get modular account')
-  }
-
-  try {
-    await ensureManagedSignerSessionKey({
+  syncPublishInAppAuthToken()
+  const managedWallet = getManagedAccountWallet()
+  await managedWallet.autoConnect({ client: getClient(), chain: getPublishThirdwebChain() })
+  const managedAccount = managedWallet.getAccount()
+  if (!managedAccount) {
+    throw new ManagedAccountPublishError(
+      `Could not connect the managed publishing account on ${getPublishChainName()}. Reconnect with the same sign-in method and try again.`,
+      'MANAGED_ACCOUNT_UNAVAILABLE',
       managedAddress,
-      signerAddress: modularAccount.address,
-    })
-  } catch (cause) {
-    if (!getPublishConfig().autoDeployEip7702ModularAccount) {
-      throw cause
-    }
-    if (!isManagedAccountPublishError(cause)) {
-      throw cause
-    }
-    await ensureEip7702ModularAccountReady()
+    )
+  }
+  if (managedAccount.address.toLowerCase() !== managedAddress.toLowerCase()) {
+    throw new ManagedAccountPublishError(
+      `The connected managed account (${managedAccount.address}) is not the publishing account ${managedAddress}. Reconnect with the sign-in method that owns it.`,
+      'MANAGED_ACCOUNT_UNAVAILABLE',
+      managedAddress,
+    )
   }
 
-  await ensureManagedAccountEasConfigured(managedAddress, (await import('./adapters/thirdwebAccount')).fromThirdwebAccount(modularAccount))
-  return modularAccount
+  await ensureManagedAccountEasConfigured(managedAddress, async () =>
+    fromThirdwebAccount(await getManagedAccountAdmin(managedAddress)),
+  )
+  return managedAccount
 }

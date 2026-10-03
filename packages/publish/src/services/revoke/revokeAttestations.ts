@@ -31,8 +31,7 @@ async function isLegacyModularExecutorAttester(attester: string | null): Promise
 
 /**
  * True when `wallet` is an automation session key on the ManagedAccount that attested the seed.
- * Read failures count as false: the revoke then goes to EAS, and the account rejects it if
- * the key is limited to the module.
+ * Read failures count as false: the revoke then goes to EAS, and the account rejects it.
  */
 async function isAutomationRevoke(
   wallet: PublishWallet,
@@ -53,9 +52,9 @@ async function isAutomationRevoke(
  * Revokes the Seed attestation and all Version and metadata attestations on EAS.
  * Prefer the registered publish wallet; fall back to Thirdweb connected account when present.
  *
- * `multiRevoke` goes to EAS, except for automation session keys (module-only targets) and
- * seeds attested by the legacy executor module, where it goes to the executor module.
- * Automation revokes check the module and simulate each call before sending.
+ * Only the attester's owner can revoke: `multiRevoke` goes to EAS from the publishing account
+ * (for a ManagedAccount, a UserOp `execute(EAS, multiRevoke)`). The Seed executor has no revoke,
+ * so automation session keys and seeds attested by the executor itself cannot be revoked here.
  */
 export async function revokeAttestations(params: {
   seedLocalId: string
@@ -67,7 +66,11 @@ export async function revokeAttestations(params: {
   await assertLocalDbChain()
   await verifyPublishChain()
   const attester = await getAttesterForSeed({ seedLocalId, seedUid })
-  let legacyModuleAttester = false
+  if (await isLegacyModularExecutorAttester(attester)) {
+    throw new Error(
+      'Revocation not supported for items attested by the Seed executor module: the executor has no revoke and is the only attester that could revoke them.',
+    )
+  }
 
   let wallet: PublishWallet | null = getPublishWallet()
   if (!wallet) {
@@ -88,27 +91,14 @@ export async function revokeAttestations(params: {
         { cause: err },
       )
     }
-  } else if (await isLegacyModularExecutorAttester(attester)) {
-    legacyModuleAttester = true
-    // Registered automation / publish wallet cannot become the module attester on EAS.
-    // Prefer ManagedAccount attester + executor-routed multiRevoke (module configured).
-    const { modularAccountModuleContract } = getPublishConfig()
-    if (!modularAccountModuleContract?.trim()) {
-      throw new Error(
-        'Revocation not supported for items published via the modular executor.',
-      )
-    }
   }
 
   const txSender = wallet.txSender
-  const automation = await isAutomationRevoke(wallet, attester)
-  if (automation) {
-    const { assertExecutorModuleReadyForAccount } = await import(
-      '~/helpers/executorModuleReadiness'
+  if (await isAutomationRevoke(wallet, attester)) {
+    throw new Error(
+      'Automation session keys cannot revoke attestations. Revoking is owner-only: connect the account that published this item.',
     )
-    await assertExecutorModuleReadyForAccount(attester as string)
   }
-  const viaExecutorModule = automation || legacyModuleAttester
 
   const [versionRows, metadataRows] = await Promise.all([
     getVersionsForSeedUid(seedUid),
@@ -154,15 +144,7 @@ export async function revokeAttestations(params: {
 
   for (const req of requests) {
     if (req.data.length === 0) continue
-    const multiRevokeTx = prepareEasMultiRevoke([req], { viaExecutorModule })
-    if (automation) {
-      const { simulateCallFromAccount } = await import('~/helpers/executorModuleReadiness')
-      await simulateCallFromAccount({
-        managedAddress: attester as string,
-        tx: multiRevokeTx,
-        action: 'multiRevoke via the executor module',
-      })
-    }
+    const multiRevokeTx = prepareEasMultiRevoke([req])
     try {
       const result = await txSender.sendTransaction(multiRevokeTx)
       await waitForPublishReceipt(result.transactionHash)
