@@ -80,7 +80,7 @@ export const getEasSchemaUidBySchemaName = async ({
     }
 
     const { schemas } = (await queryClient.fetchQuery({
-      queryKey: [`getEasSchemaUidBySchemaName`],
+      queryKey: [`getEasSchemaUidBySchemaName`, schemaName],
       queryFn: async () =>
         easClient.request(GET_SCHEMAS, {
           where: {

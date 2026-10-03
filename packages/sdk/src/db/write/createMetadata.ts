@@ -120,7 +120,7 @@ export const createMetadata: CreateMetadata = async (
           const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
         
           const queryResult = await queryClient.fetchQuery({
-            queryKey: [`getSchemaByName${metadataValues.propertyName}`],
+            queryKey: [`getSchemaByName`, easDataType, propertyNameSnakeCase],
             queryFn: async (): Promise<{schemas: EASSchema[]}> =>
               easClient.request(GET_SCHEMA_BY_NAME, {
                 where: {
