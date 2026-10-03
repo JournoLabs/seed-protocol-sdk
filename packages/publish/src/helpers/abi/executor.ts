@@ -1,3 +1,5 @@
+import { multiPublishAbi } from './publisher'
+
 /**
  * Modular executor module events (0x043462…).
  * CreatedAttestation matches publisher; SeedPublished uses typed bytes32 args.
@@ -28,58 +30,13 @@ export const executorEventsAbi = [
   },
 ] as const
 
-const attestationDataComponents = [
-  { name: 'recipient', type: 'address' },
-  { name: 'expirationTime', type: 'uint64' },
-  { name: 'revocable', type: 'bool' },
-  { name: 'refUID', type: 'bytes32' },
-  { name: 'data', type: 'bytes' },
-  { name: 'value', type: 'uint256' },
-] as const
-
 /**
  * SeedProtocolExecutor (ERC-7579 executor module) calls and errors.
- * `multiPublish` takes the executor's own `PublishRequestData` (selector 0x2a29fadc). It has the
- * same types as the ManagedAccount extension's struct (`multiPublishAbi`), but its bytes32 fields
- * are ordered seedUid, versionUid, seedSchemaUid, versionSchemaUid.
+ * `multiPublish` takes the same `PublishRequestData` as the ManagedAccount extension (selector
+ * 0x2a29fadc), so it shares `multiPublishAbi`'s entry.
  */
 export const executorModuleAbi = [
-  {
-    type: 'function',
-    name: 'multiPublish',
-    stateMutability: 'payable',
-    inputs: [
-      {
-        name: 'requests',
-        type: 'tuple[]',
-        components: [
-          { name: 'localId', type: 'string' },
-          { name: 'seedUid', type: 'bytes32' },
-          { name: 'versionUid', type: 'bytes32' },
-          { name: 'seedSchemaUid', type: 'bytes32' },
-          { name: 'versionSchemaUid', type: 'bytes32' },
-          { name: 'seedIsRevocable', type: 'bool' },
-          {
-            name: 'listOfAttestations',
-            type: 'tuple[]',
-            components: [
-              { name: 'schema', type: 'bytes32' },
-              { name: 'data', type: 'tuple[]', components: attestationDataComponents },
-            ],
-          },
-          {
-            name: 'propertiesToUpdate',
-            type: 'tuple[]',
-            components: [
-              { name: 'publishIndex', type: 'uint256' },
-              { name: 'propertySchemaUid', type: 'bytes32' },
-            ],
-          },
-        ],
-      },
-    ],
-    outputs: [{ name: '', type: 'bytes32[]' }],
-  },
+  multiPublishAbi[0],
   {
     type: 'function',
     name: 'isInitialized',

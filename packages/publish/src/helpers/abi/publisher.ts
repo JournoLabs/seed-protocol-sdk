@@ -18,11 +18,9 @@ const listOfAttestationsComponents = [
 ] as const
 
 /**
- * `SeedProtocolExtension.multiPublish` (selector 0x2a29fadc): `ISeedProtocol.PublishRequestData`,
- * where `propertiesToUpdate` names its target by `publishIndex`, the target's position in
- * `requests`. The bytes32 fields are ordered seedUid, seedSchemaUid, versionUid, versionSchemaUid,
- * unlike the executor module's struct (see `executorModuleAbi`). Both have the same selector, so
- * the selector alone can't tell them apart.
+ * `multiPublish` (selector 0x2a29fadc) on SeedProtocolExtension and SeedProtocolExecutor, which take
+ * the same `PublishRequestData`: `propertiesToUpdate` names its target by `publishIndex`, the
+ * target's position in `requests`.
  */
 export const multiPublishAbi = [
   {

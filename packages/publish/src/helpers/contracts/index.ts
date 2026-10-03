@@ -70,7 +70,10 @@ function publishIndexResolver(requests: MultiPublishRequest[]) {
     })
 }
 
-/** Encode `multiPublish` for the account's SeedProtocolExtension, mapping each `publishLocalId` to its index in `requests`. */
+/**
+ * Encode `multiPublish` for the account's SeedProtocolExtension, mapping each `publishLocalId` to
+ * its index in `requests`.
+ */
 export function encodeMultiPublish(
   to: Address,
   requests: MultiPublishRequest[],
@@ -100,35 +103,15 @@ export function encodeMultiPublish(
 }
 
 /**
- * Encode `multiPublish` for the SeedProtocolExecutor module. Takes the same request shape as
- * {@link encodeMultiPublish} and resolves references the same way; only the struct differs.
+ * Encode `multiPublish` for the SeedProtocolExecutor module, which takes the same request struct
+ * as the extension: only the target differs from {@link encodeMultiPublish}.
  */
 export function encodeExecutorMultiPublish(
   to: Address,
   requests: MultiPublishRequest[],
   gas?: bigint,
 ): SeedTxRequest {
-  const publishIndexes = publishIndexResolver(requests)
-  return {
-    to,
-    data: encodeFunctionData({
-      abi: executorModuleAbi,
-      functionName: 'multiPublish',
-      args: [
-        requests.map((r) => ({
-          localId: r.localId,
-          seedUid: r.seedUid,
-          versionUid: r.versionUid,
-          seedSchemaUid: r.seedSchemaUid,
-          versionSchemaUid: r.versionSchemaUid,
-          seedIsRevocable: r.seedIsRevocable,
-          listOfAttestations: r.listOfAttestations,
-          propertiesToUpdate: publishIndexes(r),
-        })),
-      ],
-    }),
-    gas,
-  }
+  return encodeMultiPublish(to, requests, gas)
 }
 
 export async function readExecutorModuleIsInitialized(
