@@ -32,6 +32,13 @@ export interface SeedGatewayConfig {
    * Relative URLs resolve against `window.location.origin` or {@link ResolveSeedGatewayEndpointsOptions.origin}.
    */
   proxyBaseUrl?: string
+  /**
+   * Read gateways tried before the resolved / public hosts for `/raw/{id}` reads — typically the
+   * gateway the app uploads through, which serves an item before the public gateways do. Base URLs
+   * with scheme and any path prefix; relative paths resolve like {@link proxyBaseUrl}. Applied at
+   * client init via `setPreferredArweaveReadBaseUrls`; does not change upload or GraphQL routing.
+   */
+  preferredReadBaseUrls?: string[]
   hyper?: SeedGatewayHyperConfig
   /** Shorthand for `hyper.gatewayHyperKey` in seed.config */
   gatewayHyperKey?: string

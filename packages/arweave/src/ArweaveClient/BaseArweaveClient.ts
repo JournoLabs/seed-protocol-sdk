@@ -82,6 +82,23 @@ export abstract class BaseArweaveClient {
   }
 
   /**
+   * `{ host, port, protocol }` for the `arweave` npm client's `init()`. The port is always set: the
+   * web build of `arweave` otherwise falls back to the page's own port (`https://arweave.net:5173`),
+   * and a `host:port` passed as `host` becomes `host:port:443`. Path prefixes are dropped — the
+   * `arweave` client cannot address a gateway mounted under a path.
+   */
+  static getArweaveJsApiConfig(): { host: string; port: number; protocol: 'http' | 'https' } {
+    const protocol = this.getProtocol()
+    const defaultPort = protocol === 'https' ? 443 : 80
+    try {
+      const url = new URL(`${protocol}://${this.getArweaveSdkHost()}`)
+      return { host: url.hostname, port: url.port ? Number(url.port) : defaultPort, protocol }
+    } catch {
+      return { host: this.getArweaveSdkHost(), port: defaultPort, protocol }
+    }
+  }
+
+  /**
    * Path prefix on the gateway origin (e.g. `/api/seed-gateway`), or empty.
    */
   static getGatewayPath(): string {

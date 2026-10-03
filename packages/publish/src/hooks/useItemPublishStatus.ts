@@ -18,6 +18,8 @@ export interface PublishProcessRecord {
   errorMessage?: string
   errorStep?: string
   errorDetails?: string
+  /** Stable error code (e.g. `ManagedAccountPublishError.code`) when the failure had one. */
+  errorCode?: string
   persistedSnapshot: string
   createdAt?: number
   updatedAt?: number

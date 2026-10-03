@@ -14,6 +14,7 @@ import {
   seedGatewayConfigFromSeedConfig,
   setResolvedSeedGatewayEndpoints,
 } from "@/helpers";
+import { setPreferredArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { configureEasReadChain } from '@seedprotocol/eas'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
@@ -100,6 +101,10 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       uploadApiBaseUrl,
       gateway,
     })
+    // Only when configured, so a host app's own setPreferredArweaveReadBaseUrls() call survives init.
+    if (gatewayConfig.preferredReadBaseUrls) {
+      setPreferredArweaveReadBaseUrls(gatewayConfig.preferredReadBaseUrls)
+    }
     const resolvedGateway = await resolveSeedGatewayEndpoints(gatewayConfig)
     setResolvedSeedGatewayEndpoints(resolvedGateway)
     BaseArweaveClient.setHost(`${resolvedGateway.arweaveProtocol}://${resolvedGateway.arweaveHost}`)

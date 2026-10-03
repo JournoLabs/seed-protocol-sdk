@@ -99,6 +99,13 @@
       "when": 1774300000000,
       "tag": "0013_eas_sync_processes",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1774400000000,
+      "tag": "0014_add_error_code_to_publish_processes",
+      "breakpoints": true
     }
   ]
 }

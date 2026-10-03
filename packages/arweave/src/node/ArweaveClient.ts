@@ -30,20 +30,13 @@ const getArweaveInstance = (): Arweave => {
 
   _arweaveGatewayKey = gatewayKey;
 
-  const host = BaseArweaveClient.getArweaveSdkHost();
-  const protocol = BaseArweaveClient.getProtocol();
+  const apiConfig = BaseArweaveClient.getArweaveJsApiConfig();
 
   // Handle both ES modules and CommonJS exports from arweave package
   if ('default' in Arweave && typeof (Arweave as any).default?.init === 'function') {
-    _arweaveInstance = (Arweave as any).default.init({
-      host,
-      protocol,
-    });
+    _arweaveInstance = (Arweave as any).default.init(apiConfig);
   } else {
-    _arweaveInstance = Arweave.init({
-      host,
-      protocol,
-    });
+    _arweaveInstance = Arweave.init(apiConfig);
   }
 
   return _arweaveInstance!;

@@ -16,6 +16,7 @@ import { saveAppState } from '@/db/write/saveAppState'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySelected } from '@/helpers'
+import { getArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { supportsOpfsFileDownloads } from '@/helpers/environment'
 import { Endpoints } from '@/types'
 import { throttle } from 'lodash-es'
@@ -269,16 +270,21 @@ const downloadTransactionIds = async (
     return false
   }
 
+  // Preferred gateways first: a just-published item is only on the gateway it was uploaded through.
+  const arweaveBaseUrls = getArweaveReadBaseUrls()
+
   if (transactionIdsToDownload.length === 1) {
     await BaseFileManager.downloadFileByTransactionId({
       transactionId: transactionIdsToDownload[0],
       arweaveHost: BaseArweaveClient.getBaseUrl(),
+      arweaveBaseUrls,
       excludedTransactions,
     })
   } else {
     await BaseFileManager.downloadAllFiles({
       transactionIds: transactionIdsToDownload,
       arweaveHost: BaseArweaveClient.getBaseUrl(),
+      arweaveBaseUrls,
       excludedTransactions,
     })
   }

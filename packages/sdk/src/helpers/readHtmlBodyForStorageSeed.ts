@@ -1,7 +1,5 @@
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { getDefaultArweaveReadGatewayHostsOrdered, getArweaveReadGatewayHostsForPrimary } from '@/helpers/constants'
-import { getResolvedSeedGatewayEndpoints } from '@/helpers/gateway/gatewayState'
-import { getReadGatewayHostsForConfig } from '@/helpers/gateway/resolveSeedGatewayEndpoints'
+import { fetchArweaveRawTextAcrossGateways } from '@/helpers/gateway/gatewayState'
 
 /** Published storage seeds use `0x` + 64 hex; `saveHtml` still writes `html/{localId}.html`. */
 const SEED_UID_HEX_RE = /^0x[a-fA-F0-9]{64}$/
@@ -19,46 +17,14 @@ function extractArweaveTransactionId(raw: string): string {
 }
 
 /**
- * GET /raw/{txId} on each configured gateway. Avoids arweave.js /tx/.../offset which often 404s on
- * arweave.net while another gateway (e.g. ar.seedprotocol.io) still serves the data.
+ * GET /raw/{txId} on each read gateway, preferred ones ({@link setPreferredArweaveReadBaseUrls})
+ * first. Avoids arweave.js /tx/.../offset which often 404s on arweave.net while another gateway
+ * (e.g. ar.seedprotocol.io, or the one the item was just uploaded through) still serves the data.
  */
 async function fetchHtmlViaRawAcrossGateways(txId: string): Promise<string | undefined> {
   const id = extractArweaveTransactionId(txId)
   if (!id || SEED_UID_HEX_RE.test(id)) return undefined
-
-  try {
-    const resolved = getResolvedSeedGatewayEndpoints()
-    if (!resolved || (resolved.activePath !== 'hyper-sidecar' && resolved.activePath !== 'http-proxy')) {
-      const { ensureReadGatewaySelected } = await import('@seedprotocol/arweave')
-      await ensureReadGatewaySelected().catch(() => {})
-    }
-  } catch {
-    /* optional */
-  }
-
-  const { BaseArweaveClient } = await import('@seedprotocol/arweave')
-  const protocol = BaseArweaveClient.getProtocol()
-  const resolved = getResolvedSeedGatewayEndpoints()
-  const hosts = resolved
-    ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
-    : getArweaveReadGatewayHostsForPrimary(BaseArweaveClient.getHost())
-
-  for (const host of hosts) {
-    const h = host.trim().replace(/\/$/, '')
-    if (!h) continue
-    const url = `${protocol}://${h}/raw/${encodeURIComponent(id)}`
-    try {
-      const res = await fetch(url, { method: 'GET', credentials: 'omit' })
-      if (!res.ok) continue
-      const text = await res.text()
-      if (typeof text === 'string' && text.length > 0) {
-        return text
-      }
-    } catch {
-      /* next gateway */
-    }
-  }
-  return undefined
+  return fetchArweaveRawTextAcrossGateways(id)
 }
 
 /**

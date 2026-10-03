@@ -132,6 +132,35 @@ export const gateway = {
 
 Top-level `arweaveDomain` / `uploadApiBaseUrl` still work; `gateway` merges with them.
 
+## Preferred read gateways
+
+An item is served by the gateway it was uploaded through (sidecar or app-server proxy) as soon as
+the upload is accepted. The public gateways 404 on it until the bundle settles, which is exactly
+when the author looks at it. To read your own gateway first without routing uploads, GraphQL or
+`BaseArweaveClient` through it, register it as a preferred read gateway:
+
+```typescript
+import { setPreferredArweaveReadBaseUrls } from '@seedprotocol/sdk'
+
+// Scheme plus any path prefix; relative paths resolve against window.location.origin.
+setPreferredArweaveReadBaseUrls(['https://app.example.com/api/seed-gateway'])
+```
+
+or in config, applied at client init:
+
+```typescript
+export const gateway = {
+  transport: 'http-gateway' as const,
+  preferredReadBaseUrls: ['/api/seed-gateway'],
+}
+```
+
+`/raw/{id}` readers then try those URLs first and fall back to the resolved / public list: Html
+storage-seed bodies, the browser file-download worker, `BrowserArweaveClient.getTransactionData`,
+and the feed image service. Each gateway gets a 10 s timeout so a hung one does not block the next.
+Use `getArweaveReadBaseUrls()` for the same ordered list in your own readers. The config field is
+only applied when set, so an app's own setter call survives client init.
+
 ## Publish bootstrap
 
 Resolve upload + GraphQL URLs once and pass into `initPublish`:

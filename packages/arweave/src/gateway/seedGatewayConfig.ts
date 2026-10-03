@@ -15,6 +15,7 @@ export function seedGatewayConfigFromSeedConfig(
     arweaveDomain: config.arweaveDomain ?? gateway.arweaveDomain,
     uploadApiBaseUrl: config.uploadApiBaseUrl ?? gateway.uploadApiBaseUrl,
     proxyBaseUrl: gateway.proxyBaseUrl?.trim() || undefined,
+    preferredReadBaseUrls: gateway.preferredReadBaseUrls,
     hyper: {
       gatewayHyperKey:
         gateway.hyper?.gatewayHyperKey?.trim() ||

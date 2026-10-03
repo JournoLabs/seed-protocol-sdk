@@ -129,42 +129,73 @@ const getFilesPath = (filesRoot: string, ...parts: string[]) => {
   return [root, ...parts].filter(Boolean).join('/').replace(/\/+/g, '/')
 }
 
+const toBaseUrl = (hostOrUrl: string): string => {
+  const h = (hostOrUrl || '').trim().replace(/\/$/, '')
+  if (!h) return ''
+  if (h.startsWith('http://') || h.startsWith('https://')) return h
+  const protocol =
+    h.startsWith('127.0.0.1') || h.startsWith('localhost') || h.includes(':1984')
+      ? 'http'
+      : 'https'
+  return `${protocol}://${h}`
+}
+
+/**
+ * GET /raw/{id} from each gateway in order. `networkFailedEverywhere` is true only when no gateway
+ * answered at all; a non-2xx (e.g. not yet propagated) is not a reason to exclude the transaction.
+ */
+const fetchRaw = async (
+  baseUrls: string[],
+  transactionId: string,
+): Promise<{ arrayBuffer?: ArrayBuffer; networkFailedEverywhere: boolean }> => {
+  let answered = false
+  for (const base of baseUrls) {
+    try {
+      const response = await fetch(`${base}/raw/${transactionId}`)
+      answered = true
+      if (!response.ok) continue
+      const arrayBuffer = await response.arrayBuffer()
+      if (arrayBuffer.byteLength > 0) {
+        return { arrayBuffer, networkFailedEverywhere: false }
+      }
+    } catch (error) {
+      /* next gateway */
+    }
+  }
+  return { networkFailedEverywhere: !answered }
+}
+
 const downloadFiles = async ({
   transactionIds,
   arweaveHost,
+  arweaveBaseUrls,
   filesRoot = '/files',
 }: {
   transactionIds: string[],
   arweaveHost: string,
+  arweaveBaseUrls?: string[],
   filesRoot?: string,
 }) => {
 
-  let arrayBuffer: ArrayBuffer | undefined
+  // Preferred / resolved gateways first, then the configured host; deduped.
+  const baseUrls: string[] = []
+  for (const candidate of (arweaveBaseUrls || []).concat([arweaveHost])) {
+    const base = toBaseUrl(candidate)
+    if (base && baseUrls.indexOf(base) === -1) {
+      baseUrls.push(base)
+    }
+  }
 
   for (const transactionId of transactionIds) {
-    try {
-      const response = await fetch(
-        (() => {
-          const base = arweaveHost.trim().startsWith('http')
-            ? arweaveHost.trim().replace(/\/$/, '')
-            : (() => {
-                const h = arweaveHost.trim()
-                const protocol =
-                  h.startsWith('127.0.0.1') || h.startsWith('localhost') || h.includes(':1984')
-                    ? 'http'
-                    : 'https'
-                return `${protocol}://${h}`
-              })()
-          return `${base}/raw/${transactionId}`
-        })(),
-      )
+    const { arrayBuffer, networkFailedEverywhere } = await fetchRaw(baseUrls, transactionId)
 
-      arrayBuffer = await response.arrayBuffer();
-    } catch(error) {
-      globalThis.postMessage({
-        message: 'excludeTransaction',
-        transactionId,
-      })
+    if (!arrayBuffer) {
+      if (networkFailedEverywhere) {
+        globalThis.postMessage({
+          message: 'excludeTransaction',
+          transactionId,
+        })
+      }
       continue
     }
 
@@ -239,7 +270,10 @@ const downloadFiles = async ({
 
       try {
         const response = await fetch(url)
-  
+        if (!response.ok) {
+          continue
+        }
+
         buffer = await response.arrayBuffer()
 
       } catch(error) {

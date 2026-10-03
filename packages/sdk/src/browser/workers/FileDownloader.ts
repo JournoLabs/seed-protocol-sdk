@@ -18,7 +18,7 @@ export class FileDownloader {
     )
   }
 
-  public downloadAll = async ({transactionIds, arweaveHost, excludedTransactions}: DownloadAllFilesParams): Promise<void> => {
+  public downloadAll = async ({transactionIds, arweaveHost, arweaveBaseUrls, excludedTransactions}: DownloadAllFilesParams): Promise<void> => {
 
     if (this.workersArchive.length > 0) {
       for (let i = 0; i < this.workersArchive.length; i++) {
@@ -59,6 +59,7 @@ export class FileDownloader {
       worker.postMessage({
         transactionIds,
         arweaveHost,
+        arweaveBaseUrls,
         debug: logger.enabled,
         filesRoot: BaseFileManager.getWorkingDir(),
       });

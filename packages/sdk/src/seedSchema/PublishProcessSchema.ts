@@ -12,6 +12,7 @@ export const publishProcesses = sqliteTable('publish_processes', {
   errorMessage: text('error_message'),
   errorStep: text('error_step'),
   errorDetails: text('error_details'),
+  errorCode: text('error_code'), // e.g. ManagedAccountPublishError.code
   persistedSnapshot: text('persisted_snapshot').notNull(),
   seedId: text('seed_id'),
   existingSeedUid: text('existing_seed_uid'),

@@ -38,6 +38,7 @@ function statusFromSnapshot(snapshot: { status?: string; value?: unknown }): 'in
 
 const MAX_ERROR_MESSAGE_LENGTH = 500
 const MAX_ERROR_DETAILS_LENGTH = 2000
+const MAX_ERROR_CODE_LENGTH = 100
 
 /** JSON.stringify cannot serialize BigInt; publish context (e.g. gas, tx fields) may contain bigint. */
 function jsonStringifyPersistedSnapshot(value: unknown): string {
@@ -55,14 +56,40 @@ function publishRunIdFromSnapshot(snapshot: unknown): string | undefined {
   return typeof id === 'string' && id.length > 0 ? id : undefined
 }
 
-function errorFieldsFromContext(context: { error?: unknown; errorStep?: string } | undefined, status: 'in_progress' | 'completed' | 'failed' | 'interrupted') {
+/**
+ * After a DB restore, `context.error` is the JSON form of the original error: own enumerable
+ * fields (`name`, `code`, …) survive but `message` and `stack` do not.
+ */
+function errorMessageOf(err: unknown): string | undefined {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object') {
+    const message = (err as { message?: unknown }).message
+    return typeof message === 'string' ? message : undefined
+  }
+  return String(err)
+}
+
+/** `code` on publish errors (`ManagedAccountPublishError`, `Eip7702ModularAccountPublishError`, …). */
+function errorCodeOf(err: unknown): string | undefined {
+  if (err == null || typeof err !== 'object') return undefined
+  const code = (err as { code?: unknown }).code
+  return typeof code === 'string' && code.length > 0 ? code.slice(0, MAX_ERROR_CODE_LENGTH) : undefined
+}
+
+type PublishErrorFields = {
+  errorMessage?: string
+  errorStep?: string
+  errorDetails?: string
+  errorCode?: string | null
+}
+
+export function errorFieldsFromContext(context: { error?: unknown; errorStep?: string } | undefined, status: 'in_progress' | 'completed' | 'failed' | 'interrupted'): PublishErrorFields {
   if (!context?.error) return {}
   if (status !== 'failed' && status !== 'in_progress') return {}
   const err = context.error
-  const errorMessage = err != null
-    ? (err instanceof Error ? err.message : String(err)).slice(0, MAX_ERROR_MESSAGE_LENGTH)
-    : undefined
+  const errorMessage = errorMessageOf(err)?.slice(0, MAX_ERROR_MESSAGE_LENGTH)
   const errorStep = context.errorStep
+  const errorCode = errorCodeOf(err)
   let errorDetails: string | undefined
   if (err instanceof Error && err.stack) {
     errorDetails = err.stack.slice(0, MAX_ERROR_DETAILS_LENGTH)
@@ -75,7 +102,13 @@ function errorFieldsFromContext(context: { error?: unknown; errorStep?: string }
   } else if (err != null) {
     errorDetails = String(err).slice(0, MAX_ERROR_DETAILS_LENGTH)
   }
-  return { errorMessage: errorMessage ?? undefined, errorStep, errorDetails }
+  // A restored error has no message or stack; keep the ones saved before the restore.
+  return {
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+    errorStep,
+    ...(err instanceof Error || errorMessage !== undefined ? { errorDetails } : {}),
+    errorCode: errorCode ?? null,
+  }
 }
 
 export function markInProgressPublishInterrupted(seedLocalId: string): Promise<void> {
@@ -107,6 +140,7 @@ export function markInProgressPublishInterrupted(seedLocalId: string): Promise<v
         errorMessage: null,
         errorStep: null,
         errorDetails: null,
+        errorCode: null,
       })
       .where(eq(publishProcesses.id, existing[0].id!))
   })

@@ -4,6 +4,7 @@ import {
   isGatewayHostCircuitOpen,
   recordGatewayHostFailure,
   resetArweaveReadGatewayForTests,
+  setPreferredArweaveReadBaseUrls,
   setResolvedSeedGatewayEndpoints,
 } from '@seedprotocol/arweave'
 import { ArweaveImageService } from '../src/services/arweaveImageService'
@@ -29,6 +30,34 @@ describe('ArweaveImageService circuit breaker', () => {
     vi.unstubAllGlobals()
     resetArweaveReadGatewayForTests()
     setResolvedSeedGatewayEndpoints(null)
+    setPreferredArweaveReadBaseUrls([])
+  })
+
+  it('tries preferred read gateways before the configured list', async () => {
+    setPreferredArweaveReadBaseUrls(['https://app.example.com/api/seed-gateway'])
+    const fetchMock = mockGatewayFetch(async (s, init) => {
+      if (!s.startsWith('https://app.example.com/api/seed-gateway/')) {
+        throw new Error(`unexpected ${s}`)
+      }
+      if (init?.method === 'HEAD') {
+        return new Response(null, {
+          status: 200,
+          headers: { 'content-type': 'image/png', 'content-length': '100' },
+        })
+      }
+      return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), {
+        status: 206,
+        headers: { 'content-type': 'image/png' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new ArweaveImageService({ gateways: ['arweave.net'], timeout: 5_000 })
+    const tx = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
+    const meta = await service.detectImage(tx)
+
+    expect(meta.isImage).toBe(true)
+    expect(meta.url).toBe(`https://app.example.com/api/seed-gateway/${tx}`)
   })
 
   it('skips hosts with an open circuit and tries the next gateway', async () => {

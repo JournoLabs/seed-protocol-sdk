@@ -10,7 +10,11 @@ import type {
   DownloadResult,
   CreateTransactionOptions,
 } from "@/types/arweave";
-import { GET_TRANSACTION_TAGS } from '@seedprotocol/arweave'
+import {
+  GET_TRANSACTION_TAGS,
+  fetchArweaveRawFromBaseUrl,
+  getPreferredArweaveReadBaseUrls,
+} from '@seedprotocol/arweave'
 import debug from "debug";
 
 const logger = debug("seedSdk:browser:ArweaveClient");
@@ -30,20 +34,13 @@ const getArweaveInstance = (): Arweave => {
 
   _arweaveGatewayKey = gatewayKey;
 
-  const host = BaseArweaveClient.getArweaveSdkHost();
-  const protocol = BaseArweaveClient.getProtocol();
+  const apiConfig = BaseArweaveClient.getArweaveJsApiConfig();
 
   // Handle both ES modules and CommonJS exports from arweave package
   if ("default" in Arweave && typeof (Arweave as any).default?.init === "function") {
-    _arweaveInstance = (Arweave as any).default.init({
-      host,
-      protocol,
-    });
+    _arweaveInstance = (Arweave as any).default.init(apiConfig);
   } else {
-    _arweaveInstance = Arweave.init({
-      host,
-      protocol,
-    });
+    _arweaveInstance = Arweave.init(apiConfig);
   }
 
   return _arweaveInstance!;
@@ -95,6 +92,22 @@ export class BrowserArweaveClient implements IArweaveClient {
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
+    // Preferred gateways (usually the one the item was uploaded through) serve it before L1 does.
+    // `/raw` is already decoded, so skip them when the caller asked for undecoded data.
+    const preferred = options?.decode === false ? [] : getPreferredArweaveReadBaseUrls();
+    for (const base of preferred) {
+      const response = await fetchArweaveRawFromBaseUrl(base, transactionId);
+      if (!response) continue;
+      try {
+        if (options?.string) {
+          return await response.text();
+        }
+        return new Uint8Array(await response.arrayBuffer());
+      } catch (error) {
+        logger("Error reading preferred gateway response:", error);
+      }
+    }
+
     // Path-prefixed proxies (app-server Hyper proxy) are not supported by arweave.init host;
     // fetch via getRawUrl so /api/seed-gateway/... works.
     if (BaseArweaveClient.getGatewayPath()) {

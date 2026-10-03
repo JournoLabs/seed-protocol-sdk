@@ -1,10 +1,7 @@
 import {
   BaseArweaveClient,
-  ensureReadGatewaySelected,
-  getArweaveReadGatewayHostsForPrimary,
-  getDefaultArweaveReadGatewayHostsOrdered,
-  getReadGatewayHostsForConfig,
-  getResolvedSeedGatewayEndpoints,
+  ensureArweaveReadGatewayForFallback,
+  getArweaveReadBaseUrls,
   isGatewayHostCircuitOpen,
   recordGatewayHostFailure,
   recordGatewayHostSuccess,
@@ -31,38 +28,26 @@ export class ArweaveImageService {
    * Detect if an Arweave transaction ID links to an image and extract metadata
    */
   async detectImage(transactionId: string): Promise<ImageMetadata> {
-    const resolved = getResolvedSeedGatewayEndpoints()
-    if (!resolved || (resolved.activePath !== 'hyper-sidecar' && resolved.activePath !== 'http-proxy')) {
-      await ensureReadGatewaySelected().catch(() => {
-        /* feed may run without browser client init */
-      })
-    }
+    await ensureArweaveReadGatewayForFallback()
 
-    const gatewayHosts = resolved
-      ? getReadGatewayHostsForConfig(resolved, getDefaultArweaveReadGatewayHostsOrdered())
-      : this.config.gateways?.length
-        ? this.config.gateways
-        : getArweaveReadGatewayHostsForPrimary(BaseArweaveClient.getHost())
-
-    const protocol = resolved?.arweaveProtocol ?? 'https'
+    // Preferred gateways first, then resolved / public (this service's own list when unresolved)
+    const baseUrls = getArweaveReadBaseUrls({ fallbackHosts: this.config.gateways })
 
     // Try each gateway until one succeeds (skip hosts with an open circuit)
-    for (const gateway of gatewayHosts) {
-      const host = gateway.trim().replace(/\/$/, '')
-      if (!host) continue
-      if (isGatewayHostCircuitOpen(host)) {
+    for (const base of baseUrls) {
+      if (isGatewayHostCircuitOpen(base)) {
         continue
       }
       try {
-        const url = `${protocol}://${host}/${transactionId}`
-        const metadata = await this.getImageMetadata(url, host)
+        const url = `${base}/${transactionId}`
+        const metadata = await this.getImageMetadata(url, base)
         if (metadata.isImage) {
           return metadata
         }
       } catch (error) {
-        recordGatewayHostFailure(host)
+        recordGatewayHostFailure(base)
         // Log but continue to next gateway
-        console.warn(`Failed to fetch from gateway ${gateway} for transaction ${transactionId}:`, error)
+        console.warn(`Failed to fetch from gateway ${base} for transaction ${transactionId}:`, error)
         continue
       }
     }
@@ -70,7 +55,7 @@ export class ArweaveImageService {
     // If all gateways failed, return non-image result
     return {
       isImage: false,
-      url: `${protocol}://${gatewayHosts[0]?.trim() || BaseArweaveClient.getHost()}/${transactionId}`,
+      url: `${baseUrls[0] ?? BaseArweaveClient.getBaseUrl()}/${transactionId}`,
     }
   }
 

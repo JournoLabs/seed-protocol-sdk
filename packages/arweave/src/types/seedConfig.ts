@@ -9,6 +9,7 @@ export type SeedConfigGatewayInput = {
     arweaveDomain?: string
     uploadApiBaseUrl?: string
     proxyBaseUrl?: string
+    preferredReadBaseUrls?: string[]
     gatewayHyperKey?: string
     localSidecarHost?: string
     localSidecarPort?: number

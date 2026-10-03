@@ -93,11 +93,13 @@ export abstract class BaseFileManager {
   static downloadAllFiles({
     transactionIds,
     arweaveHost,
+    arweaveBaseUrls,
     excludedTransactions,
   }: DownloadAllFilesParams): Promise<void> {
     return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds,
       arweaveHost,
+      arweaveBaseUrls,
       excludedTransactions,
     })
   }
@@ -105,11 +107,13 @@ export abstract class BaseFileManager {
   static downloadFileByTransactionId({
     transactionId,
     arweaveHost,
+    arweaveBaseUrls,
     excludedTransactions,
   }: DownloadSingleFileParams): Promise<void> {
     return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds: [transactionId],
       arweaveHost,
+      arweaveBaseUrls,
       excludedTransactions,
     })
   }
