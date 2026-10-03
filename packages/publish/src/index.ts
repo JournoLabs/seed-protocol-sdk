@@ -6,6 +6,7 @@ export {
 export { DEFAULT_PUBLISH_CHAIN } from './helpers/defaultChain'
 export { getPublishChainName } from './helpers/chainConfig'
 export { verifyPublishChain, PublishChainConfigError } from './helpers/verifyPublishChain'
+export { seedTwinConfig, type SeedTwinInfo, type SeedTwinPublishConfig } from './helpers/seedTwin'
 export {
   EAS_CHAIN_DEPLOYMENTS,
   getEasChainDeployment,

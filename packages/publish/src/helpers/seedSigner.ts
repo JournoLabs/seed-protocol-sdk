@@ -1,4 +1,5 @@
 import type { Address, Hex, SignableMessage } from 'viem'
+import { retryNonceTooLow } from './retryNonceTooLow'
 import { ethers } from 'ethers'
 
 /** Encoded calldata ready for submission (viem path). */
@@ -101,12 +102,14 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
   const txSender = brandTxSender({
     address,
     sendTransaction: async (tx) => {
-      const result = await wallet.sendTransaction({
-        to: tx.to,
-        data: tx.data,
-        value: tx.value,
-        gasLimit: tx.gas,
-      })
+      const result = await retryNonceTooLow(() =>
+        wallet.sendTransaction({
+          to: tx.to,
+          data: tx.data,
+          value: tx.value,
+          gasLimit: tx.gas,
+        }),
+      )
       return { transactionHash: result.hash as Hex }
     },
   })

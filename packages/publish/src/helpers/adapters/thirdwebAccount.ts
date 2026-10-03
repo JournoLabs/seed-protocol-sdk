@@ -10,6 +10,7 @@ import {
   type SeedSigner,
 } from '../seedSigner'
 import { getPublishThirdwebChain } from '../thirdwebChain'
+import { retryNonceTooLow } from '../retryNonceTooLow'
 
 export type FromThirdwebAccountOptions = {
   /**
@@ -48,7 +49,8 @@ export function fromThirdwebAccount(
         value: tx.value,
         gas: tx.gas,
       })
-      const result = await sendTransaction({ account, transaction })
+      // Smart accounts send UserOps (EntryPoint nonces); this only matters for plain EOAs.
+      const result = await retryNonceTooLow(() => sendTransaction({ account, transaction }))
       return { transactionHash: result.transactionHash as Hex }
     },
   })

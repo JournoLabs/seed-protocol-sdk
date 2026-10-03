@@ -1,4 +1,4 @@
-import { BaseError, decodeErrorResult, zeroAddress, type Address, type Hex } from 'viem'
+import { BaseError, decodeErrorResult, parseEther, zeroAddress, type Address, type Hex } from 'viem'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
 import { easAbi } from './abi/eas'
@@ -101,6 +101,12 @@ function describeRevert(data: Hex | undefined): string {
   }
 }
 
+/** True when a call failed because the caller can't cover gas fees, not because it reverted. */
+function isInsufficientFunds(err: unknown): boolean {
+  const msg = err instanceof BaseError ? `${err.shortMessage} ${err.details} ${err.message}` : String(err)
+  return /insufficient funds|insufficient balance/i.test(msg)
+}
+
 /**
  * Simulates `tx` as a call from `managedAddress` (the call the account makes when it executes a
  * UserOp) and throws before anything is sent if it would revert. Also throws when the
@@ -115,13 +121,25 @@ export async function simulateCallFromAccount(params: {
   action: string
 }): Promise<void> {
   const { managedAddress, tx, action } = params
-  try {
-    await getPublishPublicClient().call({
+  const call = (withBalance: boolean) =>
+    getPublishPublicClient().call({
       account: managedAddress as Address,
       to: tx.to,
       data: tx.data,
       value: tx.value,
+      // OP chains charge the L1 data fee up front, so an eth_call from an unfunded account
+      // fails before running. A balance override lets the simulation reach the contract.
+      ...(withBalance
+        ? { stateOverride: [{ address: managedAddress as Address, balance: parseEther('1000') }] }
+        : {}),
     })
+  try {
+    try {
+      await call(false)
+    } catch (err) {
+      if (!isInsufficientFunds(err)) throw err
+      await call(true)
+    }
   } catch (cause) {
     const reason = isRevert(cause)
       ? describeRevert(findRevertData(cause))

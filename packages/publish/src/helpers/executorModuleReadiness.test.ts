@@ -83,6 +83,18 @@ describe('assertExecutorModuleReadyForAccount', () => {
 describe('simulateCallFromAccount', () => {
   const tx = { to: MODULE as `0x${string}`, data: '0x2a29fadc' as `0x${string}` }
 
+  test('retries with a balance override when the account cannot pay the L1 fee', async () => {
+    callMock.mockImplementationOnce(async () => {
+      throw new Error('insufficient funds for gas * price + value')
+    })
+    const { simulateCallFromAccount } = await import('./executorModuleReadiness')
+    await simulateCallFromAccount({ managedAddress: ACCOUNT, tx, action: 'multiPublish' })
+    expect(callMock).toHaveBeenCalledTimes(2)
+    const retry = callMock.mock.calls[1] as unknown as [{ stateOverride?: Array<{ address: string; balance: bigint }> }]
+    expect(retry[0].stateOverride?.[0]).toMatchObject({ address: ACCOUNT })
+    expect(retry[0].stateOverride?.[0]?.balance).toBeGreaterThan(0n)
+  })
+
   test('simulates the call from the account', async () => {
     const { simulateCallFromAccount } = await import('./executorModuleReadiness')
     await simulateCallFromAccount({ managedAddress: ACCOUNT, tx, action: 'multiPublish' })

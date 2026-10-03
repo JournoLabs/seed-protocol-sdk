@@ -132,42 +132,28 @@ The resolved values are on `getPublishConfig()` (`chain`, `easContractAddress`, 
 
 ### Local OP Sepolia twin
 
-The protocol's twin (`seed-protocol`: `bun run twin:up`) is an OP Sepolia fork on chain **31337** with a local bundler (no paymaster) and EAS indexer. Thirdweb's hosted paymaster and EIP-7702 service can't reach it, so the wallets need the `thirdweb` settings below. Read addresses from `seed-protocol/.twin/twin.json`; they change with each deploy.
+The protocol's twin (`seed-protocol`: `bun run twin:up`) is an OP Sepolia fork on chain **31337** with a local bundler (no paymaster) and EAS indexer. Thirdweb's hosted paymaster and EIP-7702 service can't reach it, so the wallets need the `thirdweb` settings below. `seedTwinConfig` reads the endpoints and addresses from `seed-protocol/.twin/twin.json`, which change with each deploy; it ignores the file's test-account keys.
 
 ```ts
-import { defineChain } from 'viem'
-import twin from '../seed-protocol/.twin/twin.json'
+import { initPublish, seedTwinConfig } from '@seedprotocol/publish'
+import twinJson from '../seed-protocol/.twin/twin.json'
 
-const twinChain = defineChain({
-  id: 31337,
-  name: 'Seed twin (OP Sepolia fork)',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: { default: { http: ['http://127.0.0.1:8545'] } },
-  testnet: true,
-})
+const twin = seedTwinConfig(twinJson)
 
 initPublish({
+  ...twin.publish, // chain 31337, rpcUrl, addresses, executor, thirdweb: { bundlerUrl, sponsorGas: false, modularWalletMode: 'EOA' }
   uploadApiBaseUrl: 'http://localhost:3000', // your seed-protocol-server
   thirdwebClientId, // login stays hosted; allow the local origin
-  chain: twinChain,
-  rpcUrl: 'http://127.0.0.1:8545',
-  easContractAddress: twin.contracts.eas,
-  schemaRegistryAddress: twin.contracts.schemaRegistry,
-  managedAccountFactoryAddress: twin.contracts.managedAccountFactory,
-  modularAccountModuleContract: twin.contracts.seedProtocolExecutor,
   useModularExecutor: true,
-  thirdweb: {
-    bundlerUrl: 'http://127.0.0.1:4337',
-    sponsorGas: false, // no paymaster: the ManagedAccount pays its own gas
-    modularWalletMode: 'EOA', // no EIP-7702 service: the admin EOA sends plain txs
-  },
 })
 
 // SDK
-client.init({ config: { ...config, eas: { chainId: 31337, indexerUrl: 'http://localhost:4000/graphql' }, filesDir: '.seed-31337' } })
+client.init({ config: { ...config, eas: twin.eas, filesDir: `.seed-${twin.chain.id}` } })
 ```
 
 Fund both the ManagedAccount and the in-app EOA before publishing: `bun run twin:fund <managedAddress> <eoaAddress>` in `seed-protocol`. Each `twin:up` resets the chain, so clear the local Seed DB (`filesDir`) and browser storage too.
+
+Twin quirks the SDK handles: automation pre-flight simulations retry with a balance override when the account can't cover OP's up-front L1 fee, EOA sends retry when the fork's pending-nonce lookup lags a block, and `getArweave()` follows the gateway's protocol and port (e.g. `http://localhost:1984`).
 
 ### useIntegerLocalIds
 
