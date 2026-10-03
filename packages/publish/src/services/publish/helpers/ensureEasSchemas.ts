@@ -7,6 +7,7 @@ import {
   getEasSchemaForItemProperty,
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
+  listRelationEasPropertyName,
 } from '@seedprotocol/sdk'
 import type { IItem } from '@seedprotocol/sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
@@ -296,12 +297,21 @@ async function ensureEasSchemasForItemResolved(
 
     const easDataTypeRaw = easTypeForDataType(property.propertyDef.dataType)
     const prop = property as { storagePropertyName?: string; propertyName: string }
+    // List of Relation: name comes from the definition (authors → authorIdentityIds), matching
+    // getPublishPayload, regardless of the name the ItemProperty was built with.
+    const listRelationName = listRelationEasPropertyName(property.propertyName, property.propertyDef)
     const nameForEas =
-      prop.storagePropertyName && prop.storagePropertyName.length > 0
+      listRelationName ??
+      (prop.storagePropertyName && prop.storagePropertyName.length > 0
         ? prop.storagePropertyName
-        : property.propertyName
+        : property.propertyName)
     const propertyNameSnakeCase = toSnakeCase(nameForEas)
     const schemaDef = `${easDataTypeRaw} ${propertyNameSnakeCase}`
+    if (listRelationName && !propertyNameSnakeCase.endsWith('_ids')) {
+      throw new Error(
+        `Refusing to register "${schemaDef}" for list-relation property ${property.propertyName}: list relations attest as <singular>_<ref>_ids.`,
+      )
+    }
 
     const validEasTypes = [
       'string',
@@ -323,7 +333,8 @@ async function ensureEasSchemasForItemResolved(
       : undefined
 
     const schema = await getEasSchemaForItemProperty({
-      schemaUid: property.schemaUid,
+      // A list relation's cached schemaUid may be for its schema-key name; don't look it up.
+      schemaUid: listRelationName ? undefined : property.schemaUid,
       propertyName: nameForEas,
       easDataType: easDataTypeForLookup,
     })

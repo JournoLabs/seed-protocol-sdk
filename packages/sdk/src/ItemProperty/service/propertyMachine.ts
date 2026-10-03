@@ -16,6 +16,25 @@ import {
 } from '@/ItemProperty/service/actors/saveValueToDb'
 import { analyzeInput } from '@/ItemProperty/service/actors/saveValueToDb/analyzeInput' // import { updateMachineContext } from '@/helpers'
 // import { updateMachineContext } from '@/helpers'
+import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
+import { normalizePropertyRecordSchema } from '@/helpers/property'
+
+/**
+ * A List-of-relation schema can arrive after construction (item loaded before its model).
+ * Move the context to the storage name (staff → staffIdentityIds) so saves and publish use one name;
+ * ItemProperty keeps exposing the schema key.
+ */
+const withListRelationStorageName = <T extends { propertyName?: string; propertyRecordSchema?: any; isRelation?: boolean }>(
+  context: T,
+): T => {
+  if (!context.propertyName || !context.propertyRecordSchema) return context
+  const storageName = listRelationEasPropertyName(
+    context.propertyName,
+    normalizePropertyRecordSchema(context.propertyRecordSchema),
+  )
+  if (!storageName || storageName === context.propertyName) return context
+  return { ...context, propertyName: storageName, isRelation: true }
+}
 
 export const propertyMachine = setup({
   types: {
@@ -72,7 +91,9 @@ export const propertyMachine = setup({
           }
           newContext[key] = (event as any)[key]
         }
-        return newContext
+        return 'propertyRecordSchema' in (event as any)
+          ? withListRelationStorageName(newContext)
+          : newContext
       }),
     },
     destroyStarted: {
@@ -132,7 +153,7 @@ export const propertyMachine = setup({
           target: 'idle',
           actions: assign(({ context, event }) => {
             const property = (event as any).property
-            return {
+            return withListRelationStorageName({
               ...context,
               propertyName: property.propertyName || context.propertyName,
               propertyValue: property.propertyValue !== undefined ? property.propertyValue : context.propertyValue,
@@ -150,7 +171,7 @@ export const propertyMachine = setup({
               refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
               refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
               localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,
-            }
+            })
           }),
         },
         loadOrCreatePropertyError: {

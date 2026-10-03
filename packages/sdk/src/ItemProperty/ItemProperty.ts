@@ -24,7 +24,7 @@ import {
   resolveMetadataRecord,
   resolveStorageNameToSchemaName,
 } from '@/helpers'
-import type { PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
+import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
@@ -212,6 +212,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
   /** Set while the value setter resolves a missing schema before sending `save`; save() awaits it. */
   protected _pendingSchemaSave: Promise<boolean> | undefined
   protected _schemaUid: string | undefined
+  /** Name passed to the constructor; the public name if the machine later moves to a List-of-relation storage name. */
+  protected readonly _constructedPropertyName: string | undefined
 
   constructor(initialValues: Partial<CreatePropertyInstanceProps>) {
     const { modelName, propertyName, propertyValue, seedLocalId, seedUid, versionLocalId, versionUid, storageTransactionId, schemaUid, refResolvedValue, refResolvedDisplayValue, localStorageDir, refSeedType } = initialValues
@@ -225,6 +227,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (!propertyName) {
       throw new Error(`Property name not provided`)
     }
+    this._constructedPropertyName = propertyName
 
     // ItemProperty no longer depends on Model - property schema will be loaded from database
     // via loadOrCreateProperty actor or can be provided in initialValues
@@ -1268,7 +1271,18 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (this._alias) {
       return this._alias
     }
-    return this._getSnapshotContext().propertyName || ''
+    const context = this._getSnapshotContext()
+    const name = context.propertyName || ''
+    // Built under its schema key before the schema was known, then renamed to the storage name
+    // (staff → staffIdentityIds) when a List-of-relation schema arrived: keep the schema key public.
+    if (
+      this._constructedPropertyName &&
+      name !== this._constructedPropertyName &&
+      listRelationEasPropertyName(this._constructedPropertyName, context.propertyRecordSchema) === name
+    ) {
+      return this._constructedPropertyName
+    }
+    return name
   }
 
   /** DB / EAS / metadata column name (e.g. authorIdentityIds). Use for storage; prefer `propertyName` for public API. */
@@ -1453,6 +1467,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       
       if (cacheKey && cacheKey !== 'Item__') {
         cacheKeys.push(cacheKey)
+      }
+      // Renamed after construction (List of relation): also drop the entry cached under the old name.
+      const publicName = this.propertyName
+      if (publicName && publicName !== context.propertyName) {
+        const aliasKey = ItemProperty.cacheKey(context.seedUid || context.seedLocalId || '', publicName)
+        if (aliasKey && aliasKey !== 'Item__' && ItemProperty.instanceCache.get(aliasKey)?.instance === this) {
+          cacheKeys.push(aliasKey)
+        }
       }
       
       unloadEntity(this, {

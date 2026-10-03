@@ -66,6 +66,7 @@ export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
 export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
 export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas'
+export { listRelationEasPropertyName } from './helpers/metadataPropertyNames'
 
 export {
   getModelSchemasFromEas,

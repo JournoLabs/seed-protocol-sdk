@@ -9,6 +9,7 @@ import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
+import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 
 /** Validation error shape for MetadataValidationError */
 type MetadataValidationErrorItem = { field: string; message: string; code?: string }
@@ -48,6 +49,12 @@ export const createMetadata: CreateMetadata = async (
 
   if (!metadataValues.modelType && metadataValues.modelName) {
     metadataValues.modelType = toSnakeCase(metadataValues.modelName)
+  }
+
+  // List of Relation rows live under the storage name (authors → authorIdentityIds), never the schema key.
+  if (metadataValues.propertyName) {
+    const storageName = listRelationEasPropertyName(metadataValues.propertyName, propertyRecordSchema)
+    if (storageName) metadataValues.propertyName = storageName
   }
 
   const isItemStorage = propertyRecordSchema && propertyRecordSchema.storageType === 'ItemStorage'

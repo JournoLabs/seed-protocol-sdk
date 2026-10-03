@@ -36,7 +36,7 @@ describe('parseEasPropertyMetadata', () => {
 describe('parseEasRelationPropertyName', () => {
   it('parses singular relation', () => {
     expect(parseEasRelationPropertyName('cover_image_id')).toEqual({
-      propertyName: 'covers',
+      propertyName: 'cover',
       modelName: 'image',
       isList: false,
     })
@@ -48,6 +48,12 @@ describe('parseEasRelationPropertyName', () => {
       modelName: 'tag',
       isList: true,
     })
+  })
+
+  it('pluralizes list names with pluralize, not by appending s', () => {
+    expect(parseEasRelationPropertyName('staff_identity_ids')?.propertyName).toBe('staff')
+    expect(parseEasRelationPropertyName('admin_identity_ids')?.propertyName).toBe('admins')
+    expect(parseEasRelationPropertyName('author_identity_ids')?.propertyName).toBe('authors')
   })
 
   it('returns null for non-relation shapes', () => {

@@ -7,6 +7,7 @@ const INTERNAL_DATA_TYPES = {
   Html: { eas: 'bytes32' },
   Image: { eas: 'bytes32' },
   File: { eas: 'bytes32' },
+  List: { eas: 'bytes32[]' },
 }
 
 function normalizeDataType(value: string | undefined): string {
@@ -18,6 +19,7 @@ function normalizeDataType(value: string | undefined): string {
     html: 'Html',
     image: 'Image',
     file: 'File',
+    list: 'List',
   }
   return mapped[lower] ?? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
 }
@@ -45,6 +47,12 @@ const harness = {
     propertyName: string
     propertyDef: { dataType: string }
   }>,
+  listProperties: [] as Array<{
+    propertyName: string
+    storagePropertyName?: string
+    schemaUid?: string
+    propertyDef: { dataType: string; ref?: string }
+  }>,
 }
 
 const sendTransaction = mock(async () => ({
@@ -68,7 +76,7 @@ function segmented() {
   return {
     itemBasicProperties: harness.basicProperties,
     itemRelationProperties: [],
-    itemListProperties: [],
+    itemListProperties: harness.listProperties,
     itemImageProperties: harness.imageProperties,
   }
 }
@@ -82,6 +90,12 @@ mock.module('@seedprotocol/sdk', () => ({
   getEasSchemaForItemProperty: async () => null,
   setSchemaUidForSchemaDefinition: () => {},
   setSchemaUidForModel: () => {},
+  // Mirrors the SDK helper for the names used here (staff, authors).
+  listRelationEasPropertyName: (name: string, def?: { dataType?: string; ref?: string }) => {
+    if (normalizeDataType(def?.dataType) !== 'List' || !def?.ref) return undefined
+    if (name.endsWith(`${def.ref}Ids`)) return name
+    return `${name.replace(/s$/, '')}${def.ref}Ids`
+  },
 }))
 
 mock.module('~/helpers/schemaRegistry', () => ({
@@ -136,6 +150,7 @@ describe('ensureEasSchemasForItem', () => {
     harness.automationActive = false
     harness.imageProperties = [{ propertyName: 'html', propertyDef: { dataType: 'html' } }]
     harness.basicProperties = []
+    harness.listProperties = []
     harness.knownUids = new Set([
       ...BASE_SCHEMA_UIDS,
       schemaUid('bytes32 post'),
@@ -213,5 +228,42 @@ describe('ensureEasSchemasForItem', () => {
     const lookedUp = getSchemaRecord.mock.calls.map((call) => String(call[0]).toLowerCase())
     expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[0])
     expect(lookedUp).not.toContain(BASE_SCHEMA_UIDS[1])
+  })
+
+  test('a list relation registers <singular>_<ref>_ids whatever name the property was built with', async () => {
+    harness.automationActive = false
+    harness.imageProperties = []
+    harness.basicProperties = []
+    // Built before the model was registered: schema-key name and a cached uid for `bytes32[] staff`.
+    harness.listProperties = [
+      {
+        propertyName: 'staff',
+        storagePropertyName: 'staff',
+        schemaUid: schemaUid('bytes32[] staff'),
+        propertyDef: { dataType: 'List', ref: 'Identity' },
+      },
+      {
+        propertyName: 'authors',
+        storagePropertyName: 'authorIdentityIds',
+        propertyDef: { dataType: 'List', ref: 'Identity' },
+      },
+    ]
+    harness.knownUids = new Set([
+      ...BASE_SCHEMA_UIDS,
+      schemaUid('bytes32 post'),
+      schemaUid('bytes32 identity'),
+      schemaUid('bytes32[] staff'),
+    ])
+    registerSchema.mockClear()
+
+    await ensureEasSchemasForItem(postItem() as never, wallet())
+
+    const registered = registerSchema.mock.calls.map(
+      (call) => (call[0] as unknown as { schema: string }).schema,
+    )
+    expect(registered).toContain('bytes32[] staff_identity_ids')
+    expect(registered).toContain('bytes32[] author_identity_ids')
+    expect(registered).not.toContain('bytes32[] staff')
+    harness.listProperties = []
   })
 })

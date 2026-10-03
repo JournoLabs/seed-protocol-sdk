@@ -8,6 +8,7 @@ import {
   resolveMetadataRecord,
   resolveStorageNameToSchemaName,
   listRelationStoragePropertyName,
+  listRelationEasPropertyName,
 } from '@/helpers/metadataPropertyNames'
 
 describe('metadataPropertyNames', () => {
@@ -158,6 +159,33 @@ describe('metadataPropertyNames', () => {
       }
       expect(listRelationStoragePropertyName(schemas, 'contributors')).toBe('contributorIdentityIds')
       expect(resolveStorageNameToSchemaName(schemas, 'contributorIdentityIds')).toBe('contributors')
+    })
+  })
+
+  describe('listRelationEasPropertyName', () => {
+    const identityList = { dataType: 'List', ref: 'Identity' }
+
+    it('derives the storage name from the schema key', () => {
+      expect(listRelationEasPropertyName('authors', identityList)).toBe('authorIdentityIds')
+      expect(listRelationEasPropertyName('admins', identityList)).toBe('adminIdentityIds')
+      expect(listRelationEasPropertyName('staff', identityList)).toBe('staffIdentityIds')
+    })
+
+    it('returns a name already in storage form unchanged', () => {
+      expect(listRelationEasPropertyName('staffIdentityIds', identityList)).toBe('staffIdentityIds')
+      expect(listRelationEasPropertyName('authorIdentityIds', identityList)).toBe('authorIdentityIds')
+    })
+
+    it('accepts lowercase dataType and refModelName', () => {
+      expect(listRelationEasPropertyName('staff', { dataType: 'list', refModelName: 'Identity' })).toBe(
+        'staffIdentityIds',
+      )
+    })
+
+    it('returns undefined for anything but a List of Relation', () => {
+      expect(listRelationEasPropertyName('tags', { dataType: 'List' })).toBeUndefined()
+      expect(listRelationEasPropertyName('title', { dataType: 'Text' })).toBeUndefined()
+      expect(listRelationEasPropertyName('staff', undefined)).toBeUndefined()
     })
   })
 

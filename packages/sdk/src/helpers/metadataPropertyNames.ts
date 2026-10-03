@@ -8,6 +8,29 @@ export type PropertySchemaEntry = {
   refModelName?: string
 }
 
+/** Ref model name when propDef is a List of Relation, else undefined. */
+export function listRelationRef(propDef: PropertySchemaEntry | undefined): string | undefined {
+  if (!propDef) return undefined
+  if (normalizeDataType(propDef.dataType) !== 'List') return undefined
+  return propDef.ref || propDef.refModelName || undefined
+}
+
+/**
+ * Storage/EAS name for a List-of-relation property (`authorIdentityIds`), given either its
+ * schema key (`authors`) or its storage name. A name already in storage form is returned as-is,
+ * so this is safe on ItemProperties built before their schema was known.
+ * Returns undefined when propDef is not a List of Relation.
+ */
+export function listRelationEasPropertyName(
+  propertyName: string,
+  propDef: PropertySchemaEntry | undefined,
+): string | undefined {
+  const ref = listRelationRef(propDef)
+  if (!ref || !propertyName) return undefined
+  if (propertyName.endsWith(`${ref}Ids`)) return propertyName
+  return `${pluralize(propertyName, 1)}${ref}Ids`
+}
+
 /**
  * For a schema property key like `authors` (List of Relation to Identity), returns the
  * internal storage/EAS name: `authorIdentityIds` (singular + ref + Ids).
@@ -16,12 +39,7 @@ export function listRelationStoragePropertyName(
   propertySchemas: Record<string, PropertySchemaEntry>,
   schemaPropertyKey: string,
 ): string | undefined {
-  const propDef = propertySchemas[schemaPropertyKey]
-  if (!propDef) return undefined
-  if (normalizeDataType(propDef.dataType) !== 'List') return undefined
-  const ref = propDef.ref || propDef.refModelName
-  if (!ref) return undefined
-  return `${pluralize(schemaPropertyKey, 1)}${ref}Ids`
+  return listRelationEasPropertyName(schemaPropertyKey, propertySchemas[schemaPropertyKey])
 }
 
 /**

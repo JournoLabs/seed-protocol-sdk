@@ -15,6 +15,12 @@ import type { Item as ItemClass } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq, and } from 'drizzle-orm'
 import { models as modelsTable, modelUids, metadata, seeds } from '@/seedSchema'
+import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
+import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+import { normalizeDataType } from '@/helpers/property'
+import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
+import { toSnakeCase } from 'drizzle-orm/casing'
+import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@/stores/eas'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
 const SCHEMA_NAME_OPTIONAL_AUTHOR = 'Test Schema getPublishPayload Optional Author'
@@ -130,7 +136,7 @@ function testModelPlaceholderUid(index: number): string {
   return '0x' + (index + 1).toString(16).padStart(64, '0')
 }
 
-async function ensureModelUidsForGetPublishPayloadTest(modelNames: string[] = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html']): Promise<void> {
+export async function ensureModelUidsForGetPublishPayloadTest(modelNames: string[] = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html']): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) return
   for (let i = 0; i < modelNames.length; i++) {
@@ -141,6 +147,31 @@ async function ensureModelUidsForGetPublishPayloadTest(modelNames: string[] = ['
     const existing = await db.select().from(modelUids).where(eq(modelUids.modelId, modelId)).limit(1)
     if (existing.length > 0) continue
     await db.insert(modelUids).values({ modelId, uid: testModelPlaceholderUid(i) })
+  }
+}
+
+/**
+ * Cache a schema UID for every property schema definition of the test models that EAS doesn't have.
+ * getPublishPayload fails a property whose schema isn't registered (the publish package registers
+ * them in ensureEasSchemasForItem, which these tests don't run). Covers both name forms a property
+ * can attest under (schema key, Id-suffixed, List-of-relation storage name).
+ */
+export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: SchemaFileFormat): Promise<void> {
+  const zeroAddress = '0x0000000000000000000000000000000000000000' as `0x${string}`
+  for (const model of Object.values(schema.models ?? {})) {
+    for (const [key, def] of Object.entries((model as { properties?: Record<string, any> }).properties ?? {})) {
+      const dataType = normalizeDataType(def.type ?? def.dataType)
+      const eas = (INTERNAL_DATA_TYPES as Record<string, { eas?: string }>)[dataType]?.eas
+      if (!eas) continue
+      const names = new Set([key, `${key}Id`])
+      const listName = listRelationEasPropertyName(key, { dataType, ref: def.ref ?? def.model })
+      if (listName) names.add(listName)
+      for (const name of names) {
+        const text = `${eas} ${toSnakeCase(name)}`
+        if (await getEasSchemaUidForSchemaDefinition({ schemaText: text })) continue
+        setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
+      }
+    }
   }
 }
 
@@ -229,6 +260,7 @@ export async function createGetPublishPayloadTestSchema(): Promise<GetPublishPay
   const schema = getGetPublishPayloadTestSchema()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest()
+  await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const authorModel = Model.create('Author', SCHEMA_NAME, { waitForReady: false })
   const tagModel = Model.create('Tag', SCHEMA_NAME, { waitForReady: false })
   const postModel = Model.create('Post', SCHEMA_NAME, { waitForReady: false })
@@ -251,6 +283,7 @@ export async function createGetPublishPayloadTestSchemaOptionalAuthor(): Promise
   const schema = getGetPublishPayloadTestSchemaOptionalAuthor()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest()
+  await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const authorModel = Model.create('Author', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
   const tagModel = Model.create('Tag', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
   const postModel = Model.create('Post', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
@@ -274,6 +307,7 @@ export async function createGetPublishPayloadTestSchemaWithEnum(): Promise<{
   const schema = getGetPublishPayloadTestSchemaWithEnum()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest(['Article'])
+  await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const articleModel = Model.create('Article', SCHEMA_NAME_ENUM_VALIDATION, { waitForReady: false })
   await waitForModelIdle(articleModel)
   return {

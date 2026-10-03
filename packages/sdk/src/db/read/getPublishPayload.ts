@@ -13,10 +13,8 @@ import {
   SchemaEncoder,
 } from '@ethereum-attestation-service/eas-sdk'
 
-import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { toSnakeCase } from '@/helpers'
 import { toSnakeCase as toSnakeCaseDb } from 'drizzle-orm/casing'
-import pluralize from 'pluralize'
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
@@ -31,6 +29,7 @@ import {
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { getPropertySchema } from '@/helpers/property'
+import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
 import { camelCase, upperFirst } from 'lodash-es'
@@ -70,6 +69,8 @@ function addValidationError(
   field?: string,
   code = 'publish_validation',
 ): void {
+  // A property can be validated on more than one path (List of Relation: list + basic); report once.
+  if (ctx.errors.some((e) => e.message === message && e.field === (field ?? ''))) return
   ctx.errors.push({ field: field ?? '', message, code })
 }
 
@@ -188,7 +189,7 @@ async function resolveVersionUid(
 }
 
 type PropertyDataResult = {
-  schemaUid: string | undefined
+  schemaUid: string
   easDataType: string
   schemaDef: string
   propertyNameForSchema: string
@@ -215,43 +216,36 @@ const getPropertyData = async (
     return null
   }
 
-  let schemaUid: string | undefined = itemProperty.schemaUid
-
   const ip = itemProperty as IItemProperty<any> & { storagePropertyName?: string }
-  const propertyDefForName = itemProperty.propertyDef as
-    | { dataType?: string; ref?: string; refModelName?: string }
-    | undefined
-  let nameForEas =
-    ip.storagePropertyName && ip.storagePropertyName.length > 0
+  // List of Relation: the EAS name always comes from the property definition (authors → authorIdentityIds),
+  // never from whatever name the ItemProperty was constructed with or a cached schemaUid.
+  const listRelationName = listRelationEasPropertyName(
+    itemProperty.propertyName,
+    itemProperty.propertyDef as PropertySchemaEntry | undefined,
+  )
+  const nameForEas =
+    listRelationName ??
+    (ip.storagePropertyName && ip.storagePropertyName.length > 0
       ? ip.storagePropertyName
-      : itemProperty.propertyName
-  // Align List-of-relation EAS field name with processListProperty (authorIdentityIds for authors → Identity)
-  if (
-    matchesDataType(propertyDefForName?.dataType, ModelPropertyDataTypes.List) &&
-    (propertyDefForName?.ref || propertyDefForName?.refModelName) &&
-    !(ip.storagePropertyName && ip.storagePropertyName.length > 0)
-  ) {
-    const ref = propertyDefForName?.ref ?? propertyDefForName?.refModelName
-    if (ref) {
-      const singular = pluralize.singular(itemProperty.propertyName)
-      nameForEas = `${singular}${ref}Ids`
-    }
-  }
+      : itemProperty.propertyName)
   const propertyNameForSchema = toSnakeCase(nameForEas)
 
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
+  let schemaUid: string | undefined = listRelationName ? undefined : itemProperty.schemaUid
   if (!schemaUid) {
     schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: schemaDef })
-    if (!schemaUid) {
-      const schema = await getEasSchemaForItemProperty({
-        propertyName: 'version',
-        easDataType: 'bytes32',
-      })
-      if (schema) {
-        schemaUid = schema.id
-      }
+  }
+  if (!schemaUid) {
+    if (ctx) {
+      addValidationError(
+        ctx,
+        `EAS schema not found for "${schemaDef}" (property: ${itemProperty.propertyName}). Register it before publishing (ensureEasSchemasForItem).`,
+        itemProperty.propertyName,
+        'publish_schema_not_found',
+      )
     }
+    return null
   }
 
   return {
@@ -1090,20 +1084,6 @@ const processListProperty = async (
     )
     return multiPublishPayload
   }
-  let listPropertySchemaUid = listProperty.schemaUid
-  if (!listPropertySchemaUid && listProperty.propertyDef) {
-    const propertyData = await getPropertyData(listProperty, ctx)
-    if (!propertyData) return multiPublishPayload
-    listPropertySchemaUid = propertyData.schemaUid
-  }
-  if (!listPropertySchemaUid) {
-    addValidationError(
-      ctx,
-      `Schema uid not found for list property: ${listProperty.propertyName}`,
-      listProperty.propertyName,
-    )
-    return multiPublishPayload
-  }
 
   const snapshot = listProperty.getService().getSnapshot()
   const context = 'context' in snapshot ? snapshot.context : null
@@ -1118,8 +1098,12 @@ const processListProperty = async (
     return multiPublishPayload
   }
 
-  const singularPropertyName = pluralize.singular(listProperty.propertyName)
-  const propertyNameForSchema = `${singularPropertyName}${listProperty.propertyDef!.ref}Ids`
+  // Always resolve from the property definition; a cached schemaUid may point at a schema
+  // registered under the schema key (bytes32[] authors) instead of authorIdentityIds.
+  const propertyData = await getPropertyData(listProperty, ctx)
+  if (!propertyData) return multiPublishPayload
+  const listPropertySchemaUid = propertyData.schemaUid
+
   if (typeof value === 'string') {
     value = parseListPropertyValueFromStorage(value)
   }
