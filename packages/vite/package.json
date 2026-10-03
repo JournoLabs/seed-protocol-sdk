@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "Vite plugin for Seed Protocol browser/renderer apps",
   "type": "module",
   "main": "./dist/index.js",
