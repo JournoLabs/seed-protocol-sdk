@@ -17,12 +17,18 @@ const listOfAttestationsComponents = [
   },
 ] as const
 
-/** multiPublish with string localIds (selector 0x31e19cb8). */
+/**
+ * `SeedProtocolExtension.multiPublish` (selector 0x2a29fadc): `ISeedProtocol.PublishRequestData`,
+ * where `propertiesToUpdate` names its target by `publishIndex`, the target's position in
+ * `requests`. The bytes32 fields are ordered seedUid, seedSchemaUid, versionUid, versionSchemaUid,
+ * unlike the executor module's struct (see `executorModuleAbi`). Both have the same selector, so
+ * the selector alone can't tell them apart.
+ */
 export const multiPublishAbi = [
   {
     type: 'function',
     name: 'multiPublish',
-    stateMutability: 'nonpayable',
+    stateMutability: 'payable',
     inputs: [
       {
         name: 'requests',
@@ -43,44 +49,7 @@ export const multiPublishAbi = [
             name: 'propertiesToUpdate',
             type: 'tuple[]',
             components: [
-              { name: 'publishLocalId', type: 'string' },
-              { name: 'propertySchemaUid', type: 'bytes32' },
-            ],
-          },
-        ],
-      },
-    ],
-    outputs: [{ type: 'bytes32[]' }],
-  },
-] as const
-
-/** multiPublish with uint256 localId indices (selector 0xd688e801). */
-export const multiPublishIntegerAbi = [
-  {
-    type: 'function',
-    name: 'multiPublish',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {
-        name: 'requests',
-        type: 'tuple[]',
-        components: [
-          { name: 'localIdIndex', type: 'uint256' },
-          { name: 'seedUid', type: 'bytes32' },
-          { name: 'seedSchemaUid', type: 'bytes32' },
-          { name: 'versionUid', type: 'bytes32' },
-          { name: 'versionSchemaUid', type: 'bytes32' },
-          { name: 'seedIsRevocable', type: 'bool' },
-          {
-            name: 'listOfAttestations',
-            type: 'tuple[]',
-            components: listOfAttestationsComponents,
-          },
-          {
-            name: 'propertiesToUpdate',
-            type: 'tuple[]',
-            components: [
-              { name: 'publishLocalIdIndex', type: 'uint256' },
+              { name: 'publishIndex', type: 'uint256' },
               { name: 'propertySchemaUid', type: 'bytes32' },
             ],
           },

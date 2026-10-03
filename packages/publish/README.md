@@ -157,24 +157,6 @@ Fund both the ManagedAccount and the in-app EOA before publishing: `bun run twin
 
 Twin quirks the SDK handles: automation pre-flight simulations retry with a balance override when the account can't cover OP's up-front L1 fee, EOA sends retry when the fork's pending-nonce lookup lags a block, and `getArweave()` follows the gateway's protocol and port (e.g. `http://localhost:1984`).
 
-### useIntegerLocalIds
-
-When using the new contract that expects `uint256` localIdIndex/publishLocalIdIndex instead of string localId/publishLocalId (gas-efficient), set `useIntegerLocalIds: true`:
-
-```tsx
-<PublishProvider
-  config={{
-    thirdwebClientId: '...',
-    uploadApiBaseUrl: '...',
-    useIntegerLocalIds: true,  // Use integer-based payload for new contract
-  }}
->
-  <App />
-</PublishProvider>
-```
-
-To revert to the old contract (string-based), set `useIntegerLocalIds: false` or omit the flag. No code changes required beyond config.
-
 ### Experimental: Arweave bundler (instant uploads)
 
 When using your own gateway with an Arweave bundler, you can enable instant uploads instead of the default reimbursement + chunk upload flow. **This is experimental and not yet validated for production.**

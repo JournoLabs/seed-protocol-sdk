@@ -83,7 +83,6 @@ export {
 } from './helpers/chainClient'
 export {
   encodeMultiPublish,
-  encodeMultiPublishInteger,
   encodeSetEas,
   encodeEasAttest,
   encodeEasMultiAttest,
@@ -151,11 +150,6 @@ export {
   resolvePublishDisplayValue,
   type PublishRowForDisplay,
 } from './helpers/publishDisplayHelpers'
-export {
-  transformPayloadToIntegerIds,
-  type RequestWithStringIds,
-  type RequestWithIntegerIds,
-} from './helpers/transformPayloadToIntegerIds'
 export {
   ensureWalletThenPublish,
   type EnsureWalletThenPublishResult,

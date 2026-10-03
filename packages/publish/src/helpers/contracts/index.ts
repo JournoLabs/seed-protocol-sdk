@@ -5,7 +5,6 @@ import {
 } from 'viem'
 import {
   multiPublishAbi,
-  multiPublishIntegerAbi,
   publisherReadWriteAbi,
 } from '../abi/publisher'
 import { managedAccountFactoryAbi } from '../abi/factory'
@@ -41,47 +40,60 @@ export type MultiPublishRequest = {
   }>
 }
 
-export type MultiPublishIntegerRequest = {
-  localIdIndex: bigint
-  seedUid: `0x${string}`
-  seedSchemaUid: `0x${string}`
-  versionUid: `0x${string}`
-  versionSchemaUid: `0x${string}`
-  seedIsRevocable: boolean
-  listOfAttestations: MultiPublishRequest['listOfAttestations']
-  propertiesToUpdate: Array<{
-    publishLocalIdIndex: bigint
-    propertySchemaUid: `0x${string}`
-  }>
+/**
+ * Resolves a request's `propertiesToUpdate` to `publishIndex`es: the position in `requests` of the
+ * request whose `localId` each one names. Throws rather than guess, since the contract can't tell
+ * when an index lands on the wrong request: on a duplicate `localId`, or a `publishLocalId` that is
+ * missing, empty or not in `requests`.
+ */
+function publishIndexResolver(requests: MultiPublishRequest[]) {
+  const indexByLocalId = new Map<string, bigint>()
+  requests.forEach((r, i) => {
+    if (!r.localId) return
+    if (indexByLocalId.has(r.localId)) {
+      throw new Error(`multiPublish: duplicate localId "${r.localId}" in the batch`)
+    }
+    indexByLocalId.set(r.localId, BigInt(i))
+  })
+  return (r: MultiPublishRequest) =>
+    (r.propertiesToUpdate ?? []).map((pu) => {
+      if (!pu.publishLocalId) {
+        throw new Error(`multiPublish: request "${r.localId}" has a cross-reference with no publishLocalId`)
+      }
+      const publishIndex = indexByLocalId.get(pu.publishLocalId)
+      if (publishIndex === undefined) {
+        throw new Error(
+          `multiPublish: request "${r.localId}" cross-references localId "${pu.publishLocalId}", which isn't in the batch`,
+        )
+      }
+      return { publishIndex, propertySchemaUid: pu.propertySchemaUid }
+    })
 }
 
+/** Encode `multiPublish` for the account's SeedProtocolExtension, mapping each `publishLocalId` to its index in `requests`. */
 export function encodeMultiPublish(
   to: Address,
   requests: MultiPublishRequest[],
   gas?: bigint,
 ): SeedTxRequest {
+  const publishIndexes = publishIndexResolver(requests)
   return {
     to,
     data: encodeFunctionData({
       abi: multiPublishAbi,
       functionName: 'multiPublish',
-      args: [requests],
-    }),
-    gas,
-  }
-}
-
-export function encodeMultiPublishInteger(
-  to: Address,
-  requests: MultiPublishIntegerRequest[],
-  gas?: bigint,
-): SeedTxRequest {
-  return {
-    to,
-    data: encodeFunctionData({
-      abi: multiPublishIntegerAbi,
-      functionName: 'multiPublish',
-      args: [requests],
+      args: [
+        requests.map((r) => ({
+          localId: r.localId,
+          seedUid: r.seedUid,
+          seedSchemaUid: r.seedSchemaUid,
+          versionUid: r.versionUid,
+          versionSchemaUid: r.versionSchemaUid,
+          seedIsRevocable: r.seedIsRevocable,
+          listOfAttestations: r.listOfAttestations,
+          propertiesToUpdate: publishIndexes(r),
+        })),
+      ],
     }),
     gas,
   }
@@ -89,40 +101,31 @@ export function encodeMultiPublishInteger(
 
 /**
  * Encode `multiPublish` for the SeedProtocolExecutor module. Takes the same request shape as
- * {@link encodeMultiPublish} and maps each `publishLocalId` to its index in `requests`.
- * Entries whose `publishLocalId` is not in `requests` are dropped, matching the extension,
- * whose string comparison finds no request for them.
+ * {@link encodeMultiPublish} and resolves references the same way; only the struct differs.
  */
 export function encodeExecutorMultiPublish(
   to: Address,
   requests: MultiPublishRequest[],
   gas?: bigint,
 ): SeedTxRequest {
-  const indexByLocalId = new Map<string, bigint>()
-  requests.forEach((r, i) => {
-    if (r.localId) indexByLocalId.set(r.localId, BigInt(i))
-  })
-  const executorRequests = requests.map((r) => ({
-    localId: r.localId,
-    seedUid: r.seedUid,
-    versionUid: r.versionUid,
-    seedSchemaUid: r.seedSchemaUid,
-    versionSchemaUid: r.versionSchemaUid,
-    seedIsRevocable: r.seedIsRevocable,
-    listOfAttestations: r.listOfAttestations,
-    propertiesToUpdate: (r.propertiesToUpdate ?? []).flatMap((pu) => {
-      const publishIndex = pu.publishLocalId ? indexByLocalId.get(pu.publishLocalId) : undefined
-      return publishIndex === undefined
-        ? []
-        : [{ publishIndex, propertySchemaUid: pu.propertySchemaUid }]
-    }),
-  }))
+  const publishIndexes = publishIndexResolver(requests)
   return {
     to,
     data: encodeFunctionData({
       abi: executorModuleAbi,
       functionName: 'multiPublish',
-      args: [executorRequests],
+      args: [
+        requests.map((r) => ({
+          localId: r.localId,
+          seedUid: r.seedUid,
+          versionUid: r.versionUid,
+          seedSchemaUid: r.seedSchemaUid,
+          versionSchemaUid: r.versionSchemaUid,
+          seedIsRevocable: r.seedIsRevocable,
+          listOfAttestations: r.listOfAttestations,
+          propertiesToUpdate: publishIndexes(r),
+        })),
+      ],
     }),
     gas,
   }

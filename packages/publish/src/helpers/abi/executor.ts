@@ -39,10 +39,9 @@ const attestationDataComponents = [
 
 /**
  * SeedProtocolExecutor (ERC-7579 executor module) calls and errors.
- * `multiPublish` takes `PublishRequestData` (selector 0x2a29fadc), which differs from the
- * ManagedAccount extension's `PublishRequestDataLegacy`: bytes32 fields are ordered
- * seedUid, versionUid, seedSchemaUid, versionSchemaUid, and propertiesToUpdate uses a
- * uint256 `publishIndex` instead of a string `publishLocalId`.
+ * `multiPublish` takes the executor's own `PublishRequestData` (selector 0x2a29fadc). It has the
+ * same types as the ManagedAccount extension's struct (`multiPublishAbi`), but its bytes32 fields
+ * are ordered seedUid, versionUid, seedSchemaUid, versionSchemaUid.
  */
 export const executorModuleAbi = [
   {

@@ -148,12 +148,6 @@ export interface PublishConfig {
    */
   arweaveGraphqlUrl?: string
   /**
-   * Use integer indices instead of string localId/publishLocalId for multiPublish (gas-efficient).
-   * Set to true when using the new contract that expects uint256 localIdIndex/publishLocalIdIndex.
-   * Default: false (uses string-based payload for backward compatibility).
-   */
-  useIntegerLocalIds?: boolean
-  /**
    * Bypass the SeedProtocol contract and call EAS attest/multiAttest directly from the user's wallet.
    * Default: false (uses contract multiPublish).
    */
@@ -347,7 +341,6 @@ export interface ResolvedPublishConfig extends PublishConfig {
   schemaRegistryAddress: string
   /** EAS deployment for the publish chain (addresses, indexer and explorer URLs). */
   easChain: EasChainDeployment
-  useIntegerLocalIds: boolean
   useDirectEas: boolean
   modularAccountModuleData: string
   useModularExecutor: boolean
@@ -414,7 +407,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     easContractAddress: easChain.easContractAddress,
     schemaRegistryAddress: easChain.schemaRegistryAddress,
     easChain,
-    useIntegerLocalIds: config.useIntegerLocalIds ?? false,
     useDirectEas: config.useDirectEas ?? false,
     modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor,
