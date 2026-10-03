@@ -1,8 +1,0 @@
-import { GraphQLClient } from 'graphql-request';
-import type { Attestation } from '@seedprotocol/eas';
-export declare abstract class BaseEasClient {
-    private static _impl;
-    static configure(impl: import('@seedprotocol/eas').IEasClient): void;
-    static getEasClient(): GraphQLClient;
-    static getSeedsBySchemaName(schemaName: string): Promise<Attestation[]>;
-}

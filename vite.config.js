@@ -190,7 +190,9 @@ export default defineConfig({
             'packages/sdk/__tests__/**/*.test.ts',
             'packages/feed/__tests__/**/*.test.ts',
             'packages/mapping/__tests__/**/*.test.ts',
-            'packages/publish/src/**/*.test.ts',
+            // Other publish tests use bun:test and run via `bun run --filter @seedprotocol/publish test`.
+            'packages/publish/src/services/publish/actors/createArweaveDataItemsPhase2.test.ts',
+            'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',
             'packages/react/__tests__/**/*.node.test.tsx',
           ],
           exclude: [

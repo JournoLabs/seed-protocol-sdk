@@ -39,7 +39,8 @@ describe('resolveSeedGatewayEndpoints', () => {
     expect(resolved.arweaveHost).toBe(DEFAULT_ARWEAVE_HOST)
   })
 
-  describe('hybrid with mock sidecar', () => {
+  // The mock sidecar is a node:http server, which the browser project cannot start.
+  describe.skipIf(typeof window !== 'undefined')('hybrid with mock sidecar', () => {
     let server: http.Server
     let port = 0
 

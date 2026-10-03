@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { normalizeSeedConfigEndpoints } from '@/client/nodeEndpointDefaults'
 import type { SeedConfig } from '@/types'
 
-describe('normalizeSeedConfigEndpoints', () => {
+// Node-only defaults: in the browser normalizeSeedConfigEndpoints leaves endpoints to the caller.
+describe.skipIf(typeof window !== 'undefined')('normalizeSeedConfigEndpoints', () => {
   it('defaults Node endpoints from filesDir so client.init can omit them', () => {
     const config = { filesDir: '.seed' } as SeedConfig
     const normalized = normalizeSeedConfigEndpoints(config)

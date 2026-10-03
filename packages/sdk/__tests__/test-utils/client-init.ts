@@ -534,6 +534,23 @@ export async function setupTestEnvironment(options: {
 // Store test project path for cleanup
 let testProjectPathForCleanup: string | undefined
 
+const tempDirsToRemoveOnExit = new Set<string>()
+
+function scheduleTempDirCleanup(dir: string, fs: typeof import('fs')): void {
+  if (tempDirsToRemoveOnExit.size === 0) {
+    process.once('exit', () => {
+      for (const d of tempDirsToRemoveOnExit) {
+        try {
+          fs.rmSync(d, { recursive: true, force: true })
+        } catch {
+          // best effort; the OS temp dir is cleaned eventually
+        }
+      }
+    })
+  }
+  tempDirsToRemoveOnExit.add(dir)
+}
+
 /**
  * Restore the original working directory and clean up temporary test directories
  * Call this in afterAll hook
@@ -558,15 +575,10 @@ export async function teardownTestEnvironment(): Promise<void> {
       // Only clean up if it's in the temp directory (safety check)
       const tmpDir = os.tmpdir()
       if (testProjectPathForCleanup.startsWith(tmpDir)) {
-        try {
-          // Remove the entire test directory
-          if (fs.existsSync(testProjectPathForCleanup)) {
-            fs.rmSync(testProjectPathForCleanup, { recursive: true, force: true })
-            console.log(`[teardownTestEnvironment] Cleaned up temporary directory: ${testProjectPathForCleanup}`)
-          }
-        } catch (error) {
-          console.warn(`[teardownTestEnvironment] Failed to clean up directory ${testProjectPathForCleanup}:`, error)
-        }
+        // Defer deletion to process exit. Node tests run with isolate: false, so the client
+        // initialized here (and its SQLite file in this directory) is reused by later test files;
+        // deleting it now makes their writes fail with SQLITE_READONLY_DBMOVED.
+        scheduleTempDirCleanup(testProjectPathForCleanup, fs)
       }
       testProjectPathForCleanup = undefined
     }

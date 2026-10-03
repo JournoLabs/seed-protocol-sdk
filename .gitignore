@@ -158,3 +158,6 @@ packages/mapping/dist
 docs/private/
 *.handoff.md
 
+
+# Vitest browser-mode failure screenshots
+.vitest-attachments/

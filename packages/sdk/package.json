@@ -32,7 +32,8 @@
     "src/node/easLodashHook.js"
   ],
   "scripts": {
-    "build": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
+    "build": "bun run build:dev",
+    "build:types": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
     "build:watch": "tsc -w -p tsconfig.json",
     "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js\"",
     "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js\"",
