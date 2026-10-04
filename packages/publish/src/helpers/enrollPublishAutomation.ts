@@ -3,7 +3,7 @@ import type { PublishWallet } from './seedSigner'
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
-import { ensureExecutorModuleInstalled } from './ensureExecutorModule'
+import { ensureExecutorModuleInstalled, type EnsureExecutorModuleResult } from './ensureExecutorModule'
 import { assertExecutorModuleReadyForAccount } from './executorModuleReadiness'
 import {
   ensureAutomationSessionKey,
@@ -76,8 +76,9 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
   }
 
   const twAccount = await connectManagedAccount(managedAddress)
+  let install: EnsureExecutorModuleResult
   try {
-    await ensureExecutorModuleInstalled(managedAddress, twAccount, config)
+    install = await ensureExecutorModuleInstalled(managedAddress, twAccount, config)
   } catch (cause) {
     if (cause instanceof ManagedAccountPublishError) throw cause
     throw new ManagedAccountPublishError(
@@ -89,14 +90,20 @@ async function assertExecutorModuleInstalled(managedAddress: string): Promise<vo
   }
 
   // The session key may only call the module, so refuse to enroll unless the module can act
-  // for this account. Otherwise every automation publish would revert.
-  await assertExecutorModuleReadyForAccount(managedAddress)
+  // for this account. Otherwise every automation publish would revert. A fresh install is
+  // confirmed from its receipt; otherwise the read may still trail an install that just landed.
+  await assertExecutorModuleReadyForAccount(
+    managedAddress,
+    install.status === 'installed'
+      ? { installedEas: install.eas }
+      : { readAttempts: install.status === 'already-installed' ? 5 : 1 },
+  )
 }
 
 /**
  * Enroll an app automation key: install the Seed executor (`installSeedExecutor` on Router
- * accounts with the executor router extension, `installModule` on ModularCore), add an
- * executor-only session key, then attest the PublishAuthorization sidecar (ManagedAccount attester).
+ * accounts with the executor router extension), add an executor-only session key, then attest
+ * the PublishAuthorization sidecar (ManagedAccount attester).
  *
  * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding the session
  * key when the executor cannot act for the account (e.g. Router accounts without the extension)

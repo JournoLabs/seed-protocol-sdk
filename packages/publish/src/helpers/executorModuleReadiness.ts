@@ -1,7 +1,7 @@
 import { BaseError, parseEther, zeroAddress, type Address } from 'viem'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError, type ManagedAccountPublishErrorCode } from '../errors'
-import { getPublishPublicClient } from './chainClient'
+import { getPublishPublicClient, readUntil } from './chainClient'
 import {
   readExecutorModuleEas,
   readExecutorModuleIsInitialized,
@@ -36,6 +36,20 @@ async function lacksExecutorRouterExtension(managedAddress: Address): Promise<bo
   return (await readSeedExecutorRouter(managedAddress)) === null
 }
 
+export type ExecutorModuleReadinessOptions = {
+  /**
+   * The EAS the executor was just initialized with for the account, confirmed from the install
+   * receipt (`ensureExecutorModuleInstalled`). When set, the module state is not re-read: right
+   * after the install, a lagging RPC node can still report it uninitialized.
+   */
+  installedEas?: Address
+  /**
+   * Times to read `isInitialized` before reporting the module uninitialized, 2s apart. Default 1.
+   * Use more right after an install that a lagging RPC node may not have seen yet.
+   */
+  readAttempts?: number
+}
+
 /**
  * Checks that the executor module can act for `managedAddress`: the module is initialized for
  * the account and points at the configured EAS. Checks what the module reports rather than the
@@ -43,22 +57,34 @@ async function lacksExecutorRouterExtension(managedAddress: Address): Promise<bo
  *
  * @throws ManagedAccountPublishError `AUTOMATION_UNSUPPORTED_ACCOUNT` when it cannot
  */
-export async function assertExecutorModuleReadyForAccount(managedAddress: string): Promise<void> {
+export async function assertExecutorModuleReadyForAccount(
+  managedAddress: string,
+  options: ExecutorModuleReadinessOptions = {},
+): Promise<void> {
   const module = requireModuleAddress()
   const account = managedAddress as Address
 
   let initialized: boolean
   let moduleEas: Address
-  try {
-    initialized = await readExecutorModuleIsInitialized(module, account)
-    moduleEas = initialized ? await readExecutorModuleEas(module, account) : zeroAddress
-  } catch (cause) {
-    throw new ManagedAccountPublishError(
-      MSG_READ_FAILED,
-      'AUTOMATION_UNSUPPORTED_ACCOUNT',
-      managedAddress,
-      cause,
-    )
+  if (options.installedEas) {
+    initialized = true
+    moduleEas = options.installedEas
+  } else {
+    try {
+      initialized = await readUntil(
+        () => readExecutorModuleIsInitialized(module, account),
+        Boolean,
+        { attempts: options.readAttempts ?? 1 },
+      )
+      moduleEas = initialized ? await readExecutorModuleEas(module, account) : zeroAddress
+    } catch (cause) {
+      throw new ManagedAccountPublishError(
+        MSG_READ_FAILED,
+        'AUTOMATION_UNSUPPORTED_ACCOUNT',
+        managedAddress,
+        cause,
+      )
+    }
   }
 
   if (!initialized) {

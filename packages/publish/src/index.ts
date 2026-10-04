@@ -36,6 +36,7 @@ export {
   isEip7702ModularAccountPublishError,
   isRouterNonModularCoreAccountError,
   ManagedAccountPublishError,
+  PublishTransactionRevertedError,
   Eip7702ModularAccountPublishError,
   type ManagedAccountPublishErrorCode,
   type Eip7702ModularAccountPublishErrorCode,
@@ -89,6 +90,7 @@ export {
   encodeEasMultiRevoke,
   readGetEas,
   readIsActiveSigner,
+  readFactorySeedExecutor,
 } from './helpers/contracts'
 
 export {
@@ -155,7 +157,11 @@ export {
   type EnsureWalletThenPublishResult,
 } from './helpers/ensureWalletThenPublish'
 export { ensureManagedAccountEasConfigured, assertManagedAccountEasMatchesConfig } from './helpers/ensureManagedAccountEasConfigured'
-export { assertExecutorModuleReadyForAccount, simulateCallFromAccount } from './helpers/executorModuleReadiness'
+export {
+  assertExecutorModuleReadyForAccount,
+  simulateCallFromAccount,
+  type ExecutorModuleReadinessOptions,
+} from './helpers/executorModuleReadiness'
 export {
   DOMAIN_OWNERSHIP_SCHEMA_DEF,
   DOMAIN_OWNERSHIP_SCHEMA_NAME,

@@ -36,7 +36,10 @@ export {
   ensureSmartWalletThenPublish,
   type EnsureSmartWalletResult,
 } from './helpers/ensureSmartWalletThenPublish'
-export { ensureExecutorModuleInstalled } from './helpers/ensureExecutorModule'
+export {
+  ensureExecutorModuleInstalled,
+  type EnsureExecutorModuleResult,
+} from './helpers/ensureExecutorModule'
 export {
   ensureManagedAccountReady,
   tryDeployManagedAccount,

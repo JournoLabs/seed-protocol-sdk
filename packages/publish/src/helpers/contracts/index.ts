@@ -1,5 +1,8 @@
 import {
   encodeFunctionData,
+  getAbiItem,
+  toFunctionSelector,
+  zeroAddress,
   type Address,
   type Hex,
 } from 'viem'
@@ -155,6 +158,31 @@ export async function readSeedExecutorRouter(
   } catch {
     return null
   }
+}
+
+/**
+ * The executor and EAS that accounts from `factory` get from their `SeedExecutorRouterExtension`,
+ * or `null` when the factory routes no such extension. For checking `modularAccountModuleContract`
+ * at startup instead of at the first publish. `factory` defaults to the configured factory.
+ */
+export async function readFactorySeedExecutor(
+  factory: Address = requireManagedAccountFactoryAddress() as Address,
+): Promise<{ executor: Address; eas: Address } | null> {
+  const client = getPublishPublicClient()
+  const extension = await client.readContract({
+    address: factory,
+    abi: managedAccountFactoryAbi,
+    functionName: 'getImplementationForFunction',
+    args: [toFunctionSelector(getAbiItem({ abi: seedExecutorRouterAbi, name: 'getSeedExecutor' }))],
+  })
+  if (extension === zeroAddress) return null
+  // The extension keeps both as immutables, so the implementation reports what accounts see.
+  const [executor, eas] = await client.readContract({
+    address: extension,
+    abi: seedExecutorRouterAbi,
+    functionName: 'getSeedExecutor',
+  })
+  return { executor, eas }
 }
 
 /** Whether the router extension reports `executor` installed on `account`. */

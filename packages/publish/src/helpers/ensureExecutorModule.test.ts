@@ -1,10 +1,25 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
-import { decodeFunctionData } from 'viem'
+import { decodeFunctionData, encodeErrorResult, encodeEventTopics, RawContractError, type Log } from 'viem'
+import { executorModuleAbi } from './abi/executor'
 import { seedExecutorRouterAbi } from './abi/seedExecutorRouter'
 
 const ACCOUNT = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const EXECUTOR = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const ADMIN = '0xadadadadadadadadadadadadadadadadadadadad'
+const EAS = '0x4200000000000000000000000000000000000021'
+
+const installedLog = (account = ACCOUNT) =>
+  ({
+    address: account,
+    topics: encodeEventTopics({ abi: seedExecutorRouterAbi, eventName: 'SeedExecutorInstalled', args: { executor: EXECUTOR } }),
+    data: '0x',
+  }) as unknown as Log
+const initializedLog = (account = ACCOUNT) =>
+  ({
+    address: EXECUTOR,
+    topics: encodeEventTopics({ abi: executorModuleAbi, eventName: 'ModuleInitialized', args: { account, eas: EAS } }),
+    data: '0x',
+  }) as unknown as Log
 
 const state = {
   router: { executor: EXECUTOR, eas: '0x4200000000000000000000000000000000000021' } as
@@ -12,7 +27,9 @@ const state = {
     | null,
   installed: false,
   sent: [] as Array<{ from: string; to: string; data: `0x${string}` }>,
-  modularCoreInstalled: [] as Array<{ implementation: string }>,
+  receipt: { status: 'success', logs: [installedLog(), initializedLog()] } as { status: string; logs: Log[] },
+  /** What simulating installSeedExecutor throws; undefined = it would succeed. */
+  simulateError: undefined as Error | undefined,
 }
 
 const contractsActual = await import('./contracts')
@@ -26,7 +43,19 @@ const chainClientActual = await import('./chainClient')
 mock.module('./chainClient', () => ({
   ...chainClientActual,
   isContractDeployed: async () => true,
-  waitForPublishReceipt: async () => ({ status: 'success' }),
+  waitForPublishReceipt: async (hash: string) => {
+    if (state.receipt.status === 'reverted') {
+      const { PublishTransactionRevertedError } = await import('../errors')
+      throw new PublishTransactionRevertedError(hash, state.receipt)
+    }
+    return state.receipt
+  },
+  getPublishPublicClient: () => ({
+    call: async () => {
+      if (state.simulateError) throw state.simulateError
+      return { data: '0x' }
+    },
+  }),
 }))
 
 mock.module('./managedAccountAdmin', () => ({
@@ -46,12 +75,6 @@ mock.module('./adapters/thirdwebAccount', () => ({
   }),
 }))
 
-const modulesActual = await import('thirdweb/modules')
-mock.module('thirdweb/modules', () => ({
-  ...modulesActual,
-  getInstalledModules: async () => state.modularCoreInstalled,
-}))
-
 const { setConfigRef } = await import('../config')
 const { ensureExecutorModuleInstalled } = await import('./ensureExecutorModule')
 
@@ -62,14 +85,23 @@ afterEach(() => {
   state.router = { executor: EXECUTOR, eas: '0x4200000000000000000000000000000000000021' }
   state.installed = false
   state.sent = []
-  state.modularCoreInstalled = []
+  state.receipt = { status: 'success', logs: [installedLog(), initializedLog()] }
+  state.simulateError = undefined
 })
+
+const revert = (errorName: 'SeedExecutorAlreadyInstalled' | 'Unauthorized', args?: readonly [string]) =>
+  new RawContractError({
+    data: encodeErrorResult({ abi: seedExecutorRouterAbi, errorName, args } as never),
+  })
 
 setConfigRef({ uploadApiBaseUrl: 'https://example.com', rpcUrl: 'https://rpc.invalid', thirdwebClientId: 'test' })
 
 describe('ensureExecutorModuleInstalled on Router accounts with the executor extension', () => {
   test('the admin EOA sends installSeedExecutor to the account', async () => {
-    await ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).resolves.toMatchObject({
+      status: 'installed',
+      eas: EAS,
+    })
     expect(state.sent).toHaveLength(1)
     expect(state.sent[0]?.from).toBe(ADMIN)
     expect(state.sent[0]?.to).toBe(ACCOUNT)
@@ -79,8 +111,44 @@ describe('ensureExecutorModuleInstalled on Router accounts with the executor ext
 
   test('does nothing when the executor is already installed', async () => {
     state.installed = true
-    await ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).resolves.toEqual({
+      status: 'already-installed',
+    })
     expect(state.sent).toHaveLength(0)
+  })
+
+  test('fails with the revert reason when the receipt shows no install (sponsored send)', async () => {
+    state.receipt = { status: 'success', logs: [] }
+    state.simulateError = revert('Unauthorized', [ADMIN])
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).rejects.toMatchObject({
+      code: 'EXECUTOR_MODULE_NOT_INSTALLED',
+      message: expect.stringMatching(/did not install.*reverted with Unauthorized\(0xadad/i),
+    })
+  })
+
+  test('fails with the revert reason when the install transaction reverted', async () => {
+    state.receipt = { status: 'reverted', logs: [] }
+    state.simulateError = revert('Unauthorized', [ADMIN])
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).rejects.toMatchObject({
+      code: 'EXECUTOR_MODULE_NOT_INSTALLED',
+      message: expect.stringContaining('reverted with Unauthorized'),
+    })
+  })
+
+  test('ignores install events for other accounts', async () => {
+    const other = '0xcccccccccccccccccccccccccccccccccccccccc'
+    state.receipt = { status: 'success', logs: [installedLog(other), initializedLog(other)] }
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).rejects.toMatchObject({
+      code: 'EXECUTOR_MODULE_NOT_INSTALLED',
+    })
+  })
+
+  test('treats a receipt without the install as installed when the executor is already installed', async () => {
+    state.receipt = { status: 'success', logs: [] }
+    state.simulateError = revert('SeedExecutorAlreadyInstalled')
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).resolves.toEqual({
+      status: 'already-installed',
+    })
   })
 
   test('refuses when the account pins a different executor than config', async () => {
@@ -94,10 +162,11 @@ describe('ensureExecutorModuleInstalled on Router accounts with the executor ext
 })
 
 describe('ensureExecutorModuleInstalled on other accounts', () => {
-  test('ModularCore accounts with the module installed send nothing', async () => {
+  test('accounts without the executor router extension are skipped', async () => {
     state.router = null
-    state.modularCoreInstalled = [{ implementation: EXECUTOR }]
-    await ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)
+    await expect(ensureExecutorModuleInstalled(ACCOUNT, smartAccount, config)).resolves.toEqual({
+      status: 'skipped',
+    })
     expect(state.sent).toHaveLength(0)
   })
 })

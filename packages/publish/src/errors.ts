@@ -75,6 +75,18 @@ export class ManagedAccountPublishError extends Error {
   }
 }
 
+/** Thrown by `waitForPublishReceipt` when the transaction was mined but reverted. */
+export class PublishTransactionRevertedError extends Error {
+  constructor(
+    public readonly transactionHash: string,
+    /** The viem `TransactionReceipt`. */
+    public readonly receipt: unknown,
+  ) {
+    super(`Transaction ${transactionHash} reverted.`)
+    this.name = 'PublishTransactionRevertedError'
+  }
+}
+
 /**
  * True when `e` is a managed-account publish error. Uses `name` + `code` as a fallback
  * when `instanceof` fails across duplicate bundled class identities.

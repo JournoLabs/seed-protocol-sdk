@@ -31,8 +31,11 @@ mock.module('./contracts', () => ({
   readSeedExecutorRouter: (...args: unknown[]) => routerMock(...(args as [])),
 }))
 
+const { readUntil } = await import('./chainClient')
 mock.module('./chainClient', () => ({
   getPublishPublicClient: () => ({ call: (...args: unknown[]) => callMock(...(args as [])) }),
+  readUntil: (read: () => Promise<unknown>, accept: (v: unknown) => boolean, opts?: { attempts?: number }) =>
+    readUntil(read, accept, { ...opts, intervalMs: 0 }),
 }))
 
 afterEach(() => {
@@ -69,6 +72,27 @@ describe('assertExecutorModuleReadyForAccount', () => {
       code: 'AUTOMATION_UNSUPPORTED_ACCOUNT',
       message: expect.stringContaining('installSeedExecutor'),
     })
+  })
+
+  test('retries a not-initialized read when asked, for a lagging RPC node', async () => {
+    isInitializedMock.mockImplementationOnce(async () => false)
+    const { assertExecutorModuleReadyForAccount } = await import('./executorModuleReadiness')
+    await expect(assertExecutorModuleReadyForAccount(ACCOUNT, { readAttempts: 3 })).resolves.toBeUndefined()
+    expect(isInitializedMock).toHaveBeenCalledTimes(2)
+  })
+
+  test('trusts an EAS confirmed from the install receipt without reading', async () => {
+    isInitializedMock.mockImplementation(async () => false)
+    const { assertExecutorModuleReadyForAccount } = await import('./executorModuleReadiness')
+    await expect(assertExecutorModuleReadyForAccount(ACCOUNT, { installedEas: EAS })).resolves.toBeUndefined()
+    expect(isInitializedMock).not.toHaveBeenCalled()
+  })
+
+  test('rejects an install receipt EAS that differs from config', async () => {
+    const { assertExecutorModuleReadyForAccount } = await import('./executorModuleReadiness')
+    await expect(
+      assertExecutorModuleReadyForAccount(ACCOUNT, { installedEas: '0x0000000000000000000000000000000000000001' }),
+    ).rejects.toMatchObject({ message: expect.stringContaining('different EAS') })
   })
 
   test('rejects when the module points at a different EAS', async () => {

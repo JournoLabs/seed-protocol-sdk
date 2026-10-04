@@ -3,7 +3,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 const managedAccount = { address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
 const autoConnectMock = mock(() => Promise.resolve())
 const getAccountMock = mock(() => managedAccount)
-const ensureExecutorModuleInstalledMock = mock(async () => {})
+const ensureExecutorModuleInstalledMock = mock(async (): Promise<unknown> => ({ status: 'already-installed' }))
 const ensureAutomationSessionKeyMock = mock(async () => {})
 const removeAutomationSessionKeyMock = mock(async () => {})
 const attestPublishAuthorizationMock = mock(async () => ({
@@ -77,7 +77,7 @@ afterEach(() => {
   assertExecutorModuleReadyMock.mockClear()
   assertExecutorModuleReadyMock.mockImplementation(async () => {})
   getAccountMock.mockImplementation(() => managedAccount)
-  ensureExecutorModuleInstalledMock.mockImplementation(async () => {})
+  ensureExecutorModuleInstalledMock.mockImplementation(async () => ({ status: 'already-installed' }))
 })
 
 describe('enrollPublishAutomation', () => {
@@ -88,7 +88,7 @@ describe('enrollPublishAutomation', () => {
       sessionKeyAddress: '0xsession',
     })
     expect(ensureExecutorModuleInstalledMock).toHaveBeenCalled()
-    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged')
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged', { readAttempts: 5 })
     expect(ensureAutomationSessionKeyMock).toHaveBeenCalled()
     expect(attestPublishAuthorizationMock).toHaveBeenCalled()
     expect(result.authorization.uid).toMatch(/^0x/)
@@ -124,9 +124,29 @@ describe('enrollPublishAutomation', () => {
         sessionKeyAddress: '0xsession',
       }),
     ).rejects.toMatchObject({ code: 'AUTOMATION_UNSUPPORTED_ACCOUNT' })
-    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged')
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged', { readAttempts: 5 })
     expect(ensureAutomationSessionKeyMock).not.toHaveBeenCalled()
     expect(attestPublishAuthorizationMock).not.toHaveBeenCalled()
+  })
+
+  test('checks a fresh install against its receipt instead of re-reading the module', async () => {
+    const eas = '0x4200000000000000000000000000000000000021'
+    ensureExecutorModuleInstalledMock.mockImplementationOnce(async () => ({
+      status: 'installed',
+      eas,
+      transactionHash: `0x${'12'.repeat(32)}`,
+    }))
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    await enrollPublishAutomation({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession' })
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged', { installedEas: eas })
+    expect(ensureAutomationSessionKeyMock).toHaveBeenCalled()
+  })
+
+  test('reads once for accounts the install step skipped', async () => {
+    ensureExecutorModuleInstalledMock.mockImplementationOnce(async () => ({ status: 'skipped' }))
+    const { enrollPublishAutomation } = await import('./enrollPublishAutomation')
+    await enrollPublishAutomation({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession' })
+    expect(assertExecutorModuleReadyMock).toHaveBeenCalledWith('0xmanaged', { readAttempts: 1 })
   })
 })
 

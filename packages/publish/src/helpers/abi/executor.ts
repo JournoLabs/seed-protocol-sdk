@@ -51,6 +51,14 @@ export const executorModuleAbi = [
     inputs: [{ name: 'account', type: 'address' }],
     outputs: [{ name: '', type: 'address' }],
   },
+  {
+    type: 'event',
+    name: 'ModuleInitialized',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+      { name: 'eas', type: 'address', indexed: true },
+    ],
+  },
   { type: 'error', name: 'AlreadyInitialized', inputs: [{ name: 'account', type: 'address' }] },
   { type: 'error', name: 'NotInitialized', inputs: [{ name: 'account', type: 'address' }] },
   { type: 'error', name: 'InvalidEASAddress', inputs: [] },

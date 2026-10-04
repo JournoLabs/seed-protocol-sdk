@@ -20,4 +20,11 @@ export const managedAccountFactoryAbi = [
     ],
     outputs: [{ type: 'address' }],
   },
+  {
+    type: 'function',
+    name: 'getImplementationForFunction',
+    stateMutability: 'view',
+    inputs: [{ name: '_functionSelector', type: 'bytes4' }],
+    outputs: [{ type: 'address' }],
+  },
 ] as const

@@ -1,5 +1,13 @@
-import { createPublicClient, http, type Address, type Hex, type PublicClient } from 'viem'
+import {
+  createPublicClient,
+  http,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type TransactionReceipt,
+} from 'viem'
 import { getPublishConfig } from '../config'
+import { PublishTransactionRevertedError } from '../errors'
 import { getPublishRpcUrl, getPublishViemChain } from './chainConfig'
 
 type PublishPublicClient = PublicClient
@@ -53,8 +61,35 @@ export function resetPublishPublicClient(): void {
   _clientKey = null
 }
 
-export async function waitForPublishReceipt(transactionHash: Hex) {
-  return getPublishPublicClient().waitForTransactionReceipt({ hash: transactionHash })
+/**
+ * Waits for `transactionHash` to be mined and returns its receipt.
+ *
+ * @throws PublishTransactionRevertedError when the transaction reverted. A successful receipt
+ * only covers the outer transaction: for a sponsored (relayed) send, check the receipt's logs to
+ * confirm the inner call did what it should.
+ */
+export async function waitForPublishReceipt(transactionHash: Hex): Promise<TransactionReceipt> {
+  const receipt = await getPublishPublicClient().waitForTransactionReceipt({ hash: transactionHash })
+  if (receipt.status === 'reverted') throw new PublishTransactionRevertedError(transactionHash, receipt)
+  return receipt
+}
+
+/**
+ * Calls `read` until `accept` passes on its result, up to `attempts` times, and returns the last
+ * result either way. For reads right after a receipt: a load-balanced RPC can serve them from a
+ * node that has not seen the receipt's block yet, and pinning `blockNumber` does not help there.
+ */
+export async function readUntil<T>(
+  read: () => Promise<T>,
+  accept: (value: T) => boolean,
+  { attempts = 5, intervalMs = 2_000 }: { attempts?: number; intervalMs?: number } = {},
+): Promise<T> {
+  let value = await read()
+  for (let i = 1; i < attempts && !accept(value); i++) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    value = await read()
+  }
+  return value
 }
 
 export async function isContractDeployed(address: string): Promise<boolean> {

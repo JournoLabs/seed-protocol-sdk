@@ -153,12 +153,13 @@ export interface PublishConfig {
    */
   useDirectEas?: boolean
   /**
-   * Optional IModularCore module to ensure is installed on the **ModularCore** account contract.
-   * When set, onConnect / publish prep will check getInstalledModules and install if missing.
-   * If the smart account is not ModularCore (no Router), install is skipped — typical for default EIP-4337 accounts.
+   * Seed executor module (SeedProtocolExecutor). Must match the executor pinned by the
+   * ManagedAccount's `SeedExecutorRouterExtension` (`readFactorySeedExecutor` reads it from the
+   * factory). When set, onConnect / publish prep install it with `installSeedExecutor()` if
+   * missing; accounts without the extension are skipped.
    */
   modularAccountModuleContract?: string
-  /** Optional module install data (default "0x"). Used with modularAccountModuleContract. */
+  /** Unused: `installSeedExecutor()` takes no install data. */
   modularAccountModuleData?: string
   /**
    * Use the modular executor for multiPublish.

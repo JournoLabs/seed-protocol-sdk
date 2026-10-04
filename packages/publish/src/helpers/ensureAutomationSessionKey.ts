@@ -6,7 +6,7 @@ import {
 } from 'thirdweb/extensions/erc4337'
 import type { Address } from 'viem'
 import { ManagedAccountPublishError } from '../errors'
-import { isContractDeployed, waitForPublishReceipt } from './chainClient'
+import { isContractDeployed, readUntil, waitForPublishReceipt } from './chainClient'
 import { readIsActiveSigner } from './contracts'
 import {
   buildAutomationSessionKeyPermissions,
@@ -95,7 +95,12 @@ export async function ensureAutomationSessionKey(params: {
     }
   }
 
-  const active = await isAutomationSessionActive(managedAddress, sessionKeyAddress)
+  // Right after addSessionKey, a lagging RPC node can still report the key inactive.
+  const active = await readUntil(
+    () => isAutomationSessionActive(managedAddress, sessionKeyAddress),
+    Boolean,
+    { attempts: shouldUpdate ? 5 : 1 },
+  )
   if (!active) {
     throw new ManagedAccountPublishError(
       MSG_ACTIVATION_FAILED(),

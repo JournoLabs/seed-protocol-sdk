@@ -30,10 +30,9 @@ Automation session key ──ANS-104──► Arweave
 
 1. `initPublish` / `PublishProvider` with:
    - `useModularExecutor: true` (typical)
-   - **`modularAccountModuleContract`** set to the Seed executor module
+   - **`modularAccountModuleContract`** set to the Seed executor module. To check it at startup, compare it with `readFactorySeedExecutor()` (the executor the configured factory's accounts pin).
 2. The executor must be able to act for the ManagedAccount: `isInitialized(account)` is true and `getEAS(account)` matches `easContractAddress`. Enroll installs it:
    - Router ManagedAccounts (the default Thirdweb `ManagedAccountFactory`) with the `SeedExecutorRouterExtension`: `installSeedExecutor()`, sent by the user's in-app EOA (the account admin). The extension rejects it as a self-call, so the smart account can't send it itself.
-   - ModularCore ManagedAccounts: `installModule`.
    - Router accounts without the extension can't run the executor; enroll rejects them with `AUTOMATION_UNSUPPORTED_ACCOUNT` before adding a session key.
 3. App generates and stores a session keypair offline; only the **address** is passed into enroll.
 
@@ -69,8 +68,8 @@ const { authorization } = await enrollPublishAutomation({
 
 Steps performed:
 
-1. Install the executor (`installSeedExecutor` from the admin EOA, or `installModule` on ModularCore).
-2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain.
+1. Install the executor (`installSeedExecutor` from the admin EOA). The install is confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` events. If they are missing (the transaction reverted, or a sponsored relayer transaction succeeded without the inner call), enroll throws `EXECUTOR_MODULE_NOT_INSTALLED` with the revert reason when one can be found.
+2. Check that the module can act for the account. Otherwise throw `ManagedAccountPublishError` with code `AUTOMATION_UNSUPPORTED_ACCOUNT`, before anything is written on-chain. After a fresh install this uses the EAS from the install receipt rather than re-reading, since a load-balanced RPC can serve the read from a node that hasn't seen the install yet.
 3. `addSessionKey` with module-only `approvedTargets`.
 4. Attest `seedprotocol.publishAuthorization` (ManagedAccount attester).
 

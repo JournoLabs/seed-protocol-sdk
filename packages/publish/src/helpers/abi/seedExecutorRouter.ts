@@ -1,7 +1,7 @@
 /**
  * `SeedExecutorRouterExtension`, routed on ManagedAccounts by the factory
  * (seed-protocol contracts/SeedExecutorRouterExtension.sol). Installs the Seed executor on a
- * Router (non-ModularCore) account.
+ * Router account.
  */
 export const seedExecutorRouterAbi = [
   { type: 'function', name: 'installSeedExecutor', stateMutability: 'nonpayable', inputs: [], outputs: [] },
@@ -25,6 +25,11 @@ export const seedExecutorRouterAbi = [
       { name: 'additionalContext', type: 'bytes' },
     ],
     outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'event',
+    name: 'SeedExecutorInstalled',
+    inputs: [{ name: 'executor', type: 'address', indexed: true }],
   },
   { type: 'error', name: 'Unauthorized', inputs: [{ name: 'caller', type: 'address' }] },
   { type: 'error', name: 'SeedExecutorAlreadyInstalled', inputs: [] },

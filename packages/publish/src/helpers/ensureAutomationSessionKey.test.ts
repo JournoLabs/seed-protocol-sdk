@@ -48,7 +48,10 @@ mock.module('./contracts', () => ({
   readIsActiveSigner: (...args: unknown[]) => readIsActiveSignerMock(...args),
 }))
 
+const { readUntil } = await import('./chainClient')
 mock.module('./chainClient', () => ({
+  readUntil: (read: () => Promise<unknown>, accept: (v: unknown) => boolean, opts?: { attempts?: number }) =>
+    readUntil(read, accept, { ...opts, intervalMs: 0 }),
   waitForPublishReceipt: (...args: unknown[]) => waitForPublishReceiptMock(...args),
   isContractDeployed: (...args: unknown[]) => isContractDeployedMock(...args),
 }))
@@ -89,6 +92,24 @@ describe('ensureAutomationSessionKey', () => {
     })
     expect(addSessionKeyMock).toHaveBeenCalled()
     expect(sendTransactionMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('waits out a lagging RPC node that still reports the new key inactive', async () => {
+    shouldUpdateSessionKeyMock.mockImplementationOnce(async () => true)
+    readIsActiveSignerMock.mockImplementationOnce(async () => false)
+    const { ensureAutomationSessionKey } = await import('./ensureAutomationSessionKey')
+    await ensureAutomationSessionKey({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession' })
+    expect(readIsActiveSignerMock).toHaveBeenCalledTimes(2)
+  })
+
+  test('fails when the new key never becomes active', async () => {
+    shouldUpdateSessionKeyMock.mockImplementationOnce(async () => true)
+    readIsActiveSignerMock.mockImplementation(async () => false)
+    const { ensureAutomationSessionKey } = await import('./ensureAutomationSessionKey')
+    await expect(
+      ensureAutomationSessionKey({ managedAddress: '0xmanaged', sessionKeyAddress: '0xsession' }),
+    ).rejects.toMatchObject({ code: 'MODULAR_SIGNER_ACTIVATION_FAILED' })
+    expect(readIsActiveSignerMock).toHaveBeenCalledTimes(5)
   })
 })
 

@@ -4,8 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking
+
+- **`waitForPublishReceipt` throws on a reverted transaction** (`PublishTransactionRevertedError`, with `transactionHash` and `receipt`). It used to return the reverted receipt, so callers treated a revert as success. Functions that return its receipt (`attestPublishAuthorization`, `revokePublishAuthorization`, domain ownership and publishedBy attest/revoke) now throw instead.
+- **`ensureExecutorModuleInstalled` no longer calls `installModule` on thirdweb ModularCore accounts.** That path could never work: ModularCore installs modules by `delegatecall`, and the Seed executor is an ERC-7579 module without `getModuleConfig`. Accounts without the `SeedExecutorRouterExtension` are skipped, and `assertExecutorModuleReadyForAccount` reports why the executor can't act for them. `ensureExecutorModuleInstalled` now returns `{ status: 'skipped' | 'already-installed' }` or `{ status: 'installed', eas, transactionHash }`. `PublishConfig.modularAccountModuleData` is unused.
+
 ### Fixed
 
+- **Executor install race in `enrollPublishAutomation`:** turning on automation could fail with "The Seed executor is not installed for this ManagedAccount" right after a successful `installSeedExecutor`, because the follow-up `isInitialized` read hit a load-balanced RPC node that hadn't seen the block yet. The install is now confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` logs, and the readiness check uses the EAS from that event instead of re-reading. When the executor was already installed, the `isInitialized` read is retried briefly. `ensureAutomationSessionKey` retries the `isActiveSigner` read after `addSessionKey` for the same reason.
+- **Failed executor installs report why:** an install whose receipt lacks the install events (a reverted transaction, or a sponsored EIP-7702 relayer transaction that succeeded while the inner call reverted) throws `EXECUTOR_MODULE_NOT_INSTALLED` with the decoded revert reason, instead of a misleading "not installed" from the readiness check.
 - **List-of-relation EAS names:** a list relation such as `staff` (List → Identity) was attested as `bytes32[] staff` or `bytes32[] staff_identity_ids` depending on whether the model was loaded before the item. `getPublishPayload` and `ensureEasSchemasForItem` now derive the name from the property definition with `listRelationEasPropertyName` (exported from `@seedprotocol/sdk`) and ignore a cached `schemaUid` for list relations. `ensureEasSchemasForItem` refuses to register a list-relation schema that doesn't end in `_ids`. Locally, `createMetadata` writes list-relation rows under the storage name (`staffIdentityIds`), and an `ItemProperty` that receives its schema after construction moves to the storage name while `propertyName` stays `staff`. Already-published data (`author_identity_ids` and the like) is unchanged.
 - **Missing property schemas fail publish validation:** when a property's EAS schema can't be found, `getPublishPayload` now reports `publish_schema_not_found` instead of attesting the value under the Version schema. Call `ensureEasSchemasForItem` first, as the publish flow already does.
 - **`parseEasRelationPropertyName`** (`@seedprotocol/query`) pluralizes list names with `pluralize`: `staff_identity_ids` → `staff` (was `staffs`). Single relations return the singular (`cover_image_id` → `cover`).
@@ -18,6 +25,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`readFactorySeedExecutor(factory?)`:** the executor and EAS that a ManagedAccount factory's `SeedExecutorRouterExtension` pins, or `null` when it routes none. Compare it with `modularAccountModuleContract` at startup instead of finding a stale address at the first publish or enroll.
+- **`assertExecutorModuleReadyForAccount(address, { installedEas, readAttempts })`:** pass the EAS confirmed from an install receipt to skip the read, or retry a not-initialized read.
 - **Publish automation grants:** ManagedAccount-hosted session keys (executor-module-only `approvedTargets`), `seedprotocol.publishAuthorization` sidecar, `enrollPublishAutomation` / `revokePublishAutomation`, and `assertStorageBoundToIdentity`. See `docs/PUBLISH_AUTOMATION.md`.
 - **`prepareEasMultiRevoke`:** When `modularAccountModuleContract` is set, routes `multiRevoke` to the executor module so automation session keys can revoke as the ManagedAccount.
 - **`resolveRevokeAccount` / `revokeAttestations`:** No longer hard-block ManagedAccount attesters; legacy module-attester path attempts ManagedAccount + executor revoke when configured.

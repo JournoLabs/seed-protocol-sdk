@@ -45,9 +45,9 @@ function waitUntilSeedInitialized(): Promise<void> {
 }
 
 /**
- * Executor module (ModularCore) must be installed on the **ManagedAccount** (EIP-4337) contract.
- * The EIP-7702 modular wallet contract does not expose Thirdweb's installModule / Router API;
- * calling it there reverts with "Router: function does not exist."
+ * Installs the Seed executor on the **ManagedAccount** (EIP-4337 Router) contract via its
+ * `SeedExecutorRouterExtension`. Other accounts, such as the EIP-7702 modular wallet, have no
+ * extension, so `ensureExecutorModuleInstalled` skips them.
  */
 async function ensureExecutorModulesForConnect(
   modularAccount: Account,
