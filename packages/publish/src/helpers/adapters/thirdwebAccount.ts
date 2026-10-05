@@ -11,6 +11,7 @@ import {
 } from '../seedSigner'
 import { getPublishThirdwebChain } from '../thirdwebChain'
 import { retryNonceTooLow } from '../retryNonceTooLow'
+import { logGas } from '../gasLog'
 
 export type FromThirdwebAccountOptions = {
   /**
@@ -49,8 +50,25 @@ export function fromThirdwebAccount(
         value: tx.value,
         gas: tx.gas,
       })
+      logGas('sending transaction through thirdweb', {
+        account: address,
+        chainId: chain.id,
+        to: tx.to,
+        dataBytes: tx.data ? (tx.data.length - 2) / 2 : 0,
+        txGas: tx.gas ?? '(none: thirdweb estimates)',
+      })
       // Smart accounts send UserOps (EntryPoint nonces); this only matters for plain EOAs.
-      const result = await retryNonceTooLow(() => sendTransaction({ account, transaction }))
+      let result
+      try {
+        result = await retryNonceTooLow(() => sendTransaction({ account, transaction }))
+      } catch (error) {
+        logGas('thirdweb sendTransaction failed', {
+          account: address,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+      logGas('thirdweb sendTransaction returned', { account: address, transactionHash: result.transactionHash })
       return { transactionHash: result.transactionHash as Hex }
     },
   })

@@ -39,8 +39,9 @@ export function describeRevert(data: Hex | undefined, noDataReason = NO_DATA_REA
 
 /**
  * Message for a UserOp that failed in transaction `txHash`. With no revert data it was usually
- * out of gas: the bundler's callGasLimit estimate was too low, and thirdweb replaces the
- * transaction's own gas limit with that estimate.
+ * out of gas: the bundler's callGasLimit estimate was too low. Sponsored managed-account UserOps
+ * get headroom on that estimate (see `seedPaymaster`); unsponsored ones still use it as is,
+ * because thirdweb replaces the transaction's own gas limit with it.
  */
 export function describeFailedUserOp(txHash: string, revertData?: Hex): string {
   if (revertData && revertData !== '0x') {

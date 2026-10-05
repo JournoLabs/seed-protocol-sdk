@@ -48,7 +48,9 @@ describe('in-app wallets follow publish config', () => {
       mode: 'EIP4337',
       smartAccount: { sponsorGas: true, factoryAddress: '0x76f47d88bfaf670f5208911181fcdc0e160cb16d' },
     })
-    expect(managed.options.executionMode.smartAccount.overrides).toBeUndefined()
+    const overrides = managed.options.executionMode.smartAccount.overrides
+    expect(Object.keys(overrides)).toEqual(['paymaster'])
+    expect(typeof overrides.paymaster).toBe('function')
     const modular = getModularAccountWallet() as unknown as { options: InAppOptions }
     expect(modular.options.executionMode).toEqual({ mode: 'EIP7702', sponsorGas: true })
   })
@@ -72,6 +74,20 @@ describe('in-app wallets follow publish config', () => {
     expect(getManagedAccountWallet()).toBe(first)
     setConfigRef({ ...twinConfig, thirdweb: { ...twinConfig.thirdweb, bundlerUrl: 'http://127.0.0.1:4338' } })
     expect(getManagedAccountWallet()).not.toBe(first)
+  })
+
+  test('sponsored managed wallet keeps a custom bundler next to the paymaster hook', () => {
+    setConfigRef({ ...twinConfig, thirdweb: { bundlerUrl: 'http://127.0.0.1:4337', modularWalletMode: 'EOA' } })
+    const managed = getManagedAccountWallet() as unknown as { options: InAppOptions }
+    const { overrides } = managed.options.executionMode.smartAccount
+    expect(overrides.bundlerUrl).toBe('http://127.0.0.1:4337')
+    expect(typeof overrides.paymaster).toBe('function')
+  })
+
+  test('unsponsored managed wallet on a hosted chain has no overrides', () => {
+    setConfigRef({ uploadApiBaseUrl: 'https://example.com', thirdweb: { sponsorGas: false } })
+    const managed = getManagedAccountWallet() as unknown as { options: InAppOptions }
+    expect(managed.options.executionMode.smartAccount.overrides).toBeUndefined()
   })
 
   test('EIP-7702 follows thirdweb.sponsorGas on a hosted chain', () => {

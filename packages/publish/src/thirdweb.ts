@@ -27,6 +27,7 @@ export {
 } from './helpers/thirdweb'
 
 export { getPublishThirdwebChain } from './helpers/thirdwebChain'
+export { seedPaymaster, CALL_GAS_HEADROOM_BPS } from './helpers/seedPaymaster'
 
 export { default as ConnectButton } from './react/ConnectButton'
 export { default as PublishProvider, usePublishConfig } from './react/PublishProvider.thirdweb'

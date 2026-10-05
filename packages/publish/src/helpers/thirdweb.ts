@@ -22,6 +22,8 @@ import {
 import { encodeCreateAccount, readFactoryGetAddress } from './contracts'
 import type { PublishWallet } from './seedSigner'
 import { getPublishThirdwebChain, isLocalThirdwebChain } from './thirdwebChain'
+import { seedPaymaster } from './seedPaymaster'
+import { logGas } from './gasLog'
 
 const logger = debug('permaPress:helpers:thirdweb')
 
@@ -352,6 +354,12 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
   }
   const key = [chain.id, chain.rpc, factoryAddress, bundlerUrl ?? '', sponsorGas].join('|').toLowerCase()
   if (_managedInAppWallet?.key !== key) {
+    logGas('managed wallet built', {
+      chainId: chain.id,
+      sponsorGas,
+      bundlerUrl: bundlerUrl ?? '(thirdweb default)',
+      paymasterHook: sponsorGas ? 'installed' : 'none (thirdweb estimates callGasLimit itself)',
+    })
     _managedInAppWallet = {
       key,
       wallet: inAppWallet({
@@ -363,7 +371,15 @@ export const getManagedAccountWallet = (config?: PublishConfig) => {
             chain,
             factoryAddress,
             sponsorGas,
-            ...(bundlerUrl ? { overrides: { bundlerUrl } } : {}),
+            ...(bundlerUrl || sponsorGas
+              ? {
+                  overrides: {
+                    ...(bundlerUrl ? { bundlerUrl } : {}),
+                    // Adds headroom to callGasLimit; see seedPaymaster.
+                    ...(sponsorGas ? { paymaster: seedPaymaster(getClient, chain, bundlerUrl) } : {}),
+                  },
+                }
+              : {}),
           },
         },
       }),
