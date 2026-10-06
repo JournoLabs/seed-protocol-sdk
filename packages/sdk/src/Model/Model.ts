@@ -1779,6 +1779,47 @@ export class Model {
   }
 
   /**
+   * Force-evict every cached Model belonging to a schema, ignoring refCounts, and stop their services.
+   * Used by Schema.destroy(): once the DB rows are gone, cached instances would keep a dangling _dbId
+   * and be handed back by Model.create/Model.all after the schema is re-imported.
+   * @returns names of the evicted models (so callers can evict their ModelProperty instances)
+   */
+  static evictForSchema(schemaName: string): string[] {
+    const instances = new Set<Model>()
+    for (const { instance } of this.instanceCacheById.values()) instances.add(instance)
+    for (const { instance } of this.instanceCache.values()) instances.add(instance)
+
+    const evictedNames: string[] = []
+    for (const instance of instances) {
+      let context: ModelMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (context.schemaName !== schemaName) continue
+
+      const nameKey = `${context.schemaName}:${context.modelName}`
+      clearDestroySubscriptions(instance, { instanceState: modelInstanceState })
+      forceRemoveFromCaches(instance, {
+        getCacheKeys: () => (context.id ? [context.id, nameKey] : [nameKey]),
+        caches: [
+          Model.instanceCacheById as Map<string, unknown>,
+          Model.instanceCacheByName as Map<string, unknown>,
+          Model.instanceCache as Map<string, unknown>,
+        ],
+      })
+      try {
+        instance._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
+      if (context.modelName) evictedNames.push(context.modelName)
+    }
+    return evictedNames
+  }
+
+  /**
    * Unload the model instance and clean up resources
    */
   unload(): void {

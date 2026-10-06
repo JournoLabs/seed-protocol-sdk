@@ -1064,6 +1064,33 @@ export class ModelProperty {
     // No-op for now, but could be enhanced to reload from DB if needed
   }
 
+  /**
+   * Force-evict cached ModelProperty instances for the given models, ignoring refCounts, and stop
+   * their services. Used by Schema.destroy() so a re-imported schema gets fresh instances instead of
+   * ones holding a deleted row's _dbId.
+   */
+  static evictForModels(modelNames: string[], schemaName?: string): void {
+    if (modelNames.length === 0) return
+    const names = new Set(modelNames)
+    for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
+      let context: ModelPropertyMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (!context.modelName || !names.has(context.modelName)) continue
+      if (schemaName && context._schemaName && context._schemaName !== schemaName) continue
+
+      this.instanceCache.delete(cacheKey)
+      try {
+        instance._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
+    }
+  }
+
   unload(): void {
     // ModelProperty doesn't have liveQuery subscriptions or complex cache management
     // Just stop the service
