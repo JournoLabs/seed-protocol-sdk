@@ -14,19 +14,6 @@ import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { eventEmitter } from '@/eventBus'
 
-const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      if (!e.target || !e.target.result) {
-        throw new Error('FileReader result is null')
-      }
-      resolve(e.target.result as ArrayBuffer)
-    }
-    reader.readAsArrayBuffer(file)
-  })
-}
-
 let fileSchemaUid: string | undefined
 
 export const saveFile = fromCallback<
@@ -112,7 +99,7 @@ export const saveFile = fromCallback<
 
     if (newValue instanceof File) {
       fileName = newValue.name
-      fileData = await readFileAsArrayBuffer(newValue)
+      fileData = await newValue.arrayBuffer() // Blob API: works in browsers and Node (no FileReader in Node)
     }
 
     // Handle existing file reference: filename from listFiles() that exists in files folder
