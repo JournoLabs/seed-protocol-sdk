@@ -124,7 +124,10 @@ export const loadOrCreateProperty = fromCallback<
 
     // Load propertyRecordSchema from database to make ItemProperty independent from Model
     let propertyRecordSchema: any = undefined
-    const modelName = metadataRecord.modelType || context.modelName
+    // metadata.modelType is the snake_case model type ("test_post"), not the model name ("TestPost").
+    // It ends up in the context below, and later lookups by name (Model.getByName) can't match it.
+    const modelName =
+      context.modelName || (metadataRecord.modelType ? upperFirst(camelCase(metadataRecord.modelType)) : undefined)
     if (modelName) {
       try {
         // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)

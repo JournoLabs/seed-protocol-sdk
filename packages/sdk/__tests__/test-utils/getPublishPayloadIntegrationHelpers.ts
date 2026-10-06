@@ -254,6 +254,14 @@ export function getGetPublishPayloadTestSchemaWithEnum(): SchemaFileFormat {
 }
 
 /**
+ * The imported schema's model instance. Model.create without a modelFileId makes a new runtime model
+ * with a unique name ("Post 1"), which leaves duplicate models in the DB that confuse name lookups.
+ */
+function getSchemaModel(schema: { models: Record<string, { id?: string }> }, modelName: string, schemaName: string): Model {
+  return Model.create(modelName, schemaName, { modelFileId: schema.models[modelName].id, waitForReady: false }) as Model
+}
+
+/**
  * Import the comprehensive schema and create all models. Call once in beforeAll.
  */
 export async function createGetPublishPayloadTestSchema(): Promise<GetPublishPayloadTestSchemaResult> {
@@ -261,9 +269,9 @@ export async function createGetPublishPayloadTestSchema(): Promise<GetPublishPay
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest()
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
-  const authorModel = Model.create('Author', SCHEMA_NAME, { waitForReady: false })
-  const tagModel = Model.create('Tag', SCHEMA_NAME, { waitForReady: false })
-  const postModel = Model.create('Post', SCHEMA_NAME, { waitForReady: false })
+  const authorModel = getSchemaModel(schema, 'Author', SCHEMA_NAME)
+  const tagModel = getSchemaModel(schema, 'Tag', SCHEMA_NAME)
+  const postModel = getSchemaModel(schema, 'Post', SCHEMA_NAME)
   await waitForModelIdle(authorModel)
   await waitForModelIdle(tagModel)
   await waitForModelIdle(postModel)
@@ -284,9 +292,9 @@ export async function createGetPublishPayloadTestSchemaOptionalAuthor(): Promise
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest()
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
-  const authorModel = Model.create('Author', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
-  const tagModel = Model.create('Tag', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
-  const postModel = Model.create('Post', SCHEMA_NAME_OPTIONAL_AUTHOR, { waitForReady: false })
+  const authorModel = getSchemaModel(schema, 'Author', SCHEMA_NAME_OPTIONAL_AUTHOR)
+  const tagModel = getSchemaModel(schema, 'Tag', SCHEMA_NAME_OPTIONAL_AUTHOR)
+  const postModel = getSchemaModel(schema, 'Post', SCHEMA_NAME_OPTIONAL_AUTHOR)
   await waitForModelIdle(authorModel)
   await waitForModelIdle(tagModel)
   await waitForModelIdle(postModel)
@@ -308,7 +316,7 @@ export async function createGetPublishPayloadTestSchemaWithEnum(): Promise<{
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
   await ensureModelUidsForGetPublishPayloadTest(['Article'])
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
-  const articleModel = Model.create('Article', SCHEMA_NAME_ENUM_VALIDATION, { waitForReady: false })
+  const articleModel = getSchemaModel(schema, 'Article', SCHEMA_NAME_ENUM_VALIDATION)
   await waitForModelIdle(articleModel)
   return {
     schemaName: SCHEMA_NAME_ENUM_VALIDATION,

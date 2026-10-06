@@ -15,6 +15,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { and, eq } from 'drizzle-orm'
+import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 
 // Html saves in Node: saveHtml used to throw from NodeFileManager.getContentUrlFromPath, and
 // ItemProperty.save() resolved anyway, so raw HTML reached publish encoding.
@@ -102,10 +103,13 @@ testDescribe('Html property saves in Node', () => {
       author: author.seedLocalId,
       tagIds: tags.map((t) => t.seedLocalId),
     } as any)
+    // List-of-relation values are stored under their EAS storage name (tagIds -> tagIdTagIds).
+    const storageName = listRelationEasPropertyName('tagIds', { dataType: 'List', ref: 'Tag', refValueType: 'Relation' } as any)
+    expect(storageName).toBe('tagIdTagIds')
     const rows = await BaseDb.getAppDb()!
       .select({ propertyValue: metadata.propertyValue })
       .from(metadata)
-      .where(and(eq(metadata.seedLocalId, item.seedLocalId!), eq(metadata.propertyName, 'tagIds')))
+      .where(and(eq(metadata.seedLocalId, item.seedLocalId!), eq(metadata.propertyName, storageName!)))
     expect(rows.map((r: { propertyValue: string | null }) => r.propertyValue)).toContain(JSON.stringify(tags.map((t) => t.seedLocalId)))
 
     const result = await validateItemForPublish(item)
