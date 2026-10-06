@@ -2064,8 +2064,12 @@ testDescribe('ItemProperty Integration Tests', () => {
   describe('Html property persistence', () => {
     it('Html property returns HTML content (not seedLocalId) after load from DB', async () => {
       const schemaName = 'Test Schema Html Persistence'
+      // Unique model name: earlier tests in this file import other schemas with a 'Post' model, and
+      // beforeEach deletes their rows without evicting the cached Model instances. Item.create resolves
+      // the model by name only (Model.getByName('Post')), which returns the first cached '*:Post' --
+      // the Relation test's Post (title, author) -- so 'html' never got a property instance.
       const testSchema = createTestSchema(schemaName, {
-        Post: {
+        HtmlPost: {
           id: generateId(),
           properties: {
             title: { dataType: 'Text' },
@@ -2076,7 +2080,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('Post', schemaName, { waitForReady: false })
+      const model = Model.create('HtmlPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -2085,7 +2089,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       const htmlContent = '<p>Hello World</p>'
       const item = await Item.create({
-        modelName: 'Post',
+        modelName: 'HtmlPost',
         title: 'Test Post',
         html: htmlContent,
       })
@@ -2109,7 +2113,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       item.unload()
 
       const reloadedItem = await Item.find({
-        modelName: 'Post',
+        modelName: 'HtmlPost',
         seedLocalId: seedLocalId!,
       })
       expect(reloadedItem).toBeDefined()
