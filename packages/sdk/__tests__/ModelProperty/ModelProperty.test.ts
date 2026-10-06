@@ -10,11 +10,12 @@ import { models as modelsTable, properties as propertiesTable } from '@/seedSche
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { propertyUids } from '@/seedSchema/PropertyUidSchema'
-import { eq, and, ne, notInArray } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import type { TProperty } from '@/Schema'
@@ -101,75 +102,8 @@ testDescribe('ModelProperty Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        // Evict cached instances of the test schemas first. This stops their actors (no new writes) and
-        // makes the next import build fresh instances instead of reusing ones bound to deleted rows.
-        const testSchemaRows = await db
-          .select({ name: schemas.name })
-          .from(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        for (const { name } of testSchemaRows) {
-          if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
-        }
-
-        // Then delete in FK order, scoped to every model that isn't a Seed Protocol model
-        // (including orphans not linked to any schema).
-        const isTestModel = (column: typeof propertiesTable.modelId | typeof modelsTable.id) =>
-          seedProtocolModelIds.length > 0 ? notInArray(column, seedProtocolModelIds) : undefined
-
-        // A write the previous test started (e.g. writeModelToDb inserting a model_schemas row) can't be
-        // cancelled by stopping its actor and may land mid-cleanup, failing an FK check. Retry until it settles.
-        for (let attempt = 0; ; attempt++) {
-          try {
-            await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
-            await db.delete(propertyUids)
-            await db.delete(modelUids)
-            await db.delete(propertiesTable).where(isTestModel(propertiesTable.modelId))
-            await db.delete(modelSchemas).where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-            await db.delete(modelsTable).where(isTestModel(modelsTable.id))
-            await db.delete(schemas).where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-            break
-          } catch (error) {
-            if (attempt >= 10) throw error
-            await new Promise((resolve) => setTimeout(resolve, 200))
-          }
-        }
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.update(propertiesTable).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(propertiesTable)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
-    }
+    // FK-safe cleanup that keeps the Seed Protocol schema (required for client initialization)
+    await cleanupTestSchemaData()
 
     // Clean up property files (Node.js only)
     if (isNodeEnv && fsModule) {
