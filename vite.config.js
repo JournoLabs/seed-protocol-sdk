@@ -211,7 +211,6 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/Db.test.ts',
 
             // Known broken — stale against current code. Fix or delete each, then drop it from this list.
-            'packages/sdk/__tests__/commonjs-compatibility.test.ts', // expects dist/main.cjs.js; bare require in ESM
             'packages/sdk/__tests__/db/liveQuery.test.ts', // liveQuery expectations fail in Node and browser
             'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
             'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
