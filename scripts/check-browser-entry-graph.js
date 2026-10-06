@@ -6,7 +6,7 @@
  * Walks source entries (and published dist when present).
  * Usage: node scripts/check-browser-entry-graph.js [--fail]
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -48,14 +48,24 @@ function resolveImport(fromFile, spec) {
     `${base}.js`,
     `${base}.jsx`,
     path.join(base, 'index.ts'),
+    path.join(base, 'index.tsx'),
     path.join(base, 'index.js'),
   ]
-  return candidates.find((c) => existsSync(c) && !c.endsWith(path.sep))
+  // A bare directory import (`./Foo` where Foo/ exists) must fall through to Foo/index.*.
+  return candidates.find(isFile)
+}
+
+function isFile(p) {
+  try {
+    return statSync(p).isFile()
+  } catch {
+    return false
+  }
 }
 
 function walk(file) {
   const abs = path.resolve(rootDir, file)
-  if (visited.has(abs) || !existsSync(abs)) return
+  if (visited.has(abs) || !isFile(abs)) return
   visited.add(abs)
   const content = readFileSync(abs, 'utf8')
   const rel = path.relative(rootDir, abs)
