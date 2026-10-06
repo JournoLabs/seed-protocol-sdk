@@ -65,6 +65,17 @@ and one stylesheet injected at runtime**. This follows `FieldMapper`'s model.
   important modifier (`bg-red-500!`), or use `theme="none"`. We accepted this because
   the alternative is worse. Prepending our stylesheet would put it under Tailwind's
   preflight layer, and preflight would reset our buttons and inputs.
+- **Element defaults have zero specificity.** Rules that target elements inside the
+  component (`button`, `input`, `select`, `svg`, `code`) are written as
+  `:where(.seed-fm) :where(button, …)`, so any component class beats them. The first
+  version used `.seed-fm button` at (0,1,1). That beat every single-class variant, which
+  left the primary button's label unreadable in dark mode and the danger text uncoloured.
+  Our layer still beats Tailwind's preflight whatever the specificity, because layer
+  order is decided before specificity.
+- **Restate browser defaults we rely on.** Being in a later layer only wins for
+  properties we set. Preflight resets `margin` to 0 everywhere, which removes the
+  browser's `margin: auto` that centres a modal `<dialog>`, so `.seed-fm-dialog` sets
+  `margin: auto` itself.
 - Injected `<style>` tags need `style-src 'unsafe-inline'` or a nonce under a strict
   CSP. Hosts in that situation can render `OPFS_FILES_MANAGER_CSS` themselves.
 - During development, edits to the CSS string need a full page reload, because the

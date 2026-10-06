@@ -62,12 +62,22 @@ a custom `onDownload`, the handler is called once with the zip blob and a synthe
 - `deleteWarning(files)` adds a warning to the dialog. The default flags
   `db/seed.db`, because deleting it discards local items and unpublished drafts.
 - `confirmDelete(files)` replaces the built-in dialog for hosts with their own.
+- `deleteAction(files)` returns `{ label?, destructive? }`. `label` replaces "Delete" on
+  the batch bar, row action, panel footer, and the dialog's heading and confirm button.
+  `destructive: false` drops the danger colour and uses the primary confirm button. The
+  host knows whether a file also exists elsewhere, such as on Arweave, and the component
+  doesn't. The dialog calls it again when the resized-copies checkbox changes, so labels
+  that include a count stay accurate. Row `aria-label`s keep the file name so rows stay
+  distinguishable.
 - `onBeforeDelete` runs per file **after** confirmation. Files it vetoes are reported
   in the result toast.
 - There's no Undo, because OPFS deletes are permanent.
 
 **Feedback.** Toasts replace `alert()` for results and errors. Errors name the cause,
 for example a `NotFoundError` for a missing `rootPath`, or OPFS being unsupported.
+Hosts with their own toaster pass `onNotify(message, tone, notice)`, and the built-in
+toasts aren't rendered. `notice` says what happened (`delete` with deleted, skipped and
+failed paths, `download`, or `copy-path`) so hosts can write their own wording.
 
 **Structure.** The component lives in `src/OPFSFilesManager/`, split into views,
 dialog, panel, hooks, and pure helpers (`fileModel.ts`, `format.ts`, `zip.ts`). OPFS
