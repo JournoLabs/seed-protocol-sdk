@@ -90,9 +90,10 @@ const CSS = `
 
 .seed-fm { position: relative; color: var(--seed-fg); background: var(--seed-bg); font-family: inherit; font-size: 14px; line-height: 1.45; }
 .seed-fm *, .seed-fm *::before, .seed-fm *::after { box-sizing: border-box; }
-.seed-fm button, .seed-fm input, .seed-fm select { font: inherit; color: inherit; }
+/* Element defaults use :where() so they have zero specificity and any component class beats them. */
+:where(.seed-fm) :where(button, input, select) { font: inherit; color: inherit; }
 .seed-fm :focus-visible { outline: 2px solid var(--seed-accent); outline-offset: 2px; }
-.seed-fm svg { flex: none; display: inline-block; vertical-align: middle; }
+:where(.seed-fm) :where(svg) { flex: none; display: inline-block; vertical-align: middle; }
 .seed-fm-frame { container: seed-fm / inline-size; }
 
 .seed-fm-header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-start; padding: 18px 20px 14px; }
@@ -221,7 +222,7 @@ const CSS = `
 .seed-fm-state h3 { font-size: 15px; font-weight: 600; }
 .seed-fm-state p { color: var(--seed-fg-muted); font-size: 13px; }
 .seed-fm-state .seed-fm-btn { margin-top: 8px; }
-.seed-fm code { font-family: var(--seed-font-mono); font-size: 0.92em; }
+:where(.seed-fm) :where(code) { font-family: var(--seed-font-mono); font-size: 0.92em; }
 .seed-fm-state code { background: var(--seed-sunken); padding: 1px 5px; border-radius: 4px; }
 
 .seed-fm-batch { position: sticky; bottom: 16px; z-index: 5; width: fit-content; max-width: calc(100% - 24px); margin: 0 auto 16px; display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 6px 6px 6px 14px; background: var(--seed-fg); color: var(--seed-bg); border-radius: 12px; box-shadow: var(--seed-shadow); }
@@ -255,7 +256,8 @@ const CSS = `
 .seed-fm-panel-foot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--seed-border); }
 .seed-fm-panel-foot .seed-fm-btn--primary { flex: 1; }
 
-.seed-fm-dialog { border: 1px solid var(--seed-border); border-radius: var(--seed-radius-lg); background: var(--seed-surface); color: var(--seed-fg); box-shadow: var(--seed-shadow); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; }
+/* margin: auto restates the UA default that centres a modal; Tailwind's preflight resets it to 0. */
+.seed-fm-dialog { margin: auto; border: 1px solid var(--seed-border); border-radius: var(--seed-radius-lg); background: var(--seed-surface); color: var(--seed-fg); box-shadow: var(--seed-shadow); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; }
 .seed-fm-dialog::backdrop { background: var(--seed-backdrop); }
 .seed-fm-dialog form { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 20px; }
 .seed-fm-dialog h3 { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }

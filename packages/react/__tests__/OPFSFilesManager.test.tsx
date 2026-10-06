@@ -169,6 +169,55 @@ describe('OPFSFilesManager', () => {
     await opfs.removeEntry(`${root}-empty`)
   })
 
+  describe('stylesheet', () => {
+    // Stands in for Tailwind's preflight: a layered reset declared before ours.
+    let preflight: HTMLStyleElement
+    beforeEach(() => {
+      preflight = document.createElement('style')
+      preflight.textContent = '@layer base { *, ::before, ::after, ::backdrop { margin: 0; padding: 0; border: 0 solid; } }'
+      document.head.prepend(preflight)
+    })
+    afterEach(() => preflight.remove())
+
+    const color = (el: Element) => getComputedStyle(el).color
+    const tokenColor = (root: Element, token: string) => {
+      const probe = document.createElement('span')
+      probe.style.color = `var(${token})`
+      root.appendChild(probe)
+      const value = getComputedStyle(probe).color
+      probe.remove()
+      return value
+    }
+
+    it('lets button variant classes beat the element reset', async () => {
+      const { container } = render(<OPFSFilesManager rootPath={root} theme="dark" />)
+      fireEvent.click(await screen.findByRole('option', { name: /seed\.db|abc\.json/ }).catch(async () => {
+        await openFolder('files')
+        await openFolder('images')
+        return screen.findByRole('option', { name: 'ridge.png' })
+      }))
+      const panel = await screen.findByRole('dialog')
+      const fm = container.querySelector('.seed-fm')!
+      const primary = panel.querySelector('.seed-fm-btn--primary')!
+      const danger = panel.querySelector('.seed-fm-btn--danger-text')!
+      expect(color(primary)).toBe(tokenColor(fm, '--seed-accent-fg'))
+      expect(color(danger)).toBe(tokenColor(fm, '--seed-danger'))
+      expect(getComputedStyle(primary).fontSize).toBe('13px')
+      expect(getComputedStyle(primary).fontWeight).toBe('500')
+    })
+
+    it('centres the delete dialog under a margin reset', async () => {
+      render(<OPFSFilesManager rootPath={root} defaultView="list" />)
+      await openFolder('files')
+      await openFolder('json')
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete abc.json' }))
+      await screen.findByRole('button', { name: 'Delete 1 file' })
+      const rect = document.querySelector('.seed-fm-dialog')!.getBoundingClientRect()
+      expect(Math.abs(rect.left - (window.innerWidth - rect.right))).toBeLessThanOrEqual(1)
+      expect(rect.top).toBeGreaterThan(0)
+    })
+  })
+
   it('applies theme and classNames', async () => {
     const { container, rerender } = render(<OPFSFilesManager rootPath={root} classNames={{ root: 'host-root' }} />)
     const el = container.firstElementChild as HTMLElement
