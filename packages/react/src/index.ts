@@ -23,8 +23,14 @@ export { ADDRESSES_PERSISTED_EVENT } from './addressesPersistedEventName'
 export { LOCAL_COPIES_REMOVED_EVENT } from './localCopiesRemovedEventName'
 export { SeedClientGate } from './SeedClientGate'
 export type { SeedClientGateProps } from './SeedClientGate'
-export { OPFSFilesManager } from './OPFSFilesManager'
-export type { OPFSFilesManagerProps, OPFSFilesManagerTheme } from './OPFSFilesManager'
+export { OPFSFilesManager, OPFS_FILES_MANAGER_CSS } from './OPFSFilesManager'
+export type {
+  OPFSFilesManagerProps,
+  OPFSFilesManagerTheme,
+  OPFSFilesManagerView,
+  OPFSFilesManagerSlot,
+  OPFSFilesManagerClassNames,
+} from './OPFSFilesManager'
 export { useOPFSFiles } from './useOPFSFiles'
 export type { OPFSFile, UseOPFSFilesOptions } from './useOPFSFiles'
 export {

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, HTMLAttributes } from 'react';
 import { ImageSize } from '@seedprotocol/sdk'
+import { getOPFSFile } from './opfsPaths'
 
 const {EXTRA_SMALL, SMALL, MEDIUM, LARGE, EXTRA_LARGE} = ImageSize
 
@@ -33,18 +34,7 @@ const OPFSImage: React.FC<OPFSImageProps> = ({ filename, ...props }) => {
               const srcsetParts: string[] = [];
 
               for (const width of widths) {
-                  const filePath = `files/images/${width}/${baseFilename}.webp`;
-                  const segments = filePath.split('/').filter(Boolean);
-
-                  // Traverse the directory structure to find the file
-                  let currentHandle: FileSystemDirectoryHandle = rootHandle;
-                  for (let i = 0; i < segments.length - 1; i++) {
-                      currentHandle = await currentHandle.getDirectoryHandle(segments[i]);
-                  }
-
-                  // Get the file handle
-                  const fileHandle = await currentHandle.getFileHandle(segments[segments.length - 1]);
-                  const file = await fileHandle.getFile();
+                  const file = await getOPFSFile(`files/images/${width}/${baseFilename}.webp`, rootHandle);
 
                   // Create a Blob URL and add it to srcset
                   const blobUrl = URL.createObjectURL(file);
