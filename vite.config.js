@@ -75,7 +75,7 @@ export default defineConfig({
             'scripts/**',
             'db/**',
             'services/**',
-            'Schema/schema-models-integration.test.ts',
+            'Schema/schema-models-integration.test.ts', // Node-only (reads/writes schema files with fs); runs in NodeJS
             'imports/**',
             'fromCallbackActors.test.ts',
             'validation-timeout.test.ts',
@@ -206,13 +206,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/Db.test.ts',
 
             // Known broken — stale against current code. Fix or delete each, then drop it from this list.
-            'packages/sdk/__tests__/db/liveQuery.test.ts', // liveQuery expectations fail in Node and browser
             'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
-            'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
-            'packages/sdk/__tests__/Model/pendingWrites.test.ts', // cleanup deletes models before FK-dependent rows
-            'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)
-            'packages/sdk/__tests__/services/write/writeProcessMachine.test.ts', // cleanup deletes models before FK-dependent rows
-            'packages/sdk/__tests__/validation-timeout.test.ts', // same FK-violating cleanup
           ],
           testTimeout: 30000,
           pool: 'forks',
