@@ -1901,6 +1901,14 @@ export class Schema {
       ],
     })
 
+    // The rows for this schema's models and properties are deleted below; evict their cached
+    // instances too, or a re-import would get them back with dangling _dbIds.
+    if (schemaName) {
+      const evictedModelNames = Model.evictForSchema(schemaName)
+      const { ModelProperty } = await import('../ModelProperty/ModelProperty')
+      ModelProperty.evictForModels(evictedModelNames, schemaName)
+    }
+
     await runDestroyLifecycle(this, {
       getService: (instance) =>
         instance._service as { send: (ev: unknown) => void; stop: () => void },

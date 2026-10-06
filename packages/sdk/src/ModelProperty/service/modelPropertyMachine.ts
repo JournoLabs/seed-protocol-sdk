@@ -277,11 +277,9 @@ export const modelPropertyMachine = setup({
       },
     },
     saveToSchema: {
-      always: {
-        guard: 'isPropertyValid',
-        target: '.saving',
-      },
-      initial: 'saving',
+      // Gate the save in a transient child. An `always` on this parent targeting `.saving` re-enters
+      // the invoking child on every microstep and never settles (save() ran the process out of memory).
+      initial: 'checking',
       on: {
         // Apply updateContext but do not re-invoke saveToSchema actor (avoids infinite loop).
         // Context is updated; in-flight save completes with original context.
@@ -352,6 +350,12 @@ export const modelPropertyMachine = setup({
         },
       },
       states: {
+        checking: {
+          always: [
+            { guard: 'isPropertyValid', target: 'saving' },
+            { target: '#modelProperty.idle' },
+          ],
+        },
         saving: {
           on: {
             saveToSchemaSuccess: {

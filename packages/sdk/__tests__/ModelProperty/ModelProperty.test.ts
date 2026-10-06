@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
@@ -127,51 +127,38 @@ testDescribe('ModelProperty Integration Tests', () => {
           .map((link: { modelId: number | null }) => link.modelId)
           .filter((id: number | null): id is number => id !== null)
         
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(propertiesTable)
-            .set({ refModelId: null })
-            .where(notInArray(propertiesTable.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(propertiesTable).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(propertiesTable)
-            .where(notInArray(propertiesTable.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(propertiesTable)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
+        // Evict cached instances of the test schemas first. This stops their actors (no new writes) and
+        // makes the next import build fresh instances instead of reusing ones bound to deleted rows.
+        const testSchemaRows = await db
+          .select({ name: schemas.name })
+          .from(schemas)
           .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+        for (const { name } of testSchemaRows) {
+          if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
+        }
+
+        // Then delete in FK order, scoped to every model that isn't a Seed Protocol model
+        // (including orphans not linked to any schema).
+        const isTestModel = (column: typeof propertiesTable.modelId | typeof modelsTable.id) =>
+          seedProtocolModelIds.length > 0 ? notInArray(column, seedProtocolModelIds) : undefined
+
+        // A write the previous test started (e.g. writeModelToDb inserting a model_schemas row) can't be
+        // cancelled by stopping its actor and may land mid-cleanup, failing an FK check. Retry until it settles.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
+            await db.delete(propertyUids)
+            await db.delete(modelUids)
+            await db.delete(propertiesTable).where(isTestModel(propertiesTable.modelId))
+            await db.delete(modelSchemas).where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
+            await db.delete(modelsTable).where(isTestModel(modelsTable.id))
+            await db.delete(schemas).where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+            break
+          } catch (error) {
+            if (attempt >= 10) throw error
+            await new Promise((resolve) => setTimeout(resolve, 200))
+          }
+        }
       } else {
         // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
         await db.update(propertiesTable).set({ refModelId: null })
@@ -1031,14 +1018,18 @@ testDescribe('ModelProperty Integration Tests', () => {
         property.dataType = 'Number'
         await new Promise(resolve => setTimeout(resolve, 200))
         
-        // Save property
+        // Save property. Regression: save() used to loop forever inside the machine and exhaust memory.
         property.save()
-        
-        // Wait for save to complete
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Property should still be defined
-        expect(property).toBeDefined()
+        await waitForModelPropertyIdle(property)
+
+        const propertyFileId = property._getSnapshotContext().id!
+        await vi.waitFor(async () => {
+          const [row] = await BaseDb.getAppDb()!
+            .select({ dataType: propertiesTable.dataType })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, propertyFileId))
+          expect(row?.dataType).toBe('Number')
+        }, { timeout: 5000 })
       }
     })
   })

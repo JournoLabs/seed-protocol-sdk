@@ -40,6 +40,10 @@ async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) return
 
+  // Evict cached instances first (stopping their actors) so the next import builds fresh ones bound
+  // to the new rows; otherwise Model.create returns the stale instance and its properties are never written.
+  ModelProperty.evictForModels(Model.evictForSchema(schemaName), schemaName)
+
   const schemaRow = await db
     .select()
     .from(schemas)
