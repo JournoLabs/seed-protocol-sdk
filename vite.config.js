@@ -218,11 +218,8 @@ export default defineConfig({
             'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
             'packages/sdk/__tests__/Model/pendingWrites.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/node/FileManager.test.ts', // static FileManager.initializeFileSystem() no longer exists
-            'packages/sdk/__tests__/node/PathResolver.test.ts', // chdirs into mock dirs that don't exist
-            'packages/sdk/__tests__/node/PathResolver.production.test.ts', // assumes NODE_ENV=production and a built dist/
             'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)
             'packages/sdk/__tests__/scripts/codegen.test.ts', // reads process.cwd()/src/seedSchema
-            'packages/sdk/__tests__/scripts/production-path.test.ts', // imports removed @/node/PathResolver
             'packages/sdk/__tests__/services/write/writeProcessMachine.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/validation-timeout.test.ts', // same FK-violating cleanup
           ],
