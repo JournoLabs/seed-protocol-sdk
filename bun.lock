@@ -332,7 +332,7 @@
         "vite-plugin-dts": "^4.5.4",
       },
       "peerDependencies": {
-        "@seedprotocol/sdk": "^0.4.0",
+        "@seedprotocol/sdk": "^0.6.0",
         "@tanstack/react-query": "^5",
         "react": "^18 || ^19",
       },
