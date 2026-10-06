@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
@@ -1018,14 +1018,18 @@ testDescribe('ModelProperty Integration Tests', () => {
         property.dataType = 'Number'
         await new Promise(resolve => setTimeout(resolve, 200))
         
-        // Save property
+        // Save property. Regression: save() used to loop forever inside the machine and exhaust memory.
         property.save()
+        await waitForModelPropertyIdle(property)
 
-        // Wait for save to complete
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        // Property should still be defined
-        expect(property).toBeDefined()
+        const propertyFileId = property._getSnapshotContext().id!
+        await vi.waitFor(async () => {
+          const [row] = await BaseDb.getAppDb()!
+            .select({ dataType: propertiesTable.dataType })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, propertyFileId))
+          expect(row?.dataType).toBe('Number')
+        }, { timeout: 5000 })
       }
     })
   })
