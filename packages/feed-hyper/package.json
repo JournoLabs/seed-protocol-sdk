@@ -48,6 +48,11 @@
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/feed-hyper"
+  },
   "publishConfig": {
     "access": "public"
   }
