@@ -156,6 +156,23 @@ describe('OPFSFilesManager', () => {
     expect(await existsOPFS(`${root}/files/json/abc.json`)).toBe(true)
   })
 
+  it('sends results to onNotify instead of the built-in toasts', async () => {
+    const onNotify = vi.fn()
+    const { container } = render(<OPFSFilesManager rootPath={root} onNotify={onNotify} defaultView="list" />)
+    await openFolder('files')
+    await openFolder('json')
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete abc.json' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete 1 file' }))
+    await waitFor(() => expect(onNotify).toHaveBeenCalledTimes(1))
+    expect(onNotify).toHaveBeenCalledWith('Deleted 1 file', 'success', {
+      kind: 'delete',
+      deleted: [`${root}/files/json/abc.json`],
+      skipped: [],
+      failed: [],
+    })
+    expect(container.querySelector('.seed-fm-toasts')).toBeNull()
+  })
+
   it('explains a missing rootPath', async () => {
     render(<OPFSFilesManager rootPath={`${root}-missing`} />)
     expect((await screen.findByRole('alert')).textContent).toContain(`Can’t open ${root}-missing`)

@@ -20,7 +20,13 @@ import { formatFileSize } from './format'
 import { Icon } from './icons'
 import { PreviewPanel } from './PreviewPanel'
 import { ensureStylesInjected } from './styles'
-import type { OPFSFilesManagerProps, OPFSFilesManagerSlot, OPFSFilesManagerView } from './types'
+import type {
+  OPFSFilesManagerNotice,
+  OPFSFilesManagerNotifyTone,
+  OPFSFilesManagerProps,
+  OPFSFilesManagerSlot,
+  OPFSFilesManagerView,
+} from './types'
 import { useStorageEstimate, type StorageEstimate } from './useStorageEstimate'
 import { createZip } from './zip'
 
@@ -45,7 +51,7 @@ function triggerBrowserDownload(name: string, blob: Blob) {
 interface Toast {
   id: number
   message: string
-  tone: 'success' | 'error'
+  tone: OPFSFilesManagerNotifyTone
 }
 
 function useToasts() {
@@ -178,6 +184,7 @@ export function OPFSFilesManager({
   groupImageVariants = true,
   deleteWarning = defaultDeleteWarning,
   confirmDelete,
+  onNotify,
 }: OPFSFilesManagerProps) {
   useInsertionEffect(() => {
     if (theme !== 'none') ensureStylesInjected()
@@ -207,6 +214,10 @@ export function OPFSFilesManager({
   const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null)
   const [busy, setBusy] = useState(false)
   const { toasts, showToast } = useToasts()
+  const notify = (message: string, tone: OPFSFilesManagerNotifyTone, notice: OPFSFilesManagerNotice) => {
+    if (onNotify) onNotify(message, tone, notice)
+    else showToast(message, tone)
+  }
 
   const listing = useMemo(() => listDirectory(entries, cwd, { query, sort }), [entries, cwd, query, sort])
   const visible = listing.entries
@@ -309,9 +320,17 @@ export function OPFSFilesManager({
       const zip = await createZip(inputs)
       const name = `${rootLabel}-${new Date().toISOString().slice(0, 10)}.zip`
       await saveBlob({ name, path: name, size: zip.size, type: 'application/zip', lastModified: Date.now() }, zip)
-      showToast(`Saved ${name} with ${plural(list.length, 'file')}`)
+      notify(`Saved ${name} with ${plural(list.length, 'file')}`, 'success', {
+        kind: 'download',
+        paths: list.map((e) => e.file.path),
+        fileName: name,
+      })
     } catch (err) {
-      showToast(`Couldn’t download: ${errorMessage(err)}`, 'error')
+      notify(`Couldn’t download: ${errorMessage(err)}`, 'error', {
+        kind: 'download',
+        paths: list.map((e) => e.file.path),
+        error: errorMessage(err),
+      })
     } finally {
       setBusy(false)
     }
@@ -323,24 +342,24 @@ export function OPFSFilesManager({
   const performDelete = async (targets: OPFSFile[]) => {
     setBusy(true)
     const deleted: string[] = []
-    const failed: string[] = []
-    let skipped = 0
+    const failed: { path: string; error: string }[] = []
+    const skipped: string[] = []
     try {
       const root = await navigator.storage.getDirectory()
       for (const file of targets) {
         if (onBeforeDelete && !(await onBeforeDelete(file))) {
-          skipped++
+          skipped.push(file.path)
           continue
         }
         try {
           await deleteOPFSEntry(file.path, root)
           deleted.push(file.path)
         } catch (err) {
-          failed.push(`${file.name}: ${errorMessage(err)}`)
+          failed.push({ path: file.path, error: errorMessage(err) })
         }
       }
     } catch (err) {
-      failed.push(errorMessage(err))
+      failed.push({ path: '', error: errorMessage(err) })
     }
 
     setSelected((prev) => {
@@ -353,9 +372,12 @@ export function OPFSFilesManager({
     setBusy(false)
 
     const parts = [deleted.length > 0 ? `Deleted ${plural(deleted.length, 'file')}` : 'Nothing deleted']
-    if (skipped) parts.push(`${skipped} kept by onBeforeDelete`)
-    if (failed.length) parts.push(`${failed.length} failed (${failed.join('; ')})`)
-    showToast(parts.join('. '), failed.length ? 'error' : 'success')
+    if (skipped.length) parts.push(`${skipped.length} kept by onBeforeDelete`)
+    if (failed.length) {
+      const reasons = failed.map((f) => (f.path ? `${f.path.split('/').pop()}: ${f.error}` : f.error))
+      parts.push(`${failed.length} failed (${reasons.join('; ')})`)
+    }
+    notify(parts.join('. '), failed.length ? 'error' : 'success', { kind: 'delete', deleted, skipped, failed })
 
     if (deleted.length > 0) await onAfterDelete?.(deleted)
   }
@@ -371,12 +393,17 @@ export function OPFSFilesManager({
   }
 
   const copyPath = (path: string) => {
-    const done = () => showToast('Path copied')
-    const fail = () => showToast('Couldn’t copy. Select the path text instead.', 'error')
+    const done = () => notify('Path copied', 'success', { kind: 'copy-path', path })
+    const fail = (err?: unknown) =>
+      notify('Couldn’t copy. Select the path text instead.', 'error', {
+        kind: 'copy-path',
+        path,
+        error: err === undefined ? 'Clipboard unavailable' : errorMessage(err),
+      })
     try {
       navigator.clipboard.writeText(path).then(done, fail)
-    } catch {
-      fail()
+    } catch (err) {
+      fail(err)
     }
   }
 
@@ -682,14 +709,16 @@ export function OPFSFilesManager({
         />
       )}
 
-      <ul className="seed-fm-toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <li key={t.id} className={cn('toast', `seed-fm-toast${t.tone === 'error' ? ' seed-fm-toast--error' : ''}`)}>
-            <Icon name={t.tone === 'error' ? 'triangleAlert' : 'check'} size={15} strokeWidth={2.5} />
-            {t.message}
-          </li>
-        ))}
-      </ul>
+      {!onNotify && (
+        <ul className="seed-fm-toasts" aria-live="polite">
+          {toasts.map((t) => (
+            <li key={t.id} className={cn('toast', `seed-fm-toast${t.tone === 'error' ? ' seed-fm-toast--error' : ''}`)}>
+              <Icon name={t.tone === 'error' ? 'triangleAlert' : 'check'} size={15} strokeWidth={2.5} />
+              {t.message}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

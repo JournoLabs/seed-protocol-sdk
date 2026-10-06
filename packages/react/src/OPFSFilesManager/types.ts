@@ -26,6 +26,26 @@ export type OPFSFilesManagerSlot =
 
 export type OPFSFilesManagerClassNames = Partial<Record<OPFSFilesManagerSlot, string>>
 
+export type OPFSFilesManagerNotifyTone = 'success' | 'error'
+
+/** What a notification is about, so hosts can write their own wording. */
+export type OPFSFilesManagerNotice =
+  | {
+      kind: 'delete'
+      deleted: string[]
+      /** Paths that onBeforeDelete kept. */
+      skipped: string[]
+      failed: { path: string; error: string }[]
+    }
+  | {
+      kind: 'download'
+      paths: string[]
+      /** Name of the saved .zip. Set when several files were saved. */
+      fileName?: string
+      error?: string
+    }
+  | { kind: 'copy-path'; path: string; error?: string }
+
 export interface OPFSFilesManagerProps {
   /** Optional subdirectory to scan (e.g. 'app-files'). Default: root. */
   rootPath?: string
@@ -76,4 +96,9 @@ export interface OPFSFilesManagerProps {
    * including resized copies. Resolve true to delete.
    */
   confirmDelete?: (files: OPFSFile[]) => Promise<boolean>
+  /**
+   * Show results and errors in the host's own toaster. When set, the built-in toasts
+   * aren't rendered.
+   */
+  onNotify?: (message: string, tone: OPFSFilesManagerNotifyTone, notice: OPFSFilesManagerNotice) => void
 }

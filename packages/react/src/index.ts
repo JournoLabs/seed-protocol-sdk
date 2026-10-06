@@ -30,6 +30,8 @@ export type {
   OPFSFilesManagerView,
   OPFSFilesManagerSlot,
   OPFSFilesManagerClassNames,
+  OPFSFilesManagerNotice,
+  OPFSFilesManagerNotifyTone,
 } from './OPFSFilesManager'
 export { useOPFSFiles } from './useOPFSFiles'
 export type { OPFSFile, UseOPFSFilesOptions } from './useOPFSFiles'

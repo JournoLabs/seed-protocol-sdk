@@ -5,5 +5,7 @@ export type {
   OPFSFilesManagerView,
   OPFSFilesManagerSlot,
   OPFSFilesManagerClassNames,
+  OPFSFilesManagerNotice,
+  OPFSFilesManagerNotifyTone,
 } from './types'
 export { OPFS_FILES_MANAGER_CSS } from './styles'
