@@ -684,6 +684,7 @@ export class ModelProperty {
             dataType: property.dataType!,
             refModelId: property.refModelId,
             refValueType: property.refValueType,
+            required: property.required,
             storageType: property.storageType,
             localStorageDir: property.localStorageDir,
             filenameSuffix: property.filenameSuffix,

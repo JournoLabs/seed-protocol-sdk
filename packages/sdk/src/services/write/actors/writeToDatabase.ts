@@ -79,6 +79,7 @@ export const writeToDatabase = fromCallback<
                 storageType: ctx.storageType ?? input.entityData.storageType,
                 localStorageDir: ctx.localStorageDir ?? input.entityData.localStorageDir,
                 filenameSuffix: ctx.filenameSuffix ?? input.entityData.filenameSuffix,
+                required: ctx.required ?? input.entityData.required,
               }
             }
           }

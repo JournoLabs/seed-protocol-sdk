@@ -2013,7 +2013,11 @@ export async function writePropertyToDb(
     propertyData.refValueType = null
   }
 
-  propertyData.required = data.required ?? false
+  // Only overwrite `required` when the caller knows it. The creation write's payload can lack it, and
+  // defaulting to false here cleared the flag the schema import set (required relations became optional).
+  if (data.required !== undefined) {
+    propertyData.required = data.required
+  }
 
   // Note: Additional property fields like storageType, localStorageDir, filenameSuffix
   // are not stored in the properties table but may be in the schema JSON
@@ -2046,7 +2050,7 @@ export async function writePropertyToDb(
       logger(`Property with schemaFileId "${propertyFileId}" was created by another process, updated existing record`)
     } else {
       try {
-        await db.insert(properties).values(propertyData)
+        await db.insert(properties).values({ required: false, ...propertyData })
         logger(`Created property ${data.name} (${propertyFileId}) in database`)
       } catch (error: any) {
         // Handle unique constraint violation

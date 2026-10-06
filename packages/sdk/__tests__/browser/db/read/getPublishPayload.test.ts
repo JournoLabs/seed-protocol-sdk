@@ -13,6 +13,7 @@ import {
   createItemWithAllPropertyTypes,
   createItemWithImageAndUploadedTx,
   createImageItemWithMissingStorageTxMetadata,
+  createPublishedTestAuthor,
   waitForPropertyInstances,
 } from '../../../test-utils/getPublishPayloadIntegrationHelpers'
 
@@ -135,9 +136,11 @@ describe('getPublishPayload integration (browser)', () => {
     const { imageSeedLocalId } = await createImageItemWithMissingStorageTxMetadata()
     const imageItem = await Item.find({ seedLocalId: imageSeedLocalId })
     if (!imageItem) throw new Error('Image item not found')
+    const author = await createPublishedTestAuthor()
     const postItem = await Item.create({
       modelName: 'Post',
       title: 'Post with image placeholder',
+      author: author.seedLocalId,
       coverImage: imageSeedLocalId,
     })
     await waitForPropertyInstances(postItem)
