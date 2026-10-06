@@ -75,7 +75,7 @@ export default defineConfig({
             'scripts/**',
             'db/**',
             'services/**',
-            'Schema/schema-models-integration.test.ts',
+            'Schema/schema-models-integration.test.ts', // Node-only (reads/writes schema files with fs); runs in NodeJS
             'imports/**',
             'fromCallbackActors.test.ts',
             'validation-timeout.test.ts',
@@ -218,7 +218,6 @@ export default defineConfig({
             'packages/sdk/__tests__/node/FileManager.test.ts', // static FileManager.initializeFileSystem() no longer exists
             'packages/sdk/__tests__/node/PathResolver.test.ts', // chdirs into mock dirs that don't exist
             'packages/sdk/__tests__/node/PathResolver.production.test.ts', // assumes NODE_ENV=production and a built dist/
-            'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)
             'packages/sdk/__tests__/scripts/addModel.test.ts', // every test is commented out
             'packages/sdk/__tests__/scripts/bin.test.ts', // imports removed @/helpers/scripts
             'packages/sdk/__tests__/scripts/codegen.test.ts', // reads process.cwd()/src/seedSchema
