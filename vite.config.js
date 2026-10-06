@@ -204,9 +204,6 @@ export default defineConfig({
 
             // Browser-only: SQL-tag liveQuery isn't supported by the Node stub. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/db/Db.test.ts',
-
-            // Known broken — stale against current code. Fix or delete each, then drop it from this list.
-            'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
           ],
           testTimeout: 30000,
           pool: 'forks',

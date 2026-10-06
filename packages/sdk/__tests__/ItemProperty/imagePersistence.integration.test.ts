@@ -63,17 +63,52 @@ async function waitForItemPropertyIdle(
   )
 }
 
+/**
+ * Wait until saveImage has finished: it replaces propertyValue with the image seed id and sets
+ * refResolvedValue to the saved filename. Blob/File values get an optimistic refResolvedValue
+ * ('image' or the File name) before the save runs, so refResolvedValue alone is not a completion signal.
+ */
 async function waitForRefResolvedValue(
   property: ItemProperty<any>,
-  timeout = 30000
+  timeout = 15000
 ): Promise<string | undefined> {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    const val = property.refResolvedValue
-    if (val) return val
-    await new Promise((r) => setTimeout(r, 200))
+  const snapshot = await waitFor(
+    property.getService(),
+    (s) => {
+      const ctx = s.context as Record<string, any>
+      if (ctx._saveError || ctx._saveValidationErrors?.length) return true
+      return (
+        !!ctx.refResolvedValue &&
+        ctx.refSeedType === 'image' &&
+        typeof ctx.propertyValue === 'string' &&
+        !/^(blob|data):/.test(ctx.propertyValue)
+      )
+    },
+    { timeout }
+  )
+  const ctx = snapshot.context as Record<string, any>
+  expect(ctx._saveError ?? null).toBeNull()
+  expect(ctx._saveValidationErrors ?? []).toEqual([])
+  return ctx.refResolvedValue
+}
+
+/**
+ * Browser: Image values render as blob: URLs. Node has no display blob URLs for saved files
+ * (NodeFileManager.getContentUrlFromPath returns file://, d0159c8), so ItemProperty.value
+ * falls back to the saved filename.
+ */
+async function expectImageDisplayValue(
+  property: ItemProperty<any>,
+  savedFileName: string | undefined
+): Promise<void> {
+  const renderValue = property.value
+  expect(renderValue).toBeTruthy()
+  if (typeof window !== 'undefined') {
+    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    return
   }
-  return undefined
+  expect(renderValue).toBe(savedFileName)
+  expect(await BaseFileManager.pathExists(BaseFileManager.getFilesPath('images', renderValue))).toBe(true)
 }
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -228,9 +263,7 @@ testDescribe('Image property persistence integration tests', () => {
 
     await waitForItemPropertyIdle(reloadedProp)
 
-    const renderValue = reloadedProp.value
-    expect(renderValue).toBeTruthy()
-    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    await expectImageDisplayValue(reloadedProp, refResolvedValue)
   })
 
   it('Image displays after reload when saved from blob URL', async () => {
@@ -270,9 +303,7 @@ testDescribe('Image property persistence integration tests', () => {
 
     await waitForItemPropertyIdle(reloadedProp)
 
-    const renderValue = reloadedProp.value
-    expect(renderValue).toBeTruthy()
-    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    await expectImageDisplayValue(reloadedProp, refResolvedValue)
   })
 
   it('data URL still works and persists', async () => {

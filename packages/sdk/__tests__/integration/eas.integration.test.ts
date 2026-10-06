@@ -236,11 +236,13 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
 
       const versionsKey = recordedQueryKeys.find((k) => Array.isArray(k) && k[0] === 'getVersionsForAllModels')
       expect(versionsKey).toBeDefined()
-      expect(versionsKey).toHaveLength(2)
+      // [name, sorted uids, excludeRevoked] — excludeRevoked changes the GraphQL filter, so it is part of the key
+      expect(versionsKey).toHaveLength(3)
       expect(versionsKey![0]).toBe('getVersionsForAllModels')
       expect(versionsKey![1]).toBeDefined()
       expect(Array.isArray(versionsKey![1])).toBe(true)
       expect((versionsKey![1] as string[]).sort()).toEqual([...seedUids].sort())
+      expect(versionsKey![2]).toBe(true)
     }, NETWORK_TIMEOUT)
 
     it('getItemPropertiesFromEas includes versionUids in queryKey', async () => {
@@ -256,11 +258,13 @@ describe.skipIf(!isNodeEnv)('EAS Integration', () => {
 
       const propsKey = recordedQueryKeys.find((k) => Array.isArray(k) && k[0] === 'getPropertiesForAllModels')
       expect(propsKey).toBeDefined()
-      expect(propsKey).toHaveLength(2)
+      // [name, sorted uids, excludeRevoked] — excludeRevoked changes the GraphQL filter, so it is part of the key
+      expect(propsKey).toHaveLength(3)
       expect(propsKey![0]).toBe('getPropertiesForAllModels')
       expect(propsKey![1]).toBeDefined()
       expect(Array.isArray(propsKey![1])).toBe(true)
       expect((propsKey![1] as string[]).sort()).toEqual([...versionUids].sort())
+      expect(propsKey![2]).toBe(true)
     }, NETWORK_TIMEOUT)
 
     it('different parameters produce different queryKeys', async () => {
