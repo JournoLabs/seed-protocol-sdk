@@ -214,7 +214,6 @@ export default defineConfig({
             'packages/sdk/__tests__/commonjs-compatibility.test.ts', // expects dist/main.cjs.js; bare require in ESM
             'packages/sdk/__tests__/db/liveQuery.test.ts', // liveQuery expectations fail in Node and browser
             'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
-            'packages/sdk/__tests__/fromCallbackActors.test.ts', // walks process.cwd()/src, which doesn't exist at repo root
             'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
             'packages/sdk/__tests__/Model/pendingWrites.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)

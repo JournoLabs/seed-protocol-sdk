@@ -7,12 +7,11 @@
  * This utility can be used to test all fromCallback actors in the codebase.
  */
 
-import { fromCallback, EventObject } from 'xstate'
 import { readdir, readFile } from 'fs/promises'
 import { stat } from 'fs/promises'
 import * as path from 'path'
 
-type ValidationResult = {
+export type ValidationResult = {
   file: string
   actorName: string
   issues: string[]
@@ -26,16 +25,52 @@ type SendBackCall = {
   typeValue?: string
 }
 
+/** Blank out comments (keeping newlines so line numbers stay right). */
+function stripComments(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/.*$/gm, (_m, pre) => pre)
+}
+
+/**
+ * Finds actual `sendBack(...)` calls (not the `({ sendBack })` destructuring) and returns each call's
+ * argument text, matching parentheses so multi-line event objects are captured whole.
+ */
+function findSendBackCalls(code: string): SendBackCall[] {
+  const calls: SendBackCall[] = []
+  const re = /\bsendBack\s*\(/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(code))) {
+    let i = match.index + match[0].length
+    let depth = 1
+    while (i < code.length && depth > 0) {
+      if (code[i] === '(') depth++
+      else if (code[i] === ')') depth--
+      i++
+    }
+    const args = code.slice(match.index + match[0].length, i - 1).trim()
+    calls.push({
+      line: code.slice(0, match.index).split('\n').length,
+      code: `sendBack(${args})`,
+      // `{ type: ... }` or a spread of an existing event object (`{ ...event }`)
+      hasType: /\btype\s*:/.test(args) || /^\{\s*\.\.\./.test(args),
+      typeValue: extractTypeValue(args),
+    })
+  }
+  return calls
+}
+
 /**
  * Validates a single fromCallback actor file
  */
 export function validateFromCallbackActor(
   filePath: string,
-  actorCode: string
+  sourceCode: string
 ): ValidationResult {
   const issues: string[] = []
   const actorName = path.basename(filePath, path.extname(filePath))
-  
+  const actorCode = stripComments(sourceCode)
+
   // Check if file contains fromCallback
   if (!actorCode.includes('fromCallback')) {
     return {
@@ -46,84 +81,42 @@ export function validateFromCallbackActor(
     }
   }
 
-  // Find all sendBack calls
-  const sendBackCalls: SendBackCall[] = []
-  const lines = actorCode.split('\n')
-  
-  lines.forEach((line, index) => {
-    // Look for sendBack calls (can span multiple lines)
-    if (line.includes('sendBack')) {
-      // Try to find the complete call (may span lines)
-      let fullCall = line
-      let lineOffset = 0
-      
-      // If line doesn't end with ), try to find the closing
-      while (!fullCall.includes(')') && index + lineOffset < lines.length - 1) {
-        lineOffset++
-        fullCall += '\n' + lines[index + lineOffset]
-      }
-      
-      sendBackCalls.push({
-        line: index + 1,
-        code: fullCall.trim(),
-        hasType: /type\s*[:=]/.test(fullCall),
-        typeValue: extractTypeValue(fullCall),
-      })
-    }
-  })
-
-  // Validate each sendBack call
-  sendBackCalls.forEach((call, idx) => {
+  for (const call of findSendBackCalls(actorCode)) {
     if (!call.hasType) {
       issues.push(
         `Line ${call.line}: sendBack call missing 'type' property. Callback actors must send explicit event types.`
       )
-    } else if (call.typeValue) {
-      // Check for common anti-patterns
-      const type = call.typeValue.toLowerCase()
-      if (type.includes('done') || type.includes('complete') && !type.includes('success')) {
-        issues.push(
-          `Line ${call.line}: sendBack uses '${call.typeValue}' which might be confused with onDone. Use explicit success/error event types.`
-        )
-      }
+    } else if (call.typeValue && /^(done|complete)$/i.test(call.typeValue)) {
+      // A bare 'done' event reads like onDone, which callback actors never trigger.
+      issues.push(
+        `Line ${call.line}: sendBack uses '${call.typeValue}' which might be confused with onDone. Use explicit success/error event types.`
+      )
     }
-  })
+  }
 
   // Check for onDone usage in the file (would indicate incorrect pattern)
-  if (actorCode.includes('onDone') && actorCode.includes('fromCallback')) {
+  if (actorCode.includes('onDone')) {
     issues.push(
       'File contains both fromCallback and onDone. Callback actors do not support onDone - use explicit event handlers instead.'
     )
   }
 
   // Check for error.platform pattern (should use explicit error events)
-  if (actorCode.includes('error.platform') && actorCode.includes('fromCallback')) {
+  if (actorCode.includes('error.platform')) {
     issues.push(
       'File uses error.platform pattern. Callback actors should send explicit error event types via sendBack.'
     )
   }
 
   // Check that all async operations have error handling
-  const asyncPatterns = [
-    /\.then\(/g,
-    /async\s+\(/g,
-    /await\s+/g,
-  ]
-  
-  let hasAsync = false
-  asyncPatterns.forEach(pattern => {
-    if (pattern.test(actorCode)) {
-      hasAsync = true
-    }
-  })
+  const hasAsync = [/\.then\(/, /async\s+\(/, /await\s+/].some((pattern) => pattern.test(actorCode))
 
   if (hasAsync) {
-    // Check if there's error handling
-    const hasErrorHandling = 
-      actorCode.includes('.catch(') || 
+    const hasErrorHandling =
+      actorCode.includes('.catch(') ||
       actorCode.includes('try {') ||
       actorCode.includes('catch (')
-    
+
     if (!hasErrorHandling) {
       issues.push(
         'Async operations detected but no error handling found. All async operations should have .catch() handlers that send error events.'
@@ -143,18 +136,18 @@ export function validateFromCallbackActor(
  * Extracts the type value from a sendBack call
  */
 function extractTypeValue(code: string): string | undefined {
-  // Match patterns like: type: 'eventName' or type: "eventName" or type: EventName
-  const typeMatch = code.match(/type\s*[:=]\s*['"`]([^'"`]+)['"`]/)
+  // Match patterns like: type: 'eventName' or type: "eventName"
+  const typeMatch = code.match(/type\s*:\s*['"`]([^'"`]+)['"`]/)
   if (typeMatch) {
     return typeMatch[1]
   }
-  
-  // Match patterns like: type: SomeConstant
-  const constMatch = code.match(/type\s*[:=]\s*([A-Z_][A-Z0-9_]*)/)
+
+  // Match patterns like: type: SomeConstant or type: Events.SOME_EVENT
+  const constMatch = code.match(/type\s*:\s*([A-Za-z_][\w.]*)/)
   if (constMatch) {
     return constMatch[1]
   }
-  
+
   return undefined
 }
 
@@ -210,34 +203,3 @@ export async function validateAllFromCallbackActors(
   await walkDir(directory)
   return results
 }
-
-/**
- * Creates a test that validates all fromCallback actors
- */
-export function createFromCallbackValidationTest() {
-  return async () => {
-    const srcDir = path.join(process.cwd(), 'src')
-    const results = await validateAllFromCallbackActors(srcDir)
-    
-    const invalid = results.filter(r => !r.isValid)
-    
-    if (invalid.length > 0) {
-      console.error('\n❌ Found fromCallback actors with issues:\n')
-      invalid.forEach(result => {
-        console.error(`\n📁 ${result.file}`)
-        console.error(`   Actor: ${result.actorName}`)
-        result.issues.forEach(issue => {
-          console.error(`   ⚠️  ${issue}`)
-        })
-      })
-      
-      throw new Error(
-        `Found ${invalid.length} fromCallback actor(s) with validation issues. ` +
-        `See output above for details.`
-      )
-    } else {
-      console.log(`✅ All ${results.length} fromCallback actors are valid!`)
-    }
-  }
-}
-
