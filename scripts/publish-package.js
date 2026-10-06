@@ -3,8 +3,8 @@
  * Publish package(s) to npm with dependency validation.
  *
  * Usage:
- *   node scripts/publish-package.js [-f] [-y] <package>
- *   node scripts/publish-package.js [-f] [-y] all
+ *   node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] <package>
+ *   node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] all
  *   node scripts/publish-package.js [-f] [-y]          # same as "all" (used by bun run publish:all)
  *
  * Packages: eas, arweave, vite, query, sdk, feed, feed-hyper, gateway-hyper, react, publish, mapping
@@ -26,6 +26,11 @@
  * Flags:
  * - `-f` / `--force` — skip running tests before build (sdk / react paths)
  * - `-y` / `--yes` — skip the publish:all confirmation prompt
+ * - `--tag <tag>` — dist-tag passed to every `npm publish` (required for prerelease versions;
+ *   `latest` is refused for them)
+ * - `--provenance` — publish with npm provenance (CI only; see docs/RELEASING.md)
+ *
+ * Without a terminal (CI), any prompt fails instead of waiting for input.
  *
  * Experimental packages (cli, webpack, ghost) are private and not publishable via this script.
  */
@@ -36,31 +41,24 @@ import { fileURLToPath } from 'url'
 import { spawn, execSync } from 'child_process'
 import * as readline from 'readline'
 import { withPublishableWorkspaceManifest } from './workspace-publish-manifest.js'
+import { PUBLISH_ORDER } from './release-channel.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-/**
- * Dependency-safe publish order for a full release.
- * Keep in sync with real @seedprotocol/* package.json dependencies.
- */
-const PUBLISH_ORDER = [
-  'eas',
-  'arweave',
-  'vite',
-  'query',
-  'sdk',
-  'feed',
-  'feed-hyper',
-  'gateway-hyper',
-  'react',
-  'publish',
-  'mapping',
-]
-
 const VALID_PACKAGES = [...PUBLISH_ORDER]
 const LEAN_PACKAGES = ['eas', 'arweave', 'vite']
+
+/** Extra `npm publish` arguments from --tag / --provenance; set in main(). */
+const npmPublishOptions = { tag: null, provenance: false }
+
+function npmPublishCommand() {
+  const parts = ['npm publish --access public']
+  if (npmPublishOptions.tag) parts.push(`--tag ${npmPublishOptions.tag}`)
+  if (npmPublishOptions.provenance) parts.push('--provenance')
+  return parts.join(' ')
+}
 
 function readPackageJson(path) {
   const content = readFileSync(path, 'utf-8')
@@ -108,6 +106,10 @@ function isReactVersionPublished(version) {
  * Prompt user for yes/no input
  */
 function prompt(question) {
+  if (!process.stdin.isTTY) {
+    console.error(`\n❌ Would prompt without a terminal: ${question.trim()}`)
+    process.exit(1)
+  }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
@@ -143,20 +145,14 @@ function runCommand(command, options = {}) {
   })
 }
 
-/** Build only (no npm publish); must stay in sync with packages/sdk build:publish inner command */
-const SDK_BUILD_ONLY_CMD =
-  'bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js'
-
 async function publishSdk(skipTests = false) {
   const sdkDir = join(rootDir, 'packages', 'sdk')
   console.log('\n📦 Publishing @seedprotocol/sdk...\n')
-  if (skipTests) {
-    await runCommand(`node scripts/build-with-tests.js -f "${SDK_BUILD_ONLY_CMD}"`, { cwd: rootDir })
-  } else {
-    await runCommand('bun run build:publish', { cwd: sdkDir })
-  }
+  // Always the same build, with every dist check; -f only skips its test run.
+  const env = skipTests ? { ...process.env, SKIP_TESTS: '1' } : process.env
+  await runCommand('bun run build:publish', { cwd: sdkDir, env })
   await withPublishableWorkspaceManifest(rootDir, 'packages/sdk', async () => {
-    await runCommand('npm publish --access public', { cwd: sdkDir })
+    await runCommand(npmPublishCommand(), { cwd: sdkDir })
   })
   console.log('\n✅ SDK published successfully!\n')
 }
@@ -168,7 +164,7 @@ async function publishReact(skipTests = false) {
     await runCommand('node scripts/build-with-tests.js "true"', { cwd: rootDir })
   }
   await withPublishableWorkspaceManifest(rootDir, 'packages/react', async () => {
-    await runCommand('npm publish --access public', { cwd: reactDir })
+    await runCommand(npmPublishCommand(), { cwd: reactDir })
   })
   console.log('\n✅ @seedprotocol/react published successfully!\n')
 }
@@ -177,7 +173,7 @@ async function publishPackage(packageName) {
   const packageDir = join(rootDir, 'packages', packageName)
   console.log(`\n📦 Publishing @seedprotocol/${packageName}...\n`)
   await withPublishableWorkspaceManifest(rootDir, `packages/${packageName}`, async () => {
-    await runCommand('npm publish', { cwd: packageDir })
+    await runCommand(npmPublishCommand(), { cwd: packageDir })
   })
   console.log(`\n✅ @seedprotocol/${packageName} published successfully!\n`)
 }
@@ -355,11 +351,13 @@ function printUsage(message) {
   if (message) {
     console.error(`❌ Error: ${message}`)
   }
-  console.error(`Usage: node scripts/publish-package.js [-f] [-y] [<package>|all]`)
+  console.error(`Usage: node scripts/publish-package.js [-f] [-y] [--tag <tag>] [--provenance] [<package>|all]`)
   console.error(`Valid packages: ${VALID_PACKAGES.join(', ')}, all`)
   console.error(`  (omit package or pass "all" to publish every package in dependency order)`)
-  console.error(`  -f, --force  Skip running tests before build`)
-  console.error(`  -y, --yes    Skip confirmation when publishing all`)
+  console.error(`  -f, --force    Skip running tests before build`)
+  console.error(`  -y, --yes      Skip confirmation when publishing all`)
+  console.error(`  --tag <tag>    dist-tag for npm publish (required for prerelease versions)`)
+  console.error(`  --provenance   Publish with npm provenance (CI only)`)
 }
 
 function printUsageAndExit(message) {
@@ -371,9 +369,19 @@ async function main() {
   const args = process.argv.slice(2)
   const flags = new Set()
   const positionals = []
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
     if (arg === '-f' || arg === '--force' || arg === '-y' || arg === '--yes') {
       flags.add(arg === '--force' ? '-f' : arg === '--yes' ? '-y' : arg)
+    } else if (arg === '--tag' || arg.startsWith('--tag=')) {
+      const tag = arg === '--tag' ? args[++i] : arg.slice('--tag='.length)
+      // Interpolated into a shell command, so keep it to dist-tag-safe characters.
+      if (!tag || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) {
+        printUsageAndExit(`Invalid --tag value: ${tag ?? '(missing)'}`)
+      }
+      npmPublishOptions.tag = tag
+    } else if (arg === '--provenance') {
+      npmPublishOptions.provenance = true
     } else if (arg.startsWith('-')) {
       printUsageAndExit(`Unknown flag: ${arg}`)
     } else {
@@ -387,6 +395,11 @@ async function main() {
 
   if (packageArg !== 'all' && !VALID_PACKAGES.includes(packageArg)) {
     printUsageAndExit(`Invalid package name: ${packageArg}`)
+  }
+
+  const version = getSdkVersion()
+  if (version.includes('-') && (!npmPublishOptions.tag || npmPublishOptions.tag === 'latest')) {
+    printUsageAndExit(`${version} is a prerelease; pass --tag <name> other than latest`)
   }
 
   if (packageArg === 'all') {
