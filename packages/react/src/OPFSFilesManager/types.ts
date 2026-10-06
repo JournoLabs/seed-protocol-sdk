@@ -46,6 +46,22 @@ export type OPFSFilesManagerNotice =
     }
   | { kind: 'copy-path'; path: string; error?: string }
 
+export interface OPFSFilesManagerDeleteAction {
+  /**
+   * Replaces "Delete" on the batch bar, panel footer, row action and the confirm dialog's
+   * heading and button. Used as-is, so it can include a count ("Remove 3 files from this device").
+   */
+  label?: string
+  /** false drops the danger colour and uses the primary confirm button. Default: true */
+  destructive?: boolean
+}
+
+/** A delete action with defaults applied. Internal. */
+export interface ResolvedDeleteAction {
+  label?: string
+  destructive: boolean
+}
+
 export interface OPFSFilesManagerProps {
   /** Optional subdirectory to scan (e.g. 'app-files'). Default: root. */
   rootPath?: string
@@ -100,5 +116,12 @@ export interface OPFSFilesManagerProps {
    * Show results and errors in the host's own toaster. When set, the built-in toasts
    * aren't rendered.
    */
+  /**
+   * Relabel the delete action, or make it non-destructive, for the files it would remove
+   * (including resized copies). Use it when the host knows those files have a copy
+   * elsewhere, such as on Arweave. Runs on every render, once per list row, so keep it
+   * cheap and synchronous.
+   */
+  deleteAction?: (files: OPFSFile[]) => OPFSFilesManagerDeleteAction
   onNotify?: (message: string, tone: OPFSFilesManagerNotifyTone, notice: OPFSFilesManagerNotice) => void
 }

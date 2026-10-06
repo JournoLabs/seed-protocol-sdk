@@ -4,6 +4,7 @@ import type { FileViewProps } from './FileGrid'
 import { FileThumbnail, kindStyle } from './FileThumbnail'
 import { formatDateTime, formatFileSize, formatRelativeTime } from './format'
 import { Icon } from './icons'
+import type { ResolvedDeleteAction } from './types'
 
 export interface FileListProps extends Omit<FileViewProps, 'tileClassName'> {
   /** Paths are shown relative to this folder. */
@@ -11,6 +12,7 @@ export interface FileListProps extends Omit<FileViewProps, 'tileClassName'> {
   onToggleAll: () => void
   onDownload: (entry: FileEntry) => void
   onDelete: (entry: FileEntry) => void
+  deleteActionFor: (entry: FileEntry) => ResolvedDeleteAction
   rowClassName?: string
 }
 
@@ -23,6 +25,7 @@ export function FileList({
   onToggleAll,
   onDownload,
   onDelete,
+  deleteActionFor,
   className,
   rowClassName,
 }: FileListProps) {
@@ -64,6 +67,7 @@ export function FileList({
           {entries.map((entry, index) => {
             const { file } = entry
             const isSelected = selected.has(file.path)
+            const deleteAction = deleteActionFor(entry)
             return (
               <tr
                 key={file.path}
@@ -128,8 +132,8 @@ export function FileList({
                   <button
                     type="button"
                     className="seed-fm-btn seed-fm-btn--ghost seed-fm-btn--icon"
-                    aria-label={`Delete ${file.name}`}
-                    title="Delete"
+                    aria-label={deleteAction.label ? `${deleteAction.label}: ${file.name}` : `Delete ${file.name}`}
+                    title={deleteAction.label ?? 'Delete'}
                     onClick={() => onDelete(entry)}
                   >
                     <Icon name="trash" size={15} />

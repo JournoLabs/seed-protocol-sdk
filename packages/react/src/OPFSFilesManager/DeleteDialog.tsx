@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import type { FileEntry } from './fileModel'
 import { formatFileSize, truncateMiddle } from './format'
 import { Icon } from './icons'
+import type { ResolvedDeleteAction } from './types'
 
 const MAX_LISTED = 6
 
@@ -10,13 +11,23 @@ export interface DeleteDialogProps {
   /** Folder that listed paths are shown relative to. */
   rootPath: string
   warning: string | null
+  /** Resolves the label and tone for the files the confirm button would remove. */
+  deleteActionFor: (includeVariants: boolean) => ResolvedDeleteAction
   onCancel: () => void
   onConfirm: (includeVariants: boolean) => void
   className?: string
 }
 
 /** Delete confirmation, rendered as a native modal <dialog> (focus trap, Esc, top layer). */
-export function DeleteDialog({ entries, rootPath, warning, onCancel, onConfirm, className }: DeleteDialogProps) {
+export function DeleteDialog({
+  entries,
+  rootPath,
+  warning,
+  deleteActionFor,
+  onCancel,
+  onConfirm,
+  className,
+}: DeleteDialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const [includeVariants, setIncludeVariants] = useState(true)
 
@@ -32,8 +43,12 @@ export function DeleteDialog({ entries, rootPath, warning, onCancel, onConfirm, 
   const variantsSize = variants.reduce((n, v) => n + v.file.size, 0)
   const count = entries.length + (includeVariants ? variants.length : 0)
   const prefix = rootPath ? `${rootPath}/` : ''
-  const heading =
-    entries.length === 1 ? `Delete ${truncateMiddle(entries[0].file.name, 32)}?` : `Delete ${entries.length} files?`
+  const action = deleteActionFor(includeVariants)
+  const heading = action.label
+    ? `${action.label}?`
+    : entries.length === 1
+      ? `Delete ${truncateMiddle(entries[0].file.name, 32)}?`
+      : `Delete ${entries.length} files?`
 
   return (
     <dialog
@@ -95,8 +110,11 @@ export function DeleteDialog({ entries, rootPath, warning, onCancel, onConfirm, 
           <button type="button" className="seed-fm-btn" onClick={onCancel} autoFocus>
             Cancel
           </button>
-          <button type="submit" className="seed-fm-btn seed-fm-btn--danger">
-            Delete {count} {count === 1 ? 'file' : 'files'}
+          <button
+            type="submit"
+            className={`seed-fm-btn ${action.destructive ? 'seed-fm-btn--danger' : 'seed-fm-btn--primary'}`}
+          >
+            {action.label ?? `Delete ${count} ${count === 1 ? 'file' : 'files'}`}
           </button>
         </div>
       </form>

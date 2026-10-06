@@ -5,6 +5,7 @@ export type {
   OPFSFilesManagerView,
   OPFSFilesManagerSlot,
   OPFSFilesManagerClassNames,
+  OPFSFilesManagerDeleteAction,
   OPFSFilesManagerNotice,
   OPFSFilesManagerNotifyTone,
 } from './types'

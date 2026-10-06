@@ -4,6 +4,7 @@ import { effectiveType, fileKind, type FileEntry } from './fileModel'
 import { KIND_META, kindStyle } from './FileThumbnail'
 import { formatDateTime, formatFileSize, formatRelativeTime } from './format'
 import { Icon } from './icons'
+import type { ResolvedDeleteAction } from './types'
 
 /** Text files larger than this aren't previewed. */
 const MAX_TEXT_PREVIEW_FILE = 1024 * 1024
@@ -76,6 +77,7 @@ export interface PreviewPanelProps {
   onNext: (() => void) | null
   onDownload: () => void
   onDelete: () => void
+  deleteAction: ResolvedDeleteAction
   onCopyPath: () => void
   className?: string
 }
@@ -87,6 +89,7 @@ export function PreviewPanel({
   onNext,
   onDownload,
   onDelete,
+  deleteAction,
   onCopyPath,
   className,
 }: PreviewPanelProps) {
@@ -251,8 +254,12 @@ export function PreviewPanel({
         <button type="button" className="seed-fm-btn seed-fm-btn--primary" onClick={onDownload}>
           <Icon name="download" size={15} /> Download
         </button>
-        <button type="button" className="seed-fm-btn seed-fm-btn--danger-text" onClick={onDelete}>
-          <Icon name="trash" size={15} /> Delete
+        <button
+          type="button"
+          className={`seed-fm-btn${deleteAction.destructive ? ' seed-fm-btn--danger-text' : ''}`}
+          onClick={onDelete}
+        >
+          <Icon name="trash" size={15} /> {deleteAction.label ?? 'Delete'}
         </button>
       </div>
     </aside>

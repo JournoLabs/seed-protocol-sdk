@@ -173,6 +173,45 @@ describe('OPFSFilesManager', () => {
     expect(container.querySelector('.seed-fm-toasts')).toBeNull()
   })
 
+  it('relabels delete with deleteAction and drops the danger styling', async () => {
+    const deleteAction = vi.fn((files: { path: string }[]) => ({
+      label: `Remove ${files.length} ${files.length === 1 ? 'file' : 'files'} from this device`,
+      destructive: false,
+    }))
+    render(<OPFSFilesManager rootPath={root} deleteAction={deleteAction} />)
+    await openFolder('files')
+    await openFolder('images')
+
+    fireEvent.click(await screen.findByRole('option', { name: 'ridge.png' }))
+    const panel = await screen.findByRole('dialog', { name: 'ridge.png' })
+    const panelButton = within(panel).getByRole('button', { name: 'Remove 3 files from this device' })
+    expect(panelButton.classList.contains('seed-fm-btn--danger-text')).toBe(false)
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close details' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select ridge.png' }))
+    const bar = screen.getByRole('toolbar', { name: 'Selected files' })
+    fireEvent.click(within(bar).getByRole('button', { name: 'Remove 3 files from this device' }))
+
+    const dialog = within(await screen.findByRole('dialog', { name: 'Remove 3 files from this device?' }))
+    const confirm = dialog.getByRole('button', { name: 'Remove 3 files from this device' })
+    expect(confirm.classList.contains('seed-fm-btn--primary')).toBe(true)
+    // Unticking the resized copies re-asks for a label that matches what will be removed.
+    fireEvent.click(dialog.getByRole('checkbox', { name: /resized/ }))
+    expect(dialog.getByRole('button', { name: 'Remove 1 file from this device' })).toBeTruthy()
+  })
+
+  it('uses the deleteAction label in list row actions', async () => {
+    render(<OPFSFilesManager rootPath={root} deleteAction={() => ({ label: 'Remove' })} defaultView="list" />)
+    await openFolder('files')
+    await openFolder('json')
+    const button = await screen.findByRole('button', { name: 'Remove: abc.json' })
+    expect(button.getAttribute('title')).toBe('Remove')
+    fireEvent.click(button)
+    const dialog = within(await screen.findByRole('dialog', { name: 'Remove?' }))
+    const confirm = dialog.getByRole('button', { name: 'Remove' })
+    expect(confirm.classList.contains('seed-fm-btn--danger')).toBe(true)
+  })
+
   it('explains a missing rootPath', async () => {
     render(<OPFSFilesManager rootPath={`${root}-missing`} />)
     expect((await screen.findByRole('alert')).textContent).toContain(`Can’t open ${root}-missing`)

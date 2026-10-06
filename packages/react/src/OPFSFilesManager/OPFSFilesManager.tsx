@@ -26,6 +26,7 @@ import type {
   OPFSFilesManagerProps,
   OPFSFilesManagerSlot,
   OPFSFilesManagerView,
+  ResolvedDeleteAction,
 } from './types'
 import { useStorageEstimate, type StorageEstimate } from './useStorageEstimate'
 import { createZip } from './zip'
@@ -184,6 +185,7 @@ export function OPFSFilesManager({
   groupImageVariants = true,
   deleteWarning = defaultDeleteWarning,
   confirmDelete,
+  deleteAction,
   onNotify,
 }: OPFSFilesManagerProps) {
   useInsertionEffect(() => {
@@ -338,6 +340,12 @@ export function OPFSFilesManager({
 
   const filesToDelete = (list: FileEntry[], includeVariants: boolean) =>
     list.flatMap((e) => [e.file, ...(includeVariants ? e.variants.map((v) => v.file) : [])])
+
+  const resolveDeleteAction = (targets: OPFSFile[]): ResolvedDeleteAction => {
+    const action = deleteAction?.(targets)
+    return { label: action?.label, destructive: action?.destructive !== false }
+  }
+  const deleteActionFor = (list: FileEntry[]) => resolveDeleteAction(filesToDelete(list, true))
 
   const performDelete = async (targets: OPFSFile[]) => {
     setBusy(true)
@@ -541,6 +549,7 @@ export function OPFSFilesManager({
                 onToggleAll={toggleAllVisible}
                 onDownload={(e) => download([e])}
                 onDelete={(e) => requestDelete([e])}
+                deleteActionFor={(e) => deleteActionFor([e])}
                 className={classNames.list}
                 rowClassName={classNames.row}
               />
@@ -552,6 +561,7 @@ export function OPFSFilesManager({
   }
 
   const pendingFiles = pendingDelete ? filesToDelete(pendingDelete, true) : []
+  const batchDeleteAction = selected.size > 0 ? deleteActionFor(selectedEntries) : null
 
   return (
     <div
@@ -648,7 +658,7 @@ export function OPFSFilesManager({
 
         <div className={cn('body', 'seed-fm-body')}>{body}</div>
 
-        {selected.size > 0 && (
+        {batchDeleteAction && (
           <div className={cn('batchBar', 'seed-fm-batch')} role="toolbar" aria-label="Selected files">
             <span className="seed-fm-batch-count" aria-live="polite">
               {selected.size} selected <span>· {formatFileSize(selectedSize)}</span>
@@ -658,11 +668,11 @@ export function OPFSFilesManager({
             </button>
             <button
               type="button"
-              className="seed-fm-btn seed-fm-btn--danger-text"
+              className={`seed-fm-btn${batchDeleteAction.destructive ? ' seed-fm-btn--danger-text' : ''}`}
               disabled={busy}
               onClick={() => requestDelete(selectedEntries)}
             >
-              <Icon name="trash" size={15} /> Delete
+              <Icon name="trash" size={15} /> {batchDeleteAction.label ?? 'Delete'}
             </button>
             <button
               type="button"
@@ -690,6 +700,7 @@ export function OPFSFilesManager({
           }
           onDownload={() => download([panelEntry])}
           onDelete={() => requestDelete([panelEntry])}
+          deleteAction={deleteActionFor([panelEntry])}
           onCopyPath={() => copyPath(panelEntry.file.path)}
         />
       )}
@@ -699,6 +710,7 @@ export function OPFSFilesManager({
           entries={pendingDelete}
           rootPath={rootDir}
           warning={deleteWarning(pendingFiles)}
+          deleteActionFor={(includeVariants) => resolveDeleteAction(filesToDelete(pendingDelete, includeVariants))}
           className={classNames.dialog}
           onCancel={() => setPendingDelete(null)}
           onConfirm={(includeVariants) => {
