@@ -202,11 +202,6 @@ export default defineConfig({
             '**/node_modules/**',
             'dist/**',
 
-            // Side effects: npm install / npx seed init / npm run build, rewrite tracked mock files, and leave
-            // the process cwd in a deleted temp dir — with isolate: false that breaks every later file.
-            'packages/sdk/__tests__/scripts/integration.test.ts',
-            'packages/sdk/__tests__/node/client.test.ts',
-
             // Browser-only: SQL-tag liveQuery isn't supported by the Node stub. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/db/Db.test.ts',
 
@@ -216,7 +211,6 @@ export default defineConfig({
             'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
             'packages/sdk/__tests__/Model/pendingWrites.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)
-            'packages/sdk/__tests__/scripts/codegen.test.ts', // reads process.cwd()/src/seedSchema
             'packages/sdk/__tests__/services/write/writeProcessMachine.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/validation-timeout.test.ts', // same FK-violating cleanup
           ],
