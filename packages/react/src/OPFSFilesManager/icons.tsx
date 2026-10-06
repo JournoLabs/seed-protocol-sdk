@@ -1,6 +1,6 @@
 /**
  * Icons vendored from Lucide (https://lucide.dev), ISC License,
- * Copyright (c) Lucide Contributors. See docs/adr/0002-icons-vendored-from-lucide.md.
+ * Copyright (c) Lucide Contributors. See docs/adr/0003-icons-vendored-from-lucide.md.
  *
  * To add an icon, copy the children of its <svg> from lucide.dev into ICONS.
  * Keep Lucide's 24×24 viewBox and stroke-width 2 so icons match hosts that use lucide-react.

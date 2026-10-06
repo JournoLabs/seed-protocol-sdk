@@ -1,6 +1,6 @@
 /**
  * Scoped stylesheet for OPFSFilesManager. Injected once into document.head (see
- * docs/adr/0001-component-styling-tokens-and-injected-css.md). Every color comes from a
+ * docs/adr/0002-component-styling-tokens-and-injected-css.md). Every color comes from a
  * `--seed-*` custom property, so hosts restyle by overriding variables on `.seed-fm`
  * or an ancestor.
  */
