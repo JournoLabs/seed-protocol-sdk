@@ -226,7 +226,6 @@ export default defineConfig({
             'packages/sdk/__tests__/scripts/config-validation.test.ts', // only empty describe blocks
             'packages/sdk/__tests__/scripts/production-path.test.ts', // imports removed @/node/PathResolver
             'packages/sdk/__tests__/scripts/rollup-typia-proto.test.ts', // imports removed rollup-typia-proto
-            'packages/sdk/__tests__/services/write/writeProcessMachine.test.ts', // cleanup deletes models before FK-dependent rows
             'packages/sdk/__tests__/validation-timeout.test.ts', // same FK-violating cleanup
           ],
           testTimeout: 30000,
