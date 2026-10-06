@@ -209,6 +209,19 @@ export function npm(args, { capture = false } = {}) {
 }
 
 /**
+ * Run an npm command that changes the registry. With RELEASE_DRY_RUN=1 it is
+ * printed instead, so promote/cleanup can be tried locally against real tags.
+ * @param {string[]} args
+ */
+export function npmWrite(args) {
+  if (process.env.RELEASE_DRY_RUN === '1') {
+    console.log(`[dry run] npm ${args.join(' ')}`)
+    return
+  }
+  npm(args)
+}
+
+/**
  * Current dist-tags for a package, read fresh from the registry.
  * @param {string} packageName - e.g. @seedprotocol/sdk
  * @returns {Record<string, string>}

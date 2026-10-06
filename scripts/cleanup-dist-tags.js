@@ -16,7 +16,7 @@ import {
   channelIdForBranch,
   getDistTags,
   listRemoteBranches,
-  npm,
+  npmWrite,
 } from './release-channel.js'
 
 function main() {
@@ -49,7 +49,7 @@ function main() {
       // Leftover staging tags from this branch's failed runs.
       const isStaleStaging = tag.startsWith(STAGING_TAG_PREFIX) && branchVersion.test(version)
       if (isBranchTag || isStaleStaging) {
-        npm(['dist-tag', 'rm', packageName, tag])
+        npmWrite(['dist-tag', 'rm', packageName, tag])
         console.log(`[cleanup] ${packageName}: removed ${tag} (${version})`)
       }
     }

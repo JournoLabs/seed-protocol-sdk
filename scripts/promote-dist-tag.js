@@ -25,6 +25,7 @@ import {
   getDistTags,
   listRemoteBranches,
   npm,
+  npmWrite,
 } from './release-channel.js'
 
 const PACKAGES = PUBLISH_ORDER.map((name) => `@seedprotocol/${name}`)
@@ -100,7 +101,7 @@ async function main() {
     } else if (tags[distTag] === version) {
       status = `${distTag} already at ${version}`
     } else {
-      npm(['dist-tag', 'add', `${packageName}@${version}`, distTag])
+      npmWrite(['dist-tag', 'add', `${packageName}@${version}`, distTag])
       status = `${distTag} → ${version}`
     }
     results.push({ packageName, status, moved: decision.move })
@@ -111,7 +112,7 @@ async function main() {
     const tags = tagsByPackage.get(packageName)
     for (const [tag, tagged] of Object.entries(tags)) {
       if (tag.startsWith(STAGING_TAG_PREFIX) && tagged === version) {
-        npm(['dist-tag', 'rm', packageName, tag])
+        npmWrite(['dist-tag', 'rm', packageName, tag])
         console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
       }
     }
