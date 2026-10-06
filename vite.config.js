@@ -215,7 +215,6 @@ export default defineConfig({
             'packages/sdk/__tests__/db/liveQuery.test.ts', // liveQuery expectations fail in Node and browser
             'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
             'packages/sdk/__tests__/fromCallbackActors.test.ts', // walks process.cwd()/src, which doesn't exist at repo root
-            'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
             'packages/sdk/__tests__/node/FileManager.test.ts', // static FileManager.initializeFileSystem() no longer exists
             'packages/sdk/__tests__/node/PathResolver.test.ts', // chdirs into mock dirs that don't exist
             'packages/sdk/__tests__/node/PathResolver.production.test.ts', // assumes NODE_ENV=production and a built dist/
