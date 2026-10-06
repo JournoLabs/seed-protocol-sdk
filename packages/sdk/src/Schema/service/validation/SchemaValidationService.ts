@@ -530,8 +530,15 @@ export class SchemaValidationService {
       errors.push(...structureResult.errors)
     }
 
+    // Schema context definitions come in two shapes: schema-file ({ type, model }) and runtime
+    // ({ dataType, ref/refModelName }, e.g. models added from Model instances). Accept both, as the
+    // List check below already does; requiring `type` rejected every edit to a runtime-shaped property.
+    const definitionType = propertyDefinition.type ?? (propertyDefinition as any).dataType
+    const definitionRefModel: string | undefined =
+      propertyDefinition.model ?? (propertyDefinition as any).ref ?? (propertyDefinition as any).refModelName
+
     // Validate property definition structure
-    if (!propertyDefinition.type) {
+    if (!definitionType) {
       errors.push({
         field: 'property.type',
         message: 'Property type is required',
@@ -541,18 +548,18 @@ export class SchemaValidationService {
     }
 
     // Validate Relation: requires model
-    if (propertyDefinition.type === 'Relation') {
-      if (!propertyDefinition.model || propertyDefinition.model.trim() === '') {
+    if (isDataType(definitionType, ModelPropertyDataTypes.Relation)) {
+      if (!definitionRefModel || definitionRefModel.trim() === '') {
         errors.push({
           field: 'property.model',
           message: `Property with type "Relation" requires a "model" field to be defined`,
           code: 'missing_ref',
           severity: 'error' as const,
         })
-      } else if (!schema.models[propertyDefinition.model]) {
+      } else if (!schema.models[definitionRefModel]) {
         errors.push({
           field: 'property.model',
-          message: `Referenced model "${propertyDefinition.model}" not found in schema`,
+          message: `Referenced model "${definitionRefModel}" not found in schema`,
           code: 'invalid_reference',
           severity: 'error' as const,
         })
