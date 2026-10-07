@@ -20,6 +20,7 @@ import {
   Schema,
   Model,
   Item,
+  BaseFileManager,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { and, eq, inArray } from 'drizzle-orm'
@@ -135,6 +136,29 @@ async function deleteTestSchemaItemsHooksRows(): Promise<void> {
   await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
   await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
   await db.delete(schemas).where(eq(schemas.id, schemaId))
+}
+
+/**
+ * Remove the schema JSON file that importJsonSchema writes to the shared OPFS working dir.
+ * If it is left behind, client.init in the next browser test file re-imports this schema, and that
+ * file's own `Post` model then reuses (and re-ids) this schema's `Post` row by name.
+ */
+async function deleteTestSchemaItemsHooksFile(): Promise<void> {
+  try {
+    const path = BaseFileManager.getPathModule()
+    const workingDir = BaseFileManager.getWorkingDir()
+    const sanitizedName = TEST_SCHEMA_ITEMS_HOOKS_NAME.replace(/\s+/g, '_')
+    const filePath = path.join(
+      workingDir,
+      `${testSchemaWithItems.id}_${sanitizedName}_v${testSchemaWithItems.version}.json`,
+    )
+    if (await BaseFileManager.pathExists(filePath)) {
+      const fs = await BaseFileManager.getFs()
+      await fs.promises.unlink(filePath)
+    }
+  } catch {
+    // File may not exist
+  }
 }
 
 // Helper function to wait for item to be in idle state
@@ -442,6 +466,7 @@ describe('React Item Hooks Integration Tests', () => {
 
   afterAll(async () => {
     await deleteTestSchemaItemsHooksRows()
+    await deleteTestSchemaItemsHooksFile()
     Schema.clearCache()
   })
 
@@ -451,6 +476,7 @@ describe('React Item Hooks Integration Tests', () => {
     document.body.appendChild(container)
 
     await deleteTestSchemaItemsHooksRows()
+    await deleteTestSchemaItemsHooksFile()
     Schema.clearCache()
 
     // Import test schema
