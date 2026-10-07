@@ -49,6 +49,13 @@ import { eventEmitter } from '@/eventBus'
 import { assertLocalDbChain, waitForEasReadChain } from '@/helpers/localDbChain'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 
+/**
+ * Sync stores the newest non-revoked attestation per (version, property schema). When every
+ * attestation of a property is revoked (e.g. after `item.unpublish()`), keep the newest one so a
+ * revoked item synced to a new device still has its last values next to its seed's `revokedAt`.
+ */
+const SYNC_CANONICAL_OPTIONS = { ifAllRevoked: 'newestRevoked' } as const
+
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
@@ -648,8 +655,10 @@ const getRelatedSeedsAndVersions = async () => {
     },
   })
 
-  const canonicalRelatedProperties =
-    pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
+  const canonicalRelatedProperties = pickLatestPropertyAttestationsByRefAndSchema(
+    itemProperties,
+    SYNC_CANONICAL_OPTIONS,
+  )
 
   await saveEasPropertiesToDb({
     itemProperties: canonicalRelatedProperties,
@@ -761,7 +770,10 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     versionUids,
     excludeRevoked: false,
   })
-  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
+  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(
+    rawProperties,
+    SYNC_CANONICAL_OPTIONS,
+  )
 
   await saveEasPropertiesToDb({
     itemProperties,
