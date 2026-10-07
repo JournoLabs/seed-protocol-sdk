@@ -10,6 +10,7 @@ import { metadata } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, isNotNull } from 'drizzle-orm'
 import { getMetadataLatest } from '@seedprotocol/sdk'
+import { pickLatestMetadataRowPerProperty } from '@seedprotocol/sdk'
 import { propertyMachine } from '@seedprotocol/sdk'
 import { debounce, startCase } from 'lodash-es'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -563,6 +564,8 @@ export function useItemProperties(
             schemaUid: metadata.schemaUid,
             createdAt: metadata.createdAt,
             attestationCreatedAt: metadata.attestationCreatedAt,
+            localId: metadata.localId,
+            revokedAt: metadata.revokedAt,
           })
           .from(metadata)
           .where(
@@ -582,6 +585,8 @@ export function useItemProperties(
                 schemaUid: metadata.schemaUid,
                 createdAt: metadata.createdAt,
                 attestationCreatedAt: metadata.attestationCreatedAt,
+                localId: metadata.localId,
+                revokedAt: metadata.revokedAt,
               })
               .from(metadata)
               .where(
@@ -605,6 +610,8 @@ export function useItemProperties(
     schemaUid: string | null
     createdAt: number | null
     attestationCreatedAt: number | null
+    localId: string | null
+    revokedAt: number | null
   }>(propertiesQuery)
   
   // Filter for latest records (one per propertyName) in JavaScript
@@ -613,26 +620,8 @@ export function useItemProperties(
       return []
     }
 
-    // Group by propertyName and keep only the latest record for each
-    const latestByProperty = new Map<string, typeof rawPropertiesTableData[0]>()
-    
-    for (const record of rawPropertiesTableData) {
-      if (!record.propertyName) continue
-      
-      const existing = latestByProperty.get(record.propertyName)
-      if (!existing) {
-        latestByProperty.set(record.propertyName, record)
-      } else {
-        // Compare timestamps to find the latest
-        const existingTime = existing.attestationCreatedAt || existing.createdAt || 0
-        const currentTime = record.attestationCreatedAt || record.createdAt || 0
-        if (currentTime > existingTime) {
-          latestByProperty.set(record.propertyName, record)
-        }
-      }
-    }
-
-    return Array.from(latestByProperty.values())
+    // One record per propertyName, in the SDK's reader order (live before revoked, then newest)
+    return pickLatestMetadataRowPerProperty(rawPropertiesTableData)
   }, [rawPropertiesTableData])
 
   // Invalidate when metadata table data actually changes so useQuery refetches

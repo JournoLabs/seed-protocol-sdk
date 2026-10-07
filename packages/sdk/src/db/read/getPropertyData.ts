@@ -9,6 +9,7 @@ import {
   resolveMetadataRecord,
 } from "@/helpers/metadataPropertyNames"
 import { modelPropertiesToObject } from "@/helpers/model"
+import { METADATA_LATEST_FIRST_ORDER_SQL } from "@/helpers/compareMetadataRowsLatestFirst"
 
 export const getPropertyData = async ({
   propertyName,
@@ -60,9 +61,7 @@ export const getPropertyData = async ({
     .select()
     .from(metadata)
     .where(and(...whereClauses))
-    .orderBy(
-      sql.raw(`COALESCE(attestation_created_at, created_at) DESC`),
-    )) as MetadataType[]
+    .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as MetadataType[]
 
   if (!rows || rows.length === 0) {
     return

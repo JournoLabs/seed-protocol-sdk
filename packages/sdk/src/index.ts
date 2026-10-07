@@ -26,6 +26,12 @@ export {
 export type { PropertyAttestationApplyPair } from './db/write/applyPropertyAttestationUidsFromPublish'
 export { getVersionData } from './db/read/subqueries/versionData'
 export { getMetadataLatest } from './db/read/subqueries/metadataLatest'
+export {
+  compareMetadataRowsLatestFirst,
+  pickLatestMetadataRowPerProperty,
+  METADATA_LATEST_FIRST_ORDER_SQL,
+} from './helpers/compareMetadataRowsLatestFirst'
+export type { MetadataRecencyRow } from './helpers/compareMetadataRowsLatestFirst'
 export { loadAllSchemasFromDb } from './helpers/schema'
 export { schemaMachine } from './Schema/service/schemaMachine'
 export { propertyMachine } from './ItemProperty/service/propertyMachine'
