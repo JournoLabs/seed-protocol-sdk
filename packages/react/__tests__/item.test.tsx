@@ -913,7 +913,6 @@ describe('React Item Hooks Integration Tests', () => {
           const count = screen.getByTestId('items-count')
           const n = parseInt(count.textContent || '0')
           expect(n).toBeGreaterThanOrEqual(3)
-          expect(n).toBeGreaterThanOrEqual(3)
         },
         { timeout: 10000 }
       )

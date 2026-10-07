@@ -1000,7 +1000,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Post model has at least 3 properties: title, content, author
           expect(countValue).toBeGreaterThanOrEqual(3)
-          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1032,7 +1031,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
-          expect(countValue).toBeGreaterThanOrEqual(3)
           expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
@@ -1070,7 +1068,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
-          expect(countValue).toBeGreaterThanOrEqual(3)
           expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }

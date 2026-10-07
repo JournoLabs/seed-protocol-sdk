@@ -685,7 +685,6 @@ describe(
           const count = parseInt(modelsCount.textContent || '0')
           // Test Schema 1 has a Post model, so we should have at least 1 model
           expect(count).toBeGreaterThan(0)
-          expect(count).toBeGreaterThan(0)
         },
         { timeout: 30000 }
       )
@@ -945,7 +944,6 @@ describe(
         () => {
           const count = screen.getByTestId('schemas-count')
           const countValue = parseInt(count.textContent || '0')
-          expect(countValue).toBeGreaterThan(0)
           expect(countValue).toBeGreaterThan(0)
         },
         { timeout: 15000 }

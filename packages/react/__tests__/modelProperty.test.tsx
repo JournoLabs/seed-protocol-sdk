@@ -596,7 +596,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Post model has 3 properties: title, content, author
           expect(countValue).toBeGreaterThanOrEqual(3)
-          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -648,7 +647,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -684,7 +682,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           // Article model has 2 properties: headline, body
-          expect(countValue).toBeGreaterThanOrEqual(2)
           expect(countValue).toBeGreaterThanOrEqual(2)
         },
         { timeout: 30000 }
