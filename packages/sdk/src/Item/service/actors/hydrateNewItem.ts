@@ -7,7 +7,7 @@ export const hydrateNewItem = fromCallback<
   EventObject,
   FromCallbackInput<ItemMachineContext<any>>
 >(({ sendBack, input: { context } }) => {
-  const { seedUid, versionUid, modelName } = context
+  const { seedUid, versionUid, modelName, modelFileId } = context
 
   let newSeedLocalId: string
 
@@ -18,6 +18,7 @@ export const hydrateNewItem = fromCallback<
 
     newSeedLocalId = await createSeed({
       type: modelName.toLowerCase(),
+      modelFileId,
       ...(seedUid && seedUid !== 'NULL' ? { seedUid } : {}),
     })
 

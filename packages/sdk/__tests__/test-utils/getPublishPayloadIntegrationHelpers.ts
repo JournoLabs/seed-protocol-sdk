@@ -339,7 +339,7 @@ export type CreateItemWithBasicPropertiesOnlyOptions = {
  * marked published (seeds.uid set) so getPublishPayload validates and adds no Author payload.
  */
 export async function createPublishedTestAuthor(): Promise<ItemClass<any>> {
-  const author = await Item.create({ modelName: 'Author', name: 'Published Test Author' })
+  const author = await Item.create({ modelName: 'Author', schemaName: SCHEMA_NAME, name: 'Published Test Author' })
   await waitForItemIdle(author)
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
@@ -370,6 +370,7 @@ export async function createItemWithBasicPropertiesOnly(
   const author = await createPublishedTestAuthor()
   const item = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     author: author.seedLocalId,
     title,
     count,
@@ -397,11 +398,12 @@ export async function createItemWithRelation(
   options: CreateItemWithRelationOptions = {}
 ): Promise<{ authorItem: ItemClass<any>; postItem: ItemClass<any> }> {
   const { authorName = 'Jane Author', authorBio = 'Bio', postTitle = 'Post with author' } = options
-  const authorItem = await Item.create({ modelName: 'Author', name: authorName, bio: authorBio })
+  const authorItem = await Item.create({ modelName: 'Author', schemaName: SCHEMA_NAME, name: authorName, bio: authorBio })
   await waitForItemIdle(authorItem)
   await waitForPropertyInstances(authorItem)
   const postItem = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     title: postTitle,
     author: authorItem.seedLocalId,
   })
@@ -424,7 +426,7 @@ export async function createItemWithList(
   const { tagLabels = ['tag1', 'tag2'], postTitle = 'Post with tags' } = options
   const tagItems: ItemClass<any>[] = []
   for (const label of tagLabels) {
-    const tagItem = await Item.create({ modelName: 'Tag', label })
+    const tagItem = await Item.create({ modelName: 'Tag', schemaName: SCHEMA_NAME, label })
     await waitForItemIdle(tagItem)
     tagItems.push(tagItem)
   }
@@ -432,6 +434,7 @@ export async function createItemWithList(
   const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     author: author.seedLocalId,
     title: postTitle,
     tagIds: JSON.stringify(tagIds),
@@ -455,6 +458,7 @@ export async function createItemWithImage(
   const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     author: author.seedLocalId,
     title: postTitle,
     coverImage: '', // Empty or placeholder; getPublishPayload may skip or handle
@@ -492,6 +496,7 @@ export async function createItemWithImageAndUploadedTx(
   const author = await createPublishedTestAuthor()
   const postItem = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     author: author.seedLocalId,
     title: postTitle,
     coverImage: imageItem.seedLocalId,
@@ -557,18 +562,19 @@ export async function createItemWithAllPropertyTypes(
     postTitle = 'Full post',
     basicOverrides = {},
   } = options
-  const authorItem = await Item.create({ modelName: 'Author', name: authorName, bio: 'Bio' })
+  const authorItem = await Item.create({ modelName: 'Author', schemaName: SCHEMA_NAME, name: authorName, bio: 'Bio' })
   await waitForItemIdle(authorItem)
   await waitForPropertyInstances(authorItem)
   const tagItems: ItemClass<any>[] = []
   for (const label of tagLabels) {
-    const tagItem = await Item.create({ modelName: 'Tag', label })
+    const tagItem = await Item.create({ modelName: 'Tag', schemaName: SCHEMA_NAME, label })
     await waitForItemIdle(tagItem)
     tagItems.push(tagItem)
   }
   const tagIds = tagItems.map((t) => t.seedLocalId)
   const item = await Item.create({
     modelName: 'Post',
+    schemaName: SCHEMA_NAME,
     title: basicOverrides.title ?? postTitle,
     count: basicOverrides.count ?? 10,
     payload: basicOverrides.payload ?? '{}',

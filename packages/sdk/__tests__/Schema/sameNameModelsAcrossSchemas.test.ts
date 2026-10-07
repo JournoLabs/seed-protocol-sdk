@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
@@ -6,6 +6,8 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { importJsonSchema } from '@/imports/json'
 import { Model } from '@/Model/Model'
+import { Item } from '@/Item/Item'
+import { seeds } from '@/seedSchema/SeedSchema'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
 import { generateId } from '@/helpers'
@@ -100,5 +102,35 @@ testDescribe('same-name models across schemas', () => {
       'headline',
       'summary',
     ])
+
+    // Items record their own model, so each resolves its schema's Post definition.
+    const itemA = await Item.create({ modelName: 'Post', schemaName: schemaA.metadata.name, title: 'A title' })
+    const itemB = await Item.create({ modelName: 'Post', schemaName: schemaB.metadata.name, headline: 'B headline' })
+    const seedModelFileId = async (seedLocalId: string) =>
+      (await db.select({ modelFileId: seeds.modelFileId }).from(seeds).where(eq(seeds.localId, seedLocalId)))[0]
+        ?.modelFileId
+    expect(await seedModelFileId(itemA.seedLocalId)).toBe(postIdA)
+    expect(await seedModelFileId(itemB.seedLocalId)).toBe(postIdB)
+
+    const itemPropertyNames = async (item: Item<any>) =>
+      vi.waitFor(
+        () => {
+          const names = item.properties.map((p) => p.propertyName).sort()
+          expect(names.length).toBeGreaterThan(0)
+          return names
+        },
+        { timeout: 15000 },
+      )
+    expect(await itemPropertyNames(itemA)).toEqual(['body', 'title'])
+    expect(await itemPropertyNames(itemB)).toEqual(['author', 'headline', 'summary'])
+
+    // A fresh load from the DB (no schemaName passed) still finds the right model.
+    const seedLocalIdB = itemB.seedLocalId
+    itemB.unload()
+    const loadedB = await Item.find({ seedLocalId: seedLocalIdB, modelName: 'Post' })
+    expect(loadedB).toBeDefined()
+    const headline = loadedB!.properties.find((p) => p.propertyName === 'headline')
+    expect(loadedB!.properties.map((p) => p.propertyName).sort()).toEqual(['author', 'headline', 'summary'])
+    expect(headline?.propertyDef?.dataType).toBe('Text')
   }, 60000)
 })

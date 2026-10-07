@@ -26,7 +26,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { eq, or } from 'drizzle-orm'
+import { and, desc, eq, or } from 'drizzle-orm'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -1012,14 +1012,37 @@ export class Model {
       }
       return this.getById(id)
     }
-    // If schemaName not provided, try to find in cache by searching all name keys
+    // If schemaName not provided, search all name keys. Model names are only unique per schema, so
+    // with several matches prefer the most recently registered (mirrors resolveModelRecord's newest row).
+    // Callers that know the schema or model id should use Model.resolve() instead.
+    let matchId: string | undefined
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const [, cachedModelName] = nameKey.split(':')
+      const cachedModelName = nameKey.slice(nameKey.lastIndexOf(':') + 1)
       if (cachedModelName === modelName) {
-        return this.getById(id)
+        matchId = id
       }
     }
-    return undefined
+    return matchId ? this.getById(matchId) : undefined
+  }
+
+  /**
+   * Resolve a cached Model from the most specific scope available: modelFileId (Model.id), then
+   * schemaName + modelName, then modelName alone.
+   */
+  static resolve(
+    modelName: string | undefined,
+    scope: { modelFileId?: string | null; schemaName?: string | null } = {},
+  ): Model | undefined {
+    if (scope.modelFileId) {
+      const byId = this.getById(scope.modelFileId)
+      if (byId) return byId
+    }
+    if (!modelName) return undefined
+    if (scope.schemaName) {
+      const bySchema = this.getByName(modelName, scope.schemaName)
+      if (bySchema) return bySchema
+    }
+    return this.getByName(modelName)
   }
 
   /**
@@ -1028,14 +1051,14 @@ export class Model {
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
+    let matchId: string | undefined
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const parts = nameKey.split(':', 2)
-      const cachedModelName = parts[1]
+      const cachedModelName = nameKey.slice(nameKey.lastIndexOf(':') + 1)
       if (cachedModelName && toSnakeCase(cachedModelName) === modelType) {
-        return this.getById(id)
+        matchId = id
       }
     }
-    return undefined
+    return matchId ? this.getById(matchId) : undefined
   }
 
   /**
@@ -1067,6 +1090,53 @@ export class Model {
       }
     }
     return instances
+  }
+
+  /**
+   * Async Model.resolve(): exact cache hit by modelFileId or schemaName+modelName, else the DB row for
+   * that scope (instantiating the Model), and only then the name-only fallback.
+   */
+  static async resolveAsync(
+    modelName: string | undefined,
+    scope: { modelFileId?: string | null; schemaName?: string | null } = {},
+  ): Promise<Model | undefined> {
+    if (scope.modelFileId) {
+      const byId = this.getById(scope.modelFileId)
+      if (byId) return byId
+    }
+    if (modelName && scope.schemaName) {
+      const bySchema = this.getByName(modelName, scope.schemaName)
+      if (bySchema) return bySchema
+    }
+    if (scope.modelFileId || scope.schemaName) {
+      const db = BaseDb.getAppDb()
+      if (db) {
+        try {
+          const rows = await db
+            .select({
+              modelFileId: modelsTable.schemaFileId,
+              modelName: modelsTable.name,
+              schemaName: schemasTable.name,
+            })
+            .from(modelsTable)
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(
+              scope.modelFileId
+                ? eq(modelsTable.schemaFileId, scope.modelFileId)
+                : and(eq(modelsTable.name, modelName ?? ''), eq(schemasTable.name, scope.schemaName!)),
+            )
+            .limit(1)
+          const record = rows[0]
+          if (record?.modelName && record.schemaName && record.modelFileId) {
+            return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
+          }
+        } catch (error) {
+          logger(`Model.resolveAsync: scoped lookup failed for "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+    return modelName ? this.getByNameAsync(modelName) : undefined
   }
 
   /**
@@ -1104,6 +1174,7 @@ export class Model {
           .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
           .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
           .where(eq(modelsTable.name, modelName))
+          .orderBy(desc(modelsTable.id))
           .limit(1)
 
         if (modelRecords.length === 0) {

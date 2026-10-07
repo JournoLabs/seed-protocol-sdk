@@ -154,6 +154,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelInstance,
       publisher,
     } = initialValues
+    const modelFileId =
+      ((initialValues as Record<string, unknown>).modelFileId as string | undefined) ?? modelInstance?.id
 
     // Store modelInstance if provided (for backward compatibility)
     // But Item no longer depends on Model being loaded - it loads properties from database directly
@@ -167,6 +169,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         seedUid,
         schemaUid,
         modelName,
+        modelFileId,
+        schemaName: ((initialValues as Record<string, unknown>).schemaName as string | undefined) ?? modelInstance?.schemaName,
         latestVersionLocalId,
         latestVersionUid,
         publisher,
@@ -265,10 +269,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       versionLocalId: latestVersionLocalId,
       versionUid: latestVersionUid,
       modelName,
+      modelFileId,
     }
 
     const metadataKeys = [
       'modelName',
+      'modelFileId',
       'schemaName',
       'modelInstance',
       'seedLocalId',
@@ -289,7 +295,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     let model: import('@/Model/Model').Model | undefined
     try {
       const M = getModel()
-      model = M != null ? M.getByName(modelName, schemaNameForModel) : undefined
+      model = M != null ? M.resolve(modelName, { modelFileId, schemaName: schemaNameForModel }) : undefined
     } catch {
       model = undefined
     }
@@ -652,43 +658,24 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       throw new Error('Model name is required to create an item')
     }
     // Filter out ItemData metadata properties - only pass model schema properties
-    // Use schemaName from props if available (passed from Model.create() instance method)
-    const schemaName = (props as any).schemaName
+    // Use schemaName / modelInstance from props if available (passed from Model.create() instance method)
+    const schemaName = (props as any).schemaName as string | undefined
+    const modelInstance = (props as any).modelInstance as { id?: string; schemaName?: string } | undefined
     
     // Get property names directly from database to make Item independent from Model
     let propertyNames: string[] = []
     const dataTypeByPropertyName = new Map<string, string>()
     const db = BaseDb.getAppDb()
     if (db && props.modelName) {
-      // Query properties table directly by model name
-      // First get the model record by name, optionally filtered by schema
-      let modelRecords
-      
-      // If we have a schema name, join with modelSchemas to filter by schema
-      if (schemaName) {
-        const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
-        const { modelSchemas } = modelSchemaSchemaMod
-        const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-        const { schemas: schemasTable } = schemaSchemaMod
-        
-        modelRecords = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(
-            and(
-              eq(modelsTable.name, props.modelName),
-              eq(schemasTable.name, schemaName)
-            )
-          )
-          .limit(1)
-      } else {
-        modelRecords = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .where(eq(modelsTable.name, props.modelName))
-          .limit(1)
+      // Model names are only unique per schema: resolve the exact models row from the most specific scope.
+      const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+      const modelRecord = await resolveModelRecord(props.modelName, {
+        modelFileId: (props as any).modelFileId ?? modelInstance?.id,
+        schemaName: schemaName ?? modelInstance?.schemaName,
+      })
+      const modelRecords = modelRecord ? [modelRecord] : []
+      if (modelRecord?.schemaFileId) {
+        ;(props as any).modelFileId = modelRecord.schemaFileId
       }
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
@@ -704,7 +691,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
     }
     
-    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string; modelFileId?: string } = {
+      modelName: props.modelName,
+      modelFileId: (props as any).modelFileId,
+    }
     // File/Image/Html values that are raw content (html string, data URI, URL, File) must go through
     // the property's save pipeline to become storage seeds; createNewItem would store them verbatim.
     const pipelineValues: Array<[string, unknown]> = []
@@ -713,7 +703,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Exclude modelInstance, modelName, and schemaName as they're metadata, not item properties
     for (const [key, value] of Object.entries(props)) {
       // Skip metadata properties that aren't part of the item's data
-      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance') {
+      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance' || key === 'modelFileId') {
         continue
       }
       if (propertyNames.length === 0 || propertyNames.includes(key)) {
@@ -1064,6 +1054,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       readyTimeout?: number
       includeEas?: boolean
       addressFilter?: 'owned' | 'watched' | 'all'
+      /** Only items of this model (Model.id); needed when several schemas define a model with this name. */
+      modelFileId?: string
     },
   ): Promise<Item<any>[]> {
     const {
@@ -1071,8 +1063,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       readyTimeout = 5000,
       includeEas = false,
       addressFilter,
+      modelFileId,
     } = options ?? {}
-    const itemsData = await getItemsData({ modelName, deleted, includeEas, addressFilter })
+    const itemsData = await getItemsData({ modelName, modelFileId, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     for (const itemData of itemsData) {
       itemInstances.push(
@@ -1145,9 +1138,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           try {
             const M = getModel()
             const model =
-              schemaNameForModel !== undefined
-                ? M?.getByName(itemModelName, schemaNameForModel)
-                : M?.getByName(itemModelName)
+              M?.resolve(itemModelName, {
+                  modelFileId: ctx.modelFileId as string | undefined,
+                  schemaName: schemaNameForModel,
+                })
             if (model?.properties?.length) {
               propertySchemas = modelPropertiesToObject(model.properties)
             }
@@ -1464,7 +1458,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (!modelName) {
         return []
       }
-      const model = Model.getByName(modelName, schemaName)
+      const model = Model.resolve(modelName, {
+        modelFileId: this.serviceContext.modelFileId,
+        schemaName: schemaName ?? this.serviceContext.schemaName,
+      })
       if (!model) {
         return []
       }
@@ -1518,7 +1515,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return []
       }
       
-      const model = Model.getByName(modelName)
+      const model = Model.resolve(modelName, {
+        modelFileId: serviceContext.modelFileId,
+        schemaName: serviceContext.schemaName,
+      })
       if (!model) {
         return []
       }
@@ -1925,9 +1925,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                     if (itemModelName) {
                       const M = getModel()
                       const model =
-                        schemaNameForModel !== undefined
-                          ? M?.getByName(itemModelName, schemaNameForModel)
-                          : M?.getByName(itemModelName)
+                        M?.resolve(itemModelName, {
+                            modelFileId: this._service.getSnapshot().context.modelFileId,
+                            schemaName: schemaNameForModel,
+                          })
                       if (model?.properties?.length) {
                         propertySchemas = modelPropertiesToObject(model.properties)
                       }

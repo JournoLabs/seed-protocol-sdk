@@ -250,7 +250,7 @@ const isModelLinkedToOtherSchema = async (
   modelId: number,
   schemaId?: number,
 ): Promise<boolean> => {
-  const links = await db
+  const links = await (db as BetterSQLite3Database)
     .select({ schemaId: modelSchemas.schemaId })
     .from(modelSchemas)
     .where(eq(modelSchemas.modelId, modelId))

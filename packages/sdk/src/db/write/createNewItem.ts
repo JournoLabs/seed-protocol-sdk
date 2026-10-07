@@ -9,6 +9,8 @@ import { modelPropertiesToObject } from '@/helpers/model'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
+  /** schemaFileId of the item's models row; recorded on the seed so the item's model is unambiguous. */
+  modelFileId?: string
 }
 
 type CreateNewItemReturnType = {
@@ -19,6 +21,7 @@ type CreateNewItemReturnType = {
 
 export const createNewItem = async ({
   modelName,
+  modelFileId,
   ...propertyData
 }: CreateNewItemProps): Promise<CreateNewItemReturnType> => {
   if (!modelName) {
@@ -27,14 +30,14 @@ export const createNewItem = async ({
 
   const seedType = toSnakeCase(modelName)
 
-  const newSeedId = await createSeed({ type: seedType })
+  const newSeedId = await createSeed({ type: seedType, modelFileId })
 
   const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const model = await Model.getByNameAsync(modelName)
+  const model = (modelFileId ? Model.getById(modelFileId) : undefined) ?? (await Model.getByNameAsync(modelName))
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
   // Build set of all properties to create metadata for: union of model schema + propertyData

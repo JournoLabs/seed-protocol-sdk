@@ -194,6 +194,7 @@ export const itemMachineSingle = setup({
               seedLocalId: item.seedLocalId || context.seedLocalId,
               seedUid: item.seedUid || context.seedUid,
               schemaUid: item.schemaUid || context.schemaUid,
+              modelFileId: item.modelFileId || context.modelFileId,
               latestVersionLocalId: item.latestVersionLocalId || context.latestVersionLocalId,
               latestVersionUid: item.latestVersionUid || context.latestVersionUid,
               versionsCount: item.versionsCount || context.versionsCount,

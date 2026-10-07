@@ -8,9 +8,10 @@ import { normalizePublisher } from '@/helpers/addresses'
 type CreateSeedProps = {
   type: string
   seedUid?: string
+  modelFileId?: string
 }
 
-export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<string> => {
+export const createSeed = async ({ type, seedUid, modelFileId }: CreateSeedProps): Promise<string> => {
   const schemaUid = await getEasSchemaUidForModel(type)
 
   // schemaUid is optional - Items can be created without a schemaUid
@@ -25,6 +26,7 @@ export const createSeed = async ({ type, seedUid }: CreateSeedProps): Promise<st
   await appDb.insert(seeds).values({
     localId: newSeedLocalId,
     type,
+    modelFileId: modelFileId ?? null,
     uid: seedUid,
     createdAt: Date.now(),
     schemaUid: schemaUid || null,

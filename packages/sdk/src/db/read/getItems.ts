@@ -11,6 +11,8 @@ import { ZERO_BYTES32 } from '@/helpers/constants'
 
 type GetItemsDataProps = {
   modelName?: string
+  /** Restrict to items of this models row (seeds.model_file_id); legacy rows without one still match by type. */
+  modelFileId?: string
   deleted?: boolean
   includeEas?: boolean
   addressFilter?: 'owned' | 'watched' | 'all'
@@ -29,6 +31,7 @@ type GetItemsData = (props: GetItemsDataProps) => Promise<ItemData[]>
  */
 export const getItemsData: GetItemsData = async ({
   modelName,
+  modelFileId,
   deleted,
   includeEas = false,
   addressFilter,
@@ -50,6 +53,10 @@ export const getItemsData: GetItemsData = async ({
 
   if (modelName) {
     conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+  }
+
+  if (modelFileId) {
+    conditions.push(or(eq(seeds.modelFileId, modelFileId), isNull(seeds.modelFileId)) as SQL)
   }
 
   if (addressFilter === 'owned') {
@@ -95,6 +102,7 @@ export const getItemsData: GetItemsData = async ({
       seedLocalId: seeds.localId,
       seedUid: seeds.uid,
       schemaUid: seeds.schemaUid,
+      modelFileId: seeds.modelFileId,
       ...selectModelNameOrType,
       attestationCreatedAt: seeds.attestationCreatedAt,
       versionsCount: versionData.versionsCount,
