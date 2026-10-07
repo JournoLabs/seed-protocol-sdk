@@ -27,6 +27,11 @@ export const metadata = sqliteTable('metadata', {
   createdAt: int('created_at'),
   updatedAt: int('updated_at'),
   publisher: text('publisher'),
+  // Unix seconds when this row's attestation was revoked on EAS; null while it's live (or for a
+  // local, unpublished row). EAS sync keeps only the canonical attestation per (version, property
+  // schema): the newest live one, or the newest revoked one when all are revoked. So a non-null
+  // value marks a property kept only for its last value, not one that is present on the version.
+  revokedAt: int('revoked_at'),
 })
 
 export type MetadataType = InferSelectModel<typeof metadata>
