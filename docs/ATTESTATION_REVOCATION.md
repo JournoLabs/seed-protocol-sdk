@@ -55,6 +55,12 @@ After revocation, the item's local state is updated:
 
 The `seedUid` is preserved. Revoked attestations remain on-chain but are marked as revoked; they no longer appear in discovery queries that filter by `revoked: false`.
 
+The item's property rows (`metadata`) keep their values and get `revoked_at` (Unix seconds) for the attestations that were revoked.
+
+### EAS sync
+
+Sync fetches revoked attestations too and keeps local metadata on the canonical attestation per (version, property schema): the newest non-revoked one. When that attestation is later revoked, sync replaces the stored row with the next newest live attestation; when a newer one is published, it replaces the stored row. When every attestation of a property on a version is revoked (an unpublished item), sync keeps the newest one with `metadata.revoked_at` set, so a revoked item synced to a new device still has its last values. A non-null `revoked_at` therefore means "kept for its last value", not "present on the version". Seeds record `seeds.revoked_at` from EAS `revocationTime`.
+
 ## Republishing
 
 To make content visible again, call `item.publish()`. This creates **new** attestations (a new `seedUid`). There is no "unrevoke" – republishing is a fresh publish.
