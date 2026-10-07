@@ -379,4 +379,34 @@ describe.sequential('runSyncFromEas: revocations', () => {
       ]),
     ).toEqual([[liveRelatedOldTitle, 'live']])
   })
+
+  // Uses the relation scenario the previous test left in the fake EAS store.
+  it('refetches related seeds of already-stored relation properties on a later run', async () => {
+    const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+
+    fakeEas.rawRequests = []
+    await runSyncFromEas({ addresses: [attester] })
+
+    expect(relatedSeedRequests().map((uids) => [...uids].sort())).toEqual([
+      [uid('e3'), uid('f1')].sort(),
+    ])
+  })
+
+  it("does not carry an earlier run's related seed UIDs into the next run", async () => {
+    const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+    const modelSchemaUid = fakeEas.modelSchema!.id
+    const seed = uid('d1')
+    const version = uid('d2')
+
+    // Nothing in this run relates to another seed.
+    fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 2_000)]
+    fakeEas.versions = [attestation(version, seed, uid('5b'), 2_001)]
+    fakeEas.properties = [
+      property(uid('d3'), version, TITLE_SCHEMA_UID, 'title', 'plain', 2_002),
+    ]
+    fakeEas.rawRequests = []
+    await runSyncFromEas({ addresses: [attester] })
+
+    expect(relatedSeedRequests()).toEqual([])
+  })
 })

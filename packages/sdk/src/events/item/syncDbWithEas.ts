@@ -70,17 +70,52 @@ const relationValuesToExclude = [
 ]
 
 
-const seedUidToLocalId = new Map<string, string>()
-const seedUidToModelType = new Map<string, string>()
-const relatedSeedUids = new Set<string>()
+/**
+ * Lookups one `runSyncFromEas` run builds up as it stores seeds and versions, and the relation
+ * targets its properties point at. Created per run and passed down, so a run never sees another
+ * run's seeds or re-fetches its related seeds, even when runs overlap.
+ */
+type SyncRunState = {
+  seedUidToLocalId: Map<string, string>
+  seedUidToModelType: Map<string, string>
+  versionUidToLocalId: Map<string, string>
+  versionUidToSeedUid: Map<string, string>
+  relatedSeedUids: Set<string>
+}
 
-const versionUidToLocalId = new Map<string, string>()
-const versionUidToSeedUid = new Map<string, string>()
+const createSyncRunState = (): SyncRunState => ({
+  seedUidToLocalId: new Map(),
+  seedUidToModelType: new Map(),
+  versionUidToLocalId: new Map(),
+  versionUidToSeedUid: new Map(),
+  relatedSeedUids: new Set(),
+})
 
-const propertyUidToLocalId = new Map<string, string>()
+const isRelationPropertyName = (propertyNameSnake: string): boolean =>
+  (propertyNameSnake.endsWith('_id') || propertyNameSnake.endsWith('_ids')) &&
+  propertyNameSnake !== 'storage_transaction_id' &&
+  propertyNameSnake !== 'storage_provider_transaction_id'
+
+/**
+ * Seed UIDs that relation properties point at. Collected from every property the run fetched, not
+ * only newly stored ones, so related seeds are refreshed (new versions, revocations) on each sync.
+ */
+const collectRelatedSeedUids = (properties: Attestation[], into: Set<string>): void => {
+  for (const property of properties) {
+    const parsed = parseEasPropertyMetadata(property.decodedDataJson)
+    if (!parsed.ok) continue
+    const { name, value } = parsed.metadata
+    if (!name || !isRelationPropertyName(name)) continue
+    const values = Array.isArray(value) ? value : [value]
+    for (const v of values) {
+      if (typeof v === 'string' && v && !relationValuesToExclude.includes(v)) into.add(v)
+    }
+  }
+}
 
 type SaveEasSeedsToDbProps = {
   itemSeeds: Attestation[]
+  state: SyncRunState
 }
 
 type SaveEasSeedsToDbReturn = {
@@ -92,7 +127,8 @@ type SaveEasSeedsToDb = (
   props: SaveEasSeedsToDbProps,
 ) => Promise<SaveEasSeedsToDbReturn>
 
-const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
+const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
+  const { seedUidToLocalId, seedUidToModelType } = state
   const appDb = BaseDb.getAppDb()
 
   const seedUids = itemSeeds.map((seed) => seed.id)
@@ -178,6 +214,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
 
 type SaveEasVersionsToDbParams = {
   itemVersions: Attestation[]
+  state: SyncRunState
 }
 
 type SaveEasVersionsToDb = (
@@ -188,7 +225,8 @@ type SaveEasVersionsToDbReturn = {
   versionUids: string[]
 }
 
-const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
+const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state }) => {
+  const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
   const versionUids = itemVersions.map((version) => version.id)
 
   const appDb = BaseDb.getAppDb()
@@ -262,7 +300,9 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions }) => {
 const createMetadataRecordsForStorageTransactionId = async (
   storageTransactionIdProperty: Attestation,
   modelSchema: ModelSchema | undefined,
+  state: SyncRunState,
 ) => {
+  const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
   // Early return if modelSchema is not provided
   if (!modelSchema) {
     console.warn(
@@ -373,11 +413,11 @@ const createMetadataRecordsForStorageTransactionId = async (
 type SaveEasPropertiesToDbParams = {
   itemProperties: Attestation[]
   itemSeeds: Attestation[]
+  state: SyncRunState
 }
 
 type SaveEasPropertiesToDbReturn = {
   propertyUids: string[]
-  propertyUidToLocalId?: Map<string, string>
 }
 
 type SaveEasPropertiesToDb = (
@@ -390,8 +430,12 @@ let saveEasPropertiesDbChain: Promise<unknown> = Promise.resolve()
 const saveEasPropertiesToDbBody = async ({
   itemProperties,
   itemSeeds,
+  state,
 }: SaveEasPropertiesToDbParams): Promise<SaveEasPropertiesToDbReturn> => {
+  const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
   const propertyUids = itemProperties.map((property) => property.id)
+
+  collectRelatedSeedUids(itemProperties, state.relatedSeedUids)
 
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
@@ -412,9 +456,6 @@ const saveEasPropertiesToDbBody = async ({
     for (const row of existingMetadataRecordsRows) {
       if (row.uid) {
         existingPropertyRecordsUids.add(row.uid)
-        if (row.localId) {
-          propertyUidToLocalId.set(row.uid, row.localId)
-        }
       }
     }
   }
@@ -424,7 +465,7 @@ const saveEasPropertiesToDbBody = async ({
   )
 
   if (newProperties.length === 0) {
-    return { propertyUidToLocalId, propertyUids }
+    return { propertyUids }
   }
 
   let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_id, property_name, property_value,
@@ -487,12 +528,7 @@ const saveEasPropertiesToDbBody = async ({
       schemaUid,
     })
 
-    if (
-      (propertyNameSnake.endsWith('_id') ||
-        propertyNameSnake.endsWith('_ids')) &&
-      propertyNameSnake !== 'storage_transaction_id' &&
-      propertyNameSnake !== 'storage_provider_transaction_id'
-    ) {
+    if (isRelationPropertyName(propertyNameSnake)) {
       isRelation = true
 
       if (Array.isArray(propertyMetadata.value)) {
@@ -506,16 +542,12 @@ const saveEasPropertiesToDbBody = async ({
           refSeedType = result.modelName
         }
 
-        propertyMetadata.value.forEach((value: string) => {
-          relatedSeedUids.add(value)
-        })
       }
 
       if (!isList) {
         if (relationValuesToExclude.includes(propertyMetadata.value as string)) {
           continue
         }
-        relatedSeedUids.add(propertyMetadata.value as string)
       }
     }
 
@@ -562,7 +594,7 @@ const saveEasPropertiesToDbBody = async ({
     const modelSchema = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
     if (propertyNameSnake === 'storage_transaction_id') {
-      await createMetadataRecordsForStorageTransactionId(property, modelSchema)
+      await createMetadataRecordsForStorageTransactionId(property, modelSchema, state)
     }
 
     const propertyId =
@@ -599,7 +631,6 @@ const saveEasPropertiesToDbBody = async ({
       insertPropertiesQuery += valuesString + ';'
     }
 
-    propertyUidToLocalId.set(property.id, propertyLocalId)
   }
 
   if (insertPropertiesQuery.endsWith('VALUES ')) {
@@ -634,9 +665,11 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {
 const syncVersionsAndPropertiesForSeeds = async ({
   seedUids,
   itemSeeds,
+  state,
 }: {
   seedUids: string[]
   itemSeeds: Attestation[]
+  state: SyncRunState
 }): Promise<void> => {
   if (seedUids.length === 0) return
 
@@ -647,6 +680,7 @@ const syncVersionsAndPropertiesForSeeds = async ({
 
   const { versionUids } = await saveEasVersionsToDb({
     itemVersions,
+    state,
   })
   if (versionUids.length === 0) return
 
@@ -662,6 +696,7 @@ const syncVersionsAndPropertiesForSeeds = async ({
   await saveEasPropertiesToDb({
     itemProperties,
     itemSeeds,
+    state,
   })
 }
 
@@ -674,8 +709,9 @@ const syncVersionsAndPropertiesForSeeds = async ({
  * would also break the canonical pick, which needs the revoked attestations to skip them (or to
  * keep the newest one when all are revoked), and would leave `seeds.revoked_at` unset.
  */
-const getRelatedSeedsAndVersions = async () => {
-  const uids = Array.from(relatedSeedUids)
+const getRelatedSeedsAndVersions = async (state: SyncRunState) => {
+  // Snapshot: relations found on the related seeds themselves aren't followed (one level deep).
+  const uids = Array.from(state.relatedSeedUids)
   if (uids.length === 0) return
 
   const easClient = BaseEasClient.getEasClient()
@@ -689,10 +725,10 @@ const getRelatedSeedsAndVersions = async () => {
     },
   })
 
-  const { seedUids } = await saveEasSeedsToDb({ itemSeeds })
+  const { seedUids } = await saveEasSeedsToDb({ itemSeeds, state })
 
   // Only seeds EAS returned: a version of an unknown seed would be stored without its seed.
-  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds })
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state })
 }
 
 export type SyncFromEasOptions = {
@@ -782,13 +818,16 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     excludeRevoked: false,
   })
 
+  const state = createSyncRunState()
+
   const { seedUids } = await saveEasSeedsToDb({
     itemSeeds,
+    state,
   })
 
-  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds })
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds, state })
 
-  await getRelatedSeedsAndVersions()
+  await getRelatedSeedsAndVersions(state)
   scheduleBulkFilesDownloadFromEasSync(addresses)
 
   try {
