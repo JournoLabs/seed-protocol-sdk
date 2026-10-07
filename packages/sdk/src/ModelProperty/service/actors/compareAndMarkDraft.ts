@@ -165,12 +165,17 @@ export const compareAndMarkDraft = fromCallback<
         
         const db = BaseDb.getAppDb()
         if (db && fullContext.modelName && fullContext.name) {
-          // Find model by name
-          const modelRecords = await db
-            .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .where(eq(modelsTable.name, fullContext.modelName))
-            .limit(1)
+          // Find this property's model (model names are only unique per schema)
+          const { resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+          const modelRecord = await resolveModelRecord(
+            fullContext.modelName,
+            {
+              modelId: typeof fullContext.modelId === 'number' ? fullContext.modelId : undefined,
+              schemaName: fullContext._schemaName,
+            },
+            db,
+          )
+          const modelRecords = modelRecord ? [modelRecord] : []
           
           if (modelRecords.length > 0) {
             // Find property by name and modelId

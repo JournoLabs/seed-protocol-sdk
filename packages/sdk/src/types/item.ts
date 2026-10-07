@@ -26,6 +26,8 @@ export type ItemMachineContext<T> = {
   modelNamePlural?: string
   modelName?: string
   schemaName?: string
+  /** schemaFileId of the item's models row (seeds.model_file_id); disambiguates same-name models across schemas. */
+  modelFileId?: string
   existingItem?: Record<string, unknown>
   propertiesUpdatedAt?: number
   hasRemoteBackup?: boolean
@@ -48,6 +50,8 @@ export type ItemMachineContext<T> = {
 export type NewItemProps<T> = Partial<ItemData> &
   Partial<T> & {
     modelName: string
+    /** Which model, when several schemas define `modelName`: the Model.id, or pass `schemaName`. */
+    modelFileId?: string
     modelInstance?: Model
     schemaUidsByModelName?: Map<string, string>
     mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
@@ -59,6 +63,8 @@ export interface ItemData {
   seedUid?: string;
   modelName?: string;
   schemaName?: string;
+  /** schemaFileId of the item's models row (seeds.model_file_id). */
+  modelFileId?: string;
   schemaUid?: string;
   attestationCreatedAt?: number & tags.Type<"int64">;
   latestVersionUid?: string;
@@ -89,6 +95,10 @@ export type CreatePropertyInstanceProps = {
   versionLocalId?: string
   versionUid?: string
   modelName: string
+  /** schemaFileId of the owning item's models row. */
+  modelFileId?: string
+  /** metadata.property_id (properties.id) when created from a metadata row. */
+  propertyId?: number
   storageTransactionId?: string
   propertyValue: any
   schemaUid?: string

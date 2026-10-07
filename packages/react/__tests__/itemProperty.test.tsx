@@ -667,6 +667,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema Items',
       title: 'Test Post Title',
       content: 'Test Post Content',
       author: 'Test Author',
@@ -678,6 +679,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       testItem2 = await Item.create({
         modelName: 'Post',
+        schemaName: 'Test Schema Items',
         title: 'Test Post Title 2',
         content: 'Test Post Content 2',
         author: 'Test Author 2',

@@ -14,7 +14,6 @@ import debug from 'debug'
 // import { getClient } from '@/client/ClientManager'
 import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
 const logger = debug('seedSdk:imports:json')
@@ -840,7 +839,7 @@ export async function importJsonSchema(
           const modelSchemaMod = await import('../seedSchema/ModelSchema')
           const { models: modelsTable } = modelSchemaMod
           const drizzleMod = await import('drizzle-orm')
-          const { eq, and } = drizzleMod
+          const { eq, and, isNull } = drizzleMod
           
           const modelLinks = await db
             .select({
@@ -895,9 +894,14 @@ export async function importJsonSchema(
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" with schemaFileId "${modelFileId}" in database`)
                     }
                   } else {
-                    // Fallback: find by name, but never link another schema's same-named model
-                    const byName = await getModelRecordByName(db, missingModelName, schemaRecord.name)
-                    const missingModel = byName ? [byName] : []
+                    // Fallback: find by name, but only a stub no schema claims (model names are only
+                    // unique per schema; an unlinked row with a schemaFileId is a deleted schema's leftover)
+                    const missingModel = await db
+                      .select({ id: modelsTable.id })
+                      .from(modelsTable)
+                      .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+                      .where(and(eq(modelsTable.name, missingModelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
+                      .limit(1)
                     
                     if (missingModel.length > 0 && missingModel[0].id) {
                       const existingJoin = await db

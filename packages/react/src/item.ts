@@ -209,6 +209,10 @@ type UseItemsReturn = {
 
 type UseItemsProps = {
   modelName?: string
+  /** Only items of one model, when several schemas define `modelName`: the schema that defines it ... */
+  schemaName?: string
+  /** ... or its Model.id. */
+  modelFileId?: string
   deleted?: boolean
   includeEas?: boolean
   addressFilter?: 'owned' | 'watched' | 'all'
@@ -222,6 +226,8 @@ const getItemsQueryKey = (
   includeEas?: boolean,
   addressFilter?: 'owned' | 'watched' | 'all',
   addressRevision?: number,
+  modelFileId?: string,
+  schemaName?: string,
 ) =>
   [
     'seed',
@@ -231,6 +237,8 @@ const getItemsQueryKey = (
     includeEas ?? false,
     addressFilter ?? null,
     addressRevision ?? 0,
+    // Only scoped lists get the extra segment, so unscoped keys keep their existing shape.
+    ...(modelFileId || schemaName ? [{ modelFileId: modelFileId ?? null, schemaName: schemaName ?? null }] : []),
   ] as const
 
 /**
@@ -245,6 +253,8 @@ const getItemsQueryKey = (
  */
 export const useItems: UseItems = ({
   modelName,
+  modelFileId,
+  schemaName,
   deleted = false,
   includeEas = false,
   addressFilter,
@@ -283,8 +293,8 @@ export const useItems: UseItems = ({
   }, [addressFilter, addressRevision])
 
   const queryKey = useMemo(
-    () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter, addressRevision),
-    [modelName, deleted, includeEas, addressFilter, addressRevision],
+    () => getItemsQueryKey(modelName, deleted, includeEas, addressFilter, addressRevision, modelFileId, schemaName),
+    [modelName, deleted, includeEas, addressFilter, addressRevision, modelFileId, schemaName],
   )
 
   useEffect(() => {
@@ -302,6 +312,8 @@ export const useItems: UseItems = ({
         waitForReady: true,
         includeEas,
         addressFilter,
+        modelFileId,
+        schemaName,
       })
       return rows
     },

@@ -5,9 +5,8 @@ import { ModelMachineContext } from '../modelMachine'
 // import { Schema } from '@/Schema/Schema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, isNull } from 'drizzle-orm'
 import { generateId } from '@/helpers'
-import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
 
@@ -93,14 +92,43 @@ export const loadOrCreateModel = fromCallback<
           }
         }
 
-        // If not found by ID, try by name within this schema (model names are only unique per
-        // schema; a name-only lookup would let this instance adopt another schema's row).
+        // If not found by ID, try by name
         // But if we have a schemaFileId and the model found by name has a different schemaFileId,
         // don't use it - we're creating a new model from a schema file with a specific ID
         if (!modelRecord) {
-          const foundModel = await getModelRecordByName(db, modelName, schemaName)
-
-          if (foundModel) {
+          // Model names are only unique per schema: prefer this schema's row, and otherwise only
+          // consider same-name rows that no schema claims yet (never another schema's model).
+          const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
+          const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
+          let dbModels = await db
+            .select({
+              id: modelsTable.id,
+              name: modelsTable.name,
+              schemaFileId: modelsTable.schemaFileId,
+              isEdited: modelsTable.isEdited,
+            })
+            .from(modelsTable)
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
+            .limit(1)
+          if (dbModels.length === 0) {
+            dbModels = await db
+              .select({
+                id: modelsTable.id,
+                name: modelsTable.name,
+                schemaFileId: modelsTable.schemaFileId,
+                isEdited: modelsTable.isEdited,
+              })
+              .from(modelsTable)
+              .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+              // Stubs only: an unlinked row with a schemaFileId is a deleted schema's leftover, not ours
+              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
+              .limit(1)
+          }
+          
+          if (dbModels.length > 0) {
+            const foundModel = dbModels[0]
             const dbSchemaFileId = foundModel.schemaFileId
             
             // CRITICAL: If we found a model in the database by name, check if there's already a cached instance
@@ -108,14 +136,15 @@ export const loadOrCreateModel = fromCallback<
             // This handles the case where Model.create was called with a generated ID, but the model
             // already exists in the database with a different ID. By updating the current instance's
             // schemaFileId to match the database, both will point to the same cached instance.
-            if (dbSchemaFileId) {
+            // Skip for schema models (_idFromSchema): their id is authoritative, and a same-name row
+            // with a different id belongs to another schema (e.g. two schemas that each define "Post").
+            if (dbSchemaFileId && !(_idFromSchema && schemaFileId && schemaFileId !== dbSchemaFileId)) {
               try {
                 const modelMod = await import('../../../Model/Model')
                 const { Model } = modelMod
                 // Access instanceCacheById via type assertion since it's protected
                 const cacheById = (Model as any).instanceCacheById as Map<string, any>
-                const cachedSchemaName = cacheById.get(dbSchemaFileId)?.instance?._getSnapshotContext?.()?.schemaName
-                if (cacheById.has(dbSchemaFileId) && cachedSchemaName === schemaName) {
+                if (cacheById.has(dbSchemaFileId)) {
                   logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
                   // Update the current instance's schemaFileId to match the database
                   // This ensures both instances point to the same cached instance

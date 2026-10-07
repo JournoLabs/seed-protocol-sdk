@@ -3,12 +3,12 @@ import type { DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { generateId } from '@/helpers'
 import { addModelsToDb } from '@/helpers/db'
 import { createModelFromJson } from '@/imports/json'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import { eq, desc } from 'drizzle-orm'
+import { and, eq, desc } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 export type AddModelsMachineContext = {
@@ -94,15 +94,24 @@ export const addModelsMachine = setup({
           logger(`Creating model instance for "${modelName}"`)
           
           // Look up modelFileId from database BEFORE creating the Model instance
-          let modelFileId: string | undefined = undefined
+          // Model names are only unique per schema: use the schema file's id, else this schema's row
+          // (never a same-name model from another schema).
+          let modelFileId: string | undefined =
+            typeof (modelData as { id?: unknown })?.id === 'string' ? (modelData as { id: string }).id : undefined
           try {
             const db = BaseDb.getAppDb()
-            if (db) {
-              // Scoped to this schema: another schema's same-named model has its own file id
-              const dbModel = await getModelRecordByName(db, modelName, schemaName)
-
-              if (dbModel?.schemaFileId) {
-                modelFileId = dbModel.schemaFileId
+            if (db && !modelFileId && schemaName) {
+              const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
+              const dbModels = await db
+                .select({ schemaFileId: modelsTable.schemaFileId })
+                .from(modelsTable)
+                .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+                .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+                .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
+                .limit(1)
+              
+              if (dbModels.length > 0 && dbModels[0].schemaFileId) {
+                modelFileId = dbModels[0].schemaFileId
                 logger(`Found modelFileId "${modelFileId}" for model "${modelName}" from database`)
               }
             }

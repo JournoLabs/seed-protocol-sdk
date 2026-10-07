@@ -1,7 +1,7 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, eq, getTableColumns, SQL } from "drizzle-orm"
+import { and, desc, eq, getTableColumns, SQL } from "drizzle-orm"
 import { toSnakeCase } from "drizzle-orm/casing"
 import { startCase } from "lodash-es"
 import { getItemProperties } from "./getItemProperties"
@@ -83,14 +83,20 @@ export const getItemData: GetItemData = async ({
   // Fix 5: Derive schemaName for multi-schema Model resolution (models -> model_schemas -> schemas)
   let schemaName: string | undefined
   const normalizedModelName = modelName ? startCase(modelName) : (seedRow.type ? startCase(seedRow.type) : undefined)
-  if (appDb && normalizedModelName) {
+  if (appDb && (seedRow.modelFileId || normalizedModelName)) {
     try {
+      // Prefer the seed's own model row; model names are only unique within a schema.
       const schemaRows = await appDb
         .select({ schemaName: schemasTable.name })
         .from(models)
         .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
         .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(eq(models.name, normalizedModelName))
+        .where(
+          seedRow.modelFileId
+            ? eq(models.schemaFileId, seedRow.modelFileId)
+            : eq(models.name, normalizedModelName!),
+        )
+        .orderBy(desc(models.id))
         .limit(1)
       if (schemaRows.length > 0 && schemaRows[0].schemaName) {
         schemaName = schemaRows[0].schemaName

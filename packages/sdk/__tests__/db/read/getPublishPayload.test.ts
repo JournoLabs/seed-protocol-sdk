@@ -154,6 +154,7 @@ testDescribe('getPublishPayload integration', () => {
     const author = await createPublishedTestAuthor()
     const postItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema getPublishPayload',
       author: author.seedLocalId,
       title: 'Post with image placeholder',
       coverImage: imageSeedLocalId,

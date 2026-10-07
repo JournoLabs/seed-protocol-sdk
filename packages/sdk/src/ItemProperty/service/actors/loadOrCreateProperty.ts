@@ -78,9 +78,15 @@ export const loadOrCreateProperty = fromCallback<
         try {
           const { Model } = await import('../../../Model/Model')
           const { modelPropertiesToObject } = await import('../../../helpers/model')
+          const { resolveItemModelFileId } = await import('../../../db/read/resolveModelRecord')
           const normalizedModelName = upperFirst(camelCase(modelNameForNew))
-          let model = Model.getByName(normalizedModelName)
-          if (!model?.properties?.length) {
+          const itemModelFileId = await resolveItemModelFileId({
+            modelFileId: context.modelFileId,
+            seedLocalId,
+            seedUid,
+          })
+          let model = await Model.resolveAsync(normalizedModelName, { modelFileId: itemModelFileId })
+          if (!model?.properties?.length && !itemModelFileId) {
             model = Model.findByModelType(toSnakeCase(modelNameForNew))
           }
           if (model?.properties?.length) {
@@ -128,16 +134,21 @@ export const loadOrCreateProperty = fromCallback<
     // It ends up in the context below, and later lookups by name (Model.getByName) can't match it.
     const modelName =
       context.modelName || (metadataRecord.modelType ? upperFirst(camelCase(metadataRecord.modelType)) : undefined)
+    // Model names are only unique per schema: pin lookups to the item's own model row.
+    const { resolveItemModelFileId, resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+    const modelFileId = await resolveItemModelFileId({
+      modelFileId: context.modelFileId,
+      seedLocalId: seedLocalId ?? metadataRecord.seedLocalId,
+      seedUid: seedUid ?? metadataRecord.seedUid,
+      propertyId: metadataRecord.propertyId,
+    })
     if (modelName) {
       try {
         // Normalize snake_case to PascalCase: "test_post" -> "TestPost" (startCase gives "Test Post" which fails)
         const normalizedModelName = upperFirst(camelCase(modelName))
         // Query properties table to get property schema
-        const modelRecords = await db
-          .select({ id: models.id })
-          .from(models)
-          .where(eq(models.name, normalizedModelName))
-          .limit(1)
+        const modelRecord = await resolveModelRecord(normalizedModelName, { modelFileId }, db)
+        const modelRecords = modelRecord ? [modelRecord] : []
 
         if (modelRecords.length > 0 && modelRecords[0].id) {
           const propertyRecords = await db
@@ -176,7 +187,9 @@ export const loadOrCreateProperty = fromCallback<
             // Merge with schema from file/DB to get validation rules (enum, pattern, etc.) - properties table doesn't store these
             try {
               const { getPropertySchema } = await import('../../../helpers/property')
-              let schemaFromFile = await getPropertySchema(normalizedModelName, propertyName)
+              let schemaFromFile = await getPropertySchema(normalizedModelName, propertyName, {
+                modelFileId: modelRecord?.schemaFileId ?? modelFileId,
+              })
               if (!schemaFromFile?.validation) {
                 // Fallback: get validation from schemaData in database (Schema context may not be loaded yet)
                 const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
@@ -223,8 +236,8 @@ export const loadOrCreateProperty = fromCallback<
         const { modelPropertiesToObject } = await import('../../../helpers/model')
         const normalizedModelName = upperFirst(camelCase(modelName))
         // Try PascalCase first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
-        let model = Model.getByName(normalizedModelName)
-        if (!model?.properties?.length) {
+        let model = Model.resolve(normalizedModelName, { modelFileId })
+        if (!model?.properties?.length && !modelFileId) {
           model = Model.findByModelType(toSnakeCase(modelName))
         }
         if (model?.properties?.length) {
@@ -417,6 +430,7 @@ export const loadOrCreateProperty = fromCallback<
         localId: metadataRecord.localId || undefined,
         uid: metadataRecord.uid || undefined,
         modelName: modelName || context.modelName,
+        modelFileId: modelFileId ?? context.modelFileId,
         propertyRecordSchema,
         refSeedType: refSeedType ?? context.refSeedType,
         refResolvedValue: metadataRecord.refResolvedValue ?? context.refResolvedValue,

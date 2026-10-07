@@ -8,6 +8,9 @@ export const seeds = sqliteTable(
     uid: text('uid'),
     schemaUid: text('schema_uid'),
     type: text('type'),
+    // schemaFileId of the models row this item belongs to (= Model.id). Disambiguates items whose
+    // model name exists in more than one schema; null for legacy rows that couldn't be backfilled.
+    modelFileId: text('model_file_id'),
     publisher: text('publisher'),
     attestationRaw: text('attestation_raw'),
     attestationCreatedAt: int('attestation_created_at'),

@@ -85,7 +85,7 @@ function dedupeMetadataRowsByInstanceKey(
  * @param modelName - Model name for resolving propertyRecordSchema from Model
  * @param versionLocalId - Latest version local ID (for placeholder properties)
  * @param versionUid - Latest version UID (for placeholder properties)
- * @param schemaName - Schema the model belongs to, so a same-named model from another schema isn't used
+ * @param modelScope - modelFileId / schemaName of the item's model (model names are only unique per schema)
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
@@ -95,9 +95,10 @@ const createItemPropertyInstances = async (
   modelName: string,
   versionLocalId?: string,
   versionUid?: string,
-  schemaName?: string,
+  modelScope: { modelFileId?: string; schemaName?: string } = {},
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
+  const schemaName = modelScope.schemaName
 
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
@@ -107,10 +108,9 @@ const createItemPropertyInstances = async (
 
     // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    // With a known schema, never fall back to a same-named model from another schema.
-    let model = Model.getByName(modelName, schemaName)
+    let model = Model.resolve(modelName, modelScope)
     if (!model?.properties?.length) {
-      model = (await Model.getByNameAsync(modelName, schemaName)) ?? model
+      model = await Model.resolveAsync(modelName, modelScope) ?? undefined
     }
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
@@ -247,6 +247,8 @@ const createItemPropertyInstances = async (
           seedLocalId,
           seedUid,
           modelName,
+          modelFileId: modelScope.modelFileId,
+          propertyId: metaRow.propertyId ?? undefined,
           propertyValue: metaRow.propertyValue ?? undefined,
           versionLocalId: metaRow.versionLocalId ?? undefined,
           versionUid: metaRow.versionUid ?? undefined,
@@ -280,6 +282,7 @@ const createItemPropertyInstances = async (
           seedLocalId,
           seedUid,
           modelName,
+          modelFileId: modelScope.modelFileId,
           propertyValue: undefined,
           versionLocalId: versionLocalId ?? undefined,
           versionUid: versionUid ?? undefined,
@@ -377,6 +380,8 @@ export const loadOrCreateItem = fromCallback<
     const resolvedSeedLocalId = seedRecord.localId
     const resolvedSeedUid = seedRecord.uid || undefined
     const schemaUid = seedRecord.schemaUid || undefined
+    const modelFileId = seedRecord.modelFileId || context.modelFileId || undefined
+    const modelScope = { modelFileId, schemaName: context.schemaName }
 
     // Step 2: Query versions table to find all versions for that seed
     const versionData = getVersionData()
@@ -404,6 +409,7 @@ export const loadOrCreateItem = fromCallback<
           seedUid: resolvedSeedUid,
           modelName,
           schemaUid,
+          modelFileId,
           latestVersionLocalId: undefined,
           latestVersionUid: undefined,
           versionsCount: 0,
@@ -430,6 +436,7 @@ export const loadOrCreateItem = fromCallback<
           seedUid: resolvedSeedUid,
           modelName,
           schemaUid,
+          modelFileId,
           latestVersionLocalId: undefined,
           latestVersionUid: undefined,
           versionsCount: versionRecord.versionsCount || 0,
@@ -468,7 +475,7 @@ export const loadOrCreateItem = fromCallback<
       modelName,
       latestVersionLocalId,
       latestVersionUid,
-      context.schemaName,
+      modelScope,
     )
 
     // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
@@ -489,6 +496,7 @@ export const loadOrCreateItem = fromCallback<
         seedUid: resolvedSeedUid,
         modelName,
         schemaUid,
+        modelFileId,
         latestVersionLocalId,
         latestVersionUid,
         versionsCount: versionRecord.versionsCount || 0,

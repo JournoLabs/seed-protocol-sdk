@@ -1,3 +1,4 @@
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import {
@@ -122,6 +123,7 @@ export const saveImage = fromCallback<
 
     const newImageSeedLocalId = await createSeed({
       type: 'image',
+      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
     })
 
     if (!fileName) {

@@ -1,3 +1,4 @@
+import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
 // Dynamic import to break circular dependency with getItem -> BaseItem
 // import { getItem } from '@/db/read/getItem'
 import {
@@ -268,15 +269,17 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
           p.propertyDef?.required === undefined)),
   )
   let schema: any
+  // Model names are only unique per schema: resolve definitions from this item's own model.
+  const targetScope = await getItemModelScope(targetItem as any)
   for (const itemProperty of targetItem.properties) {
     if (!itemProperty.propertyDef && targetItem.modelName) {
-      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName)
+      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName, targetScope)
       if (!schema) {
         try {
           const { Model } = await import('@/Model/Model')
           const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-          let model = Model.getByName(normalizedModelName)
-          if (!model?.properties?.length) {
+          let model = Model.resolve(normalizedModelName, targetScope)
+          if (!model?.properties?.length && !targetScope.modelFileId) {
             model = Model.findByModelType(toSnakeCaseDb(targetItem.modelName))
           }
           const modelFound = !!model
@@ -296,11 +299,8 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
         if (db) {
           try {
             const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-            const modelRecords = await db
-              .select({ id: models.id })
-              .from(models)
-              .where(eq(models.name, normalizedModelName))
-              .limit(1)
+            const modelRecord = await resolveModelRecord(normalizedModelName, targetScope, db)
+            const modelRecords = modelRecord ? [modelRecord] : []
             if (modelRecords.length > 0 && modelRecords[0].id) {
               const propertyRecords = await db
                 .select()
@@ -682,17 +682,16 @@ const processRelationOrImageProperty = async (
   let isRequired = propertyDef?.required === true
   // Resolve required from schema/DB when propertyDef lacks it
   if (!isRequired && relationOrImageProperty.modelName) {
+    const propertyScope = await getItemModelScope(relationOrImageProperty as any)
     let schema = await getPropertySchema(
       relationOrImageProperty.modelName,
       relationOrImageProperty.propertyName,
+      propertyScope,
     )
     if (!schema && BaseDb.getAppDb()) {
       const normalizedModelName = upperFirst(camelCase(relationOrImageProperty.modelName))
-      const modelRecords = await BaseDb.getAppDb()!
-        .select({ id: models.id })
-        .from(models)
-        .where(eq(models.name, normalizedModelName))
-        .limit(1)
+      const modelRecord = await resolveModelRecord(normalizedModelName, propertyScope)
+      const modelRecords = modelRecord ? [modelRecord] : []
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await BaseDb.getAppDb()!
           .select()
@@ -895,7 +894,7 @@ const processRelationOrImageProperty = async (
       !p.propertyDef &&
       relatedItem.modelName
     ) {
-      const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId')
+      const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId', await getItemModelScope(relatedItem as any))
       if (schema) {
         p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
       }
@@ -1049,7 +1048,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
         !p.propertyDef &&
         relatedItem.modelName
       ) {
-        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId')
+        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId', await getItemModelScope(relatedItem as any))
         if (schema) {
           p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
         }
@@ -1512,11 +1511,8 @@ export const getPublishPayload = async (
     let isRequired = relProp.propertyDef?.required === true
     if (!isRequired && BaseDb.getAppDb() && item.modelName) {
       const normalizedModelName = upperFirst(camelCase(item.modelName))
-      const modelRows = await BaseDb.getAppDb()!
-        .select({ id: models.id })
-        .from(models)
-        .where(eq(models.name, normalizedModelName))
-        .limit(1)
+      const modelRecord = await resolveModelRecord(normalizedModelName, await getItemModelScope(item as any))
+      const modelRows = modelRecord ? [modelRecord] : []
       if (modelRows.length > 0) {
         const propRows = await BaseDb.getAppDb()!
           .select({ required: properties.required, refModelId: properties.refModelId })
@@ -1593,7 +1589,7 @@ export const getPublishPayload = async (
 
   for (const p of itemBasicProperties) {
     if (isStorageTransactionPropertyName(p.propertyName) && !p.propertyDef && item.modelName) {
-      const schema = await getPropertySchema(item.modelName, 'storageTransactionId')
+      const schema = await getPropertySchema(item.modelName, 'storageTransactionId', await getItemModelScope(item as any))
       if (schema) {
         p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
       }
