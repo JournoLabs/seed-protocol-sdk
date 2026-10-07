@@ -43,6 +43,21 @@ async function waitForModelPropertyIdle(property: ModelProperty, timeout: number
   }
 }
 
+// Schema names here must not match other test files': in the browser all files share one OPFS store, and
+// importing a same-name/same-version schema loads the other file's schema instead.
+// Schema imports settle asynchronously (slower under a busy browser run). Wait for the property's schema
+// instead of relying on the fixed sleeps after importJsonSchema.
+async function waitForPropertySchema(modelName: string, propertyName: string) {
+  return vi.waitFor(
+    async () => {
+      const data = await getPropertySchema(modelName, propertyName)
+      if (!data) throw new Error(`Property schema ${modelName}.${propertyName} not loaded yet`)
+      return data
+    },
+    { timeout: 15000, interval: 100 },
+  )
+}
+
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
@@ -141,7 +156,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty.create()', () => {
     it('should create a new ModelProperty instance with property data', async () => {
-      const schemaName = 'Test Schema Property Create'
+      const schemaName = 'Test Schema ModelProperty Create'
       const modelName = 'TestModel Property Create'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -164,7 +179,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 500))
       
       // Get property schema data
-      const propertyData = await getPropertySchema(modelName, 'title')
+      const propertyData = await waitForPropertySchema(modelName, 'title')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -178,7 +193,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
 
     it('should return the same instance when called multiple times (caching)', async () => {
-      const schemaName = 'Test Schema Property Cache'
+      const schemaName = 'Test Schema ModelProperty Cache'
       const modelName = 'TestModel Property Cache'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -198,7 +213,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'content')
+      const propertyData = await waitForPropertySchema(modelName, 'content')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -243,7 +258,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'name')
+      const propertyData = await waitForPropertySchema(modelName, 'name')
       expect(propertyData).toBeDefined()
       
       if (propertyData && propertyData.id) {
@@ -262,7 +277,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty.find()', () => {
     it('should find existing ModelProperty by propertyFileId and wait for idle by default', async () => {
-      const schemaName = 'Test Schema Property Find'
+      const schemaName = 'Test Schema ModelProperty Find'
       const propertyFileId = generateId()
       const testSchema = createTestSchema(schemaName, {
         'TestPost': {
@@ -307,7 +322,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
 
     it('should support waitForReady: false option', async () => {
-      const schemaName = 'Test Schema Property Find No Wait'
+      const schemaName = 'Test Schema ModelProperty Find No Wait'
       const propertyFileId = generateId()
       const testSchema = createTestSchema(schemaName, {
         'TestPost': {
@@ -431,7 +446,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'description')
+      const propertyData = await waitForPropertySchema(modelName, 'description')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -635,7 +650,7 @@ testDescribe('ModelProperty Integration Tests', () => {
         })))
       }
       
-      const propertyData = await getPropertySchema(postModelName, 'author')
+      const propertyData = await waitForPropertySchema(postModelName, 'author')
       expect(propertyData).toBeDefined()
       console.log('[TEST] propertyData from getPropertySchema:', JSON.stringify(propertyData, null, 2))
       
@@ -680,7 +695,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'title')
+      const propertyData = await waitForPropertySchema(modelName, 'title')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -714,7 +729,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'description')
+      const propertyData = await waitForPropertySchema(modelName, 'description')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -754,7 +769,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'value')
+      const propertyData = await waitForPropertySchema(modelName, 'value')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -788,7 +803,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'field')
+      const propertyData = await waitForPropertySchema(modelName, 'field')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -828,7 +843,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'status')
+      const propertyData = await waitForPropertySchema(modelName, 'status')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -867,7 +882,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'valid')
+      const propertyData = await waitForPropertySchema(modelName, 'valid')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -903,7 +918,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'test')
+      const propertyData = await waitForPropertySchema(modelName, 'test')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -921,7 +936,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty save', () => {
     it('should save property to schema', async () => {
-      const schemaName = 'Test Schema Property Save'
+      const schemaName = 'Test Schema ModelProperty Save'
       const modelName = 'TestModel Property Save'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -941,7 +956,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'saved')
+      const propertyData = await waitForPropertySchema(modelName, 'saved')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -990,7 +1005,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'reload')
+      const propertyData = await waitForPropertySchema(modelName, 'reload')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1008,7 +1023,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty unload', () => {
     it('should unload property and clean up resources', async () => {
-      const schemaName = 'Test Schema Property Unload'
+      const schemaName = 'Test Schema ModelProperty Unload'
       const modelName = 'TestModel Property Unload'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -1028,7 +1043,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'unload')
+      const propertyData = await waitForPropertySchema(modelName, 'unload')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1071,7 +1086,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'oldName')
+      const propertyData = await waitForPropertySchema(modelName, 'oldName')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1111,7 +1126,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'oldPropertyName')
+      const propertyData = await waitForPropertySchema(modelName, 'oldPropertyName')
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1251,7 +1266,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'initialName')
+      const propertyData = await waitForPropertySchema(modelName, 'initialName')
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1335,7 +1350,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'originalPropertyName')
+      const propertyData = await waitForPropertySchema(modelName, 'originalPropertyName')
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1405,7 +1420,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'beforeName')
+      const propertyData = await waitForPropertySchema(modelName, 'beforeName')
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1484,7 +1499,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'initialName')
+      const propertyData = await waitForPropertySchema(modelName, 'initialName')
       expect(propertyData).toBeDefined()
       if (!propertyData) throw new Error('Property data not found')
 
@@ -1540,7 +1555,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'original')
+      const propertyData = await waitForPropertySchema(modelName, 'original')
       expect(propertyData).toBeDefined()
       if (!propertyData) throw new Error('Property data not found')
 
@@ -1579,7 +1594,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'score')
+      const propertyData = await waitForPropertySchema(modelName, 'score')
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1654,7 +1669,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'amount')
+      const propertyData = await waitForPropertySchema(modelName, 'amount')
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1714,7 +1729,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'value')
+      const propertyData = await waitForPropertySchema(modelName, 'value')
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1788,7 +1803,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const model = Model.create(modelName, schemaName, { waitForReady: false })
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'sub')
+      const propertyData = await waitForPropertySchema(modelName, 'sub')
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
