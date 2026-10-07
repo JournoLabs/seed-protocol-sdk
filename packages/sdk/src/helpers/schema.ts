@@ -5,7 +5,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { isInternalSchema } from '@/helpers/constants'
-import { desc, eq, sql } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:schema')
@@ -250,7 +250,9 @@ export async function listSchemaFiles(): Promise<Array<{ name: string; version: 
  * These are already-processed schema files that need to be loaded into the model store
  * @returns Array of objects containing name, version, and file path for each complete schema
  */
-export async function listCompleteSchemaFiles(): Promise<Array<{ name: string; version: number; filePath: string; schemaFileId?: string }>> {
+type CompleteSchemaFileInfo = { name: string; version: number; filePath: string; schemaFileId?: string }
+
+export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[]> {
   const fs = await BaseFileManager.getFs()
   const path = BaseFileManager.getPathModule()
 
@@ -412,33 +414,51 @@ export function filterLatestSchemas<T extends { name?: string; metadata?: { name
  * Returns all schemas with their draft status and source information
  * @returns Array of schema objects with metadata about their state
  */
-export async function loadAllSchemasFromDb(): Promise<Array<{
+export type LoadedSchema = {
   schema: SchemaFileFormat
   isDraft: boolean
   source: 'db' | 'file' | 'db+file'
   schemaRecordId?: number
-}>> {
+  /** The schema file the entry was read from (source 'file' or 'db+file'). */
+  filePath?: string
+  /**
+   * Source 'db+file' only: the DB row already matched the file before this call (same schema file
+   * id and version, file not updated since). The file's models were applied by an earlier load.
+   */
+  dbMatchesFile?: boolean
+}
+
+export async function loadAllSchemasFromDb(): Promise<LoadedSchema[]> {
   const db = BaseDb.getAppDb()
   if (!db) {
     throw new Error('Database not found')
   }
 
-  const result: Array<{
-    schema: SchemaFileFormat
-    isDraft: boolean
-    source: 'db' | 'file' | 'db+file'
-    schemaRecordId?: number
-  }> = []
+  const result: LoadedSchema[] = []
 
   // STEP 1: Query all schemas from database
-  const directQuery = await db.run(sql.raw(`SELECT name, version, schema_file_id, id FROM schemas ORDER BY name, version DESC`))
-  
   const dbSchemas = await db
     .select()
     .from(schemasTable)
     .orderBy(schemasTable.name, desc(schemasTable.version))
 
   const processedSchemaNames = new Set<string>()
+
+  // List the schema files once. listCompleteSchemaFiles reads and parses every file in the working
+  // dir, so listing per schema made this O(files x schemas).
+  let completeSchemaFiles: CompleteSchemaFileInfo[] | undefined
+  const getCompleteSchemaFiles = async (): Promise<CompleteSchemaFileInfo[]> => {
+    if (!completeSchemaFiles) {
+      try {
+        completeSchemaFiles = await listCompleteSchemaFiles()
+      } catch (error) {
+        // If we can't list schema files (e.g., directory doesn't exist yet), continue without file-based loading
+        logger(`Error listing complete schema files (continuing with DB data): ${error instanceof Error ? error.message : String(error)}`)
+        completeSchemaFiles = []
+      }
+    }
+    return completeSchemaFiles
+  }
 
   // STEP 2: Process each database schema
   for (const dbSchema of dbSchemas) {
@@ -498,13 +518,7 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
 
     // If it's not a draft and has schemaFileId, try to load from file
     if (dbSchema.isDraft === false && dbSchema.schemaFileId) {
-      let completeSchemas: Array<{ name: string; version: number; filePath: string; schemaFileId?: string }> = []
-      try {
-        completeSchemas = await listCompleteSchemaFiles()
-      } catch (error) {
-        // If we can't list schema files (e.g., directory doesn't exist yet), continue without file-based loading
-        logger(`Error listing complete schema files (continuing with DB data): ${error instanceof Error ? error.message : String(error)}`)
-      }
+      const completeSchemas = await getCompleteSchemaFiles()
       const matchingSchemas = completeSchemas.filter((s) => s.name === schemaName)
       
       if (matchingSchemas.length > 0) {
@@ -521,6 +535,11 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
           // Check if file is newer than DB record
           const fileUpdatedAt = new Date(schemaFile.metadata.updatedAt).getTime()
           const dbUpdatedAt = dbSchema.updatedAt || 0
+
+          const dbMatchesFile =
+            schemaFile.id === dbSchema.schemaFileId &&
+            schemaFile.version === dbSchema.version &&
+            fileUpdatedAt <= dbUpdatedAt
 
           // If file is newer, update DB with file content
           if (fileUpdatedAt > dbUpdatedAt && schemaFile.id === dbSchema.schemaFileId) {
@@ -542,6 +561,8 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
             isDraft: false,
             source: 'db+file',
             schemaRecordId: dbSchema.id || undefined,
+            filePath: latest.filePath,
+            dbMatchesFile,
           })
           processedSchemaNames.add(schemaName)
           continue
@@ -600,7 +621,7 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
   }
 
   // STEP 3: Find schema files not yet in database (for migration/backward compatibility)
-  const completeSchemas = await listCompleteSchemaFiles()
+  const completeSchemas = await getCompleteSchemaFiles()
 
   for (const schemaFileInfo of completeSchemas) {
     // Only process if not already in result
@@ -632,6 +653,7 @@ export async function loadAllSchemasFromDb(): Promise<Array<{
           isDraft: false,
           source: 'file',
           schemaRecordId: schemaRecord.id || undefined,
+          filePath: schemaFileInfo.filePath,
         })
         processedSchemaNames.add(schemaFileInfo.name)
       } catch (error) {
