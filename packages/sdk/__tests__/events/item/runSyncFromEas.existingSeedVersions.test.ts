@@ -184,12 +184,13 @@ describe.sequential('runSyncFromEas: existing seeds', () => {
     const modelSchemaUid = fakeEas.modelSchema!.id
 
     // A stored seed row with the attestation's uid but no local id: nothing to attach versions to.
-    const orphanSeed = uid('c1')
-    const orphanVersion = uid('c2')
-    const orphanProperty = uid('c3')
-    const seed = uid('d1')
-    const version = uid('d2')
-    const property = uid('d3')
+    // (UIDs differ from the other sync test files: files run in one browser worker share its DB.)
+    const orphanSeed = uid('3a')
+    const orphanVersion = uid('3b')
+    const orphanProperty = uid('3c')
+    const seed = uid('3d')
+    const version = uid('3e')
+    const property = uid('3f')
     await appDb.insert(seeds).values({ uid: orphanSeed, type: modelName, createdAt: Date.now() })
 
     fakeEas.seeds = [
