@@ -168,7 +168,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
   }
 
   if (newSeeds.length === 0) {
-    return { seedUidToLocalId, seedUids }
+    return { seedUids }
   }
 
   const newSeedsData: Partial<SeedType>[] = []
@@ -202,8 +202,6 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
       attestationRaw,
       ...(revokedAt !== undefined && { revokedAt }),
     })
-
-    seedUidToLocalId.set(seed.id, seedLocalId)
   }
 
   await createSeeds(newSeedsData)
@@ -257,7 +255,7 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
   )
 
   if (newVersions.length === 0) {
-    return { versionUidToLocalId, versionUids }
+    return { versionUids }
   }
 
   let insertVersionsQuery = `INSERT INTO versions (local_id, uid, seed_uid, seed_local_id, seed_type, created_at,
@@ -288,8 +286,6 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
     if (i === newVersions.length - 1) {
       insertVersionsQuery += valuesString + ';'
     }
-
-    versionUidToLocalId.set(version.id, versionLocalId)
   }
 
   await appDb.run(sql.raw(insertVersionsQuery))
