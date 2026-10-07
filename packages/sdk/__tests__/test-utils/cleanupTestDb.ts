@@ -29,8 +29,10 @@ export type CleanupTestSchemaDataOptions = {
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Retries briefly on failure: a write a previous test started (e.g. writeModelToDb inserting a
  *    model_schemas row) can't be cancelled by stopping its actor and may land mid-cleanup.
- * 4. Deletes the test schema JSON files from the working dir, so the next client.init doesn't
- *    re-import the schemas whose rows were just removed.
+ * 4. Browser only: deletes the test schema JSON files from the working dir. Browser test files share one
+ *    OPFS store, so otherwise the next file's client.init re-imports the schemas whose rows were just
+ *    removed. (Under Node each run gets a fresh temp dir; deleting there changed the timing of
+ *    validation-timeout.test's Schema.create-before-import race and made it fail.)
  */
 export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOptions = {}): Promise<void> {
   const { retries = 10, retryDelayMs = 200 } = options
@@ -48,7 +50,7 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
   for (let attempt = 0; ; attempt++) {
     try {
       await deleteTestRows(db)
-      await cleanupTestSchemaFiles()
+      if (typeof window !== 'undefined') await cleanupTestSchemaFiles()
       return
     } catch (error) {
       if (attempt >= retries) throw error
