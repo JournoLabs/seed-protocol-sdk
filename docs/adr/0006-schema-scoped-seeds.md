@@ -43,10 +43,15 @@ seed of that model belongs to the schema:
 
 | `match` | Meaning |
 |---|---|
-| `'any'` (default) | Counts toward "the seed has at least one of the model's properties" |
+| `'any'` (default for model properties) | Counts toward "the seed has at least one of the model's properties" |
 | `'required'` | The seed must have this property |
 | `'requiredTogether'` | The seed must have this property on the same version as every other `'requiredTogether'` property |
-| `'ignore'` | Never qualifies a seed (for example `storageTransactionId`) |
+| `'ignore'` (default for internal properties) | Never qualifies a seed |
+
+Internal properties default to `'ignore'`, because they say nothing about whether a seed
+fits the model. These are the ones the SDK adds or derives rather than the developer
+defining them: `storageTransactionId` and list-relation `*_ids` storage names. A
+developer can still set `match` on them explicitly.
 
 ```json
 "Post": {
@@ -67,8 +72,25 @@ below):
   one `'any'` property has an attestation.
 
 A property attestation counts when its schema is `"<easType> <snake_name>"` for that
-property (the string publish registers), it isn't revoked, and its `refUID` is a
-candidate version of the seed.
+property (the string publish registers) and its `refUID` is a candidate version of the
+seed.
+
+#### Canonical attestation per property
+
+A version can carry several attestations of the same property, for example after a
+same-version patch publish. Matching and stored values use one **canonical**
+attestation per `(version, property schema)`: the newest non-revoked one, by greatest
+`timeCreated`. Older or revoked attestations of that property on that version are
+ignored. A property is **present** on a version when it has a canonical attestation.
+
+`pickLatestPropertyAttestationsByRefAndSchema` (`packages/eas/src/easPropertyCanonical.ts`)
+is documented this way but doesn't check `revoked`, and `runSyncFromEas` passes revoked
+attestations into it (`excludeRevoked: false`). So today a revoked newest attestation
+wins. It has to skip revoked attestations before matching relies on it.
+
+So in loose mode a property is present if *any* candidate version has a canonical
+attestation of it. In strict mode, only the latest version's canonical attestation
+counts.
 
 `match` is separate from `required`. `required` keeps its current meaning: publish
 fails if a required relation, image or file is missing.
@@ -82,8 +104,8 @@ The mode decides which versions' attestations are candidates:
   come from different versions. `'requiredTogether'` properties must share one.
 - **Strict:** only the seed's latest version (highest `timeCreated` among its
   non-revoked version attestations). `'required'` and `'requiredTogether'` behave the
-  same here, because there's only one version. A later change can add a time window for
-  choosing "latest", for example latest as of a given time.
+  same here, because there's only one version. A time window for choosing "latest" is
+  deferred to a later ADR. Until then, strict always uses the current latest version.
 
 The mode is set in two places, and the per-call setting wins:
 
@@ -230,7 +252,8 @@ can see today disappears.
   `getRelatedSeedsAndVersions` probably bypass the filter regardless.
 - **Active schema:** where does it live: client config, a `SeedProvider` prop, or
   both?
-- **Strict time window:** what form should it take ("latest as of T", or a
-  `[from, to]` window), and is it per call only?
-- **Internal properties:** should they default to `match: 'ignore'` instead of `'any'`?
-  Examples are `storageTransactionId` and list-relation `*_ids`.
+
+## Deferred
+
+- **Strict time window:** a way to choose "latest" within a time range. Strict mode
+  uses the current latest version until a later ADR adds it.
