@@ -9,6 +9,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
+import { cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
 
 export type CleanupTestSchemaDataOptions = {
   /** How many times to retry after an FK failure before giving up (default 10). */
@@ -28,6 +29,8 @@ export type CleanupTestSchemaDataOptions = {
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Retries briefly on failure: a write a previous test started (e.g. writeModelToDb inserting a
  *    model_schemas row) can't be cancelled by stopping its actor and may land mid-cleanup.
+ * 4. Deletes the test schema JSON files from the working dir, so the next client.init doesn't
+ *    re-import the schemas whose rows were just removed.
  */
 export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOptions = {}): Promise<void> {
   const { retries = 10, retryDelayMs = 200 } = options
@@ -45,6 +48,7 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
   for (let attempt = 0; ; attempt++) {
     try {
       await deleteTestRows(db)
+      await cleanupTestSchemaFiles()
       return
     } catch (error) {
       if (attempt >= retries) throw error
