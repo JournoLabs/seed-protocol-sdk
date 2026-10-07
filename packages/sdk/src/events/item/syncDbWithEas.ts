@@ -173,14 +173,15 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
 
   const newSeeds = itemSeeds.filter((seed) => !existingSeedUids.has(seed.id))
 
-  // Update existing seeds when attestations are revoked on EAS
+  // Update existing seeds when attestations are revoked on EAS, and replace a local unpublish stamp
+  // with EAS's revocationTime once EAS reports one (see `syncedRevokedAt`).
   const seedByUid = new Map(itemSeeds.map((s) => [s.id, s]))
   for (const row of existingSeedRecordsRows) {
     if (!row.uid || !row.localId) continue
     const attestation = seedByUid.get(row.uid)
-    if (!attestation?.revoked) continue
-    if (row.revokedAt != null) continue
-    const revokedAt = revokedAtSeconds(attestation)!
+    if (!attestation) continue
+    const revokedAt = syncedRevokedAt(attestation, row.revokedAt)
+    if (revokedAt == null || revokedAt === row.revokedAt) continue
     await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
   }
 

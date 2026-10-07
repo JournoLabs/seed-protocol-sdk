@@ -250,6 +250,31 @@ describe.sequential('runSyncFromEas: revocations', () => {
     expect((await seedRow(storedLive))?.revokedAt).toBe(1_700_000_500)
   })
 
+  it("replaces a local unpublish stamp on a seed with EAS's revocationTime once EAS reports one", async () => {
+    const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+    const { updateSeedRevokedAt } = await import('@/db/write/updateSeedRevokedAt')
+    const modelSchemaUid = fakeEas.modelSchema!.id
+    const seed = uid('c8')
+
+    fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 1_300)]
+    fakeEas.versions = []
+    fakeEas.properties = []
+    await runSyncFromEas({ addresses: [attester] })
+
+    await updateSeedRevokedAt({
+      seedLocalId: (await seedRow(seed))!.localId!,
+      revokedAt: 1_700_000_900,
+    })
+
+    // EAS's index hasn't caught up with the revoke yet: the local stamp stays.
+    await runSyncFromEas({ addresses: [attester] })
+    expect((await seedRow(seed))?.revokedAt).toBe(1_700_000_900)
+
+    fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 1_300, 1_700_000_907)]
+    await runSyncFromEas({ addresses: [attester] })
+    expect((await seedRow(seed))?.revokedAt).toBe(1_700_000_907)
+  })
+
   const versionRow = async (versionUid: string): Promise<VersionsType | undefined> => {
     const { BaseDb } = await import('@/db/Db/BaseDb')
     const { versions } = await import('@/seedSchema')
