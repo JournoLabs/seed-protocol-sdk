@@ -97,14 +97,10 @@ export const propertyMachine = setup({
       }),
     },
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           (event as { type: 'destroyError'; error: unknown }).error instanceof Error
             ? {
@@ -113,9 +109,6 @@ export const propertyMachine = setup({
               }
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
     saveValueValidationError: {
       target: '.idle',

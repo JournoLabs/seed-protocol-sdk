@@ -264,7 +264,7 @@ describe('SeedImage integration tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some((s) => s.schema.metadata?.name === TEST_SCHEMA_SEED_IMAGE_NAME)
+        expect(allSchemas.some((s) => s.schema.metadata?.name === TEST_SCHEMA_SEED_IMAGE_NAME)).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -360,7 +360,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return prop?.refResolvedValue === TEST_IMAGE_FILENAME
+        expect(prop?.refResolvedValue).toBe(TEST_IMAGE_FILENAME)
       },
       { timeout: 20000 }
     )
@@ -381,7 +381,7 @@ describe('SeedImage integration tests', () => {
     await waitFor(
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
-        return img !== null && (img as HTMLImageElement).src?.length > 0
+        expect(img !== null && (img as HTMLImageElement).src?.length > 0).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -417,7 +417,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return !!prop?.refResolvedValue
+        expect(prop?.refResolvedValue).toBeTruthy()
       },
       { timeout: 20000 }
     )
@@ -450,7 +450,7 @@ describe('SeedImage integration tests', () => {
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
         const src = (img as HTMLImageElement)?.src
-        return img !== null && src?.length > 0 && src.startsWith('blob:')
+        expect(img !== null && src?.length > 0 && src.startsWith('blob:')).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -486,7 +486,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return !!prop?.refResolvedValue
+        expect(prop?.refResolvedValue).toBeTruthy()
       },
       { timeout: 20000 }
     )
@@ -520,7 +520,7 @@ describe('SeedImage integration tests', () => {
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
         const src = (img as HTMLImageElement)?.src
-        return img !== null && src?.length > 0 && src.startsWith('blob:')
+        expect(img !== null && src?.length > 0 && src.startsWith('blob:')).toBe(true)
       },
       { timeout: 15000 }
     )
