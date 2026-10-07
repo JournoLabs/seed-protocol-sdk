@@ -10,7 +10,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { renameModelProperty } from '@/helpers/updateSchema'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 async function waitForItemIdle(item: Item<any>, timeout = 5000): Promise<void> {
   const service = item.getService()
@@ -49,9 +49,9 @@ testDescribe('Property Rename Metadata Migration', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 60000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 60000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     const db = BaseDb.getAppDb()

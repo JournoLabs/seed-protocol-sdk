@@ -4,7 +4,7 @@ import { Db } from '@/browser/db/Db'
 import { models, properties, modelSchemas, schemas } from '@/seedSchema'
 import { eq, sql } from 'drizzle-orm'
 import { firstValueFrom, take, timeout } from 'rxjs'
-import { setupTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { BaseFileManager } from '@/helpers'
 
 describe('Browser Db Integration Tests', () => {
@@ -12,9 +12,9 @@ describe('Browser Db Integration Tests', () => {
     // Initialize test client and database
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     // Clean up test data after each test

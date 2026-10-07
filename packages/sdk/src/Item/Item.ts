@@ -677,6 +677,21 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (modelRecord?.schemaFileId) {
         ;(props as any).modelFileId = modelRecord.schemaFileId
       }
+      // Scope the constructor's Model lookup to this model's schema (as getItemData does on reload),
+      // so a same-named model cached from another schema can't supply the property set.
+      if (modelRecord && !(props as any).schemaName) {
+        const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+        const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+        const schemaRows = await db
+          .select({ schemaName: schemasTable.name })
+          .from(modelSchemas)
+          .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+          .where(eq(modelSchemas.modelId, modelRecord.id))
+          .limit(1)
+        if (schemaRows[0]?.schemaName) {
+          ;(props as any).schemaName = schemaRows[0].schemaName
+        }
+      }
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await db

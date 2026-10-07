@@ -27,6 +27,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import type { SnapshotFrom } from 'xstate'
 import { eq, desc, inArray } from 'drizzle-orm'
+import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 
 // Test schema data
 const testSchema1: SchemaFileFormat = {
@@ -450,9 +451,9 @@ describe(
       () => {
         expect(client.isInitialized()).toBe(true)
       },
-      { timeout: 30000 }
+      { timeout: SETUP_HOOK_TIMEOUT_MS }
     )
-  }, 60000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Helper function to delete schema file if it exists
@@ -575,7 +576,7 @@ describe(
     
     // Give a small delay to ensure database operations are processed
     await new Promise(resolve => setTimeout(resolve, 100))
-  }, 60000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(() => {
     document.body.innerHTML = ''

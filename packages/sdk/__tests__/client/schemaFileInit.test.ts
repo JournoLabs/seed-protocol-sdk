@@ -11,6 +11,7 @@ import {
   teardownTestEnvironment,
   createTestConfig,
   initializeTestClient,
+  SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -29,7 +30,7 @@ testDescribe('schemaFile init', () => {
       }
       await setupTestEnvironment({
         testFileUrl: import.meta.url,
-        timeout: 90000,
+        timeout: SETUP_HOOK_TIMEOUT_MS,
         configOverrides: {
           config: { schemaFile: 'schema.json' },
         },
@@ -49,7 +50,7 @@ testDescribe('schemaFile init', () => {
           fs.writeFileSync(schemaPath, schemaContent)
         },
       })
-    }, 90000)
+    }, SETUP_HOOK_TIMEOUT_MS)
 
     afterAll(async () => {
       if (typeof window !== 'undefined') return
@@ -98,12 +99,12 @@ testDescribe('schemaFile init', () => {
       }
       await setupTestEnvironment({
         testFileUrl: import.meta.url,
-        timeout: 90000,
+        timeout: SETUP_HOOK_TIMEOUT_MS,
         configOverrides: {
           config: { schemaFile: 'nonexistent-schema.json' },
         },
       })
-    }, 90000)
+    }, SETUP_HOOK_TIMEOUT_MS)
 
     afterAll(async () => {
       if (typeof window !== 'undefined') return

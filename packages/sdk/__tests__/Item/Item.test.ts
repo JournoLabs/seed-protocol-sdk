@@ -18,7 +18,7 @@ import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 // Helper function to wait for item to be in idle state using xstate waitFor
 async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
@@ -104,9 +104,9 @@ testDescribe('Item Integration Tests', () => {
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Clean up - delete in order to respect foreign key constraints
@@ -1224,6 +1224,99 @@ testDescribe('Item Integration Tests', () => {
       
       const properties = item.properties
       expect(properties.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('should build properties from the DB model when another schema\'s same-named model is cached', async () => {
+      // A schema whose rows are gone but whose Model instance is still cached (e.g. removed earlier
+      // in the session) must not supply the property set for a same-named model in another schema.
+      const staleSchemaName = 'Test Schema Item Stale Shared Name'
+      const staleModelId = generateId()
+      const staleSchema = createTestSchema(staleSchemaName, {
+        SharedPost: { id: staleModelId, properties: { title: { dataType: 'Text' }, content: { dataType: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(staleSchema) }, staleSchema.version)
+      const staleModel = Model.create('SharedPost', staleSchemaName, { modelFileId: staleModelId, waitForReady: false })
+      await waitFor(staleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const db = BaseDb.getAppDb()
+      const [staleSchemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, staleSchemaName))
+      const staleLinks = await db.select({ modelId: modelSchemas.modelId }).from(modelSchemas).where(eq(modelSchemas.schemaId, staleSchemaRow.id))
+      for (const { modelId } of staleLinks) {
+        await db.delete(properties).where(eq(properties.modelId, modelId!))
+        await db.delete(modelUids).where(eq(modelUids.modelId, modelId!))
+      }
+      await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, staleSchemaRow.id))
+      for (const { modelId } of staleLinks) {
+        await db.delete(modelsTable).where(eq(modelsTable.id, modelId!))
+      }
+      await db.delete(schemas).where(eq(schemas.id, staleSchemaRow.id))
+
+      const schemaName = 'Test Schema Item Current Shared Name'
+      const modelId = generateId()
+      const currentSchema = createTestSchema(schemaName, {
+        SharedPost: { id: modelId, properties: { title: { dataType: 'Text' }, featureImage: { dataType: 'Image' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+      const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const item = await Item.create({ modelName: 'SharedPost', title: 'Shared name' })
+      await waitForItemIdle(item)
+
+      const names = item.properties.map((p) => p.propertyName)
+      expect(names).toContain('featureImage')
+      expect(names).not.toContain('content')
+    })
+
+    it('should not take properties from another schema when its own cached model was reimported', async () => {
+      const otherSchemaName = 'Test Schema Item Other Shared Name'
+      const otherModelId = generateId()
+      const otherSchema = createTestSchema(otherSchemaName, {
+        SharedPost: { id: otherModelId, properties: { title: { dataType: 'Text' }, content: { dataType: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(otherSchema) }, otherSchema.version)
+      const otherModel = Model.create('SharedPost', otherSchemaName, { modelFileId: otherModelId, waitForReady: false })
+      await waitFor(otherModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const schemaName = 'Test Schema Item Reimported Shared Name'
+      const modelId = generateId()
+      const currentSchema = createTestSchema(schemaName, {
+        SharedPost: { id: modelId, properties: { title: { dataType: 'Text' }, featureImage: { dataType: 'Image' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+      const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
+      // a deleted DB id (no properties) while the other schema's Model is still cached.
+      // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
+      const db = BaseDb.getAppDb()
+      const schemaIds: number[] = []
+      const modelIds = new Set<number>()
+      for (const name of [otherSchemaName, schemaName]) {
+        const [schemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, name))
+        schemaIds.push(schemaRow.id)
+        const links = await db.select({ modelId: modelSchemas.modelId }).from(modelSchemas).where(eq(modelSchemas.schemaId, schemaRow.id))
+        for (const { modelId: id } of links) modelIds.add(id!)
+        await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaRow.id))
+      }
+      for (const id of modelIds) {
+        await db.delete(properties).where(eq(properties.modelId, id))
+        await db.delete(modelUids).where(eq(modelUids.modelId, id))
+        await db.delete(modelsTable).where(eq(modelsTable.id, id))
+      }
+      for (const id of schemaIds) {
+        await db.delete(schemas).where(eq(schemas.id, id))
+      }
+      Schema.clearCache()
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+
+      const item = await Item.create({ modelName: 'SharedPost', title: 'Reimported' })
+      await waitForItemIdle(item)
+
+      const names = item.properties.map((p) => p.propertyName)
+      expect(names).toContain('featureImage')
+      expect(names).not.toContain('content')
     })
   })
 

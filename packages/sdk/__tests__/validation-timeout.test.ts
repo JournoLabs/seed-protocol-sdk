@@ -5,7 +5,7 @@ import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from './test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { cleanupTestSchemaData } from './test-utils/cleanupTestDb'
 
 // Helper function to wait for schema to be in idle state using xstate waitFor
@@ -120,9 +120,9 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await cleanupTestSchemaData()

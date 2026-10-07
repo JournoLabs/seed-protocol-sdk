@@ -98,6 +98,7 @@ const createItemPropertyInstances = async (
   modelScope: { modelFileId?: string; schemaName?: string } = {},
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
+  const schemaName = modelScope.schemaName
 
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
@@ -117,7 +118,7 @@ const createItemPropertyInstances = async (
     // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
     // This fixes persistence when useItem returns items with empty propertyInstances.
     if (Object.keys(propertySchemas).length === 0) {
-      const schemaNameToTry = model?.schemaName
+      const schemaNameToTry = schemaName ?? model?.schemaName
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
@@ -136,6 +137,7 @@ const createItemPropertyInstances = async (
           const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
           const allSchemas = await loadAllSchemasFromDb()
           for (const { schema: schemaFile } of allSchemas) {
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
             if (models?.[modelName]?.properties) {
               propertySchemas = models[modelName].properties as Record<string, any>
@@ -154,7 +156,11 @@ const createItemPropertyInstances = async (
           const schemaFiles = await listCompleteSchemaFiles()
           for (const { filePath } of schemaFiles) {
             const content = await BaseFileManager.readFileAsString(filePath)
-            const schemaFile = JSON.parse(content) as { models?: Record<string, { properties?: Record<string, any> }> }
+            const schemaFile = JSON.parse(content) as {
+              metadata?: { name?: string }
+              models?: Record<string, { properties?: Record<string, any> }>
+            }
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             if (schemaFile.models?.[modelName]?.properties) {
               propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
               logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)

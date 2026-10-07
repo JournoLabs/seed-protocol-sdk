@@ -27,13 +27,21 @@ async function getClient(): Promise<ClientType> {
   return cachedClient
 }
 
+/**
+ * Timeout for test setup hooks (client init, DB readiness, fixtures). Healthy setup takes under 10s
+ * (slowest measured beforeAll: ~8.4s in the browser projects), so this leaves ~3x headroom while
+ * making a hung setup fail in 30s instead of 90-120s. Use it for the hook timeout and for
+ * setupTestEnvironment's `timeout` so the inner wait never outlives the hook.
+ */
+export const SETUP_HOOK_TIMEOUT_MS = 30_000
+
 export interface TestClientConfig {
   config: SeedConstructorOptions
   projectPath?: string
   timeout?: number
 }
 
-async function waitForDatabase(timeout: number = 30000): Promise<void> {
+async function waitForDatabase(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const startTime = Date.now()
   return new Promise<void>((resolve, reject) => {
     const checkInterval = setInterval(() => {
@@ -57,7 +65,7 @@ async function waitForDatabase(timeout: number = 30000): Promise<void> {
   })
 }
 
-async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
+async function waitForClientAndDbReady(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const client = await getClient()
   const startTime = Date.now()
   if (!client.isInitialized()) {
@@ -77,7 +85,7 @@ async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
 }
 
 export async function initializeTestClient(options: TestClientConfig): Promise<void> {
-  const { config, timeout = 90000 } = options
+  const { config, timeout = SETUP_HOOK_TIMEOUT_MS } = options
   const client = await getClient()
 
   if (!client.isInitialized()) {

@@ -12,6 +12,10 @@ import { seedVitePlugin } from '@seedprotocol/vite'
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
 
+// Debug logging is opt-in: `DEBUG='seedSdk:*' bun run test`. Leaving it on by default ('*') produced
+// tens of thousands of log lines per run, slowing Node runs and burying failures.
+const debugNamespaces = process.env.DEBUG ?? ''
+
 export default defineConfig({
   plugins: [
     Inspect({
@@ -59,7 +63,7 @@ export default defineConfig({
           name: 'browser',
           dir: './packages/sdk/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/sdk/__tests__/setup.browser.ts',
@@ -86,7 +90,7 @@ export default defineConfig({
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: 1,
           browser: {
@@ -130,7 +134,7 @@ export default defineConfig({
           name: 'browser-react',
           dir: './packages/react/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/react/__tests__/setup.browser.ts',
@@ -142,7 +146,7 @@ export default defineConfig({
             ...configDefaults.exclude,
             'dist/**',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: 1,
           browser: {
@@ -183,7 +187,7 @@ export default defineConfig({
           environment: 'node',
           dir: '.',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [],
           include: [
