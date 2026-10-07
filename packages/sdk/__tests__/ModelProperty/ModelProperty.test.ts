@@ -4,7 +4,6 @@ import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -15,6 +14,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
@@ -82,17 +82,7 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('ModelProperty Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
@@ -120,18 +110,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     // FK-safe cleanup that keeps the Seed Protocol schema (required for client initialization)
     await cleanupTestSchemaData()
 
-    // Clean up property files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Property') || file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    await cleanupTestSchemaFiles()
   })
 
   afterEach(async () => {

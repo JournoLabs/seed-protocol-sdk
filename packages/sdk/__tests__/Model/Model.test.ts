@@ -3,7 +3,6 @@ import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
@@ -86,17 +85,7 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('Model Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
@@ -109,21 +98,9 @@ testDescribe('Model Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // FK-safe; keeps the Seed Protocol schema, which client initialization needs
+    // FK-safe; keeps the Seed Protocol schema, which client initialization needs. Also deletes the
+    // test schema files.
     await cleanupTestSchemaData()
-
-    // Clean up model files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
   })
 
   afterEach(async () => {

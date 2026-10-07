@@ -5,7 +5,6 @@ import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -103,17 +102,7 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('ItemProperty Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
