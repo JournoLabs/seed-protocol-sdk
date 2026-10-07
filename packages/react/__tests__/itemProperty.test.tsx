@@ -38,6 +38,7 @@ import { eq, and, inArray, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitForItemPersisted } from './test-utils/persistence'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -653,9 +654,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       },
       { timeout: 15000 }
     )
-    
-    // Give a small delay to ensure database operations are processed
-    await new Promise(resolve => setTimeout(resolve, 100))
 
     // Create test items
     const model = Model.create('Post', 'Test Schema Items', { waitForReady: false })
@@ -673,9 +671,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       author: 'Test Author',
     })
     await waitForItemIdle(testItem)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+    await waitForItemPersisted(testItem!, { title: 'Test Post Title', content: 'Test Post Content', author: 'Test Author' })
 
       testItem2 = await Item.create({
         modelName: 'Post',
@@ -685,9 +681,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         author: 'Test Author 2',
       })
       await waitForItemIdle(testItem2)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(testItem2!, { title: 'Test Post Title 2', content: 'Test Post Content 2', author: 'Test Author 2' })
   })
 
   afterEach(async () => {
@@ -950,8 +944,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         { timeout: 10000 }
       )
 
-      // Allow DB write to complete
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await waitForItemPersisted(testItem, { title: testValue })
 
       // Strict DB verification - no fallback to in-memory checks
       const db = BaseDb.getAppDb()
@@ -1133,10 +1126,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Isolate from previous tests: clear instance cache for this item so we don't reuse instances from earlier tests in the group
       ItemProperty.clearInstanceCacheForItem(testItem.seedLocalId)
 
-      // Ensure properties are saved to database before rendering
-      // Wait a bit more to ensure all properties are persisted
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
       // Verify properties are actually in the database
       const db = BaseDb.getAppDb()
       if (db) {
@@ -1292,9 +1281,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         description: 'Test Item Description',
       })
       await waitForItemIdle(newItem)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(newItem!, { name: 'Test Item Name', description: 'Test Item Description' })
 
       // Verify properties are actually in the database
       const db = BaseDb.getAppDb()

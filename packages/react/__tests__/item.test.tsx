@@ -26,6 +26,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { and, eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitForItemPersisted } from './test-utils/persistence'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -517,9 +518,7 @@ describe('React Item Hooks Integration Tests', () => {
       author: 'Test Author 1',
     } as any)
     await waitForItemIdle(testItem1)
-
-    // Wait for properties to be saved to database
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await waitForItemPersisted(testItem1!, { title: 'Test Post Title 1', content: 'Test Post Content 1', author: 'Test Author 1' })
 
     testItem2 = await Item.create({
       modelName: 'Post',
@@ -529,9 +528,7 @@ describe('React Item Hooks Integration Tests', () => {
       author: 'Test Author 2',
     } as any)
     await waitForItemIdle(testItem2)
-
-    // Wait for properties to be saved to database
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await waitForItemPersisted(testItem2!, { title: 'Test Post Title 2', content: 'Test Post Content 2', author: 'Test Author 2' })
 
     testItem3 = await Item.create({
       modelName: 'Post',
@@ -541,9 +538,7 @@ describe('React Item Hooks Integration Tests', () => {
       author: 'Test Author 3',
     } as any)
     await waitForItemIdle(testItem3)
-
-    // Wait for properties to be saved to database
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await waitForItemPersisted(testItem3!, { title: 'Test Post Title 3', content: 'Test Post Content 3', author: 'Test Author 3' })
 
     const articleModel = Model.create('Article', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
     await xstateWaitFor(
@@ -558,9 +553,7 @@ describe('React Item Hooks Integration Tests', () => {
       body: 'Test Article Body',
     } as any)
     await waitForItemIdle(testArticleItem)
-
-    // Wait for properties to be saved to database
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await waitForItemPersisted(testArticleItem!, { headline: 'Test Article Headline', body: 'Test Article Body' })
   })
 
   afterEach(async () => {
@@ -629,9 +622,6 @@ describe('React Item Hooks Integration Tests', () => {
         <UseItemTest modelName="Post" seedLocalId={item1.seedLocalId} />,
         { container }
       )
-
-      // Small delay to allow React to process initial render and state updates
-      await new Promise(resolve => setTimeout(resolve, 100))
 
       // Wait for loading to complete first (this ensures state updates have propagated)
       await waitFor(
@@ -1024,9 +1014,7 @@ describe('React Item Hooks Integration Tests', () => {
         author: 'New Test Author',
       } as any)
       await waitForItemIdle(newItem)
-
-      // Wait for properties to be saved and database to update
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(newItem, { title: 'New Test Post', content: 'New Test Content', author: 'New Test Author' })
 
       // useItems uses useLiveQuery which should automatically detect database changes
       // Wait for the new item to appear (reactive query should pick it up)

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { client } from '@/client'
 import { Schema } from '@/Schema/Schema'
@@ -19,6 +19,21 @@ import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/clien
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 
 // Helper function to wait for schema to be in idle state using xstate waitFor
+// Bounded wait for a condition that a lenient test tolerates never becoming true (replaces fixed sleeps)
+async function waitUntil(condition: () => boolean | Promise<boolean>, timeout = 2000): Promise<boolean> {
+  try {
+    await vi.waitFor(
+      async () => {
+        if (!(await condition())) throw new Error('condition not met yet')
+      },
+      { timeout, interval: 50 },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
   const service = schema.getService()
   
@@ -413,9 +428,6 @@ testDescribe('Schema Integration Tests', () => {
         schemaName: schemaFileId, // Setting schemaName to ID (the bug scenario)
       })
       
-      // Wait a bit for the update to process
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
       // The schemaName getter should still return the actual name, not the ID
       // This is the fix we implemented
       expect(schema.schemaName).toBe(schemaName)
@@ -443,9 +455,6 @@ testDescribe('Schema Integration Tests', () => {
         type: 'updateContext',
         schemaName: schemaFileId, // Bug scenario: schemaName is set to ID
       })
-      
-      // Wait for update
-      await new Promise(resolve => setTimeout(resolve, 100))
       
       // Create a Model using the Schema instance
       // Model.create() reads schemaInstance.schemaName, which should return the name, not ID
@@ -780,7 +789,6 @@ testDescribe('Schema Integration Tests', () => {
         waitForReady: false,
       })
       await waitForModelIdle(articleModel, 20000)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       // Schema.all() should return the schema, and when loaded, it should include
       // models from both the schemaData and the database
@@ -790,8 +798,6 @@ testDescribe('Schema Integration Tests', () => {
 
       if (foundSchema) {
         await waitForSchemaIdle(foundSchema)
-        // Wait a bit for models to be loaded
-        await new Promise(resolve => setTimeout(resolve, 1000))
         
         // The schema should have models (from database merge)
         const context = foundSchema.getService().getSnapshot().context
@@ -863,8 +869,6 @@ testDescribe('Schema Integration Tests', () => {
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
         
-        // Wait a bit for draft to be saved
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Save new version
         // Note: In browser, this might behave differently
@@ -943,7 +947,6 @@ testDescribe('Schema Integration Tests', () => {
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
         
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Should throw ConflictError
         await expect(schema.saveNewVersion()).rejects.toThrow(ConflictError)
@@ -1015,8 +1018,7 @@ testDescribe('Schema Integration Tests', () => {
         // Wait for schema to be idle after reload
         await waitForSchemaIdle(schema)
         
-        // Give it more time for the context to update from database
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await waitUntil(() => schema.getService().getSnapshot().context.version === 2 || schema.version === 2)
         
         // Check both context and schema property
         const context = schema.getService().getSnapshot().context
@@ -1147,23 +1149,26 @@ testDescribe('Schema Integration Tests', () => {
       // Update name
       schema.name = newName
       
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+      await vi.waitFor(() => expect(schema.schemaName).toBe(newName), { timeout: 5000, interval: 50 })
       
       // Verify name changed
       expect(schema.name).toBe(newName)
       expect(schema.schemaName).toBe(newName)
       
-      // Verify database was updated
+      // Verify database was updated (written after the in-memory change, so poll)
       const db = BaseDb.getAppDb()
       if (db) {
-        const dbSchemas = await db
-          .select()
-          .from(schemas)
-          .where(eq(schemas.name, newName))
-          .limit(1)
-        
-        expect(dbSchemas.length).toBeGreaterThan(0)
+        await vi.waitFor(
+          async () => {
+            const dbSchemas = await db
+              .select()
+              .from(schemas)
+              .where(eq(schemas.name, newName))
+              .limit(1)
+            expect(dbSchemas.length).toBeGreaterThan(0)
+          },
+          { timeout: 5000, interval: 50 },
+        )
       }
     })
 
@@ -1186,8 +1191,7 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
-      // Wait for models to be loaded (they're created asynchronously)
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await waitUntil(() => (schema.models || []).length > 0)
       
       // schema.models should return Model instances from cache
       const models = schema.models || []
@@ -1235,8 +1239,7 @@ testDescribe('Schema Integration Tests', () => {
       // Make a change
       schema.name = 'Test Schema Draft Updated'
       
-      // Wait for draft to be saved
-      await new Promise(resolve => setTimeout(resolve, 200))
+      await vi.waitFor(() => expect(schema.getService().getSnapshot().context._isDraft).toBe(true), { timeout: 5000, interval: 50 })
       
       // Should now be a draft
       context = schema.getService().getSnapshot().context
@@ -1293,7 +1296,6 @@ testDescribe('Schema Integration Tests', () => {
       
       // Wait for validation to complete
       await validatePromise
-      await new Promise(resolve => setTimeout(resolve, 100))
       
       // After validation, should be back to 'idle'
       expect(schema.status).toBe('idle')
@@ -1386,9 +1388,6 @@ testDescribe('Schema Integration Tests', () => {
         await new Promise(resolve => setTimeout(resolve, 2000))
       }
       
-      // Wait a bit for registration to complete
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       // Schema.models should now include the newly created Model instance
       // Wait a bit more for the model to be registered in the schema
       let foundModel: Model | undefined
@@ -1459,8 +1458,7 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
-      // Wait for models to be loaded
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await waitUntil(() => (schema.models || []).some((m: any) => m.modelName === 'TestModel'))
       
       // Get the Model instance
       let models = schema.models || []
@@ -1470,7 +1468,7 @@ testDescribe('Schema Integration Tests', () => {
         // If model not found, create one
         const newModel = Model.create('TestModel', schema, { waitForReady: false })
         await waitForModelIdle(newModel)
-        await new Promise(resolve => setTimeout(resolve, 500))
+        await waitUntil(() => (schema.models || []).some((m: any) => m.modelName === 'TestModel'))
         
         models = schema.models || []
         model = models.find((m: any) => m.modelName === 'TestModel')

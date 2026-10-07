@@ -570,9 +570,6 @@ testDescribe('Item Integration Tests', () => {
       expect(createdItem.seedLocalId).toBe(seedLocalId)
       expect(createdItem.modelName).toBe('TestPost')
       
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
       // Try to find the item (may return undefined if no version exists yet)
       const foundItem = await Item.find({
         modelName: 'TestPost',
@@ -700,9 +697,6 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(createdItem)
       const seedLocalId = createdItem.seedLocalId
       
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
       // Find with waitForReady: false - should return immediately
       const foundItem = await Item.find({
         modelName: 'TestPost',
@@ -759,9 +753,6 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item1)
       await waitForItemIdle(item2)
       await waitForItemIdle(item3)
-      
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Get all items
       const allItems = await Item.all('TestPost')
@@ -829,7 +820,6 @@ testDescribe('Item Integration Tests', () => {
 
       await waitForItemIdle(item1)
       await waitForItemIdle(item2)
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       const allItems = await Item.all('TestPost', undefined, { waitForReady: true })
 
@@ -1088,9 +1078,6 @@ testDescribe('Item Integration Tests', () => {
         titleProp.value = 'Version 2'
         await titleProp.save()
       }
-      
-      // Wait a bit for version to update
-      await new Promise(resolve => setTimeout(resolve, 1000))
       
       // Item should detect the new version via liveQuery
       // Note: This test verifies the liveQuery subscription is set up correctly
