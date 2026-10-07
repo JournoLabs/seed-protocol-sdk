@@ -5,10 +5,9 @@ import { easSyncMachine } from '@/events/item/easSyncManager'
 // vi.mock rather than vi.spyOn on the module namespace: ESM namespaces aren't configurable in browser
 // mode ("Module namespace is not configurable in ESM").
 const { runSyncFromEas } = vi.hoisted(() => ({ runSyncFromEas: vi.fn() }))
-vi.mock('@/events/item/syncDbWithEas', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/events/item/syncDbWithEas')>()),
-  runSyncFromEas,
-}))
+// easSyncManager only imports runSyncFromEas (lazily) from this module; loading the real module
+// pulls in the whole sync pipeline.
+vi.mock('@/events/item/syncDbWithEas', () => ({ runSyncFromEas }))
 vi.mock('@/db/write/easSyncProcess', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/db/write/easSyncProcess')>()),
   insertEasSyncProcessRow: vi.fn().mockResolvedValue(1),
