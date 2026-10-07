@@ -1,6 +1,8 @@
 # Resolving the model of EAS-synced seeds (plan)
 
-Status: not started. The seam exists; the matching logic does not.
+Status: superseded by [ADR 0006](adr/0006-schema-scoped-seeds.md) (see its 2026-10-07
+amendment). Synced seeds link to every schema whose `match` rules they satisfy, through
+`seed_schemas`, instead of resolving to one model. Kept for history.
 
 ## Background
 
