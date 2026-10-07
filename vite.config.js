@@ -102,6 +102,8 @@ export default defineConfig({
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: testWorkers(3),
+          // Both browser projects share a group so they run at the same time, after the Node group
+          sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
             provider: playwright(),
@@ -158,6 +160,8 @@ export default defineConfig({
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: testWorkers(3),
+          // Both browser projects share a group so they run at the same time, after the Node group
+          sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
             provider: playwright(),
@@ -221,6 +225,7 @@ export default defineConfig({
           testTimeout: 30000,
           pool: 'forks',
           maxWorkers: testWorkers(4),
+          sequence: { groupOrder: 0 },
           // Several files vi.mock core modules (@/helpers/environment, BaseDb, BaseFileManager). With
           // isolate: false those mocks and the shared client leaked into later files, and every DB-backed
           // suite after them failed in beforeAll ("Seed Protocol schema not found").
