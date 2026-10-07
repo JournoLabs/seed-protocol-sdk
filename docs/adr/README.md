@@ -14,7 +14,7 @@ ADR records the decision a study led to.
 | [0003](0003-icons-vendored-from-lucide.md) | Vendor Lucide icons instead of depending on an icon package | Accepted |
 | [0004](0004-opfs-files-manager-behavior.md) | OPFSFilesManager: thumbnails, grouping, downloads, and deletes | Accepted |
 | [0005](0005-shared-design-system.md) | A shared design system for exported UI | Proposed |
-| [0006](0006-schema-scoped-seeds.md) | Schemas scope seeds on the client, not on-chain | Proposed |
+| [0006](0006-schema-scoped-seeds.md) | Schemas scope seeds on the client, not on-chain | Accepted |
 
 ## Writing one
 

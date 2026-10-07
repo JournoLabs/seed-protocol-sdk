@@ -1,6 +1,6 @@
 # 0006. Schemas scope seeds on the client, not on-chain
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-07
 - **Scope:** `@seedprotocol/sdk` (local DB, EAS sync, item reads), `@seedprotocol/react` item hooks
 
