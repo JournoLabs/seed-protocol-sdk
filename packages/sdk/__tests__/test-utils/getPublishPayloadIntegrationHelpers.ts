@@ -178,7 +178,12 @@ export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: S
 /**
  * Schema with optional author relation (required: false).
  * Used for testing that optional relations skip (no throw) when related item not found.
+ * The post model has its own name: item-level lookups (ItemProperty schemas, getPublishPayload's
+ * required checks) resolve models by name without a schema, so a second 'Post' would resolve to the
+ * main test schema's Post, whose author is required.
  */
+export const OPTIONAL_AUTHOR_POST_MODEL_NAME = 'OptionalAuthorPost'
+
 export function getGetPublishPayloadTestSchemaOptionalAuthor(): SchemaFileFormat {
   const authorId = generateId()
   const tagId = generateId()
@@ -206,7 +211,7 @@ export function getGetPublishPayloadTestSchemaOptionalAuthor(): SchemaFileFormat
           label: { id: generateId(), type: 'Text' },
         },
       },
-      Post: {
+      [OPTIONAL_AUTHOR_POST_MODEL_NAME]: {
         id: postId,
         properties: {
           title: { id: generateId(), type: 'Text' },
@@ -290,11 +295,11 @@ export async function createGetPublishPayloadTestSchemaOptionalAuthor(): Promise
 }> {
   const schema = getGetPublishPayloadTestSchemaOptionalAuthor()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-  await ensureModelUidsForGetPublishPayloadTest()
+  await ensureModelUidsForGetPublishPayloadTest(['Author', 'Tag', 'Post', 'Image', 'File', 'Html', OPTIONAL_AUTHOR_POST_MODEL_NAME])
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const authorModel = getSchemaModel(schema, 'Author', SCHEMA_NAME_OPTIONAL_AUTHOR)
   const tagModel = getSchemaModel(schema, 'Tag', SCHEMA_NAME_OPTIONAL_AUTHOR)
-  const postModel = getSchemaModel(schema, 'Post', SCHEMA_NAME_OPTIONAL_AUTHOR)
+  const postModel = getSchemaModel(schema, OPTIONAL_AUTHOR_POST_MODEL_NAME, SCHEMA_NAME_OPTIONAL_AUTHOR)
   await waitForModelIdle(authorModel)
   await waitForModelIdle(tagModel)
   await waitForModelIdle(postModel)

@@ -16,6 +16,7 @@ import {
   createPublishedTestAuthor,
   createImageItemWithMissingStorageTxMetadata,
   waitForPropertyInstances,
+  OPTIONAL_AUTHOR_POST_MODEL_NAME,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -129,7 +130,7 @@ testDescribe('getPublishPayload integration', () => {
   it('skips (no throw) when related item not found for optional relation', async () => {
     const { schemaName } = await createGetPublishPayloadTestSchemaOptionalAuthor()
     const postItem = await Item.create({
-      modelName: 'Post',
+      modelName: OPTIONAL_AUTHOR_POST_MODEL_NAME,
       schemaName,
       title: 'Post with optional author',
       author: '0000000000', // Non-existent author - optional so should skip
