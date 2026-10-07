@@ -18,7 +18,7 @@ import { eq, and, ne, notInArray, sql } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import type { IItemProperty } from '@/interfaces'
 
 // Helper function to wait for ItemProperty to be in idle state
@@ -115,9 +115,9 @@ testDescribe('ItemProperty Integration Tests', () => {
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Clean up - delete in order to respect foreign key constraints

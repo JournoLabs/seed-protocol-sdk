@@ -7,7 +7,7 @@ import { createVersion } from '@/db/write/createVersion'
 import { createMetadata, MetadataValidationError } from '@/db/write/createMetadata'
 import { createSeed } from '@/db/write/createSeed'
 import { setGetPublisherForNewSeeds, getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -21,10 +21,10 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

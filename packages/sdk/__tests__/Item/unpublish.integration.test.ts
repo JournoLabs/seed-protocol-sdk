@@ -3,7 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { setGetPublisherForNewSeeds, setRevokeExecutor } from '@/helpers/publishConfig'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createPublishedItemForUnpublish,
@@ -17,14 +17,14 @@ testDescribe('Item.unpublish integration', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
       configOverrides: {
         addresses: [UNPUBLISH_TEST_PUBLISHER],
       },
     })
     await createGetPublishPayloadTestSchema()
     setRevokeExecutor(createTestRevokeExecutor())
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     setRevokeExecutor(null)

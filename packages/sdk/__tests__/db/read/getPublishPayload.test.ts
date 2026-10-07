@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createGetPublishPayloadTestSchemaOptionalAuthor,
@@ -24,11 +24,11 @@ testDescribe('getPublishPayload integration', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
     await createGetPublishPayloadTestSchemaWithEnum()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

@@ -28,6 +28,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
+import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 
 const testSchemaWithImage: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -227,9 +228,9 @@ describe('SeedImage integration tests', () => {
 
     await waitFor(
       () => client.isInitialized(),
-      { timeout: 30000 }
+      { timeout: SETUP_HOOK_TIMEOUT_MS }
     )
-  }, 30000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await deleteTestSchemaSeedImageRows()

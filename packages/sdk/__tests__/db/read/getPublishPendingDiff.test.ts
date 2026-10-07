@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import { getPublishPendingDiff } from '@/db/read/getPublishPendingDiff'
 import { getItemsData } from '@/db/read/getItems'
 import { getSeedPublishState } from '@/db/read/getSeedPublishState'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -20,10 +20,10 @@ testDescribe('getPublishPendingDiff', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

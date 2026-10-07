@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Item } from '@/Item/Item'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -13,9 +13,9 @@ testDescribe('Image allProperties storageTransactionId key', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

@@ -4,16 +4,16 @@ import { schemaMachine } from '@/Schema/service/schemaMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
 // Import Node.js Db to initialize platform class
 import '@/node/db/Db'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 describe('Staged Schema Loading', () => {
   beforeAll(async () => {
     // Initialize test environment and database
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   beforeEach(async () => {
     // Ensure database is available
