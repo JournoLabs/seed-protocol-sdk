@@ -21,8 +21,7 @@ export type ModelPropertyMachineContext = Static<typeof TProperty> & {
   _propertyFileId?: string
   // Note: id field (from TProperty) is now the schemaFileId (string)
   // _dbId (from TProperty) stores the database integer ID
-  // Destroy lifecycle (for destroy hooks)
-  _destroyInProgress?: boolean
+  // Destroy failure from the last destroy() (read by destroy hooks)
   _destroyError?: { message: string; name?: string } | null
 }
 
@@ -45,9 +44,7 @@ export const modelPropertyMachine = setup({
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'requestWrite'; data: any }
       | { type: 'destroyStarted' }
-      | { type: 'destroyDone' }
-      | { type: 'destroyError'; error: unknown }
-      | { type: 'clearDestroyError' },
+      | { type: 'destroyError'; error: unknown },
   },
   actors: {
     saveToSchema,
@@ -186,22 +183,15 @@ export const modelPropertyMachine = setup({
       })),
     },
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           event.error instanceof Error
             ? { message: event.error.message, name: event.error.name }
             : { message: String(event.error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
   },
   states: {

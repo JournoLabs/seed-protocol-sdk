@@ -459,7 +459,7 @@ describe('React Item Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -496,7 +496,7 @@ describe('React Item Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === TEST_SCHEMA_ITEMS_HOOKS_NAME)
+        expect(allSchemas.some(s => s.schema.metadata?.name === TEST_SCHEMA_ITEMS_HOOKS_NAME)).toBe(true)
       },
       { timeout: 10000 }
     )
@@ -616,7 +616,7 @@ describe('React Item Hooks Integration Tests', () => {
               .from(seeds)
               .where(eq(seeds.localId, item1.seedLocalId))
               .limit(1)
-            return seedRows.length > 0
+            expect(seedRows.length).toBeGreaterThan(0)
           },
           { timeout: 5000 }
         )
@@ -633,8 +633,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Wait for loading to complete first (this ensures state updates have propagated)
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('item-is-loading')
-          return isLoading.textContent === 'false'
+          expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
@@ -642,8 +641,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Wait for item to be found
       await waitFor(
         () => {
-          const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
-          return itemSeedLocalId !== null
+          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
         },
         { timeout: 15000 }
       )
@@ -657,8 +655,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Wait for item properties to be loaded
       await waitFor(
         () => {
-          const itemDataTitle = screen.queryByTestId('item-data-title')
-          return itemDataTitle !== null && itemDataTitle.textContent === 'Test Post Title 1'
+          expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
         },
         { timeout: 15000 }
       )
@@ -685,8 +682,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
-          return itemSeedLocalId !== null
+          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
         },
         { timeout: 10000 }
       )
@@ -728,8 +724,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemDataTitle = screen.queryByTestId('item-data-title')
-          return itemDataTitle !== null && itemDataTitle.textContent === 'Test Post Title 1'
+          expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
         },
         { timeout: 10000 }
       )
@@ -760,8 +755,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
-          return itemSeedLocalId !== null
+          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
         },
         { timeout: 10000 }
       )
@@ -769,8 +763,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Wait for loading to complete
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('item-is-loading')
-          return isLoading.textContent === 'false'
+          expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
         },
         { timeout: 10000 }
       )
@@ -800,15 +793,14 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = withinContainer.queryByTestId('item-status')
-          return status !== null && status.textContent === 'loaded'
+          expect(status?.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
 
       await waitFor(
         () => {
-          const itemModelName = withinContainer.queryByTestId('item-model-name')
-          return itemModelName !== null && itemModelName.textContent === 'Article'
+          expect(withinContainer.queryByTestId('item-model-name')?.textContent).toBe('Article')
         },
         { timeout: 10000 }
       )
@@ -819,8 +811,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Wait for properties to be rendered
       await waitFor(
         () => {
-          const itemDataHeadline = withinContainer.queryByTestId('item-data-headline')
-          return itemDataHeadline !== null && itemDataHeadline.textContent === 'Test Article Headline'
+          expect(withinContainer.queryByTestId('item-data-headline')?.textContent).toBe('Test Article Headline')
         },
         { timeout: 10000 }
       )
@@ -830,8 +821,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemDataBody = withinContainer.queryByTestId('item-data-body')
-          return itemDataBody !== null && itemDataBody.textContent === 'Test Article Body'
+          expect(withinContainer.queryByTestId('item-data-body')?.textContent).toBe('Test Article Body')
         },
         { timeout: 10000 }
       )
@@ -851,14 +841,11 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const qc = queryClientRef.current
-          if (!qc) return false
-          const query = qc.getQueryCache().find({
+          const query = queryClientRef.current?.getQueryCache().find({
             queryKey: ['seed', 'items', 'Post', false, false, null, 0],
           })
-          if (!query) return false
-          expect(query.options.staleTime).toBe(0)
-          return true
+          expect(query).toBeDefined()
+          expect(query!.options.staleTime).toBe(0)
         },
         { timeout: 10000 }
       )
@@ -935,13 +922,8 @@ describe('React Item Hooks Integration Tests', () => {
       // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
       await waitFor(
         () => {
-          const status = scoped.getByTestId('items-status').textContent
-          const count = parseInt(scoped.getByTestId('items-count').textContent || '0')
-          if (status === 'loaded' && count >= 3) {
-            expect(count).toBeGreaterThanOrEqual(3)
-            return true
-          }
-          return false
+          expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
+          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 10000 }
       )
@@ -957,7 +939,6 @@ describe('React Item Hooks Integration Tests', () => {
           const count = screen.getByTestId('items-count')
           const n = parseInt(count.textContent || '0')
           expect(n).toBeGreaterThanOrEqual(3)
-          return n >= 3
         },
         { timeout: 10000 }
       )
@@ -969,14 +950,8 @@ describe('React Item Hooks Integration Tests', () => {
       // waitFor so we don't depend on DOM state after resolve and avoid races with clearing/refetch.
       await waitFor(
         () => {
-          const count = screen.getByTestId('items-count')
-          const itemCount = parseInt(count.textContent || '0')
-          if (itemCount < 1) return false
-          const itemModelName = screen.queryByTestId('item-0-model-name')
-          if (!itemModelName || itemModelName.textContent !== 'Article') return false
-          expect(itemCount).toBeGreaterThanOrEqual(1)
-          expect(itemModelName.textContent).toBe('Article')
-          return true
+          expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(1)
+          expect(screen.queryByTestId('item-0-model-name')?.textContent).toBe('Article')
         },
         { timeout: 10000 }
       )
@@ -1006,12 +981,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
       await waitFor(
         () => {
-          const count = parseInt(scoped.getByTestId('items-count').textContent || '0')
-          if (count >= 3) {
-            expect(count).toBeGreaterThanOrEqual(3)
-            return true
-          }
-          return false
+          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 10000 }
       )
@@ -1021,13 +991,8 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const status = scoped.getByTestId('items-status')
-          const count = parseInt(scoped.getByTestId('items-count').textContent || '0')
-          if (status.textContent === 'loaded' && count === 0) {
-            expect(count).toBe(0)
-            return true
-          }
-          return false
+          expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
+          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(0)
         },
         { timeout: 10000 }
       )
@@ -1039,7 +1004,7 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('items-count')
-          return parseInt(count.textContent || '0') >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 10000 }
       )
@@ -1064,8 +1029,7 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('items-count')
-          const itemCount = parseInt(count.textContent || '0')
-          return itemCount > initialItemCount
+          expect(parseInt(count.textContent || '0')).toBeGreaterThan(initialItemCount)
         },
         { timeout: 15000 }
       )
@@ -1100,14 +1064,12 @@ describe('React Item Hooks Integration Tests', () => {
           () => {
             const listA = screen.getByTestId('list-a')
             const listB = screen.getByTestId('list-b')
-            const statusA = within(listA).getByTestId('items-status').textContent
-            const statusB = within(listB).getByTestId('items-status').textContent
-            if (statusA !== 'loaded' || statusB !== 'loaded') return false
+            expect(within(listA).getByTestId('items-status').textContent).toBe('loaded')
+            expect(within(listB).getByTestId('items-status').textContent).toBe('loaded')
             const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
             const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
             expect(countA).toBe(countB)
             expect(countA).toBeGreaterThanOrEqual(3)
-            return true
           },
           { timeout: 15000 }
         )
@@ -1144,8 +1106,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const titleEl = screen.queryByTestId('item-title')
-          return titleEl !== null && titleEl.textContent === 'Test Post Title 1'
+          expect(screen.queryByTestId('item-title')?.textContent).toBe('Test Post Title 1')
         },
         { timeout: 15000 }
       )
@@ -1158,8 +1119,7 @@ describe('React Item Hooks Integration Tests', () => {
       // 3. Wait for edit/save to complete
       await waitFor(
         () => {
-          const editDoneEl = screen.queryByTestId('edit-done')
-          return editDoneEl !== null
+          expect(screen.queryByTestId('edit-done')).not.toBeNull()
         },
         { timeout: 10000 }
       )
@@ -1180,7 +1140,7 @@ describe('React Item Hooks Integration Tests', () => {
                   eq(metadata.propertyValue, editedTitle)
                 )
             )
-            return rows.length > 0
+            expect(rows.length).toBeGreaterThan(0)
           },
           { timeout: 5000 }
         )
@@ -1204,12 +1164,7 @@ describe('React Item Hooks Integration Tests', () => {
       // 7. Verify the new value is displayed as the current value after reload
       await waitFor(
         () => {
-          const titleEl = screen.queryByTestId('item-title')
-          if (titleEl !== null && titleEl.textContent === editedTitle) {
-            expect(titleEl.textContent).toBe(editedTitle)
-            return true
-          }
-          return false
+          expect(screen.queryByTestId('item-title')?.textContent).toBe(editedTitle)
         },
         { timeout: 15000 }
       )
@@ -1243,16 +1198,9 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemsCount = screen.queryByTestId('combined-items-count')
-          const itemSeedLocalId = screen.queryByTestId('combined-item-seed-local-id')
-          const itemTitle = screen.queryByTestId('combined-item-title')
-          if (!itemsCount || !itemSeedLocalId || !itemTitle) return false
-          const count = parseInt(itemsCount.textContent || '0')
-          if (count < 3) return false
-          expect(count).toBeGreaterThanOrEqual(3)
-          expect(itemSeedLocalId.textContent).toBe(item1.seedLocalId)
-          expect(itemTitle.textContent).toBe('Test Post Title 1')
-          return true
+          expect(parseInt(screen.queryByTestId('combined-items-count')?.textContent || '0')).toBeGreaterThanOrEqual(3)
+          expect(screen.queryByTestId('combined-item-seed-local-id')?.textContent).toBe(item1.seedLocalId)
+          expect(screen.queryByTestId('combined-item-title')?.textContent).toBe('Test Post Title 1')
         },
         { timeout: 10000 }
       )
@@ -1298,8 +1246,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('create-item-is-loading')
-          return isLoading.textContent === 'true'
+          expect(screen.getByTestId('create-item-is-loading').textContent).toBe('true')
         },
         { timeout: 3000 }
       )

@@ -71,8 +71,7 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   renderValue?: any
   storageTransactionId?: string
   newValue?: ItemPropertyValueType
-  /** Destroy lifecycle (for destroy hooks). */
-  _destroyInProgress?: boolean
+  /** Destroy failure from the last destroy() (read by destroy hooks). */
   _destroyError?: { message: string; name?: string } | null
   /** Validation errors from last failed save (enum, pattern, etc.). Cleared on successful save. */
   _saveValidationErrors?: import('@/Schema/validation').ValidationError[]

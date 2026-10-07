@@ -92,7 +92,7 @@ describe('Unpublish React Integration Tests', () => {
       await client.setAddresses([UNPUBLISH_TEST_PUBLISHER])
     }
 
-    await waitFor(() => client.isInitialized(), { timeout: 30000 })
+    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: 30000 })
     await createGetPublishPayloadTestSchema()
     setRevokeExecutor(createTestRevokeExecutor())
   }, 60000)

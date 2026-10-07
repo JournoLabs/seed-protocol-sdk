@@ -210,7 +210,7 @@ describe('Html property persistence integration tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some((s) => s.schema.metadata?.name === 'Test Schema Html Persistence')
+        expect(allSchemas.some((s) => s.schema.metadata?.name === 'Test Schema Html Persistence')).toBe(true)
       },
       { timeout: 15000 }
     )

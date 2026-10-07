@@ -68,7 +68,7 @@ describe('LiveQuery Timing Investigation', () => {
 
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -112,7 +112,7 @@ describe('LiveQuery Timing Investigation', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Timing Test Schema')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Timing Test Schema')).toBe(true)
       },
       { timeout: 15000 }
     )
