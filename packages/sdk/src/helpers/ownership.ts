@@ -1,7 +1,7 @@
 import type { IItem } from '@/interfaces/IItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds } from '@/seedSchema'
-import { eq, inArray, or, sql, type SQL } from 'drizzle-orm'
+import { eq, inArray, sql, type SQL } from 'drizzle-orm'
 import { getOwnedAddressesFromDb } from '@/helpers/db'
 import { isPlaceholderUid } from '@/helpers/easUid'
 import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
@@ -20,23 +20,27 @@ async function getSeedRowForItem(item: ItemLike): Promise<SeedOwnershipRow | nul
   const appDb = BaseDb.getAppDb()
   if (!appDb) return null
 
-  const conditions = []
-  if (item.seedLocalId) conditions.push(eq(seeds.localId, item.seedLocalId))
-  if (item.seedUid) conditions.push(eq(seeds.uid, item.seedUid))
-  if (conditions.length === 0) return null
+  const selectRow = async (condition: SQL): Promise<SeedOwnershipRow | null> => {
+    const seedRows = await appDb
+      .select({
+        publisher: seeds.publisher,
+        attestationRaw: seeds.attestationRaw,
+        uid: seeds.uid,
+      })
+      .from(seeds)
+      .where(condition)
+      .limit(1)
+    return seedRows?.[0] ?? null
+  }
 
-  const seedRows = await appDb
-    .select({
-      publisher: seeds.publisher,
-      attestationRaw: seeds.attestationRaw,
-      uid: seeds.uid,
-    })
-    .from(seeds)
-    .where(conditions.length === 1 ? conditions[0] : (or(...conditions) as any))
-    .limit(1)
-
-  if (!seedRows || seedRows.length === 0) return null
-  return seedRows[0]
+  // localId identifies the item's own row; uid may be shared by other local rows
+  // (e.g. duplicate syncs), so only fall back to it when there is no localId match.
+  if (item.seedLocalId) {
+    const row = await selectRow(eq(seeds.localId, item.seedLocalId))
+    if (row) return row
+  }
+  if (item.seedUid) return selectRow(eq(seeds.uid, item.seedUid))
+  return null
 }
 
 /** Resolve publisher from seed row: `publisher` column, else `attestationRaw.attester`. */
