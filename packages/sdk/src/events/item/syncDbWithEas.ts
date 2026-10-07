@@ -1,3 +1,4 @@
+import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { camelCase, startCase } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
 import {
@@ -322,7 +323,9 @@ const createMetadataRecordsForStorageTransactionId = async (
     const modelType = seedUidToModelType.get(seedUid)
     const propertyId =
       modelType != null
-        ? await getPropertyIdForModelAndName(modelType, _propertyName)
+        ? await getPropertyIdForModelAndName(modelType, _propertyName, {
+            modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+          })
         : null
 
     const propertyLocalId = generateId()
@@ -542,7 +545,10 @@ const saveEasPropertiesToDbBody = async ({
 
     const propertyId =
       modelType != null
-        ? await getPropertyIdForModelAndName(modelType, propertyName)
+        ? await getPropertyIdForModelAndName(modelType, propertyName, {
+            // EAS identifies models by name only; a locally-created seed still knows its model.
+            modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+          })
         : null
     const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
 

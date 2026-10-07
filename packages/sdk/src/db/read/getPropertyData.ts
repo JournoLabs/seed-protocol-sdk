@@ -22,11 +22,10 @@ export const getPropertyData = async ({
   if (modelName) {
     try {
       const { Model } = await import("@/Model/Model")
-      const normalizedModelName = modelName
-      let model = Model.getByName(normalizedModelName)
-      if (!model?.properties?.length) {
-        model = await Model.getByNameAsync(normalizedModelName)
-      }
+      const { resolveItemModelFileId } = await import("@/db/read/resolveModelRecord")
+      // Model names are only unique per schema: use the seed's own model when it is recorded.
+      const modelFileId = await resolveItemModelFileId({ seedLocalId, seedUid })
+      const model = await Model.resolveAsync(modelName, { modelFileId })
       if (model?.properties?.length) {
         const schemas = modelPropertiesToObject(model.properties)
         const storage = listRelationStoragePropertyName(schemas, propertyName)

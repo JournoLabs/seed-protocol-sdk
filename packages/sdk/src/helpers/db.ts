@@ -23,6 +23,7 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
+import { resolveModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType } from '@/helpers/property'
 
@@ -36,19 +37,16 @@ const logger = debug('seedSdk:helpers:db')
 export async function getPropertyIdForSchemaFileId(
   modelNameOrType: string,
   schemaFileId: string,
+  scope: ModelScope = {},
 ): Promise<number | null> {
   const db = BaseDb.getAppDb()
   if (!db || !modelNameOrType || !schemaFileId) return null
+  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  if (!modelRecord) return null
   const rows = await db
     .select({ id: properties.id })
     .from(properties)
-    .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
-    .where(
-      and(
-        eq(modelsTable.name, upperFirst(camelCase(modelNameOrType))),
-        eq(properties.schemaFileId, schemaFileId),
-      ),
-    )
+    .where(and(eq(properties.modelId, modelRecord.id), eq(properties.schemaFileId, schemaFileId)))
     .limit(1)
   return rows[0]?.id ?? null
 }
@@ -58,17 +56,20 @@ export async function getPropertyIdForSchemaFileId(
  * Handles property name variants (e.g. htmlId -> html, avatarImageIds -> avatarImages).
  * @param modelNameOrType - Model name (PascalCase) or model type (snake_case)
  * @param propertyName - Property name as stored in metadata (may have Id/Ids suffix)
+ * @param scope - Which model is meant when several schemas define one with this name
  * @returns properties.id or null if not found
  */
 export async function getPropertyIdForModelAndName(
   modelNameOrType: string,
   propertyName: string,
+  scope: ModelScope = {},
 ): Promise<number | null> {
   const db = BaseDb.getAppDb()
   if (!db) return null
   if (!modelNameOrType || !propertyName) return null
 
-  const normalizedModelName = upperFirst(camelCase(modelNameOrType))
+  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  if (!modelRecord) return null
 
   const propertyNamesToTry = [propertyName]
   if (propertyName.endsWith('Ids')) {
@@ -82,13 +83,7 @@ export async function getPropertyIdForModelAndName(
     const rows = await db
       .select({ id: properties.id })
       .from(properties)
-      .innerJoin(modelsTable, eq(properties.modelId, modelsTable.id))
-      .where(
-        and(
-          eq(modelsTable.name, normalizedModelName),
-          eq(properties.name, pName),
-        ),
-      )
+      .where(and(eq(properties.modelId, modelRecord.id), eq(properties.name, pName)))
       .limit(1)
 
     if (rows.length > 0 && rows[0].id != null) {
@@ -113,6 +108,7 @@ export async function migrateMetadataForPropertyRename(
   oldPropertyName: string,
   newPropertyName: string,
   propertySchemaFileId?: string,
+  scope: ModelScope = {},
 ): Promise<number> {
   const db = BaseDb.getAppDb()
   if (!db) {
@@ -123,10 +119,10 @@ export async function migrateMetadataForPropertyRename(
   // Find the property row by schemaFileId (preferred) or by name
   let propertyId: number | null = null
   if (propertySchemaFileId) {
-    propertyId = await getPropertyIdForSchemaFileId(modelName, propertySchemaFileId)
+    propertyId = await getPropertyIdForSchemaFileId(modelName, propertySchemaFileId, scope)
   }
   if (propertyId == null) {
-    propertyId = await getPropertyIdForModelAndName(modelName, oldPropertyName)
+    propertyId = await getPropertyIdForModelAndName(modelName, oldPropertyName, scope)
   }
   if (propertyId == null) {
     logger(

@@ -1,3 +1,4 @@
+import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
@@ -24,6 +25,7 @@ export async function backfillMetadataPropertyIds(): Promise<number> {
         localId: metadata.localId,
         modelType: metadata.modelType,
         propertyName: metadata.propertyName,
+        seedLocalId: metadata.seedLocalId,
       })
       .from(metadata)
       .where(
@@ -42,10 +44,11 @@ export async function backfillMetadataPropertyIds(): Promise<number> {
     for (const row of rowsToBackfill) {
       if (!row.modelType || !row.propertyName || !row.localId) continue
 
-      const propertyId = await getPropertyIdForModelAndName(
-        row.modelType,
-        row.propertyName,
-      )
+      // Pin to the seed's own model (model names are only unique per schema).
+      const modelFileId = await resolveItemModelFileId({ seedLocalId: row.seedLocalId })
+      const propertyId = await getPropertyIdForModelAndName(row.modelType, row.propertyName, {
+        modelFileId,
+      })
       if (propertyId == null) continue
 
       await db

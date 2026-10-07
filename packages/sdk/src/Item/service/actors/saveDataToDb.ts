@@ -108,10 +108,10 @@ export const saveDataToDb = fromCallback<
 
           const propertyId =
             modelTableName != null
-              ? await getPropertyIdForModelAndName(
-                  modelTableName,
-                  camelCasePropertyName,
-                )
+              ? await getPropertyIdForModelAndName(modelTableName, camelCasePropertyName, {
+                  modelFileId: context.modelFileId,
+                  schemaName: context.schemaName,
+                })
               : null
           const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
 

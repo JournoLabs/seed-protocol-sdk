@@ -30,15 +30,16 @@ export const createNewItem = async ({
 
   const seedType = toSnakeCase(modelName)
 
-  const newSeedId = await createSeed({ type: seedType, modelFileId })
-
-  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
-
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const model = (modelFileId ? Model.getById(modelFileId) : undefined) ?? (await Model.getByNameAsync(modelName))
+  const model = await Model.resolveAsync(modelName, { modelFileId })
   const propertySchemas = model?.properties ? modelPropertiesToObject(model.properties) : undefined
+  modelFileId ??= model?.id
+
+  const newSeedId = await createSeed({ type: seedType, modelFileId })
+
+  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
 
   // Build set of all properties to create metadata for: union of model schema + propertyData
   // This ensures we create metadata for ALL model properties even when creating with no initial values
@@ -63,7 +64,7 @@ export const createNewItem = async ({
         modelName,
       } as Parameters<typeof createMetadata>[0],
       propertyRecordSchema,
-      { skipValidation: true },
+      { skipValidation: true, modelFileId },
     )
   }
 
