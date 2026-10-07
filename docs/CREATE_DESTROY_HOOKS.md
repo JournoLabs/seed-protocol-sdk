@@ -22,6 +22,8 @@ All create and destroy hooks follow the same pattern:
 
 Loading and error state are derived from the entity instance’s service (the instance passed to `destroy()`), not from hook-local state. This keeps the service as the single source of truth for destroy progress and errors.
 
+**Exception: `useDestroySchema`** tracks `isLoading` and `error` in hook-local state. `Schema.destroy()` sends `destroyStarted` and `destroyDone` and stops the service within a few microtasks, so both updates land in one React render and a service-derived `isLoading` is never seen as `true`. The hook sets `isLoading` when `destroy()` is called, clears it when the promise settles, reads `_destroyError` from the service afterwards, and `resetError` clears the hook's error.
+
 ## Hooks by entity
 
 | Entity        | Create hook              | Destroy hook             |
