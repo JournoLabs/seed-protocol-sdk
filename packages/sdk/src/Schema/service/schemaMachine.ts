@@ -657,10 +657,9 @@ export const schemaMachine = setup({
           },
         },
       },
-      always: {
-        guard: 'hasValidationErrors',
-        target: 'validating',
-      },
+      // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
+      // (updateContext, addModels) or on request (validateSchema). Re-entering while errors exist would loop
+      // forever on a schema that is still invalid.
     },
     addingModels: {
       entry: assign({
@@ -775,11 +774,21 @@ export const schemaMachine = setup({
     },
     validating: {
       on: {
+        // These state-level handlers take precedence over the root ones, so they must store the result
+        // themselves.
         validationSuccess: {
           target: 'idle',
+          actions: assign(({ context }) => ({
+            ...context,
+            _validationErrors: [],
+          })),
         },
         validationError: {
           target: 'idle',
+          actions: assign(({ context, event }) => ({
+            ...context,
+            _validationErrors: event.errors,
+          })),
         },
       },
       invoke: {

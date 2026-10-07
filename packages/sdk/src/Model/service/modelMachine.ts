@@ -385,10 +385,9 @@ export const modelMachine = setup({
           },
         ],
       },
-      always: {
-        guard: 'hasValidationErrors',
-        target: 'validating',
-      },
+      // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
+      // (updateContext) or on request (validateModel). Re-entering while errors exist would loop forever on a
+      // model that is still invalid.
     },
     validating: {
       on: {
