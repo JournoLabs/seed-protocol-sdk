@@ -156,7 +156,11 @@ const createItemPropertyInstances = async (
           const schemaFiles = await listCompleteSchemaFiles()
           for (const { filePath } of schemaFiles) {
             const content = await BaseFileManager.readFileAsString(filePath)
-            const schemaFile = JSON.parse(content) as { models?: Record<string, { properties?: Record<string, any> }> }
+            const schemaFile = JSON.parse(content) as {
+              metadata?: { name?: string }
+              models?: Record<string, { properties?: Record<string, any> }>
+            }
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             if (schemaFile.models?.[modelName]?.properties) {
               propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
               logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)
