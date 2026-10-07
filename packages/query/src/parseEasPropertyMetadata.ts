@@ -12,7 +12,7 @@ export type ParseEasPropertyMetadataResult =
 
 /**
  * Parse EAS property `decodedDataJson`.
- * Matches SDK guards in syncDbWithEas / saveDataToDb (empty trim, parse, array + [0].value).
+ * Matches SDK guards in syncDbWithEas (empty trim, parse, array + [0].value).
  */
 export function parseEasPropertyMetadata(
   decodedDataJson: string | undefined | null,

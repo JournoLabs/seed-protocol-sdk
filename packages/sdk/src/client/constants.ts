@@ -77,15 +77,6 @@ export enum InternalState {
 const { VALIDATING_INPUT, CONFIGURING_FS, LOADING_SEED_DB, LOADING_APP_DB } =
         InternalState
 
-export enum PublishMachineStates {
-  VALIDATING_ITEM_DATA           = 'validatingItemData',
-  CREATING_PUBLISH_ATTEMPT       = 'creatingPublishAttempt',
-  UPLOADING                      = 'uploading',
-  PREPARING_PUBLISH_REQUEST_DATA = 'preparingPublishRequestData',
-  PUBLISHING                     = 'publishing',
-  IDLE                           = 'idle',
-}
-
 export const INTERNAL_VALIDATING_INPUT_SUCCESS = `${INTERNAL}.${VALIDATING_INPUT}.success`
 
 export const INTERNAL_CONFIGURING_FS_SUCCESS = `${INTERNAL}.${CONFIGURING_FS}.success`
