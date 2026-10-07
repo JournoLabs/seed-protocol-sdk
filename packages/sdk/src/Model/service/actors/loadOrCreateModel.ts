@@ -122,7 +122,8 @@ export const loadOrCreateModel = fromCallback<
               })
               .from(modelsTable)
               .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id)))
+              // Stubs only: an unlinked row with a schemaFileId is a deleted schema's leftover, not ours
+              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
               .limit(1)
           }
           

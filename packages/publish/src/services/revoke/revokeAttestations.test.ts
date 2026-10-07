@@ -15,6 +15,8 @@ const state = {
   automationActive: false,
   sent: [] as Array<{ to: string; data: `0x${string}` }>,
   revokedAt: null as number | null,
+  revokedMetadataUids: null as string[] | null,
+  metadata: [] as { uid: string; schemaUid: string }[],
 }
 
 const sdkActual = await import('@seedprotocol/sdk')
@@ -23,10 +25,17 @@ mock.module('@seedprotocol/sdk', () => ({
   assertLocalDbChain: async () => {},
   getAttesterForSeed: async () => state.attester,
   getVersionsForSeedUid: async () => [],
-  getMetadataAttestationUidsForSeedUid: async () => [],
+  getMetadataAttestationUidsForSeedUid: async () => state.metadata,
   getGetAdditionalSyncAddresses: () => async () => [EXECUTOR],
-  updateSeedRevokedAt: async ({ revokedAt }: { revokedAt: number }) => {
+  updateSeedRevokedAt: async ({
+    revokedAt,
+    metadataUids,
+  }: {
+    revokedAt: number
+    metadataUids?: string[]
+  }) => {
     state.revokedAt = revokedAt
+    state.revokedMetadataUids = metadataUids ?? null
   },
 }))
 
@@ -70,11 +79,25 @@ afterEach(() => {
   state.automationActive = false
   state.sent = []
   state.revokedAt = null
+  state.revokedMetadataUids = null
+  state.metadata = []
 })
 
 const params = { seedLocalId: 'seed1', seedUid: SEED_UID, seedSchemaUid: SEED_SCHEMA }
 
 describe('revokeAttestations', () => {
+  test('marks the revoked property attestations along with the seed', async () => {
+    const titleUid = `0x${'31'.repeat(32)}`
+    const bodyUid = `0x${'32'.repeat(32)}`
+    state.metadata = [
+      { uid: titleUid, schemaUid: `0x${'41'.repeat(32)}` },
+      { uid: bodyUid, schemaUid: `0x${'42'.repeat(32)}` },
+    ]
+    await revokeAttestations(params)
+    expect(state.revokedAt).not.toBeNull()
+    expect(state.revokedMetadataUids?.slice().sort()).toEqual([titleUid, bodyUid].sort())
+  })
+
   test('the owner revokes through EAS, never the executor', async () => {
     await revokeAttestations(params)
     expect(state.sent).toHaveLength(1)

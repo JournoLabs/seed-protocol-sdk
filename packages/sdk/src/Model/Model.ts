@@ -1450,9 +1450,10 @@ export class Model {
     const seen = new Set<string>()
 
     for (const row of rows) {
-      if (row.schemaFileId) {
+      // A model can appear more than once (e.g. duplicate model_schemas links); return it once.
+      if (row.schemaFileId && !seen.has(row.schemaFileId)) {
         const instance = await this.createById(row.schemaFileId)
-        if (instance) {
+        if (instance && !seen.has(instance.id ?? row.schemaFileId)) {
           instances.push(instance)
           seen.add(instance.id ?? row.schemaFileId)
         }

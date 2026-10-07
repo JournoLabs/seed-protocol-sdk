@@ -26,6 +26,7 @@ import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstrain
 import { resolveModelRecord, resolveRefModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType } from '@/helpers/property'
+import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -253,6 +254,18 @@ const isModelLinkedToOtherSchema = async (
   return links.some((l: { schemaId: number | null }) => l.schemaId !== schemaId)
 }
 
+const isModelLinkedToAnySchema = async (
+  db: BetterSQLite3Database | SqliteRemoteDatabase,
+  modelId: number,
+): Promise<boolean> => {
+  const links = await (db as BetterSQLite3Database)
+    .select({ id: modelSchemas.id })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.modelId, modelId))
+    .limit(1)
+  return links.length > 0
+}
+
 /**
  * Find or create a models row by schemaFileId (preferred) or name.
  * Reuses an existing same-name row (especially schemaFileId=null stubs created via
@@ -320,7 +333,10 @@ const findOrCreateModelRecord = async (
     if (!chosen && modelFileId) {
       // Every same-name row has a different file id. Only adopt one that no other
       // schema claims; otherwise fall through and insert a row for this file id.
+      // A row with a file id that no schema links is a deleted schema's leftover (its old
+      // properties are still attached), not an unclaimed row: don't adopt it either.
       for (const candidate of byName) {
+        if (candidate.schemaFileId && !(await isModelLinkedToAnySchema(db, candidate.id!))) continue
         if (!(await isModelLinkedToOtherSchema(db, candidate.id!, schemaId))) {
           chosen = candidate
           break
@@ -1327,10 +1343,7 @@ export const addModelsToDb = async (
       const toInsert = modelIds.filter(({ modelId }) => !existingSet.has(modelId))
       if (toInsert.length > 0) {
         for (const { modelName, modelId } of toInsert) {
-          await db.insert(modelSchemas).values({
-            modelId,
-            schemaId: schemaRecord.id,
-          })
+          if (!(await linkModelToSchema(db, modelId, schemaRecord.id))) continue
           logger(`Created join table entry for model ${modelName} (id: ${modelId}) to schema (id: ${schemaRecord.id})`)
         }
       }
@@ -1910,10 +1923,7 @@ export async function writeModelToDb(
       
       logger(`Creating join record: modelId=${modelId}, schemaId=${data.schemaId} (both verified to exist)`)
       
-      await db.insert(modelSchemas).values({
-        modelId,
-        schemaId: data.schemaId,
-      })
+      await linkModelToSchema(db, modelId, data.schemaId)
       // Notify React useModels so it can invalidate; live query over join often doesn't re-run when model_schemas is inserted.
       // Yield so the insert is visible to the refetch that will run when the broadcast is received.
       if (typeof BroadcastChannel !== 'undefined') {

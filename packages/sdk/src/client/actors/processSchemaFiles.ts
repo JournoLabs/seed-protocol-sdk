@@ -2,10 +2,11 @@ import { EventObject, fromCallback } from "xstate"
 import { ClientManagerContext, FromCallbackInput } from "@/types/machines"
 import { ClientManagerEvents } from "@/client/constants"
 import { isInternalSchema, INTERNAL_SCHEMA_IDS, SEED_PROTOCOL_SCHEMA_NAME } from "@/helpers/constants"
-import { listSchemaFiles, loadAllSchemasFromDb } from "@/helpers/schema"
+import { listSchemaFiles, loadAllSchemasFromDb, type LoadedSchema } from "@/helpers/schema"
 import { BaseDb } from "@/db/Db/BaseDb"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
-import { eq } from "drizzle-orm"
+import { countDistinct, eq } from "drizzle-orm"
+import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
 import {
   createModelsFromJson,
   createModelsFromJsonFile,
@@ -198,7 +199,7 @@ export const processSchemaFiles = fromCallback<
 
     // Then, load all schemas using the unified database-first approach
     logger('Loading schemas from database and files')
-    let allSchemasData: Array<{ schema: SchemaFileFormat; isDraft: boolean; source: string }> = []
+    let allSchemasData: LoadedSchema[] = []
     try {
       allSchemasData = await loadAllSchemasFromDb()
       logger(`Loaded ${allSchemasData.length} schemas (${allSchemasData.filter(s => s.isDraft).length} drafts, ${allSchemasData.filter(s => !s.isDraft).length} published)`)
@@ -210,6 +211,22 @@ export const processSchemaFiles = fromCallback<
     }
     // Collect models to add to context (schemas are now loaded on-demand via database queries)
     const allModels: { [key: string]: any } = { ...(context.models || {}) }
+
+    // Linked model count per schema row, to tell whether an earlier load already applied a file's models
+    const linkedModelCounts = new Map<number, number>()
+    if (db) {
+      try {
+        const rows = await db
+          .select({ schemaId: modelSchemas.schemaId, count: countDistinct(modelSchemas.modelId) })
+          .from(modelSchemas)
+          .groupBy(modelSchemas.schemaId)
+        for (const row of rows as Array<{ schemaId: number | null; count: number }>) {
+          if (row.schemaId != null) linkedModelCounts.set(row.schemaId, Number(row.count))
+        }
+      } catch (error) {
+        logger('Error counting linked models (re-applying all schema files):', error)
+      }
+    }
     
     for (const schemaData of allSchemasData) {
       const schema = schemaData.schema
@@ -219,17 +236,9 @@ export const processSchemaFiles = fromCallback<
       
       // For published schemas (not drafts), load models from file if available
       if (!schemaData.isDraft && schema.id) {
-        const { listCompleteSchemaFiles } = await import('@/helpers/schema')
-        const completeSchemas = await listCompleteSchemaFiles()
-        const matchingSchemas = completeSchemas.filter((s) => s.name === schemaName)
-        const latest = matchingSchemas.length > 0
-          ? matchingSchemas.reduce((prev, current) =>
-              current.version > prev.version ? current : prev,
-            )
-          : null
-
-        const fileExists = latest ? await BaseFileManager.pathExists(latest.filePath) : false
-        if (latest && fileExists) {
+        // loadAllSchemasFromDb already picked the latest file for this schema (and read it)
+        const latestFilePath = schemaData.filePath
+        if (latestFilePath) {
           try {
             // Skip loadSchemaFromFile when this schema was already written this run (or is
             // internal) — re-applying creates UNIQUE constraint races on properties.
@@ -237,12 +246,20 @@ export const processSchemaFiles = fromCallback<
             const alreadyWritten =
               schemasWrittenThisRun.has(schemaName) ||
               isInternalSchema(schemaName, schema.id)
-            if (alreadyWritten) {
-              const modelDefinitions = await createModelsFromJsonFile(latest.filePath)
+            // Also skip when an earlier init already applied this file: the DB row matches it and
+            // all its models are linked. Re-applying every published schema on every init made
+            // init time grow with the number of schema files.
+            const expectedModelCount = Object.keys(schema.models || {}).length
+            const alreadyApplied =
+              schemaData.dbMatchesFile === true &&
+              schemaData.schemaRecordId != null &&
+              (linkedModelCounts.get(schemaData.schemaRecordId) ?? 0) >= expectedModelCount
+            if (alreadyWritten || alreadyApplied) {
+              const modelDefinitions = await createModelsFromJsonFile(latestFilePath)
               Object.assign(allModels, modelDefinitions)
             } else {
-              await loadSchemaFromFile(latest.filePath)
-              const modelDefinitions = await createModelsFromJsonFile(latest.filePath)
+              await loadSchemaFromFile(latestFilePath)
+              const modelDefinitions = await createModelsFromJsonFile(latestFilePath)
               Object.assign(allModels, modelDefinitions)
             }
           } catch (error) {

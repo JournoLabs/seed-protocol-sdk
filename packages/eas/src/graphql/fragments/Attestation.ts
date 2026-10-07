@@ -12,6 +12,7 @@ export const ATTESTATION_FIELDS = graphql(/* GraphQL */ `
     }
     refUID
     revoked
+    revocationTime
     schemaId
     txid
     timeCreated

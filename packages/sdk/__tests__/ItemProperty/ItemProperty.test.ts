@@ -5,7 +5,6 @@ import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -19,6 +18,8 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
+import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 import type { IItemProperty } from '@/interfaces'
 
 // Helper function to wait for ItemProperty to be in idle state
@@ -101,17 +102,7 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('ItemProperty Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
@@ -188,51 +179,10 @@ testDescribe('ItemProperty Integration Tests', () => {
           await db.delete(seeds)
         }
         
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map(link => link.modelId)
-          .filter((id): id is number => id !== null && id !== undefined)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+        // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema). The inline version
+        // deleted the model_schemas links before reading them to find the models to delete, so test
+        // models were left behind as orphans and later name lookups picked them up.
+        await cleanupTestSchemaData()
       } else {
         // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
         await db.delete(metadata)
@@ -248,18 +198,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       }
     }
 
-    // Clean up property files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Property') || file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    await cleanupTestSchemaFiles()
   })
 
   afterEach(async () => {
