@@ -19,11 +19,7 @@ import {
   generateId,
 } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
-import {
-  GET_PROPERTIES,
-  GET_SEEDS,
-  GET_VERSIONS,
-} from '@seedprotocol/eas'
+import { GET_SEEDS } from '@seedprotocol/eas'
 import { escapeSqliteString, getAllAddressesFromDb, getPropertyIdForModelAndName } from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
@@ -35,7 +31,6 @@ import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
-import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import {
   getItemPropertiesFromEas,
   getItemVersionsFromEas,
@@ -629,49 +624,75 @@ const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {
   return next
 }
 
-const getRelatedSeedsAndVersions = async () => {
-  const queryClient = BaseQueryClient.getQueryClient()
-  const easClient = BaseEasClient.getEasClient()
+/**
+ * Fetch every version of `seedUids` and every property attestation of those versions, and store
+ * them. The main sync and the related-seed fetch both go through here, so they treat revocation
+ * the same way: revoked attestations are fetched on purpose (`excludeRevoked: false`), revoked
+ * seeds record `revokedAt` (in `saveEasSeedsToDb`), and properties go through the canonical pick
+ * (newest non-revoked per version and property schema, see ADR 0006).
+ */
+const syncVersionsAndPropertiesForSeeds = async ({
+  seedUids,
+  itemSeeds,
+}: {
+  seedUids: string[]
+  itemSeeds: Attestation[]
+}): Promise<void> => {
+  if (seedUids.length === 0) return
 
-  const { itemSeeds } = await easClient.request(GET_SEEDS, {
-    where: {
-      id: {
-        in: Array.from(relatedSeedUids),
-      },
-    },
+  const itemVersions = await getItemVersionsFromEas({
+    seedUids,
+    excludeRevoked: false,
   })
 
-  await saveEasSeedsToDb({ itemSeeds })
-
-  const { itemVersions } = await easClient.request(GET_VERSIONS, {
-    where: {
-      refUID: {
-        in: Array.from(relatedSeedUids),
-      },
-    },
+  const { versionUids } = await saveEasVersionsToDb({
+    itemVersions,
   })
+  if (versionUids.length === 0) return
 
-  await saveEasVersionsToDb({ itemVersions })
-
-  const relatedVersionUids = itemVersions.map((v) => v.id)
-
-  const { itemProperties } = await easClient.request(GET_PROPERTIES, {
-    where: {
-      refUID: {
-        in: relatedVersionUids,
-      },
-    },
+  const rawProperties = await getItemPropertiesFromEas({
+    versionUids,
+    excludeRevoked: false,
   })
-
-  const canonicalRelatedProperties = pickLatestPropertyAttestationsByRefAndSchema(
-    itemProperties,
+  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(
+    rawProperties,
     SYNC_CANONICAL_OPTIONS,
   )
 
   await saveEasPropertiesToDb({
-    itemProperties: canonicalRelatedProperties,
+    itemProperties,
     itemSeeds,
   })
+}
+
+/**
+ * Relation targets of synced properties, fetched by id from any attester (one level deep).
+ *
+ * This deliberately matches the main sync instead of filtering out revoked attestations: a
+ * relation to an unpublished seed should still resolve locally, to the seed's last values next to
+ * its `revokedAt`, exactly as if that seed had been synced in its own right. Filtering at the query
+ * would also break the canonical pick, which needs the revoked attestations to skip them (or to
+ * keep the newest one when all are revoked), and would leave `seeds.revoked_at` unset.
+ */
+const getRelatedSeedsAndVersions = async () => {
+  const uids = Array.from(relatedSeedUids)
+  if (uids.length === 0) return
+
+  const easClient = BaseEasClient.getEasClient()
+
+  // No `revoked` filter, like `getSeedsFromSchemaUids({ excludeRevoked: false })` in the main sync.
+  const { itemSeeds } = await easClient.request(GET_SEEDS, {
+    where: {
+      id: {
+        in: uids,
+      },
+    },
+  })
+
+  const { seedUids } = await saveEasSeedsToDb({ itemSeeds })
+
+  // Only seeds EAS returned: a version of an unknown seed would be stored without its seed.
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds })
 }
 
 export type SyncFromEasOptions = {
@@ -765,28 +786,7 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
     itemSeeds,
   })
 
-  const itemVersions = await getItemVersionsFromEas({
-    seedUids,
-    excludeRevoked: false,
-  })
-
-  const { versionUids } = await saveEasVersionsToDb({
-    itemVersions,
-  })
-
-  const rawProperties = await getItemPropertiesFromEas({
-    versionUids,
-    excludeRevoked: false,
-  })
-  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(
-    rawProperties,
-    SYNC_CANONICAL_OPTIONS,
-  )
-
-  await saveEasPropertiesToDb({
-    itemProperties,
-    itemSeeds,
-  })
+  await syncVersionsAndPropertiesForSeeds({ seedUids, itemSeeds })
 
   await getRelatedSeedsAndVersions()
   scheduleBulkFilesDownloadFromEasSync(addresses)
