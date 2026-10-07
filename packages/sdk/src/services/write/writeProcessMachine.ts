@@ -206,7 +206,10 @@ export const writeProcessMachine = setup({
               retryCount: ({ context }) => context.retryCount + 1,
             }),
             ({ context, event }) => {
-              logger(`[writing] Write error for ${context.entityType} "${context.entityId}":`, event.error)
+              const errorMsg = `[writing] Write error for ${context.entityType} "${context.entityId}": ${event.error}`
+              logger(errorMsg)
+              // Nothing else reports a failed persist to the caller, so always log to console
+              console.error(errorMsg, event.error)
             },
           ],
         },

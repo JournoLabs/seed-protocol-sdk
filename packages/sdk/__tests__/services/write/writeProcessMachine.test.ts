@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { createActor, fromCallback, fromPromise, waitFor, type AnyActorRef } from 'xstate'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
@@ -20,7 +20,14 @@ describe('writeProcessMachine', () => {
     return actor
   }
 
+  // Write failures are always logged with console.error; keep the deliberate ones out of the output.
+  let consoleError: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
   afterEach(async () => {
+    consoleError.mockRestore()
     for (const actor of actors.splice(0)) actor.stop()
     await cleanupTestSchemaData()
   })
@@ -170,6 +177,11 @@ describe('writeProcessMachine', () => {
       const errorSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 })
       expect(errorSnapshot.context.retryCount).toBe(1)
       expect(errorSnapshot.context.error?.message).toBe('Test error')
+      // A failed persist is otherwise only visible to debug logging
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Write error for model "test-model-id": Error: Test error'),
+        expect.any(Error),
+      )
 
       // Retry goes back through validation (stubbed to pass) and into writing again
       actor.send({ type: 'retry' })
