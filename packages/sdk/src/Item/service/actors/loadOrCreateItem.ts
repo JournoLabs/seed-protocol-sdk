@@ -107,9 +107,10 @@ const createItemPropertyInstances = async (
 
     // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    let model = (schemaName && Model.getByName(modelName, schemaName)) || Model.getByName(modelName)
+    // With a known schema, never fall back to a same-named model from another schema.
+    let model = Model.getByName(modelName, schemaName)
     if (!model?.properties?.length) {
-      model = await Model.getByNameAsync(modelName) ?? undefined
+      model = (await Model.getByNameAsync(modelName, schemaName)) ?? model
     }
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
@@ -117,7 +118,7 @@ const createItemPropertyInstances = async (
     // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
     // This fixes persistence when useItem returns items with empty propertyInstances.
     if (Object.keys(propertySchemas).length === 0) {
-      const schemaNameToTry = model?.schemaName
+      const schemaNameToTry = schemaName ?? model?.schemaName
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
@@ -136,6 +137,7 @@ const createItemPropertyInstances = async (
           const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
           const allSchemas = await loadAllSchemasFromDb()
           for (const { schema: schemaFile } of allSchemas) {
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
             if (models?.[modelName]?.properties) {
               propertySchemas = models[modelName].properties as Record<string, any>
