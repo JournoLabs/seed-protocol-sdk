@@ -7,6 +7,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { eq, and } from 'drizzle-orm'
 import { generateId } from '@/helpers'
+import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
 
@@ -92,18 +93,14 @@ export const loadOrCreateModel = fromCallback<
           }
         }
 
-        // If not found by ID, try by name
+        // If not found by ID, try by name within this schema (model names are only unique per
+        // schema; a name-only lookup would let this instance adopt another schema's row).
         // But if we have a schemaFileId and the model found by name has a different schemaFileId,
         // don't use it - we're creating a new model from a schema file with a specific ID
         if (!modelRecord) {
-          const dbModels = await db
-            .select()
-            .from(modelsTable)
-            .where(eq(modelsTable.name, modelName))
-            .limit(1)
-          
-          if (dbModels.length > 0) {
-            const foundModel = dbModels[0]
+          const foundModel = await getModelRecordByName(db, modelName, schemaName)
+
+          if (foundModel) {
             const dbSchemaFileId = foundModel.schemaFileId
             
             // CRITICAL: If we found a model in the database by name, check if there's already a cached instance
@@ -117,7 +114,8 @@ export const loadOrCreateModel = fromCallback<
                 const { Model } = modelMod
                 // Access instanceCacheById via type assertion since it's protected
                 const cacheById = (Model as any).instanceCacheById as Map<string, any>
-                if (cacheById.has(dbSchemaFileId)) {
+                const cachedSchemaName = cacheById.get(dbSchemaFileId)?.instance?._getSnapshotContext?.()?.schemaName
+                if (cacheById.has(dbSchemaFileId) && cachedSchemaName === schemaName) {
                   logger(`Model "${modelName}" found in database by name with schemaFileId "${dbSchemaFileId}", and a cached instance already exists. Updating current instance to use the same schemaFileId.`)
                   // Update the current instance's schemaFileId to match the database
                   // This ensures both instances point to the same cached instance

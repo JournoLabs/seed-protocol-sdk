@@ -3,10 +3,10 @@ import type { DoneActorEvent } from 'xstate'
 import { SchemaMachineContext } from './schemaMachine'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { generateId } from '@/helpers'
 import { addModelsToDb } from '@/helpers/db'
 import { createModelFromJson } from '@/imports/json'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { eq, desc } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
@@ -98,14 +98,11 @@ export const addModelsMachine = setup({
           try {
             const db = BaseDb.getAppDb()
             if (db) {
-              const dbModels = await db
-                .select()
-                .from(modelsTable)
-                .where(eq(modelsTable.name, modelName))
-                .limit(1)
-              
-              if (dbModels.length > 0 && dbModels[0].schemaFileId) {
-                modelFileId = dbModels[0].schemaFileId
+              // Scoped to this schema: another schema's same-named model has its own file id
+              const dbModel = await getModelRecordByName(db, modelName, schemaName)
+
+              if (dbModel?.schemaFileId) {
+                modelFileId = dbModel.schemaFileId
                 logger(`Found modelFileId "${modelFileId}" for model "${modelName}" from database`)
               }
             }

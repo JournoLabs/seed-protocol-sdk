@@ -6,6 +6,7 @@ import { Model } from '@/Model/Model'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
@@ -1280,13 +1281,10 @@ export class Schema {
         // Clear isEdited flag in database
         try {
           if (db && modelName && propertyName) {
-            // Find model by name
-            const modelRecords = await db
-              .select({ id: modelsTable.id })
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
-            
+            // Find model by name within this schema
+            const modelRecord = await getModelRecordByName(db, modelName, this.schemaName)
+            const modelRecords = modelRecord ? [modelRecord] : []
+
             if (modelRecords.length > 0) {
               // Find property by name and modelId
               const propertyRecords = await db

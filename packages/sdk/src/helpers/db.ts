@@ -25,6 +25,8 @@ import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType } from '@/helpers/property'
+import { getModelRecordsByName } from '@/db/read/getModelRecordByName'
+import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -252,7 +254,18 @@ const findOrCreateModelRecord = async (
   db: BetterSQLite3Database | SqliteRemoteDatabase,
   modelName: string,
   modelFileId?: string,
+  schemaName?: string,
 ): Promise<NewModelRecord> => {
+  // With a schema, only consider same-named rows of that schema (or not yet linked to any): the
+  // adoption below rewrites the chosen row's schemaFileId, which must never hit another schema's model.
+  const findByName = async (): Promise<NewModelRecord[]> =>
+    schemaName
+      ? ((await getModelRecordsByName(db, modelName, schemaName)) as NewModelRecord[])
+      : ((await db
+          .select()
+          .from(modelsTable)
+          .where(eq(modelsTable.name, modelName))) as NewModelRecord[])
+
   if (modelFileId) {
     const byFileId = await db
       .select()
@@ -272,10 +285,7 @@ const findOrCreateModelRecord = async (
     }
   }
 
-  const byName = (await db
-    .select()
-    .from(modelsTable)
-    .where(eq(modelsTable.name, modelName))) as NewModelRecord[]
+  const byName = await findByName()
 
   if (byName.length > 0) {
     // Prefer exact file-id match, then adoptable null schemaFileId stub, then any single row.
@@ -335,10 +345,7 @@ const findOrCreateModelRecord = async (
       }
     }
     // Race: another writer inserted by name — reuse rather than throw on duplicates.
-    const raced = (await db
-      .select()
-      .from(modelsTable)
-      .where(eq(modelsTable.name, modelName))) as NewModelRecord[]
+    const raced = await findByName()
     if (raced.length > 0) {
       return (
         (modelFileId
@@ -996,7 +1003,7 @@ export const addModelsToDb = async (
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
 
-      let modelRecord = await findOrCreateModelRecord(db, modelName, modelFileId)
+      let modelRecord = await findOrCreateModelRecord(db, modelName, modelFileId, schemaRecord?.name)
 
       // Keep schemaFileId aligned when findOrCreate returned a row that still needs adoption
       // (e.g. sole same-name row that already had a different non-null id — rare).
@@ -1277,10 +1284,7 @@ export const addModelsToDb = async (
       const toInsert = modelIds.filter(({ modelId }) => !existingSet.has(modelId))
       if (toInsert.length > 0) {
         for (const { modelName, modelId } of toInsert) {
-          await db.insert(modelSchemas).values({
-            modelId,
-            schemaId: schemaRecord.id,
-          })
+          if (!(await linkModelToSchema(db, modelId, schemaRecord.id))) continue
           logger(`Created join table entry for model ${modelName} (id: ${modelId}) to schema (id: ${schemaRecord.id})`)
         }
       }
@@ -1860,10 +1864,7 @@ export async function writeModelToDb(
       
       logger(`Creating join record: modelId=${modelId}, schemaId=${data.schemaId} (both verified to exist)`)
       
-      await db.insert(modelSchemas).values({
-        modelId,
-        schemaId: data.schemaId,
-      })
+      await linkModelToSchema(db, modelId, data.schemaId)
       // Notify React useModels so it can invalidate; live query over join often doesn't re-run when model_schemas is inserted.
       // Yield so the insert is visible to the refetch that will run when the broadcast is received.
       if (typeof BroadcastChannel !== 'undefined') {

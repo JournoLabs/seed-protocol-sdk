@@ -25,6 +25,7 @@ import {
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
+import { getModelRecordByName } from '@/db/read/getModelRecordByName'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { eq, or } from 'drizzle-orm'
 import { Subscription } from 'rxjs'
@@ -1367,9 +1368,10 @@ export class Model {
     const seen = new Set<string>()
 
     for (const row of rows) {
-      if (row.schemaFileId) {
+      // A model can appear more than once (e.g. duplicate model_schemas links); return it once.
+      if (row.schemaFileId && !seen.has(row.schemaFileId)) {
         const instance = await this.createById(row.schemaFileId)
-        if (instance) {
+        if (instance && !seen.has(instance.id ?? row.schemaFileId)) {
           instances.push(instance)
           seen.add(instance.id ?? row.schemaFileId)
         }
@@ -1942,17 +1944,23 @@ export class Model {
               return undefined
             }
 
-            const modelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
+            // By file id, else by name within this model's schema (names are only unique per schema)
+            const modelRecords = context.id
+              ? await db
+                  .select()
+                  .from(modelsTable)
+                  .where(eq(modelsTable.schemaFileId, context.id))
+                  .limit(1)
+              : []
+            const modelRecord =
+              modelRecords[0] ??
+              (context.schemaName ? await getModelRecordByName(db, modelName, context.schemaName) : undefined)
 
-            if (modelRecords.length === 0 || !modelRecords[0].id) {
+            if (!modelRecord?.id) {
               return undefined
             }
 
-            dbId = modelRecords[0].id
+            dbId = modelRecord.id
 
             // Update context with _dbId
             model._service.send({

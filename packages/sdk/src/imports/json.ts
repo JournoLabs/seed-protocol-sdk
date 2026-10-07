@@ -14,6 +14,8 @@ import debug from 'debug'
 // import { getClient } from '@/client/ClientManager'
 import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getModelRecordByName } from '@/db/read/getModelRecordByName'
+import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
 const logger = debug('seedSdk:imports:json')
 
@@ -886,22 +888,16 @@ export async function importJsonSchema(
                         .limit(1)
                       
                       if (existingJoin.length === 0) {
-                        await db.insert(modelSchemas).values({
-                          modelId: missingModel[0].id,
-                          schemaId: schemaRecord.id,
-                        })
+                        await linkModelToSchema(db, missingModel[0].id, schemaRecord.id)
                       } else {
                       }
                     } else {
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" with schemaFileId "${modelFileId}" in database`)
                     }
                   } else {
-                    // Fallback: find by name
-                    const missingModel = await db
-                      .select()
-                      .from(modelsTable)
-                      .where(eq(modelsTable.name, missingModelName))
-                      .limit(1)
+                    // Fallback: find by name, but never link another schema's same-named model
+                    const byName = await getModelRecordByName(db, missingModelName, schemaRecord.name)
+                    const missingModel = byName ? [byName] : []
                     
                     if (missingModel.length > 0 && missingModel[0].id) {
                       const existingJoin = await db
@@ -916,10 +912,7 @@ export async function importJsonSchema(
                         .limit(1)
                       
                       if (existingJoin.length === 0) {
-                        await db.insert(modelSchemas).values({
-                          modelId: missingModel[0].id,
-                          schemaId: schemaRecord.id,
-                        })
+                        await linkModelToSchema(db, missingModel[0].id, schemaRecord.id)
                       }
                     } else {
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" by name in database`)

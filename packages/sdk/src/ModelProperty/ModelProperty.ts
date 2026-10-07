@@ -239,6 +239,18 @@ export class ModelProperty {
         return fallbackIsEdited
       }
 
+      // The property's file id is unique; a model name isn't (other schemas can have the same one)
+      if (property.id) {
+        const byFileId = await db
+          .select({ isEdited: propertiesTable.isEdited })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.schemaFileId, property.id))
+          .limit(1)
+        if (byFileId.length > 0) {
+          return byFileId[0].isEdited ?? false
+        }
+      }
+
       // Find model by name
       const modelRecords = await db
         .select({ id: modelsTable.id })
