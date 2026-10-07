@@ -18,6 +18,8 @@ import {
   schemas,
   seeds,
   metadata,
+  versions,
+  publishProcesses,
   modelSchemas,
   properties as propertiesTable,
   models as modelsTable,
@@ -32,7 +34,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { IItemProperty, SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { generateId } from '@seedprotocol/sdk'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, inArray, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
@@ -544,15 +546,22 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       }
     }
 
-    // Clean up items from database
+    // Clean up items from database. Delete by seed type rather than via testItem/testItem2:
+    // afterEach has already nulled those, and leftover items (whose models lose their schema links
+    // below) make Item.all() in later browser test files wait ~5s per item.
     const db = BaseDb.getAppDb()
-    if (db && testItem) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem.seedLocalId))
-    }
-    if (db && testItem2) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem2.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem2.seedLocalId))
+    if (db) {
+      const leftoverSeeds = await db
+        .select({ localId: seeds.localId })
+        .from(seeds)
+        .where(inArray(seeds.type, ['post', 'article', 'new_item_model']))
+      const leftoverIds = leftoverSeeds.map((s) => s.localId).filter(Boolean) as string[]
+      if (leftoverIds.length) {
+        await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, leftoverIds))
+        await db.delete(metadata).where(inArray(metadata.seedLocalId, leftoverIds))
+        await db.delete(versions).where(inArray(versions.seedLocalId, leftoverIds))
+        await db.delete(seeds).where(inArray(seeds.localId, leftoverIds))
+      }
     }
 
     // Clean up schemas from database (model_schemas.schema_id FK must be cleared first)
