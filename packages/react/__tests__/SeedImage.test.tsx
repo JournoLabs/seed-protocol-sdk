@@ -19,6 +19,7 @@ import {
   importJsonSchema,
   Schema,
   Model,
+  ModelProperty,
   Item,
   ItemProperty,
   BaseFileManager,
@@ -107,6 +108,10 @@ const TEST_SCHEMA_SEED_IMAGE_NAME = 'Test Schema Seed Image'
 async function deleteTestSchemaSeedImageRows(): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) return
+
+  // Evict cached instances so the next import builds a Post bound to the new rows, and later files
+  // can't resolve this schema's Post by name.
+  ModelProperty.evictForModels(Model.evictForSchema(TEST_SCHEMA_SEED_IMAGE_NAME), TEST_SCHEMA_SEED_IMAGE_NAME)
 
   const schemaRow = await db
     .select()
@@ -271,7 +276,12 @@ describe('SeedImage integration tests', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, { waitForReady: false })
+    // Pass the schema's modelFileId so this resolves the imported Post instead of creating a
+    // runtime "Post 1", "Post 2", ... on every test.
+    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, {
+      modelFileId: testSchemaWithImage.models.Post.id,
+      waitForReady: false,
+    })
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',

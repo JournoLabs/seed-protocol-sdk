@@ -167,6 +167,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         seedUid,
         schemaUid,
         modelName,
+        schemaName: (initialValues as Record<string, unknown>).schemaName as string | undefined,
         latestVersionLocalId,
         latestVersionUid,
         publisher,
@@ -663,14 +664,11 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       // Query properties table directly by model name
       // First get the model record by name, optionally filtered by schema
       let modelRecords
+      const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+      const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
       
       // If we have a schema name, join with modelSchemas to filter by schema
       if (schemaName) {
-        const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
-        const { modelSchemas } = modelSchemaSchemaMod
-        const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-        const { schemas: schemasTable } = schemaSchemaMod
-        
         modelRecords = await db
           .select({ id: modelsTable.id })
           .from(modelsTable)
@@ -685,10 +683,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           .limit(1)
       } else {
         modelRecords = await db
-          .select({ id: modelsTable.id })
+          .select({ id: modelsTable.id, schemaName: schemasTable.name })
           .from(modelsTable)
+          .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+          .leftJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
           .where(eq(modelsTable.name, props.modelName))
           .limit(1)
+        // Scope the constructor's Model lookup to this model's schema (as getItemData does on reload),
+        // so a same-named model cached from another schema can't supply the property set.
+        if (modelRecords[0]?.schemaName) {
+          ;(props as any).schemaName = modelRecords[0].schemaName
+        }
       }
       
       if (modelRecords.length > 0 && modelRecords[0].id) {

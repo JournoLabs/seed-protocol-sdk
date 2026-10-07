@@ -85,6 +85,7 @@ function dedupeMetadataRowsByInstanceKey(
  * @param modelName - Model name for resolving propertyRecordSchema from Model
  * @param versionLocalId - Latest version local ID (for placeholder properties)
  * @param versionUid - Latest version UID (for placeholder properties)
+ * @param schemaName - Schema the model belongs to, so a same-named model from another schema isn't used
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
@@ -93,7 +94,8 @@ const createItemPropertyInstances = async (
   seedUid: string | undefined,
   modelName: string,
   versionLocalId?: string,
-  versionUid?: string
+  versionUid?: string,
+  schemaName?: string,
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
 
@@ -105,9 +107,10 @@ const createItemPropertyInstances = async (
 
     // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    let model = Model.getByName(modelName)
+    // With a known schema, never fall back to a same-named model from another schema.
+    let model = Model.getByName(modelName, schemaName)
     if (!model?.properties?.length) {
-      model = await Model.getByNameAsync(modelName) ?? undefined
+      model = (await Model.getByNameAsync(modelName, schemaName)) ?? model
     }
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
@@ -115,7 +118,7 @@ const createItemPropertyInstances = async (
     // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
     // This fixes persistence when useItem returns items with empty propertyInstances.
     if (Object.keys(propertySchemas).length === 0) {
-      const schemaNameToTry = model?.schemaName
+      const schemaNameToTry = schemaName ?? model?.schemaName
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
@@ -134,6 +137,7 @@ const createItemPropertyInstances = async (
           const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
           const allSchemas = await loadAllSchemasFromDb()
           for (const { schema: schemaFile } of allSchemas) {
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
             if (models?.[modelName]?.properties) {
               propertySchemas = models[modelName].properties as Record<string, any>
@@ -152,7 +156,11 @@ const createItemPropertyInstances = async (
           const schemaFiles = await listCompleteSchemaFiles()
           for (const { filePath } of schemaFiles) {
             const content = await BaseFileManager.readFileAsString(filePath)
-            const schemaFile = JSON.parse(content) as { models?: Record<string, { properties?: Record<string, any> }> }
+            const schemaFile = JSON.parse(content) as {
+              metadata?: { name?: string }
+              models?: Record<string, { properties?: Record<string, any> }>
+            }
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             if (schemaFile.models?.[modelName]?.properties) {
               propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
               logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)
@@ -459,7 +467,8 @@ export const loadOrCreateItem = fromCallback<
       resolvedSeedUid,
       modelName,
       latestVersionLocalId,
-      latestVersionUid
+      latestVersionUid,
+      context.schemaName,
     )
 
     // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
