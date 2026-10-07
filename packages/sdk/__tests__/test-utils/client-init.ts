@@ -35,6 +35,7 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
 import { and } from 'drizzle-orm'
 import { cleanupLeftoverOpfsSchemaFiles, cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
+import { cleanupTestSchemaData } from './cleanupTestDb'
 
 // Dynamically import client from src/client (same pattern as client.test.ts)
 type ClientType = typeof import('@/client')['client']
@@ -526,6 +527,13 @@ export async function setupTestEnvironment(options: {
   })
   
   console.log('Client initialized')
+
+  // The OPFS database is shared too. client.init builds Model instances for every schema still in it,
+  // and a model created later by name (e.g. 'Note') can adopt another schema's same-named row and
+  // instance. Start each browser test file with only the Seed Protocol schema.
+  if (!isNodeEnv) {
+    await cleanupTestSchemaData()
+  }
   
   // Store test project path for cleanup if it's a temporary directory
   if (isNodeEnv && testProjectPath && !options.projectPath) {
