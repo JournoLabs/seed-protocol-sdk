@@ -12,6 +12,10 @@ import { seedVitePlugin } from '@seedprotocol/vite'
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
 
+// Debug logging is opt-in: `DEBUG='seedSdk:*' bun run test`. Leaving it on by default ('*') produced
+// tens of thousands of log lines per run, slowing Node runs and burying failures.
+const debugNamespaces = process.env.DEBUG ?? ''
+
 export default defineConfig({
   plugins: [
     Inspect({
@@ -59,7 +63,7 @@ export default defineConfig({
           name: 'browser',
           dir: './packages/sdk/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/sdk/__tests__/setup.browser.ts',
@@ -130,7 +134,7 @@ export default defineConfig({
           name: 'browser-react',
           dir: './packages/react/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/react/__tests__/setup.browser.ts',
@@ -183,7 +187,7 @@ export default defineConfig({
           environment: 'node',
           dir: '.',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [],
           include: [
