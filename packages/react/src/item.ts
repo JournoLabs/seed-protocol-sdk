@@ -237,8 +237,8 @@ const getItemsQueryKey = (
     includeEas ?? false,
     addressFilter ?? null,
     addressRevision ?? 0,
-    modelFileId ?? null,
-    schemaName ?? null,
+    // Only scoped lists get the extra segment, so unscoped keys keep their existing shape.
+    ...(modelFileId || schemaName ? [{ modelFileId: modelFileId ?? null, schemaName: schemaName ?? null }] : []),
   ] as const
 
 /**
