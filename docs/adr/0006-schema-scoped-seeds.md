@@ -206,9 +206,34 @@ through `seed_schemas`:
   and `matchMode` options, next to the existing `addressFilter`. The mode picks
   `matches_loose` or `matches_strict`. Without one, the model's `matchMode` from the
   schema applies.
-- The client gets an **active schema** (config, overridable per call). When it's set,
-  reads use it by default. When it isn't, reads behave as today (by `seeds.type`), so
-  existing apps keep working.
+- The client has an **active schema**. Reads and sync use it when a call doesn't name
+  one. When there isn't one, reads behave as today (by `seeds.type`), so existing apps
+  keep working.
+
+#### Choosing the active schema
+
+The common setup is one `seedSchema.json` at the project root, and that file is the
+active schema unless something more specific says otherwise. The first of these that is
+set wins:
+
+1. **Per call:** `schemaName` on `Item.all`, `useItems`, `syncFromEas`, and so on.
+2. **`SeedProvider` prop:** `<SeedProvider activeSchema="Blog">`, for React subtrees.
+3. **Client config:** `config.activeSchema` (a schema name).
+4. **The app's canonical schema:** `config.schema`, the existing "single canonical
+   schema for the app" option (a path or an inline `SchemaFileFormat`).
+5. **`seedSchema.json` at the project root,** when `config.schema` isn't set:
+   - **Node:** read from `process.cwd()` at init, the same way a relative
+     `config.schema` path resolves today.
+   - **Browser:** the browser can't read the project root, so `@seedprotocol/vite`
+     reads `seedSchema.json` at build time and passes it as `config.schema`. This is
+     the plugin's first schema handling.
+
+If none of these applies, there is no active schema. The SDK doesn't guess one from the
+schemas in the DB.
+
+Steps 4 and 5 also load and apply the schema at init, as `config.schema` does today.
+Steps 1 to 3 only choose among schemas that are already loaded. Naming an unknown
+schema is an error, not a silent fallback.
 - An item loaded under a schema resolves its properties from that schema's model row.
   `getItemData` and `resolveSchemaNameForSeedType` stop guessing the schema from the
   model name when a link exists.
@@ -242,8 +267,10 @@ can see today disappears.
   arrive, so links are stable. In strict mode, a seed whose new latest version drops a
   matching property stops matching on the next sync. It drops out of strict lists, and
   its local data isn't deleted.
-- **Breaking for consumers that set an active schema:** lists shrink to matching seeds.
-  Apps that don't set one see no change. That needs a minor version and release notes.
+- **Breaking for apps with an active schema, which includes every app that uses
+  `config.schema` or has a root `seedSchema.json`:** lists shrink to seeds linked to
+  that schema. Apps with none of the five sources see no change. This needs a minor
+  version (pre-1.0) and release notes.
 - Schema files gain three optional fields: `match` on properties, and `matchMode` and
   `syncScope` on models. Existing files stay valid. Schema file types, JSON import and
   export, and the `models` and `properties` tables need the new columns.
@@ -279,11 +306,6 @@ can see today disappears.
 - **Strict as the only mode.** Simpler, but a seed would disappear from lists whenever
   an edit leaves a property out of the newest version, and the loose reverse-fetch sync
   wouldn't be possible.
-
-## Open questions
-
-- **Active schema:** where does it live: client config, a `SeedProvider` prop, or
-  both?
 
 ## Deferred
 
