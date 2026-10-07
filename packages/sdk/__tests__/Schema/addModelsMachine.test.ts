@@ -73,4 +73,36 @@ testDescribe('addModelsMachine', () => {
     await waitFor(service, (s) => s.value !== 'addingModels', { timeout: 15000 })
     expect(service.getSnapshot().context.models?.Note).toBeDefined()
   }, 30000)
+
+  // Regression: addModelsMachine's `error` state is final, so the schema saw onDone (never onError),
+  // merged nothing, dropped the errors, and validated as if the models had been added.
+  it('records addModelsMachine failures on the schema instead of treating them as success', async () => {
+    const schema = await Schema.create(`AddModels Schema ${generateId()}`, { waitForReady: true })
+    const service = schema.getService()
+    service.send({ type: 'addModels', models: { Note: {} } })
+
+    const snapshot = await waitFor(service, (s) => s.value === 'idle', { timeout: 15000 })
+    expect(snapshot.context.models?.Note).toBeUndefined()
+    expect(snapshot.context._pendingModelAdditions).toBeUndefined()
+    expect(snapshot.context._modelAdditionErrors).toHaveLength(1)
+    expect(snapshot.context._modelAdditionErrors?.[0]?.error.message).toMatch(/must have a "properties" object/)
+  }, 30000)
+
+  // Regression: the queue advanced with an `always` that targeted addingModels from inside itself,
+  // which doesn't re-enter, so a request queued behind another never got its own addModelsMachine.
+  it('processes an addModels request queued while another is running', async () => {
+    const schema = await Schema.create(`AddModels Schema ${generateId()}`, { waitForReady: true })
+    const service = schema.getService()
+    service.send({ type: 'addModels', models: { Note: { properties: { title: { dataType: 'Text' } } } } })
+    service.send({ type: 'addModels', models: { Tag: { properties: { label: { dataType: 'Text' } } } } })
+
+    const snapshot = await waitFor(
+      service,
+      (s) => s.value === 'idle' && !s.context._pendingModelAdditions,
+      { timeout: 15000 },
+    )
+    expect(snapshot.context.models?.Note).toBeDefined()
+    expect(snapshot.context.models?.Tag).toBeDefined()
+    expect(snapshot.context._modelAdditionErrors).toBeUndefined()
+  }, 30000)
 })
