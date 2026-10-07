@@ -43,8 +43,7 @@ export type ItemMachineContext<T> = {
   revokedAt?: number
   /** Last publish failure; cleared on success or reset. Serializable for XState (use message string). */
   _publishError?: { message: string } | null
-  /** Destroy lifecycle (for destroy hooks). */
-  _destroyInProgress?: boolean
+  /** Destroy failure from the last destroy() (read by destroy hooks). */
   _destroyError?: { message: string; name?: string } | null
 }
 

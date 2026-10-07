@@ -1,7 +1,6 @@
 import { assign, setup, stateIn } from 'xstate'
 import { PropertyMachineContext, SaveValueToDbEvent } from '@/types'
 
-import { resolveRemoteStorage } from '@/ItemProperty/service/actors/resolveRemoteStorage'
 import { waitForDb } from '@/ItemProperty/service/actors/waitForDb'
 import { initialize } from '@/ItemProperty/service/actors/initialize'
 import { resolveRelatedValue } from '@/ItemProperty/service/actors/resolveRelatedValue'
@@ -54,7 +53,6 @@ export const propertyMachine = setup({
     hydrateFromDb,
     initialize,
     resolveRelatedValue,
-    resolveRemoteStorage,
     analyzeInput,
     saveImage,
     saveFile,
@@ -97,14 +95,10 @@ export const propertyMachine = setup({
       }),
     },
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           (event as { type: 'destroyError'; error: unknown }).error instanceof Error
             ? {
@@ -113,9 +107,6 @@ export const propertyMachine = setup({
               }
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
     saveValueValidationError: {
       target: '.idle',
@@ -199,9 +190,6 @@ export const propertyMachine = setup({
         isRelatedProperty: {
           target: 'resolvingRelatedValue',
         },
-        hasRemoteBackup: {
-          target: 'resolvingRemoteStorage',
-        },
       },
       invoke: {
         src: 'initialize',
@@ -224,17 +212,6 @@ export const propertyMachine = setup({
       },
       invoke: {
         src: 'resolveRelatedValue',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    resolvingRemoteStorage: {
-      on: {
-        resolveRemoteStorageSuccess: {
-          target: 'idle',
-        },
-      },
-      invoke: {
-        src: 'resolveRemoteStorage',
         input: ({ context }) => ({ context }),
       },
     },

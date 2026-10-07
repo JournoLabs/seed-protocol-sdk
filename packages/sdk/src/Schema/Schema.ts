@@ -570,7 +570,12 @@ export class Schema {
       () => schema,
     )
     this.pendingSchemaByName.set(schemaName, readyPromise)
-    readyPromise.finally(() => this.pendingSchemaByName.delete(schemaName))
+    // Clear on both outcomes without a .finally() chain: that derived promise would reject unhandled
+    // whenever readyPromise does, even when the caller handles the rejection.
+    const clearPending = () => {
+      this.pendingSchemaByName.delete(schemaName)
+    }
+    readyPromise.then(clearPending, clearPending)
     return readyPromise
   }
 

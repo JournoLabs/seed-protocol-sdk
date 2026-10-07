@@ -12,9 +12,8 @@ export const useDeleteItem = (): UseDeleteItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
-  // Loading state is tracked here rather than read from the item's service: destroy() sends
-  // destroyStarted and destroyDone (then stops the service) before an effect could subscribe,
-  // so a fast destroy would never surface isLoading: true.
+  // Loading state is tracked here: the item's service doesn't record destroy progress, and
+  // destroy() stops the service, often within a few microtasks.
   const destroy = useCallback(async (item: Item<any>) => {
     if (!item) return
     setError(null)

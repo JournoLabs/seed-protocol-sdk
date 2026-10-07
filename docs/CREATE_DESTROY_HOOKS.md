@@ -20,7 +20,7 @@ All create and destroy hooks follow the same pattern:
 - `error` – `Error | null`; set when `instance.destroy()` throws or records a `_destroyError` on the instance's service
 - `resetError` – call to clear `error`
 
-Destroy hooks track `isLoading` and `error` in hook-local state rather than reading them from the instance's service. `destroy()` sends `destroyStarted` and `destroyDone` and stops the service within a few microtasks, so both updates land in one React render and a service-derived `isLoading` would never be seen as `true`. Each hook sets `isLoading` when `destroy()` is called and clears it when the promise settles. Because `instance.destroy()` reports database failures on the service context instead of throwing, the hook reads `_destroyError` from the service snapshot afterwards; errors that are thrown are stored and rethrown.
+Destroy hooks track `isLoading` and `error` in hook-local state. The instance's service doesn't record destroy progress, and `destroy()` stops the service, often within a few microtasks, which is too soon for an effect to subscribe. Each hook sets `isLoading` when `destroy()` is called and clears it when the promise settles. Because `instance.destroy()` reports database failures on the service context instead of throwing, the hook reads `_destroyError` from the service snapshot afterwards; errors that are thrown are stored and rethrown.
 
 ## Hooks by entity
 

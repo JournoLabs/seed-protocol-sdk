@@ -6,7 +6,7 @@ import {
 import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 
 /**
- * Contracts used by syncDbWithEas / saveDataToDb after Phase 5:
+ * Contracts used by syncDbWithEas after Phase 5:
  * shared decode + relation parse from @seedprotocol/query, and pickLatest
  * on both main and related-seed property write paths.
  */

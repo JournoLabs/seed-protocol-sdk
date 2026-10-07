@@ -71,7 +71,19 @@ export const saveImage = fromCallback<
       imageSchemaUid = fetchedSchemaUid ?? undefined
     }
 
-    if (typeof newValue === 'string') {
+    // Handle existing file reference: filename from listImageFiles() that exists in images folder.
+    // Check before classifying the string: a filename like "photo.png" also matches the URL regex
+    // and would otherwise be fetched relative to the page.
+    let isExistingFileReference = false
+    if (typeof newValue === 'string' && !newValue.includes('/') && !newValue.startsWith('data:')) {
+      const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
+      if (await BaseFileManager.pathExists(existingFilePath)) {
+        isExistingFileReference = true
+        fileName = newValue
+      }
+    }
+
+    if (typeof newValue === 'string' && !isExistingFileReference) {
       newValueType = getDataTypeFromString(newValue)
     }
 
@@ -103,19 +115,6 @@ export const saveImage = fromCallback<
     if (newValue instanceof Blob) {
       mimeType = newValue.type || 'image/png'
       fileData = await newValue.arrayBuffer()
-    }
-
-    // Handle existing file reference: filename from listImageFiles() that exists in images folder
-    let isExistingFileReference = false
-    if (
-      typeof newValue === 'string' &&
-      getDataTypeFromString(newValue) === null
-    ) {
-      const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
-      if (await BaseFileManager.pathExists(existingFilePath)) {
-        isExistingFileReference = true
-        fileName = newValue
-      }
     }
 
     if (!fileData && !isExistingFileReference) {

@@ -70,7 +70,7 @@ export interface RunDestroyLifecycleConfig<T extends object> {
 
 /**
  * Run the service event sequence and stop the service:
- * destroyStarted -> doDestroy -> destroyDone/destroyError -> stop.
+ * destroyStarted -> doDestroy -> (destroyError on failure) -> stop.
  * Event names must match what the entity machines expect.
  */
 export async function runDestroyLifecycle<T extends object>(
@@ -84,7 +84,6 @@ export async function runDestroyLifecycle<T extends object>(
   } catch (error) {
     service.send({ type: 'destroyError', error } as { type: string; error?: unknown })
   } finally {
-    service.send({ type: 'destroyDone' } as { type: string; error?: unknown })
     try {
       service.stop()
     } catch {

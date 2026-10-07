@@ -320,7 +320,7 @@ describe('React Model Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -364,7 +364,7 @@ describe('React Model Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')).toBe(true)
       },
       { timeout: 10000 }
     )
@@ -389,7 +389,7 @@ describe('React Model Hooks Integration Tests', () => {
     await waitFor(
       () => {
         const models = schema.models || []
-        return models.length >= 3 // At least Post, Article, Comment
+        expect(models.length).toBeGreaterThanOrEqual(3) // At least Post, Article, Comment
       },
       { timeout: 10000 }
     )
@@ -427,14 +427,12 @@ describe('React Model Hooks Integration Tests', () => {
             () => {
               const listA = screen.getByTestId('list-a')
               const listB = screen.getByTestId('list-b')
-              const statusA = within(listA).getByTestId('models-status').textContent
-              const statusB = within(listB).getByTestId('models-status').textContent
-              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              expect(within(listA).getByTestId('models-status').textContent).toBe('loaded')
+              expect(within(listB).getByTestId('models-status').textContent).toBe('loaded')
               const countA = parseInt(within(listA).getByTestId('models-count').textContent || '0')
               const countB = parseInt(within(listB).getByTestId('models-count').textContent || '0')
               expect(countA).toBe(countB)
               expect(countA).toBeGreaterThanOrEqual(3)
-              return true
             },
             { timeout: 15000 }
           )
@@ -571,8 +569,7 @@ describe('React Model Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const modelName = screen.queryByTestId('model-name')
-          return modelName !== null && modelName.textContent === 'Post'
+          expect(screen.queryByTestId('model-name')?.textContent).toBe('Post')
         },
         { timeout: 10000 }
       )
@@ -655,8 +652,7 @@ describe('React Model Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const modelName = screen.queryByTestId('model-name')
-          return modelName !== null
+          expect(screen.queryByTestId('model-name')).not.toBeNull()
         },
         { timeout: 15000 }
       )
@@ -718,7 +714,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -748,7 +744,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('models-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
@@ -786,7 +782,7 @@ describe('React Model Hooks Integration Tests', () => {
               validationErrors: modelSnapshot.context._validationErrors,
             })
           }
-          return isIdle
+          expect(isIdle).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -809,7 +805,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
-          return Array.isArray(data) && data.length >= 1
+          expect(Array.isArray(data) && data.length >= 1).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -864,7 +860,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('create-model-status')
-          return status.textContent === 'created'
+          expect(status.textContent).toBe('created')
         },
         { timeout: 3000 }
       )

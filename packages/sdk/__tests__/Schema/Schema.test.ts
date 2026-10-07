@@ -16,6 +16,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { ConflictError } from '@/Schema/errors'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 
 // Helper function to wait for schema to be in idle state using xstate waitFor
 async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
@@ -180,18 +181,8 @@ testDescribe('Schema Integration Tests', () => {
       }
     }
 
-    // Clean up schema files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && file.includes('Test_Schema')) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    // Clean up schema files (both environments; in the browser they persist in OPFS)
+    await cleanupTestSchemaFiles()
   })
 
   afterEach(async () => {
