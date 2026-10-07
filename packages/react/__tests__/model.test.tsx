@@ -30,6 +30,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitUntil } from './test-utils/waitUntil'
 
 /**
  * Remove the schema JSON files importJsonSchema writes to the shared OPFS working dir. If they are left
@@ -395,21 +396,9 @@ describe('React Model Hooks Integration Tests', () => {
       { timeout: 10000 }
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
-    await new Promise<void>((resolve) => {
-      const subscription = schema.getService().subscribe((snapshot) => {
-        if (snapshot.value === 'idle') {
-          subscription.unsubscribe()
-          schemaId = schema.id ?? testSchemaWithModels.id ?? null
-          resolve()
-        }
-      })
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        subscription.unsubscribe()
-        schemaId = testSchemaWithModels.id ?? null
-        resolve()
-      }, 5000)
-    })
+    // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+    const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
+    schemaId = (schemaIdle ? schema.id : undefined) ?? testSchemaWithModels.id ?? null
 
     // Wait for models to be populated (they're loaded asynchronously)
     await waitFor(
@@ -419,9 +408,6 @@ describe('React Model Hooks Integration Tests', () => {
       },
       { timeout: 10000 }
     )
-
-    // Give React hooks a moment to process the schema instance
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(() => {
@@ -655,18 +641,8 @@ describe('React Model Hooks Integration Tests', () => {
 
       // First get the model by name to get its ID
       const schema = Schema.create('Test Schema Models', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
 
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
       if (!postModel || !postModel.id) {
@@ -747,18 +723,8 @@ describe('React Model Hooks Integration Tests', () => {
 
       // Get schema instance
       const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
 
       // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
       render(<UseModelsTest schemaId="Test Schema Dynamic" />, {

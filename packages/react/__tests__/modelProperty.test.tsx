@@ -36,6 +36,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { eq, inArray } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitFor as xstateWaitFor } from 'xstate'
+import { waitUntil } from './test-utils/waitUntil'
 
 /** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
 async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
@@ -610,18 +611,8 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should return properties when modelId provided', async () => {
       // First get the model to get its ID
       const schema = Schema.create('Test Schema Properties', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
 
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
       if (!postModel || !postModel.id) {
