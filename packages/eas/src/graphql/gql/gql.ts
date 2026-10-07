@@ -14,7 +14,7 @@ import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/
  * Learn more about it here: https://the-guild.dev/graphql/codegen/plugins/presets/preset-client#reducing-bundle-size
  */
 type Documents = {
-    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": typeof types.AttestationFieldsFragmentDoc,
+    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": typeof types.AttestationFieldsFragmentDoc,
     "\n  fragment schemaFields on Schema {\n    id\n    resolver\n    revocable\n    schema\n    index\n    schemaNames {\n      name\n    }\n    time\n    txid\n    creator\n  }\n": typeof types.SchemaFieldsFragmentDoc,
     "\n  query GetSchemas($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": typeof types.GetSchemasDocument,
     "\n  query GetSchemaByName($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": typeof types.GetSchemaByNameDocument,
@@ -29,7 +29,7 @@ type Documents = {
     "\n  query GetImageVersions($where: AttestationWhereInput!) {\n    imageVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": typeof types.GetImageVersionsDocument,
 };
 const documents: Documents = {
-    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": types.AttestationFieldsFragmentDoc,
+    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": types.AttestationFieldsFragmentDoc,
     "\n  fragment schemaFields on Schema {\n    id\n    resolver\n    revocable\n    schema\n    index\n    schemaNames {\n      name\n    }\n    time\n    txid\n    creator\n  }\n": types.SchemaFieldsFragmentDoc,
     "\n  query GetSchemas($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": types.GetSchemasDocument,
     "\n  query GetSchemaByName($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": types.GetSchemaByNameDocument,
@@ -61,7 +61,7 @@ export function graphql(source: string): unknown;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"): (typeof documents)["\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"];
+export function graphql(source: "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"): (typeof documents)["\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

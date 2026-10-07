@@ -56,6 +56,20 @@ import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
  */
 const SYNC_CANONICAL_OPTIONS = { ifAllRevoked: 'newestRevoked' } as const
 
+/**
+ * When an attestation was revoked, in Unix seconds: EAS `revocationTime` is a block timestamp in
+ * seconds, the same unit local unpublish writes to `seeds.revoked_at`. `undefined` when not revoked.
+ * A revoked attestation without a revocation time (0 or not selected) falls back to now.
+ */
+const revokedAtSeconds = (
+  attestation: Pick<Attestation, 'revoked'> & { revocationTime?: number | null },
+): number | undefined => {
+  if (!attestation.revoked) return undefined
+  return attestation.revocationTime != null && attestation.revocationTime > 0
+    ? attestation.revocationTime
+    : Math.floor(Date.now() / 1000)
+}
+
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
@@ -118,10 +132,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
     const attestation = seedByUid.get(row.uid)
     if (!attestation?.revoked) continue
     if (row.revokedAt != null) continue
-    const revokedAt =
-      attestation.revocationTime > 0
-        ? attestation.revocationTime
-        : Math.floor(Date.now() / 1000)
+    const revokedAt = revokedAtSeconds(attestation)!
     await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
   }
 
@@ -138,12 +149,7 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
     seedUidToLocalId.set(seed.id, seedLocalId)
 
     const attestationRaw = escapeSqliteString(JSON.stringify(seed))
-    const revokedAt =
-      seed.revoked && seed.revocationTime != null && seed.revocationTime > 0
-        ? seed.revocationTime
-        : seed.revoked
-          ? Math.floor(Date.now() / 1000)
-          : undefined
+    const revokedAt = revokedAtSeconds(seed)
 
     // EAS only knows the model by name; the seam may match it to a local model (not built yet).
     const modelFileId = await resolveModelForSyncedSeed({
