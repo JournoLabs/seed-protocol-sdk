@@ -271,7 +271,12 @@ describe('SeedImage integration tests', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, { waitForReady: false })
+    // Pass the schema's modelFileId so this resolves the imported Post instead of creating a
+    // runtime "Post 1", "Post 2", ... on every test.
+    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, {
+      modelFileId: testSchemaWithImage.models.Post.id,
+      waitForReady: false,
+    })
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',

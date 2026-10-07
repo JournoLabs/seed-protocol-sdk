@@ -85,6 +85,7 @@ function dedupeMetadataRowsByInstanceKey(
  * @param modelName - Model name for resolving propertyRecordSchema from Model
  * @param versionLocalId - Latest version local ID (for placeholder properties)
  * @param versionUid - Latest version UID (for placeholder properties)
+ * @param schemaName - Schema the model belongs to, so a same-named model from another schema isn't used
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
@@ -93,7 +94,8 @@ const createItemPropertyInstances = async (
   seedUid: string | undefined,
   modelName: string,
   versionLocalId?: string,
-  versionUid?: string
+  versionUid?: string,
+  schemaName?: string,
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
 
@@ -105,7 +107,7 @@ const createItemPropertyInstances = async (
 
     // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    let model = Model.getByName(modelName)
+    let model = (schemaName && Model.getByName(modelName, schemaName)) || Model.getByName(modelName)
     if (!model?.properties?.length) {
       model = await Model.getByNameAsync(modelName) ?? undefined
     }
@@ -459,7 +461,8 @@ export const loadOrCreateItem = fromCallback<
       resolvedSeedUid,
       modelName,
       latestVersionLocalId,
-      latestVersionUid
+      latestVersionUid,
+      context.schemaName,
     )
 
     // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
