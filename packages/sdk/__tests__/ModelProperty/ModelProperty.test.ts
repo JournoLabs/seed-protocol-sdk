@@ -614,7 +614,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const postModel = Model.create(postModelName, schemaName)
+      const postModel = Model.create(postModelName, schemaName, { waitForReady: false })
 
       const propertyData = await waitForPropertySchema(postModelName, 'author')
       expect(propertyData).toBeDefined()
