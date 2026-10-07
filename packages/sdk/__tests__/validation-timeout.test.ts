@@ -198,12 +198,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
     it('should return timeout error if validation takes too long', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName, { waitForReady: false })
-      
-      // Mock the validation service to hang
-      const originalValidate = schema.getService().getSnapshot().context
-      const validationService = await import('@/Schema/service/validation/SchemaValidationService')
-      
+
       // Create a schema with a very large number of models to potentially slow down validation
       const largeModels: Record<string, any> = {}
       for (let i = 0; i < 1000; i++) {
@@ -217,6 +212,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
       const schemaData = createTestSchema(schemaName, largeModels)
       await importSchema(schemaData)
+      // Open the schema only after the import lands; created first, it races the import to make the record
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema, 30000) // importing 1000 models is slow; validation is what is timed
 
       // Validation should still complete within timeout (10 seconds)
