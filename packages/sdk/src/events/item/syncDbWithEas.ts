@@ -75,6 +75,7 @@ type SaveEasSeedsToDbProps = {
 }
 
 type SaveEasSeedsToDbReturn = {
+  /** UIDs of every seed passed in (already stored or newly inserted). */
   seedUids: string[]
 }
 
@@ -168,9 +169,10 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
     seedUidToLocalId.set(seed.id, seedLocalId)
   }
 
-  const newSeedUids = await createSeeds(newSeedsData)
+  await createSeeds(newSeedsData)
 
-  return { seedUids: newSeedUids }
+  // All fetched seeds, not only the new ones: existing seeds can have new versions on EAS.
+  return { seedUids }
 }
 
 type SaveEasVersionsToDbParams = {
