@@ -66,6 +66,10 @@ describe.sequential('syncFromEasOnAddressChange', () => {
 
     await client.setAddresses([ownedAddr])
     await new Promise((r) => setTimeout(r, 400))
-    expect(runSyncSpy).not.toHaveBeenCalled()
+    // Client init also requests a sync once models are added (models_init, no addresses), which can
+    // land in this window; only an address-change sync carries the addresses.
+    expect(runSyncSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ addresses: expect.arrayContaining([ownedAddr]) }),
+    )
   })
 })
