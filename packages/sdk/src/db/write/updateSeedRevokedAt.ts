@@ -1,5 +1,5 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { metadata, seeds } from '@/seedSchema'
+import { metadata, seeds, versions } from '@/seedSchema'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 
 type UpdateSeedRevokedAtProps = {
@@ -11,6 +11,8 @@ type UpdateSeedRevokedAtProps = {
    * `revoked_at` (unless they already have one), so they read as revoked before the next sync.
    */
   metadataUids?: string[]
+  /** Version attestation UIDs revoked along with the seed; their rows are stamped the same way. */
+  versionUids?: string[]
 }
 
 /**
@@ -20,6 +22,7 @@ export const updateSeedRevokedAt = async ({
   seedLocalId,
   revokedAt,
   metadataUids,
+  versionUids,
 }: UpdateSeedRevokedAtProps): Promise<void> => {
   if (!seedLocalId) {
     return
@@ -40,5 +43,12 @@ export const updateSeedRevokedAt = async ({
       .update(metadata)
       .set({ revokedAt, updatedAt: Date.now() })
       .where(and(inArray(metadata.uid, metadataUids), isNull(metadata.revokedAt)))
+  }
+
+  if (versionUids && versionUids.length > 0) {
+    await appDb
+      .update(versions)
+      .set({ revokedAt, updatedAt: Date.now() })
+      .where(and(inArray(versions.uid, versionUids), isNull(versions.revokedAt)))
   }
 }

@@ -66,6 +66,22 @@ const revokedAtSeconds = (
     : Math.floor(Date.now() / 1000)
 }
 
+/**
+ * `revoked_at` to store for an attestation that already has a row (seed or version), given the
+ * stored value. EAS's `revocationTime` wins once EAS reports one. A stored stamp is otherwise kept:
+ * local unpublish writes one only after its revoke transactions are mined, and revocation can't be
+ * undone, so EAS reporting the attestation as live then just means its index hasn't caught up yet.
+ */
+const syncedRevokedAt = (
+  attestation: Pick<Attestation, 'revoked'> & { revocationTime?: number | null },
+  stored: number | null | undefined,
+): number | null => {
+  if (attestation.revoked && attestation.revocationTime != null && attestation.revocationTime > 0) {
+    return attestation.revocationTime
+  }
+  return stored ?? revokedAtSeconds(attestation) ?? null
+}
+
 const relationValuesToExclude = [
   '0x0000000000000000000000000000000000000000000000000000000000000020',
 ]
@@ -239,6 +255,7 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
     .where(inArray(versions.uid, versionUids))
 
   const existingVersionUids = new Set<string>()
+  const versionByUid = new Map(itemVersions.map((version) => [version.id, version]))
 
   if (existingVersionRecordsRows && existingVersionRecordsRows.length > 0) {
     for (const row of existingVersionRecordsRows) {
@@ -249,6 +266,15 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
         }
         if (row.seedUid) {
           versionUidToSeedUid.set(row.uid, row.seedUid)
+        }
+        // Already-stored versions pick up revocations (and EAS's revocation time) too.
+        const attestation = versionByUid.get(row.uid)
+        const revokedAt = attestation ? syncedRevokedAt(attestation, row.revokedAt) : null
+        if (attestation && revokedAt !== (row.revokedAt ?? null)) {
+          await appDb
+            .update(versions)
+            .set({ revokedAt, updatedAt: Date.now() })
+            .where(eq(versions.uid, row.uid))
         }
       }
     }
@@ -286,6 +312,7 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
       attestationCreatedAt: version.timeCreated * 1000,
       attestationRaw: JSON.stringify(version),
       publisher: version.attester ? normalizeHexAddress(version.attester) : '',
+      revokedAt: revokedAtSeconds(version) ?? null,
     })
   }
 
