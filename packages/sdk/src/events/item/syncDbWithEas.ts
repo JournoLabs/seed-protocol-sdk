@@ -13,6 +13,7 @@ import {
   seeds,
   SeedType,
   versions,
+  VersionsType,
 } from '@/seedSchema'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
@@ -223,13 +224,16 @@ type SaveEasVersionsToDbReturn = {
   versionUids: string[]
 }
 
+/** Rows per versions INSERT (about 10 bound parameters each). */
+const VERSION_INSERT_BATCH = 50
+
 const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state }) => {
   const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
   const versionUids = itemVersions.map((version) => version.id)
 
   const appDb = BaseDb.getAppDb()
 
-  const existingVersionRecordsRows: MetadataType[] = await appDb
+  const existingVersionRecordsRows: VersionsType[] = await appDb
     .select()
     .from(versions)
     .where(inArray(versions.uid, versionUids))
@@ -254,43 +258,44 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
     (version) => !existingVersionUids.has(version.id),
   )
 
-  if (newVersions.length === 0) {
-    return { versionUids }
-  }
-
-  let insertVersionsQuery = `INSERT INTO versions (local_id, uid, seed_uid, seed_local_id, seed_type, created_at,
-                                                   attestation_created_at,
-                                                   attestation_raw, publisher)
-  VALUES `
-
-  for (let i = 0; i < newVersions.length; i++) {
-    const version = newVersions[i]
-    versionUidToSeedUid.set(version.id, version.refUID)
+  const rows: (typeof versions.$inferInsert)[] = []
+  const storedVersionUids = new Set(existingVersionUids)
+  for (const version of newVersions) {
+    const seedUid = version.refUID
+    const seedLocalId = seedUidToLocalId.get(seedUid)
+    if (!seedLocalId) {
+      // Storing it anyway would orphan the version (and its properties) from any local seed.
+      console.warn(
+        '[item/events] [syncDbWithEas] skipping version whose seed has no local id: ',
+        version.id,
+        seedUid,
+      )
+      continue
+    }
     const versionLocalId = generateId()
+    versionUidToSeedUid.set(version.id, seedUid)
     versionUidToLocalId.set(version.id, versionLocalId)
-
-    const seedUid = versionUidToSeedUid.get(version.id)
-    const seedLocalId = seedUidToLocalId.get(seedUid!)
-    const seedType = seedUidToModelType.get(seedUid!)
-    const attestationRaw = escapeSqliteString(JSON.stringify(version))
-    const publisher = escapeSqliteString(
-      version.attester ? normalizeHexAddress(version.attester) : '',
-    )
-
-    const valuesString = `('${versionLocalId}', '${version.id}', '${seedUid}', '${seedLocalId}', '${seedType}', ${Date.now()}, ${version.timeCreated * 1000}, '${attestationRaw}', '${publisher}')`
-
-    if (i < newVersions.length - 1) {
-      insertVersionsQuery += valuesString + ', '
-    }
-
-    if (i === newVersions.length - 1) {
-      insertVersionsQuery += valuesString + ';'
-    }
+    storedVersionUids.add(version.id)
+    rows.push({
+      localId: versionLocalId,
+      uid: version.id,
+      seedUid,
+      seedLocalId,
+      seedType: seedUidToModelType.get(seedUid) ?? null,
+      createdAt: Date.now(),
+      attestationCreatedAt: version.timeCreated * 1000,
+      attestationRaw: JSON.stringify(version),
+      publisher: version.attester ? normalizeHexAddress(version.attester) : '',
+    })
   }
 
-  await appDb.run(sql.raw(insertVersionsQuery))
+  // Bound parameters: keep each statement well under SQLite's host-parameter limit.
+  for (let i = 0; i < rows.length; i += VERSION_INSERT_BATCH) {
+    await appDb.insert(versions).values(rows.slice(i, i + VERSION_INSERT_BATCH))
+  }
 
-  return { versionUids }
+  // Only versions that are stored locally: properties of a skipped version would have no version row.
+  return { versionUids: versionUids.filter((uid) => storedVersionUids.has(uid)) }
 }
 
 const createMetadataRecordsForStorageTransactionId = async (

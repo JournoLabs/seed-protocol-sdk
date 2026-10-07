@@ -175,4 +175,54 @@ describe.sequential('runSyncFromEas: existing seeds', () => {
     // Versions were requested for every seed the seed query returned, not only the new one.
     expect(fakeEas.versionRequests[0]?.slice().sort()).toEqual([seedA, seedB].sort())
   })
+
+  it("skips a version whose seed can't be resolved to a local id, with its properties", async () => {
+    const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { seeds, versions, metadata } = await import('@/seedSchema')
+    const appDb = BaseDb.getAppDb()
+    const modelSchemaUid = fakeEas.modelSchema!.id
+
+    // A stored seed row with the attestation's uid but no local id: nothing to attach versions to.
+    const orphanSeed = uid('c1')
+    const orphanVersion = uid('c2')
+    const orphanProperty = uid('c3')
+    const seed = uid('d1')
+    const version = uid('d2')
+    const property = uid('d3')
+    await appDb.insert(seeds).values({ uid: orphanSeed, type: modelName, createdAt: Date.now() })
+
+    fakeEas.seeds = [
+      attestation(orphanSeed, uid('00'), modelSchemaUid, 3_000),
+      attestation(seed, uid('00'), modelSchemaUid, 3_001),
+    ]
+    fakeEas.versions = [
+      attestation(orphanVersion, orphanSeed, uid('5b'), 3_002),
+      attestation(version, seed, uid('5b'), 3_003),
+    ]
+    fakeEas.properties = [
+      titleProperty(orphanProperty, orphanVersion, 'orphan', 3_004),
+      titleProperty(property, version, "it's fine", 3_005),
+    ]
+    await runSyncFromEas({ addresses: [attester] })
+
+    const versionRows: VersionsType[] = await appDb
+      .select()
+      .from(versions)
+      .where(inArray(versions.uid, [orphanVersion, version]))
+    expect(versionRows.map((r) => r.uid)).toEqual([version])
+    const seedRow = (
+      await appDb.select().from(seeds).where(inArray(seeds.uid, [seed]))
+    )[0] as SeedType
+    expect(versionRows[0]?.seedLocalId).toBe(seedRow.localId)
+    expect(
+      await appDb.select().from(versions).where(inArray(versions.seedLocalId, ['undefined'])),
+    ).toEqual([])
+
+    const metadataRows: MetadataType[] = await appDb
+      .select()
+      .from(metadata)
+      .where(inArray(metadata.uid, [orphanProperty, property]))
+    expect(metadataRows.map((r) => [r.uid, r.propertyValue])).toEqual([[property, "it's fine"]])
+  })
 })
