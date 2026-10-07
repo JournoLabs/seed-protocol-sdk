@@ -35,6 +35,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitFor as xstateWaitFor } from 'xstate'
 
 /** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
 async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
@@ -501,9 +502,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       },
       { timeout: 15000 }
     )
-    
-    // Give a small delay to ensure database operations are processed
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(() => {
@@ -800,14 +798,11 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       // Get the model instance
       const model = Model.create('TestModel', 'LiveQuery Test Schema Properties', { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await xstateWaitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
 
       // Add a new property to the model
       // Note: This is a simplified test - in reality, properties are added through Model.create with properties option
       // For this test, we'll verify that the hook responds to database changes via liveQuery
-
-      // Wait for liveQuery to detect the change (if any)
-      await new Promise(resolve => setTimeout(resolve, 2000))
 
       model.unload()
       await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
@@ -951,8 +946,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { timeout: 15000 }
       )
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
       const db = BaseDb.getAppDb()
       expect(db).toBeTruthy()
       if (db) {
@@ -1044,9 +1037,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         },
         { timeout: 10000 }
       )
-
-      // Give useModels poll/refetch time to pick up the new model before waiting for properties
-      await new Promise((r) => setTimeout(r, 800))
 
       // Wait for properties to appear in the UI
       await waitFor(
