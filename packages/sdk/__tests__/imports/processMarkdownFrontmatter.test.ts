@@ -12,7 +12,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { ModelDefinitions } from '@/types'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -39,10 +39,10 @@ describe('processMarkdownFrontmatter', () => {
     }
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 30000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     db = BaseDb.getAppDb()!
-  }, 30000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(() => {
     // Clean up temporary directory

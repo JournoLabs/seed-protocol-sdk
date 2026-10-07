@@ -4,7 +4,7 @@ import React from 'react'
 import { useLiveQuery } from '@seedprotocol/react'
 import { BaseDb, schemas, models, properties, modelSchemas, modelUids, propertyUids } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
-import { setupTestEnvironment } from './test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { firstValueFrom, take, timeout } from 'rxjs'
 
 // Test component for useLiveQuery
@@ -26,9 +26,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
     // Initialize test client and database
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     // Unmount rendered trees first so useLiveQuery unsubscribes before we clear the DOM

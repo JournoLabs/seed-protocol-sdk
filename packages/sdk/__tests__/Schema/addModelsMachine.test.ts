@@ -4,7 +4,7 @@ import { addModelsMachine } from '@/Schema/service/addModelsMachine'
 import type { SchemaMachineContext } from '@/Schema/service/schemaMachine'
 import { Schema } from '@/Schema/Schema'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -14,8 +14,8 @@ const schemaContextFor = (schemaName: string) => ({ schemaName }) as SchemaMachi
 // actors never emit, so the machine sat in `preparing` forever (and schemaMachine in `addingModels`).
 testDescribe('addModelsMachine', () => {
   beforeAll(async () => {
-    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: 90000 })
-  }, 90000)
+    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

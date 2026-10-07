@@ -90,7 +90,7 @@ export default defineConfig({
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: 1,
           browser: {
@@ -146,7 +146,7 @@ export default defineConfig({
             ...configDefaults.exclude,
             'dist/**',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           maxWorkers: 1,
           browser: {
