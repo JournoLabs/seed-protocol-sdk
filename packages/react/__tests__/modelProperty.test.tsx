@@ -34,6 +34,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 
 /** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
 async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
@@ -1141,13 +1142,39 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyModelPropertyTest modelProperty={createFastDestroyStub<ModelProperty>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-property-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-property-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-property-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-property-error')).toBeNull()
+      })
+    })
+
     it('should destroy a model property and set loading state during destroy', async () => {
       const model = Model.create('Post', 'Test Schema Properties', { waitForReady: false })
       try {
         await waitFor(
           () => {
-            const snapshot = model.getService().getSnapshot()
-            return snapshot.value === 'idle'
+            expect(model.getService().getSnapshot().value).toBe('idle')
           },
           { timeout: 10000 }
         )
@@ -1172,23 +1199,18 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-property-is-loading')
-            return isLoading.textContent === 'true'
+            expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
           },
           { timeout: 2000 }
         )
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-property-is-loading')
-            const status = screen.getByTestId('destroy-property-status')
-            return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
+            expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
+            expect(['destroyed', 'error']).toContain(screen.getByTestId('destroy-property-status').textContent)
           },
           { timeout: 5000 }
         )
-
-        const status = screen.getByTestId('destroy-property-status')
-        expect(['destroyed', 'error']).toContain(status.textContent)
       } finally {
         model.unload()
       }

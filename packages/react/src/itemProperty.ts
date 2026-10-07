@@ -758,49 +758,37 @@ export type UseDestroyItemPropertyReturn = {
 }
 
 export const useDestroyItemProperty = (): UseDestroyItemPropertyReturn => {
-  const [currentInstance, setCurrentInstance] = useState<IItemProperty | null>(null)
-  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
-    isLoading: false,
-    error: null,
-  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!currentInstance) {
-      setDestroyState({ isLoading: false, error: null })
-      return
-    }
-    const service = currentInstance.getService()
-    const update = () => {
-      const snap = service.getSnapshot() as unknown as {
-        context: { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
-      }
-      const ctx = snap.context
-      setDestroyState({
-        isLoading: !!ctx._destroyInProgress,
-        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
-      })
-    }
-    update()
-    const sub = service.subscribe(update)
-    return () => sub.unsubscribe()
-  }, [currentInstance])
-
+  // Loading state is tracked here rather than read from the item property's service: destroy() sends
+  // destroyStarted and destroyDone (then stops the service) before an effect could subscribe,
+  // so a fast destroy would never surface isLoading: true.
   const destroy = useCallback(async (itemProperty: IItemProperty) => {
     if (!itemProperty) return
-    setCurrentInstance(itemProperty)
-    await itemProperty.destroy()
+    setError(null)
+    setIsLoading(true)
+    try {
+      await itemProperty.destroy()
+      // destroy() reports DB failures via the service context instead of throwing
+      const ctx = (itemProperty.getService().getSnapshot() as unknown as {
+        context: { _destroyError?: { message: string } | null }
+      }).context
+      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  const resetError = useCallback(() => {
-    if (currentInstance) {
-      currentInstance.getService().send({ type: 'clearDestroyError' })
-    }
-  }, [currentInstance])
+  const resetError = useCallback(() => setError(null), [])
 
   return {
     destroy,
-    isLoading: destroyState.isLoading,
-    error: destroyState.error,
+    isLoading,
+    error,
     resetError,
   }
 }

@@ -35,6 +35,7 @@ import { generateId } from '@seedprotocol/sdk'
 import { eq, and, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -1426,6 +1427,33 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyItemPropertyTest property={createFastDestroyStub<IItemProperty>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-item-property-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-item-property-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-item-property-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-item-property-error')).toBeNull()
+      })
+    })
+
     it('should destroy an item property and set loading state during destroy', async () => {
       if (!testItem) return
 
@@ -1450,8 +1478,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('destroy-item-property-is-loading')
-          return isLoading.textContent === 'true'
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
         },
         { timeout: 2000 }
       )

@@ -15,14 +15,12 @@ All create and destroy hooks follow the same pattern:
 
 **Destroy hooks** return:
 
-- `destroy` – function that accepts the entity instance and calls `instance.destroy()` (removes from DB where applicable and unloads)
-- `isLoading` – `true` while the destroy operation is in progress (read from the instance’s service)
-- `error` – `Error | null`; set when the operation fails (read from the instance’s service)
-- `resetError` – call to clear `error` (sends `clearDestroyError` to the instance’s service)
+- `destroy` – function that accepts the entity instance and calls `instance.destroy()` (removes from DB where applicable and unloads). `useDeleteItem` names this `deleteItem`.
+- `isLoading` – `true` from the moment `destroy()` is called until its promise settles
+- `error` – `Error | null`; set when `instance.destroy()` throws or records a `_destroyError` on the instance's service
+- `resetError` – call to clear `error`
 
-Loading and error state are derived from the entity instance’s service (the instance passed to `destroy()`), not from hook-local state. This keeps the service as the single source of truth for destroy progress and errors.
-
-**Exception: `useDestroySchema`** tracks `isLoading` and `error` in hook-local state. `Schema.destroy()` sends `destroyStarted` and `destroyDone` and stops the service within a few microtasks, so both updates land in one React render and a service-derived `isLoading` is never seen as `true`. The hook sets `isLoading` when `destroy()` is called, clears it when the promise settles, reads `_destroyError` from the service afterwards, and `resetError` clears the hook's error.
+Destroy hooks track `isLoading` and `error` in hook-local state rather than reading them from the instance's service. `destroy()` sends `destroyStarted` and `destroyDone` and stops the service within a few microtasks, so both updates land in one React render and a service-derived `isLoading` would never be seen as `true`. Each hook sets `isLoading` when `destroy()` is called and clears it when the promise settles. Because `instance.destroy()` reports database failures on the service context instead of throwing, the hook reads `_destroyError` from the service snapshot afterwards; errors that are thrown are stored and rethrown.
 
 ## Hooks by entity
 
