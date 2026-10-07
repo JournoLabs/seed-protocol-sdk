@@ -64,6 +64,12 @@ async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<v
   }
 }
 
+// A runtime Model writes itself to the DB in the background. Wait for that write, or it can land after
+// the next test's beforeEach has deleted the schema it targets.
+async function waitForModelPersisted(model: Model, timeout: number = 5000): Promise<void> {
+  await waitFor(model.getService(), (snapshot) => snapshot.context._dbId != null, { timeout })
+}
+
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
@@ -462,6 +468,7 @@ testDescribe('Schema Integration Tests', () => {
       const modelContext = model.getService().getSnapshot().context
       expect(modelContext.schemaName).toBe(schemaName)
       expect(modelContext.schemaName).not.toBe(schemaFileId)
+      await waitForModelPersisted(model)
     })
 
     it('should handle Schema instance during loading state correctly', async () => {
@@ -489,6 +496,7 @@ testDescribe('Schema Integration Tests', () => {
       const model = Model.create('TestModel', schema, {
         waitForReady: false, waitForReady: false })
       expect(model.schemaName).toBe(schemaName)
+      await waitForModelPersisted(model)
     })
 
     it('should prevent ID from being passed to Schema.create() when Model uses Schema instance', async () => {
@@ -529,6 +537,7 @@ testDescribe('Schema Integration Tests', () => {
       const modelContext = model.getService().getSnapshot().context
       expect(modelContext.schemaName).toBe(schemaName)
       expect(modelContext.schemaName).not.toBe(schemaFileId)
+      await waitForModelPersisted(model)
     })
   })
 
