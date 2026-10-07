@@ -32,6 +32,26 @@ async function checkOPFSAvailability(): Promise<boolean> {
   }
 }
 
+/**
+ * Remove everything in OPFS. Each test file runs in its own iframe but OPFS (the app DB and .seed files)
+ * is shared across files, and several files define same-name models (e.g. 'Post'), so leftovers from one
+ * file break the next depending on run order. Starting each file from an empty store avoids that.
+ */
+async function clearOPFS(): Promise<void> {
+  const root = await navigator.storage.getDirectory()
+  const names: string[] = []
+  for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) {
+    names.push(name)
+  }
+  for (const name of names) {
+    try {
+      await root.removeEntry(name, { recursive: true })
+    } catch (error) {
+      console.warn(`[setup.browser] Could not remove OPFS entry "${name}":`, error)
+    }
+  }
+}
+
 beforeAll(async () => {
   if (typeof window !== 'undefined') {
     const opfsAvailable = await checkOPFSAvailability()
@@ -40,6 +60,7 @@ beforeAll(async () => {
         'OPFS is required for browser tests. Use Chrome 86+, Edge 86+, or Safari 17+.'
       )
     }
+    await clearOPFS()
   }
 })
 
