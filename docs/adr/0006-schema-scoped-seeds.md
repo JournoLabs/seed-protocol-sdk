@@ -114,6 +114,34 @@ The mode is set in two places, and the per-call setting wins:
 - **Per call:** a `matchMode` option on sync (`syncFromEas`) and on item reads
   (`Item.all`, `useItems`, the local query source).
 
+#### Sync scope per model
+
+A model can loosen or replace the property match with `syncScope`:
+
+```json
+"Tag": { "syncScope": "referenced", "properties": { "name": { "type": "Text" } } }
+```
+
+| `syncScope` | Seeds of this model that sync down |
+|---|---|
+| `'match'` (default) | Seeds from the sync addresses that match by `match` and `matchMode` |
+| `'all'` | Every seed of the type from the sync addresses, without a property check |
+| `'referenced'` | No fetch of its own. Only seeds of this type that a synced seed of another model relates to |
+
+The sync addresses (owned, watched, and `setAdditionalSyncAddresses`) still bound
+`'match'` and `'all'`. No scope pulls every seed of a type from every attester.
+
+**Referenced seeds**, whatever the scope: when a synced seed has a relation to another
+seed, sync fetches the target by ID from any attester, as `getRelatedSeedsAndVersions`
+does today. It stores the target and links it to the schema with `source = 'related'`,
+so the relation resolves and the target shows in that model's lists in both modes. This
+goes one level deep, as today. A related seed's own relations aren't followed unless
+that seed was also synced in its own right.
+
+- With `'match'` or `'all'`, a model gets its own seeds plus any referenced ones.
+- With `'referenced'`, it gets only referenced ones. This suits a `Tag` model that is
+  only used as a relation target: you get exactly the tags your posts use.
+
 ### 2. Seeds link to schemas in a local join table
 
 Add `seed_schemas (seed_local_id, schema_id, source, matches_loose, matches_strict,
@@ -127,8 +155,10 @@ subset of the loose ones, and every rule only checks that attestations exist.
 - **Local create:** `Item.create` links the new seed to the schema of the model that
   created it, with `source = 'created'` and both columns true.
 - **Sync:** each synced seed is linked to every local schema whose model it matches
-  loosely (`source = 'sync'`). Seeds that match no schema in the requested mode aren't
-  stored.
+  loosely, or whose model has `syncScope: 'all'` (`source = 'sync'`). Seeds that match no
+  schema in the requested mode aren't stored.
+- **Related:** a relation target fetched for a synced seed is linked to that seed's
+  schema with `source = 'related'`, and both match columns true.
 - **New versions:** `matches_loose` only ever turns true, because adding attestations
   can't undo a loose match. `matches_strict` is re-evaluated when a seed gets a new
   latest version.
@@ -214,9 +244,14 @@ can see today disappears.
   its local data isn't deleted.
 - **Breaking for consumers that set an active schema:** lists shrink to matching seeds.
   Apps that don't set one see no change. That needs a minor version and release notes.
-- Schema files gain two optional fields, `match` on properties and `matchMode` on
-  models. Both default to today's widest behaviour, so existing files stay valid. Schema
-  file types, JSON import/export and the `properties` table need the new columns.
+- Schema files gain three optional fields: `match` on properties, and `matchMode` and
+  `syncScope` on models. Existing files stay valid. Schema file types, JSON import and
+  export, and the `models` and `properties` tables need the new columns.
+- **Sync narrows for existing schemas.** Today's sync behaves like `syncScope: 'all'`.
+  With the `'match'` default, seeds that have none of a model's non-ignored properties
+  stop syncing, even in apps that never set an active schema. In practice that means
+  seeds that only have internal properties, or none at all. Seeds already in the local
+  DB stay. A schema can set `'all'` to keep today's behaviour. That needs release notes.
 - Many name-only lookups in the item layer (`loadOrCreateProperty`, `getPublishPayload`,
   `getPropertyIdForModelAndName`, `ModelProperty.instanceCache` keyed
   `modelName:propertyName`) need the schema threaded through. That work is mechanical
@@ -247,9 +282,6 @@ can see today disappears.
 
 ## Open questions
 
-- **Opting out of filtering:** should a model be able to sync every seed of its type,
-  for example a `Tag` model used only as a relation target? Related seeds fetched by
-  `getRelatedSeedsAndVersions` probably bypass the filter regardless.
 - **Active schema:** where does it live: client config, a `SeedProvider` prop, or
   both?
 
