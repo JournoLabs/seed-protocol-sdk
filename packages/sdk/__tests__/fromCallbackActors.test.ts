@@ -20,10 +20,6 @@ const sdkSrcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const ASYNC_NO_CATCH = 'async work without .catch()/try — a rejection leaves the parent machine waiting'
 
 const KNOWN_VIOLATIONS: Record<string, string> = {
-  // Real bug: every state invokes a fromCallback actor and transitions on onDone/onError, which
-  // callback actors never emit; their sendBack({ type: 'done' }) has no handler, so the machine
-  // stays in 'preparing' forever (verified with createActor on valid and duplicate-model input).
-  'Schema/service/addModelsMachine.ts': 'onDone with fromCallback actors',
   'Item/service/actors/hydrateExistingItem.ts': ASYNC_NO_CATCH,
   'Item/service/actors/hydrateNewItem.ts': ASYNC_NO_CATCH,
   'Item/service/actors/reload.ts': ASYNC_NO_CATCH,
