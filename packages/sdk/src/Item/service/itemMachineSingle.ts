@@ -108,14 +108,10 @@ export const itemMachineSingle = setup({
     },
     reload: '.reloading',
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           (event as { type: 'destroyError'; error: unknown }).error instanceof Error
             ? {
@@ -124,9 +120,6 @@ export const itemMachineSingle = setup({
               }
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
   },
   states: {
