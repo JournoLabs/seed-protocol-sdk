@@ -142,7 +142,10 @@ export {
   isValidEasAttestationUid,
   normalizeBytes32Hex,
 } from '@seedprotocol/eas'
-export type { AttestationLikeForCanonical } from '@seedprotocol/eas'
+export type {
+  AttestationLikeForCanonical,
+  PickLatestPropertyAttestationsOptions,
+} from '@seedprotocol/eas'
 export {
   isItemOwned,
   isLocalUnsealedDraft,
