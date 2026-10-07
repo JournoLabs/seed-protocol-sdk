@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
-import { setRevokeExecutor } from '@/helpers/publishConfig'
+import { setGetPublisherForNewSeeds, setRevokeExecutor } from '@/helpers/publishConfig'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -72,7 +72,16 @@ testDescribe('Item.unpublish integration', () => {
     const { createItemWithBasicPropertiesOnly } = await import(
       '../test-utils/getPublishPayloadIntegrationHelpers'
     )
-    const { item } = await createItemWithBasicPropertiesOnly({ title: 'Never published' })
+    // With owned addresses configured, a draft is owned only if its publisher is stamped at
+    // creation (publisher IS NULL is not owned since 2539c65). The publish package does that via
+    // setGetPublisherForNewSeeds; simulate the connected wallet so the "not published" check is reached.
+    setGetPublisherForNewSeeds(async () => UNPUBLISH_TEST_PUBLISHER)
+    let item: Awaited<ReturnType<typeof createItemWithBasicPropertiesOnly>>['item']
+    try {
+      ;({ item } = await createItemWithBasicPropertiesOnly({ title: 'Never published' }))
+    } finally {
+      setGetPublisherForNewSeeds(null)
+    }
     expect(item.seedUid).toBeFalsy()
 
     await expect(item.unpublish()).rejects.toThrow('Item is not published. Cannot unpublish.')

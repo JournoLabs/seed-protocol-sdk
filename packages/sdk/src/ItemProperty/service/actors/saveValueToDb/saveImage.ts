@@ -17,22 +17,6 @@ import { eventEmitter } from '@/eventBus'
 import { ImageSize } from '@/helpers/constants'
 
 
-const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      if (!e.target || !e.target.result) {
-        throw new Error('FileReader result is null')
-      }
-      const arrayBuffer = e.target.result as ArrayBuffer
-
-      resolve(arrayBuffer)
-    }
-
-    reader.readAsArrayBuffer(file)
-  })
-}
-
 /** Fetch image from URL (including blob:) and return { buffer, mimeType } for saving as binary. */
 const fetchImageAsBuffer = async (url: string): Promise<{ buffer: ArrayBuffer; mimeType?: string }> => {
   const response = await fetch(url)
@@ -112,7 +96,7 @@ export const saveImage = fromCallback<
     if (newValue instanceof File) {
       fileName = newValue.name
       mimeType = newValue.type
-      fileData = await readFileAsArrayBuffer(newValue)
+      fileData = await newValue.arrayBuffer() // Blob API: works in browsers and Node (no FileReader in Node)
     }
 
     if (newValue instanceof Blob) {

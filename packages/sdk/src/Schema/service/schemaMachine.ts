@@ -73,6 +73,12 @@ export type SchemaMachineContext = {
   _destroyError?: { message: string; name?: string } | null
 }
 
+// Drop the request addModelsMachine just finished (the head of the queue), success or not
+const dequeueModelAddition = (context: SchemaMachineContext) => {
+  const pending = context._pendingModelAdditions || []
+  return pending.length > 1 ? pending.slice(1) : undefined
+}
+
 export const schemaMachine = setup({
   types: {
     context: {} as SchemaMachineContext,
@@ -686,9 +692,26 @@ export const schemaMachine = setup({
             existingModels: context.models || {},
           }
         },
-        onDone: {
-          actions: [
-            assign({
+        onDone: [
+          {
+            // addModelsMachine reports failure through its final `error` state, which arrives here
+            // as onDone with { errors } rather than as onError
+            guard: ({ event }) => ((event.output as any)?.errors?.length ?? 0) > 0,
+            target: 'finishingModelAddition',
+            actions: assign({
+              _modelAdditionErrors: ({ context, event }) => [
+                ...(context._modelAdditionErrors || []),
+                ...((event.output as any).errors as Array<{ error: Error }>).map(({ error }) => ({
+                  error,
+                  timestamp: Date.now(),
+                })),
+              ],
+              _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
+            }),
+          },
+          {
+            target: 'finishingModelAddition',
+            actions: assign({
               models: ({ context, event }) => {
                 const addedModels = (event.output as any)?.addedModels || {}
                 return {
@@ -696,19 +719,12 @@ export const schemaMachine = setup({
                   ...addedModels,
                 }
               },
-              _pendingModelAdditions: ({ context }) => {
-                // Remove first item from queue (the one we just processed)
-                const pending = context._pendingModelAdditions || []
-                return pending.length > 1 ? pending.slice(1) : undefined
-              },
+              _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
             }),
-            // Trigger validation after models are added
-            ({ self }) => {
-              self.send({ type: 'validateSchema' })
-            },
-          ],
-        },
+          },
+        ],
         onError: {
+          target: 'finishingModelAddition',
           actions: assign({
             _modelAdditionErrors: ({ context, event }) => {
               const existing = context._modelAdditionErrors || []
@@ -720,11 +736,7 @@ export const schemaMachine = setup({
                 },
               ]
             },
-            _pendingModelAdditions: ({ context }) => {
-              // Remove first item from queue even on error, so we can process next
-              const pending = context._pendingModelAdditions || []
-              return pending.length > 1 ? pending.slice(1) : undefined
-            },
+            _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
           }),
         },
       },
@@ -745,18 +757,19 @@ export const schemaMachine = setup({
           }),
         },
       },
+    },
+    // Transient: leaving addingModels and coming back re-enters it, so the next queued request gets
+    // its own addModelsMachine. An `always` inside addingModels targeting itself would not re-enter.
+    // Validation waits until the queue drains: validateSchema is handled at the root, so sending it
+    // mid-queue would pull the machine out of addingModels and cancel the next request.
+    finishingModelAddition: {
       always: [
         {
-          // If there are pending additions after processing, process next one
-          guard: ({ context }) => {
-            const pending = context._pendingModelAdditions || []
-            return pending.length > 0
-          },
+          guard: ({ context }) => (context._pendingModelAdditions || []).length > 0,
           target: 'addingModels',
         },
         {
-          // No more pending, return to idle
-          target: 'idle',
+          target: 'validating',
         },
       ],
     },

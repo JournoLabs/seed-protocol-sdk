@@ -1263,8 +1263,7 @@ describe(
 
       await waitFor(
         () => {
-          const status = screen.getByTestId('destroy-status')
-          return status.textContent === 'created'
+          expect(screen.getByTestId('destroy-status').textContent).toBe('created')
         },
         { timeout: 3000 }
       )
@@ -1273,17 +1272,15 @@ describe(
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('destroy-is-loading')
-          return isLoading.textContent === 'true'
+          expect(screen.getByTestId('destroy-is-loading').textContent).toBe('true')
         },
         { timeout: 2000 }
       )
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('destroy-is-loading')
-          const status = screen.getByTestId('destroy-status')
-          return isLoading.textContent === 'false' && status.textContent === 'destroyed'
+          expect(screen.getByTestId('destroy-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-status').textContent).toBe('destroyed')
         },
         { timeout: 5000 }
       )

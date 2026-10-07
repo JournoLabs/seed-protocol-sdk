@@ -75,7 +75,7 @@ export default defineConfig({
             'scripts/**',
             'db/**',
             'services/**',
-            'Schema/schema-models-integration.test.ts',
+            'Schema/schema-models-integration.test.ts', // Node-only (reads/writes schema files with fs); runs in NodeJS
             'imports/**',
             'fromCallbackActors.test.ts',
             'validation-timeout.test.ts',
@@ -202,33 +202,8 @@ export default defineConfig({
             '**/node_modules/**',
             'dist/**',
 
-            // Side effects: npm install / npx seed init / npm run build, rewrite tracked mock files, and leave
-            // the process cwd in a deleted temp dir — with isolate: false that breaks every later file.
-            'packages/sdk/__tests__/scripts/integration.test.ts',
-            'packages/sdk/__tests__/node/client.test.ts',
-
             // Browser-only: SQL-tag liveQuery isn't supported by the Node stub. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/db/Db.test.ts',
-
-            // Known broken — stale against current code. Fix or delete each, then drop it from this list.
-            'packages/sdk/__tests__/commonjs-compatibility.test.ts', // expects dist/main.cjs.js; bare require in ESM
-            'packages/sdk/__tests__/db/liveQuery.test.ts', // liveQuery expectations fail in Node and browser
-            'packages/sdk/__tests__/events/files/download.test.ts', // @/helpers mock lacks BaseArweaveClient.getBaseUrl
-            'packages/sdk/__tests__/fromCallbackActors.test.ts', // walks process.cwd()/src, which doesn't exist at repo root
-            'packages/sdk/__tests__/imports/processMarkdownFrontmatter.test.ts', // saveModelsFromMarkdown tests never configure the Db
-            'packages/sdk/__tests__/Model/pendingWrites.test.ts', // cleanup deletes models before FK-dependent rows
-            'packages/sdk/__tests__/node/FileManager.test.ts', // static FileManager.initializeFileSystem() no longer exists
-            'packages/sdk/__tests__/node/PathResolver.test.ts', // chdirs into mock dirs that don't exist
-            'packages/sdk/__tests__/node/PathResolver.production.test.ts', // assumes NODE_ENV=production and a built dist/
-            'packages/sdk/__tests__/Schema/schema-models-integration.test.ts', // mkdirs '/app-files' (browser path)
-            'packages/sdk/__tests__/scripts/addModel.test.ts', // every test is commented out
-            'packages/sdk/__tests__/scripts/bin.test.ts', // imports removed @/helpers/scripts
-            'packages/sdk/__tests__/scripts/codegen.test.ts', // reads process.cwd()/src/seedSchema
-            'packages/sdk/__tests__/scripts/config-validation.test.ts', // only empty describe blocks
-            'packages/sdk/__tests__/scripts/production-path.test.ts', // imports removed @/node/PathResolver
-            'packages/sdk/__tests__/scripts/rollup-typia-proto.test.ts', // imports removed rollup-typia-proto
-            'packages/sdk/__tests__/services/write/writeProcessMachine.test.ts', // cleanup deletes models before FK-dependent rows
-            'packages/sdk/__tests__/validation-timeout.test.ts', // same FK-violating cleanup
           ],
           testTimeout: 30000,
           pool: 'forks',

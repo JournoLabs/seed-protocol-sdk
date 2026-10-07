@@ -31,12 +31,17 @@ describe('sync canonical helpers (shared with @seedprotocol/query)', () => {
   })
 
   it('parseEasRelationPropertyName is re-exported for sync relation naming', () => {
+    // Single relations keep the singular name (55d6cbe); only `_ids` lists are pluralized.
     expect(parseEasRelationPropertyName('author_person_id')).toEqual({
-      propertyName: 'authors',
+      propertyName: 'author',
       modelName: 'person',
       isList: false,
     })
-    expect(parseEasRelationPropertyName('tag_tag_ids')?.isList).toBe(true)
+    expect(parseEasRelationPropertyName('tag_tag_ids')).toEqual({
+      propertyName: 'tags',
+      modelName: 'tag',
+      isList: true,
+    })
   })
 
   it('related-seed property path should apply pickLatest before save', () => {

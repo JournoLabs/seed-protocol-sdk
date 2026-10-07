@@ -1,162 +1,195 @@
-import { describe, it, beforeEach, afterEach } from 'vitest'
-import path             from 'path'
-import { fileURLToPath } from 'node:url'
-import { PathResolver } from '@/node/helpers/PathResolver'
-import process                                     from 'node:process'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { NodePathResolver, PathResolver } from '@/node/helpers/PathResolver'
+import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-/** packages/sdk — mocks live under packages/sdk/__tests__/__mocks__ */
-const packageRoot = path.resolve(__dirname, '../..')
-const mocksRoot = path.join(packageRoot, '__tests__', '__mocks__')
+/**
+ * NodePathResolver decides where the SDK lives from process.cwd() and NODE_ENV. Each test builds the
+ * project layout it needs in a fresh temp dir, chdirs into it, and afterEach restores cwd and env.
+ */
 
-describe('PathResolver', () => {
-  let originalCwd: string | undefined
+const writeJson = (file: string, data: unknown) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(data))
+}
+
+describe('NodePathResolver', () => {
+  let originalCwd: string
+  let tmpRoot: string
+  let resolver: NodePathResolver
+
   beforeEach(() => {
     originalCwd = process.cwd()
+    // realpath: on macOS os.tmpdir() is a symlink (/var -> /private/var) and process.cwd() returns the real path.
+    tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'seed-path-resolver-')))
+    resolver = new NodePathResolver()
+    vi.stubEnv('SEED_SDK_TEST_PROJECT_TYPE', undefined)
   })
 
   afterEach(() => {
-    if (originalCwd) {
-      process.chdir(originalCwd)
-    }
+    process.chdir(originalCwd)
+    vi.unstubAllEnvs()
+    fs.rmSync(tmpRoot, { recursive: true, force: true })
   })
 
-  describe('Singleton Pattern', () => {
-    it('should create only one instance', ({expect}) => {
-      const instance1 = PathResolver.getInstance()
-      const instance2 = PathResolver.getInstance()
-      expect(instance1).toBe(instance2)
-    })
-  })
+  const makeDir = (...parts: string[]) => {
+    const dir = path.join(tmpRoot, ...parts)
+    fs.mkdirSync(dir, { recursive: true })
+    return dir
+  }
 
-  describe('Environment Detection', () => {
-    it('should detect sdk-dev environment', ({expect}) => {
-      const sdkDevCwd = path.join(mocksRoot, 'sdk-dev', 'project')
-      process.chdir(sdkDevCwd)
-
-      const resolver = PathResolver.getInstance()
-      const rootDir = resolver.getSdkRootDir()
-      
-      expect(rootDir).toContain('src')
-      process.chdir(originalCwd!)
-    })
-
-    it('should detect test environment', ({expect}) => {
-      const originalNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = 'test'
-
-      const resolver = PathResolver.getInstance()
-      const dotSeedDir = resolver.getDotSeedDir()
-
-      expect(dotSeedDir).toContain('__tests__')
-      expect(dotSeedDir).toContain('__mocks__')
-
-      process.env.NODE_ENV = originalNodeEnv
-    })
-
-    it('should detect linked-sdk environment', ({expect}) => {
-      const linkSdkCwd = path.join(mocksRoot, 'linked-sdk', 'project-link')
-      const portalSdkCwd = path.join(mocksRoot, 'linked-sdk', 'project-portal')
-      process.chdir(linkSdkCwd)
-
-      const resolver = PathResolver.getInstance()
-      const rootDir = resolver.getRootWithNodeModules()
-      
-      expect(rootDir).toContain('linked-sdk')
-      expect(rootDir).toContain('project-link')
-
-      process.chdir(portalSdkCwd)
-
-      expect(portalSdkCwd).toContain('linked-sdk')
-      expect(portalSdkCwd).toContain('project-portal')
-
-      process.chdir(originalCwd!)
-    })
-
-    it('should default to production environment', ({expect}) => {
-      const originalNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = ''
-
-      const prodBrowserCwd = path.join(mocksRoot, 'browser', 'project', 'node_modules', '@seedprotocol', 'sdk')
-      const prodNodeCwd = path.join(mocksRoot, 'node', 'project', 'node_modules', '@seedprotocol', 'sdk')
-
-      process.chdir(prodBrowserCwd)
-
-      const resolver = PathResolver.getInstance()
-      const rootDirBrowser = resolver.getSdkRootDir()
-      
-      expect(rootDirBrowser).toContain('node_modules/@seedprotocol/sdk/dist')
-
-      process.chdir(prodNodeCwd)
-
-      const rootDirNode = resolver.getSdkRootDir()
-
-      expect(rootDirNode).toContain('node_modules/@seedprotocol/sdk/dist')
-
-      process.chdir(originalCwd!)
-      process.env.NODE_ENV = originalNodeEnv
+  describe('registration', () => {
+    it('is registered as the BasePathResolver implementation on import', () => {
+      const instance = PathResolver.getInstance()
+      expect(instance).toBeInstanceOf(NodePathResolver)
+      expect(PathResolver.getInstance()).toBe(instance)
+      expect(BasePathResolver.getInstance()).toBe(instance)
     })
   })
 
-  describe('Path Resolution', () => {
-    it('should resolve app paths correctly for node project', ( {expect} ) => {
-      const schemaFileDir = path.join(mocksRoot, 'node', 'project')
-
-      const resolver = PathResolver.getInstance()
-      const appPaths = resolver.getAppPaths(schemaFileDir)
-
-      expect(appPaths.appSchemaDir).toContain('.seed/schema')
-      expect(appPaths.appDbDir).toContain('.seed/db')
-      expect(appPaths.appMetaDir).toContain('.seed/db/meta')
+  describe('getSdkRootDir', () => {
+    it('returns cwd in the test environment', () => {
+      vi.stubEnv('NODE_ENV', 'test')
+      const project = makeDir('project')
+      process.chdir(project)
+      expect(resolver.getSdkRootDir()).toBe(project)
     })
 
-    it('should resolve app paths correctly for linked-sdk project', ( {expect} ) => {
-      const originalNodeEnv = process.env.NODE_ENV
-      process.env.NODE_ENV = ''
+    it('returns packages/sdk when run from the monorepo root (sdk-dev)', () => {
+      vi.stubEnv('NODE_ENV', '')
+      makeDir('repo', 'packages', 'sdk', 'src', 'node')
+      writeJson(path.join(tmpRoot, 'repo', 'packages', 'sdk', 'package.json'), { name: '@seedprotocol/sdk' })
+      process.chdir(path.join(tmpRoot, 'repo'))
+      expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'repo', 'packages', 'sdk'))
+    })
 
-      const linkedProjectDir = path.join(mocksRoot, 'linked-sdk', 'project-link')
+    it('returns cwd when run from the SDK package root (sdk-dev)', () => {
+      vi.stubEnv('NODE_ENV', '')
+      const sdk = makeDir('sdk', 'src', 'node')
+      writeJson(path.join(tmpRoot, 'sdk', 'package.json'), { name: '@seedprotocol/sdk' })
+      process.chdir(path.dirname(path.dirname(sdk)))
+      expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'sdk'))
+    })
 
-      const schemaFileDir = path.join(linkedProjectDir, 'seed.config.ts')
+    it('does not treat a package with another name as the SDK repo', () => {
+      vi.stubEnv('NODE_ENV', '')
+      makeDir('other', 'src', 'node')
+      writeJson(path.join(tmpRoot, 'other', 'package.json'), { name: 'something-else' })
+      process.chdir(path.join(tmpRoot, 'other'))
+      expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'other', 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+    })
 
-      process.chdir(linkedProjectDir)
+    it('resolves a link:@seedprotocol/sdk dependency to node_modules', () => {
+      vi.stubEnv('NODE_ENV', '')
+      const project = makeDir('project-link')
+      writeJson(path.join(project, 'package.json'), { dependencies: { '@seedprotocol/sdk': 'link:@seedprotocol/sdk' } })
+      process.chdir(project)
+      expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk'))
+    })
 
-      const resolver = PathResolver.getInstance()
-      const appPaths = resolver.getAppPaths(schemaFileDir)
+    it('resolves a portal: dependency relative to the project', () => {
+      vi.stubEnv('NODE_ENV', '')
+      const project = makeDir('project-portal')
+      writeJson(path.join(project, 'package.json'), { dependencies: { '@seedprotocol/sdk': 'portal:../seed-protocol-sdk' } })
+      process.chdir(project)
+      expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'seed-protocol-sdk'))
+    })
 
-      expect(appPaths.appSchemaDir).toContain('.seed/schema')
-      expect(appPaths.appDbDir).toContain('.seed/db')
-      expect(appPaths.appMetaDir).toContain('.seed/db/meta')
+    it('defaults to node_modules/@seedprotocol/sdk/dist in production', () => {
+      vi.stubEnv('NODE_ENV', 'production')
+      const project = makeDir('app')
+      writeJson(path.join(project, 'package.json'), { dependencies: { '@seedprotocol/sdk': '^1.0.0' } })
+      process.chdir(project)
+      expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+      expect(resolver.getNodeModulesDir()).toBe(path.join(project, 'node_modules'))
+    })
 
-
-      process.chdir(originalCwd!)
-
-      process.env.NODE_ENV = originalNodeEnv
+    it('treats a project without package.json as production', () => {
+      vi.stubEnv('NODE_ENV', '')
+      const project = makeDir('bare')
+      process.chdir(project)
+      expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'))
     })
   })
 
-  // describe('Error Handling', () => {
-  //   it('should handle filesystem errors gracefully when checking SDK repo', ({expect}) => {
-  //     vi.mocked(fs.existsSync).mockImplementation(() => {
-  //       throw new Error('Filesystem error')
-  //     })
-  //
-  //     const resolver = PathResolver.getInstance()
-  //     const rootDir = resolver.getRootWithNodeModules()
-  //
-  //     // Should default to current directory when errors occur
-  //     expect(rootDir).toBe(process.cwd())
-  //   })
-  //
-  //   it('should handle invalid package.json when checking linked SDK', ({expect}) => {
-  //     vi.mocked(fs.existsSync).mockReturnValue(true)
-  //     vi.mocked(fs.readFileSync).mockReturnValue('invalid json')
-  //
-  //     const resolver = PathResolver.getInstance()
-  //     const rootDir = resolver.getRootWithNodeModules()
-  //
-  //     // Should default to current directory when errors occur
-  //     expect(rootDir).toBe(process.cwd())
-  //   })
-  // })
-}) 
+  describe('getRootWithNodeModules', () => {
+    it('returns cwd for a normal project', () => {
+      const project = makeDir('project')
+      process.chdir(project)
+      expect(resolver.getRootWithNodeModules()).toBe(project)
+    })
+
+    it('climbs four levels when cwd is a __mocks__ project', () => {
+      const mockProject = makeDir('sdk', '__tests__', '__mocks__', 'node', 'project')
+      process.chdir(mockProject)
+      expect(resolver.getRootWithNodeModules()).toBe(path.join(tmpRoot, 'sdk'))
+    })
+  })
+
+  describe('getDotSeedDir', () => {
+    it('uses the given schema dir', () => {
+      expect(resolver.getDotSeedDir('/some/project')).toBe(path.join('/some/project', '.seed'))
+    })
+
+    it('falls back to cwd', () => {
+      const project = makeDir('project')
+      process.chdir(project)
+      expect(resolver.getDotSeedDir()).toBe(path.join(project, '.seed'))
+    })
+
+    it('points at the mock project when SEED_SDK_TEST_PROJECT_TYPE is set', () => {
+      vi.stubEnv('SEED_SDK_TEST_PROJECT_TYPE', 'node')
+      const sdk = makeDir('sdk')
+      process.chdir(sdk)
+      expect(resolver.getDotSeedDir()).toBe(path.join(sdk, '__tests__', '__mocks__', 'node', 'project', '.seed'))
+    })
+  })
+
+  describe('findConfigFile', () => {
+    it('returns null when no config file exists', () => {
+      expect(resolver.findConfigFile(makeDir('empty'))).toBeNull()
+    })
+
+    it('prefers seed.config.ts over the fallbacks', () => {
+      const dir = makeDir('project')
+      for (const name of ['seed.config.ts', 'seed.schema.ts', 'schema.ts']) {
+        fs.writeFileSync(path.join(dir, name), '')
+      }
+      expect(resolver.findConfigFile(dir)).toBe(path.join(dir, 'seed.config.ts'))
+    })
+
+    it('tries seed.schema.ts before schema.ts', () => {
+      const dir = makeDir('project')
+      fs.writeFileSync(path.join(dir, 'schema.ts'), '')
+      expect(resolver.findConfigFile(dir)).toBe(path.join(dir, 'schema.ts'))
+      fs.writeFileSync(path.join(dir, 'seed.schema.ts'), '')
+      expect(resolver.findConfigFile(dir)).toBe(path.join(dir, 'seed.schema.ts'))
+    })
+
+    it('searches cwd by default', () => {
+      const dir = makeDir('project')
+      fs.writeFileSync(path.join(dir, 'seed.config.ts'), '')
+      process.chdir(dir)
+      expect(resolver.findConfigFile()).toBe(path.join(dir, 'seed.config.ts'))
+    })
+  })
+
+  describe('getAppPaths', () => {
+    it('derives schema, db and meta dirs from the .seed dir', () => {
+      vi.stubEnv('NODE_ENV', 'production')
+      const project = makeDir('app')
+      process.chdir(project)
+      const dotSeed = path.join(project, '.seed')
+      expect(resolver.getAppPaths(project)).toEqual({
+        sdkRootDir: path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'),
+        dotSeedDir: dotSeed,
+        nodeModulesDir: path.join(project, 'node_modules'),
+        appSchemaDir: path.join(dotSeed, 'schema'),
+        appDbDir: path.join(dotSeed, 'db'),
+        appMetaDir: path.join(dotSeed, 'db', 'meta'),
+      })
+    })
+  })
+})
