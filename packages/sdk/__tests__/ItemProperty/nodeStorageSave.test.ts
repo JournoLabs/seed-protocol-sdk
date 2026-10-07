@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { Item } from '@/Item/Item'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { validateItemForPublish } from '@/db/read/getPublishPayload'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createPublishedTestAuthor,
@@ -24,9 +24,9 @@ const testDescribe =
 
 testDescribe('Html property saves in Node', () => {
   beforeAll(async () => {
-    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: 90000 })
+    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

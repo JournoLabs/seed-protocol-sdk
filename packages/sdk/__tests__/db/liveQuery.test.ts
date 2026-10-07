@@ -4,7 +4,7 @@ import { NodeDb } from '@/node/db/Db'
 import { models } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { firstValueFrom, take, timeout } from 'rxjs'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
 // Node-only: BaseDb.liveQuery in Node is NodeDb's polling stub (re-runs a Drizzle query builder every second
@@ -16,7 +16,7 @@ describe('LiveQuery (Node polling implementation)', () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     await cleanupTestSchemaData()

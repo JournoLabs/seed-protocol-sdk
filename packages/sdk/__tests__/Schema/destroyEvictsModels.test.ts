@@ -8,7 +8,7 @@ import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { Schema } from '@/Schema/Schema'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -17,8 +17,8 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 // _dbId pointing at a deleted row.
 testDescribe('Schema.destroy evicts cached models and properties', () => {
   beforeAll(async () => {
-    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: 90000 })
-  }, 90000)
+    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

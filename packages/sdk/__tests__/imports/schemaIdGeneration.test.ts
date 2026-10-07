@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { setupFixtureFiles, cleanupFixtureFiles, getFixturePath } from '../test-utils/setupFixtureFiles'
 import { loadSchemaFromFile, importJsonSchema } from '@/imports/json'
 import { models, properties, schemas, modelSchemas, modelUids, propertyUids, PropertyType } from '@/seedSchema'
@@ -42,7 +42,7 @@ testDescribe('Schema ID Generation Integration Tests', () => {
 
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 120000, // Increased timeout for database initialization
+      timeout: SETUP_HOOK_TIMEOUT_MS, // Increased timeout for database initialization
       configOverrides: {
         // Ensure we have a proper working directory for file operations
       },
@@ -50,7 +50,7 @@ testDescribe('Schema ID Generation Integration Tests', () => {
 
     // Make fixture files available in the test environment
     await setupFixtureFiles(fixtureNames)
-  }, 120000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     // Clean up database after each test

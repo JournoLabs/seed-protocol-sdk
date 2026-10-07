@@ -4,6 +4,7 @@ import { ADDRESSES_PERSISTED_EVENT } from '@/client/events'
 import {
   setupTestEnvironment,
   teardownTestEnvironment,
+  SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
 
 const ownedAddr = '0x1234567890123456789012345678901234567890'
@@ -15,9 +16,9 @@ describe.sequential('ADDRESSES_PERSISTED_EVENT', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 120000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 120000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

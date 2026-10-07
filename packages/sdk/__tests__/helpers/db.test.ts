@@ -3,7 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { appState } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getAddressesFromDbOptional } from '@/helpers/db'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -11,9 +11,9 @@ testDescribe('getAddressesFromDbOptional', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

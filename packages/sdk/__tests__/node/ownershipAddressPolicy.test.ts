@@ -10,6 +10,7 @@ import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import {
   setupTestEnvironment,
   teardownTestEnvironment,
+  SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? describe.sequential : describe
@@ -50,12 +51,12 @@ testDescribe('ownership address policy', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 120000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
       configOverrides: {
         syncFromEasOnAddressChange: false,
       },
     })
-  }, 120000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     setAdditionalSyncAddresses(null)

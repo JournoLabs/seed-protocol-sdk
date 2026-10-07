@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest'
 import { createActor, fromCallback, fromPromise, waitFor, type AnyActorRef } from 'xstate'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
-import { setupTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { cleanupTestSchemaData } from '../../test-utils/cleanupTestDb'
 
 describe('writeProcessMachine', () => {
@@ -9,9 +9,9 @@ describe('writeProcessMachine', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 30000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 30000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   // Stop every actor a test started so no validation/write keeps running into the next test's cleanup.
   const actors: AnyActorRef[] = []

@@ -22,9 +22,9 @@
  *   beforeAll(async () => {
  *     testProjectPath = await setupTestEnvironment({
  *       testFileUrl: import.meta.url,
- *       timeout: 90000,
+ *       timeout: SETUP_HOOK_TIMEOUT_MS,
  *     })
- *   }, 90000)
+ *   }, SETUP_HOOK_TIMEOUT_MS)
  * })
  * ```
  */
@@ -55,6 +55,14 @@ async function getClient(): Promise<ClientType> {
   return cachedClient
 }
 
+/**
+ * Timeout for test setup hooks (client init, DB readiness, fixtures). Healthy setup takes under 10s
+ * (slowest measured beforeAll: ~8.4s in the browser projects), so this leaves ~3x headroom while
+ * making a hung setup fail in 30s instead of 90-120s. Use it for the hook timeout and for
+ * setupTestEnvironment's `timeout` so the inner wait never outlives the hook.
+ */
+export const SETUP_HOOK_TIMEOUT_MS = 30_000
+
 export interface TestClientConfig {
   config: SeedConstructorOptions
   projectPath?: string
@@ -64,7 +72,7 @@ export interface TestClientConfig {
 /**
  * Wait for database to be ready
  */
-async function waitForDatabase(timeout: number = 30000): Promise<void> {
+async function waitForDatabase(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const startTime = Date.now()
   
   return new Promise<void>((resolve, reject) => {
@@ -100,7 +108,7 @@ async function waitForDatabase(timeout: number = 30000): Promise<void> {
 /**
  * Wait for client and database to be ready
  */
-async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
+async function waitForClientAndDbReady(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const client = await getClient()
   const startTime = Date.now()
   
@@ -132,7 +140,7 @@ async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
  * @returns Promise that resolves when client and database are ready
  */
 export async function initializeTestClient(options: TestClientConfig): Promise<void> {
-  const { config, timeout = 90000 } = options
+  const { config, timeout = SETUP_HOOK_TIMEOUT_MS } = options
 
   // Dynamically import client (same pattern as client.test.ts)
   const client = await getClient()

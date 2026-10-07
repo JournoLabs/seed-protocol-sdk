@@ -4,7 +4,7 @@ import { getPublishUploads, itemHasPublishUploadCandidates } from '@/db/read/get
 import { summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { isPublishedSeedRef } from '@/helpers/relationSeedRef'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   waitForPropertyInstances,
@@ -35,10 +35,10 @@ testDescribe('publish with relations to published uids that have no local copy',
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

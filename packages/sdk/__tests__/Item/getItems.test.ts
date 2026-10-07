@@ -5,7 +5,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -34,10 +34,10 @@ testDescribe('getItemsData', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

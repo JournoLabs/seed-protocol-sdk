@@ -4,6 +4,7 @@ import { getPublishUploadData } from './getPublishUploadData'
 import {
   setupTestEnvironment,
   teardownTestEnvironment,
+  SETUP_HOOK_TIMEOUT_MS,
 } from '../../../../../sdk/__tests__/test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
@@ -18,10 +19,10 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
