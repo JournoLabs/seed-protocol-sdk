@@ -16,6 +16,21 @@ import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
+// Bounded wait for a condition that a lenient test tolerates never becoming true (replaces fixed sleeps)
+async function waitUntil(condition: () => boolean | Promise<boolean>, timeout = 2000): Promise<boolean> {
+  try {
+    await vi.waitFor(
+      async () => {
+        if (!(await condition())) throw new Error('condition not met yet')
+      },
+      { timeout, interval: 50 },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
   const service = model.getService()
   
@@ -149,7 +164,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
+      await waitForSchemaIdle(schema)
       
       const model = Model.create('TestModel Schema Instance', schema, {
         waitForReady: false,
@@ -184,10 +199,43 @@ testDescribe('Model Integration Tests', () => {
       
       await waitForModelIdle(model)
       
-      // Wait for the properties themselves, not just _liveQueryPropertyIds: the getter only returns
-      // ids whose ModelProperty instances are already cached, and those are created asynchronously.
-      await vi.waitFor(() => expect(model.properties).toHaveLength(2), { timeout: 10000 })
-
+      // Wait for liveQuery subscription to be set up and context to be updated
+      await new Promise<void>((resolve, reject) => {
+        const subscription = model.getService().subscribe((snapshot) => {
+          console.log('Waiting for liveQueryIds', snapshot.context._liveQueryPropertyIds)
+          const liveQueryIds = snapshot.context._liveQueryPropertyIds || []
+          if (liveQueryIds.length >= 2) {
+            subscription.unsubscribe()
+            resolve()
+          }
+        })
+        
+        // Also check immediately in case it's already updated
+        const currentSnapshot = model.getService().getSnapshot()
+        const currentLiveQueryIds = currentSnapshot.context._liveQueryPropertyIds || []
+        if (currentLiveQueryIds.length >= 2) {
+          subscription.unsubscribe()
+          resolve()
+          return
+        }
+        
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          subscription.unsubscribe()
+          const finalSnapshot = model.getService().getSnapshot()
+          const finalLiveQueryIds = finalSnapshot.context._liveQueryPropertyIds || []
+          console.log('finalLiveQueryIds', finalLiveQueryIds)
+          if (finalLiveQueryIds.length >= 2) {
+            resolve()
+          } else {
+            reject(new Error(`Timeout waiting for liveQueryPropertyIds. Got ${finalLiveQueryIds.length} items, expected at least 2`))
+          }
+        }, 5000)
+      })
+      
+      // model.properties only returns ModelProperty instances already in the cache, which can lag the
+      // liveQuery ids above, so poll for the instances
+      await vi.waitFor(() => expect((model.properties || []).length).toBe(2), { timeout: 5000, interval: 50 })
       expect(model.properties).toBeDefined()
       const modelProperties = model.properties || []
       expect(Array.isArray(modelProperties)).toBe(true)
@@ -297,8 +345,14 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait for the imported model to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // The imported model is written asynchronously; the rename check below needs it in the database
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()!.select().from(modelsTable).where(eq(modelsTable.name, 'Existing Model')).limit(1)
+          expect(rows.length).toBe(1)
+        },
+        { timeout: 15000, interval: 100 },
+      )
       
       // Clear the cache to force database lookup
       // Note: We can't easily clear the cache, but we can create a model with a different name first
@@ -433,8 +487,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait a bit for the schema import to complete and model to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await waitUntil(async () => !!(await Model.getByNameAsync(modelName, schemaName)), 5000)
       
       // Get the model that was imported (may be renamed if duplicate exists)
       // Try getByNameAsync first, but if that fails, try Model.create which will handle renaming
@@ -491,9 +544,6 @@ testDescribe('Model Integration Tests', () => {
         content: 'Test Content',
         count: 42,
       } as any)
-
-      // Wait a bit for database writes to complete
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify item has required IDs
       expect(testModelItem.seedLocalId).toBeDefined()
@@ -594,8 +644,6 @@ testDescribe('Model Integration Tests', () => {
         name: 'Test Item',
       } as any)
 
-      await new Promise(resolve => setTimeout(resolve, 500))
-
       // Verify item has required IDs
       expect(item.seedLocalId).toBeDefined()
       expect(item.latestVersionLocalId).toBeDefined()
@@ -656,8 +704,6 @@ testDescribe('Model Integration Tests', () => {
       await waitForModelIdle(model)
       
       const item = await model.create({} as any)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify item has required IDs
       expect(item.seedLocalId).toBeDefined()
@@ -723,8 +769,6 @@ testDescribe('Model Integration Tests', () => {
       // Create multiple items
       const item1 = await model.create({ value: 'Item 1' } as any)
       const item2 = await model.create({ value: 'Item 2' } as any)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify items have required IDs
       expect(item1.seedLocalId).toBeDefined()
@@ -1022,9 +1066,8 @@ testDescribe('Model Integration Tests', () => {
       const newName = 'UpdatedModel'
       
       model.modelName = newName
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       
       expect(model.modelName).toBe(newName)
       expect(model.name).toBe(newName)
@@ -1195,9 +1238,8 @@ testDescribe('Model Integration Tests', () => {
       const newName = 'UpdatedModel'
       
       model.modelName = newName
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       
       // Model should still be accessible by new name
       const modelByName = Model.getByName(newName, schemaName)
@@ -1229,8 +1271,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait a bit for the model to be loaded into cache from the schema import
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await waitUntil(async () => !!(await Model.getByNameAsync(modelName, schemaName)), 5000)
       
       // Get the existing model from the schema import (don't create a new one)
       // Use getByNameAsync to ensure we get the model even if it's not in cache yet
@@ -1264,9 +1305,6 @@ testDescribe('Model Integration Tests', () => {
       expect(oldName).toBeDefined()
       expect(oldName).toBe(modelName)
       
-      // Wait a bit for model to be written to database if it wasn't already
-      await new Promise(resolve => setTimeout(resolve, 300))
-      
       // Verify model exists in database with old name first (if it was written)
       const db = BaseDb.getAppDb()
       if (db && oldName) {
@@ -1283,24 +1321,26 @@ testDescribe('Model Integration Tests', () => {
       // Update name
       model.modelName = newName
       
-      // Wait for update to complete (including database save)
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
       // Verify name changed in memory
-      expect(model.modelName).toBe(newName)
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       expect(model.name).toBe(newName)
-      
-      // Verify database was updated with new name
+
+      // Verify database was updated with new name (the save is asynchronous, so poll)
       if (db) {
-        const dbModels = await db
-          .select()
-          .from(modelsTable)
-          .where(eq(modelsTable.name, newName))
-          .limit(1)
-        
-        expect(dbModels.length).toBeGreaterThan(0)
+        const dbModels = await vi.waitFor(
+          async () => {
+            const rows = await db
+              .select()
+              .from(modelsTable)
+              .where(eq(modelsTable.name, newName))
+              .limit(1)
+            expect(rows.length).toBeGreaterThan(0)
+            return rows
+          },
+          { timeout: 5000, interval: 50 },
+        )
         expect(dbModels[0].name).toBe(newName)
-        
+
         // Verify old name no longer exists in database (if it existed before)
         if (oldName) {
           const oldDbModels = await db
@@ -1347,7 +1387,6 @@ testDescribe('Model Integration Tests', () => {
       
       // Note: description is not supported - JSON files can have it but we ignore it at runtime
       // Edit the model (using a supported property if needed)
-      await new Promise(resolve => setTimeout(resolve, 200))
       
       // Save the model (this persists to database)
       // Note: The exact save mechanism depends on implementation
@@ -1495,7 +1534,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
+      await waitForSchemaIdle(schema)
       
       const newModel = Model.create('New model', schema, {
         properties: {
