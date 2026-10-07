@@ -744,7 +744,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -774,7 +774,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('models-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
@@ -812,7 +812,7 @@ describe('React Model Hooks Integration Tests', () => {
               validationErrors: modelSnapshot.context._validationErrors,
             })
           }
-          return isIdle
+          expect(isIdle).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -835,7 +835,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
-          return Array.isArray(data) && data.length >= 1
+          expect(Array.isArray(data) && data.length >= 1).toBe(true)
         },
         { timeout: 10000 }
       )
