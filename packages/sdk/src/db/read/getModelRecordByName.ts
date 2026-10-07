@@ -7,9 +7,11 @@ export type ModelRecordByName = typeof modelsTable.$inferSelect
 
 /**
  * `models` rows with this name that may belong to `schemaName`: rows linked to the schema (any
- * version) through `model_schemas` first, then rows not linked to any schema yet (inserted ahead of
- * their link). Rows that belong only to other schemas are left out: model names are unique per
- * schema, not globally, so a lookup by name alone can pick up another schema's same-named model.
+ * version) through `model_schemas` first, then stub rows not linked to any schema and without a
+ * schemaFileId (e.g. inserted by name for config models, to be adopted by a schema import). Rows that
+ * belong only to other schemas are left out: model names are unique per schema, not globally, so a
+ * lookup by name alone can pick up another schema's same-named model. So are unlinked rows with a
+ * schemaFileId: those are models of another schema whose link was removed, not stubs.
  */
 export async function getModelRecordsByName(
   db: any,
@@ -26,11 +28,11 @@ export async function getModelRecordsByName(
     .select({ model: modelsTable })
     .from(modelsTable)
     .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
-    .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id)))
+    .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
   return [...linked, ...unlinked].map(({ model }) => model)
 }
 
-/** First of {@link getModelRecordsByName}: the schema's own model if linked, else an unlinked one. */
+/** First of {@link getModelRecordsByName}: the schema's own model if linked, else an unlinked stub. */
 export async function getModelRecordByName(
   db: any,
   modelName: string,
