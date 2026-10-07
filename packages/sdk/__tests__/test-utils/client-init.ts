@@ -34,6 +34,8 @@ import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
 import { and } from 'drizzle-orm'
+import { cleanupLeftoverOpfsSchemaFiles, cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
+import { cleanupTestSchemaData } from './cleanupTestDb'
 
 // Dynamically import client from src/client (same pattern as client.test.ts)
 type ClientType = typeof import('@/client')['client']
@@ -507,6 +509,15 @@ export async function setupTestEnvironment(options: {
     await options.beforeInit()
   }
 
+  // Browser test files share one OPFS store. Remove schema files an earlier file left behind so
+  // client.init doesn't re-import them (each adds ~0.8s to init, which pushed setup past hookTimeout).
+  if (!isNodeEnv && config.config.filesDir) {
+    const removed = await cleanupLeftoverOpfsSchemaFiles(config.config.filesDir)
+    if (removed > 0) {
+      console.log(`[setupTestEnvironment] Removed ${removed} leftover test schema files from OPFS`)
+    }
+  }
+
   console.log('Initializing client...')
   
   // Initialize client
@@ -516,6 +527,13 @@ export async function setupTestEnvironment(options: {
   })
   
   console.log('Client initialized')
+
+  // The OPFS database is shared too. client.init builds Model instances for every schema still in it,
+  // and a model created later by name (e.g. 'Note') can adopt another schema's same-named row and
+  // instance. Start each browser test file with only the Seed Protocol schema.
+  if (!isNodeEnv) {
+    await cleanupTestSchemaData()
+  }
   
   // Store test project path for cleanup if it's a temporary directory
   if (isNodeEnv && testProjectPath && !options.projectPath) {
@@ -557,6 +575,10 @@ function scheduleTempDirCleanup(dir: string, fs: typeof import('fs')): void {
  */
 export async function teardownTestEnvironment(): Promise<void> {
   const isNodeEnv = typeof window === 'undefined'
+
+  if (!isNodeEnv) {
+    await cleanupTestSchemaFiles()
+  }
   
   if (isNodeEnv) {
     // Restore original working directory
