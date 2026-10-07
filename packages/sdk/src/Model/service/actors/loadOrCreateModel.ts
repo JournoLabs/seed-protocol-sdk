@@ -111,7 +111,9 @@ export const loadOrCreateModel = fromCallback<
             // This handles the case where Model.create was called with a generated ID, but the model
             // already exists in the database with a different ID. By updating the current instance's
             // schemaFileId to match the database, both will point to the same cached instance.
-            if (dbSchemaFileId) {
+            // Skip for schema models (_idFromSchema): their id is authoritative, and a same-name row
+            // with a different id belongs to another schema (e.g. two schemas that each define "Post").
+            if (dbSchemaFileId && !(_idFromSchema && schemaFileId && schemaFileId !== dbSchemaFileId)) {
               try {
                 const modelMod = await import('../../../Model/Model')
                 const { Model } = modelMod

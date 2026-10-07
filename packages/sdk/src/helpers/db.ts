@@ -243,15 +243,37 @@ export const getSqlResultObject = (
   return obj
 }
 /**
+ * True when the models row is linked (model_schemas) to any schema other than schemaId.
+ */
+const isModelLinkedToOtherSchema = async (
+  db: BetterSQLite3Database | SqliteRemoteDatabase,
+  modelId: number,
+  schemaId?: number,
+): Promise<boolean> => {
+  const links = await db
+    .select({ schemaId: modelSchemas.schemaId })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.modelId, modelId))
+  return links.some((l: { schemaId: number | null }) => l.schemaId !== schemaId)
+}
+
+/**
  * Find or create a models row by schemaFileId (preferred) or name.
  * Reuses an existing same-name row (especially schemaFileId=null stubs created via
  * ref resolution) instead of inserting a second row — models.name is not unique,
  * and duplicate names break createOrUpdate lookups (e.g. Resource.tags → Tag).
+ *
+ * When modelFileId is given, a same-name row that already carries a *different*
+ * non-null schemaFileId is only adopted if no other schema is linked to it via
+ * model_schemas. Otherwise it belongs to another schema (e.g. two schemas that each
+ * define "Post"), and re-id'ing it would strand that schema's cached Model instance,
+ * so a new row is inserted instead.
  */
 const findOrCreateModelRecord = async (
   db: BetterSQLite3Database | SqliteRemoteDatabase,
   modelName: string,
   modelFileId?: string,
+  schemaId?: number,
 ): Promise<NewModelRecord> => {
   if (modelFileId) {
     const byFileId = await db
@@ -279,16 +301,29 @@ const findOrCreateModelRecord = async (
 
   if (byName.length > 0) {
     // Prefer exact file-id match, then adoptable null schemaFileId stub, then any single row.
-    let chosen =
+    let chosen: NewModelRecord | undefined =
       (modelFileId
         ? byName.find((r) => r.schemaFileId === modelFileId)
         : undefined) ||
-      byName.find((r) => !r.schemaFileId) ||
-      (byName.length === 1 ? byName[0] : undefined) ||
-      byName.find((r) => !!r.schemaFileId) ||
-      byName[0]
+      byName.find((r) => !r.schemaFileId)
 
-    if (modelFileId && chosen.schemaFileId !== modelFileId) {
+    if (!chosen && modelFileId) {
+      // Every same-name row has a different file id. Only adopt one that no other
+      // schema claims; otherwise fall through and insert a row for this file id.
+      for (const candidate of byName) {
+        if (!(await isModelLinkedToOtherSchema(db, candidate.id!, schemaId))) {
+          chosen = candidate
+          break
+        }
+      }
+    } else if (!chosen) {
+      chosen =
+        (byName.length === 1 ? byName[0] : undefined) ||
+        byName.find((r) => !!r.schemaFileId) ||
+        byName[0]
+    }
+
+    if (chosen && modelFileId && chosen.schemaFileId !== modelFileId) {
       const conflict = await db
         .select()
         .from(modelsTable)
@@ -297,20 +332,20 @@ const findOrCreateModelRecord = async (
       if (conflict.length > 0) {
         return conflict[0] as NewModelRecord
       }
-      // Adopt stub (null schemaFileId) or sole same-name row by attaching this file id.
-      if (!chosen.schemaFileId || byName.length === 1) {
-        await db
-          .update(modelsTable)
-          .set({ schemaFileId: modelFileId, isEdited: false })
-          .where(eq(modelsTable.id, chosen.id!))
-        chosen = { ...chosen, schemaFileId: modelFileId, isEdited: false }
-        logger(
-          `Adopted existing model "${modelName}" (id: ${chosen.id}) with schemaFileId "${modelFileId}"`,
-        )
-      }
+      // Adopt stub (null schemaFileId) or an unclaimed same-name row by attaching this file id.
+      await db
+        .update(modelsTable)
+        .set({ schemaFileId: modelFileId, isEdited: false })
+        .where(eq(modelsTable.id, chosen.id!))
+      chosen = { ...chosen, schemaFileId: modelFileId, isEdited: false }
+      logger(
+        `Adopted existing model "${modelName}" (id: ${chosen.id}) with schemaFileId "${modelFileId}"`,
+      )
     }
 
-    return chosen
+    if (chosen) {
+      return chosen
+    }
   }
 
   try {
@@ -996,10 +1031,10 @@ export const addModelsToDb = async (
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
 
-      let modelRecord = await findOrCreateModelRecord(db, modelName, modelFileId)
+      let modelRecord = await findOrCreateModelRecord(db, modelName, modelFileId, schemaRecord?.id)
 
       // Keep schemaFileId aligned when findOrCreate returned a row that still needs adoption
-      // (e.g. sole same-name row that already had a different non-null id — rare).
+      // (rare: findOrCreate handles stubs and unclaimed same-name rows itself).
       if (modelFileId && modelRecord.schemaFileId !== modelFileId) {
         const existingWithFileId = await db
           .select()
@@ -1108,7 +1143,7 @@ export const addModelsToDb = async (
         const refModelFileId = schemaFileData?.modelFileIds?.get(refModelName)
         const refModel = cachedRef
           ? cachedRef
-          : await findOrCreateModelRecord(db, refModelName, refModelFileId)
+          : await findOrCreateModelRecord(db, refModelName, refModelFileId, schemaRecord?.id)
         if (!cachedRef) {
           modelRecords.set(refModelName, refModel)
         }
