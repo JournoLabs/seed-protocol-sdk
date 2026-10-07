@@ -29,40 +29,89 @@ The local DB used to blur schemas in a different way:
   can't say which seeds it actually wants.
 
 What developers expect: if my `Post` defines `title` and `content`, the SDK should bring
-down the `Post` seeds that have those properties, and associate them with my schema. If
-I mark both as required, only seeds that have both.
+down the `Post` seeds that have either of those properties, and associate them with my
+schema. If I mark both as needed for matching, only seeds that have both. By default any
+version's attestations count. A developer can ask for strict matching against the latest
+version instead.
 
 ## Decision
 
 ### 1. A schema's models filter which seeds it sees
 
-For each model in a schema, a seed of that type **matches** when its latest version
-has property attestations that satisfy the model's definition:
+Each property in a schema file gets a `match` field that says how it decides whether a
+seed of that model belongs to the schema:
 
-- If any of the model's properties are `required`, every required property must be
-  present.
-- Otherwise, at least one of the model's properties must be present.
+| `match` | Meaning |
+|---|---|
+| `'any'` (default) | Counts toward "the seed has at least one of the model's properties" |
+| `'required'` | The seed must have this property |
+| `'requiredTogether'` | The seed must have this property on the same version as every other `'requiredTogether'` property |
+| `'ignore'` | Never qualifies a seed (for example `storageTransactionId`) |
 
-"Present" means a canonical (latest per `refUID` + `schemaId`) attestation whose schema
-is `"<easType> <snake_name>"` for that property, the same string publish registers.
+```json
+"Post": {
+  "properties": {
+    "title":   { "type": "Text", "match": "requiredTogether" },
+    "content": { "type": "Text", "match": "requiredTogether" },
+    "summary": { "type": "Text" }
+  }
+}
+```
 
-`required` today means only "publishing fails if a required relation, image or file is
-missing" (`properties.required`, `getPublishPayload`). This ADR widens it to "an item of
-this model must have this property", which covers both meanings. Publish behaviour for
-non-relation properties doesn't change.
+A seed **matches** a model when, among the candidate attestations (see the modes
+below):
+
+- every `'required'` property has an attestation;
+- every `'requiredTogether'` property has an attestation, all on one version;
+- and, if the model has no `'required'` or `'requiredTogether'` properties, at least
+  one `'any'` property has an attestation.
+
+A property attestation counts when its schema is `"<easType> <snake_name>"` for that
+property (the string publish registers), it isn't revoked, and its `refUID` is a
+candidate version of the seed.
+
+`match` is separate from `required`. `required` keeps its current meaning: publish
+fails if a required relation, image or file is missing.
+
+#### Loose and strict mode
+
+The mode decides which versions' attestations are candidates:
+
+- **Loose (default):** any version of the seed. An attestation of `title` on an old
+  version still counts after a newer version leaves it out. `'required'` properties may
+  come from different versions. `'requiredTogether'` properties must share one.
+- **Strict:** only the seed's latest version (highest `timeCreated` among its
+  non-revoked version attestations). `'required'` and `'requiredTogether'` behave the
+  same here, because there's only one version. A later change can add a time window for
+  choosing "latest", for example latest as of a given time.
+
+The mode is set in two places, and the per-call setting wins:
+
+- **Per model in the schema:** `"Post": { "matchMode": "strict", ... }`. The default is
+  `'loose'`.
+- **Per call:** a `matchMode` option on sync (`syncFromEas`) and on item reads
+  (`Item.all`, `useItems`, the local query source).
 
 ### 2. Seeds link to schemas in a local join table
 
-Add `seed_schemas (seed_local_id, schema_id, source, linked_at)`, unique on
-`(seed_local_id, schema_id)`. It is many-to-many: one `Post` seed can match a `{title}`
-schema and a `{title, content}` schema at the same time.
+Add `seed_schemas (seed_local_id, schema_id, source, matches_loose, matches_strict,
+evaluated_at)`, unique on `(seed_local_id, schema_id)`. It is many-to-many: one `Post`
+seed can match a `{title}` schema and a `{title, content}` schema at the same time.
+
+Both modes are stored, so a per-call `matchMode` can pick the column without
+re-evaluating. A strict match always implies a loose one: the strict candidates are a
+subset of the loose ones, and every rule only checks that attestations exist.
 
 - **Local create:** `Item.create` links the new seed to the schema of the model that
-  created it (`source = 'created'`).
+  created it, with `source = 'created'` and both columns true.
 - **Sync:** each synced seed is linked to every local schema whose model it matches
-  (`source = 'sync'`).
-- **Schema change:** when a schema's model definition changes, re-evaluate that model's
-  `sync` links from local metadata. `created` links are kept.
+  loosely (`source = 'sync'`). Seeds that match no schema in the requested mode aren't
+  stored.
+- **New versions:** `matches_loose` only ever turns true, because adding attestations
+  can't undo a loose match. `matches_strict` is re-evaluated when a seed gets a new
+  latest version.
+- **Schema change:** when a schema's model definition (`match` or `matchMode`) changes,
+  re-evaluate that model's `sync` links from local metadata. `created` links are kept.
 - **Schema destroy:** delete its links. A seed with no remaining links stays in the DB
   and is no longer listed (see 5).
 
@@ -79,23 +128,32 @@ EAS's GraphQL API can't express "seeds that have a version with a property attes
 in [A, B]". `AttestationWhereInput` has no relation to the attestation a `refUID` points
 at or to the attestations that point back, only a plain `refUID` string filter. So:
 
-- **Phase 1:** keep the forward fetch (seeds → versions → properties) and evaluate
-  matches in `runSyncFromEas` after properties are fetched. Store seeds, versions and
-  metadata only for seeds that match at least one local schema. Non-matching seeds are
-  skipped, not stored.
-- **Phase 2 (optimization):** fetch backwards to cut transfer. Query property
-  attestations by `schemaId in [schema's property UIDs]` and `attester in addresses`,
-  take their `refUID`s as version UIDs, then fetch those versions and their seeds,
-  filtered to the model's `bytes32 <snake>` schema. Then fetch the full property set for
-  matching versions only.
+- **Phase 1:** keep the forward fetch (seeds → all their versions → property
+  attestations) and evaluate both modes in `runSyncFromEas` after properties are fetched.
+  This is correct for both modes, because strict needs every version to find the latest.
+  Store seeds, versions and metadata only for seeds that match at least one local schema
+  in the effective mode. Skip the rest.
+- **Phase 2 (optimization, loose mode):** fetch backwards to cut transfer. Query
+  property attestations by `schemaId in [the model's matching property UIDs]` and
+  `attester in addresses`. Their `refUID`s are candidate version UIDs. Fetch those
+  versions, take their `refUID`s as seed UIDs, and keep seeds whose schema is the model's
+  `bytes32 <snake>`. Evaluate the rules on that set, then fetch full versions and
+  properties only for matching seeds. Strict mode keeps the phase 1 path, because the
+  latest version may carry none of the matching properties.
+
+`runSyncFromEas` today fetches versions only for seeds it newly inserted
+(`saveEasSeedsToDb` returns new UIDs only). Strict mode needs new versions of existing
+seeds too, so that has to be fixed first.
 
 ### 5. Reads default to the active schema
 
 Item reads take an optional schema and, when one is known, list only seeds linked to it
 through `seed_schemas`:
 
-- `getItemsData`, `Item.all`, `useItems` and the local query source gain a `schemaName`
-  option, next to the existing `addressFilter`.
+- `getItemsData`, `Item.all`, `useItems` and the local query source gain `schemaName`
+  and `matchMode` options, next to the existing `addressFilter`. The mode picks
+  `matches_loose` or `matches_strict`. Without one, the model's `matchMode` from the
+  schema applies.
 - The client gets an **active schema** (config, overridable per call). When it's set,
   reads use it by default. When it isn't, reads behave as today (by `seeds.type`), so
   existing apps keep working.
@@ -116,7 +174,9 @@ through `seed_schemas`:
 ### 7. Existing data
 
 A migration creates `seed_schemas` and backfills it. For each seed and each schema with
-a model of that type, it applies the match rule to the seed's local metadata. Seeds with
+a model of that type, it evaluates both modes against the seed's local metadata. Every
+existing property gets the default `match: 'any'`, so a seed with any of the model's
+properties keeps showing up. Seeds with
 no local versions (drafts) link to every schema with that model type, so nothing a user
 can see today disappears.
 
@@ -126,13 +186,15 @@ can see today disappears.
   different `Post` schemas no longer mix each other's items.
 - Sync stores less. Phase 1 transfers the same amount as today, and phase 2 transfers
   less.
-- Matching is evaluated against the latest version. A seed whose newer version drops a
-  required property stops matching on the next sync. Its `sync` link is removed and it
-  drops out of that schema's lists. Local data isn't deleted.
+- In loose mode (the default), a seed that matches never stops matching as new versions
+  arrive, so links are stable. In strict mode, a seed whose new latest version drops a
+  matching property stops matching on the next sync. It drops out of strict lists, and
+  its local data isn't deleted.
 - **Breaking for consumers that set an active schema:** lists shrink to matching seeds.
   Apps that don't set one see no change. That needs a minor version and release notes.
-- `required` gains a sync meaning. A schema that marks a property `required` for publish
-  validation also filters sync by it.
+- Schema files gain two optional fields, `match` on properties and `matchMode` on
+  models. Both default to today's widest behaviour, so existing files stay valid. Schema
+  file types, JSON import/export and the `properties` table need the new columns.
 - Many name-only lookups in the item layer (`loadOrCreateProperty`, `getPublishPayload`,
   `getPropertyIdForModelAndName`, `ModelProperty.instanceCache` keyed
   `modelName:propertyName`) need the schema threaded through. That work is mechanical
@@ -152,17 +214,23 @@ can see today disappears.
   the request is to bring down only matching seeds, and the DB keeps growing with seeds
   no schema wants. Read-time filtering is still what lists use; this ADR adds
   sync-time filtering on top.
-- **A new property flag instead of widening `required`.** It avoids changing what
-  `required` means, but developers would set two flags for one idea ("an item of this
-  model has this property").
+- **Reusing `required` for matching.** It already means "publish fails if a required
+  relation is missing". Overloading it would make one flag do two jobs, and there'd be
+  no way to say "these must appear together".
+- **A boolean flag (`matchRequired`).** It can't express "counts toward any", "must share
+  a version" or "ignore" without more flags.
+- **Strict as the only mode.** Simpler, but a seed would disappear from lists whenever
+  an edit leaves a property out of the newest version, and the loose reverse-fetch sync
+  wouldn't be possible.
 
 ## Open questions
 
-- Match against the latest version only, or any version? This ADR says latest.
-- Should a model be able to opt out of filtering (sync every seed of the type), for
-  example a `Tag` model used only as a relation target? Related seeds fetched by
+- **Opting out of filtering:** should a model be able to sync every seed of its type,
+  for example a `Tag` model used only as a relation target? Related seeds fetched by
   `getRelatedSeedsAndVersions` probably bypass the filter regardless.
-- Where the active schema lives: client config, `SeedProvider` prop, or both.
-- Does `syncDbWithEas`'s "only newly inserted seeds get versions fetched" behaviour
-  (`saveEasSeedsToDb` returns new UIDs only) need fixing first? Matching needs current
-  versions for existing seeds too.
+- **Active schema:** where does it live: client config, a `SeedProvider` prop, or
+  both?
+- **Strict time window:** what form should it take ("latest as of T", or a
+  `[from, to]` window), and is it per call only?
+- **Internal properties:** should they default to `match: 'ignore'` instead of `'any'`?
+  Examples are `storageTransactionId` and list-relation `*_ids`.
