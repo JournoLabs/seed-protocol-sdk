@@ -67,6 +67,8 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   propertyRecordSchema?: PropertyType
   isRelation: boolean
   modelName: string
+  /** schemaFileId of the owning item's models row; scopes property-definition lookups to that model. */
+  modelFileId?: string
   isDbReady: boolean
   renderValue?: any
   storageTransactionId?: string

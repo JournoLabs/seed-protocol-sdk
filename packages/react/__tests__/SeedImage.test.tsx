@@ -29,6 +29,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { waitForItemPersisted } from './test-utils/persistence'
 
 const testSchemaWithImage: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -275,8 +276,6 @@ describe('SeedImage integration tests', () => {
       { timeout: 15000 }
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
     // Pass the schema's modelFileId so this resolves the imported Post instead of creating a
     // runtime "Post 1", "Post 2", ... on every test.
     const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, {
@@ -291,11 +290,12 @@ describe('SeedImage integration tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_SEED_IMAGE_NAME,
       title: 'Test Post with Image',
     })
     await waitForItemIdle(testItem)
 
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await waitForItemPersisted(testItem!, { title: 'Test Post with Image' })
   })
 
   afterEach(async () => {

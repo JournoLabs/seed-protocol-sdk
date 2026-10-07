@@ -8,7 +8,7 @@ import { addModelsToDb } from '@/helpers/db'
 import { createModelFromJson } from '@/imports/json'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import { eq, desc } from 'drizzle-orm'
+import { and, eq, desc } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
 export type AddModelsMachineContext = {
@@ -94,14 +94,20 @@ export const addModelsMachine = setup({
           logger(`Creating model instance for "${modelName}"`)
           
           // Look up modelFileId from database BEFORE creating the Model instance
-          let modelFileId: string | undefined = undefined
+          // Model names are only unique per schema: use the schema file's id, else this schema's row
+          // (never a same-name model from another schema).
+          let modelFileId: string | undefined =
+            typeof (modelData as { id?: unknown })?.id === 'string' ? (modelData as { id: string }).id : undefined
           try {
             const db = BaseDb.getAppDb()
-            if (db) {
+            if (db && !modelFileId && schemaName) {
+              const { modelSchemas } = await import('@/seedSchema/ModelSchemaSchema')
               const dbModels = await db
-                .select()
+                .select({ schemaFileId: modelsTable.schemaFileId })
                 .from(modelsTable)
-                .where(eq(modelsTable.name, modelName))
+                .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+                .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+                .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
                 .limit(1)
               
               if (dbModels.length > 0 && dbModels[0].schemaFileId) {

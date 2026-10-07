@@ -1,3 +1,4 @@
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
 import { parseFragment, serialize } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
 import { eq } from 'drizzle-orm'
@@ -178,6 +179,7 @@ async function deleteCoPublishRowsForParent(appDb: ReturnType<typeof BaseDb.getA
 export async function createImageItemFromDataUri(dataUri: string): Promise<{ seedLocalId: string }> {
   const imageItem = await Item.create({
     modelName: 'Image',
+    modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
   })
   await waitForEntityIdle(imageItem, { timeout: 60_000 })
   const st =

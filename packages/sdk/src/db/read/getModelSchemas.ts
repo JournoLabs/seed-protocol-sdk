@@ -42,7 +42,8 @@ export const getModelSchemas: GetModelSchemas = async () => {
       })
       .from(modelsTable)
       .leftJoin(modelUids, eq(modelsTable.id, modelUids.modelId))
-      .where(eq(modelsTable.name, modelName))
+      // Model names are only unique per schema: use this model's own row
+      .where(model.id ? eq(modelsTable.schemaFileId, model.id) : eq(modelsTable.name, modelName))
       .limit(1)
 
     if (!foundModelQuery[0]) {

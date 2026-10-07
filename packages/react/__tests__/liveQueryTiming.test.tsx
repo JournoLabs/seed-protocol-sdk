@@ -19,6 +19,8 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { eq, and, isNotNull } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { Observable } from 'rxjs'
+import { waitForItemPersisted } from './test-utils/persistence'
+import { waitUntil } from './test-utils/waitUntil'
 
 // Test schema
 const testSchema: SchemaFileFormat = {
@@ -117,7 +119,6 @@ describe('LiveQuery Timing Investigation', () => {
       { timeout: 15000 }
     )
 
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(async () => {
@@ -152,8 +153,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      // Wait for properties to be saved
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Test Item', value: 'Test Value' })
 
       // Measure time: Direct query
       const directQueryStart = performance.now()
@@ -277,8 +277,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      // Wait for properties to be saved
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Existing Item', value: 'Existing Value' })
 
       // Verify data exists with direct query
       const directResults = await db
@@ -395,7 +394,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Transaction Test Item', value: 'Initial Value' })
 
       // Set up reactive query BEFORE updating
       let emissionCount = 0
@@ -435,7 +434,7 @@ describe('LiveQuery Timing Investigation', () => {
       })
 
       // Wait for initial emission
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await waitUntil(() => emissionCount >= 1, 5000)
 
       console.log(`[Transaction Test] Initial emission count: ${emissionCount}`)
       console.log(`[Transaction Test] Initial emission records: ${initialEmission?.length || 0}`)
@@ -460,7 +459,7 @@ describe('LiveQuery Timing Investigation', () => {
         console.log(`[Transaction Test] Property update took ${updateTime.toFixed(2)}ms`)
 
         // Wait for reactive query to detect change
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await waitUntil(() => emissionCount >= 2) // the test tolerates the update emission not arriving
 
         console.log(`[Transaction Test] Total emissions: ${emissionCount}`)
         console.log(`[Transaction Test] Update emission records: ${updateEmission?.length || 0}`)
@@ -514,7 +513,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Drizzle Test Item', value: 'Drizzle Test Value' })
 
       // Test 1: Create Drizzle query builder
       const queryBuilderStart = performance.now()

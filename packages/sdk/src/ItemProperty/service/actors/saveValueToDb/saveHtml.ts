@@ -1,3 +1,4 @@
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import {
@@ -63,6 +64,7 @@ export const saveHtml = fromCallback<
 
     const newHtmlSeedLocalId = await createSeed({
       type: 'html',
+      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.html,
     })
 
     const fileName = `${newHtmlSeedLocalId}.html`

@@ -1,3 +1,4 @@
+import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { metadata, MetadataType } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
 import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
@@ -25,7 +26,11 @@ export class MetadataValidationError extends Error {
   }
 }
 
-type CreateMetadataOptions = { skipValidation?: boolean }
+type CreateMetadataOptions = {
+  skipValidation?: boolean
+  /** schemaFileId of the item's models row; otherwise read from the seed (seeds.model_file_id). */
+  modelFileId?: string
+}
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType> & { modelName?: string },
@@ -163,13 +168,20 @@ export const createMetadata: CreateMetadata = async (
     if (typeof schemaId === 'number' && Number.isInteger(schemaId)) {
       metadataValues.propertyId = schemaId
     } else if (modelKey) {
+      // Model names are only unique per schema: resolve against the item's own model row.
+      const modelFileId = await resolveItemModelFileId({
+        modelFileId: options?.modelFileId,
+        seedLocalId: metadataValues.seedLocalId,
+        seedUid: metadataValues.seedUid,
+      })
       if (typeof schemaId === 'string' && schemaId) {
         metadataValues.propertyId =
-          (await getPropertyIdForSchemaFileId(modelKey, schemaId)) ?? undefined
+          (await getPropertyIdForSchemaFileId(modelKey, schemaId, { modelFileId })) ?? undefined
       }
       if (metadataValues.propertyId == null && metadataValues.propertyName) {
         metadataValues.propertyId =
-          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName)) ?? undefined
+          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName, { modelFileId })) ??
+          undefined
       }
     }
   }

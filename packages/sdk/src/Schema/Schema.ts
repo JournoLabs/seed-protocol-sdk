@@ -1260,13 +1260,21 @@ export class Schema {
     const { ModelProperty } = modelPropertyMod
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
-      const cacheKey = `${modelName}:${propertyName}`
       
       const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
         instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
       }
       
-      const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
+      // Model names are only unique per schema: pick this schema's instance, which may be keyed by id.
+      const thisSchemaName = this.schemaName
+      const cachedInstance = [...ModelPropertyClass.instanceCache.values()].find(({ instance }) => {
+        const ctx = instance.getService().getSnapshot().context
+        return (
+          ctx.modelName === modelName &&
+          ctx.name === propertyName &&
+          (!ctx._schemaName || ctx._schemaName === thisSchemaName)
+        )
+      })
       
       if (cachedInstance) {
         const modelProperty = cachedInstance.instance
@@ -1280,12 +1288,10 @@ export class Schema {
         // Clear isEdited flag in database
         try {
           if (db && modelName && propertyName) {
-            // Find model by name
-            const modelRecords = await db
-              .select({ id: modelsTable.id })
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
+            // Find this schema's model by name
+            const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+            const modelRecord = await resolveModelRecord(modelName, { schemaName: thisSchemaName }, db)
+            const modelRecords = modelRecord ? [modelRecord] : []
             
             if (modelRecords.length > 0) {
               // Find property by name and modelId

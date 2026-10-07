@@ -136,6 +136,25 @@ testDescribe('ownership address policy', () => {
     expect(await isItemOwned({ seedLocalId: stampedId })).toBe(true)
   })
 
+  it('isItemOwned prefers the localId row over another row sharing the uid', async () => {
+    const { client } = await import('@/client')
+    const t = Date.now()
+    const sharedUid = '0x' + '7'.repeat(64)
+    const strayId = `owned-stray-${t}`
+    const ownId = `owned-own-${t}`
+    // Inserted first so a `localId OR uid` LIMIT 1 lookup would tend to return it.
+    await insertListedSeed({ localId: strayId, publisher: null, uid: sharedUid })
+    await insertListedSeed({ localId: ownId, publisher: OWNED, uid: sharedUid })
+
+    await client.setAddresses({ owned: [OWNED] })
+    expect(await isItemOwned({ seedLocalId: ownId, seedUid: sharedUid })).toBe(true)
+    expect(await isItemOwned({ seedLocalId: strayId, seedUid: sharedUid })).toBe(false)
+    // localId with no row: falls back to uid.
+    const fallbackUid = '0x' + '8'.repeat(64)
+    await insertListedSeed({ localId: `owned-fallback-${t}`, publisher: OWNED, uid: fallbackUid })
+    expect(await isItemOwned({ seedLocalId: `missing-${t}`, seedUid: fallbackUid })).toBe(true)
+  })
+
   it('claimUnpublishedDrafts stamps unsealed rows and skips sealed', async () => {
     const { client } = await import('@/client')
     const t = Date.now()

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
@@ -577,9 +577,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         { timeout: 5000 }
       )
       
-      // Wait for model properties to be loaded
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       // Get property schema from model
       const modelProperties = model.properties
       const descriptionProperty = modelProperties.find(p => p.name === 'description' || p.name === 'Description')
@@ -675,9 +672,6 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitForItemIdle(item)
       const seedLocalId = item.seedLocalId
       
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
       // Find property
       const property = await ItemProperty.find({
         propertyName: 'title',
@@ -727,9 +721,6 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Publish item to get seedUid (if not already published)
       // For now, we'll use seedLocalId if seedUid is not available
       const seedUid = item.seedUid || item.seedLocalId
-      
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
       
       // Find property by seedUid
       const property = await ItemProperty.find({
@@ -794,9 +785,6 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitForItemIdle(item)
       const seedLocalId = item.seedLocalId
       
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
       // Find with waitForReady: false - should return immediately
       const property = await ItemProperty.find({
         propertyName: 'title',
@@ -839,7 +827,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         content: 'All Test Content',
       })
       await waitForItemIdle(item)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
 
       const allProperties = await ItemProperty.all({ seedLocalId: item.seedLocalId })
       expect(allProperties).toBeDefined()
@@ -873,7 +860,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         title: 'WaitForReady Test',
       })
       await waitForItemIdle(item)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
 
       const allProperties = await ItemProperty.all(
         { seedLocalId: item.seedLocalId },
@@ -1010,11 +996,8 @@ testDescribe('ItemProperty Integration Tests', () => {
         
         // Set new value
         titleProperty.value = 'Updated Value'
-        
-        // Wait a bit for the value to update
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        expect(titleProperty.value).toBe('Updated Value')
+
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: 5000, interval: 50 })
       }
     })
 
@@ -1627,9 +1610,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'Updated Title'
         
-        // Wait a bit for the value to be set
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
         // Save property
         await titleProperty.save()
         
@@ -1639,9 +1619,6 @@ testDescribe('ItemProperty Integration Tests', () => {
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
           { timeout: 10000 }
         )
-        
-        // Wait longer for database write to complete (save is async)
-        await new Promise(resolve => setTimeout(resolve, 2000))
         
         // Verify value was saved in the property
         expect(titleProperty.value).toBe('Updated Title')
@@ -1830,8 +1807,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'New Value'
         
-        // Wait for subscription to fire
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: 5000, interval: 50 })
         
         // Unsubscribe
         subscription.unsubscribe()
@@ -1912,7 +1888,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Note: XState services don't have a direct "stopped" state we can check,
         // but unload() calls service.stop() which should stop the service
         // We can verify by checking that the service is no longer active
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Property should still be accessible (unload doesn't delete the instance)
         expect(titleProperty.propertyName).toBe('title')
@@ -2052,11 +2027,8 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update property value
         titleProperty.value = 'Updated'
         
-        // Wait for update
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
         // Property value should be updated
-        expect(titleProperty.value).toBe('Updated')
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: 5000, interval: 50 })
       }
     })
   })

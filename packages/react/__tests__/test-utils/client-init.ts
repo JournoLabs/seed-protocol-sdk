@@ -171,8 +171,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
       `Database not ready: ${error instanceof Error ? error.message : String(error)}`
     )
   }
-
-  await new Promise((r) => setTimeout(r, 500))
 }
 
 export async function getTestProjectPath(): Promise<string> {

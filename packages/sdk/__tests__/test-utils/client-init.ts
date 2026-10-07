@@ -365,9 +365,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
   } catch (error: any) {
     throw new Error(`Database not ready after initialization: ${error?.message || String(error)}`)
   }
-  
-  // Small delay to ensure everything is fully settled
-  await new Promise(resolve => setTimeout(resolve, 500))
 }
 
 /**

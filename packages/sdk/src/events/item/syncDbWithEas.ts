@@ -1,3 +1,5 @@
+import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
+import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { camelCase, startCase } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
 import {
@@ -135,11 +137,20 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds }) => {
           ? Math.floor(Date.now() / 1000)
           : undefined
 
+    // EAS only knows the model by name; the seam may match it to a local model (not built yet).
+    const modelFileId = await resolveModelForSyncedSeed({
+      seedUid: seed.id,
+      seedLocalId,
+      modelType: seed.schema.schemaNames[0].name,
+      schemaUid: seed.schemaId,
+    })
+
     newSeedsData.push({
       localId: seedLocalId,
       uid: seed.id,
       schemaUid: seed.schemaId,
       type: seed.schema.schemaNames[0].name,
+      ...(modelFileId && { modelFileId }),
       publisher: seed.attester ? normalizeHexAddress(seed.attester) : seed.attester,
       createdAt: Date.now(),
       attestationCreatedAt: seed.timeCreated * 1000,
@@ -322,7 +333,11 @@ const createMetadataRecordsForStorageTransactionId = async (
     const modelType = seedUidToModelType.get(seedUid)
     const propertyId =
       modelType != null
-        ? await getPropertyIdForModelAndName(modelType, _propertyName)
+        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
+            getPropertyIdForModelAndName(modelType, _propertyName, {
+              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+            }),
+          )) ?? null)
         : null
 
     const propertyLocalId = generateId()
@@ -542,7 +557,12 @@ const saveEasPropertiesToDbBody = async ({
 
     const propertyId =
       modelType != null
-        ? await getPropertyIdForModelAndName(modelType, propertyName)
+        ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
+            getPropertyIdForModelAndName(modelType, propertyName, {
+              // EAS identifies models by name only; a locally-created seed still knows its model.
+              modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+            }),
+          )) ?? null)
         : null
     const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
 

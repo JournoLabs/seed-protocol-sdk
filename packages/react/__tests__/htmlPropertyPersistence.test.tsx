@@ -215,8 +215,6 @@ describe('Html property persistence integration tests', () => {
       { timeout: 15000 }
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
     const model = Model.create('Post', 'Test Schema Html Persistence', { waitForReady: false })
     await xstateWaitFor(
       model.getService(),
@@ -226,6 +224,7 @@ describe('Html property persistence integration tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema Html Persistence',
       title: 'Test Post',
       html: '<h1>Test HTML</h1>',
     })
