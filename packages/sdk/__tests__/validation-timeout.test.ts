@@ -154,11 +154,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(result.errors).toEqual([])
     }, 30000)
 
-    // KNOWN SDK BUG: schemaMachine's `validating` state handles validationError with a bare `target: 'idle'`,
-    // which overrides the root handler that stores the errors, so Schema.validate() always reports isValid:
-    // true. (Simply storing them would hit idle's `always: hasValidationErrors -> validating` and loop, as the
-    // model machine does.) it.fails keeps this documented; flip back to it() once fixed.
-    it.fails('should always return validation result for invalid schema (missing metadata)', async () => {
+    it('should always return validation result for invalid schema (missing metadata)', async () => {
       const schemaName = `test-schema-${generateId()}`
       const schema = Schema.create(schemaName, { waitForReady: false })
       
@@ -179,8 +175,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(result.errors.some(e => e.field === 'metadata' || e.field === 'schemaName')).toBe(true)
     }, 30000)
 
-    // Same known schemaMachine bug as above.
-    it.fails('should always return validation result for invalid schema (missing schemaName)', async () => {
+    it('should always return validation result for invalid schema (missing schemaName)', async () => {
       const schemaName = `test-schema-${generateId()}`
       const schema = Schema.create(schemaName, { waitForReady: false })
       
@@ -233,8 +228,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(Array.isArray(result.errors)).toBe(true)
     }, 60000)
 
-    // Same known schemaMachine bug as above.
-    it.fails('should handle validation errors gracefully and always return', async () => {
+    it('should handle validation errors gracefully and always return', async () => {
       const schemaName = `test-schema-${generateId()}`
       const schema = Schema.create(schemaName, { waitForReady: false })
       
@@ -321,12 +315,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(Array.isArray(result.errors)).toBe(true)
     }, 30000)
 
-    // KNOWN SDK BUG: when model validation fails, modelMachine goes validating -> idle with the errors stored,
-    // and idle's `always: hasValidationErrors -> validating` re-enters validation forever, so the actor never
-    // settles and validate() only returns via its 15s fallback. (properties: null, which this test used to set,
-    // is valid now; an invalid value such as a string triggers the loop.) Skipped rather than it.fails because
-    // running it leaves an actor spinning for the rest of the file.
-    it.skip('should handle validation errors gracefully and always return', async () => {
+    // properties: null, which this test used to set, is valid now; a non-object value is not.
+    it('should handle validation errors gracefully and always return', async () => {
       const schemaName = `test-schema-${generateId()}`
       const modelName = 'TestModel'
       const schemaData = createTestSchema(schemaName, {
@@ -471,18 +461,20 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       })
     }, 60000)
 
-    // Same known modelMachine validation loop as above: an invalid model never settles. (The old way of making
-    // invalid models, Model.create with an empty schema name, now throws.)
-    it.skip('should handle mixed valid and invalid concurrent validations', async () => {
+    it('should handle mixed valid and invalid concurrent validations', async () => {
       const schemaName = `test-schema-${generateId()}`
       
       // Create valid schema
+      const invalidModelNames = Array.from({ length: 5 }, (_, i) => `InvalidModel${i}`)
       const schemaData = createTestSchema(schemaName, {
         ValidModel: {
           properties: {
             title: { dataType: 'String' },
           },
         },
+        ...Object.fromEntries(
+          invalidModelNames.map(name => [name, { properties: { title: { dataType: 'String' } } }]),
+        ),
       })
       await importSchema(schemaData)
       const schema = Schema.create(schemaName, { waitForReady: false })
@@ -492,8 +484,12 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       const validModel = getSchemaModel(schemaData, 'ValidModel')
       await waitForModelIdle(validModel)
 
-      // Create invalid models (missing schemaName)
-      const invalidModels = Array.from({ length: 5 }, () => Model.create('InvalidModel', ''))
+      // Make the rest invalid. (Model.create with an empty schema name, the old way, now throws.)
+      const invalidModels = invalidModelNames.map(name => getSchemaModel(schemaData, name))
+      await Promise.all(invalidModels.map(model => waitForModelIdle(model)))
+      invalidModels.forEach(model => {
+        model.getService().send({ type: 'updateContext', properties: 'not-an-object' })
+      })
 
       // Run all validations concurrently
       const validations = [

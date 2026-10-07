@@ -20,10 +20,12 @@ import {
   Schema,
   Model,
   Item,
+  BaseFileManager,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { and, eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -135,6 +137,29 @@ async function deleteTestSchemaItemsHooksRows(): Promise<void> {
   await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
   await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
   await db.delete(schemas).where(eq(schemas.id, schemaId))
+}
+
+/**
+ * Remove the schema JSON file that importJsonSchema writes to the shared OPFS working dir.
+ * If it is left behind, client.init in the next browser test file re-imports this schema, and that
+ * file's own `Post` model then reuses (and re-ids) this schema's `Post` row by name.
+ */
+async function deleteTestSchemaItemsHooksFile(): Promise<void> {
+  try {
+    const path = BaseFileManager.getPathModule()
+    const workingDir = BaseFileManager.getWorkingDir()
+    const sanitizedName = TEST_SCHEMA_ITEMS_HOOKS_NAME.replace(/\s+/g, '_')
+    const filePath = path.join(
+      workingDir,
+      `${testSchemaWithItems.id}_${sanitizedName}_v${testSchemaWithItems.version}.json`,
+    )
+    if (await BaseFileManager.pathExists(filePath)) {
+      const fs = await BaseFileManager.getFs()
+      await fs.promises.unlink(filePath)
+    }
+  } catch {
+    // File may not exist
+  }
 }
 
 // Helper function to wait for item to be in idle state
@@ -442,6 +467,7 @@ describe('React Item Hooks Integration Tests', () => {
 
   afterAll(async () => {
     await deleteTestSchemaItemsHooksRows()
+    await deleteTestSchemaItemsHooksFile()
     Schema.clearCache()
   })
 
@@ -451,6 +477,7 @@ describe('React Item Hooks Integration Tests', () => {
     document.body.appendChild(container)
 
     await deleteTestSchemaItemsHooksRows()
+    await deleteTestSchemaItemsHooksFile()
     Schema.clearCache()
 
     // Import test schema
@@ -1303,6 +1330,33 @@ describe('React Item Hooks Integration Tests', () => {
       expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a delete the service finishes before an effect could subscribe', async () => {
+      render(<UseDeleteItemTest item={createFastDestroyStub<Item<any>>({ destroyError: 'stub delete failed' })} />, { container })
+
+      screen.getByTestId('delete-item-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('delete-item-error').textContent).toBe('stub delete failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('delete-item-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('delete-item-error')).toBeNull()
+      })
+    })
+
     it('should delete an item and set loading state during delete', async () => {
       if (!testItem2) return
 
@@ -1322,8 +1376,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const isLoading = scope.getByTestId('delete-item-is-loading')
-          return isLoading.textContent === 'true'
+          expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('true')
         },
         { timeout: 3000 }
       )
@@ -1334,6 +1387,12 @@ describe('React Item Hooks Integration Tests', () => {
         scope.findByText('error', { timeout: 20000 }),
       ])
       expect(['deleted', 'error']).toContain(statusEl.textContent)
+      await waitFor(
+        () => {
+          expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('false')
+        },
+        { timeout: 5000 }
+      )
     })
   })
 })

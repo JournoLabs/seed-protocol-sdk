@@ -27,6 +27,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 
 /** Delete a schema row and all FK-dependent rows (matches Schema.destroy ordering). */
 async function removeSchemaByName(
@@ -889,6 +890,33 @@ describe('React Model Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyModelTest model={createFastDestroyStub<Model>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-model-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-model-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-model-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-model-error')).toBeNull()
+      })
+    })
+
     it(
       'should destroy a model and set loading state during destroy',
       async () => {
@@ -912,27 +940,18 @@ describe('React Model Hooks Integration Tests', () => {
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-model-is-loading')
-            return isLoading.textContent === 'true'
+            expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
           },
           { timeout: 2000 }
         )
 
-        // Let destroy() complete and React flush setStatus('destroyed') (destroy resolves in ~10ms)
-        await act(async () => {
-          await new Promise((r) => setTimeout(r, 100))
-        })
-
         await waitFor(
           () => {
-            const status = screen.getByTestId('destroy-model-status')
-            return status.textContent === 'destroyed' || status.textContent === 'error'
+            expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
+            expect(['destroyed', 'error']).toContain(screen.getByTestId('destroy-model-status').textContent)
           },
           { timeout: 25000 }
         )
-
-        const status = screen.getByTestId('destroy-model-status')
-        expect(['destroyed', 'error']).toContain(status.textContent)
       },
       30000
     )

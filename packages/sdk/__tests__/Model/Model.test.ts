@@ -4,11 +4,7 @@ import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { schemas } from '@/seedSchema/SchemaSchema'
-import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
-import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -17,6 +13,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
@@ -108,105 +105,12 @@ testDescribe('Model Integration Tests', () => {
   }, 90000) // Increased timeout to allow for full initialization
 
   afterAll(async () => {
-    // Clean up - delete in order to respect foreign key constraints
-    const db = BaseDb.getAppDb()
-    if (db) {
-      // First, nullify refModelId in properties to break self-referential foreign keys
-      await db.update(properties).set({ refModelId: null })
-      // Delete in order: propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
-      await db.delete(propertyUids)
-      await db.delete(modelUids)
-      await db.delete(properties)
-      await db.delete(modelSchemas)
-      await db.delete(modelsTable)
-      await db.delete(schemas)
-    }
+    await cleanupTestSchemaData()
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      const { eq, ne, notInArray, sql } = await import('drizzle-orm')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.update(properties).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(properties)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
-    }
+    // FK-safe; keeps the Seed Protocol schema, which client initialization needs
+    await cleanupTestSchemaData()
 
     // Clean up model files (Node.js only)
     if (isNodeEnv && fsModule) {
