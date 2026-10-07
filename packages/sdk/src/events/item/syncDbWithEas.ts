@@ -15,7 +15,7 @@ import {
   versions,
   VersionsType,
 } from '@/seedSchema'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import {
   generateId,
 } from '@/helpers'
@@ -535,7 +535,90 @@ const saveEasPropertiesToDbBody = async ({
       .where(eq(metadata.uid, uid))
   }
 
+  await syncDerivedStorageRows({ fetchedProperties, canonicalProperties: itemProperties })
+
   return { propertyUids }
+}
+
+/** The transaction id a `storage_transaction_id` attestation carries; undefined for other properties. */
+const storageTransactionIdOf = (property: Attestation): string | undefined => {
+  const parsed = parseEasPropertyMetadata(property.decodedDataJson)
+  if (!parsed.ok || parsed.metadata.name !== 'storage_transaction_id') return undefined
+  const { value } = parsed.metadata
+  // Same serialization as the derived rows' property_value.
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+/**
+ * Rows `createMetadataRecordsForStorageTransactionId` derived from a `storage_transaction_id`
+ * attestation. They have no uid of their own; what identifies them is what they're derived from,
+ * the key their creation dedupes on: no uid, `ref_value_type` 'file', the attestation's version
+ * and its transaction id as the value. Local edits of an ItemStorage property store a file name
+ * (`<seed>.<ext>`), never a bare transaction id, so they don't match.
+ */
+const derivedStorageRowsWhere = (versionUid: string, transactionId: string) =>
+  and(
+    isNull(metadata.uid),
+    eq(metadata.refValueType, 'file'),
+    eq(metadata.versionUid, versionUid),
+    eq(metadata.propertyValue, transactionId),
+  )
+
+/**
+ * Make derived ItemStorage rows follow their `storage_transaction_id` attestation the way synced
+ * rows follow theirs: rows derived from a fetched attestation that isn't canonical are deleted
+ * (unless the canonical one carries the same transaction id), and rows derived from the canonical
+ * one take its `revoked_at`.
+ */
+const syncDerivedStorageRows = async ({
+  fetchedProperties,
+  canonicalProperties,
+}: {
+  fetchedProperties: Attestation[]
+  canonicalProperties: Attestation[]
+}): Promise<void> => {
+  const canonical = canonicalProperties
+    .map((property) => ({ property, transactionId: storageTransactionIdOf(property) }))
+    .filter((c): c is { property: Attestation; transactionId: string } => !!c.transactionId)
+  const canonicalUids = new Set(canonicalProperties.map((property) => property.id))
+  const canonicalTransactionIds = new Set(
+    canonical.map((c) => `${c.property.refUID}|${c.transactionId}`),
+  )
+
+  const appDb = BaseDb.getAppDb()
+
+  for (const property of fetchedProperties) {
+    if (canonicalUids.has(property.id)) continue
+    const transactionId = storageTransactionIdOf(property)
+    if (!transactionId) continue
+    if (canonicalTransactionIds.has(`${property.refUID}|${transactionId}`)) continue
+    await appDb.delete(metadata).where(derivedStorageRowsWhere(property.refUID, transactionId))
+  }
+
+  if (canonical.length === 0) return
+
+  // The canonical rows' revoked_at as just stored (the saves above already applied EAS's state).
+  const sourceRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await appDb
+    .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
+    .from(metadata)
+    .where(inArray(metadata.uid, canonical.map((c) => c.property.id)))
+  const revokedAtByUid = new Map(sourceRows.map((row) => [row.uid, row.revokedAt ?? null]))
+
+  for (const { property, transactionId } of canonical) {
+    if (!revokedAtByUid.has(property.id)) continue
+    const revokedAt = revokedAtByUid.get(property.id) ?? null
+    await appDb
+      .update(metadata)
+      .set({ revokedAt, updatedAt: Date.now() })
+      .where(
+        and(
+          derivedStorageRowsWhere(property.refUID, transactionId),
+          revokedAt == null
+            ? isNotNull(metadata.revokedAt)
+            : or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
+        ),
+      )
+  }
 }
 
 const insertSyncedProperties = async ({
