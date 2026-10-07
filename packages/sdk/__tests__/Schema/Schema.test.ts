@@ -79,10 +79,23 @@ async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<v
   }
 }
 
-// A runtime Model writes itself to the DB in the background. Wait for that write, or it can land after
-// the next test's beforeEach has deleted the schema it targets.
-async function waitForModelPersisted(model: Model, timeout: number = 5000): Promise<void> {
-  await waitFor(model.getService(), (snapshot) => snapshot.context._dbId != null, { timeout })
+// A runtime Model writes itself to the DB in the background, and each of its properties is then written by
+// its own ModelProperty. Wait for those rows, or a write can land after the next test's beforeEach has
+// deleted the schema it targets.
+async function waitForModelPersisted(model: Model, propertyNames: string[] = [], timeout: number = 5000): Promise<void> {
+  const snapshot = await waitFor(model.getService(), (s) => s.context._dbId != null, { timeout })
+  if (propertyNames.length === 0) return
+  const modelId = snapshot.context._dbId as number
+  await vi.waitFor(
+    async () => {
+      const rows = await BaseDb.getAppDb()!
+        .select({ name: properties.name })
+        .from(properties)
+        .where(eq(properties.modelId, modelId))
+      expect(rows.map((row: { name: string }) => row.name)).toEqual(expect.arrayContaining(propertyNames))
+    },
+    { timeout },
+  )
 }
 
 // Helper to create a test schema
@@ -798,6 +811,7 @@ testDescribe('Schema Integration Tests', () => {
         waitForReady: false,
       })
       await waitForModelIdle(articleModel, 20000)
+      await waitForModelPersisted(articleModel, ['content'])
 
       // Schema.all() should return the schema, and when loaded, it should include
       // models from both the schemaData and the database
@@ -877,6 +891,7 @@ testDescribe('Schema Integration Tests', () => {
           // If timeout, wait a bit more and continue
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
+        await waitForModelPersisted(articleModel, ['content'])
         
         
         // Save new version
@@ -955,6 +970,7 @@ testDescribe('Schema Integration Tests', () => {
           // If timeout, wait a bit more and continue
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
+        await waitForModelPersisted(articleModel, ['content'])
         
         
         // Should throw ConflictError
