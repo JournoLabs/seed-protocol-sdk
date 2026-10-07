@@ -23,7 +23,7 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
-import { resolveModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
+import { resolveModelRecord, resolveRefModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType } from '@/helpers/property'
 
@@ -296,12 +296,26 @@ const findOrCreateModelRecord = async (
     .where(eq(modelsTable.name, modelName))) as NewModelRecord[]
 
   if (byName.length > 0) {
-    // Prefer exact file-id match, then adoptable null schemaFileId stub, then any single row.
-    let chosen: NewModelRecord | undefined =
-      (modelFileId
-        ? byName.find((r) => r.schemaFileId === modelFileId)
-        : undefined) ||
-      byName.find((r) => !r.schemaFileId)
+    // Prefer exact file-id match, then (for refs without a file id) this schema's row, then an
+    // adoptable null schemaFileId stub, then any single row.
+    let chosen: NewModelRecord | undefined = modelFileId
+      ? byName.find((r) => r.schemaFileId === modelFileId)
+      : undefined
+    if (!chosen && !modelFileId && schemaId && byName.length > 1) {
+      for (const candidate of byName) {
+        if (!(await isModelLinkedToOtherSchema(db, candidate.id!, schemaId))) {
+          const links = await (db as BetterSQLite3Database)
+            .select({ schemaId: modelSchemas.schemaId })
+            .from(modelSchemas)
+            .where(eq(modelSchemas.modelId, candidate.id!))
+          if (links.length > 0) {
+            chosen = candidate
+            break
+          }
+        }
+      }
+    }
+    chosen ??= byName.find((r) => !r.schemaFileId)
 
     if (!chosen && modelFileId) {
       // Every same-name row has a different file id. Only adopt one that no other
@@ -791,7 +805,12 @@ export const renameModelInDb = async (
       })
       .from(modelsTable)
       .where(eq(modelsTable.name, oldName))
-      .limit(1)
+    // Model names are only unique per schema: an unscoped rename must not pick one arbitrarily.
+    if (existingModels.length > 1) {
+      throw new Error(
+        `Model "${oldName}" exists in more than one schema; pass the schema name or id to rename it`,
+      )
+    }
   }
 
   if (existingModels.length === 0) {
@@ -886,6 +905,8 @@ async function checkIfPropertyIsEdited(
   modelName: string,
   propertyName: string,
   schemaFileValue?: { dataType?: string; ref?: string; refValueType?: string; required?: boolean },
+  /** The property's models row (model names are only unique per schema). */
+  modelId?: number,
 ): Promise<boolean> {
   try {
     // When schemaFileValue is provided (schema sync path), do database check FIRST.
@@ -895,11 +916,8 @@ async function checkIfPropertyIsEdited(
       const db = BaseDb.getAppDb()
       if (db) {
         // Find the model
-        const modelRecords = await db
-          .select()
-          .from(modelsTable)
-          .where(eq(modelsTable.name, modelName))
-          .limit(1)
+        const resolvedModel = await resolveModelRecord(modelName, { modelId }, db)
+        const modelRecords = resolvedModel ? [resolvedModel] : []
         
         if (modelRecords.length > 0) {
           const modelRecord = modelRecords[0]
@@ -926,13 +944,13 @@ async function checkIfPropertyIsEdited(
             
             // Check refModelId if it's a relation
             if (schemaFileValue.ref) {
-              const refModelRecords = await db
-                .select()
-                .from(modelsTable)
-                .where(eq(modelsTable.name, schemaFileValue.ref))
-                .limit(1)
-              if (refModelRecords.length > 0) {
-                const expectedRefModelId = refModelRecords[0].id
+              const refModelRecord = await resolveRefModelRecord(
+                schemaFileValue.ref,
+                { modelId: modelRecord.id },
+                db,
+              )
+              if (refModelRecord) {
+                const expectedRefModelId = refModelRecord.id
                 if (dbProperty.refModelId !== expectedRefModelId) {
                   logger(`Property ${modelName}:${propertyName} has been edited (refModelId differs)`)
                   return true
@@ -1203,6 +1221,7 @@ export const addModelsToDb = async (
                 refValueType: propertyValues.refValueType,
                 required: propertyValues.required,
               },
+              modelRecord.id,
             )
         
         if (isPropertyEdited) {
@@ -1498,12 +1517,12 @@ export const savePropertyToDb = async (
     modelRecord = byId[0]
   }
   if (!modelRecord && property.modelName) {
-    const byName = await db
-      .select()
-      .from(modelsTable)
-      .where(eq(modelsTable.name, property.modelName))
-      .limit(1)
-    modelRecord = byName[0]
+    // Model names are only unique per schema: scope by the property's schema when known
+    modelRecord = await resolveModelRecord(
+      property.modelName,
+      { schemaName: (property as { _schemaName?: string })._schemaName },
+      db,
+    )
   }
   if (!modelRecord && property.modelName) {
     const bySchemaFileId = await db
@@ -2252,12 +2271,9 @@ export async function getModelId(
           .limit(1)
       }
     } else {
-      // No schema filter, just search by name
-      records = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.name, modelNameOrFileId))
-        .limit(1)
+      // No schema filter: name-only (newest row, warns when the name is ambiguous)
+      const byName = await resolveModelRecord(modelNameOrFileId, {}, db)
+      records = byName ? [byName] : []
     }
   }
 

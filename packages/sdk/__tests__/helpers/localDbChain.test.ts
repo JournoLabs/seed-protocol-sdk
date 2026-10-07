@@ -23,7 +23,7 @@ async function freshDb() {
   const client = createClient({ url: ':memory:' })
   await client.executeMultiple(`
     CREATE TABLE appState (key text UNIQUE, value text, created_at integer, updated_at integer);
-    CREATE TABLE seeds (local_id text UNIQUE, uid text, schema_uid text, type text, publisher text,
+    CREATE TABLE seeds (local_id text UNIQUE, uid text, schema_uid text, type text, model_file_id text, publisher text,
       attestation_raw text, attestation_created_at integer, created_at integer, updated_at integer,
       _marked_for_deletion integer, revoked_at integer);
   `)

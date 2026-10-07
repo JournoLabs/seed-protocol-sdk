@@ -1,12 +1,10 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import debug from 'debug'
-
-const logger = debug('seedSdk:db:read:resolveModelRecord')
+import { AmbiguousModelError } from '@/Model/errors'
 
 /**
  * What is known about which model an item, property or lookup belongs to. Model names are only
@@ -36,13 +34,10 @@ const columns = {
   schemaFileId: modelsTable.schemaFileId,
 }
 
-const warnedAmbiguous = new Set<string>()
-
 /**
  * Resolve a models row from a model name plus whatever scope is known, most specific first:
- * modelFileId, modelId, then schemaId/schemaName + name. The name-only fallback is for data that
- * predates seeds.model_file_id (and EAS-synced seeds, whose schema is keyed by model name only);
- * when several rows share the name it picks the most recently created one and logs a warning.
+ * modelFileId, modelId, then schemaId/schemaName + name, then the name alone. The name alone is
+ * only accepted when it is unambiguous; otherwise this throws AmbiguousModelError.
  */
 export const resolveModelRecord = async (
   modelName: string | undefined | null,
@@ -83,18 +78,36 @@ export const resolveModelRecord = async (
     if (rows.length > 0) return rows[0] as ResolvedModelRecord
   }
 
-  const byName = (await db
-    .select(columns)
+  return resolveModelRecordByNameOnly(modelName, db)
+}
+
+/**
+ * Name-only resolution. Rows linked to a schema win over unlinked stubs (null-schemaFileId rows
+ * from ref resolution); if more than one linked row has the name it is ambiguous and this throws.
+ */
+const resolveModelRecordByNameOnly = async (
+  modelName: string,
+  db: NonNullable<Db>,
+): Promise<ResolvedModelRecord | undefined> => {
+  const rows = (await db
+    .select({ ...columns, schemaName: schemasTable.name })
     .from(modelsTable)
+    .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+    .leftJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
     .where(eq(modelsTable.name, modelName))
-    .orderBy(desc(modelsTable.id))) as ResolvedModelRecord[]
-  if (byName.length > 1 && !warnedAmbiguous.has(modelName)) {
-    warnedAmbiguous.add(modelName)
-    logger(
-      `Model name "${modelName}" exists in ${byName.length} rows and no schema/model id was given; using the newest (id ${byName[0].id})`,
+    .orderBy(desc(modelsTable.id))) as (ResolvedModelRecord & { schemaName: string | null })[]
+  if (rows.length === 0) return undefined
+
+  const linked = rows.filter((r) => r.schemaName)
+  const linkedIds = new Set(linked.map((r) => r.id))
+  if (linkedIds.size > 1) {
+    throw new AmbiguousModelError(
+      modelName,
+      linked.map((r) => r.schemaName!),
     )
   }
-  return byName[0]
+  const chosen = linked[0] ?? rows[0]
+  return { id: chosen.id, name: chosen.name, schemaFileId: chosen.schemaFileId }
 }
 
 /**
@@ -159,4 +172,39 @@ export const getItemModelScope = async (item: {
     propertyId: context?.propertyId,
   })
   return { modelFileId, schemaName: context?.schemaName }
+}
+
+/**
+ * Resolve a ref (e.g. a Relation's target model) by name from the schema(s) its owning model belongs
+ * to, so "Tag" means the owner schema's Tag rather than any Tag. Falls back to resolveModelRecord.
+ */
+export const resolveRefModelRecord = async (
+  refModelName: string | undefined | null,
+  owner: ModelScope,
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<ResolvedModelRecord | undefined> => {
+  if (!db || !refModelName) return undefined
+  const ownerRow = owner.modelFileId || owner.modelId ? await resolveModelRecord(undefined, owner, db) : undefined
+  const schemaFilter = ownerRow
+    ? inArray(
+        modelSchemas.schemaId,
+        // any schema the owner is linked to
+        db.select({ schemaId: modelSchemas.schemaId }).from(modelSchemas).where(eq(modelSchemas.modelId, ownerRow.id)),
+      )
+    : owner.schemaId
+      ? eq(modelSchemas.schemaId, owner.schemaId)
+      : owner.schemaName
+        ? eq(schemasTable.name, owner.schemaName)
+        : undefined
+  if (schemaFilter) {
+    const rows = await db
+      .select(columns)
+      .from(modelsTable)
+      .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+      .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+      .where(and(eq(modelsTable.name, refModelName), schemaFilter))
+      .limit(1)
+    if (rows.length > 0) return rows[0] as ResolvedModelRecord
+  }
+  return resolveModelRecord(refModelName, {}, db)
 }

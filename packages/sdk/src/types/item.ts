@@ -51,6 +51,8 @@ export type ItemMachineContext<T> = {
 export type NewItemProps<T> = Partial<ItemData> &
   Partial<T> & {
     modelName: string
+    /** Which model, when several schemas define `modelName`: the Model.id, or pass `schemaName`. */
+    modelFileId?: string
     modelInstance?: Model
     schemaUidsByModelName?: Map<string, string>
     mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>

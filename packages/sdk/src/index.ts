@@ -55,6 +55,11 @@ export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
+export { AmbiguousModelError } from './Model/errors'
+export {
+  MODEL_AMBIGUOUS_EVENT,
+  type ModelAmbiguousEventPayload,
+} from './db/read/resolveModelForSyncedSeed'
 export { ModelProperty } from './ModelProperty/ModelProperty'
 export { Schema } from './Schema/Schema'
 // Note: SchemaAllOptions type is available from './Schema/Schema'

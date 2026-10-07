@@ -369,22 +369,22 @@ async function fetchItemPropertiesList(
     modelName = first.modelName ?? (first as any).modelType
     if (modelName && typeof modelName === 'string') modelName = startCase(modelName)
   }
-  if (!modelName) {
-    const seedRecords = await db
-      .select({ type: seeds.type })
-      .from(seeds)
-      .where(seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!))
-      .limit(1)
-    if (seedRecords.length > 0 && seedRecords[0].type) {
-      modelName = startCase(seedRecords[0].type)
-    }
+  // The seed records which model it belongs to (model names are only unique per schema)
+  const seedRecords = await db
+    .select({ type: seeds.type, modelFileId: seeds.modelFileId })
+    .from(seeds)
+    .where(seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!))
+    .limit(1)
+  const modelFileId: string | undefined = seedRecords[0]?.modelFileId ?? undefined
+  if (!modelName && seedRecords.length > 0 && seedRecords[0].type) {
+    modelName = startCase(seedRecords[0].type)
   }
 
   const modelProperties: string[] = []
   if (modelName) {
     try {
       const { Model } = await import('@seedprotocol/sdk')
-      const model = await Model.getByNameAsync(modelName)
+      const model = await Model.resolveAsync(modelName, { modelFileId })
       if (model?.properties) {
         for (const modelProperty of model.properties) {
           if (modelProperty.name) modelProperties.push(modelProperty.name)

@@ -8,6 +8,13 @@ import { importJsonSchema } from '@/imports/json'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { seeds } from '@/seedSchema/SeedSchema'
+import { appState } from '@/seedSchema/AppStateSchema'
+import { AmbiguousModelError } from '@/Model/errors'
+import { resolveModelRecord } from '@/db/read/resolveModelRecord'
+import {
+  LEGACY_ITEM_MODEL_CHECK_KEY,
+  resetAmbiguousLegacyItemData,
+} from '@/db/resetAmbiguousLegacyItemData'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
 import { generateId } from '@/helpers'
@@ -132,5 +139,55 @@ testDescribe('same-name models across schemas', () => {
     const headline = loadedB!.properties.find((p) => p.propertyName === 'headline')
     expect(loadedB!.properties.map((p) => p.propertyName).sort()).toEqual(['author', 'headline', 'summary'])
     expect(headline?.propertyDef?.dataType).toBe('Text')
+
+    // Without a schema, a name that exists in two schemas is an error, not a guess.
+    const ambiguous = Item.create({ modelName: 'Post', title: 'which Post?' })
+    await expect(ambiguous).rejects.toBeInstanceOf(AmbiguousModelError)
+    await expect(ambiguous).rejects.toMatchObject({
+      modelName: 'Post',
+      schemaNames: [schemaA.metadata.name, schemaB.metadata.name].sort(),
+    })
+    expect(() => Model.getByName('Post')).toThrow(AmbiguousModelError)
+    await expect(resolveModelRecord('Post')).rejects.toBeInstanceOf(AmbiguousModelError)
+    expect(Model.getByName('Post', schemaB.metadata.name)).toBe(postB)
+
+    // Listing doesn't need one model: all Posts unscoped, one schema's with schemaName or modelFileId.
+    const allPosts = (await Item.all('Post')).map((i) => i.seedLocalId)
+    expect(allPosts).toEqual(expect.arrayContaining([itemA.seedLocalId, seedLocalIdB]))
+    const postsInA = (await Item.all('Post', false, { schemaName: schemaA.metadata.name })).map((i) => i.seedLocalId)
+    expect(postsInA).toEqual([itemA.seedLocalId])
+    const postsInB = (await Item.all('Post', false, { modelFileId: postIdB })).map((i) => i.seedLocalId)
+    expect(postsInB).toEqual([seedLocalIdB])
+  }, 60000)
+
+  it('clears item data once when legacy seeds have no model and their name is ambiguous', async () => {
+    const db = BaseDb.getAppDb()!
+    const suffix = generateId()
+    const schemaA = buildSchemaFile(`Legacy A ${suffix}`, generateId(), ['title'])
+    const schemaB = buildSchemaFile(`Legacy B ${suffix}`, generateId(), ['headline'])
+    await importJsonSchema({ contents: JSON.stringify(schemaA) }, schemaA.version)
+    await importJsonSchema({ contents: JSON.stringify(schemaB) }, schemaB.version)
+    const schemaCount = async () => (await db.select({ id: schemasTable.id }).from(schemasTable)).length
+    const schemasBefore = await schemaCount()
+
+    // A seed from before seeds.model_file_id existed
+    const legacySeedLocalId = generateId()
+    await db.insert(seeds).values({ localId: legacySeedLocalId, type: 'post', createdAt: Date.now() })
+    await db.delete(appState).where(eq(appState.key, LEGACY_ITEM_MODEL_CHECK_KEY))
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await resetAmbiguousLegacyItemData()).toBe(true)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Clearing local item data'))
+    } finally {
+      warn.mockRestore()
+    }
+    expect(await db.select({ localId: seeds.localId }).from(seeds)).toEqual([])
+    expect(await schemaCount()).toBe(schemasBefore)
+
+    // Only once: later seeds without a model (e.g. EAS-synced) don't trigger it again.
+    await db.insert(seeds).values({ localId: generateId(), type: 'post', createdAt: Date.now() })
+    expect(await resetAmbiguousLegacyItemData()).toBe(false)
+    expect((await db.select({ localId: seeds.localId }).from(seeds)).length).toBe(1)
   }, 60000)
 })

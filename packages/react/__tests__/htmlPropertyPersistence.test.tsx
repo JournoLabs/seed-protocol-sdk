@@ -226,6 +226,7 @@ describe('Html property persistence integration tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema Html Persistence',
       title: 'Test Post',
       html: '<h1>Test HTML</h1>',
     })

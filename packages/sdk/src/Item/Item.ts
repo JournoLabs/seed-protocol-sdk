@@ -1054,8 +1054,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       readyTimeout?: number
       includeEas?: boolean
       addressFilter?: 'owned' | 'watched' | 'all'
-      /** Only items of this model (Model.id); needed when several schemas define a model with this name. */
+      /** Only items of one model, when several schemas define `modelName`: its Model.id ... */
       modelFileId?: string
+      /** ... or the schema that defines it. */
+      schemaName?: string
     },
   ): Promise<Item<any>[]> {
     const {
@@ -1064,8 +1066,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       includeEas = false,
       addressFilter,
       modelFileId,
+      schemaName,
     } = options ?? {}
-    const itemsData = await getItemsData({ modelName, modelFileId, deleted, includeEas, addressFilter })
+    const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     for (const itemData of itemsData) {
       itemInstances.push(

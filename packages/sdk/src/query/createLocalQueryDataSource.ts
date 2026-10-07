@@ -174,6 +174,8 @@ function metadataRowToAttestation(row: {
 async function resolveSchemaNameForSeedType(
   appDb: any,
   seedType: string | null,
+  /** seeds.model_file_id: the seed's own model (model names are only unique per schema). */
+  modelFileId?: string | null,
 ): Promise<string | null> {
   if (!seedType) return null
   const normalized = startCase(seedType)
@@ -183,7 +185,8 @@ async function resolveSchemaNameForSeedType(
       .from(models)
       .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
       .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-      .where(eq(models.name, normalized))
+      .where(modelFileId ? eq(models.schemaFileId, modelFileId) : eq(models.name, normalized))
+      .orderBy(desc(models.id))
       .limit(1)
     if (schemaRows[0]?.schemaName) return schemaRows[0].schemaName as string
   } catch {
@@ -225,6 +228,7 @@ async function listPublishedSeedRows(
       uid: seeds.uid,
       schemaUid: seeds.schemaUid,
       type: seeds.type,
+      modelFileId: seeds.modelFileId,
       publisher: seeds.publisher,
       attestationRaw: seeds.attestationRaw,
       attestationCreatedAt: seeds.attestationCreatedAt,
@@ -263,7 +267,7 @@ async function listPublishedSeedRows(
     )
     if (!hasPublished) continue
 
-    const schemaResolved = await resolveSchemaNameForSeedType(appDb, row.type)
+    const schemaResolved = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
     const att = seedRowToAttestation({
       ...row,
       schemaName: schemaResolved === schemaName ? schemaName : (schemaResolved ?? schemaName),
@@ -298,6 +302,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
+          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -311,7 +316,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
       if (!row?.uid || !isValidEasAttestationUid(row.uid)) return null
       if (row.revokedAt != null && row.revokedAt !== 0) return null
 
-      const schemaName = await resolveSchemaNameForSeedType(appDb, row.type)
+      const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
       return seedRowToAttestation({ ...row, schemaName })
     },
 
@@ -397,6 +402,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
+          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -408,7 +414,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
       const out: AttestationLike[] = []
       for (const row of rows) {
         if (row.revokedAt != null && row.revokedAt !== 0) continue
-        const schemaName = await resolveSchemaNameForSeedType(appDb, row.type)
+        const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
         const att = seedRowToAttestation({ ...row, schemaName })
         if (att) out.push(att)
       }

@@ -1,4 +1,5 @@
 import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
+import { skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
@@ -45,10 +46,14 @@ export async function backfillMetadataPropertyIds(): Promise<number> {
       if (!row.modelType || !row.propertyName || !row.localId) continue
 
       // Pin to the seed's own model (model names are only unique per schema).
-      const modelFileId = await resolveItemModelFileId({ seedLocalId: row.seedLocalId })
-      const propertyId = await getPropertyIdForModelAndName(row.modelType, row.propertyName, {
-        modelFileId,
-      })
+      const propertyId = await skipSeedOnAmbiguousModel(
+        { seedLocalId: row.seedLocalId },
+        'backfillMetadataPropertyIds',
+        async () =>
+          getPropertyIdForModelAndName(row.modelType!, row.propertyName!, {
+            modelFileId: await resolveItemModelFileId({ seedLocalId: row.seedLocalId }),
+          }),
+      )
       if (propertyId == null) continue
 
       await db

@@ -27,6 +27,7 @@ import {
 import { getModelsData } from '@/db/read/getModelsData'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { and, desc, eq, or } from 'drizzle-orm'
+import { AmbiguousModelError } from './errors'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -1013,15 +1014,28 @@ export class Model {
       return this.getById(id)
     }
     // If schemaName not provided, search all name keys. Model names are only unique per schema, so
-    // with several matches prefer the most recently registered (mirrors resolveModelRecord's newest row).
+    // this throws AmbiguousModelError when cached models from several schemas share the name.
     // Callers that know the schema or model id should use Model.resolve() instead.
-    let matchId: string | undefined
+    return this._getUniqueCachedModel(modelName, (cachedModelName) => cachedModelName === modelName)
+  }
+
+  /** The one cached Model whose name matches, or AmbiguousModelError if models from several schemas do. */
+  private static _getUniqueCachedModel(
+    label: string,
+    matches: (cachedModelName: string) => boolean,
+  ): Model | undefined {
+    const matchesById = new Map<string, string>() // modelFileId -> schemaName
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const cachedModelName = nameKey.slice(nameKey.lastIndexOf(':') + 1)
-      if (cachedModelName === modelName) {
-        matchId = id
+      const separator = nameKey.lastIndexOf(':')
+      const cachedModelName = nameKey.slice(separator + 1)
+      if (id && cachedModelName && matches(cachedModelName) && this.instanceCacheById.has(id)) {
+        matchesById.set(id, nameKey.slice(0, separator))
       }
     }
+    if (matchesById.size > 1) {
+      throw new AmbiguousModelError(label, [...matchesById.values()])
+    }
+    const [matchId] = matchesById.keys()
     return matchId ? this.getById(matchId) : undefined
   }
 
@@ -1051,14 +1065,7 @@ export class Model {
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
-    let matchId: string | undefined
-    for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const cachedModelName = nameKey.slice(nameKey.lastIndexOf(':') + 1)
-      if (cachedModelName && toSnakeCase(cachedModelName) === modelType) {
-        matchId = id
-      }
-    }
-    return matchId ? this.getById(matchId) : undefined
+    return this._getUniqueCachedModel(modelType, (cachedModelName) => toSnakeCase(cachedModelName) === modelType)
   }
 
   /**
@@ -1163,7 +1170,12 @@ export class Model {
 
       try {
 
-        // Query model by name
+        // Query model by name (throws AmbiguousModelError when several schemas define it)
+        const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+        const resolved = await resolveModelRecord(modelName, {}, db)
+        if (!resolved?.schemaFileId) {
+          return undefined
+        }
         const modelRecords = await db
           .select({
             modelFileId: modelsTable.schemaFileId,
@@ -1173,8 +1185,7 @@ export class Model {
           .from(modelsTable)
           .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
           .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(modelsTable.name, modelName))
-          .orderBy(desc(modelsTable.id))
+          .where(eq(modelsTable.id, resolved.id))
           .limit(1)
 
         if (modelRecords.length === 0) {
@@ -1191,6 +1202,7 @@ export class Model {
           id: record.modelFileId, // id is now the schemaFileId (string)
         })
       } catch (error) {
+        if (error instanceof AmbiguousModelError) throw error
         logger(`Model.getByNameAsync: Error looking up model by name "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
         return undefined
       }
@@ -2013,17 +2025,19 @@ export class Model {
               return undefined
             }
 
-            const modelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
+            // Model names are only unique per schema: find this model's row by its id (schemaFileId).
+            const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+            const modelRecord = await resolveModelRecord(
+              modelName,
+              { modelFileId: context.id, schemaName: context.schemaName },
+              db,
+            )
 
-            if (modelRecords.length === 0 || !modelRecords[0].id) {
+            if (!modelRecord?.id) {
               return undefined
             }
 
-            dbId = modelRecords[0].id
+            dbId = modelRecord.id
 
             // Update context with _dbId
             model._service.send({

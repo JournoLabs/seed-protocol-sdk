@@ -39,37 +39,39 @@ export const addModelsToDb = fromCallback<
     const schemaDefsByModelName = new Map<
       string,
       {
-        dbId: number
+        dbIds: number[]
         schemaDef: string
       }
     >()
 
-    // Batch fetch all existing models in one query (avoids N sequential queries)
-    type ModelRow = { id: number; name: string }
-    const existingModels = await appDb
-      .select({ id: modelsTable.id, name: modelsTable.name })
+    // Batch fetch all existing same-name models in one query (avoids N sequential queries).
+    // Model names are only unique per schema, so match each Model by its id (schemaFileId) first.
+    type ModelRow = { id: number; name: string; schemaFileId: string | null }
+    const existingModels = (await appDb
+      .select({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
       .from(modelsTable)
-      .where(inArray(modelsTable.name, modelNames))
+      .where(inArray(modelsTable.name, modelNames))) as ModelRow[]
 
-    const existingByName = new Map<string, ModelRow>(
-      (existingModels as ModelRow[]).map((m) => [m.name, m])
-    )
-    const modelsToInsert = modelNames.filter((name) => !existingByName.has(name))
+    const rowFor = (modelName: string): ModelRow | undefined => {
+      const modelFileId = (allModels[modelName] as { id?: string } | undefined)?.id
+      const sameName = existingModels.filter((m) => m.name === modelName)
+      return (
+        (modelFileId ? sameName.find((m) => m.schemaFileId === modelFileId) : undefined) ??
+        (sameName.length === 1 ? sameName[0] : undefined) ??
+        sameName.find((m) => !m.schemaFileId)
+      )
+    }
+    const modelsToInsert = modelNames.filter((name) => !existingModels.some((m) => m.name === name))
 
     // Batch insert missing models
     if (modelsToInsert.length > 0) {
-      await appDb
+      const newlyInserted = (await appDb
         .insert(modelsTable)
+        // Null schemaFileId stubs; the schema import adopts them (findOrCreateModelRecord).
         .values(modelsToInsert.map((name) => ({ name })))
+        .returning({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })) as ModelRow[]
 
-      const newlyInserted = await appDb
-        .select({ id: modelsTable.id, name: modelsTable.name })
-        .from(modelsTable)
-        .where(inArray(modelsTable.name, modelsToInsert))
-
-      for (const m of newlyInserted) {
-        existingByName.set(m.name, m)
-      }
+      existingModels.push(...newlyInserted)
       for (const name of modelsToInsert) {
         logger('[client/actors] [addModelsToDb] inserted model:', name)
       }
@@ -77,14 +79,15 @@ export const addModelsToDb = fromCallback<
 
     let hasModelsInDb = true
     for (const modelName of modelNames) {
-      const foundModel = existingByName.get(modelName)
+      const foundModel = rowFor(modelName)
       if (!foundModel) {
         logger('[client/actors] [addModelsToDb] Warning: Could not find or create model:', modelName)
         hasModelsInDb = false
         continue
       }
+      // The EAS schema string depends only on the model name, so every same-name row shares its uid.
       schemaDefsByModelName.set(modelName, {
-        dbId: foundModel.id,
+        dbIds: existingModels.filter((m) => m.name === modelName).map((m) => m.id),
         schemaDef: `bytes32 ${toSnakeCase(modelName)}`,
       })
     }
@@ -129,11 +132,12 @@ export const addModelsToDb = fromCallback<
           const db = BaseDb.getAppDb()
           if (db) {
             for (const schema of schemas) {
-              const modelId = Array.from(schemaDefsByModelName.values()).find(
-                ({ schemaDef }) => schemaDef === schema.schema,
-              )?.dbId
+              const modelIds =
+                Array.from(schemaDefsByModelName.values()).find(
+                  ({ schemaDef }) => schemaDef === schema.schema,
+                )?.dbIds ?? []
 
-              if (modelId) {
+              for (const modelId of modelIds) {
                 await db
                   .insert(modelUids)
                   .values({

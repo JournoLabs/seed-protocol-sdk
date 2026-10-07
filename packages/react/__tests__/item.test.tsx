@@ -485,6 +485,7 @@ describe('React Item Hooks Integration Tests', () => {
 
     testItem1 = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
       title: 'Test Post Title 1',
       content: 'Test Post Content 1',
       author: 'Test Author 1',
@@ -496,6 +497,7 @@ describe('React Item Hooks Integration Tests', () => {
 
     testItem2 = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
       title: 'Test Post Title 2',
       content: 'Test Post Content 2',
       author: 'Test Author 2',
@@ -507,6 +509,7 @@ describe('React Item Hooks Integration Tests', () => {
 
     testItem3 = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
       title: 'Test Post Title 3',
       content: 'Test Post Content 3',
       author: 'Test Author 3',
@@ -1024,6 +1027,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Create a new item
       const newItem = await Item.create({
         modelName: 'Post',
+        schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
         title: 'New Test Post',
         content: 'New Test Content',
         author: 'New Test Author',

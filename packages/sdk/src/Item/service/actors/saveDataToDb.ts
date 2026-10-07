@@ -1,3 +1,4 @@
+import { skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { EventObject, fromCallback } from 'xstate'
 import { sql } from 'drizzle-orm'
 import { parseEasPropertyMetadata } from '@seedprotocol/query'
@@ -108,10 +109,12 @@ export const saveDataToDb = fromCallback<
 
           const propertyId =
             modelTableName != null
-              ? await getPropertyIdForModelAndName(modelTableName, camelCasePropertyName, {
-                  modelFileId: context.modelFileId,
-                  schemaName: context.schemaName,
-                })
+              ? ((await skipSeedOnAmbiguousModel({ seedLocalId }, 'easSync.saveDataToDb', () =>
+                  getPropertyIdForModelAndName(modelTableName, camelCasePropertyName, {
+                    modelFileId: context.modelFileId,
+                    schemaName: context.schemaName,
+                  }),
+                )) ?? null)
               : null
           const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
 

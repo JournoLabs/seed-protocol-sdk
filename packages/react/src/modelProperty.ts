@@ -177,8 +177,8 @@ const getPropertySchemaByModelFileId = async (
     return undefined
   }
 
-  // Use existing getPropertySchema function
-  return getPropertySchema(modelName, propertyName)
+  // Use existing getPropertySchema function, pinned to this model (names are only unique per schema)
+  return getPropertySchema(modelName, propertyName, { modelFileId, schemaName: model.schemaName })
 }
 
 /**
@@ -337,7 +337,9 @@ export function useModelProperty(
         }
 
         // Use existing getPropertySchema for schemaId + modelName + propertyName
-        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName)
+        // schemaId may be a schema file id or a schema name; scope the lookup to that schema
+        const schemaName = (await getSchemaNameFromId(lookupMode.schemaId)) ?? lookupMode.schemaId
+        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName, { schemaName })
         resolvedModelName = lookupMode.modelName
       }
 

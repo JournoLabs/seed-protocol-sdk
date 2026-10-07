@@ -108,7 +108,7 @@ export class ModelProperty {
     const refModelName = property.refModelName || property.ref
     if (refModelName && !property.refModelId) {
       // Resolve refModelId asynchronously and update context
-      this._resolveRefModelId(refModelName).then((refModelId) => {
+      this._resolveRefModelId(refModelName, property).then((refModelId) => {
         if (refModelId) {
           // Update the context with the resolved refModelId
           this._service.send({
@@ -239,12 +239,10 @@ export class ModelProperty {
         return fallbackIsEdited
       }
 
-      // Find model by name
-      const modelRecords = await db
-        .select({ id: modelsTable.id })
-        .from(modelsTable)
-        .where(eq(modelsTable.name, property.modelName))
-        .limit(1)
+      // Find this property's model (by modelId when known; model names are only unique per schema)
+      const { resolveModelRecord } = await import('@/db/read/resolveModelRecord')
+      const modelRecord = await resolveModelRecord(property.modelName, this._ownerModelScope(property), db)
+      const modelRecords = modelRecord ? [modelRecord] : []
       
       if (modelRecords.length === 0) {
         return fallbackIsEdited
@@ -277,7 +275,10 @@ export class ModelProperty {
    * @param refModelName - The name of the referenced model
    * @returns The database ID of the referenced model, or undefined if not found
    */
-  private async _resolveRefModelId(refModelName: string): Promise<number | undefined> {
+  private async _resolveRefModelId(
+    refModelName: string,
+    property?: Static<typeof TProperty>,
+  ): Promise<number | undefined> {
     if (!refModelName) {
       return undefined
     }
@@ -288,14 +289,16 @@ export class ModelProperty {
         return undefined
       }
 
-      const refModelRecords = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.name, refModelName))
-        .limit(1)
+      // Resolve the ref within the owning model's schema
+      const { resolveRefModelRecord } = await import('@/db/read/resolveModelRecord')
+      const refModelRecord = await resolveRefModelRecord(
+        refModelName,
+        property ? this._ownerModelScope(property) : { schemaName: this._getSnapshotContext()._schemaName },
+        db,
+      )
       
-      if (refModelRecords.length > 0 && refModelRecords[0].id) {
-        return refModelRecords[0].id
+      if (refModelRecord?.id) {
+        return refModelRecord.id
       }
     } catch (error) {
       // Ignore errors - model might not exist yet or database not available
@@ -303,6 +306,16 @@ export class ModelProperty {
     }
 
     return undefined
+  }
+
+  /** Which model this property belongs to: its models row id and/or schema. */
+  private _ownerModelScope(property: Static<typeof TProperty>): { modelId?: number; schemaName?: string } {
+    const context = this._getSnapshotContext() as { modelId?: number; _schemaName?: string }
+    const modelId = (property as { modelId?: number }).modelId ?? context.modelId
+    return {
+      modelId: typeof modelId === 'number' ? modelId : undefined,
+      schemaName: context._schemaName,
+    }
   }
 
   /**
@@ -317,7 +330,30 @@ export class ModelProperty {
     }
 
     try {
-      const model = await Model.getByNameAsync(property.modelName)
+      const { modelId, schemaName } = this._ownerModelScope(property)
+      // Synchronous cache hits first: callers compare against these values right after construction,
+      // so an extra await here lets every property look "edited" (a draft save each). Only then the
+      // DB (by modelId), and never instantiate a Model while its own properties are initializing.
+      let model = schemaName ? Model.getByName(property.modelName, schemaName) : undefined
+      if (!model) {
+        try {
+          model = Model.getByName(property.modelName)
+        } catch {
+          model = undefined // ambiguous name; resolve by modelId below
+        }
+      }
+      if (!model && modelId) {
+        const { resolveModelRecord } = await import('@/db/read/resolveModelRecord')
+        const modelFileId = (await resolveModelRecord(property.modelName, { modelId }))?.schemaFileId
+        model = modelFileId ? Model.getById(modelFileId) : undefined
+      }
+      if (!model) {
+        try {
+          model = await Model.getByNameAsync(property.modelName)
+        } catch {
+          model = undefined
+        }
+      }
       
       if (!model || !model.properties || model.properties.length === 0) {
         return undefined
@@ -345,7 +381,7 @@ export class ModelProperty {
         originalValues.ref = schemaFileValue.ref
         originalValues.refModelName = schemaFileValue.ref
         // Try to get refModelId from database
-        const refModelId = await this._resolveRefModelId(schemaFileValue.ref)
+        const refModelId = await this._resolveRefModelId(schemaFileValue.ref, property)
         if (refModelId) {
           originalValues.refModelId = refModelId
         }
@@ -518,11 +554,33 @@ export class ModelProperty {
     }
 
     // Create cache key from modelName and name, or use id
-    const cacheKey = propertyWithId.modelName && propertyWithId.name
+    let cacheKey = propertyWithId.modelName && propertyWithId.name
       ? `${propertyWithId.modelName}:${propertyWithId.name}`
       : propertyWithId.id
       ? `id:${propertyWithId.id}`
       : propertyWithId.name || 'unnamed'
+
+    // Model names are only unique per schema: a cached "Post:title" may be another schema's
+    // property. If the ids say it's a different property, key this one by its own id instead.
+    // (Not by file id: the same property is often created first with a generated id, then its real one.)
+    const isOtherProperty = (cachedContext: ModelPropertyMachineContext): boolean =>
+      (typeof propertyWithId.modelId === 'number' &&
+        typeof cachedContext.modelId === 'number' &&
+        cachedContext.modelId !== propertyWithId.modelId) ||
+      (!!schemaName && !!cachedContext._schemaName && cachedContext._schemaName !== schemaName)
+    const cachedByName = this.instanceCache.get(cacheKey)
+    if (cachedByName && propertyWithId.id && isOtherProperty(cachedByName.instance._getSnapshotContext())) {
+      // Reuse this property's own id-keyed entry if it already has one.
+      cacheKey = `id:${propertyWithId.id}`
+      for (const [key, { instance }] of this.instanceCache.entries()) {
+        if (!key.startsWith('id:')) continue
+        const ctx = instance._getSnapshotContext()
+        if (ctx.modelName === propertyWithId.modelName && ctx.name === propertyWithId.name && !isOtherProperty(ctx)) {
+          cacheKey = key
+          break
+        }
+      }
+    }
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
@@ -1107,14 +1165,23 @@ export class ModelProperty {
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
-    const cacheKey =
-      context.modelName && context.name
-        ? `${context.modelName}:${context.name}`
-        : (context.id ?? '')
-    if (!cacheKey) return
+    // Stored under "modelName:name", or "id:<id>" when another schema's same-name property holds that key
+    const cacheKeys = [...ModelProperty.instanceCache.entries()]
+      .filter(([, entry]) => {
+        try {
+          return entry.instance._getSnapshotContext().id === context.id
+        } catch {
+          return false
+        }
+      })
+      .map(([key]) => key)
+    if (cacheKeys.length === 0 && context.modelName && context.name) {
+      cacheKeys.push(`${context.modelName}:${context.name}`)
+    }
+    if (cacheKeys.length === 0) return
 
     forceRemoveFromCaches(this, {
-      getCacheKeys: () => [cacheKey],
+      getCacheKeys: () => cacheKeys,
       caches: [ModelProperty.instanceCache as Map<string, unknown>],
     })
 

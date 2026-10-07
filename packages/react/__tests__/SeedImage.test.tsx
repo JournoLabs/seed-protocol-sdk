@@ -280,6 +280,7 @@ describe('SeedImage integration tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_SEED_IMAGE_NAME,
       title: 'Test Post with Image',
     })
     await waitForItemIdle(testItem)

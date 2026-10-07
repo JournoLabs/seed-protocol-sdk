@@ -838,7 +838,7 @@ export async function importJsonSchema(
           const modelSchemaMod = await import('../seedSchema/ModelSchema')
           const { models: modelsTable } = modelSchemaMod
           const drizzleMod = await import('drizzle-orm')
-          const { eq, and } = drizzleMod
+          const { eq, and, isNull } = drizzleMod
           
           const modelLinks = await db
             .select({
@@ -896,11 +896,13 @@ export async function importJsonSchema(
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" with schemaFileId "${modelFileId}" in database`)
                     }
                   } else {
-                    // Fallback: find by name
+                    // Fallback: find by name, but only a row no other schema claims
+                    // (model names are only unique per schema)
                     const missingModel = await db
-                      .select()
+                      .select({ id: modelsTable.id })
                       .from(modelsTable)
-                      .where(eq(modelsTable.name, missingModelName))
+                      .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+                      .where(and(eq(modelsTable.name, missingModelName), isNull(modelSchemas.id)))
                       .limit(1)
                     
                     if (missingModel.length > 0 && missingModel[0].id) {

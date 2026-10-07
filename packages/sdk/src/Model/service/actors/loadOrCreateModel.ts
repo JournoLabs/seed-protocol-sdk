@@ -5,7 +5,7 @@ import { ModelMachineContext } from '../modelMachine'
 // import { Schema } from '@/Schema/Schema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, isNull } from 'drizzle-orm'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
@@ -96,11 +96,35 @@ export const loadOrCreateModel = fromCallback<
         // But if we have a schemaFileId and the model found by name has a different schemaFileId,
         // don't use it - we're creating a new model from a schema file with a specific ID
         if (!modelRecord) {
-          const dbModels = await db
-            .select()
+          // Model names are only unique per schema: prefer this schema's row, and otherwise only
+          // consider same-name rows that no schema claims yet (never another schema's model).
+          const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
+          const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
+          let dbModels = await db
+            .select({
+              id: modelsTable.id,
+              name: modelsTable.name,
+              schemaFileId: modelsTable.schemaFileId,
+              isEdited: modelsTable.isEdited,
+            })
             .from(modelsTable)
-            .where(eq(modelsTable.name, modelName))
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
             .limit(1)
+          if (dbModels.length === 0) {
+            dbModels = await db
+              .select({
+                id: modelsTable.id,
+                name: modelsTable.name,
+                schemaFileId: modelsTable.schemaFileId,
+                isEdited: modelsTable.isEdited,
+              })
+              .from(modelsTable)
+              .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id)))
+              .limit(1)
+          }
           
           if (dbModels.length > 0) {
             const foundModel = dbModels[0]

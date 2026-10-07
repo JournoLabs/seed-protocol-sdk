@@ -13,7 +13,7 @@ export const createModelProperties = fromCallback<
 >(({ sendBack, input }) => {
   const _createProperties = async (): Promise<void> => {
     const { context, propertyDefinitions } = input
-    const { id, _dbId, modelName } = context
+    const { id, _dbId, modelName, schemaName } = context
 
     
     if (!id || !_dbId || !modelName) {
@@ -64,15 +64,12 @@ export const createModelProperties = fromCallback<
             refModelId = propertyRecords[0].refModelId
             logger(`Found refModelId ${refModelId} from database for property "${propName}"`)
           } else if (refModelName) {
-            // Fallback: query models table directly by name
-            const refModelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, refModelName))
-              .limit(1)
+            // Fallback: resolve the ref by name within this model's schema
+            const { resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+            const refModelRecord = await resolveModelRecord(refModelName, { schemaName }, db)
             
-            if (refModelRecords.length > 0 && refModelRecords[0].id) {
-              refModelId = refModelRecords[0].id
+            if (refModelRecord?.id) {
+              refModelId = refModelRecord.id
               logger(`Resolved refModelId ${refModelId} from model name "${refModelName}" for property "${propName}"`)
             }
           }
