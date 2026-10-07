@@ -67,9 +67,6 @@ export const modelMachine = setup({
     isModelValid: ({ context }) => {
       return !context._validationErrors || context._validationErrors.length === 0
     },
-    hasValidationErrors: ({ context }) => {
-      return !!context._validationErrors && context._validationErrors.length > 0
-    },
   },
   actions: {
     assignValidationErrors: assign(({ context, event }) => {

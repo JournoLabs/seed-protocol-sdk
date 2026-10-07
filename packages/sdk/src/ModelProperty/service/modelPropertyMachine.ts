@@ -57,9 +57,6 @@ export const modelPropertyMachine = setup({
       const valid = !context._validationErrors || context._validationErrors.length === 0
       return valid
     },
-    hasValidationErrors: ({ context }) => {
-      return !!context._validationErrors && context._validationErrors.length > 0
-    },
   },
   actions: {
     assignValidationErrors: assign(({ context, event }) => {

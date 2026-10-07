@@ -40,7 +40,6 @@ type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 // Only stores resources that cannot be serialized (subscriptions, timers, etc.)
 export const schemaInstanceState = new WeakMap<Schema, {
   liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance model updates
-  modelInstances?: Map<string, Model> // Model instances cache
 }>()
 
 // Cache client initialization state globally to avoid repeated checks
@@ -137,7 +136,6 @@ export class Schema {
     // Initialize instance state in WeakMap (only non-serializable resources)
     schemaInstanceState.set(this, {
       liveQuerySubscription: null,
-      modelInstances: new Map<string, Model>(),
     })
     
     // Set up liveQuery subscription for cross-instance model updates
@@ -381,143 +379,12 @@ export class Schema {
             logger(`Schema name unchanged: "${oldName}"`)
           }
         } else if (prop === 'models') {
-          // Models are read-only computed values from Model instances
-          // Cannot be set directly - models are managed via Model instances
-          throw new Error('Cannot set schema.models directly. Models are computed from Model instances.')
-          // DISABLED: Array assignment to schema.models is temporarily disabled
-          // 
-          // REASON: This approach had race condition issues where _saveDraftToDb() would run
-          // before Model instances were fully created, causing models to not be saved to the database.
-          // 
-          // NEW APPROACH: Use Model.create() instead:
-          //   const model = Model.create('ModelName', schemaInstance, {
-          //     properties: {...},
-          //     description: '...'
-          //   })
-          // 
-          // This ensures:
-          //   1. Model instance is created first with its _modelFileId
-          //   2. Model automatically registers with the schema
-          //   3. Schema saves to database with complete model data
-          //   4. No race conditions between model creation and schema persistence
-          //
-          // TODO: Re-enable this if we can fix the race condition, or if we need backward compatibility
-          
+          // Models are read-only, computed from Model instances. Array assignment was removed because
+          // the draft save could run before the new Model instances existed, losing them.
           throw new Error(
-            'Direct assignment to schema.models is disabled. ' +
-            'Please use Model.create() instead: ' +
-            'const model = Model.create("ModelName", schemaInstance, { properties: {...}, description: "..." })'
+            'Cannot set schema.models directly. Models are computed from Model instances; ' +
+              'use Model.create(modelName, schema, { properties }) to add one.',
           )
-          
-          /* DISABLED CODE - See comment above
-          // Convert array of Model instances or plain objects back to object format
-          let modelsObject: { [key: string]: any }
-          if (Array.isArray(value)) {
-            modelsObject = {}
-            const seenNames = new Set<string>()
-            
-            // Check for duplicate model names
-            for (const model of value) {
-              // Handle Model instances
-              if (model instanceof Model) {
-                const modelName = model.modelName!
-                if (seenNames.has(modelName)) {
-                  throw new Error(
-                    `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                  )
-                }
-                seenNames.add(modelName)
-                modelsObject[modelName] = {
-                  properties: model.properties || {},
-                }
-              } else if (model && typeof model === 'object' && 'name' in model) {
-                // Handle plain objects
-                const modelName = model.name as string
-                if (seenNames.has(modelName)) {
-                  throw new Error(
-                    `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                  )
-                }
-                seenNames.add(modelName)
-                const { name, ...modelData } = model
-                modelsObject[name] = modelData
-              }
-            }
-          } else {
-            modelsObject = value || {}
-            // Check for duplicates in object format too
-            const modelNames = Object.keys(modelsObject)
-            const seenNames = new Set<string>()
-            for (const modelName of modelNames) {
-              if (seenNames.has(modelName)) {
-                throw new Error(
-                  `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                )
-              }
-              seenNames.add(modelName)
-            }
-          }
-          
-          const context = newInstance._getSnapshotContext()
-          
-          // Check if service is still running before sending events
-          let snapshot = newInstance._service.getSnapshot()
-          const wasServiceStopped = snapshot.status === 'stopped'
-          
-          if (wasServiceStopped) {
-            logger(`Service is stopped, will restart before adding models`)
-            newInstance._service.start()
-            snapshot = newInstance._service.getSnapshot()
-          }
-          
-          // Check current state after potential restart
-          const currentState = snapshot.value
-          // Check if state is a loading state object (XState v5 nested states)
-          const isServiceLoading = typeof currentState === 'object' && 'loading' in currentState
-          
-          // If service is loading, wait for it to finish before adding models
-          if (isServiceLoading || wasServiceStopped) {
-            logger(`Service is ${isServiceLoading ? 'loading' : 'was stopped'}, will add models after loading completes`)
-            
-            const loadingSubscription = newInstance._service.subscribe((snapshot) => {
-              if (snapshot.value === 'idle') {
-                loadingSubscription.unsubscribe()
-                logger(`Service finished loading, sending addModels event`)
-                newInstance._service.send({
-                  type: 'addModels',
-                  models: modelsObject,
-                })
-              } else if (snapshot.value === 'error') {
-                loadingSubscription.unsubscribe()
-                logger(`Service failed to load, cannot add models`)
-              }
-            })
-          } else {
-            // Service is ready, send addModels event immediately
-            // The state machine will handle all the complexity (validation, instance creation, ID collection, persistence)
-            logger(`Service is ready, sending addModels event`)
-            newInstance._service.send({
-              type: 'addModels',
-              models: modelsObject,
-            })
-          }
-          
-          // Mark schema as draft when models change
-          newInstance._service.send({
-            type: 'markAsDraft',
-            propertyKey: 'schema:models',
-          })
-          
-          // Save draft to database immediately so changes persist
-          newInstance._saveDraftToDb().catch((error) => {
-            logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-          })
-          
-          // Update client context so useSchema and useSchemas hooks reflect the change
-          newInstance._updateClientContext().catch(() => {
-            // Silently fail if not in browser environment
-          })
-          */
         } else if (prop === 'createdAt' || prop === 'updatedAt') {
           // Update metadata object
           const metadataContext = newInstance._getSnapshotContext()
