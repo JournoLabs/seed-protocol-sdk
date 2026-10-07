@@ -411,7 +411,8 @@ const createMetadataRecordsForStorageTransactionId = async (
 }
 
 type SaveEasPropertiesToDbParams = {
-  itemProperties: Attestation[]
+  /** Every property attestation fetched for a set of versions, revoked ones included. */
+  fetchedProperties: Attestation[]
   itemSeeds: Attestation[]
   state: SyncRunState
 }
@@ -427,15 +428,97 @@ type SaveEasPropertiesToDb = (
 /** Serialize property saves: concurrent `runSyncFromEas` used to hit `isSavingToDb` and return `{}` with no insert. */
 let saveEasPropertiesDbChain: Promise<unknown> = Promise.resolve()
 
+/**
+ * Make local metadata match EAS for every fetched (version, property schema): exactly one synced
+ * row, for the canonical attestation (ADR 0006), with `revoked_at` set when that attestation is
+ * revoked (which, with `SYNC_CANONICAL_OPTIONS`, means all of the property's attestations on that
+ * version are).
+ *
+ * - Canonical attestation not stored yet: insert it. This also covers an older live attestation
+ *   taking over from a revoked newer one, and a newer attestation superseding the stored one.
+ * - Stored row for a fetched attestation that isn't canonical (revoked, or superseded): delete it,
+ *   so readers, which take the newest row per property, can't pick it.
+ * - Stored canonical row: bring `revoked_at` up to date.
+ *
+ * Rows without an attestation UID (local edits) and rows for attestations EAS didn't return are
+ * left alone.
+ */
 const saveEasPropertiesToDbBody = async ({
-  itemProperties,
+  fetchedProperties,
   itemSeeds,
   state,
 }: SaveEasPropertiesToDbParams): Promise<SaveEasPropertiesToDbReturn> => {
-  const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
+  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(
+    fetchedProperties,
+    SYNC_CANONICAL_OPTIONS,
+  )
   const propertyUids = itemProperties.map((property) => property.id)
 
   collectRelatedSeedUids(itemProperties, state.relatedSeedUids)
+
+  const appDb = BaseDb.getAppDb()
+
+  const storedRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await appDb
+    .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
+    .from(metadata)
+    .where(inArray(metadata.uid, fetchedProperties.map((property) => property.id)))
+
+  const canonicalByUid = new Map(itemProperties.map((property) => [property.id, property]))
+  const existingPropertyRecordsUids = new Set<string>()
+  const staleUids = new Set<string>()
+  const revokedAtUpdates = new Map<string, number | null>()
+
+  for (const row of storedRows) {
+    if (!row.uid) continue
+    const canonical = canonicalByUid.get(row.uid)
+    if (!canonical) {
+      staleUids.add(row.uid)
+      continue
+    }
+    existingPropertyRecordsUids.add(row.uid)
+    // Keep a stored revocation time when EAS has none (local unpublish records its own).
+    const revokedAt =
+      canonical.revoked && !(canonical.revocationTime > 0) && row.revokedAt != null
+        ? row.revokedAt
+        : (revokedAtSeconds(canonical) ?? null)
+    if ((row.revokedAt ?? null) !== revokedAt) {
+      revokedAtUpdates.set(row.uid, revokedAt)
+    }
+  }
+
+  const newProperties = itemProperties.filter(
+    (property) => !existingPropertyRecordsUids.has(property.id),
+  )
+
+  // Insert before deleting, so a property never goes without a row in between.
+  if (newProperties.length > 0) {
+    await insertSyncedProperties({ newProperties, itemSeeds, state })
+  }
+
+  if (staleUids.size > 0) {
+    await appDb.delete(metadata).where(inArray(metadata.uid, [...staleUids]))
+  }
+
+  for (const [uid, revokedAt] of revokedAtUpdates) {
+    await appDb
+      .update(metadata)
+      .set({ revokedAt, updatedAt: Date.now() })
+      .where(eq(metadata.uid, uid))
+  }
+
+  return { propertyUids }
+}
+
+const insertSyncedProperties = async ({
+  newProperties,
+  itemSeeds,
+  state,
+}: {
+  newProperties: Attestation[]
+  itemSeeds: Attestation[]
+  state: SyncRunState
+}): Promise<void> => {
+  const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
 
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
@@ -445,35 +528,13 @@ const saveEasPropertiesToDbBody = async ({
 
   const appDb = BaseDb.getAppDb()
 
-  const existingMetadataRecordsRows: MetadataType[] = await appDb
-    .select()
-    .from(metadata)
-    .where(inArray(metadata.uid, propertyUids))
-
-  const existingPropertyRecordsUids = new Set<string>()
-
-  if (existingMetadataRecordsRows && existingMetadataRecordsRows.length > 0) {
-    for (const row of existingMetadataRecordsRows) {
-      if (row.uid) {
-        existingPropertyRecordsUids.add(row.uid)
-      }
-    }
-  }
-
-  const newProperties = itemProperties.filter(
-    (property) => !existingPropertyRecordsUids.has(property.id),
-  )
-
-  if (newProperties.length === 0) {
-    return { propertyUids }
-  }
-
   let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_id, property_name, property_value,
                                                      eas_data_type, version_uid, version_local_id, seed_uid,
                                                      seed_local_id, model_type, ref_value_type, ref_seed_type,
                                                      ref_schema_uid,
                                                      created_at, attestation_created_at, attestation_raw,
-                                                     local_storage_dir, ref_resolved_value, publisher)
+                                                     local_storage_dir, ref_resolved_value, publisher,
+                                                     revoked_at)
   VALUES `
 
   for (let i = 0; i < newProperties.length; i++) {
@@ -621,7 +682,7 @@ const saveEasPropertiesToDbBody = async ({
                          ${Date.now()}, ${attestationCreatedAt}, '${attestationRaw}',
                          ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
                          ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
-                         '${publisher}')`
+                         '${publisher}', ${revokedAtSeconds(property) ?? 'NULL'})`
 
     if (i < newProperties.length - 1) {
       insertPropertiesQuery += valuesString + ', '
@@ -634,7 +695,7 @@ const saveEasPropertiesToDbBody = async ({
   }
 
   if (insertPropertiesQuery.endsWith('VALUES ')) {
-    return { propertyUids }
+    return
   }
 
   if (insertPropertiesQuery.endsWith(', ')) {
@@ -642,8 +703,6 @@ const saveEasPropertiesToDbBody = async ({
   }
 
   await appDb.run(sql.raw(insertPropertiesQuery))
-
-  return { propertyUids }
 }
 
 const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {
@@ -684,17 +743,14 @@ const syncVersionsAndPropertiesForSeeds = async ({
   })
   if (versionUids.length === 0) return
 
-  const rawProperties = await getItemPropertiesFromEas({
+  const fetchedProperties = await getItemPropertiesFromEas({
     versionUids,
     excludeRevoked: false,
   })
-  const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(
-    rawProperties,
-    SYNC_CANONICAL_OPTIONS,
-  )
 
+  // The save makes the canonical pick; it also needs the other attestations to clean up after them.
   await saveEasPropertiesToDb({
-    itemProperties,
+    fetchedProperties,
     itemSeeds,
     state,
   })

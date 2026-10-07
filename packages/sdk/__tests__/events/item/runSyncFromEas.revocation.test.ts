@@ -409,4 +409,233 @@ describe.sequential('runSyncFromEas: revocations', () => {
 
     expect(relatedSeedRequests()).toEqual([])
   })
+
+  describe.sequential('property revocations reach stored metadata', () => {
+    const seed = uid('91')
+    const version = uid('92')
+    const olderTitle = uid('93')
+    const newerTitle = uid('94')
+
+    const titles = () =>
+      metadataRows(version).then((rows) =>
+        rows
+          .map((r) => [r.uid, r.propertyValue, r.revokedAt ?? null])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      )
+
+    const readTitle = async () => {
+      const { getItemProperties } = await import('@/db/read/getItemProperties')
+      const properties = await getItemProperties({ seedUid: seed })
+      return properties.find((p) => p.propertyName === 'title')?.propertyValue
+    }
+
+    const sync = async (titleAttestations: FakeAttestation[]) => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      fakeEas.seeds = [
+        attestation(seed, uid('00'), fakeEas.modelSchema!.id, 4_000),
+      ]
+      fakeEas.versions = [attestation(version, seed, uid('5b'), 4_001)]
+      fakeEas.properties = titleAttestations
+      await runSyncFromEas({ addresses: [attester] })
+    }
+
+    it('stores the newest live attestation', async () => {
+      await sync([
+        property(
+          olderTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'older',
+          4_002,
+        ),
+        property(
+          newerTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'newer',
+          4_003,
+        ),
+      ])
+      expect(await titles()).toEqual([[newerTitle, 'newer', null]])
+      expect(await readTitle()).toBe('newer')
+    })
+
+    it('falls back to the older live attestation once the stored one is revoked', async () => {
+      await sync([
+        property(
+          olderTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'older',
+          4_002,
+        ),
+        property(
+          newerTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'newer',
+          4_003,
+          1_700_003_000,
+        ),
+      ])
+      expect(await titles()).toEqual([[olderTitle, 'older', null]])
+      expect(await readTitle()).toBe('older')
+    })
+
+    it('keeps the newest revoked attestation, marked revoked, once all are revoked', async () => {
+      await sync([
+        property(
+          olderTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'older',
+          4_002,
+          1_700_003_100,
+        ),
+        property(
+          newerTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'newer',
+          4_003,
+          1_700_003_000,
+        ),
+      ])
+      expect(await titles()).toEqual([[newerTitle, 'newer', 1_700_003_000]])
+      expect(await readTitle()).toBe('newer')
+    })
+
+    it('replaces the stored attestation with a newer live one', async () => {
+      const newestTitle = uid('95')
+      await sync([
+        property(
+          olderTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'older',
+          4_002,
+          1_700_003_100,
+        ),
+        property(
+          newerTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'newer',
+          4_003,
+          1_700_003_000,
+        ),
+        property(
+          newestTitle,
+          version,
+          TITLE_SCHEMA_UID,
+          'title',
+          'newest',
+          4_004,
+        ),
+      ])
+      expect(await titles()).toEqual([[newestTitle, 'newest', null]])
+      expect(await readTitle()).toBe('newest')
+    })
+
+    it('marks a stored live attestation revoked in place when it is revoked', async () => {
+      const onlySeed = uid('a6')
+      const onlyVersion = uid('a7')
+      const onlyTitle = uid('a8')
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      fakeEas.seeds = [
+        attestation(onlySeed, uid('00'), fakeEas.modelSchema!.id, 5_000),
+      ]
+      fakeEas.versions = [attestation(onlyVersion, onlySeed, uid('5b'), 5_001)]
+      fakeEas.properties = [
+        property(
+          onlyTitle,
+          onlyVersion,
+          TITLE_SCHEMA_UID,
+          'title',
+          'only',
+          5_002,
+        ),
+      ]
+      await runSyncFromEas({ addresses: [attester] })
+      const [before] = await metadataRows(onlyVersion)
+
+      fakeEas.properties = [
+        property(
+          onlyTitle,
+          onlyVersion,
+          TITLE_SCHEMA_UID,
+          'title',
+          'only',
+          5_002,
+          1_700_004_000,
+        ),
+      ]
+      await runSyncFromEas({ addresses: [attester] })
+
+      const after = await metadataRows(onlyVersion)
+      expect(after.map((r) => [r.localId, r.uid, r.revokedAt])).toEqual([
+        [before!.localId, onlyTitle, 1_700_004_000],
+      ])
+    })
+
+    it('local unpublish marks the revoked property rows; a later sync takes EAS revocation time', async () => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      const { updateSeedRevokedAt } =
+        await import('@/db/write/updateSeedRevokedAt')
+      const localSeed = uid('b6')
+      const localVersion = uid('b7')
+      const localTitle = uid('b8')
+      fakeEas.seeds = [
+        attestation(localSeed, uid('00'), fakeEas.modelSchema!.id, 6_000),
+      ]
+      fakeEas.versions = [
+        attestation(localVersion, localSeed, uid('5b'), 6_001),
+      ]
+      fakeEas.properties = [
+        property(
+          localTitle,
+          localVersion,
+          TITLE_SCHEMA_UID,
+          'title',
+          'mine',
+          6_002,
+        ),
+      ]
+      await runSyncFromEas({ addresses: [attester] })
+
+      const seedLocalId = (await seedRow(localSeed))!.localId!
+      await updateSeedRevokedAt({
+        seedLocalId,
+        revokedAt: 1_700_005_000,
+        metadataUids: [localTitle],
+      })
+      expect(
+        (await metadataRows(localVersion)).map((r) => r.revokedAt),
+      ).toEqual([1_700_005_000])
+
+      fakeEas.properties = [
+        property(
+          localTitle,
+          localVersion,
+          TITLE_SCHEMA_UID,
+          'title',
+          'mine',
+          6_002,
+          1_700_005_007,
+        ),
+      ]
+      await runSyncFromEas({ addresses: [attester] })
+      expect(
+        (await metadataRows(localVersion)).map((r) => r.revokedAt),
+      ).toEqual([1_700_005_007])
+    })
+  })
 })
