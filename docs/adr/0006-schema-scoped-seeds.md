@@ -311,3 +311,59 @@ can see today disappears.
 
 - **Strict time window:** a way to choose "latest" within a time range. Strict mode
   uses the current latest version until a later ADR adds it.
+
+## Amendment (2026-10-07): `seeds.model_file_id` and ambiguous model names
+
+Two changes landed on `main` the same day as this ADR, written without knowledge of it:
+
+- **`982b1a6`:** adds `seeds.model_file_id` (migration 0015). It records each item's
+  model, as the `models` row's `schemaFileId`, i.e. `Model.id`. Local creates set it,
+  and the migration backfills it via `metadata.property_id`. `getItemsData` /
+  `Item.all` filter by it when given `modelFileId`, or `schemaName` + `modelName`.
+- **`631df2d`:** throws `AmbiguousModelError` when a model name exists in several
+  schemas and no schema or `modelFileId` is given. Sync calls
+  `resolveModelForSyncedSeed`, a stub, to set `model_file_id` on synced seeds. Its plan,
+  [`docs/EAS_SYNCED_SEED_MODEL_RESOLUTION.md`](../EAS_SYNCED_SEED_MODEL_RESOLUTION.md),
+  picks **one** model per synced seed: the candidate whose properties contain all of
+  the seed's properties.
+
+This ADR's decisions stand. The two fit together as follows.
+
+### What `seeds.model_file_id` means
+
+It is the item's **origin model**: the model it was created with locally. It
+implements the `source = 'created'` link from section 2, so `seed_schemas` doesn't
+duplicate it. A `created` link is the row in `seed_schemas`, or equivalently
+`seeds.model_file_id` resolved to its schema, with both match columns true.
+
+- **Local creates** keep setting it, as today.
+- **Synced seeds** leave it null unless the seed was created on this device. A synced
+  seed's schemas come from its `seed_schemas` rows (`sync` and `related` links). One
+  model can't represent a seed that matches several schemas, which is why section 2
+  uses a join table.
+- **Reads scoped to a schema** select seeds that either have a `seed_schemas` link to
+  it or have a `model_file_id` belonging to it. Filtering on `model_file_id` alone, as
+  `getItemsData` does today, would hide every synced seed.
+
+### Replaces the synced-seed resolution plan
+
+`docs/EAS_SYNCED_SEED_MODEL_RESOLUTION.md` is superseded by this ADR:
+
+- **Matching rule:** the property-containment rule ("the model contains all of the
+  seed's properties") is replaced by section 1's `match` / `matchMode` rules. A seed can
+  match several schemas, and all of them get links, so there is nothing to resolve to a
+  single model.
+- **`resolveModelForSyncedSeed`:** stays a no-op for `model_file_id` and is removed once
+  `seed_schemas` sync links exist.
+
+### Ambiguous model names
+
+`AmbiguousModelError` is correct when nothing says which schema is meant. With an
+active schema (section 5), the active schema says it: a name resolves to the active
+schema's model, and the error is thrown only when there's no active schema, no
+`schemaName`/`modelFileId`, and the name exists in several schemas.
+
+`skipSeedOnAmbiguousModel` and `MODEL_AMBIGUOUS_EVENT` in background sync work are
+replaced by per-schema evaluation. Sync evaluates a seed against every local model of
+its type and links it to each schema it matches, so a shared name is no longer
+ambiguous there.
