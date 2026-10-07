@@ -448,7 +448,7 @@ describe(
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -568,7 +568,7 @@ describe(
         if (!hasSchema1 || !hasSchema2) {
           console.log('Waiting for schemas. Schema 1:', hasSchema1, 'Schema 2:', hasSchema2)
         }
-        return hasSchema1 && hasSchema2
+        expect(hasSchema1 && hasSchema2).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -646,7 +646,7 @@ describe(
                   .from(modelSchemas)
                   .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
                   .where(eq(modelSchemas.schemaId, schemaId))
-                return updatedRecords.length > 0
+                expect(updatedRecords.length).toBeGreaterThan(0)
               },
               { timeout: 10000 }
             )
@@ -685,7 +685,7 @@ describe(
           const count = parseInt(modelsCount.textContent || '0')
           // Test Schema 1 has a Post model, so we should have at least 1 model
           expect(count).toBeGreaterThan(0)
-          return count > 0
+          expect(count).toBeGreaterThan(0)
         },
         { timeout: 30000 }
       )
@@ -742,7 +742,6 @@ describe(
           const isLoading = scoped.getByTestId('is-loading')
           expect(status.textContent).toBe('loaded')
           expect(isLoading.textContent).toBe('false')
-          return true
         },
         { timeout: 10000 }
       )
@@ -773,8 +772,7 @@ describe(
       // waitFor resolving and assertion (reading isLoading twice was flaky)
       await waitFor(
         () => {
-          const isLoading = scoped.getByTestId('is-loading')
-          if (isLoading.textContent !== 'false') return false
+          expect(scoped.getByTestId('is-loading').textContent).toBe('false')
 
           const errorMessage = scoped.queryByTestId('error-message')
           if (errorMessage) {
@@ -787,8 +785,6 @@ describe(
               expect(['loaded', 'not-loaded', 'loading']).toContain(status.textContent)
             }
           }
-          expect(isLoading.textContent).toBe('false')
-          return true
         },
         { timeout: 10000 }
       )
@@ -807,14 +803,9 @@ describe(
       // pass at the moment both conditions are met, before any subsequent transition.
       await waitFor(
         () => {
-          const status = scoped.getByTestId('schema-status')
-          const isLoading = scoped.getByTestId('is-loading')
-          if (status.textContent !== 'loaded') return false
-          if (isLoading.textContent !== 'false') return false
-          const errorMessage = scoped.queryByTestId('error-message')
-          expect(errorMessage).toBeNull()
-          expect(isLoading.textContent).toBe('false')
-          return true
+          expect(scoped.getByTestId('schema-status').textContent).toBe('loaded')
+          expect(scoped.getByTestId('is-loading').textContent).toBe('false')
+          expect(scoped.queryByTestId('error-message')).toBeNull()
         },
         { timeout: 10000 }
       )
@@ -836,12 +827,8 @@ describe(
       // moment both conditions are met.
       await waitFor(
         () => {
-          const status = scoped.getByTestId('schema-status')
-          const isLoading = scoped.getByTestId('is-loading')
-          if (status.textContent !== 'loaded') return false
-          if (isLoading.textContent !== 'false') return false
-          expect(isLoading.textContent).toBe('false')
-          return true
+          expect(scoped.getByTestId('schema-status').textContent).toBe('loaded')
+          expect(scoped.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 10000 }
       )
@@ -871,14 +858,12 @@ describe(
             () => {
               const listA = screen.getByTestId('list-a')
               const listB = screen.getByTestId('list-b')
-              const statusA = within(listA).getByTestId('schemas-status').textContent
-              const statusB = within(listB).getByTestId('schemas-status').textContent
-              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              expect(within(listA).getByTestId('schemas-status').textContent).toBe('loaded')
+              expect(within(listB).getByTestId('schemas-status').textContent).toBe('loaded')
               const countA = parseInt(within(listA).getByTestId('schemas-count').textContent || '0')
               const countB = parseInt(within(listB).getByTestId('schemas-count').textContent || '0')
               expect(countA).toBe(countB)
               expect(countA).toBeGreaterThanOrEqual(1)
-              return true
             },
             { timeout: 15000 }
           )
@@ -914,7 +899,7 @@ describe(
           const count = screen.getByTestId('schemas-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(2) // At least our 2 test schemas
-          return countValue >= 2
+          expect(countValue).toBeGreaterThanOrEqual(2)
         },
         { timeout: 15000 }
       )
@@ -961,7 +946,7 @@ describe(
           const count = screen.getByTestId('schemas-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThan(0)
-          return countValue > 0
+          expect(countValue).toBeGreaterThan(0)
         },
         { timeout: 15000 }
       )
@@ -1009,7 +994,7 @@ describe(
           const status = screen.getByTestId('schemas-status')
           const count = parseInt(screen.getByTestId('schemas-count').textContent || '0')
           // Wait for status to be loaded and count to be at least 2
-          return status.textContent === 'loaded' && count >= 2
+          expect(status.textContent === 'loaded' && count >= 2).toBe(true)
         },
         { timeout: 20000 }
       )
@@ -1100,7 +1085,7 @@ describe(
             if (dbSchemas.length > 0) {
               console.log(`[Test] Schema found in DB:`, dbSchemas[0])
             }
-            return dbSchemas.length > 0
+            expect(dbSchemas.length).toBeGreaterThan(0)
           },
           { timeout: 5000 }
         )
@@ -1118,7 +1103,7 @@ describe(
           const count = screen.getByTestId('schemas-count')
           const newCount = parseInt(count.textContent || '0')
           // The count should have increased by exactly 1
-          return newCount === initialCount + 1
+          expect(newCount).toBe(initialCount + 1)
         },
         { timeout: 15000 }
       )
@@ -1186,8 +1171,7 @@ describe(
       // Wait for loading state
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          return isLoading.textContent === 'true'
+          expect(screen.getByTestId('is-loading').textContent).toBe('true')
         },
         { timeout: 5000 }
       )
@@ -1200,10 +1184,10 @@ describe(
             const isLoading = screen.getByTestId('is-loading')
             const status = screen.getByTestId('create-status')
             // Wait until loading is false AND status is one of the expected states
-            return (
+            expect((
               isLoading.textContent === 'false' &&
               ['created', 'error', 'idle'].includes(status.textContent || '')
-            )
+            )).toBe(true)
           },
           { timeout: 20000 }
         )
@@ -1241,8 +1225,7 @@ describe(
       const resetBtn = screen.getByTestId('reset-error-button')
       resetBtn.click()
       await waitFor(() => {
-        const errorEl = screen.queryByTestId('create-error')
-        return true // Just ensure component is stable
+        expect(screen.queryByTestId('create-error')).toBeNull()
       }, { timeout: 1000 })
     })
   })
@@ -1306,7 +1289,7 @@ describe(
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1341,8 +1324,7 @@ describe(
       // Wait for schema to be ready
       await waitFor(
         () => {
-          const snapshot = schemaInstance.getService().getSnapshot()
-          return snapshot.value === 'idle'
+          expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1353,8 +1335,7 @@ describe(
       // Wait for model to be idle
       await waitFor(
         () => {
-          const modelSnapshot = newModel.getService().getSnapshot()
-          return modelSnapshot.value === 'idle'
+          expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1365,7 +1346,7 @@ describe(
         () => {
           const models = schemaInstance.models || []
           const hasModel = models.some((m: any) => m.modelName === 'New model')
-          return hasModel
+          expect(hasModel).toBe(true)
         },
         { timeout: 15000 }
       )
@@ -1394,8 +1375,7 @@ describe(
       // Wait for the model to appear in the UI (React component should re-render)
       await waitFor(
         () => {
-          const modelsCountAfter = screen.getByTestId('models-count')
-          return parseInt(modelsCountAfter.textContent || '0') > 0
+          expect(parseInt(screen.getByTestId('models-count').textContent || '0')).toBeGreaterThan(0)
         },
         { timeout: 15000 }
       )

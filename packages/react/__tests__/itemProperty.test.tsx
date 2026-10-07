@@ -513,7 +513,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -640,7 +640,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Items')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Items')).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -728,8 +728,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
       await waitFor(
         () => {
-          const el = scoped.queryByTestId('property-value')
-          return el !== null && el.textContent === 'Test Post Content'
+          expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Content')
         },
         { timeout: 10000 }
       )
@@ -756,8 +755,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
       await waitFor(
         () => {
-          const el = scoped.queryByTestId('property-value')
-          return el !== null && el.textContent === 'Test Post Title'
+          expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Title')
         },
         { timeout: 10000 }
       )
@@ -779,8 +777,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null && propertyName.textContent === 'title'
+          expect(screen.queryByTestId('property-name')?.textContent).toBe('title')
         },
         { timeout: 15000 }
       )
@@ -809,8 +806,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyValue = screen.queryByTestId('property-value')
-          return propertyValue !== null && propertyValue.textContent === 'Test Post Title'
+          expect(screen.queryByTestId('property-value')?.textContent).toBe('Test Post Title')
         },
         { timeout: 15000 }
       )
@@ -841,14 +837,9 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // We'll check that it becomes false when loaded
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('property-status')
+          expect(screen.getByTestId('property-status').textContent).toBe('loaded')
           // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
@@ -857,7 +848,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
-          return true
         },
         { timeout: 2000 }
       )
@@ -998,7 +988,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1010,7 +1000,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Post model has at least 3 properties: title, content, author
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
+          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1032,7 +1022,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1043,7 +1033,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
+          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1060,7 +1050,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1068,7 +1058,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1081,7 +1071,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
+          expect(countValue).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1101,14 +1091,9 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // We'll check that it becomes false when loaded
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('properties-status')
+          expect(screen.getByTestId('properties-status').textContent).toBe('loaded')
           // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
@@ -1117,7 +1102,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
-          return true
         },
         { timeout: 2000 }
       )
@@ -1163,7 +1147,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .select()
               .from(metadataLatest)
               .where(eq(metadataLatest.rowNum, 1))
-            return records.length >= 3
+            expect(records.length).toBeGreaterThanOrEqual(3)
           },
           { timeout: 10000 }
         )
@@ -1177,8 +1161,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = scoped.getByTestId('properties-count')
-          const countValue = parseInt(count.textContent || '0')
-          return countValue >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1188,7 +1171,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const initialCount = parseInt(scoped.getByTestId('properties-count').textContent || '0')
           expect(initialCount).toBeGreaterThanOrEqual(3)
-          return true
         },
         { timeout: 5000, interval: 200 }
       )
@@ -1227,12 +1209,8 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               await qc.refetchQueries({ queryKey: key })
               const data = qc.getQueryData(key) as IItemProperty[] | undefined
               const titleProp = Array.isArray(data) ? data.find((p) => p.propertyName === 'title') : undefined
-              if (titleProp != null && String((titleProp as IItemProperty).value ?? '') === 'Updated Title') {
-                expect(titleProp).toBeTruthy()
-                expect(String((titleProp as IItemProperty).value ?? '')).toBe('Updated Title')
-                return true
-              }
-              return false
+              expect(titleProp).toBeTruthy()
+              expect(String((titleProp as IItemProperty).value ?? '')).toBe('Updated Title')
             },
             { timeout: 10000, interval: 150 }
           )
@@ -1240,7 +1218,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
             () => {
               const propertyElements = scoped.getAllByTestId(/^property-\d+$/)
               const propertyTexts = propertyElements.map((el) => el.textContent)
-              return propertyTexts.some(text => text?.includes('Updated Title'))
+              expect(propertyTexts.some(text => text?.includes('Updated Title'))).toBe(true)
             },
             { timeout: 15000 }
           )
@@ -1266,7 +1244,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Items')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Items')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1277,8 +1255,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Wait for schema to be ready
       await waitFor(
         () => {
-          const snapshot = schemaInstance.getService().getSnapshot()
-          return snapshot.value === 'idle'
+          expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1295,8 +1272,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Wait for model to be idle
       await waitFor(
         () => {
-          const modelSnapshot = newModel.getService().getSnapshot()
-          return modelSnapshot.value === 'idle'
+          expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1325,7 +1301,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .select()
               .from(metadataLatest)
               .where(eq(metadataLatest.rowNum, 1))
-            return records.length > 0
+            expect(records.length).toBeGreaterThan(0)
           },
           { timeout: 10000 }
         )
@@ -1339,7 +1315,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = scopedList.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') > 0
+          expect(parseInt(count.textContent || '0')).toBeGreaterThan(0)
         },
         { timeout: 30000 }
       )
@@ -1349,7 +1325,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const finalCount = scopedList.getByTestId('properties-count')
           expect(parseInt(finalCount.textContent || '0')).toBeGreaterThan(0)
-          return true
         },
         { timeout: 5000, interval: 200 }
       )
@@ -1401,7 +1376,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('create-item-property-status')
-          return status.textContent === 'created' || status.textContent === 'error'
+          expect(status.textContent === 'created' || status.textContent === 'error').toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1531,11 +1506,8 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const prop = testItem!.properties.find(
             (p) => p.propertyName === 'coverImage' || p.propertyName === 'coverImageId'
           ) as ItemProperty<any> | undefined
-          if (prop?.refResolvedValue === TEST_IMAGE_FILENAME) {
-            savedProp = prop
-            return true
-          }
-          return false
+          expect(prop?.refResolvedValue).toBe(TEST_IMAGE_FILENAME)
+          savedProp = prop
         },
         { timeout: 20000 }
       )
@@ -1561,16 +1533,14 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const loadingEl = screen.getByTestId('item-property-loading')
-          return loadingEl.textContent === 'false'
+          expect(screen.getByTestId('item-property-loading').textContent).toBe('false')
         },
         { timeout: 10000 }
       )
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.getByTestId('item-property-datatype')
-          return dataTypeEl.textContent === 'Text'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Text')
         },
         { timeout: 15000 }
       )
@@ -1600,8 +1570,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.getByTestId('item-property-datatype')
-          return dataTypeEl.textContent === 'Number'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Number')
         },
         { timeout: 15000 }
       )
@@ -1626,7 +1595,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const modelDataTypeEl = screen.getByTestId('model-property-datatype')
           const itemDataTypeEl = screen.getByTestId('item-property-datatype')
-          return modelDataTypeEl.textContent === 'Text' && itemDataTypeEl.textContent === 'Text'
+          expect(modelDataTypeEl.textContent === 'Text' && itemDataTypeEl.textContent === 'Text').toBe(true)
         },
         { timeout: 15000 }
       )
@@ -1635,8 +1604,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemDataTypeEl = screen.getByTestId('item-property-datatype')
-          return itemDataTypeEl.textContent === 'Number'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Number')
         },
         { timeout: 15000 }
       )
