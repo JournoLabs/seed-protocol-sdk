@@ -599,8 +599,15 @@ export type CreatePublishedItemForUnpublishOptions = {
 /** Default publisher for unpublish tests. Include in client config addresses. */
 export const UNPUBLISH_TEST_PUBLISHER = '0x' + 'd'.repeat(40)
 
-/** Default seed UID for simulating published state. */
-export const UNPUBLISH_TEST_SEED_UID = '0x' + 'e'.repeat(64)
+/**
+ * Unique seed UID per call for simulating published state. Must not be a shared constant:
+ * browser test files share one DB, and ownership lookup matches `localId OR uid`, so a stale
+ * row with the same uid from another file (e.g. publisher NULL) would be picked instead.
+ */
+function randomTestSeedUid(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return '0x' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
 
 /**
  * Create a Post item in "published" state (seedUid, publisher, schemaUid set).
@@ -617,7 +624,7 @@ export async function createPublishedItemForUnpublish(
   const { title = 'Unpublish test post', publisher = UNPUBLISH_TEST_PUBLISHER } = options
   const { item } = await createItemWithBasicPropertiesOnly({ title })
   const seedLocalId = item.seedLocalId!
-  const seedUid = UNPUBLISH_TEST_SEED_UID
+  const seedUid = randomTestSeedUid()
 
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
