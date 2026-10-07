@@ -16,6 +16,15 @@ import { seedVitePlugin } from '@seedprotocol/vite'
 // tens of thousands of log lines per run, slowing Node runs and burying failures.
 const debugNamespaces = process.env.DEBUG ?? ''
 
+// Test files run in parallel. Each browser worker gets its own Playwright context (separate OPFS and
+// localStorage) and each Node file runs in its own forked process with its own temp project dir, so
+// files don't share storage. TEST_WORKERS overrides the per-project count; TEST_WORKERS=1 restores
+// one-file-at-a-time runs for debugging order-dependent failures.
+const testWorkers = (defaultCount) => {
+  const n = Number.parseInt(process.env.TEST_WORKERS ?? '', 10)
+  return Number.isFinite(n) && n > 0 ? n : defaultCount
+}
+
 export default defineConfig({
   plugins: [
     Inspect({
@@ -92,7 +101,7 @@ export default defineConfig({
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
-          maxWorkers: 1,
+          maxWorkers: testWorkers(3),
           browser: {
             enabled: true,
             provider: playwright(),
@@ -148,7 +157,7 @@ export default defineConfig({
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
-          maxWorkers: 1,
+          maxWorkers: testWorkers(3),
           browser: {
             enabled: true,
             provider: playwright(),
@@ -211,12 +220,11 @@ export default defineConfig({
           ],
           testTimeout: 30000,
           pool: 'forks',
-          maxWorkers: 1,
+          maxWorkers: testWorkers(4),
           // Several files vi.mock core modules (@/helpers/environment, BaseDb, BaseFileManager). With
           // isolate: false those mocks and the shared client leaked into later files, and every DB-backed
           // suite after them failed in beforeAll ("Seed Protocol schema not found").
           isolate: true,
-          fileParallelism: false,
         },
       },
       // {
