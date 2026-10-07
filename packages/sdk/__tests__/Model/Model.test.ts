@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
@@ -184,40 +184,10 @@ testDescribe('Model Integration Tests', () => {
       
       await waitForModelIdle(model)
       
-      // Wait for liveQuery subscription to be set up and context to be updated
-      await new Promise<void>((resolve, reject) => {
-        const subscription = model.getService().subscribe((snapshot) => {
-          console.log('Waiting for liveQueryIds', snapshot.context._liveQueryPropertyIds)
-          const liveQueryIds = snapshot.context._liveQueryPropertyIds || []
-          if (liveQueryIds.length >= 2) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        // Also check immediately in case it's already updated
-        const currentSnapshot = model.getService().getSnapshot()
-        const currentLiveQueryIds = currentSnapshot.context._liveQueryPropertyIds || []
-        if (currentLiveQueryIds.length >= 2) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          subscription.unsubscribe()
-          const finalSnapshot = model.getService().getSnapshot()
-          const finalLiveQueryIds = finalSnapshot.context._liveQueryPropertyIds || []
-          console.log('finalLiveQueryIds', finalLiveQueryIds)
-          if (finalLiveQueryIds.length >= 2) {
-            resolve()
-          } else {
-            reject(new Error(`Timeout waiting for liveQueryPropertyIds. Got ${finalLiveQueryIds.length} items, expected at least 2`))
-          }
-        }, 5000)
-      })
-      
+      // Wait for the properties themselves, not just _liveQueryPropertyIds: the getter only returns
+      // ids whose ModelProperty instances are already cached, and those are created asynchronously.
+      await vi.waitFor(() => expect(model.properties).toHaveLength(2), { timeout: 10000 })
+
       expect(model.properties).toBeDefined()
       const modelProperties = model.properties || []
       expect(Array.isArray(modelProperties)).toBe(true)
