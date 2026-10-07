@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
 import { createActor } from 'xstate'
 import { schemaMachine } from '@/Schema/service/schemaMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
-// Import Node.js Db to initialize platform class
-import '@/node/db/Db'
 import { setupTestEnvironment } from '../test-utils/client-init'
 
 describe('Staged Schema Loading', () => {

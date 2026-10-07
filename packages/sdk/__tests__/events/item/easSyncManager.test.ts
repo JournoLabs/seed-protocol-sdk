@@ -1,21 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createActor } from 'xstate'
 import { easSyncMachine } from '@/events/item/easSyncManager'
-import * as syncDbWithEas from '@/events/item/syncDbWithEas'
-import * as easSyncProcess from '@/db/write/easSyncProcess'
+
+// vi.mock rather than vi.spyOn on the module namespace: ESM namespaces aren't configurable in browser
+// mode ("Module namespace is not configurable in ESM").
+const { runSyncFromEas } = vi.hoisted(() => ({ runSyncFromEas: vi.fn() }))
+vi.mock('@/events/item/syncDbWithEas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/events/item/syncDbWithEas')>()),
+  runSyncFromEas,
+}))
+vi.mock('@/db/write/easSyncProcess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/db/write/easSyncProcess')>()),
+  insertEasSyncProcessRow: vi.fn().mockResolvedValue(1),
+  finalizeEasSyncProcessRow: vi.fn().mockResolvedValue(undefined),
+}))
 
 describe('easSyncMachine', () => {
-  let runSpy: ReturnType<typeof vi.spyOn<typeof syncDbWithEas, 'runSyncFromEas'>>
+  const runSpy = runSyncFromEas
 
   beforeEach(() => {
-    runSpy = vi.spyOn(syncDbWithEas, 'runSyncFromEas').mockResolvedValue(undefined)
-    vi.spyOn(easSyncProcess, 'insertEasSyncProcessRow').mockResolvedValue(1)
-    vi.spyOn(easSyncProcess, 'finalizeEasSyncProcessRow').mockResolvedValue(undefined)
+    runSpy.mockReset()
+    runSpy.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
-    runSpy.mockRestore()
-    vi.restoreAllMocks()
+    vi.clearAllMocks()
   })
 
   it('merges requests received while a sync is in flight into the next run', async () => {
