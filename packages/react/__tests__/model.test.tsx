@@ -23,17 +23,43 @@ import {
   importJsonSchema,
   Schema,
   Model,
+  ModelProperty,
+  BaseFileManager,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 
+/**
+ * Remove the schema JSON files importJsonSchema writes to the shared OPFS working dir. If they are left
+ * behind, client.init in the next browser test file re-imports these schemas, and that file's own
+ * Post/Article models then reuse these schemas' rows by name.
+ */
+async function removeSchemaFilesByName(schemaName: string): Promise<void> {
+  try {
+    const fs = await BaseFileManager.getFs()
+    const path = BaseFileManager.getPathModule()
+    const workingDir = BaseFileManager.getWorkingDir()
+    const suffix = new RegExp(`_${schemaName.replace(/\s+/g, '_')}_v\\d+\\.json$`)
+    for (const file of await fs.promises.readdir(workingDir)) {
+      if (suffix.test(file)) await fs.promises.unlink(path.join(workingDir, file))
+    }
+  } catch {
+    // Working dir or file may not exist
+  }
+}
+
 /** Delete a schema row and all FK-dependent rows (matches Schema.destroy ordering). */
 async function removeSchemaByName(
   db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
   schemaName: string,
 ): Promise<void> {
+  // Evict cached instances and remove the schema file too, so later files can't resolve or
+  // re-import this schema's models (e.g. "Post").
+  ModelProperty.evictForModels(Model.evictForSchema(schemaName), schemaName)
+  await removeSchemaFilesByName(schemaName)
+
   const schemaRows = await db
     .select({ id: schemas.id })
     .from(schemas)
@@ -86,36 +112,36 @@ const testSchemaWithModels: SchemaFileFormat = {
   },
   models: {
     Post: {
-      id: 'post-model-id',
+      id: 'post-model-models-test-id',
       properties: {
         title: {
-          id: 'title-prop-id',
+          id: 'title-prop-models-test-id',
           type: 'Text',
         },
         content: {
-          id: 'content-prop-id',
+          id: 'content-prop-models-test-id',
           type: 'Text',
         },
       },
     },
     Article: {
-      id: 'article-model-id',
+      id: 'article-model-models-test-id',
       properties: {
         title: {
-          id: 'article-title-prop-id',
+          id: 'article-title-prop-models-test-id',
           type: 'Text',
         },
         author: {
-          id: 'author-prop-id',
+          id: 'author-prop-models-test-id',
           type: 'Text',
         },
       },
     },
     Comment: {
-      id: 'comment-model-id',
+      id: 'comment-model-models-test-id',
       properties: {
         text: {
-          id: 'text-prop-id',
+          id: 'text-prop-models-test-id',
           type: 'Text',
         },
       },
