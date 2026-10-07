@@ -655,8 +655,11 @@ export class ModelProperty {
     // Wait for service to be ready (idle state) and have writeProcess spawned
     const propertyFileId = propertyWithId.id // id is now the schemaFileId (string)
     const hasModelId = propertyWithId.modelId || propertyWithId.modelName
-    
-    if (hasModelId && propertyFileId) {
+    // A _dbId means the data was loaded from an existing row (createById, getPropertySchema), so
+    // there's nothing to write. Writing it back anyway raced deletes of that row's model (FK error).
+    const isPersisted = typeof (propertyWithId as { _dbId?: unknown })._dbId === 'number'
+
+    if (hasModelId && propertyFileId && !isPersisted) {
       // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
       // Retry a few times if writeProcess isn't available yet
       let retries = 0
