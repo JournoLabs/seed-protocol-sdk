@@ -19,6 +19,7 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -887,6 +888,8 @@ export class Model {
               let retries = 0
               const maxRetries = 10
               const checkAndSend = async () => {
+                // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
+                if (isActorStopped(proxiedInstance._service)) return
                 const currentSnapshot = proxiedInstance._service.getSnapshot()
                 if (currentSnapshot.context.writeProcess) {
                   logger(`Triggering write process for model "${finalSnapshot.context.modelName}" (schemaId: ${schemaId})`)
@@ -2039,7 +2042,8 @@ export class Model {
 
             dbId = modelRecord.id
 
-            // Update context with _dbId
+            // Update context with _dbId (unless the model was stopped while the lookup ran)
+            if (isActorStopped(model._service)) return undefined
             model._service.send({
               type: 'updateContext',
               _dbId: dbId,
@@ -2130,6 +2134,9 @@ export class Model {
         .from(propertiesTable)
         .where(eq(propertiesTable.modelId, dbId)) // Use _dbId (database integer ID)
 
+      // Stopped while querying: don't re-cache ModelProperty instances for an evicted/unloaded model
+      if (isActorStopped(this._service)) return
+
       const propertyIds = propertyRows
         .map((row: { schemaFileId: string | null }) => row.schemaFileId)
         .filter((id: string | null): id is string => id !== null && id !== undefined)
@@ -2162,7 +2169,9 @@ export class Model {
         }
       }
 
-      // Update context with refreshed property IDs AFTER creating instances
+      // Update context with refreshed property IDs AFTER creating instances (the awaits above can
+      // outlive the instance)
+      if (isActorStopped(this._service)) return
       this._service.send({
         type: 'updateContext',
         _liveQueryPropertyIds: propertyIds,

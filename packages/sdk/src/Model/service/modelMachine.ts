@@ -427,6 +427,7 @@ export const modelMachine = setup({
               // Trigger property refresh after properties are created
               // This ensures _liveQueryPropertyIds is updated in Node.js where liveQuery isn't available
               setTimeout(() => {
+                if (self.getSnapshot().status === 'stopped') return
                 self.send({ type: 'refreshProperties' })
               }, 100) // Small delay to ensure properties are written to DB
             },

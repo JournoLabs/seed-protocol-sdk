@@ -29,3 +29,12 @@ export function isEntityValid<T extends { getService(): any }>(entity: T): boole
   const errors = getEntityValidationErrors(entity)
   return errors.length === 0
 }
+
+/**
+ * Whether an actor has been stopped (unload, destroy, or Schema eviction). Async work started by an
+ * entity (DB lookups, retry timers) must check this before sending, since a stopped actor ignores
+ * events and XState warns about every one of them.
+ */
+export function isActorStopped(actor: { getSnapshot(): { status: string } }): boolean {
+  return actor.getSnapshot().status === 'stopped'
+}
