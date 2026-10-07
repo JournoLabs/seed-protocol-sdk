@@ -492,6 +492,68 @@ export const snapshotJson = `{
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "html_embedded_image_co_publish": {
+      "name": "html_embedded_image_co_publish",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "parent_seed_local_id": {
+          "name": "parent_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "html_seed_local_id": {
+          "name": "html_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "image_seed_local_id": {
+          "name": "image_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stable_key": {
+          "name": "stable_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "html_embed_co_pub_parent_html_stable": {
+          "name": "html_embed_co_pub_parent_html_stable",
+          "columns": [
+            "parent_seed_local_id",
+            "html_seed_local_id",
+            "stable_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "metadata": {
       "name": "metadata",
       "columns": {
