@@ -948,8 +948,22 @@ const processRelationOrImageProperty = async (
   }
 
   await ensurePropertyDefs(relatedItem)
-  const { itemBasicProperties, itemUploadProperties } =
+  const { itemBasicProperties, itemUploadProperties, itemImageProperties: relatedStorageSeedProperties } =
     await getSegmentedItemProperties(relatedItem)
+
+  // A draft item related to the published one is published with it, including its own
+  // Image/File/Html/Json properties and the images embedded in its Html (as for the item itself).
+  if (!isStorageSeed) {
+    multiPublishPayload = await processRelatedDraftStorageSeeds(
+      relatedItem,
+      relatedStorageSeedProperties,
+      itemBasicProperties,
+      multiPublishPayload,
+      uploadedTransactions,
+      ctx,
+      buildOpts,
+    )
+  }
 
   const relatedStorageUpload = resolveStorageTransactionUploadSlot(
     relatedItem,
@@ -994,6 +1008,42 @@ const processRelationOrImageProperty = async (
   multiPublishPayload.push(publishPayload)
 
   return multiPublishPayload
+}
+
+/**
+ * Storage-seed properties (Image/File/Html/Json) of a draft item related to the published one, and
+ * the images embedded in its Html (htmlEmbeddedImageCoPublish rows it owns): payloads for their seeds,
+ * and the properties added to `itemBasicProperties` so the related item attests them. Same handling
+ * as the published item's own (see getPublishPayload).
+ */
+async function processRelatedDraftStorageSeeds(
+  relatedItem: IItem<any>,
+  storageSeedProperties: IItemProperty<any>[],
+  itemBasicProperties: IItemProperty<any>[],
+  multiPublishPayload: MultiPublishPayload,
+  uploadedTransactions: UploadedTransaction[],
+  ctx: PublishValidationContext,
+  buildOpts?: PublishBuildOpts,
+): Promise<MultiPublishPayload> {
+  for (const storageSeedProperty of storageSeedProperties) {
+    multiPublishPayload = await processRelationOrImageProperty(
+      storageSeedProperty,
+      multiPublishPayload,
+      uploadedTransactions,
+      relatedItem.seedLocalId,
+      ctx,
+      buildOpts,
+    )
+    itemBasicProperties.push(storageSeedProperty)
+  }
+  return processHtmlEmbeddedCoPublishImagePayloads(
+    relatedItem,
+    multiPublishPayload,
+    uploadedTransactions,
+    relatedItem.seedLocalId,
+    ctx,
+    buildOpts,
+  )
 }
 
 async function resolveHtmlPropertySchemaUidByHtmlSeed(

@@ -38,7 +38,8 @@ export type CleanupTestSchemaDataOptions = {
  * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null, property_uids,
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Waits for writes already running (stopping an actor can't cancel them), then retries briefly on
- *    failure in case a write still lands mid-cleanup.
+ *    failure in case a write still lands mid-cleanup. Evicts once more after the deletes, since reads
+ *    still running from client.init can re-create instances from the rows until they're gone.
  * With `items: true`, first deletes the test models' items (see the option).
  * 4. Deletes the test schema JSON files from the working dir, or the next client.init re-imports the
  *    schemas whose rows were just removed. Matters most in the browser, where test files share one
@@ -53,21 +54,29 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
     .select({ name: schemas.name })
     .from(schemas)
     .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-  for (const { name } of testSchemaRows) {
-    if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
-  }
+  evictTestSchemaInstances(testSchemaRows)
   // Evicting stops new writes but can't cancel running ones; deleting under them fails their join/FK steps
   await waitForInFlightWrites()
 
   for (let attempt = 0; ; attempt++) {
     try {
       await deleteTestRows(db, { items })
+      // Evict again: work still running from client.init when we first evicted (e.g. a ModelProperty
+      // resolving its model via Model.getByNameAsync) re-creates Model instances from the rows being
+      // deleted. With the rows gone nothing re-creates them, so this pass leaves the cache clean.
+      evictTestSchemaInstances(testSchemaRows)
       await cleanupTestSchemaFiles()
       return
     } catch (error) {
       if (attempt >= retries) throw error
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
     }
+  }
+}
+
+function evictTestSchemaInstances(testSchemaRows: { name: string | null }[]): void {
+  for (const { name } of testSchemaRows) {
+    if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
   }
 }
 

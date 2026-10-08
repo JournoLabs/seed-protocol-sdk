@@ -327,6 +327,10 @@ async function appendCoPublishedImageUploadData(
   return uploads
 }
 
+/** No seed uid yet: a related item in this state is published together with the item. */
+const isDraftItem = (item: IItem<any>): boolean =>
+  !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
+
 export const getPublishUploadData = async (
   item: IItem<any>,
   uploads: PublishUploadData[] = [],
@@ -336,26 +340,29 @@ export const getPublishUploadData = async (
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
 
-  if (!relatedItemProperty && options?.onlyHtmlStorageSeedLocalIds?.length) {
+  // Phase 2 of an embedded-image publish: only the deferred Html storage seeds, of this item and of
+  // the related items published with it (whose Html can embed images too).
+  const onlyDeferredHtml = !!options?.onlyHtmlStorageSeedLocalIds?.length
+  if (onlyDeferredHtml) {
     const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
     uploads.push(...storageSeedUploads)
-    return uploads
-  }
+  } else {
+    for (const uploadProperty of itemUploadProperties) {
+      uploads = await processUploadPropertyData(
+        uploadProperty,
+        uploads,
+        relatedItemProperty,
+        options,
+      )
+    }
 
-  for (const uploadProperty of itemUploadProperties) {
-    uploads = await processUploadPropertyData(
-      uploadProperty,
-      uploads,
-      relatedItemProperty,
-      options,
-    )
-  }
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
+    uploads.push(...storageSeedUploads)
 
-  const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
-  uploads.push(...storageSeedUploads)
-
-  if (!relatedItemProperty && !options?.onlyHtmlStorageSeedLocalIds?.length) {
-    uploads = await appendCoPublishedImageUploadData(item, uploads, options)
+    // Images embedded in this item's Html: the published item's, and a related draft's published with it.
+    if (!relatedItemProperty || isDraftItem(item)) {
+      uploads = await appendCoPublishedImageUploadData(item, uploads, options)
+    }
   }
 
   if (options?.skipRelationRecursion) {

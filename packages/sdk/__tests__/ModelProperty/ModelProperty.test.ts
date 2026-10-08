@@ -686,8 +686,8 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       await waitForPropertySchema(modelName, 'title', schemaName)
-      // Let the model load its properties first. In Node, model.properties then never picks up
-      // the row added below (no live query), so the lookup has to find it in the table.
+      // Let the model load its properties first, so only the new property's own write can add it below.
+      // In Node there is no live query: the write itself has to put the property on the model.
       const model = await Model.resolveAsync(modelName, { schemaName })
       await vi.waitFor(() => expect(model?.properties.map((p) => p.name)).toEqual(['title']), { timeout: 15000 })
 
@@ -696,6 +696,22 @@ testDescribe('ModelProperty Integration Tests', () => {
         { waitForReady: false, schemaName },
       ) as ModelProperty
       await waitForModelPropertyIdle(added)
+      // Once the write has finished it is no longer a pending write: the model must still list it
+      // (in Node, where the Model has no reactive liveQuery, it used to drop out here).
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()
+            .select({ id: propertiesTable.id })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, added.id!))
+          if (rows.length === 0) throw new Error('subtitle not written yet')
+          if (ModelProperty.getPendingModelId(added.id!) !== undefined) throw new Error('write still pending')
+        },
+        { timeout: 15000, interval: 20 },
+      )
+      // getPropertySchema also falls back to the properties table, so check the model itself too.
+      expect(model?.properties.map((p) => p.name)).toContain('subtitle')
+      expect(await getPropertySchema(modelName, 'subtitle', { schemaName })).toMatchObject({ name: 'subtitle' })
 
       const subtitle = await waitForPropertySchema(modelName, 'subtitle', schemaName)
       expect(subtitle).toMatchObject({ name: 'subtitle', dataType: 'Text', modelName })

@@ -9,6 +9,7 @@ import {
 } from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
+import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
 import { verifyAttestations } from '../helpers/verifyAttestations'
 import { AttestationVerificationError } from '../../../errors'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
@@ -240,6 +241,8 @@ export const createAttestationsDirectToEas = fromPromise(
 
     let lastAttestationMs = Date.now()
     const batchExtraUids: string[] = []
+    /** Seed attestations this publish created, by request localId, with their attestation time. */
+    const createdSeeds = new Map<string, { seedUid: string; attestationMs: number }>()
 
     for (let i = 0; i < normalizedRequests.length; i++) {
       const request = normalizedRequests[i] as NormalizedRequest
@@ -266,6 +269,9 @@ export const createAttestationsDirectToEas = fromPromise(
         }
         newSeedUid = seedUidFromReceipt
         request.seedUid = seedUidFromReceipt
+        if (request.localId) {
+          createdSeeds.set(request.localId, { seedUid: seedUidFromReceipt, attestationMs: lastAttestationMs })
+        }
         batchExtraUids.push(seedUidFromReceipt)
         logger('created Seed attestation', newSeedUid)
       } else if (newSeedUid !== ZERO_BYTES32) {
@@ -363,12 +369,26 @@ export const createAttestationsDirectToEas = fromPromise(
       }
     }
 
-    persistSeedUidFromPublishResult(item as { seedUid?: string }, normalizedRequests)
+    // The publishing item gets its own request's seed (requests are not ordered root-first: a
+    // related item can be request [0]); every related item records the seed created for it.
+    persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, normalizedRequests)
     const itemWithPersist = item as {
       persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
     }
-    if (normalizedRequests[0]?.seedUid && normalizedRequests[0].seedUid !== ZERO_BYTES32) {
-      await persistSeedUidSafely(itemWithPersist, address, lastAttestationMs)
+    const rootRequest =
+      normalizedRequests.find((r) => r.localId === item.seedLocalId) ?? normalizedRequests[0]
+    if (rootRequest?.seedUid && rootRequest.seedUid !== ZERO_BYTES32) {
+      const rootSeedMs = createdSeeds.get(rootRequest.localId)?.attestationMs ?? lastAttestationMs
+      await persistSeedUidSafely(itemWithPersist, address, rootSeedMs)
+    }
+    for (const [seedLocalId, { seedUid, attestationMs }] of createdSeeds) {
+      if (seedLocalId === rootRequest?.localId) continue
+      await recordRelatedSeedUid({
+        seedLocalId,
+        seedUid,
+        publisherAddress: address,
+        attestationCreatedAtMs: attestationMs,
+      })
     }
 
     try {
@@ -386,15 +406,17 @@ export const createAttestationsDirectToEas = fromPromise(
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
 
     try {
+      // The item's co-publish rows and those of the related drafts published with it.
       const { clearHtmlEmbeddedImageCoPublishRows } = await import('@seedprotocol/sdk')
-      await clearHtmlEmbeddedImageCoPublishRows(item.seedLocalId)
+      const published = new Set<string>([item.seedLocalId])
+      for (const r of normalizedRequests) if (r?.localId) published.add(r.localId)
+      for (const seedLocalId of published) await clearHtmlEmbeddedImageCoPublishRows(seedLocalId)
     } catch {
       /* best-effort cleanup */
     }
 
     const { collectPublishedBatch } = await import('../../publishedBy/collectBatchUids')
-    const rootReq =
-      normalizedRequests.find((r) => r?.localId === item.seedLocalId) ?? normalizedRequests[0]
+    const rootReq = rootRequest
     const publishedBatch = rootReq?.seedUid
       ? collectPublishedBatch({
           seedUid: String(rootReq.seedUid),

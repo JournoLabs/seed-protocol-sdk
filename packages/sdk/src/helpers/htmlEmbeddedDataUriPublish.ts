@@ -1,4 +1,4 @@
-import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
+import { INTERNAL_STORAGE_MODEL_FILE_IDS, ZERO_BYTES32 } from '@/helpers/constants'
 import { parseFragment, serialize } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
 import { eq } from 'drizzle-orm'
@@ -11,6 +11,8 @@ import type { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
+import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@/helpers/relationSeedRef'
 
 export const HTML_EMBEDDED_MAX_IMAGES_PER_DOC = 50
 export const HTML_EMBEDDED_MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -207,9 +209,47 @@ export async function prepareHtmlEmbeddedImagesForPublish(
     return { deferredHtmlSeedLocalIds: [] }
   }
 
-  await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
-
   const deferred = new Set<string>()
+  // The item's own Html, and the Html of the draft items published with it: each gets its embedded
+  // images materialized and co-published (rows keyed by the item owning the Html property).
+  for (const parent of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
+    await prepareHtmlEmbeddedImagesOfItem(appDb, parent, publishPolicy, deferred)
+  }
+
+  return { deferredHtmlSeedLocalIds: [...deferred] }
+}
+
+/**
+ * Draft items (no seed uid yet) that a publish of `item` publishes with it: the targets of its
+ * relation properties, one level deep, as getPublishPayload and getPublishUploads walk them.
+ * Html-embedded images of these items are co-published with `item` like its own.
+ */
+export async function getRelatedDraftsCoPublishedWith(item: IItem<any>): Promise<IItem<any>[]> {
+  const { itemRelationProperties } = await getSegmentedItemProperties(item)
+  const out: IItem<any>[] = []
+  const seen = new Set<string>([item.seedLocalId])
+  for (const relationProperty of itemRelationProperties) {
+    if (relationProperty.uid) continue
+    const snap = relationProperty.getService().getSnapshot()
+    const value = 'context' in snap ? (snap.context as { propertyValue?: unknown }).propertyValue : undefined
+    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalizeRelationPropertyValue(value) ?? '')
+    if (!seedLocalId && !seedUid) continue
+    const related = await Item.find({ seedLocalId, seedUid })
+    if (!related?.seedLocalId || seen.has(related.seedLocalId)) continue
+    if (related.seedUid && related.seedUid !== ZERO_BYTES32) continue
+    seen.add(related.seedLocalId)
+    out.push(related)
+  }
+  return out
+}
+
+async function prepareHtmlEmbeddedImagesOfItem(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  item: IItem<any>,
+  publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
+  deferred: Set<string>,
+): Promise<void> {
+  await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
 
   for (const p of item.properties) {
     const def = p.propertyDef
@@ -270,8 +310,6 @@ export async function prepareHtmlEmbeddedImagesForPublish(
       }).onConflictDoNothing()
     }
   }
-
-  return { deferredHtmlSeedLocalIds: [...deferred] }
 }
 
 function normalizeDataTypeLocal(dt: string | undefined): string {
@@ -291,12 +329,8 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
 
-  const rows = await appDb
-    .select()
-    .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentSeedLocalId))
-
-  if (rows.length === 0) return
+  const parentItem = await Item.find({ seedLocalId: parentSeedLocalId })
+  if (!parentItem) return
 
   const txByImageSeed = new Map<string, string>()
   for (const u of uploadedTransactions) {
@@ -305,10 +339,27 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
     }
   }
 
+  // The parent's Html and that of the draft items published with it (see prepareHtmlEmbeddedImagesForPublish).
+  for (const item of [parentItem, ...(await getRelatedDraftsCoPublishedWith(parentItem))]) {
+    await rewriteHtmlEmbeddedImagesOfItem(appDb, item, txByImageSeed)
+  }
+}
+
+async function rewriteHtmlEmbeddedImagesOfItem(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  parentItem: IItem<any>,
+  txByImageSeed: Map<string, string>,
+): Promise<void> {
+  const rows = await appDb
+    .select()
+    .from(htmlEmbeddedImageCoPublish)
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentItem.seedLocalId))
+
+  if (rows.length === 0) return
+
   const htmlSeedIds = new Set(
     rows.map((r: (typeof rows)[number]) => String(r.htmlSeedLocalId).trim()),
   )
-  const parentItem = await Item.find({ seedLocalId: parentSeedLocalId })
 
   const refByHtmlSeed = new Map<string, string>()
   if (parentItem) {

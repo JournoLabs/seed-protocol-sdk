@@ -11,6 +11,7 @@ import {
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { IItem, IItemProperty } from '@/interfaces'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
@@ -320,9 +321,9 @@ async function collectUnpublishedRelatedItems(
 }
 
 /**
- * Images embedded in the item's Html properties (co-published with it) whose seed was revoked:
- * getPublishPayload rejects them like image properties pointing at revoked seeds. Like
- * getPublishPayload, only the published item's own co-publish rows are checked.
+ * Images embedded in Html properties (co-published) whose seed was revoked: getPublishPayload rejects
+ * them like image properties pointing at revoked seeds. Like getPublishPayload, checks the published
+ * item's co-publish rows and those of the draft items published with it.
  */
 async function collectUnpublishedEmbeddedImages(
   item: IItem<any>,
@@ -330,16 +331,18 @@ async function collectUnpublishedEmbeddedImages(
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb || !item.seedLocalId) return
-  const rows = await appDb
-    .select()
-    .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
-  for (const row of rows) {
-    const seed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
-    if (!isUnpublishedSeed(seed)) continue
-    const propertyName = htmlPropertyNameForHtmlSeed(item, row.htmlSeedLocalId)
-    if (out.some((r) => r.propertyName === propertyName && r.seedLocalId === seed.seedLocalId)) continue
-    out.push({ propertyName, modelName: 'Image', seedLocalId: seed.seedLocalId, seedUid: seed.seedUid })
+  for (const owner of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
+    const rows = await appDb
+      .select()
+      .from(htmlEmbeddedImageCoPublish)
+      .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, owner.seedLocalId))
+    for (const row of rows) {
+      const seed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
+      if (!isUnpublishedSeed(seed)) continue
+      const propertyName = htmlPropertyNameForHtmlSeed(owner, row.htmlSeedLocalId)
+      if (out.some((r) => r.propertyName === propertyName && r.seedLocalId === seed.seedLocalId)) continue
+      out.push({ propertyName, modelName: 'Image', seedLocalId: seed.seedLocalId, seedUid: seed.seedUid })
+    }
   }
 }
 

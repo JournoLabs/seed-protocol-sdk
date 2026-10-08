@@ -86,18 +86,12 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
     if (!req.localId || req.localId === rootSeedLocalId || !isZero(req.seedUid) || isZero(seedUid)) {
       continue
     }
-    try {
-      const related = await Item.find({ seedLocalId: req.localId } as Parameters<typeof Item.find>[0])
-      if (!related) {
-        logger('related item %s not found; its seed uid is not recorded', req.localId)
-        continue
-      }
-      ;(related as { seedUid?: string }).seedUid = seedUid
-      await persistSeedUidSafely(related, publisherAddress, attMs)
-    } catch (err) {
-      // Attestations are on-chain; recording the related seed uid locally is best-effort.
-      logger('recording seed uid of related item %s failed: %O', req.localId, err)
-    }
+    await recordRelatedSeedUid({
+      seedLocalId: req.localId,
+      seedUid: seedUid!,
+      publisherAddress,
+      attestationCreatedAtMs: attMs,
+    })
   }
 
   return {
@@ -110,5 +104,29 @@ export async function recordMultiPublishReceipt<R extends MultiPublishRequestLik
         ...(isZero(req.versionUid) && !isZero(versionUid) ? { versionUid } : {}),
       }
     }),
+  }
+}
+
+/**
+ * Records the Seed attestation a publish created for a related item (one published together with the
+ * item being published) on that item. Best-effort: the attestation is already on-chain.
+ */
+export async function recordRelatedSeedUid(params: {
+  seedLocalId: string
+  seedUid: string
+  publisherAddress: string
+  attestationCreatedAtMs?: number
+}): Promise<void> {
+  const { seedLocalId, seedUid, publisherAddress, attestationCreatedAtMs } = params
+  try {
+    const related = await Item.find({ seedLocalId } as Parameters<typeof Item.find>[0])
+    if (!related) {
+      logger('related item %s not found; its seed uid is not recorded', seedLocalId)
+      return
+    }
+    ;(related as { seedUid?: string }).seedUid = seedUid
+    await persistSeedUidSafely(related, publisherAddress, attestationCreatedAtMs)
+  } catch (err) {
+    logger('recording seed uid of related item %s failed: %O', seedLocalId, err)
   }
 }
