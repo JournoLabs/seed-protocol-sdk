@@ -1,5 +1,5 @@
 import { graphql } from '../graphql/gql/index.js'
-import { TypedDocumentNode } from '@graphql-typed-document-node/core'
+import type { TypedDocumentNode } from '@graphql-typed-document-node/core'
 
 export const GET_TRANSACTION_TAGS = graphql(/* GraphQL */ `
   query GetTransactionTags($transactionId: ID!) {

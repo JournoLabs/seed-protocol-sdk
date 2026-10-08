@@ -1,5 +1,5 @@
 import { graphql } from './graphql/gql/index.js'
-import { TypedDocumentNode } from '@graphql-typed-document-node/core'
+import type { TypedDocumentNode } from '@graphql-typed-document-node/core'
 import type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 
 export const GET_SCHEMAS = graphql(/* GraphQL */ `
