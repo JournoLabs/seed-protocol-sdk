@@ -70,6 +70,8 @@ So a seed whose newest version is revoked but an older one is live reports the o
 
 `getSeedPublishState().status` is still `onchain` for an unpublished seed, because its revoked attestations stay on-chain. Use its `revokedAt` (or `item.isRevoked`) to show the item as unpublished.
 
+`@seedprotocol/query` follows the same rule in both sources. `queryBySchema`, `queryBySchemaForMonth` and `getSeed` (data) leave out a seed whose versions are all revoked, and they use the newest live version of a seed that has both live and revoked versions. To tell "every version revoked" from "no version", `assembleSeeds` asks the data source for revoked versions too, in the request that already fetches the seeds' versions (`getVersionsForSeeds(uids, { includeRevoked: true })`), and never uses them otherwise. The local source also drops such seeds before it pages, so its pages stay full. The remote source can only drop them after EAS has paged the seeds, so a remote page can hold fewer than `limit` items. Seeds with no version at all are unchanged: the remote source lists them with an empty `versionUid`, and the local source leaves them out.
+
 Code that needs the revoked versions on purpose reads the version rows directly instead of these helpers. This includes collecting attestation UIDs to revoke (`getVersionsForSeedUid`), EAS sync bookkeeping, and stamping `revoked_at`.
 
 ### EAS sync

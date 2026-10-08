@@ -94,4 +94,6 @@ export type AttestationLike = {
   timeCreated: number
   attester?: string
   schema?: { schemaNames?: Array<{ name: string }> }
+  /** Whether the attestation is revoked (EAS `revoked`; the local source sets it from `revoked_at`). */
+  revoked?: boolean
 }

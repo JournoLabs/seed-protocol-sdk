@@ -50,6 +50,8 @@ type AssembleContext = {
   assembledItems: Map<string, Record<string, unknown>>
   versionsBySeedUid: Map<string, AttestationLike[]>
   latestVersionUidsBySeedUid: Map<string, string>
+  /** Requested seeds left out because every version is revoked; not fetched again as related. */
+  droppedSeedUids: Set<string>
 }
 
 function createAssembleContext(): AssembleContext {
@@ -60,6 +62,7 @@ function createAssembleContext(): AssembleContext {
     assembledItems: new Map(),
     versionsBySeedUid: new Map(),
     latestVersionUidsBySeedUid: new Map(),
+    droppedSeedUids: new Set(),
   }
 }
 
@@ -181,6 +184,7 @@ async function processSeeds(
   ctx: AssembleContext,
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
+  opts: { dropSeedsWithOnlyRevokedVersions?: boolean } = {},
 ): Promise<void> {
   const seedUids: string[] = []
 
@@ -202,7 +206,24 @@ async function processSeeds(
 
   if (seedUids.length === 0) return
 
-  const itemVersions = await dataSource.getVersionsForSeeds(seedUids)
+  // Revoked versions come back too (marked), in the same request, only so a seed whose versions
+  // were all revoked can be told from one that never had a version; they are never used below.
+  const allVersions = await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  const itemVersions = allVersions.filter((v) => v.revoked !== true)
+
+  if (opts.dropSeedsWithOnlyRevokedVersions) {
+    // Like the SDK (latest published version skips revoked ones): every version revoked means
+    // no published version, so the seed is left out. A seed with no version at all is kept.
+    const requested = new Set(seedUids)
+    const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
+    for (const version of allVersions) {
+      const seedUid = version.refUID
+      if (seedsWithLiveVersion.has(seedUid) || !requested.has(seedUid)) continue
+      ctx.assembledItems.delete(seedUid)
+      ctx.seedUidToModelType.delete(seedUid)
+      ctx.droppedSeedUids.add(seedUid)
+    }
+  }
 
   for (let i = 0; i < itemVersions.length; i++) {
     const itemVersion = itemVersions[i] as AttestationLike
@@ -469,10 +490,10 @@ export async function assembleSeeds(
 
   const ctx = createAssembleContext()
 
-  await processSeeds(ctx, seeds, dataSource)
+  await processSeeds(ctx, seeds, dataSource, { dropSeedsWithOnlyRevokedVersions: true })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
-    (uid) => !ctx.assembledItems.has(uid),
+    (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
   )
   if (relatedSeedUidsArray.length > 0) {
     const relatedSeeds = await dataSource.getSeedsByUids(relatedSeedUidsArray)
