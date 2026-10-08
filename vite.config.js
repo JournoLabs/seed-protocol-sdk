@@ -95,6 +95,13 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
@@ -171,6 +178,13 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
