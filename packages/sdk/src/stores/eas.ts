@@ -3,6 +3,8 @@ export {
   setSchemaUidForModel,
   getSchemaUidForModelFromCache,
   getEasSchemaUidForSchemaDefinition,
+  getEasSchemaUidForExactDefinition,
+  cachedSchemaLookup,
 } from '@seedprotocol/eas'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { setSchemaUidForSchemaDefinition } from '@seedprotocol/eas'

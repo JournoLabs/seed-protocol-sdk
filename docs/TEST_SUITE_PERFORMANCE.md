@@ -99,6 +99,9 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   of the file (clearing `document.body` only detaches containers), and its hooks kept refetching
   while the next `beforeEach` deleted and re-imported the schema.
 - In browser tests the page's `console.log` isn't printed; use `console.warn` for probes.
+- **EAS schema lookups are cached per page / process**, including misses (finding 3). A test that
+  stubs the EAS client and needs a fresh lookup should call `resetSchemaUidCaches()` from
+  `@seedprotocol/eas` first (as `schemaUidCache.test.ts` does).
 - Fixed sleeps are fine for: delays inside polling loops and windows that assert something does *not*
   happen (no extra callbacks/emissions). Html/File/Image values don't need one: `Item.create` and
   `ItemProperty.save()` resolve after the file and its metadata are written, so a reload right after
@@ -150,13 +153,32 @@ their number so references to them stay valid.
    causes are `ModelProperty.createById` returning a same-name instance cached under a different id
    (so `getById` keeps missing) and unordered async liveQuery emissions in `entityLiveQuery.ts`.
    `useItemProperties` reads `model.properties` and is affected.
-3. **`Item.create` takes ~1s per item in the browser** (≈0.8–1.3s measured). It is now the main cost
-   of per-test setup in the React suites (e.g. `item.test.tsx`'s `beforeEach` creates four items,
-   ~3.8s per test). Most of it is ~5 sequential, uncached EAS GraphQL requests per item: one
-   `GetSchemaByName` per property in `createMetadata`, plus the seed's schema UID lookup, which caches
-   only found UIDs. The browser `QueryClient` helper builds a new client per call. Stubbing the
-   requests took items from ~630ms to ~200ms. `waitForDb` and `waitForFile` also wait 100ms before
-   their first check.
+3. **Fixed** (step 4, branch `fix/eas-schema-lookup-cache`). `Item.create` took ~1s per item in the
+   browser. Each item made 4–5 sequential, uncached EAS GraphQL requests (~80ms each): one
+   `GetSchemaByName` per property in `createMetadata` and one `GetSchemas` for the model in
+   `getEasSchemaUidForModel`, whose misses (most test models, e.g. `Article`) were re-requested every
+   time. `item.test.tsx` made 289 EAS requests per run. These lookups now go through a cache in
+   `packages/eas/src/stores/schemaUidCache.ts` that keeps found UIDs and misses (misses for
+   `SCHEMA_LOOKUP_MISS_TTL_MS`, 5 min, so a schema registered by another client is found
+   eventually), shares in-flight requests, and drops every cached miss when this client registers a
+   schema (`setSchemaUidForSchemaDefinition` / `setSchemaUidForModel`, which publish's
+   `ensureEasSchemasForItem` calls). `getEasSchemaUidForSchemaDefinition` caches its misses the
+   same way, and `updateMetadata` uses the same lookup as `createMetadata`. Request failures are
+   not cached. Tests: `packages/sdk/__tests__/helpers/schemaUidCache.test.ts`.
+   The Item machine's `waitForDb` and the browser `waitForFileWithContent` (called by every
+   `saveFile`) now check once before polling instead of waiting 100ms first.
+   Measured back to back against `main` on a loaded machine: `item.test.tsx` per-item `Item.create`
+   825/1157ms → 415/730ms (two rounds), its EAS requests 289 → 7, and browser-react summed file
+   time 267/334/272s → 174/238/179s (three rounds, same 205 passing); browser 294s → 229s (one
+   round). Full runs on the branch: browser twice (once with `--sequence.shuffle.files`), NodeJS
+   once, no failures. On a quieter run, items after
+   the first per model took ~125–230ms.
+   Not changed: the browser `QueryClient` helper still builds a new client per call. Building one
+   is cheap, and with `staleTime` 0 sharing one would not cache anything; it would dedupe
+   concurrent requests by query key, and several keys omit their variables
+   (`getPropertySchema${name}` is shared by model and property lookups and ignores the data type).
+   Sharing a client needs those keys fixed first. Each per-call client also schedules a 24h
+   `gcTime` timer per query, which keeps the result alive for a day in long-running apps.
 4. **Not a bug.** Html saves do have a completion signal (see "Writing tests that stay fast"); the 2s
    sleeps in `ItemProperty.test.ts` and `htmlPropertyPersistence.test.tsx` were removed.
 
@@ -246,7 +268,8 @@ Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 
 - **Step 3 — done** (branch `claude/step3-test-cleanup`): 5, 6, 7 and 16 fixed; 14 narrowed to writes
   that start after eviction, which needs an SDK fix (see 14). `item.test.tsx` and
   `itemProperty.test.tsx` now import their schema once per file.
-- **Step 4 — finding 3.** Cache EAS schema lookups, including misses (~630 → ~200ms per item).
+- **Step 4 — done** (branch `fix/eas-schema-lookup-cache`): finding 3 fixed. EAS schema lookups are
+  cached, including misses; browser-react summed file time down ~34% back to back against `main`.
 - **Step 5 — hooks and caches: 2, 12, 15.** `ModelProperty` cache identity behind `model.properties`.
   In `useModelProperties`, read `_dbId` from the model's live snapshot (or resolve by `modelFileId`)
   instead of memoizing it once, with a test that delays the property write past the 2.5s refetches.
