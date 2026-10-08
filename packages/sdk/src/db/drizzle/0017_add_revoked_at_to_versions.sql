@@ -1,0 +1,1 @@
+ALTER TABLE `versions` ADD `revoked_at` integer;

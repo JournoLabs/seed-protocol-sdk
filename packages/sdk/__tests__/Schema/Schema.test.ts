@@ -79,9 +79,8 @@ async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<v
   }
 }
 
-// A runtime Model writes itself to the DB in the background, and each of its properties is then written by
-// its own ModelProperty. Wait for those rows, or a write can land after the next test's beforeEach has
-// deleted the schema it targets.
+// A runtime Model writes itself and its properties to the DB in the background. Wait for those rows, or a
+// write can land after the next test's beforeEach has deleted the schema it targets.
 async function waitForModelPersisted(model: Model, propertyNames: string[] = [], timeout: number = 5000): Promise<void> {
   const snapshot = await waitFor(model.getService(), (s) => s.context._dbId != null, { timeout })
   if (propertyNames.length === 0) return

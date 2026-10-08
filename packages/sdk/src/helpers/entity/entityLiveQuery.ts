@@ -1,5 +1,6 @@
 import { Observable, Subscription } from 'rxjs'
 import debug from 'debug'
+import { isActorStopped } from './entityCommon'
 
 /**
  * Configuration for entity liveQuery setup
@@ -95,7 +96,8 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
             await config.createChildInstances(initialIds)
           }
           
-          // Update context with initial IDs
+          // Update context with initial IDs (the queries above can outlive the instance)
+          if (isActorStopped(instance.getService())) return
           config.updateContext(instance, initialIds)
         }
       }
@@ -132,6 +134,7 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
             }
             
             // Update context with new IDs
+            if (isActorStopped(instance.getService())) return
             config.updateContext(instance, ids)
           },
           error: (error) => {

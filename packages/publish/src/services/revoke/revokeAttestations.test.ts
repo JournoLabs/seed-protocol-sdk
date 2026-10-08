@@ -16,6 +16,8 @@ const state = {
   sent: [] as Array<{ to: string; data: `0x${string}` }>,
   revokedAt: null as number | null,
   revokedMetadataUids: null as string[] | null,
+  revokedVersionUids: null as string[] | null,
+  versions: [] as { uid: string }[],
   metadata: [] as { uid: string; schemaUid: string }[],
 }
 
@@ -24,18 +26,21 @@ mock.module('@seedprotocol/sdk', () => ({
   ...sdkActual,
   assertLocalDbChain: async () => {},
   getAttesterForSeed: async () => state.attester,
-  getVersionsForSeedUid: async () => [],
+  getVersionsForSeedUid: async () => state.versions,
   getMetadataAttestationUidsForSeedUid: async () => state.metadata,
   getGetAdditionalSyncAddresses: () => async () => [EXECUTOR],
   updateSeedRevokedAt: async ({
     revokedAt,
     metadataUids,
+    versionUids,
   }: {
     revokedAt: number
     metadataUids?: string[]
+    versionUids?: string[]
   }) => {
     state.revokedAt = revokedAt
     state.revokedMetadataUids = metadataUids ?? null
+    state.revokedVersionUids = versionUids ?? null
   },
 }))
 
@@ -80,6 +85,8 @@ afterEach(() => {
   state.sent = []
   state.revokedAt = null
   state.revokedMetadataUids = null
+  state.revokedVersionUids = null
+  state.versions = []
   state.metadata = []
 })
 
@@ -96,6 +103,14 @@ describe('revokeAttestations', () => {
     await revokeAttestations(params)
     expect(state.revokedAt).not.toBeNull()
     expect(state.revokedMetadataUids?.slice().sort()).toEqual([titleUid, bodyUid].sort())
+  })
+
+  test('marks the revoked version attestations along with the seed', async () => {
+    const v1 = `0x${'51'.repeat(32)}`
+    const v2 = `0x${'52'.repeat(32)}`
+    state.versions = [{ uid: v1 }, { uid: v2 }]
+    await revokeAttestations(params)
+    expect(state.revokedVersionUids?.slice().sort()).toEqual([v1, v2].sort())
   })
 
   test('the owner revokes through EAS, never the executor', async () => {

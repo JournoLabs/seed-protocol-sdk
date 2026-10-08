@@ -618,6 +618,79 @@ testDescribe('ModelProperty Integration Tests', () => {
         await waitForModelPropertyIdle(property)
       }
     })
+
+    // ModelProperty.create() starts its initial write on a timer once the instance is idle (setTimeout 0,
+    // retried every 50ms). Give it that long to show up before asserting it never did.
+    const settleInitialWrite = () => new Promise((resolve) => setTimeout(resolve, 100))
+
+    it('does not write back a property loaded from its existing row (createById)', async () => {
+      const db = BaseDb.getAppDb()!
+      const [modelRow] = await db
+        .insert(modelsTable)
+        .values({ name: 'TestModel Property No Rewrite', schemaFileId: generateId() })
+        .returning()
+      const propertyFileId = generateId()
+      await db.insert(propertiesTable).values({
+        name: 'content',
+        dataType: 'Text',
+        modelId: modelRow.id!,
+        schemaFileId: propertyFileId,
+      })
+
+      const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
+      try {
+        const property = await ModelProperty.createById(propertyFileId)
+        expect(property).toBeDefined()
+        await waitForModelPropertyIdle(property!)
+        await settleInitialWrite()
+
+        expect(trackPendingWrite).not.toHaveBeenCalledWith(propertyFileId, expect.anything())
+        expect(property!.getService().getSnapshot().context.writeProcess?.getSnapshot().value).toBe('idle')
+      } finally {
+        trackPendingWrite.mockRestore()
+      }
+    })
+
+    // Model.create() with runtime properties writes the property rows itself. Its ModelProperty instances used
+    // to write them again afterwards, so a test that deleted the model right after it was persisted got a late
+    // FOREIGN KEY failure from that second write.
+    it('writes a runtime model property once, with the model', async () => {
+      const schemaName = 'Test Schema Property Single Write'
+      const testSchema = createTestSchema(schemaName)
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
+      try {
+        const model = Model.create('Article Single Write', schema, {
+          properties: { content: { dataType: 'Text' } },
+          waitForReady: false,
+        })
+        const modelSnapshot = await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle' && snapshot.context._dbId != null, {
+          timeout: 10000,
+        })
+        const modelId = modelSnapshot.context._dbId as number
+
+        const db = BaseDb.getAppDb()!
+        const rows = await db.select().from(propertiesTable).where(eq(propertiesTable.modelId, modelId))
+        expect(rows.map((row: { name: string }) => row.name)).toEqual(['content'])
+        const propertyFileId = rows[0].schemaFileId!
+
+        // The property's instance carries the id of the row the model wrote, not a second generated one
+        const property = await vi.waitFor(() => {
+          const instance = ModelProperty.getById(propertyFileId)
+          if (!instance) throw new Error('content property instance not created yet')
+          return instance
+        })
+        await waitForModelPropertyIdle(property)
+        await settleInitialWrite()
+
+        expect(trackPendingWrite.mock.calls.filter(([, writeModelId]) => writeModelId === modelId)).toEqual([])
+      } finally {
+        trackPendingWrite.mockRestore()
+      }
+    })
   })
 
   describe('ModelProperty property access', () => {
