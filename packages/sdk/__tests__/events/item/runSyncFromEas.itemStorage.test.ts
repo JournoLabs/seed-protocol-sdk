@@ -268,5 +268,39 @@ describe.sequential(
       expect(await derivedHtml()).toEqual([[newerTx, 1_700_008_000]])
       expect(await localEdit()).toEqual([`${seed}.html`, null])
     })
+
+    it('keeps an unpublish stamp on the source and its derived row until EAS reports a revocation time', async () => {
+      const latestTx = uid('48')
+      const latest = (revocationTime = 0) => [
+        storageTx(uid('45'), olderTx, 8_002, 1_700_008_100),
+        storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
+        storageTx(uid('47'), latestTx, 8_004, revocationTime),
+      ]
+      await sync(latest())
+      expect(await derivedHtml()).toEqual([[latestTx, null]])
+
+      // Local unpublish stamps the attestations it revoked once the revoke is mined.
+      const { updateSeedRevokedAt } =
+        await import('@/db/write/updateSeedRevokedAt')
+      const source = (await rows()).find((r) => r.uid === uid('47'))!
+      await updateSeedRevokedAt({
+        seedLocalId: source.seedLocalId!,
+        revokedAt: 1_700_009_000,
+        metadataUids: [uid('47')],
+      })
+
+      // EAS's index still reports it live: the stamp stays, and the derived row takes it.
+      await sync(latest())
+      const sourceRevokedAt = async () =>
+        (await rows()).find((r) => r.uid === uid('47'))?.revokedAt ?? null
+      expect(await sourceRevokedAt()).toBe(1_700_009_000)
+      expect(await derivedHtml()).toEqual([[latestTx, 1_700_009_000]])
+
+      // EAS's revocation time replaces it, on both.
+      await sync(latest(1_700_009_005))
+      expect(await sourceRevokedAt()).toBe(1_700_009_005)
+      expect(await derivedHtml()).toEqual([[latestTx, 1_700_009_005]])
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+    })
   },
 )

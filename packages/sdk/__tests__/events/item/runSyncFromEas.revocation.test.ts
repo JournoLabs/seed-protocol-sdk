@@ -340,6 +340,42 @@ describe.sequential('runSyncFromEas: revocations', () => {
     expect((await versionRow(version))?.revokedAt).toBe(1_700_000_805)
   })
 
+  it("local unpublish stamps the seed's property rows; sync keeps the stamp until EAS reports a revocation time", async () => {
+    const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+    const { updateSeedRevokedAt } = await import('@/db/write/updateSeedRevokedAt')
+    const modelSchemaUid = fakeEas.modelSchema!.id
+    const seed = uid('c9')
+    const version = uid('ca')
+    const title = uid('cb')
+
+    fakeEas.seeds = [attestation(seed, uid('00'), modelSchemaUid, 1_400)]
+    fakeEas.versions = [attestation(version, seed, uid('5b'), 1_401)]
+    fakeEas.properties = [
+      property(title, version, TITLE_SCHEMA_UID, 'title', 'stamped', 1_402),
+    ]
+    await runSyncFromEas({ addresses: [attester] })
+
+    const titleRevokedAt = async () =>
+      (await metadataRows(version)).find((r) => r.uid === title)?.revokedAt ?? null
+
+    await updateSeedRevokedAt({
+      seedLocalId: (await seedRow(seed))!.localId!,
+      revokedAt: 1_700_001_000,
+      metadataUids: [title],
+    })
+    expect(await titleRevokedAt()).toBe(1_700_001_000)
+
+    // EAS's index hasn't caught up with the revoke yet: the local stamp stays.
+    await runSyncFromEas({ addresses: [attester] })
+    expect(await titleRevokedAt()).toBe(1_700_001_000)
+
+    fakeEas.properties = [
+      property(title, version, TITLE_SCHEMA_UID, 'title', 'stamped', 1_402, 1_700_001_009),
+    ]
+    await runSyncFromEas({ addresses: [attester] })
+    expect(await titleRevokedAt()).toBe(1_700_001_009)
+  })
+
   it('skips the related-seed request when no synced property relates to another seed', async () => {
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
     const modelSchemaUid = fakeEas.modelSchema!.id

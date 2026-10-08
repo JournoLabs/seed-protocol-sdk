@@ -15,7 +15,7 @@ import {
   versions,
   VersionsType,
 } from '@/seedSchema'
-import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import {
   generateId,
 } from '@/helpers'
@@ -72,7 +72,7 @@ const revokedAtSeconds = (
 }
 
 /**
- * `revoked_at` to store for an attestation that already has a row (seed or version), given the
+ * `revoked_at` to store for an attestation that already has a row (seed, version or metadata), given the
  * stored value. EAS's `revocationTime` wins once EAS reports one. A stored stamp is otherwise kept:
  * local unpublish writes one only after its revoke transactions are mined, and revocation can't be
  * undone, so EAS reporting the attestation as live then just means its index hasn't caught up yet.
@@ -520,11 +520,9 @@ const saveEasPropertiesToDbBody = async ({
       continue
     }
     existingPropertyRecordsUids.add(row.uid)
-    // Keep a stored revocation time when EAS has none (local unpublish records its own).
-    const revokedAt =
-      canonical.revoked && !(canonical.revocationTime > 0) && row.revokedAt != null
-        ? row.revokedAt
-        : (revokedAtSeconds(canonical) ?? null)
+    // Same policy as seeds and versions: a local unpublish stamp stays until EAS reports a
+    // revocationTime, even while EAS (its index lagging) still reports the attestation live.
+    const revokedAt = syncedRevokedAt(canonical, row.revokedAt)
     if ((row.revokedAt ?? null) !== revokedAt) {
       revokedAtUpdates.set(row.uid, revokedAt)
     }
@@ -583,7 +581,7 @@ const derivedStorageRowsWhere = (versionUid: string, transactionId: string) =>
  * Make derived ItemStorage rows follow their `storage_transaction_id` attestation the way synced
  * rows follow theirs: rows derived from a fetched attestation that isn't canonical are deleted
  * (unless the canonical one carries the same transaction id), and rows derived from the canonical
- * one take its `revoked_at`.
+ * one take its `revoked_at` once it has one (a stamp is never cleared, see `syncedRevokedAt`).
  */
 const syncDerivedStorageRows = async ({
   fetchedProperties,
@@ -620,17 +618,17 @@ const syncDerivedStorageRows = async ({
   const revokedAtByUid = new Map(sourceRows.map((row) => [row.uid, row.revokedAt ?? null]))
 
   for (const { property, transactionId } of canonical) {
-    if (!revokedAtByUid.has(property.id)) continue
     const revokedAt = revokedAtByUid.get(property.id) ?? null
+    // The source's revoked_at already follows `syncedRevokedAt`. A live source leaves a derived
+    // row's stamp alone: like a stamped synced row, it is only replaced by a revocation time.
+    if (revokedAt == null) continue
     await appDb
       .update(metadata)
       .set({ revokedAt, updatedAt: Date.now() })
       .where(
         and(
           derivedStorageRowsWhere(property.refUID, transactionId),
-          revokedAt == null
-            ? isNotNull(metadata.revokedAt)
-            : or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
+          or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
         ),
       )
   }
