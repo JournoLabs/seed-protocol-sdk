@@ -51,6 +51,32 @@ export async function deleteOPFSEntry(path: string, root?: FileSystemDirectoryHa
   await dir.removeEntry(name)
 }
 
+async function pruneEmptyDirectory(parent: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+  const dir = await parent.getDirectoryHandle(name)
+  const children: [string, FileSystemHandle][] = []
+  for await (const child of dir.entries()) children.push(child)
+  let empty = true
+  for (const [childName, handle] of children) {
+    if (handle.kind === 'file' || !(await pruneEmptyDirectory(dir, childName))) empty = false
+  }
+  if (empty) await parent.removeEntry(name)
+  return empty
+}
+
+/**
+ * Remove the folder at `path` and any folders inside it that hold no files. Folders that
+ * still hold files stay. Resolves true when `path` itself was removed (or was already gone).
+ */
+export async function removeEmptyOPFSDirectories(path: string, root?: FileSystemDirectoryHandle): Promise<boolean> {
+  try {
+    const { dir, name } = await resolveParent(path, root)
+    return await pruneEmptyDirectory(dir, name)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'NotFoundError') return true
+    throw err
+  }
+}
+
 /** True when this browser exposes the Origin Private File System. */
 export function isOPFSSupported(): boolean {
   return (
