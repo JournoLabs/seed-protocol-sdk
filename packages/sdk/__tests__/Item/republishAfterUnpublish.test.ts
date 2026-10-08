@@ -7,6 +7,9 @@ import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { waitFor } from 'xstate'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { updateVersionUid } from '@/db/write/updateVersionUid'
+import { applyPropertyAttestationUidsFromPublish } from '@/db/write/applyPropertyAttestationUidsFromPublish'
+import { getItemProperties } from '@/db/read/getItemProperties'
+import { getPublishPendingDiff } from '@/db/read/getPublishPendingDiff'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 import { summarizePublishWork } from '@/db/read/summarizePublishWork'
 import { setRevokeExecutor } from '@/helpers/publishConfig'
@@ -135,6 +138,182 @@ testDescribe('republish after unpublish', () => {
     const next = (await item.getPublishPayload([])).find((p: any) => p.localId === seedLocalId)!
     expect(next.seedUid).toBe(newSeedUid)
     expect(next.versionUid).toBe(newVersionUid)
+  })
+
+  /**
+   * Simulates a full-snapshot publish completing, as the publish package does: record the version
+   * (updateVersionUid), then each property attestation (applyPropertyAttestationUidsFromPublish,
+   * pairs in payload order), then the seed uid. Returns the new uids.
+   */
+  const completeFullSnapshotPublish = async (
+    item: Item<any>,
+    seedLocalId: string,
+    publisher: string,
+    publishMode: 'patch' | 'new_version',
+    newSeedUid?: string,
+  ) => {
+    const payload = await item.getPublishPayload([], { publishMode })
+    const own = payload.find((p: any) => p.localId === seedLocalId)!
+    expect(own.versionUid).toBe(ZERO)
+    const newVersionUid = nextUid()
+    const attested = own.listOfAttestations.map((a: any) => ({
+      propertyName: a._propertyName as string,
+      schemaUid: a.schema as string,
+      attestationUid: nextUid(),
+    }))
+    const at = Date.now()
+    await updateVersionUid({ seedLocalId, versionUid: newVersionUid, publisher, attestationCreatedAt: at })
+    await applyPropertyAttestationUidsFromPublish({
+      seedLocalId,
+      attestationCreatedAtMs: at,
+      versionUid: newVersionUid,
+      pairs: attested,
+    })
+    if (newSeedUid) (item as { seedUid?: string }).seedUid = newSeedUid
+    await item.persistSeedUid(publisher, at)
+    return { newVersionUid, attested }
+  }
+
+  /** Every property row of the seed attested on the published version. */
+  const markAllPropertiesAttested = async (seedLocalId: string, versionUid: string, seedUid: string) => {
+    const db = BaseDb.getAppDb()
+    const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+    const uids: string[] = []
+    for (const row of rows) {
+      const u = nextUid()
+      uids.push(u)
+      await db
+        .update(metadata)
+        .set({ uid: u, versionUid, seedUid, attestationCreatedAt: Date.now() - 60_000 })
+        .where(eq(metadata.localId, row.localId!))
+    }
+    return uids
+  }
+
+  const expectRecordedOnNewVersion = async (
+    seedLocalId: string,
+    newVersionUid: string,
+    attested: { propertyName: string; attestationUid: string }[],
+    values: Record<string, unknown>,
+    seedUid: string,
+  ) => {
+    const db = BaseDb.getAppDb()
+    const [newVersion] = await db
+      .select({ localId: versions.localId, seedUid: versions.seedUid })
+      .from(versions)
+      .where(eq(versions.uid, newVersionUid))
+    expect(newVersion?.localId).toBeTruthy()
+    expect(newVersion?.seedUid).toBe(seedUid)
+    const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+    expect(attested.length).toBeGreaterThan(0)
+    for (const { propertyName, attestationUid } of attested) {
+      const row = rows.find((r: any) => r.uid === attestationUid)
+      expect(row, `row for ${propertyName}`).toBeDefined()
+      expect(row).toMatchObject({
+        propertyName,
+        versionUid: newVersionUid,
+        versionLocalId: newVersion!.localId,
+        seedUid,
+        revokedAt: null,
+      })
+    }
+    // Readers show the published values from the new rows, without a sync.
+    const read = await getItemProperties({ seedLocalId })
+    for (const [name, value] of Object.entries(values)) {
+      const property = read.find((p: any) => p.propertyName === name)
+      expect(property?.propertyValue, name).toBe(value)
+      expect(attested.some((a) => a.attestationUid === property?.uid), `${name} reads the new row`).toBe(true)
+    }
+    expect((await getPublishPendingDiff({ seedLocalId })).pendingProperties).toEqual([])
+  }
+
+  it('republish records every attested property on the new version, already-attested ones too', async () => {
+    const { item, seedLocalId, seedUid: oldSeedUid, publisher } = await createPublishedItemForUnpublish({
+      title: 'All attested, then republished',
+    })
+    const db = BaseDb.getAppDb()
+    const oldVersionUid = nextUid()
+    await db
+      .update(versions)
+      .set({ uid: oldVersionUid, seedUid: oldSeedUid, attestationCreatedAt: Date.now() - 60_000 })
+      .where(eq(versions.seedLocalId, seedLocalId))
+    const oldPropertyUids = await markAllPropertiesAttested(seedLocalId, oldVersionUid, oldSeedUid)
+    item.getService().send({ type: 'updateContext', latestVersionUid: oldVersionUid })
+
+    setRevokeExecutor(async ({ seedLocalId: id }) => {
+      await updateSeedRevokedAt({
+        seedLocalId: id,
+        revokedAt: Math.floor(Date.now() / 1000),
+        versionUids: [oldVersionUid],
+        metadataUids: oldPropertyUids,
+      })
+    })
+    try {
+      await item.unpublish()
+    } finally {
+      setRevokeExecutor(null)
+    }
+
+    const newSeedUid = nextUid()
+    const { newVersionUid, attested } = await completeFullSnapshotPublish(
+      item,
+      seedLocalId,
+      publisher,
+      'patch',
+      newSeedUid,
+    )
+    await expectRecordedOnNewVersion(
+      seedLocalId,
+      newVersionUid,
+      attested,
+      { title: 'All attested, then republished' },
+      newSeedUid,
+    )
+    // The old seed's rows stay as they were: history of the revoked seed.
+    const oldRows = await db.select().from(metadata).where(eq(metadata.versionUid, oldVersionUid))
+    expect(oldRows.map((r: any) => r.uid).sort()).toEqual([...oldPropertyUids].sort())
+    expect(oldRows.every((r: any) => r.revokedAt != null && r.seedUid === oldSeedUid)).toBe(true)
+  })
+
+  it('new_version publish records every property on the new version, already-attested ones too', async () => {
+    const { item, seedLocalId, seedUid, publisher } = await createPublishedItemForUnpublish({
+      title: 'All attested, new version',
+    })
+    const db = BaseDb.getAppDb()
+    const oldVersionUid = nextUid()
+    await db
+      .update(versions)
+      .set({ uid: oldVersionUid, seedUid, attestationCreatedAt: Date.now() - 60_000 })
+      .where(eq(versions.seedLocalId, seedLocalId))
+    await markAllPropertiesAttested(seedLocalId, oldVersionUid, seedUid)
+    item.getService().send({ type: 'updateContext', latestVersionUid: oldVersionUid })
+
+    const { newVersionUid, attested } = await completeFullSnapshotPublish(
+      item,
+      seedLocalId,
+      publisher,
+      'new_version',
+    )
+    await expectRecordedOnNewVersion(
+      seedLocalId,
+      newVersionUid,
+      attested,
+      { title: 'All attested, new version' },
+      seedUid,
+    )
+    expect(item.latestVersionUid).toBe(newVersionUid)
+
+    // Replaying the same results (e.g. a retried persist) adds nothing.
+    const count = async () =>
+      (await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))).length
+    const before = await count()
+    await applyPropertyAttestationUidsFromPublish({
+      seedLocalId,
+      attestationCreatedAtMs: Date.now(),
+      versionUid: newVersionUid,
+      pairs: attested,
+    })
+    expect(await count()).toBe(before)
   })
 
   // Browser only: Node skips the Item liveQuery.
