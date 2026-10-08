@@ -12,7 +12,8 @@ import type { PublishUpload } from '../../../types'
 import { persistSeedUidFromPublishResult, persistSeedUidSafely } from './persistSeedUid'
 import { recordRelatedSeedUid } from './recordMultiPublishReceipt'
 import { verifyAttestations } from '../helpers/verifyAttestations'
-import { AttestationVerificationError } from '../../../errors'
+import { AttestationVerificationError, ManagedAccountPublishError } from '../../../errors'
+import { findPropertiesToUpdateTargetingEarlierRequest } from './publishRequestNormalize'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransactionsExist'
 import { enqueueArweaveL1FinalizeJobsFromPublishContext } from '../../arweaveL1Finalize/enqueue'
@@ -257,6 +258,22 @@ export const createAttestationsDirectToEas = fromPromise(
         propertiesToUpdate,
       }
     })
+
+    // Requests are attested in order, each before the next: an update aimed at an earlier request
+    // would never reach it (the relation stays unlinked). The publish contract reverts with
+    // PublishTargetAlreadyAttested in that case (SeedPublishLib.setSeedReference); fail the same
+    // way, before any attestation is sent.
+    const backwards = findPropertiesToUpdateTargetingEarlierRequest(normalizedRequests)
+    if (backwards) {
+      const { requestIndex, targetIndex, requestLocalId, targetLocalId, propertySchemaUid } = backwards
+      throw new ManagedAccountPublishError(
+        `Direct EAS publish from ${address} reverted with PublishTargetAlreadyAttested(${requestIndex}, ${targetIndex}): ` +
+          `request ${requestIndex} (${requestLocalId}) updates property ${propertySchemaUid} of request ${targetIndex} ` +
+          `(${targetLocalId}), which is attested before it; nothing was sent.`,
+        'PUBLISH_PREFLIGHT_FAILED',
+        address,
+      )
+    }
 
     const byLocalId = new Map(normalizedRequests.map((r) => [r.localId, r]))
     const placeholderData = {

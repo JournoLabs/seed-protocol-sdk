@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { SchemaEncoder } from '@ethereum-attestation-service/eas-sdk'
 import { encodeBytes32String } from 'ethers'
+import { encodeErrorResult } from 'viem'
+import { seedErrorsAbi } from '../../../helpers/abi/seedErrors'
+import { describeRevert } from '../../../helpers/describeRevert'
 
 /**
  * createAttestationsDirectToEas with relation and list properties whose targets are drafts published
@@ -323,5 +326,70 @@ describe('createAttestationsDirectToEas: relation and list properties with draft
     expect(decodeList(lists[0]!.data)).toEqual([seedA!])
     const titles = attested(SCHEMA_TITLE)
     expect(titles[0]!.data).toBe(encode('string title', 'string', 'Hello'))
+  })
+})
+
+describe('createAttestationsDirectToEas: an update aimed at a request attested before it', () => {
+  const publishError = async (payload: unknown[]) => {
+    try {
+      await runPublish(payload)
+    } catch (err) {
+      return err as { name?: string; code?: string; message: string }
+    }
+    throw new Error('publish did not fail')
+  }
+
+  /** What the contract path reports for the same payload: its simulated multiPublish reverts. */
+  const contractReason = (requestIndex: number, targetIndex: number) =>
+    describeRevert(
+      encodeErrorResult({
+        abi: seedErrorsAbi,
+        errorName: 'PublishTargetAlreadyAttested',
+        args: [BigInt(requestIndex), BigInt(targetIndex)],
+      }),
+    )
+
+  test('a relation update to an earlier request fails as the contract does, before anything is sent', async () => {
+    // Out of order: the Post (whose author A fills in) is request 0, A is request 1.
+    const err = await publishError([
+      draftRequest(POST, SCHEMA_POST_SEED, [titleAttestation(), relationAttestation(A)]),
+      draftRequest(A, SCHEMA_IDENTITY_SEED, [nameAttestation('A')], [
+        { publishLocalId: POST, propertySchemaUid: SCHEMA_AUTHOR },
+      ]),
+    ])
+    expect(err.name).toBe('ManagedAccountPublishError')
+    expect(err.code).toBe('PUBLISH_PREFLIGHT_FAILED')
+    expect(contractReason(1, 0)).toBe('reverted with PublishTargetAlreadyAttested(1, 0)')
+    expect(err.message).toContain(contractReason(1, 0))
+    expect(err.message).toContain('nothing was sent')
+    expect(sentTxs.size).toBe(0)
+    expect(applyCalls).toHaveLength(0)
+  })
+
+  test('a list link to an earlier request fails the same way', async () => {
+    const listLink = { publishLocalId: POST, propertySchemaUid: SCHEMA_AUTHORS }
+    const err = await publishError([
+      draftRequest(A, SCHEMA_IDENTITY_SEED, [nameAttestation('A')], [listLink]),
+      draftRequest(POST, SCHEMA_POST_SEED, [titleAttestation(), listAttestation([A, B])]),
+      draftRequest(B, SCHEMA_IDENTITY_SEED, [nameAttestation('B')], [listLink]),
+    ])
+    expect(err.code).toBe('PUBLISH_PREFLIGHT_FAILED')
+    expect(err.message).toContain(contractReason(2, 1))
+    expect(sentTxs.size).toBe(0)
+  })
+
+  test('an update to the request itself is sent normally (later targets: the tests above)', async () => {
+    // As on the contract (targetIndex == requestIndex): written before the request is attested.
+    await runPublish([
+      draftRequest(A, SCHEMA_IDENTITY_SEED, [nameAttestation('A')]),
+      draftRequest(
+        POST,
+        SCHEMA_POST_SEED,
+        [titleAttestation(), { schema: SCHEMA_AUTHOR, data: [dataEntry(ZERO)], _propertyName: 'author' }],
+        [{ publishLocalId: POST, propertySchemaUid: SCHEMA_AUTHOR }],
+      ),
+    ])
+    const [, seedPost] = createdSeeds
+    expect(attested(SCHEMA_AUTHOR)[0]!.data.toLowerCase()).toBe(seedPost!)
   })
 })

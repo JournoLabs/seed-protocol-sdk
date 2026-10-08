@@ -32,7 +32,12 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
    back to the item still being walked is left out of this publish; it keeps no attestation uid, and
    the next publish of its item attests it with the target's uid.
 
-3. The payload is sent to the publish contract (or direct EAS, depending on config).
+3. The payload is sent to the publish contract (or direct EAS, depending on config). Requests are
+   attested in order, so a link (`propertiesToUpdate`) must target its own request or a later one:
+   the contract reverts with `PublishTargetAlreadyAttested(requestIndex, targetIndex)`, and the
+   direct-EAS path refuses such a payload the same way (`ManagedAccountPublishError`,
+   `PUBLISH_PREFLIGHT_FAILED`) before sending any attestation. `getPublishPayload` orders requests
+   referenced-first, so its payloads never do this.
 
 4. **Local recording.** Each request records its own seed, version and property attestation uids
    (`applyPropertyAttestationUidsFromPublish`). A relation or list-of-relation value that named seeds
