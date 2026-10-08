@@ -66,36 +66,48 @@ export const getCanonicalItemPropertiesFromEas = async (props: {
   return pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
 }
 
+/**
+ * UID of the first EAS schema whose definition ends with `schemaName`, or undefined when there is
+ * none or the EAS clients aren't configured. Throws when the request fails.
+ */
+export const fetchEasSchemaUidBySchemaName = async ({
+  schemaName,
+}: {
+  schemaName: string
+}): Promise<string | undefined> => {
+  const queryClient = BaseQueryClient.getQueryClient()
+  const easClient = BaseEasClient.getEasClient()
+
+  if (!queryClient || !easClient) {
+    return undefined
+  }
+
+  const { schemas } = (await queryClient.fetchQuery({
+    queryKey: [`getEasSchemaUidBySchemaName`, schemaName],
+    queryFn: async () =>
+      easClient.request(GET_SCHEMAS, {
+        where: {
+          schema: {
+            endsWith: schemaName,
+          },
+        },
+      }),
+  })) as { schemas: Array<{ id: string }> }
+
+  if (!schemas || schemas.length === 0) {
+    return undefined
+  }
+
+  return schemas[0]!.id
+}
+
 export const getEasSchemaUidBySchemaName = async ({
   schemaName,
 }: {
   schemaName: string
 }): Promise<string | undefined> => {
   try {
-    const queryClient = BaseQueryClient.getQueryClient()
-    const easClient = BaseEasClient.getEasClient()
-
-    if (!queryClient || !easClient) {
-      return undefined
-    }
-
-    const { schemas } = (await queryClient.fetchQuery({
-      queryKey: [`getEasSchemaUidBySchemaName`],
-      queryFn: async () =>
-        easClient.request(GET_SCHEMAS, {
-          where: {
-            schema: {
-              endsWith: schemaName,
-            },
-          },
-        }),
-    })) as { schemas: Array<{ id: string }> }
-
-    if (!schemas || schemas.length === 0) {
-      return undefined
-    }
-
-    return schemas[0]!.id
+    return await fetchEasSchemaUidBySchemaName({ schemaName })
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
       console.warn(`Failed to fetch schema for schema name ${schemaName}:`, error)

@@ -361,6 +361,14 @@ export class BrowserFileManager implements IFileManager {
     // First wait for file to exist
     await this.waitForFile(filePath, interval, timeout)
 
+    // Usually readable at once: polling first cost every saveFile 100ms. Any read error falls
+    // through to the polling below, which decides whether it is transient.
+    try {
+      if ((await this.readFile(filePath)).size > 0) return true
+    } catch {
+      // handled by polling
+    }
+
     // Now wait for file to have content
     return new Promise((resolve, reject) => {
       const startTime = Date.now()
