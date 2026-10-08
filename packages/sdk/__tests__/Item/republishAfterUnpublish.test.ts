@@ -3,6 +3,8 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds, versions } from '@/seedSchema'
 import { and, eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
+import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { waitFor } from 'xstate'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { updateVersionUid } from '@/db/write/updateVersionUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
@@ -14,6 +16,7 @@ import {
   createPublishedItemForUnpublish,
   UNPUBLISH_TEST_PUBLISHER,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
 
 /**
  * docs/ATTESTATION_REVOCATION.md "Republishing": publishing an unpublished item creates a new seed
@@ -132,5 +135,58 @@ testDescribe('republish after unpublish', () => {
     const next = (await item.getPublishPayload([])).find((p: any) => p.localId === seedLocalId)!
     expect(next.seedUid).toBe(newSeedUid)
     expect(next.versionUid).toBe(newVersionUid)
+  })
+
+  // Browser only: Node skips the Item liveQuery.
+  const itBrowser = typeof window === 'undefined' ? it.skip : it
+
+  itBrowser("an item loaded by seed uid keeps observing its seed row after a republish changes the uid", async () => {
+    const { item, seedLocalId, seedUid: oldSeedUid, publisher } = await createPublishedItemForUnpublish({
+      title: 'Watched across republish',
+    })
+    const db = BaseDb.getAppDb()
+
+    // Load it as Item.all does for a published item: with its seed uid known from the start.
+    item.unload()
+    ItemProperty.clearInstanceCacheForItem(seedLocalId)
+    const loaded = await Item.create({
+      modelName: 'Post',
+      schemaName: 'Test Schema getPublishPayload',
+      seedLocalId,
+      seedUid: oldSeedUid,
+    } as any)
+    await waitFor(loaded.getService(), (s) => s.value === 'idle', { timeout: 15000 })
+    expect(loaded.seedUid).toBe(oldSeedUid)
+
+    // Unpublish, then republish (as in the test above): the seed gets a new uid.
+    await updateSeedRevokedAt({ seedLocalId, revokedAt: Math.floor(Date.now() / 1000) })
+    await waitUntilOrThrow(() => loaded.isRevoked, 'the item to observe the unpublish', 5000)
+    const newSeedUid = nextUid()
+    await updateVersionUid({ seedLocalId, versionUid: nextUid(), publisher })
+    ;(loaded as { seedUid?: string }).seedUid = newSeedUid
+    await loaded.persistSeedUid(publisher, Date.now())
+    expect(loaded.seedUid).toBe(newSeedUid)
+    expect(loaded.isRevoked).toBe(false)
+
+    // Later changes to the seed row (another tab unpublishing, sync) still reach the item.
+    const revokedAgainAt = Math.floor(Date.now() / 1000) + 7
+    await updateSeedRevokedAt({ seedLocalId, revokedAt: revokedAgainAt })
+    await waitUntilOrThrow(
+      () => loaded.revokedAt === revokedAgainAt,
+      'the item to observe revoked_at on its republished seed',
+      5000,
+    )
+
+    const syncedSeedUid = nextUid()
+    await db.update(seeds).set({ uid: syncedSeedUid, revokedAt: null }).where(eq(seeds.localId, seedLocalId))
+    await waitUntilOrThrow(
+      () => loaded.seedUid === syncedSeedUid && !loaded.isRevoked,
+      'the item to observe a seed uid written elsewhere',
+      5000,
+    )
+    const cache = (Item as any).instanceCache as Map<string, unknown>
+    expect(cache.has(newSeedUid)).toBe(false)
+    expect(cache.has(syncedSeedUid)).toBe(true)
+    loaded.unload()
   })
 })
