@@ -94,14 +94,14 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
 
     const after = await rowsFor()
     expect(after).toEqual(before)
-    expect(after.find((r) => r.localId === draftLocalId)?.uid ?? null).toBeNull()
-    expect(after.filter((r) => r.uid?.toLowerCase() === publishedVersionUid)).toHaveLength(1)
+    expect(after.find((r: any) => r.localId === draftLocalId)?.uid ?? null).toBeNull()
+    expect(after.filter((r: any) => r.uid?.toLowerCase() === publishedVersionUid)).toHaveLength(1)
 
     // A new version uid still goes onto the draft.
     const newVersionUid = '0x' + '4c7e0b'.padEnd(64, '9')
     await updateVersionUid({ seedLocalId, versionUid: newVersionUid })
     const final = await rowsFor()
-    expect(final.find((r) => r.localId === draftLocalId)?.uid).toBe(newVersionUid)
+    expect(final.find((r: any) => r.localId === draftLocalId)?.uid).toBe(newVersionUid)
     expect(final).toHaveLength(before.length)
   })
 

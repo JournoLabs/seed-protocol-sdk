@@ -39,7 +39,7 @@ describe.sequential('updateItemPropertyValue stores quotes as given', () => {
       modelName: 'Post',
       newValue: "it's",
     })
-    expect((await rowsFor(seedLocalId, 'quotedNote')).map((r) => r.propertyValue)).toEqual(["it's"])
+    expect((await rowsFor(seedLocalId, 'quotedNote')).map((r: any) => r.propertyValue)).toEqual(["it's"])
 
     // Draft row (no uid): updated in place.
     await updateItemPropertyValue({
@@ -49,7 +49,7 @@ describe.sequential('updateItemPropertyValue stores quotes as given', () => {
       modelName: 'Post',
       newValue: "can't won't",
     })
-    expect((await rowsFor(seedLocalId, 'quotedNote')).map((r) => r.propertyValue)).toEqual([
+    expect((await rowsFor(seedLocalId, 'quotedNote')).map((r: any) => r.propertyValue)).toEqual([
       "can't won't",
     ])
 
@@ -67,7 +67,7 @@ describe.sequential('updateItemPropertyValue stores quotes as given', () => {
       localStorageDir: "dir'with'quotes",
     })
     const rows = await rowsFor(seedLocalId, 'quotedNote')
-    const draft = rows.find((r) => !r.uid)
+    const draft = rows.find((r: any) => !r.uid)
     expect(draft?.propertyValue).toBe("'quoted', ''twice''")
     expect(draft?.localStorageDir).toBe("dir'with'quotes")
   })
