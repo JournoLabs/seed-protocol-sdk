@@ -6,28 +6,19 @@ import { useItem, useItems, useCreateItem, SeedProvider, useDeleteItem } from '@
 import {
   client,
   BaseDb,
-  schemas,
   metadata,
-  seeds,
-  versions,
-  propertyUids,
-  modelUids,
-  models as modelsTable,
-  modelSchemas,
-  properties,
-  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
   Item,
-  BaseFileManager,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -75,93 +66,6 @@ const testSchemaWithItems: SchemaFileFormat = {
   },
   enums: {},
   migrations: [],
-}
-
-/** Remove test schema + rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
-async function deleteTestSchemaItemsHooksRows(): Promise<void> {
-  const db = BaseDb.getAppDb()
-  if (!db) return
-
-  const schemaRow = await db
-    .select()
-    .from(schemas)
-    .where(eq(schemas.name, TEST_SCHEMA_ITEMS_HOOKS_NAME))
-    .limit(1)
-  if (!schemaRow.length || schemaRow[0].id == null) return
-
-  const schemaId = schemaRow[0].id
-
-  const links = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(eq(modelSchemas.schemaId, schemaId))
-
-  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
-  if (mids.length === 0) {
-    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-    await db.delete(schemas).where(eq(schemas.id, schemaId))
-    return
-  }
-
-  const modelRows = await db
-    .select({ name: modelsTable.name })
-    .from(modelsTable)
-    .where(inArray(modelsTable.id, mids))
-  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
-
-  const seedRows = await db
-    .select({ localId: seeds.localId })
-    .from(seeds)
-    .where(inArray(seeds.type, modelNames))
-  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
-
-  if (seedLocalIds.length) {
-    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
-    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
-    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
-    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
-  }
-
-  const propRows = await db
-    .select({ id: properties.id })
-    .from(properties)
-    .where(inArray(properties.modelId, mids))
-  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
-
-  if (pids.length) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
-  }
-
-  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
-  await db.update(properties).set({ refModelId: null }).where(inArray(properties.modelId, mids))
-  await db.delete(properties).where(inArray(properties.modelId, mids))
-  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
-  await db.delete(schemas).where(eq(schemas.id, schemaId))
-}
-
-/**
- * Remove the schema JSON file that importJsonSchema writes to the shared OPFS working dir.
- * If it is left behind, client.init in the next browser test file re-imports this schema, and that
- * file's own `Post` model then reuses (and re-ids) this schema's `Post` row by name.
- */
-async function deleteTestSchemaItemsHooksFile(): Promise<void> {
-  try {
-    const path = BaseFileManager.getPathModule()
-    const workingDir = BaseFileManager.getWorkingDir()
-    const sanitizedName = TEST_SCHEMA_ITEMS_HOOKS_NAME.replace(/\s+/g, '_')
-    const filePath = path.join(
-      workingDir,
-      `${testSchemaWithItems.id}_${sanitizedName}_v${testSchemaWithItems.version}.json`,
-    )
-    if (await BaseFileManager.pathExists(filePath)) {
-      const fs = await BaseFileManager.getFs()
-      await fs.promises.unlink(filePath)
-    }
-  } catch {
-    // File may not exist
-  }
 }
 
 // Test component that displays an item and allows editing an ItemProperty via button click
@@ -281,7 +185,9 @@ function UseItemsTest({
   deleted?: boolean
   addressFilter?: 'owned' | 'watched' | 'all'
 }) {
-  const { items, isLoading, error } = useItems({ modelName, deleted, addressFilter })
+  // Scope to this file's schema: an unscoped list spans every schema with a same-named model.
+  const schemaName = modelName ? TEST_SCHEMA_ITEMS_HOOKS_NAME : undefined
+  const { items, isLoading, error } = useItems({ modelName, schemaName, deleted, addressFilter })
   const [status, setStatus] = useState<string>('loading')
 
   useEffect(() => {
@@ -423,8 +329,7 @@ describe('React Item Hooks Integration Tests', () => {
   })
 
   afterAll(async () => {
-    await deleteTestSchemaItemsHooksRows()
-    await deleteTestSchemaItemsHooksFile()
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
   })
 
@@ -433,8 +338,7 @@ describe('React Item Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    await deleteTestSchemaItemsHooksRows()
-    await deleteTestSchemaItemsHooksFile()
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
 
     // Import test schema
@@ -792,7 +696,7 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const query = queryClientRef.current?.getQueryCache().find({
-            queryKey: ['seed', 'items', 'Post', false, false, null, 0],
+            queryKey: ['seed', 'items', 'Post', false, false, null, 0, { modelFileId: null, schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME }],
           })
           expect(query).toBeDefined()
           expect(query!.options.staleTime).toBe(0)
@@ -801,7 +705,7 @@ describe('React Item Hooks Integration Tests', () => {
       )
     })
 
-    it('should return empty array when modelName is not provided', async () => {
+    it('should return every local item when modelName is not provided', async () => {
       render(<UseItemsTest />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
@@ -813,8 +717,8 @@ describe('React Item Hooks Integration Tests', () => {
       )
 
       const count = screen.getByTestId('items-count')
-      // Without modelName, it should return empty array (or all items if that's the behavior)
-      expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(0)
+      // No model filter: the three Posts and the Article from beforeEach
+      expect(parseInt(count.textContent || '0')).toBe(4)
     })
 
     it('should return all items for a model', async () => {
@@ -830,7 +734,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       const count = screen.getByTestId('items-count')
       const itemCount = parseInt(count.textContent || '0')
-      expect(itemCount).toBeGreaterThanOrEqual(3) // At least testItem1, testItem2, testItem3
+      expect(itemCount).toBe(3) // testItem1, testItem2, testItem3
 
       // Verify specific items exist
       const itemElements = screen.getAllByTestId(/^item-\d+-seed-local-id$/)
@@ -859,7 +763,7 @@ describe('React Item Hooks Integration Tests', () => {
       )
 
       const count = screen.getByTestId('items-count')
-      expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(1)
+      expect(parseInt(count.textContent || '0')).toBe(3)
 
       const allIdle = screen.getByTestId('items-all-idle')
       expect(allIdle.textContent).toBe('true')
@@ -873,7 +777,7 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
-          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(3)
+          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
         },
         { timeout: 10000 }
       )
@@ -888,7 +792,7 @@ describe('React Item Hooks Integration Tests', () => {
         () => {
           const count = screen.getByTestId('items-count')
           const n = parseInt(count.textContent || '0')
-          expect(n).toBeGreaterThanOrEqual(3)
+          expect(n).toBe(3)
         },
         { timeout: 10000 }
       )
@@ -900,7 +804,7 @@ describe('React Item Hooks Integration Tests', () => {
       // waitFor so we don't depend on DOM state after resolve and avoid races with clearing/refetch.
       await waitFor(
         () => {
-          expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(1)
+          expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBe(1)
           expect(screen.queryByTestId('item-0-model-name')?.textContent).toBe('Article')
         },
         { timeout: 10000 }
@@ -931,7 +835,7 @@ describe('React Item Hooks Integration Tests', () => {
       // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
       await waitFor(
         () => {
-          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBeGreaterThanOrEqual(3)
+          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
         },
         { timeout: 10000 }
       )
@@ -954,7 +858,7 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('items-count')
-          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
+          expect(parseInt(count.textContent || '0')).toBe(3)
         },
         { timeout: 10000 }
       )
@@ -978,13 +882,13 @@ describe('React Item Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('items-count')
-          expect(parseInt(count.textContent || '0')).toBeGreaterThan(initialItemCount)
+          expect(parseInt(count.textContent || '0')).toBe(initialItemCount + 1)
         },
         { timeout: 15000 }
       )
 
       const finalCount = screen.getByTestId('items-count')
-      expect(parseInt(finalCount.textContent || '0')).toBeGreaterThan(initialItemCount)
+      expect(parseInt(finalCount.textContent || '0')).toBe(initialItemCount + 1)
 
       // Clean up
       newItem.unload()
@@ -1018,7 +922,7 @@ describe('React Item Hooks Integration Tests', () => {
             const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
             const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
             expect(countA).toBe(countB)
-            expect(countA).toBeGreaterThanOrEqual(3)
+            expect(countA).toBe(3)
           },
           { timeout: 15000 }
         )
@@ -1129,7 +1033,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       // Render both hooks
       function CombinedTest() {
-        const { items } = useItems({ modelName: 'Post' })
+        const { items } = useItems({ modelName: 'Post', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME })
         const { item } = useItem({ modelName: 'Post', seedLocalId: item1.seedLocalId })
 
         return (
@@ -1147,7 +1051,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          expect(parseInt(screen.queryByTestId('combined-items-count')?.textContent || '0')).toBeGreaterThanOrEqual(3)
+          expect(parseInt(screen.queryByTestId('combined-items-count')?.textContent || '0')).toBe(3)
           expect(screen.queryByTestId('combined-item-seed-local-id')?.textContent).toBe(item1.seedLocalId)
           expect(screen.queryByTestId('combined-item-title')?.textContent).toBe('Test Post Title 1')
         },
