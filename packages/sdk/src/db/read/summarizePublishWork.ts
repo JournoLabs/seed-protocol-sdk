@@ -21,6 +21,7 @@ import { isSeedRevoked } from '@/db/read/isSeedRevoked'
 import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
 import {
   findRelatedSeedRow,
+  htmlPropertyNameForHtmlSeed,
   isUnpublishedSeed,
   relatedModelNameFromDef,
 } from '@/db/read/resolveRelatedSeedRef'
@@ -318,6 +319,30 @@ async function collectUnpublishedRelatedItems(
   }
 }
 
+/**
+ * Images embedded in the item's Html properties (co-published with it) whose seed was revoked:
+ * getPublishPayload rejects them like image properties pointing at revoked seeds. Like
+ * getPublishPayload, only the published item's own co-publish rows are checked.
+ */
+async function collectUnpublishedEmbeddedImages(
+  item: IItem<any>,
+  out: UnpublishedRelatedItem[],
+): Promise<void> {
+  const appDb = BaseDb.getAppDb()
+  if (!appDb || !item.seedLocalId) return
+  const rows = await appDb
+    .select()
+    .from(htmlEmbeddedImageCoPublish)
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, item.seedLocalId))
+  for (const row of rows) {
+    const seed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
+    if (!isUnpublishedSeed(seed)) continue
+    const propertyName = htmlPropertyNameForHtmlSeed(item, row.htmlSeedLocalId)
+    if (out.some((r) => r.propertyName === propertyName && r.seedLocalId === seed.seedLocalId)) continue
+    out.push({ propertyName, modelName: 'Image', seedLocalId: seed.seedLocalId, seedUid: seed.seedUid })
+  }
+}
+
 async function appendCoPublishImages(
   item: IItem<any>,
   acc: PublishWorkSummary,
@@ -339,7 +364,9 @@ async function appendCoPublishImages(
       seedLocalId: row.imageSeedLocalId,
       modelName: 'Image',
     })
-    if (!imageItem) continue
+    // Like getPublishPayload: an embedded image that already has a seed (published, or unpublished
+    // and reported by collectUnpublishedEmbeddedImages) is not co-published.
+    if (!imageItem || !isZeroUid(imageItem.seedUid)) continue
 
     const st =
       imageItem.internalProperties['storageTransactionId'] ??
@@ -489,6 +516,7 @@ export const getUnpublishedRelatedItems = async (
   const { forceFullSnapshot } = await publishForcesFullSnapshot(item, options?.publishMode ?? 'patch')
   const out: UnpublishedRelatedItem[] = []
   await collectUnpublishedRelatedItemsDeep(item, forceFullSnapshot, out, new Set())
+  await collectUnpublishedEmbeddedImages(item, out)
   return out
 }
 
@@ -509,6 +537,7 @@ export const summarizePublishWork = async (
     unpublishedRelatedItems: [],
   }
   await summarizeItem(item, publishMode, forceFullSnapshot, acc, new Set(), new Set())
+  await collectUnpublishedEmbeddedImages(item, acc.unpublishedRelatedItems)
   // summarizeItem counts the root as an existing seed (it has a seedUid).
   if (republishRevokedSeed) acc.newSeedCount += 1
   return acc

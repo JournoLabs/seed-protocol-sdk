@@ -4,6 +4,7 @@ import { and, eq, isNotNull } from 'drizzle-orm'
 import { ZERO_BYTES32 } from '@/helpers/constants'
 import { isVersionRevoked } from './subqueries/liveVersion'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
+import type { IItem } from '@/interfaces'
 
 export type RelatedSeedRow = {
   seedLocalId: string
@@ -73,4 +74,19 @@ export function relatedModelNameFromDef(propertyDef: unknown): string | undefine
   if (dataType === ModelPropertyDataTypes.File) return 'File'
   if (dataType === ModelPropertyDataTypes.Html) return 'Html'
   return def.ref ?? def.refModelName
+}
+
+/**
+ * Name of the item's Html property whose value is the Html seed `htmlSeedLocalId`: the property
+ * that refers to the images embedded in that Html (htmlEmbeddedImageCoPublish rows).
+ */
+export function htmlPropertyNameForHtmlSeed(item: IItem<any>, htmlSeedLocalId: string): string {
+  const want = htmlSeedLocalId.trim()
+  for (const p of item.properties ?? []) {
+    if (normalizeDataType(p.propertyDef?.dataType) !== ModelPropertyDataTypes.Html) continue
+    const snap = p.getService().getSnapshot()
+    const value = 'context' in snap ? (snap.context as { propertyValue?: unknown }).propertyValue : undefined
+    if (typeof value === 'string' && value.trim() === want) return p.propertyName
+  }
+  return 'html'
 }
