@@ -16,6 +16,7 @@ import { queueCreatePublish } from './actions/queueCreatePublish'
 import { drainPendingCreates } from './actions/drainPendingCreates'
 import { registerCreatePublishResolver } from './createPublishResult'
 import { setPublishManagerRef } from './publishManagerRef'
+import { isHoldingPublishLock, releasePublishLock, tryHoldPublishLock } from './publishLocks'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:PublishManager:index')
@@ -218,19 +219,29 @@ export const PublishManager = {
   },
   /**
    * Spawn a publish. Resolves with the child actor once it exists.
-   * Resolves `undefined` when the address is missing or that seed is already in flight.
-   * This promise means the process started, not that the chain publish finished.
+   * Resolves `undefined` when the address is missing or that seed is already in flight, in this
+   * tab or another one. This promise means the process started, not that the chain publish finished.
    */
-  createPublish: (
+  createPublish: async (
     item: InstanceType<typeof Item>,
     address: string,
     account?: import('../../helpers/seedSigner').PublishWallet,
     options?: import('../../config').CreatePublishOptions
-  ) =>
-    new Promise<import('xstate').ActorRef<any, any> | undefined>((resolve) => {
+  ): Promise<import('xstate').ActorRef<any, any> | undefined> => {
+    const { seedLocalId } = item
+    const heldBefore = isHoldingPublishLock(seedLocalId)
+    if (!(await tryHoldPublishLock(seedLocalId))) {
+      console.warn(`[createPublish] "${seedLocalId}" is already publishing in another tab; skipping.`)
+      return undefined
+    }
+    const publishProcess = await new Promise<import('xstate').ActorRef<any, any> | undefined>((resolve) => {
       const createToken = registerCreatePublishResolver(resolve)
       publishManager.send({ type: 'CREATE_PUBLISH', item, address, account, options, createToken })
-    }),
+    })
+    // Nothing spawned (e.g. no address): don't keep a lock this call took.
+    if (!publishProcess && !heldBefore) releasePublishLock(seedLocalId)
+    return publishProcess
+  },
   retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').PublishWallet) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
