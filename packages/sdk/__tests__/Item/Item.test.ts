@@ -19,6 +19,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
 // Helper function to wait for item to be in idle state using xstate waitFor
 async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
@@ -168,51 +169,10 @@ testDescribe('Item Integration Tests', () => {
           await db.delete(seeds)
         }
         
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+        // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema). The inline version
+        // deleted the model_schemas links before reading them to find the models to delete, so test
+        // models were left behind as orphans (and their Model caches never evicted).
+        await cleanupTestSchemaData()
       } else {
         // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
         await db.delete(metadata)
@@ -277,6 +237,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
         content: 'Test Content',
       })
@@ -316,6 +277,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'My Post',
         content: 'Post Content',
         author: 'John Doe',
@@ -386,6 +348,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -503,6 +466,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item - should work even if Model instance is not passed
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -537,6 +501,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item first
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me',
       })
       
@@ -591,6 +556,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item first
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me By Uid',
       })
       
@@ -670,6 +636,7 @@ testDescribe('Item Integration Tests', () => {
       
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me No Wait',
       })
       
@@ -716,16 +683,19 @@ testDescribe('Item Integration Tests', () => {
       // Create multiple items
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 1',
       })
       
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 2',
       })
       
       const item3 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 3',
       })
       
@@ -734,7 +704,7 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item3)
       
       // Get all items
-      const allItems = await Item.all('TestPost')
+      const allItems = await Item.all('TestPost', undefined, { schemaName })
       
       expect(allItems).toBeDefined()
       expect(Array.isArray(allItems)).toBe(true)
@@ -790,17 +760,19 @@ testDescribe('Item Integration Tests', () => {
 
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post A',
       })
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post B',
       })
 
       await waitForItemIdle(item1)
       await waitForItemIdle(item2)
 
-      const allItems = await Item.all('TestPost', undefined, { waitForReady: true })
+      const allItems = await Item.all('TestPost', undefined, { waitForReady: true, schemaName })
 
       expect(allItems).toBeDefined()
       expect(Array.isArray(allItems)).toBe(true)
@@ -835,6 +807,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'State Test',
       })
       
@@ -874,6 +847,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Load Test',
         content: 'Load Content',
       })
@@ -934,6 +908,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Cache Test',
       })
       
@@ -943,6 +918,7 @@ testDescribe('Item Integration Tests', () => {
       // Create again with same seedLocalId - should return cached instance
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         seedLocalId,
         title: 'Updated Title',
       })
@@ -978,6 +954,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Metadata Test',
         content: 'Metadata Content',
         author: 'Metadata Author',
@@ -1042,6 +1019,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Version 1',
       })
       
@@ -1086,6 +1064,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Drift Test',
       })
       await waitForItemIdle(item)
@@ -1117,6 +1096,7 @@ testDescribe('Item Integration Tests', () => {
 
       const reloaded = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         seedLocalId,
       })
       await waitForItemIdle(reloaded)
@@ -1154,6 +1134,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item without passing modelInstance
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Independence Test',
         content: 'Independence Content',
       })
@@ -1309,6 +1290,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Proxy Test',
       })
       
@@ -1346,6 +1328,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Properties Test',
         content: 'Properties Content',
       })
@@ -1410,6 +1393,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'GOPD Test',
       })
       await waitForItemIdle(item)
@@ -1419,6 +1403,7 @@ testDescribe('Item Integration Tests', () => {
 
       const withRevoked = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'GOPD Revoked',
         revokedAt: 1_700_000_000,
       } as any)
@@ -1452,6 +1437,7 @@ testDescribe('Item Integration Tests', () => {
 
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Publisher Test',
       })
       await waitForItemIdle(createdItem)
@@ -1496,6 +1482,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'No Publisher',
       })
       await waitForItemIdle(item)
@@ -1525,6 +1512,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'ReadOnly Test',
       })
       await waitForItemIdle(item)
@@ -1558,6 +1546,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Unload Test',
       })
       

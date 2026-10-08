@@ -251,6 +251,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -335,6 +336,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         content: 'Test Content',
       })
       
@@ -432,6 +434,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         status: 'draft',
       })
 
@@ -523,6 +526,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // If model property not found, we can still test ItemProperty creation directly
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         description: 'Test Description',
       })
       
@@ -605,6 +609,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create item first
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me',
       })
       
@@ -652,6 +657,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create item first
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         content: 'Find By Uid',
       })
       
@@ -718,6 +724,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me No Wait',
       })
       
@@ -762,6 +769,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       )
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'All Test Title',
         content: 'All Test Content',
       })
@@ -796,6 +804,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       )
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'WaitForReady Test',
       })
       await waitForItemIdle(item)
@@ -834,6 +843,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Get Value Test',
       })
       
@@ -896,6 +906,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial Value',
       })
       
@@ -962,6 +973,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Same Value',
       })
       
@@ -1040,6 +1052,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Text Property',
       })
       
@@ -1114,6 +1127,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         rating: 5,
       })
       
@@ -1188,6 +1202,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         published: true,
       })
       
@@ -1280,6 +1295,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create author first
       const author = await Item.create({
         modelName: 'Author',
+        schemaName,
         name: 'John Doe',
       })
       
@@ -1288,6 +1304,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create post with author relation
       const post = await Item.create({
         modelName: 'Post',
+        schemaName,
         title: 'My Post',
         author: author.seedLocalId,
       })
@@ -1398,6 +1415,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create tags first
       const tag1 = await Item.create({
         modelName: 'Tag',
+        schemaName,
         name: 'Tag 1',
       })
       
@@ -1405,6 +1423,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const tag2 = await Item.create({
         modelName: 'Tag',
+        schemaName,
         name: 'Tag 2',
       })
       
@@ -1413,6 +1432,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create post with tags list
       const post = await Item.create({
         modelName: 'Post',
+        schemaName,
         title: 'My Post',
         tags: JSON.stringify([tag1.seedLocalId, tag2.seedLocalId]),
       })
@@ -1509,6 +1529,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial Title',
       })
       
@@ -1626,6 +1647,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Reactive Test',
       })
       
@@ -1698,6 +1720,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Subscribe Test',
       })
       
@@ -1780,6 +1803,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Unload Test',
       })
       
@@ -1859,6 +1883,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Integration Test',
         content: 'Content',
         author: 'Author',
@@ -1926,6 +1951,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial',
       })
       

@@ -121,7 +121,13 @@ testDescribe('ModelProperty Integration Tests', () => {
     // The cache will be cleared when models are unloaded
     const db = BaseDb.getAppDb()
     if (db) {
-      const dbModels = await db.select().from(modelsTable)
+      // models has no schema column; read it from model_schemas so the lookup is scoped (a bare name
+      // throws AmbiguousModelError once two schemas define it, and the catch below would hide that).
+      const dbModels = await db
+        .select({ name: modelsTable.name, schemaName: schemas.name })
+        .from(modelsTable)
+        .innerJoin(modelSchemas, eq(modelSchemas.modelId, modelsTable.id))
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
       for (const dbModel of dbModels) {
         try {
           const model = Model.getByName(dbModel.name, dbModel.schemaName)
@@ -602,7 +608,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       console.log('[TEST] propertyData from getPropertySchema:', JSON.stringify(propertyData, null, 2))
       
       if (propertyData) {
-        const property = ModelProperty.create(propertyData, { waitForReady: false })
+        const property = ModelProperty.create(propertyData, { waitForReady: false, schemaName })
         expect(property).toBeDefined()
         console.log('[TEST] property after create:', property)
         console.log('[TEST] property.ref:', property.ref)
