@@ -1138,7 +1138,17 @@ export class Model {
    * @param schemaName - Optional schema name (will query DB if not provided)
    * @returns The Model instance if found, undefined otherwise
    */
-  static async getByNameAsync(modelName: string, schemaName?: string): Promise<Model | undefined> {
+  static async getByNameAsync(
+    modelName: string,
+    schemaName?: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started. An eviction of the model's
+       * schema since then makes this return undefined instead of re-creating the model. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<Model | undefined> {
     // First try cache
     const cached = this.getByName(modelName, schemaName)
     if (cached) {
@@ -1151,7 +1161,7 @@ export class Model {
       if (!db) {
         return undefined
       }
-      const evictionEpoch = currentEvictionEpoch()
+      const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
       try {
 

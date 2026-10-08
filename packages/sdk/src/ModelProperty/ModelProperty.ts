@@ -84,6 +84,9 @@ export class ModelProperty {
   localStorageDir?: string
   filenameSuffix?: string
 
+  /** currentEvictionEpoch() at construction: lookups started for this instance don't outlive an eviction. */
+  private readonly _evictionEpoch = currentEvictionEpoch()
+
   constructor(property: Static<typeof TProperty>) {
     // id is now the schemaFileId (string), _dbId is the database integer ID
     // Preserve _propertyFileId if it exists in the property object (from getPropertySchema)
@@ -368,9 +371,16 @@ export class ModelProperty {
         const modelFileId = (await resolveModelRecord(property.modelName, { modelId }))?.schemaFileId
         model = modelFileId ? Model.getById(modelFileId) : undefined
       }
+      // Evicted (with its schema) or unloaded while the lookups above ran: don't instantiate its model
+      // again from rows that are being deleted.
+      if (!model && isActorStopped(this._service)) return undefined
       if (!model) {
         try {
-          model = await Model.getByNameAsync(property.modelName)
+          // The epoch from when this instance was built: an eviction of the model's schema since
+          // then (this instance may already be stopped) must not re-create the model.
+          model = await Model.getByNameAsync(property.modelName, undefined, {
+            evictionEpoch: this._evictionEpoch,
+          })
         } catch {
           model = undefined
         }
@@ -870,7 +880,16 @@ export class ModelProperty {
    * Create or get ModelProperty instance by propertyFileId
    * Queries the database to find the property if not cached
    */
-  static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
+  static async createById(
+    propertyFileId: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started. An eviction of the property's
+       * schema since then makes this return undefined instead of re-creating it. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<ModelProperty | undefined> {
     if (!propertyFileId) {
       return undefined
     }
@@ -886,7 +905,7 @@ export class ModelProperty {
     if (!db) {
       return undefined
     }
-    const evictionEpoch = currentEvictionEpoch()
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
     const propertyRecords = await db
       .select()
