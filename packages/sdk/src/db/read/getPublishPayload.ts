@@ -59,6 +59,7 @@ import {
 } from '@/db/read/publishErrors'
 import {
   findRelatedSeedRow,
+  htmlPropertyNameForHtmlSeed,
   isLivePublishedSeed,
   isUnpublishedSeed,
   relatedModelNameFromDef,
@@ -1049,6 +1050,21 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
   for (const row of rows) {
     if (doneImages.has(row.imageSeedLocalId)) continue
     doneImages.add(row.imageSeedLocalId)
+
+    // An embedded image that is already published is not co-published; one whose seed was revoked
+    // (unpublished) blocks the publish like an image property pointing at it would.
+    const imageSeed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
+    if (
+      noteRelatedSeed(
+        ctx,
+        row.imageSeedLocalId,
+        imageSeed,
+        htmlPropertyNameForHtmlSeed(item, row.htmlSeedLocalId),
+        'Image',
+      )
+    ) {
+      continue
+    }
 
     const htmlSchemaUid = await resolveHtmlPropertySchemaUidByHtmlSeed(item, row.htmlSeedLocalId, ctx)
     if (!htmlSchemaUid) continue

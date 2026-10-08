@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
+import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { Item } from '@/Item/Item'
 import {
   getPublishPayload,
@@ -141,6 +142,37 @@ describe.sequential('publish with relations to unpublished items', () => {
     expect(error.unpublishedRelatedItems).toEqual([
       { propertyName: 'coverImage', modelName: 'Image', seedLocalId: imageSeedLocalId, seedUid: imageUid },
     ])
+  }, 60000)
+
+  it('image embedded in an Html property (co-published) pointing at a revoked image seed: names the Html property', async () => {
+    const author = await createPublishedTestAuthor()
+    const { imageSeedLocalId } = await createImageItemWithMissingStorageTxMetadata()
+    const image = (await Item.find({ seedLocalId: imageSeedLocalId }))! as Item<any>
+    const imageUid = await markPublished(image)
+    await unpublish(image)
+    const post = await createItem({ modelName: 'Post', title: 'Embeds a gone image', author: author.seedLocalId })
+    // As prepareHtmlEmbeddedImagesForPublish leaves it: bodyHtml holds its Html seed, and a co-publish
+    // row links the embedded image to the post (a row left from an earlier, interrupted publish).
+    const htmlSeedLocalId = `html${Date.now().toString(36)}`
+    const bodyHtml = post.allProperties['bodyHtml']
+    expect(bodyHtml).toBeDefined()
+    bodyHtml!.getService().send({ type: 'updateContext', propertyValue: htmlSeedLocalId })
+    await BaseDb.getAppDb().insert(htmlEmbeddedImageCoPublish).values({
+      parentSeedLocalId: post.seedLocalId,
+      htmlSeedLocalId,
+      imageSeedLocalId,
+      stableKey: `gone-${imageSeedLocalId}`,
+      createdAt: Date.now(),
+    })
+
+    const expected = [
+      { propertyName: 'bodyHtml', modelName: 'Image', seedLocalId: imageSeedLocalId, seedUid: imageUid },
+    ]
+    const error = await getPublishPayload(post, []).catch((e) => e)
+    expect(error).toBeInstanceOf(RelatedItemUnpublishedError)
+    expect(error.unpublishedRelatedItems).toEqual(expected)
+    expect((await summarizePublishWork(post)).unpublishedRelatedItems).toEqual(expected)
+    expect(await getUnpublishedRelatedItems(post)).toEqual(expected)
   }, 60000)
 
   it('relation to a live published item: unchanged, attests its uid', async () => {

@@ -368,4 +368,77 @@ testDescribe('republish after unpublish', () => {
     expect(cache.has(syncedSeedUid)).toBe(true)
     loaded.unload()
   })
+
+  itBrowser('the old seed row, observed before the new uid is persisted, does not bring the old uid back', async () => {
+    const { item, seedLocalId, seedUid: oldSeedUid, publisher } = await createPublishedItemForUnpublish({
+      title: 'No flash back',
+    })
+    const db = BaseDb.getAppDb()
+    const cache = (Item as any).instanceCache as Map<string, unknown>
+    const entry = cache.get(seedLocalId)
+    expect(entry).toBeDefined()
+    cache.set(oldSeedUid, entry!)
+
+    // Unpublished; the item's seed liveQuery observes it.
+    await updateSeedRevokedAt({ seedLocalId, revokedAt: Math.floor(Date.now() / 1000) })
+    await waitUntilOrThrow(() => item.isRevoked, 'the item to observe the unpublish', 5000)
+
+    // A second watch on the same row tells the test when an emission was delivered.
+    const watched: { uid: string | null; updatedAt: number | null }[] = []
+    const watch = BaseDb.liveQuery<{ uid: string | null; updatedAt: number | null }>(
+      (sql: any) => sql`SELECT uid, updated_at as updatedAt FROM seeds WHERE local_id = ${seedLocalId}`,
+    ).subscribe({ next: (rows) => rows[0] && watched.push(rows[0]) })
+    const seenUids: (string | undefined)[] = []
+    const seen = item.getService().subscribe((s) => seenUids.push((s.context as { seedUid?: string }).seedUid))
+
+    try {
+      // Republish in flight: the publish has given the item its new seed uid (the tracked setter's
+      // context update; its DB write has not landed yet) ...
+      const newSeedUid = nextUid()
+      ;(Item as any).sendTrackedPropertyUpdate(item, 'seedUid', newSeedUid)
+      expect(item.seedUid).toBe(newSeedUid)
+      expect(item.isRevoked).toBe(false)
+
+      // ... when the old seed row changes before the new uid's DB write lands (here a sync records
+      // the old seed's revocation time) and the liveQuery delivers it: old uid, revoked. (The
+      // liveQuery drops unchanged results, so an unchanged old row would not be delivered.)
+      const staleAt = Date.now() + 1
+      await db
+        .update(seeds)
+        .set({ revokedAt: Math.floor(staleAt / 1000) - 5, updatedAt: staleAt })
+        .where(eq(seeds.localId, seedLocalId))
+      await waitUntilOrThrow(
+        () => watched.some((r) => r.updatedAt === staleAt && r.uid === oldSeedUid),
+        'the liveQuery to deliver the old seed row',
+        5000,
+      )
+      // Both watches are notified by the same change; let the item's handler run.
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(item.seedUid).toBe(newSeedUid)
+      expect(item.isRevoked).toBe(false)
+      expect(seenUids.slice(seenUids.indexOf(newSeedUid))).not.toContain(oldSeedUid)
+      expect(cache.has(oldSeedUid)).toBe(false)
+      expect(cache.get(newSeedUid)).toBe(entry)
+
+      // The new uid lands in the DB; later changes to the row reach the item again.
+      await item.persistSeedUid(publisher, Date.now())
+      await waitUntilOrThrow(
+        () => watched.some((r) => r.uid === newSeedUid),
+        'the liveQuery to deliver the persisted seed row',
+        5000,
+      )
+      const revokedAgainAt = Math.floor(Date.now() / 1000) + 11
+      await updateSeedRevokedAt({ seedLocalId, revokedAt: revokedAgainAt })
+      await waitUntilOrThrow(
+        () => item.revokedAt === revokedAgainAt,
+        'the item to observe revoked_at on its republished seed',
+        5000,
+      )
+      expect(item.seedUid).toBe(newSeedUid)
+    } finally {
+      watch.unsubscribe()
+      seen.unsubscribe()
+    }
+  })
 })

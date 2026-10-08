@@ -136,6 +136,15 @@ const itemInstanceState = new WeakMap<Item<any>, {
   definedPropertyNames: Set<string>
 }>()
 
+/**
+ * Seed uids an item has moved away from (a republish gives the item a new seed uid) whose seed row
+ * may still hold them: the new uid is set on the item before its DB write lands, and until then the
+ * seeds liveQuery can deliver the old row. Rows carrying one of these uids are ignored; the set is
+ * cleared once the row carries the item's current uid. Lower-cased. Keyed by the item's actor,
+ * which the instance and its reactive proxy share.
+ */
+const supersededSeedUids = new WeakMap<object, Set<string>>()
+
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   protected static instanceCache: Map<string, { instance: Item<any>; refCount: number }> = new Map();
@@ -404,6 +413,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       [prop]: value,
       ...(replacesSeedUid && { revokedAt: undefined }),
     } as any)
+    if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
+      const superseded = supersededSeedUids.get(target._service) ?? new Set<string>()
+      superseded.delete(value.toLowerCase())
+      if (replacesSeedUid) superseded.add(previousSeedUid!.toLowerCase())
+      supersededSeedUids.set(target._service, superseded)
+    }
     if (replacesSeedUid) {
       const entry = this.instanceCache.get(previousSeedUid!)
       if (entry) {
@@ -1939,6 +1954,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               // Update context with seed data
               const status = itemActor.getSnapshot().status
               if (status === 'stopped' || status === 'done') return
+              // The row still has a uid this item moved away from (a republish set the new seed uid
+              // on the item; its DB write has not landed): stale, so neither its uid nor its
+              // revocation applies. Once the row has the item's uid, the DB has caught up.
+              const rowUid = seedRow.uid?.toLowerCase()
+              const superseded = supersededSeedUids.get(this._service)
+              if (rowUid && superseded?.has(rowUid)) {
+                logger('[Item._setupLiveQuerySubscription] Ignoring seed row with a superseded uid')
+                return
+              }
+              if (rowUid && rowUid === this._getSnapshotContext().seedUid?.toLowerCase()) {
+                superseded?.clear()
+              }
               // A new uid written elsewhere (sync, another tab's republish) goes through the tracked
               // setter so the instance cache's uid alias follows it. A row without a uid (not yet
               // persisted) never clears the item's uid.
