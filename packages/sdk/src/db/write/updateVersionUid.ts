@@ -1,6 +1,7 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { versions } from '@/seedSchema'
+import { seeds, versions } from '@/seedSchema'
 import { eq, desc } from 'drizzle-orm'
+import { generateId } from '@/helpers'
 import { isPlaceholderUid } from '@/helpers/easUid'
 import { normalizePublisher } from '@/helpers/addresses'
 
@@ -39,9 +40,31 @@ export const updateVersionUid = async ({
   const toUpdate = rows.find(
     (r: { localId: string | null; uid: string | null }) => r.localId && isPlaceholderUid(r.uid),
   )
-  if (!toUpdate?.localId) return
-
   const normalizedPublisher = normalizePublisher(publisher)
+  if (!toUpdate?.localId) {
+    // No local draft version took this attestation (e.g. a republish after unpublish, where every
+    // version row is a revoked attestation): record the new version so it is the latest one.
+    if (rows.some((r: { uid: string | null }) => r.uid === versionUid)) return
+    const [seed] = await appDb
+      .select({ type: seeds.type })
+      .from(seeds)
+      .where(eq(seeds.localId, seedLocalId))
+      .limit(1)
+    if (!seed) return
+    const now = Date.now()
+    await appDb.insert(versions).values({
+      localId: generateId(),
+      seedLocalId,
+      seedType: seed.type,
+      uid: versionUid,
+      createdAt: now,
+      updatedAt: now,
+      ...(normalizedPublisher && { publisher: normalizedPublisher }),
+      ...(attestationCreatedAt != null && { attestationCreatedAt }),
+    })
+    return
+  }
+
   let shouldSetPublisher = normalizedPublisher != null
   if (shouldSetPublisher && toUpdate.publisher != null && toUpdate.publisher !== '') {
     shouldSetPublisher = false

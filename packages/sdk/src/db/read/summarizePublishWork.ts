@@ -17,6 +17,7 @@ import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPubl
 import { eq } from 'drizzle-orm'
 import type { UploadProperty } from '@/db/read/getPublishUploads'
 import type { PublishMode } from '@/db/read/getPublishPayload'
+import { isSeedRevoked } from '@/db/read/isSeedRevoked'
 
 export type { PublishMode }
 
@@ -370,7 +371,10 @@ export const summarizePublishWork = async (
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishWorkSummary> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const forceFullSnapshot = publishMode === 'new_version'
+  // Like getPublishPayload: an item whose seed was revoked republishes as a new seed with a full
+  // snapshot.
+  const republishRevokedSeed = !isZeroUid(item.seedUid) && (await isSeedRevoked(item.seedLocalId))
+  const forceFullSnapshot = publishMode === 'new_version' || republishRevokedSeed
   const acc: PublishWorkSummary = {
     publishMode,
     seedCount: 0,
@@ -381,5 +385,7 @@ export const summarizePublishWork = async (
     uploadBytes: 0,
   }
   await summarizeItem(item, publishMode, forceFullSnapshot, acc, new Set(), new Set())
+  // summarizeItem counts the root as an existing seed (it has a seedUid).
+  if (republishRevokedSeed) acc.newSeedCount += 1
   return acc
 }
