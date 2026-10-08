@@ -3,6 +3,8 @@ import {
   extractDataUriImagesFromHtml,
   replaceDataUrisInParsedHtml,
   HtmlEmbeddedDataUriLimitError,
+  findSeedPropertyRefsInHtml,
+  replaceSeedPropertyRefsInHtml,
 } from '@/helpers/htmlEmbeddedDataUriPublish'
 
 /** Minimal valid 1×1 PNG base64 */
@@ -64,6 +66,24 @@ describe('htmlEmbeddedDataUriPublish', () => {
     it('escapes a replacement value for a double-quoted attribute', () => {
       const out = replaceDataUrisInParsedHtml(`<img src="${uri}">`, new Map([[uri, 'https://g/?a=1&b="2"']]))
       expect(out).toBe('<img src="https://g/?a=1&amp;b=&quot;2&quot;">')
+    })
+  })
+
+  describe('seed:property/ placeholders', () => {
+    it('finds each referenced property once, in src, href and poster only', () => {
+      const html =
+        '<img src="seed:property/featureImage"><a href=" seed:property/attachment ">a</a>' +
+        '<video poster="seed:property/featureImage"></video><img alt="seed:property/caption">' +
+        '<p>seed:property/body</p><img src="seed:property/bad-name"><img src="seed:property/x/y">'
+      expect(findSeedPropertyRefsInHtml(html).sort()).toEqual(['attachment', 'featureImage'])
+    })
+
+    it('replaces placeholders with their URLs and keeps every other byte', () => {
+      const html = `<article class="h-entry">\r\n<pre>\n\nx</pre><IMG class=u-featured SRC='seed:property/featureImage'><img src="seed:property/other"></article>`
+      const out = replaceSeedPropertyRefsInHtml(html, new Map([['featureImage', 'https://arweave.net/tx1']]))
+      expect(out).toBe(
+        `<article class="h-entry">\r\n<pre>\n\nx</pre><IMG class=u-featured src="https://arweave.net/tx1"><img src="seed:property/other"></article>`,
+      )
     })
   })
 

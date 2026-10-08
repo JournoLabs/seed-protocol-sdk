@@ -196,7 +196,7 @@ PublishManager.createPublish(item, address, account, {
 
 You can also provide `signDataItems` or `dataItemSigner` in the PublishProvider config as a fallback when the signer is available at startup.
 
-**Html properties with embedded `data:image/...;base64,...` (materialization):** When `useArweaveBundler: true`, the publish machine runs the same two-phase flow as L1: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase.
+**Html properties with embedded `data:image/...;base64,...` (materialization):** When `useArweaveBundler: true`, the publish machine runs the same two-phase flow as L1: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase, unless the Html has `seed:property/<name>` placeholders (see docs/PUBLISHING.md), which always take the two-phase path.
 
 ### Arweave upload tags
 
