@@ -4,6 +4,8 @@ import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
+import { schemas } from '@/seedSchema/SchemaSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -122,7 +124,13 @@ testDescribe('Model Integration Tests', () => {
     // Clean up Model instances by unloading them
     const db = BaseDb.getAppDb()
     if (db) {
-      const dbModels = await db.select().from(modelsTable)
+      // models has no schema column; read it from model_schemas so the lookup is scoped (a bare name
+      // throws AmbiguousModelError once two schemas define it, and the catch below would hide that).
+      const dbModels = await db
+        .select({ name: modelsTable.name, schemaName: schemas.name })
+        .from(modelsTable)
+        .innerJoin(modelSchemas, eq(modelSchemas.modelId, modelsTable.id))
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
       for (const dbModel of dbModels) {
         try {
           const model = Model.getByName(dbModel.name, dbModel.schemaName)

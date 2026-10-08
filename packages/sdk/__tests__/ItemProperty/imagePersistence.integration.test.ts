@@ -168,7 +168,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with Blob image' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with Blob image' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -200,7 +200,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with blob URL image' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with blob URL image' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -234,7 +234,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post for reload test' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for reload test' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -270,7 +270,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post for blob URL reload test' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for blob URL reload test' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -310,7 +310,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with data URL' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with data URL' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -347,7 +347,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with File' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with File' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
