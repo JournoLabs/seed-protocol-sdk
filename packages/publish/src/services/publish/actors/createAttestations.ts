@@ -2,11 +2,9 @@ import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
-import {
-  applyPropertyAttestationUidsFromPublish,
-  resolvePublishPayloadValues,
-} from '@seedprotocol/sdk'
+import { resolvePublishPayloadValues } from '@seedprotocol/sdk'
 import { persistVersionUidFromPublishReceipt } from './persistVersionUid'
+import { persistPropertyMetadataUidsFromContractReceipt } from './persistPropertyMetadataUids'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
@@ -30,11 +28,7 @@ import { ZERO_BYTES32 } from './utils'
 import {
   seedUidFromCreatedAttestationEvents,
   seedUidFromSeedPublished,
-  versionUidFromCreatedAttestationEvents,
-  uidsFromSeedPublished,
   listCreatedAttestationPairsFromReceipt,
-  listPropertyAttestationPairsFromReceipt,
-  type CreatedAttestationPair,
 } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import {
@@ -111,98 +105,6 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
   return {
     txTargetAddress: publisherAddress,
     contractAddressForEvents: publisherAddress,
-  }
-}
-
-function schemaMatchesAttestationPair(
-  pairSchema: string | undefined,
-  requestSchema: string | undefined,
-): boolean {
-  if (!pairSchema || !requestSchema) return false
-  return toHex32(pairSchema).toLowerCase() === toHex32(requestSchema).toLowerCase()
-}
-
-function consumeIfSchemaMatches(
-  all: CreatedAttestationPair[],
-  offset: number,
-  schemaUid: string | undefined,
-): number {
-  if (!schemaUid || offset >= all.length) return offset
-  if (schemaMatchesAttestationPair(all[offset]?.schemaUid, schemaUid)) return offset + 1
-  return offset
-}
-
-/**
- * Walk receipt attestation order (per request: optional seed, version, then property schemas)
- * and persist property attestation UIDs onto metadata rows.
- */
-async function persistPropertyMetadataUidsFromContractReceipt(params: {
-  receipt: ReceiptLike
-  normalizedRequests: any[]
-  useModularExecutor: boolean
-  contractAddressForEvents: string
-}): Promise<void> {
-  const { receipt, normalizedRequests, useModularExecutor, contractAddressForEvents } = params
-  const { easContractAddress } = getPublishConfig()
-  const flattenedList = normalizedRequests.flatMap((r) => r.listOfAttestations ?? [])
-  const allPairs = listPropertyAttestationPairsFromReceipt({
-    receipt,
-    useModularExecutor,
-    easContractAddress,
-    contractAddressForEvents,
-    listOfAttestations: flattenedList,
-  })
-  if (!allPairs.length) {
-    logger('persistPropertyMetadataUidsFromContractReceipt: no property attestation pairs')
-    return
-  }
-  const attMs = await attestationMsFromReceipt(receipt)
-  let offset = 0
-  for (const req of normalizedRequests) {
-    const list = req.listOfAttestations ?? []
-    const hadNewSeed = !req.seedUid || toHex32(req.seedUid) === ZERO_BYTES32
-    if (hadNewSeed) {
-      offset = consumeIfSchemaMatches(allPairs, offset, req.seedSchemaUid)
-    }
-    offset = consumeIfSchemaMatches(allPairs, offset, req.versionSchemaUid)
-    if (!list.length) continue
-    const n = list.length
-    const slice = allPairs.slice(offset, offset + n)
-    offset += n
-    if (!slice.length) continue
-    const nApply = Math.min(slice.length, n)
-    let versionUidRow =
-      req.versionUid && toHex32(req.versionUid) !== ZERO_BYTES32
-        ? toHex32(req.versionUid)
-        : undefined
-    if (!versionUidRow) {
-      versionUidRow =
-        versionUidFromCreatedAttestationEvents(
-          receipt,
-          req.versionSchemaUid,
-          useModularExecutor,
-        ) ??
-        uidsFromSeedPublished(
-          receipt,
-          contractAddressForEvents,
-          n,
-          useModularExecutor,
-        ).versionUid
-    }
-    await applyPropertyAttestationUidsFromPublish({
-      seedLocalId: req.localId,
-      attestationCreatedAtMs: attMs ?? null,
-      versionUid:
-        versionUidRow && toHex32(versionUidRow) !== ZERO_BYTES32 ? toHex32(versionUidRow) : null,
-      pairs: slice.slice(0, nApply).map((p, j) => ({
-        schemaUid: p.schemaUid,
-        attestationUid: p.attestationUid,
-        propertyName:
-          typeof list[j]?._propertyName === 'string' && list[j]._propertyName !== ''
-            ? list[j]._propertyName
-            : undefined,
-      })),
-    })
   }
 }
 
