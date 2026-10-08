@@ -14,7 +14,7 @@ Contents:
 
 - SDK SQLite tables: static `@/seedSchema` + prebuilt SQL in `packages/sdk/src/db/drizzle`, applied via `drizzle-orm` migrator (browser + Node).
 - App domain schemas: JSON → OPFS/DB rows (EAV). No per-model Drizzle codegen at runtime.
-- `drizzle-kit` remains a **monorepo** devDependency for SDK maintainers (`scripts/track-drizzle-changes.ts`), not a consumer install.
+- `drizzle-kit` remains a **monorepo** devDependency for SDK maintainers (`bun run drizzle:update`, `scripts/update-drizzle.ts`), not a consumer install.
 
 ## Restarting the RPC experiment
 
