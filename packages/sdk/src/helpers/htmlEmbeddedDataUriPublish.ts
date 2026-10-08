@@ -1,5 +1,5 @@
 import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
-import { parseFragment, serialize } from 'parse5'
+import { parseFragment } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -62,13 +62,6 @@ export function resolveEffectiveHtmlEmbeddedDataUriPolicy(
 function getAttr(node: DefaultTreeAdapterTypes.Element, name: string): string | undefined {
   const a = node.attrs?.find((x) => x.name === name)
   return a?.value
-}
-
-function setAttr(node: DefaultTreeAdapterTypes.Element, name: string, value: string): void {
-  if (!node.attrs) node.attrs = []
-  const i = node.attrs.findIndex((x) => x.name === name)
-  if (i >= 0) node.attrs[i]!.value = value
-  else node.attrs.push({ name, value })
 }
 
 /**
@@ -136,22 +129,40 @@ export async function extractDataUriImagesFromHtml(html: string): Promise<HtmlEm
   return found
 }
 
+function escapeAttributeValue(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
 /**
- * Replace `data:image/...` src values with Arweave URLs using upload results keyed by image seed local id.
+ * Rewrite attribute values of `html` by splicing each new value into the original string: every
+ * byte other than the rewritten attributes stays as written. Re-serializing the parsed tree would
+ * not round-trip (parse5 drops the newline the parser eats after `<pre>`/`<textarea>`/`<listing>`,
+ * a fragment parse drops doctype/html/head/body, and quoting, case and line endings are normalized),
+ * and sealed Html must not change with the serializer.
+ *
+ * `rewrite` gets each attribute's (entity-decoded) value and returns its new value, or undefined to
+ * leave it. A rewritten attribute is written as `name="value"`.
  */
-export function replaceDataUrisInParsedHtml(
+function rewriteHtmlAttributes(
   html: string,
-  replacements: Map<string, string>,
+  rewrite: (element: DefaultTreeAdapterTypes.Element, attrName: string, value: string) => string | undefined,
 ): string {
-  if (replacements.size === 0) return html
-  const fragment = parseFragment(html)
+  const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
+  const edits: { start: number; end: number; text: string }[] = []
   const walk = (node: DefaultTreeAdapterTypes.ChildNode): void => {
     if (node.nodeName === '#text' || node.nodeName === '#comment') return
     const el = node as DefaultTreeAdapterTypes.Element
-    if (el.tagName === 'img') {
-      const src = getAttr(el, 'src')?.trim()
-      if (src && replacements.has(src)) {
-        setAttr(el, 'src', replacements.get(src)!)
+    if (el.attrs?.length) {
+      for (const attr of el.attrs) {
+        if (attr.prefix) continue
+        const next = rewrite(el, attr.name, attr.value)
+        const location = el.sourceCodeLocation?.attrs?.[attr.name]
+        if (next === undefined || !location) continue
+        edits.push({
+          start: location.startOffset,
+          end: location.endOffset,
+          text: `${attr.name}="${escapeAttributeValue(next)}"`,
+        })
       }
     }
     const parent = el as DefaultTreeAdapterTypes.ParentNode
@@ -160,7 +171,27 @@ export function replaceDataUrisInParsedHtml(
     }
   }
   for (const c of fragment.childNodes) walk(c as DefaultTreeAdapterTypes.ChildNode)
-  return serialize(fragment)
+
+  let out = html
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
+  }
+  return out
+}
+
+/**
+ * Replace `data:image/...` `<img src>` values with Arweave URLs (keyed by data URI). Only those
+ * `src` attributes change; the rest of the Html is kept byte for byte.
+ */
+export function replaceDataUrisInParsedHtml(
+  html: string,
+  replacements: Map<string, string>,
+): string {
+  if (replacements.size === 0) return html
+  return rewriteHtmlAttributes(html, (el, attrName, value) => {
+    if (el.tagName !== 'img' || attrName !== 'src') return undefined
+    return replacements.get(value.trim())
+  })
 }
 
 export type PrepareHtmlEmbeddedImagesResult = {
