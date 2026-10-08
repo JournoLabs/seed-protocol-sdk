@@ -110,7 +110,7 @@ export const createModelProperties = fromCallback<
         required: propData.required,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
         _dbId: propertyRecord?.schemaFileId === propertyFileId ? propertyRecord.id : undefined, // Already persisted: skip the write
-      } as any) // Use 'as any' because _propertyFileId is not in TProperty type
+      } as any, { schemaName }) // Use 'as any' because _propertyFileId is not in TProperty type
     }
     
     logger(`Successfully created all properties for model "${modelName}"`)

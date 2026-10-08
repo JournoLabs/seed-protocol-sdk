@@ -223,7 +223,7 @@ export class ModelProperty {
 
     // Get schema name from model asynchronously (fire-and-forget)
     if (property.modelName) {
-      this._setSchemaName(property.modelName).catch(() => {
+      this._setSchemaName(property).catch(() => {
         // If we can't get schema name, that's okay - it will be set later if needed
       })
     }
@@ -411,12 +411,20 @@ export class ModelProperty {
    * Set the schema name for this property by looking it up from the model
    * Tries database first (more reliable), then falls back to schema files
    */
-  private async _setSchemaName(modelName: string): Promise<void> {
+  private async _setSchemaName(property: Static<typeof TProperty>): Promise<void> {
     try {
+      // create() sets the schema name right after construction when its caller knows it. Don't look it
+      // up then: the file fallback below reads and parses every schema file, per property.
+      await Promise.resolve()
+      if (this._getSnapshotContext()._schemaName) return
+
       let schemaName: string | undefined
+      // From the property data: the instance's own modelId field is never assigned (the reactive proxy
+      // serves values from the machine context), so reading this.modelId skipped the DB lookup.
+      const { modelId } = this._ownerModelScope(property)
 
       // Try to get schema name from database first (more reliable)
-      if (this.modelId) {
+      if (modelId) {
         try {
           const db = BaseDb.getAppDb()
           if (db) {
@@ -427,7 +435,7 @@ export class ModelProperty {
               .from(modelSchemas)
               .innerJoin(schemas, eq(modelSchemas.schemaId, schemas.id))
               .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-              .where(eq(modelsTable.id, this.modelId))
+              .where(eq(modelsTable.id, modelId))
               .limit(1)
 
             if (modelSchemaRecords.length > 0) {
@@ -441,7 +449,7 @@ export class ModelProperty {
 
       // Fall back to schema file lookup if database didn't work
       if (!schemaName) {
-        schemaName = await getSchemaNameFromModel(modelName)
+        schemaName = await getSchemaNameFromModel(property.modelName!)
       }
 
       if (schemaName) {
