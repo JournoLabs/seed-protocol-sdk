@@ -31,6 +31,31 @@ describe('drizzle tooling', () => {
     expect(writers).toEqual([])
   })
 
+  it("drizzle-kit configs point at a schema and migration folder that exist", () => {
+    // Every tracked file that imports drizzle-kit's defineConfig, outside node_modules / dist.
+    const configs = [
+      ...fs.readdirSync(repoRoot).filter((f) => /\.config\.(ts|js|mjs)$/.test(f)),
+      ...filesUnder('packages/sdk/src/db/configs'),
+    ].filter((file) => /from ['"]drizzle-kit['"]/.test(read(file)))
+    expect(configs).toContain('packages/sdk/src/db/configs/migrations.config.ts')
+
+    const broken = configs.flatMap((file) => {
+      const source = read(file)
+      // Paths in these configs are relative to the repo root (drizzle-kit runs from there).
+      const dirOf = (key: string) => {
+        const value = source.match(new RegExp(`${key}:\\s*['"]([^'"]+)['"]`))?.[1]
+        return value ? path.join(repoRoot, value.includes('*') ? path.dirname(value) : value) : undefined
+      }
+      return (['schema', 'out'] as const)
+        .filter((key) => {
+          const dir = dirOf(key)
+          return !dir || !fs.existsSync(dir)
+        })
+        .map((key) => `${file}: ${key}`)
+    })
+    expect(broken).toEqual([])
+  })
+
   it('root package.json scripts only run script files that exist', () => {
     const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>
     const missing = Object.entries(scripts).flatMap(([name, command]) =>
