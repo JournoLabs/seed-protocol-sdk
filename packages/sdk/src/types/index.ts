@@ -1,5 +1,6 @@
 
 import type { Model } from '@/Model/Model'
+import type { MultiTabMode } from '@/helpers/tabCoordinator'
 
 export * from './db'
 export * from './model'
@@ -104,6 +105,12 @@ export interface SeedConstructorOptions {
    * `syncFromEas` yourself.
    */
   readonly syncFromEasOnAddressChange?: boolean
+  /**
+   * How tabs of the same app share background work (browser only; see docs/MULTI_TAB.md).
+   * `'coordinate'` (default) elects one leader tab to run automatic EAS sync, bulk file downloads
+   * and the Arweave L1 finalize worker; `'off'` runs them in every tab.
+   */
+  readonly multiTab?: MultiTabMode
 }
 
 /**
