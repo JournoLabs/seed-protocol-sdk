@@ -146,13 +146,20 @@ their number so references to them stay valid.
 1. **Fixed.** `Model.findUniqueModelName`'s schema-context check never ran (it called `getService()`
    on the promise `Schema.create` returns) and leaked a schema refCount. It was deleted; the cache
    check in the same function and `loadOrCreateModel` already handle duplicate names.
-2. **`model.properties` can briefly return `[]`** after the model's liveQuery has reported property
-   ids (`Model.ts:1738`). The getter only returns `ModelProperty` instances already in the static cache,
-   which can lag `_liveQueryPropertyIds`. One test was changed to poll for this; callers in apps can
-   see the same empty list. The ids are published only after instances are created, so likely
-   causes are `ModelProperty.createById` returning a same-name instance cached under a different id
-   (so `getById` keeps missing) and unordered async liveQuery emissions in `entityLiveQuery.ts`.
-   `useItemProperties` reads `model.properties` and is affected.
+2. **Fixed** (step 5, branch `claude/step5-hooks-caches`). `model.properties` returned `[]` while the
+   model's liveQuery had no property ids, and in one case for good: after a schema is re-imported,
+   `Model.find` returns a Model that loaded from the schema file before the import wrote its
+   `models` row (`loadOrCreateModel` step 2 reports success without `_dbId`). `setupEntityLiveQuery`
+   only retried the row lookup on snapshot changes, and an idle model has none, so `_dbId` and the
+   properties liveQuery were never set up (reproduced in 2 of 3 re-imports per run). It now also
+   retries on a backoff timer (~60s, until found or the actor stops), which covers Schema too. The
+   timer only acts while the entity is idle and, for a Model, while its `writeProcess` isn't
+   writing: a model writes from that child while itself idle, and finding its row mid-write gave it
+   a `_dbId` before its properties' rows existed (`ModelProperty.test.ts` "writes a runtime model
+   property once" then failed every run).
+   Tests: `Model/modelPropertiesAfterReimport.test.ts`, `helpers/entityLiveQuery.test.ts`.
+   The other suspected cause, `ModelProperty.createById` returning a same-name instance cached
+   under a different id, didn't show up in a probe of imports, runtime models and re-imports.
 3. **Fixed** (step 4, branch `fix/eas-schema-lookup-cache`). `Item.create` took ~1s per item in the
    browser. Each item made 4–5 sequential, uncached EAS GraphQL requests (~80ms each): one
    `GetSchemaByName` per property in `createMetadata` and one `GetSchemas` for the model in
@@ -212,21 +219,26 @@ their number so references to them stay valid.
 
 8. **Order-dependent `Item/unpublish.integration.test.ts` failures** ("Item is read-only: you do not
    own this item") when certain files (e.g. `Item/getItems.test.ts`) run before it on the same
-   browser worker. Being fixed in a separate session as of 2026-10-07.
+   browser worker. Fixed in `9a41020` (each `createPublishedItemForUnpublish` call gets its own seed
+   UID, `6d78fca`; the ownership check finds an item's row by `localId` before `uid`, `d149b56`).
+   As of 2026-10-08 the same error came back after one particular set of 24 earlier browser files;
+   a separate session is looking into it (owned addresses persisted in OPFS appState leak between
+   files).
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
-12. Flaky in `modelProperty.test.tsx`: `useModelProperties > should return properties when …`
-    (30s timeout) and three `useModelProperty` tests (~17s), intermittently. **Likely fixed by
-    `22c3a7e`, not proven.** It didn't reproduce on `main` in 9 full browser-react runs (parallel,
-    `TEST_WORKERS=1`, and concurrent with the browser project) or 12 runs of the file alone. What
-    those runs did show, in 12 of 13 file runs, was a stale write for the file's deleted Post model
-    (`Write error for model "post-model-id": Model with id 34 does not exist`), from earlier tests'
-    still-mounted hooks racing the next `beforeEach`. With `cleanup()` in the setup file that write
-    is gone and the project's summed test time dropped from ~430–480s to ~340–370s. Reopen this if
-    the failure comes back. Another possible cause, from reading the code: `useModelProperty`'s
-    schemaId lookup runs once and never retries if `getPropertySchema` comes back empty (which it can,
-    via finding 2). See also finding 15.
+12. **Rechecked in step 5; see below.** Flaky in `modelProperty.test.tsx`: `useModelProperties >
+    should return properties when …` (30s timeout) and three `useModelProperty` tests (~17s),
+    intermittently. Likely fixed by `22c3a7e` (RTL `cleanup()`, which removed a stale write for the
+    file's deleted Post model from earlier tests' still-mounted hooks). Step 5 fixed the code-level
+    causes it pointed at: finding 2, finding 15, and `useModelProperty`'s schemaId/modelFileId
+    lookup, which ran once and kept `undefined` if the model or property wasn't there yet. It now
+    retries quietly at 0.4/1.2/2.5s while it finds nothing (test: "finds a property whose model is
+    created after the hook first looked it up"). Recheck on the branch: `modelProperty.test.tsx`
+    passed 12 of 12 runs alone and 6 of 6 full browser-react runs, with no timeouts. Reopen if the
+    timeout comes back. Earlier tests' stale writes still show up in this file (1–3 "Schema/Model
+    with id N does not exist … Cannot create join record" per run, on `main` too); they are
+    finding 14's SDK side.
 13. **Fixed.** A stale `packages/eas/dist`; see "Workspace packages load from source".
 14. **Writes that start after test cleanup has evicted their model.** The React files now use the
     SDK's `cleanupTestSchemaData`, which waits for in-flight writes (`4863469`). That removed the
@@ -242,12 +254,11 @@ their number so references to them stay valid.
     `main` showed none: `main`'s cleanup never deleted model rows, so these writes landed on orphaned
     rows silently. Importing that file's schema once (step 3) removed them there. Next step is in the
     SDK: find which cache keeps the old row id, and what restarts a stopped model's write process.
-15. **`useModelProperties` can miss properties written late** (`packages/react/src/modelProperty.ts:58`).
-    `dbModelId` is memoized on `[model]` from `model._getSnapshotContext()._dbId`. If `_dbId` isn't set
-    when the model is first seen, the memo never updates (same object), so the live query on the
-    `properties` table is never built and only the fixed refetches at 0.4/1.2/2.5s (line 107) can pick
-    up properties. Under load, properties written after 2.5s would leave the list empty. Not observed
-    failing; found while instrumenting finding 12.
+15. **Fixed** (step 5). `useModelProperties` memoized the model's `_dbId` once per model instance,
+    so a model first seen before its row was resolved never got the live query on the `properties`
+    table. Properties added later then only appeared through the fixed refetches, which run only
+    while the list is empty. The hook now follows `_dbId` on the model's actor. Test: "picks up a
+    property added after the model resolves its _dbId" in `modelProperty.test.tsx`.
 16. **Fixed** (step 3, test side). `getItemsData({ modelName })`, `Item.all(name)` and
     `useItems({ modelName })` without `schemaName` / `modelFileId` list every schema's items with that
     model name. That's working as designed (2026-10-07): model types are global and a schema is a local
@@ -256,9 +267,22 @@ their number so references to them stay valid.
 17. **Fixed.** Test files threw inside a `waitFor` predicate (`throw new Error('… failed to load')`
     when the snapshot is `error`). Every SDK and React test now uses the non-throwing helpers in
     `packages/sdk/__tests__/test-utils/waitForIdle.ts` (see "Writing tests that stay fast").
-18. **`ModelProperty.getById` scans the whole instance cache** (~0.9s of a 1000-model import, since
-    `Model._refreshPropertiesFromDb` calls it per property). An id index would have to follow id
-    changes: a property is often created with a generated id and then gets its real one.
+18. **Fixed** (step 6, branch `claude/step6-getbyid-propschema`). `ModelProperty.getById` scanned
+    the whole instance cache on every call, hit or miss. Loading a 1000-property model looks each
+    property up by id (2,000–4,000 calls), so `getById` cost ~480ms there. It now uses an id index.
+    Each cached instance subscribes to its actor to keep its entry current when its id changes (a
+    property is often created with a generated id and then gets its real one). Entries are checked
+    before use, and a stale one falls back to the old scan. Same load: ~2ms in `getById`. Test:
+    `ModelProperty/getByIdIndex.test.ts`. `validation-timeout.test.ts` never loads its models'
+    properties into the cache, so it didn't pay this cost.
+19. **Fixed** (step 6). `getPropertySchema` didn't find properties added at runtime to a schema-file
+    model. When the Schema context defines the model, it read properties only from there, and
+    `ModelProperty.create({ modelName, name })` doesn't add the new property to it, so
+    `useModelProperty(schema, model, newProperty)` stayed `undefined`. When the name isn't in the
+    Schema context, it now also looks in `model.properties`; the schema file's definitions still win.
+    The Schema context itself is unchanged (minimal fix, agreed 2026-10-08). Tests: "getPropertySchema
+    finds a property added at runtime to a schema-file model" (`ModelProperty.test.ts`) and "finds a
+    property added at runtime to a schema-file model" (`modelProperty.test.tsx`).
 
 ### Plan
 
@@ -270,8 +294,12 @@ Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 
   `itemProperty.test.tsx` now import their schema once per file.
 - **Step 4 — done** (branch `fix/eas-schema-lookup-cache`): finding 3 fixed. EAS schema lookups are
   cached, including misses; browser-react summed file time down ~34% back to back against `main`.
-- **Step 5 — hooks and caches: 2, 12, 15.** `ModelProperty` cache identity behind `model.properties`.
-  In `useModelProperties`, read `_dbId` from the model's live snapshot (or resolve by `modelFileId`)
-  instead of memoizing it once, with a test that delays the property write past the 2.5s refetches.
-  Recheck 12 after that.
-- **Not scheduled:** 8 (separate session), 14's SDK side, 18.
+- **Step 5 — done** (branch `claude/step5-hooks-caches`): 2 and 15 fixed, 12 rechecked (see 12),
+  `useModelProperty` retries a lookup that found nothing. New finding 19. Correctness only: suite
+  times unchanged back to back against `main` (browser-react summed 181/181s → 185/203/179s,
+  browser 230s → 231s, with 2 and 7 more tests).
+- **Step 6 — done** (branch `claude/step6-getbyid-propschema`): 18 and 19 fixed.
+- **Not scheduled:** 14's SDK side. Its first case (a cached Model handing back a deleted row's id
+  after a re-import) is being worked on in a separate session as of 2026-10-08; look at the second
+  case (a stopped runtime model starting a write) after that lands. Also open: sharing one browser
+  `QueryClient` (see 3), which needs `claude/elegant-tu-ac5741`'s query-key fix merged first.

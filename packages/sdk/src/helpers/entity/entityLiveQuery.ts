@@ -55,6 +55,11 @@ export interface LiveQueryConfig<T extends object> {
    * Called if isReady returns false
    */
   waitForReady?: (instance: T) => Promise<void>
+  /**
+   * Optional: whether the entity id may be retried on the timer now (it always is on snapshot
+   * changes). Return false while the entity is writing its own row, which ends with a snapshot.
+   */
+  canRetryEntityId?: (instance: T) => boolean
 }
 
 /**
@@ -153,9 +158,28 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
     }
   }
 
-  // Set up liveQuery subscription as soon as we have entity ID
-  const setupSubscription = instance.getService().subscribe(async (snapshot: any) => {
-    // Check if entity is ready
+  // The entity's DB row can be written after the entity goes idle (e.g. a schema import writes its
+  // models' rows after the Model instances loaded from the schema file). Nothing changes the
+  // entity's snapshot then, so an idle entity's id is also retried on a timer until found or the
+  // actor stops. Only while idle and not writing (canRetryEntityId): a busy entity's own snapshots
+  // drive the lookup, and finding its row mid-write handed a Model its _dbId before its write (and
+  // its properties' rows) had finished.
+  let retryIndex = 0
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  const scheduleRetry = () => {
+    if (retryTimer !== undefined || retryIndex >= ENTITY_ID_RETRY_DELAYS_MS.length) return
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined
+      // Busy: its next snapshot retries
+      if (instance.getService().getSnapshot().value !== 'idle') return
+      if (config.canRetryEntityId && !config.canRetryEntityId(instance)) return
+      retryIndex++
+      void trySetup()
+    }, ENTITY_ID_RETRY_DELAYS_MS[retryIndex])
+  }
+
+  const trySetup = async () => {
+    if (setupState.subscriptionSetUp || isActorStopped(instance.getService())) return
     if (config.isReady && !config.isReady(instance)) {
       if (config.waitForReady) {
         await config.waitForReady(instance)
@@ -163,37 +187,42 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
         return // Not ready yet, will retry on next snapshot
       }
     }
-    
-    // Get entity ID
-    const entityId = await config.getEntityId(instance)
-    
+
+    let entityId: number | string | undefined
+    try {
+      entityId = await config.getEntityId(instance)
+    } catch (error) {
+      logger(`Error getting entity ID: ${error}`)
+    }
+
     if (!entityId) {
-      return // Need entity ID to proceed
+      scheduleRetry()
+      return
     }
 
     // Once we have entity ID, set up the liveQuery subscription (only once)
     if (!setupState.subscriptionSetUp) {
       await setupLiveQuery(entityId)
-      if (setupState.subscriptionSetUp) {
-        setupSubscription.unsubscribe()
-      }
     }
-  })
-  
-  // Also check current state immediately in case entity ID is already available
-  const currentSnapshot = instance.getService().getSnapshot()
-  if (config.isReady && !config.isReady(instance)) {
-    // Not ready yet, will be handled by subscription
-    return
+    if (setupState.subscriptionSetUp) {
+      setupSubscription.unsubscribe()
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+    }
   }
-  
-  config.getEntityId(instance).then((entityId) => {
-    if (entityId && !setupState.subscriptionSetUp) {
-      setupLiveQuery(entityId).catch((error) => {
-        logger(`Error in immediate setup: ${error}`)
-      })
-    }
-  }).catch((error) => {
-        logger(`Error getting entity ID: ${error}`)
-      })
+
+  // Set up liveQuery subscription as soon as we have entity ID
+  const setupSubscription = instance.getService().subscribe({
+    next: () => {
+      void trySetup()
+    },
+    complete: () => {
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+    },
+  })
+
+  // Also check current state immediately in case entity ID is already available
+  void trySetup()
 }
+
+/** Backoff for retrying an entity's id when its DB row isn't there yet (~60s in total). */
+const ENTITY_ID_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600, ...Array(28).fill(2000)]
