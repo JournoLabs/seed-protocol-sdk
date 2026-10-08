@@ -3,7 +3,6 @@ import { SchemaFileFormat } from '@/types/import'
 import { loadOrCreateSchema } from './actors/loadOrCreateSchema'
 import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
-import { addModelsMachine } from './addModelsMachine'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import { checkExistingSchema } from './actors/checkExistingSchema'
 import { writeSchemaToDb } from './actors/writeSchemaToDb'
@@ -56,9 +55,6 @@ export type SchemaMachineContext = {
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
-  // Model addition queue and tracking
-  _pendingModelAdditions?: Array<{ models: { [modelName: string]: any }; timestamp: number }>
-  _modelAdditionErrors?: Array<{ error: Error; timestamp: number }>
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   // Store model IDs from liveQuery for reactive updates
   _liveQueryModelIds?: string[]
@@ -70,12 +66,6 @@ export type SchemaMachineContext = {
   _schemaRecord?: any  // Schema database record
   // Destroy failure from the last destroy() (read by destroy hooks)
   _destroyError?: { message: string; name?: string } | null
-}
-
-// Drop the request addModelsMachine just finished (the head of the queue), success or not
-const dequeueModelAddition = (context: SchemaMachineContext) => {
-  const pending = context._pendingModelAdditions || []
-  return pending.length > 1 ? pending.slice(1) : undefined
 }
 
 export const schemaMachine = setup({
@@ -93,7 +83,6 @@ export const schemaMachine = setup({
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      | { type: 'addModels'; models: { [modelName: string]: any } }
       | { type: 'requestWrite'; data: any }
       // Staged loading events
       | { type: 'schemaFound'; schema: SchemaFileFormat; schemaRecord: any; modelIds?: string[]; loadedAt?: number; dbVersion?: number; dbUpdatedAt?: number }
@@ -114,7 +103,6 @@ export const schemaMachine = setup({
   actors: {
     loadOrCreateSchema,
     validateSchema,
-    addModelsMachine,
     writeProcessMachine,
     // Staged loading actors
     checkExistingSchema,
@@ -624,9 +612,6 @@ export const schemaMachine = setup({
         },
       }),
       on: {
-        addModels: {
-          target: 'addingModels',
-        },
         validateSchema: {
           target: 'validating',
         },
@@ -645,119 +630,8 @@ export const schemaMachine = setup({
         },
       },
       // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
-      // (updateContext, addModels) or on request (validateSchema). Re-entering while errors exist would loop
+      // (updateContext) or on request (validateSchema). Re-entering while errors exist would loop
       // forever on a schema that is still invalid.
-    },
-    addingModels: {
-      entry: assign({
-        // Move first pending item to current if not already set
-        _pendingModelAdditions: ({ context, event }) => {
-          const pending = context._pendingModelAdditions || []
-          // If event has models, it's a new request - add to queue if we're already processing
-          if ((event as any).models) {
-            return [
-              ...pending,
-              {
-                models: (event as any).models,
-                timestamp: Date.now(),
-              },
-            ]
-          }
-          return pending
-        },
-      }),
-      invoke: {
-        src: 'addModelsMachine',
-        input: ({ context }) => {
-          // Get models from first item in pending queue, or from context if queue is empty
-          const pending = context._pendingModelAdditions || []
-          const models = pending.length > 0 ? pending[0].models : {}
-          return {
-            schemaContext: context,
-            models,
-            existingModels: context.models || {},
-          }
-        },
-        onDone: [
-          {
-            // addModelsMachine reports failure through its final `error` state, which arrives here
-            // as onDone with { errors } rather than as onError
-            guard: ({ event }) => ((event.output as any)?.errors?.length ?? 0) > 0,
-            target: 'finishingModelAddition',
-            actions: assign({
-              _modelAdditionErrors: ({ context, event }) => [
-                ...(context._modelAdditionErrors || []),
-                ...((event.output as any).errors as Array<{ error: Error }>).map(({ error }) => ({
-                  error,
-                  timestamp: Date.now(),
-                })),
-              ],
-              _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
-            }),
-          },
-          {
-            target: 'finishingModelAddition',
-            actions: assign({
-              models: ({ context, event }) => {
-                const addedModels = (event.output as any)?.addedModels || {}
-                return {
-                  ...(context.models || {}),
-                  ...addedModels,
-                }
-              },
-              _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
-            }),
-          },
-        ],
-        onError: {
-          target: 'finishingModelAddition',
-          actions: assign({
-            _modelAdditionErrors: ({ context, event }) => {
-              const existing = context._modelAdditionErrors || []
-              return [
-                ...existing,
-                {
-                  error: event.error instanceof Error ? event.error : new Error(String(event.error)),
-                  timestamp: Date.now(),
-                },
-              ]
-            },
-            _pendingModelAdditions: ({ context }) => dequeueModelAddition(context),
-          }),
-        },
-      },
-      on: {
-        // Queue additional requests while processing
-        addModels: {
-          actions: assign({
-            _pendingModelAdditions: ({ context, event }) => {
-              const existing = context._pendingModelAdditions || []
-              return [
-                ...existing,
-                {
-                  models: (event as any).models,
-                  timestamp: Date.now(),
-                },
-              ]
-            },
-          }),
-        },
-      },
-    },
-    // Transient: leaving addingModels and coming back re-enters it, so the next queued request gets
-    // its own addModelsMachine. An `always` inside addingModels targeting itself would not re-enter.
-    // Validation waits until the queue drains: validateSchema is handled at the root, so sending it
-    // mid-queue would pull the machine out of addingModels and cancel the next request.
-    finishingModelAddition: {
-      always: [
-        {
-          guard: ({ context }) => (context._pendingModelAdditions || []).length > 0,
-          target: 'addingModels',
-        },
-        {
-          target: 'validating',
-        },
-      ],
     },
     validating: {
       on: {

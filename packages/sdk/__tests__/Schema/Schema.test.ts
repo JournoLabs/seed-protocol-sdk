@@ -1328,13 +1328,13 @@ testDescribe('Schema Integration Tests', () => {
       const snapshot = schema.getService().getSnapshot()
       expect(schema.status).toBe(snapshot.value)
       
-      // Status can be one of: 'idle', 'loading', 'addingModels', 'validating', 'error'
+      // Status can be one of: 'idle', 'loading', 'validating', 'error'
       // or nested states like { loading: 'checkingExisting' }, etc.
       const finalStatus = schema.status
-      const validTopLevelStates = ['idle', 'loading', 'addingModels', 'validating', 'error']
+      const validTopLevelStates = ['idle', 'loading', 'validating', 'error']
       const isTopLevelState = typeof finalStatus === 'string' && validTopLevelStates.includes(finalStatus)
       const isNestedState = typeof finalStatus === 'object' && finalStatus !== null && 
-        (('loading' in finalStatus) || ('addingModels' in finalStatus) || ('validating' in finalStatus))
+        (('loading' in finalStatus) || ('validating' in finalStatus))
       
       // At this point, should be 'idle' (top-level state)
       expect(finalStatus).toBe('idle')
