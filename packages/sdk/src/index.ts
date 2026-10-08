@@ -62,6 +62,7 @@ export type { ModelValues } from './types/model'
 export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
+export { FileSystemLockedError } from './helpers/FileManager/errors'
 export {
   MODEL_AMBIGUOUS_EVENT,
   type ModelAmbiguousEventPayload,

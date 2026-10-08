@@ -118,10 +118,15 @@ const saveBufferToOPFS = async (filePath: string, buffer: Uint8Array): Promise<v
   // Create or open the file in OPFS
   const fileHandleAsync = await currentDirHandle.getFileHandle(fileName, { create: true });
   const fileHandle = await fileHandleAsync.createSyncAccessHandle();
-  // Write the buffer to the file
-  fileHandle.write(buffer);
-  fileHandle.flush();
-  fileHandle.close();
+  try {
+    // Drop any previous, longer contents before writing from the start
+    fileHandle.truncate(0);
+    fileHandle.write(buffer, { at: 0 });
+    fileHandle.flush();
+  } finally {
+    // A leaked handle keeps the file locked for the worker's lifetime
+    fileHandle.close();
+  }
 }
 
 const getFilesPath = (filesRoot: string, ...parts: string[]) => {
@@ -224,12 +229,12 @@ const downloadFiles = async ({
         if (contentType === 'html') {
           const fileName = `${transactionId}.html`
           const buffer = encoder.encode(content)
-          saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), buffer)
+          await saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), buffer)
         }
         if (contentType === 'json') {
           const fileName = `${transactionId}.json`
           const buffer = encoder.encode(content)
-          saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), buffer)
+          await saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), buffer)
         }
       }
 
@@ -237,7 +242,7 @@ const downloadFiles = async ({
     }
 
     if (!dataString && arrayBuffer) {
-      saveBufferToOPFS(
+      await saveBufferToOPFS(
         getFilesPath(filesRoot, 'images', transactionId),
         new Uint8Array(arrayBuffer),
       )

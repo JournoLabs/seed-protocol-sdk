@@ -14,18 +14,34 @@ type Posted = { message?: string; transactionId?: string; done?: boolean }
 async function runWorker(
   data: Record<string, unknown>,
   fetchImpl: (url: string) => Promise<Response>,
-): Promise<{ saved: Map<string, string>; posted: Posted[]; fetched: string[] }> {
-  const saved = new Map<string, string>()
+  opfs: { existing?: Record<string, string>; failWrite?: boolean } = {},
+): Promise<{ saved: Map<string, string>; posted: Posted[]; fetched: string[]; closed: string[] }> {
+  const encoder = new TextEncoder()
+  const bytes = new Map<string, Uint8Array>(
+    Object.entries(opfs.existing ?? {}).map(([name, text]) => [name, encoder.encode(text)]),
+  )
   const posted: Posted[] = []
   const fetched: string[] = []
+  const closed: string[] = []
 
+  // Byte-level stand-in for FileSystemSyncAccessHandle: write() overwrites in place, so stale
+  // trailing bytes survive unless the file is truncated first.
   const dir: any = {
     getDirectoryHandle: async () => dir,
     getFileHandle: async (name: string) => ({
       createSyncAccessHandle: async () => ({
-        write: (buf: Uint8Array) => saved.set(name, new TextDecoder().decode(buf)),
+        truncate: (size: number) => bytes.set(name, (bytes.get(name) ?? new Uint8Array()).slice(0, size)),
+        write: (buf: Uint8Array, { at = 0 }: { at?: number } = {}) => {
+          if (opfs.failWrite) throw new DOMException('disk full', 'QuotaExceededError')
+          const current = bytes.get(name) ?? new Uint8Array()
+          const next = new Uint8Array(Math.max(current.length, at + buf.length))
+          next.set(current)
+          next.set(buf, at)
+          bytes.set(name, next)
+          return buf.length
+        },
         flush: () => {},
-        close: () => {},
+        close: () => closed.push(name),
       }),
     }),
   }
@@ -43,10 +59,19 @@ async function runWorker(
   // The worker source assigns the global `onmessage`.
   new Function(filesDownload)()
   const onmessage = (globalThis as any).onmessage as (e: { data: unknown }) => Promise<void>
-  await onmessage({ data: { debug: true, filesRoot: '/files', ...data } })
+  try {
+    await onmessage({ data: { debug: true, filesRoot: '/files', ...data } })
+  } finally {
+    // Captured here too, so a test can inspect what a failing run left behind.
+    lastClosed = closed
+  }
 
-  return { saved, posted, fetched }
+  const decoder = new TextDecoder()
+  const saved = new Map([...bytes].map(([name, buf]) => [name, decoder.decode(buf)] as [string, string]))
+  return { saved, posted, fetched, closed }
 }
+
+let lastClosed: string[] = []
 
 describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
   beforeEach(() => {
@@ -104,6 +129,28 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
 
     expect(saved.size).toBe(0)
     expect(posted).toContainEqual({ message: 'excludeTransaction', transactionId: TX })
+  })
+
+  it('overwrites a longer existing file without leaving its trailing bytes', async () => {
+    const { saved } = await runWorker(
+      { transactionIds: [TX], arweaveHost: HOST },
+      async () => new Response('{"a":1}', { status: 200 }),
+      { existing: { [`${TX}.json`]: '{"previous":"and much longer"}' } },
+    )
+
+    expect(saved.get(`${TX}.json`)).toBe('{"a":1}')
+  })
+
+  it('closes the sync access handle when the write fails', async () => {
+    await expect(
+      runWorker(
+        { transactionIds: [TX], arweaveHost: HOST },
+        async () => new Response('{"a":1}', { status: 200 }),
+        { failWrite: true },
+      ),
+    ).rejects.toMatchObject({ name: 'QuotaExceededError' })
+
+    expect(lastClosed).toEqual([`${TX}.json`])
   })
 
   it('still works with only arweaveHost (no base URL list)', async () => {
