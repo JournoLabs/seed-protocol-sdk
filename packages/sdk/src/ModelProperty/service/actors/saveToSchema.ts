@@ -1,4 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { FromCallbackInput } from '@/types'
 import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 import debug from 'debug'
@@ -37,7 +38,7 @@ export async function getSchemaNameFromModel(modelName: string): Promise<string 
 export const saveToSchema = fromCallback<
   EventObject,
   FromCallbackInput<ModelPropertyMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _saveToSchema = async (): Promise<void> => {
     // Use dynamic import to break circular dependency
     const validationServiceMod = await import('../../../Schema/service/validation/SchemaValidationService')
@@ -73,6 +74,8 @@ export const saveToSchema = fromCallback<
     if (schemaName) {
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
+      // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+      if (isActorStopped(self)) return
       const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
       schema.getService().send({
         type: 'markAsDraft',

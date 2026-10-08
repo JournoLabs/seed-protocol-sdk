@@ -96,7 +96,9 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
         if (initialIds.length > 0) {
           logger(`Initial query returned ${initialIds.length} entities`)
           
-          // Create child instances if provided
+          // Create child instances if provided (not for a stopped entity: an unloaded or evicted
+          // parent must not re-cache its children)
+          if (isActorStopped(instance.getService())) return
           if (config.createChildInstances) {
             await config.createChildInstances(initialIds)
           }
@@ -133,7 +135,8 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
             
             const ids = config.extractEntityIds(rows)
             
-            // Create child instances if provided (before updating context)
+            // Create child instances if provided (before updating context; not for a stopped entity)
+            if (isActorStopped(instance.getService())) return
             if (config.createChildInstances && ids.length > 0) {
               await config.createChildInstances(ids)
             }

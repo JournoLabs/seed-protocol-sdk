@@ -21,6 +21,7 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import debug from 'debug'
 
@@ -885,11 +886,7 @@ export class ModelProperty {
     if (!db) {
       return undefined
     }
-
-    const testRecords = await db
-      .select()
-      .from(propertiesTable)
-      .limit(100)
+    const evictionEpoch = currentEvictionEpoch()
 
     const propertyRecords = await db
       .select()
@@ -947,6 +944,22 @@ export class ModelProperty {
       if (refModelRecords.length > 0) {
         propertyData.refModelName = refModelRecords[0].name
         propertyData.ref = refModelRecords[0].name
+      }
+    }
+
+    // Its model's schema was evicted while we read the rows (e.g. a model's property lookup in flight
+    // during Schema.destroy or test cleanup): don't bring the property back.
+    if (anyEvictionSince(evictionEpoch)) {
+      const schemaRows = await db
+        .select({ name: schemas.name })
+        .from(modelSchemas)
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
+        .where(eq(modelSchemas.modelId, propertyRecord.modelId))
+      if (
+        schemaRows.length === 0 ||
+        schemaRows.some((row: { name: string | null }) => schemaEvictedSince(row.name, evictionEpoch))
+      ) {
+        return undefined
       }
     }
 

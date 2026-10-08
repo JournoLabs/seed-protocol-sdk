@@ -29,6 +29,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
@@ -1714,6 +1715,43 @@ export class Schema {
   }
 
 
+  /**
+   * Force-evict the cached Schema instance(s) named `schemaName`, ignoring refCounts: stop their live
+   * query and service. Schema.destroy does the same for itself. For code that deletes a schema's rows
+   * without destroying it (test cleanup): a live Schema keeps re-creating its models from its live
+   * query while their rows are being deleted.
+   */
+  static evict(schemaName: string): void {
+    const instances = new Set<Schema>()
+    for (const { instance } of Schema.instanceCacheById.values()) instances.add(instance)
+    for (const { instance } of Schema.instanceCacheByName.values()) instances.add(instance)
+    for (const instance of instances) {
+      let context: SchemaMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (context.schemaName !== schemaName) continue
+      clearDestroySubscriptions(instance, {
+        instanceState: schemaInstanceState,
+        onUnload: () => schemaInstanceState.delete(instance),
+      })
+      forceRemoveFromCaches(instance, {
+        getCacheKeys: () => [context.id, context.schemaName].filter((k): k is string => !!k),
+        caches: [
+          Schema.instanceCacheById as Map<string, unknown>,
+          Schema.instanceCacheByName as Map<string, unknown>,
+        ],
+      })
+      try {
+        instance._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
+    }
+  }
+
   unload(): void {
     try {
       const context = this._getSnapshotContext()
@@ -1952,8 +1990,10 @@ export class Schema {
         }
       },
       createChildInstances: async (ids) => {
+        // One at a time: an eviction of this schema part way through stops the rest
+        const evictionEpoch = currentEvictionEpoch()
         for (const id of ids) {
-          await Model.createById(id)
+          await Model.createById(id, { evictionEpoch })
         }
       },
       queryInitialData: async (schemaId) => {

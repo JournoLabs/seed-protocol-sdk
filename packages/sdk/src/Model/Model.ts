@@ -20,6 +20,7 @@ import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { currentEvictionEpoch, recordSchemaEviction, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -727,6 +728,8 @@ export class Model {
             }, 10000)
           })
           
+          // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
+          if (isActorStopped(proxiedInstance._service)) return
           // Only write if validation passed (model is in idle state, not error)
           const finalSnapshot = proxiedInstance._service.getSnapshot()
           if (finalSnapshot.value === 'idle' && (!finalSnapshot.context._validationErrors || finalSnapshot.context._validationErrors.length === 0)) {
@@ -854,9 +857,8 @@ export class Model {
                 logger(`WARNING: Could not verify schema exists in database: ${error}. Proceeding anyway.`)
               }
               
-              // Track pending write
-              Model.trackPendingWrite(finalSnapshot.context.id, schemaId) // id is now the schemaFileId (string)
-              
+              const pendingModelFileId = finalSnapshot.context.id
+              const pendingSchemaId = schemaId
               // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
               // Retry a few times if writeProcess isn't available yet
               let retries = 0
@@ -866,6 +868,8 @@ export class Model {
                 if (isActorStopped(proxiedInstance._service)) return
                 const currentSnapshot = proxiedInstance._service.getSnapshot()
                 if (currentSnapshot.context.writeProcess) {
+                  // Track pending write (only once it really starts: a stopped model leaves none behind)
+                  Model.trackPendingWrite(pendingModelFileId, pendingSchemaId) // id is now the schemaFileId (string)
                   logger(`Triggering write process for model "${finalSnapshot.context.modelName}" (schemaId: ${schemaId})`)
                   
                   // Use pending property definitions if available, otherwise convert from ModelProperty instances
@@ -1095,6 +1099,7 @@ export class Model {
     if (scope.modelFileId || scope.schemaName) {
       const db = BaseDb.getAppDb()
       if (db) {
+        const evictionEpoch = currentEvictionEpoch()
         try {
           const rows = await db
             .select({
@@ -1113,6 +1118,8 @@ export class Model {
             .limit(1)
           const record = rows[0]
           if (record?.modelName && record.schemaName && record.modelFileId) {
+            // Its schema was evicted while we read the row: don't bring the model back.
+            if (schemaEvictedSince(record.schemaName, evictionEpoch)) return undefined
             return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
           }
         } catch (error) {
@@ -1144,6 +1151,7 @@ export class Model {
       if (!db) {
         return undefined
       }
+      const evictionEpoch = currentEvictionEpoch()
 
       try {
 
@@ -1173,6 +1181,10 @@ export class Model {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
           return undefined
         }
+        // Its schema was evicted while we read the row: don't bring the model back.
+        if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
+          return undefined
+        }
 
         // Create model instance (will be cached)
         return this.create(record.modelName, record.schemaName, {
@@ -1195,7 +1207,17 @@ export class Model {
    * @param modelFileId - The model file ID to look up
    * @returns The Model instance if found, undefined otherwise
    */
-  static async createById(modelFileId: string): Promise<Model | undefined> {
+  static async createById(
+    modelFileId: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started (e.g. a Schema actor that read the
+       * model ids). An eviction of the model's schema since then makes this return undefined instead
+       * of re-creating the model. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<Model | undefined> {
     if (!modelFileId) {
       return undefined
     }
@@ -1213,6 +1235,7 @@ export class Model {
       logger(`Model.createById: Database not available for ID "${modelFileId}"`)
       return undefined
     }
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
     try {
 
@@ -1237,6 +1260,12 @@ export class Model {
       const { modelName, schemaName } = modelRecords[0]
       if (!modelName || !schemaName) {
         logger(`Model.createById: Missing modelName or schemaName for ID "${modelFileId}"`)
+        return undefined
+      }
+      // Its schema was evicted while we read the row (e.g. a Schema live query in flight during
+      // Schema.destroy or test cleanup): don't bring the model back.
+      if (schemaEvictedSince(schemaName, evictionEpoch)) {
+        logger(`Model.createById: schema "${schemaName}" was evicted during the lookup of "${modelFileId}"`)
         return undefined
       }
 
@@ -1312,6 +1341,7 @@ export class Model {
       logger(`Model.createBySchemaId: Database not available for schema "${schemaIdentifier}"`)
       return []
     }
+    const evictionEpoch = currentEvictionEpoch()
 
     try {
 
@@ -1341,6 +1371,10 @@ export class Model {
       const modelInstances: Model[] = []
       for (const record of modelRecords) {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
+          continue
+        }
+        // Its schema was evicted while we read the rows: don't bring its models back.
+        if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
           continue
         }
 
@@ -1846,6 +1880,8 @@ export class Model {
    * @returns names of the evicted models (so callers can evict their ModelProperty instances)
    */
   static evictForSchema(schemaName: string): string[] {
+    // Work already running for this schema's models must not re-cache them when it finishes.
+    recordSchemaEviction(schemaName)
     const instances = new Set<Model>()
     for (const { instance } of this.instanceCacheById.values()) instances.add(instance)
     for (const { instance } of this.instanceCache.values()) instances.add(instance)

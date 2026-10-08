@@ -2,6 +2,7 @@ import { eq, inArray, isNull, ne, notInArray, or } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
+import { Schema } from '@/Schema/Schema'
 import { SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
@@ -32,9 +33,10 @@ export type CleanupTestSchemaDataOptions = {
  * Removes every schema/model/property row a test created while keeping the 'Seed Protocol' schema and its
  * models, which client initialization depends on.
  *
- * 1. Evicts cached Model / ModelProperty instances for each non-Seed-Protocol schema. That stops their actors
- *    (no new writes) and makes the next import build fresh instances instead of reusing ones bound to
- *    deleted rows.
+ * 1. Evicts cached Schema / Model / ModelProperty instances for each non-Seed-Protocol schema. That stops
+ *    their actors (no new writes) and live queries, makes work still running for them drop its result
+ *    (eviction epochs, helpers/entity/evictionEpoch.ts), and makes the next import build fresh instances
+ *    instead of reusing ones bound to deleted rows.
  * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null, property_uids,
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Waits for writes already running (stopping an actor can't cancel them), then retries briefly on
@@ -76,7 +78,10 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
 
 function evictTestSchemaInstances(testSchemaRows: { name: string | null }[]): void {
   for (const { name } of testSchemaRows) {
-    if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
+    if (!name) continue
+    // The Schema first: its live query re-creates its models while their rows are being deleted.
+    Schema.evict(name)
+    ModelProperty.evictForModels(Model.evictForSchema(name), name)
   }
 }
 

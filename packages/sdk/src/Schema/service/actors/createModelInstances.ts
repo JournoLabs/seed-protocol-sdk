@@ -1,5 +1,6 @@
 import { EventObject, fromCallback } from 'xstate'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:actors:createModelInstances')
 
@@ -16,6 +17,7 @@ export const createModelInstances = fromCallback<
   EventObject,
   CreateModelInstancesInput
 >(({ sendBack, input }) => {
+  const evictionEpoch = currentEvictionEpoch()
   const _create = async (): Promise<void> => {
     const { modelIds, schemaName } = input
     
@@ -36,7 +38,8 @@ export const createModelInstances = fromCallback<
       // Model.createById() will check cache first, then query DB and create if needed
       const createPromises = modelIds.map(async (modelFileId) => {
         try {
-          const model = await Model.createById(modelFileId)
+          // Not if the schema was evicted (Schema.destroy, test cleanup) since this started
+          const model = await Model.createById(modelFileId, { evictionEpoch })
           if (model) {
             logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
             return true
