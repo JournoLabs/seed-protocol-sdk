@@ -246,8 +246,12 @@ type SaveEasVersionsToDbReturn = {
   versionUids: string[]
 }
 
-/** Rows per versions INSERT (about 10 bound parameters each). */
-const VERSION_INSERT_BATCH = 50
+/**
+ * Rows per versions INSERT. A row binds at most one parameter per `versions` column (12 today, 10
+ * set by sync), so a batch binds at most 600: under SQLite's old default limit of 999 host
+ * parameters (sqlite-wasm and libsql allow more). saveEasVersionsBatches.test.ts checks this.
+ */
+export const VERSION_INSERT_BATCH = 50
 
 const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state }) => {
   const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
