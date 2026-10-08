@@ -17,6 +17,7 @@ import {
 import { SchemaFileFormat } from "@/types/import"
 import { BaseFileManager } from "@/helpers/FileManager/BaseFileManager"
 import { isNode } from "@/helpers/environment"
+import { withSeedDbLock } from "@/helpers/tabLocks"
 import debug from "debug"
 import internalSchema from "@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json"
 
@@ -394,7 +395,8 @@ export const processSchemaFiles = fromCallback<
   }
 
   processSchemaFilesChain = processSchemaFilesChain
-    .then(() => _processSchemaFiles())
+    // Its schema and model inserts check for rows first, so tabs take turns (docs/MULTI_TAB.md).
+    .then(() => withSeedDbLock('init', context.filesDir, _processSchemaFiles))
     .catch((err) => {
       logger('processSchemaFiles chain error:', err)
       throw err

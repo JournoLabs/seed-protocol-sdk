@@ -7,6 +7,7 @@ import { appState } from '@/seedSchema'
 import debug                    from 'debug'
 import { normalizeAddressList } from '@/helpers/addresses'
 import { loadLocalDbChain } from '@/helpers/localDbChain'
+import { withSeedDbLock } from '@/helpers/tabLocks'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
@@ -130,7 +131,8 @@ export const saveConfig = fromCallback<
     }
   }
 
-  _saveConfig()
+  // Init writes run one tab at a time (docs/MULTI_TAB.md).
+  withSeedDbLock('init', context.filesDir, _saveConfig)
     .then(() => {
       logger('[internal/actors] [saveConfig] saveConfig success')
       return sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })

@@ -21,6 +21,15 @@ export function seedDbLockName(scope: SeedDbLockScope, filesDir: string): string
   return `seed:${scope}:${filesDir}/db/seed.db`
 }
 
+/** `withTabLock` on the database under `filesDir`; runs `fn` directly when there's no `filesDir` yet. */
+export function withSeedDbLock<T>(
+  scope: SeedDbLockScope,
+  filesDir: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return filesDir ? withTabLock(seedDbLockName(scope, filesDir), fn) : fn()
+}
+
 export class TabLockTimeoutError extends Error {
   readonly code = 'TAB_LOCK_TIMEOUT' as const
 

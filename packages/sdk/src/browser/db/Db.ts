@@ -4,7 +4,7 @@ import debug from "debug";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import { applyEmbeddedMigrations, canRunInTransaction, getEmbeddedMigrations } from "./embeddedMigrations"
 import { withSqliteBusyRetry } from "./sqliteBusyRetry"
-import { seedDbLockName, withTabLock } from "@/helpers/tabLocks"
+import { withSeedDbLock } from "@/helpers/tabLocks"
 import { sql } from "drizzle-orm"
 import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
@@ -45,7 +45,7 @@ export class BrowserDb implements IDb {
 
     // Another tab may be preparing the same database: run file copies, migrations and the
     // one-time data fixes one tab at a time. See docs/MULTI_TAB.md.
-    return withTabLock(seedDbLockName('migrate', filesDir), () => this.prepareDbLocked(filesDir))
+    return withSeedDbLock('migrate', filesDir, () => this.prepareDbLocked(filesDir))
   }
 
   private async prepareDbLocked(filesDir: string) {
