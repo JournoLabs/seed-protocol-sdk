@@ -33,6 +33,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
+import { selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
@@ -155,10 +156,9 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
 
   const seedUids = itemSeeds.map((seed) => seed.id)
 
-  const existingSeedRecordsRows: SeedType[] = await appDb
-    .select()
-    .from(seeds)
-    .where(inArray(seeds.uid, seedUids))
+  const existingSeedRecordsRows: SeedType[] = await selectInBatches(seedUids, (chunk) =>
+    appDb.select().from(seeds).where(inArray(seeds.uid, chunk)),
+  )
 
   const existingSeedUids = new Set<string>()
 
@@ -259,10 +259,9 @@ const saveEasVersionsToDb: SaveEasVersionsToDb = async ({ itemVersions, state })
 
   const appDb = BaseDb.getAppDb()
 
-  const existingVersionRecordsRows: VersionsType[] = await appDb
-    .select()
-    .from(versions)
-    .where(inArray(versions.uid, versionUids))
+  const existingVersionRecordsRows: VersionsType[] = await selectInBatches(versionUids, (chunk) =>
+    appDb.select().from(versions).where(inArray(versions.uid, chunk)),
+  )
 
   const existingVersionUids = new Set<string>()
   const versionByUid = new Map(itemVersions.map((version) => [version.id, version]))
@@ -513,10 +512,14 @@ const saveEasPropertiesToDbBody = async ({
 
   const appDb = BaseDb.getAppDb()
 
-  const storedRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await appDb
-    .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
-    .from(metadata)
-    .where(inArray(metadata.uid, fetchedProperties.map((property) => property.id)))
+  const storedRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await selectInBatches(
+    fetchedProperties.map((property) => property.id),
+    (chunk) =>
+      appDb
+        .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
+        .from(metadata)
+        .where(inArray(metadata.uid, chunk)),
+  )
 
   const canonicalByUid = new Map(itemProperties.map((property) => [property.id, property]))
   const existingPropertyRecordsUids = new Set<string>()
@@ -549,7 +552,9 @@ const saveEasPropertiesToDbBody = async ({
   }
 
   if (staleUids.size > 0) {
-    await appDb.delete(metadata).where(inArray(metadata.uid, [...staleUids]))
+    await writeInBatches([...staleUids], (chunk) =>
+      appDb.delete(metadata).where(inArray(metadata.uid, chunk)),
+    )
   }
 
   for (const [uid, revokedAt] of revokedAtUpdates) {
@@ -609,31 +614,39 @@ const syncDerivedStorageRows = async ({
       .map((other) => other.id)
     if (sameTransaction.length === 0) continue
     // A stamp belongs to the attestation it came from; the new source's is applied below.
-    await appDb
-      .update(metadata)
-      .set({
-        derivedFromUid: property.id,
-        revokedAt: null,
-        attestationCreatedAt: property.timeCreated * 1000,
-        updatedAt: Date.now(),
-      })
-      .where(inArray(metadata.derivedFromUid, sameTransaction))
+    await writeInBatches(sameTransaction, (chunk) =>
+      appDb
+        .update(metadata)
+        .set({
+          derivedFromUid: property.id,
+          revokedAt: null,
+          attestationCreatedAt: property.timeCreated * 1000,
+          updatedAt: Date.now(),
+        })
+        .where(inArray(metadata.derivedFromUid, chunk)),
+    )
   }
 
   const staleSourceUids = fetchedProperties
     .filter((property) => !canonicalUids.has(property.id) && storageTransactionIdOf(property))
     .map((property) => property.id)
   if (staleSourceUids.length > 0) {
-    await appDb.delete(metadata).where(inArray(metadata.derivedFromUid, staleSourceUids))
+    await writeInBatches(staleSourceUids, (chunk) =>
+      appDb.delete(metadata).where(inArray(metadata.derivedFromUid, chunk)),
+    )
   }
 
   if (canonical.length === 0) return
 
   // The canonical rows' revoked_at as just stored (the saves above already applied EAS's state).
-  const sourceRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await appDb
-    .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
-    .from(metadata)
-    .where(inArray(metadata.uid, canonical.map((c) => c.property.id)))
+  const sourceRows: Pick<MetadataType, 'uid' | 'revokedAt'>[] = await selectInBatches(
+    canonical.map((c) => c.property.id),
+    (chunk) =>
+      appDb
+        .select({ uid: metadata.uid, revokedAt: metadata.revokedAt })
+        .from(metadata)
+        .where(inArray(metadata.uid, chunk)),
+  )
   const revokedAtByUid = new Map(sourceRows.map((row) => [row.uid, row.revokedAt ?? null]))
 
   for (const { property } of canonical) {

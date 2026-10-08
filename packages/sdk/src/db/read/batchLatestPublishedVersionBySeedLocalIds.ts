@@ -2,6 +2,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { inArray } from 'drizzle-orm'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
+import { selectInBatches } from '@/db/sqlParamBatches'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 
 export type PublishedVersionSummary = { uid: string; localId: string | null }
@@ -18,16 +19,25 @@ export async function batchLatestPublishedVersionBySeedLocalIds(
   const appDb = BaseDb.getAppDb()
   if (!appDb) return out
 
-  const rows = await appDb
-    .select({
-      seedLocalId: versions.seedLocalId,
-      localId: versions.localId,
-      uid: versions.uid,
-      createdAt: versions.createdAt,
-      revokedAt: versions.revokedAt,
-    })
-    .from(versions)
-    .where(inArray(versions.seedLocalId, seedLocalIds))
+  type Row = {
+    seedLocalId: string | null
+    localId: string | null
+    uid: string | null
+    createdAt: number | null
+    revokedAt: number | null
+  }
+  const rows: Row[] = await selectInBatches(seedLocalIds, (chunk) =>
+    appDb
+      .select({
+        seedLocalId: versions.seedLocalId,
+        localId: versions.localId,
+        uid: versions.uid,
+        createdAt: versions.createdAt,
+        revokedAt: versions.revokedAt,
+      })
+      .from(versions)
+      .where(inArray(versions.seedLocalId, chunk)),
+  )
 
   const bySeed = new Map<string, typeof rows>()
   for (const r of rows) {
