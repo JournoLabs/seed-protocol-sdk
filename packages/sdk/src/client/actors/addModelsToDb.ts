@@ -111,7 +111,7 @@ export const addModelsToDb = fromCallback<
         const easClient = BaseEasClient.getEasClient()
 
         const queryPromise = queryClient.fetchQuery({
-          queryKey: [`getSchemasVersion`],
+          queryKey: [`getSchemasVersion`, [...schemaDefs].sort()],
           queryFn: async () =>
             easClient.request(GET_SCHEMAS, {
               where: {
