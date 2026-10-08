@@ -10,6 +10,7 @@ import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
+import { waitForInFlightWrites } from '@/services/write/actors/writeToDatabase'
 
 export type CleanupTestSchemaDataOptions = {
   /** How many times to retry after an FK failure before giving up (default 10). */
@@ -27,8 +28,8 @@ export type CleanupTestSchemaDataOptions = {
  *    deleted rows.
  * 2. Deletes in FK order: properties.refModelId -> null, metadata.propertyId -> null, property_uids,
  *    model_uids, properties, model_schemas, models, schemas.
- * 3. Retries briefly on failure: a write a previous test started (e.g. writeModelToDb inserting a
- *    model_schemas row) can't be cancelled by stopping its actor and may land mid-cleanup.
+ * 3. Waits for writes already running (stopping an actor can't cancel them), then retries briefly on
+ *    failure in case a write still lands mid-cleanup.
  * 4. Deletes the test schema JSON files from the working dir, or the next client.init re-imports the
  *    schemas whose rows were just removed. Matters most in the browser, where test files share one
  *    OPFS store; under Node each run gets a fresh temp dir.
@@ -45,6 +46,8 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
   for (const { name } of testSchemaRows) {
     if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
   }
+  // Evicting stops new writes but can't cancel running ones; deleting under them fails their join/FK steps
+  await waitForInFlightWrites()
 
   for (let attempt = 0; ; attempt++) {
     try {
