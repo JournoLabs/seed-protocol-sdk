@@ -70,7 +70,7 @@ export const getEasSchemaForItemProperty: GetSchemaForProperty = async ({
     }
 
     const foundPropertySchema = await queryClient.fetchQuery({
-      queryKey: [`getPropertySchema${propertyName}`],
+      queryKey: [`getEasSchemaForItemProperty`, queryParams],
       queryFn: async () => easClient.request(GET_SCHEMAS, queryParams),
       networkMode: 'offlineFirst',
     })
