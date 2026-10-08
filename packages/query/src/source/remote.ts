@@ -87,9 +87,16 @@ export function createRemoteQueryDataSource(): QueryDataSource {
       })) as AttestationLike[]
     },
 
-    async getVersionsForSeeds(seedUids: string[]): Promise<AttestationLike[]> {
+    async getVersionsForSeeds(
+      seedUids: string[],
+      opts?: { includeRevoked?: boolean },
+    ): Promise<AttestationLike[]> {
       if (seedUids.length === 0) return []
-      return (await getItemVersionsFromEas({ seedUids })) as AttestationLike[]
+      // The query fields include `revoked`, so revoked versions come back marked.
+      return (await getItemVersionsFromEas({
+        seedUids,
+        excludeRevoked: !opts?.includeRevoked,
+      })) as AttestationLike[]
     },
 
     async getPropertiesForVersionUids(

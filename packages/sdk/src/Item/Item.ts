@@ -385,6 +385,34 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
+  /**
+   * Sets a tracked context property from the proxy. Setting `seedUid` to a different uid means a
+   * new seed attestation (publishing again after unpublish): the revocation belonged to the old
+   * one, so `revokedAt` is cleared, and the instance cache's uid alias moves to the new uid.
+   */
+  private static sendTrackedPropertyUpdate(target: Item<any>, prop: string, value: unknown): void {
+    const previousSeedUid =
+      prop === 'seedUid' ? (target._getSnapshotContext() as { seedUid?: string }).seedUid : undefined
+    const replacesSeedUid =
+      typeof value === 'string' &&
+      value.length > 0 &&
+      typeof previousSeedUid === 'string' &&
+      previousSeedUid.length > 0 &&
+      previousSeedUid !== value
+    target._service.send({
+      type: 'updateContext',
+      [prop]: value,
+      ...(replacesSeedUid && { revokedAt: undefined }),
+    } as any)
+    if (replacesSeedUid) {
+      const entry = this.instanceCache.get(previousSeedUid!)
+      if (entry) {
+        this.instanceCache.delete(previousSeedUid!)
+        this.instanceCache.set(value as string, entry)
+      }
+    }
+  }
+
   private static releaseItemInstanceCacheHold(instance: Item<any>): void {
     const keys = this.collectInstanceCacheKeysForInstance(instance)
     if (keys.length === 0) return
@@ -587,10 +615,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             // Handle tracked properties
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
               // Standard property update
-              target._service.send({
-                type: 'updateContext',
-                [prop]: value,
-              })
+              Item.sendTrackedPropertyUpdate(target, prop, value)
               // Auto-persist seedUid to DB when assigned so future loads and getPublishPayload see it
               if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
                 const seedLocalId = target._getSnapshotContext().seedLocalId
@@ -816,10 +841,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
             } else {
               // Standard property update
-              target._service.send({
-                type: 'updateContext',
-                [prop]: value,
-              })
+              Item.sendTrackedPropertyUpdate(target, prop, value)
             }
             return true
           }
@@ -1417,6 +1439,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         publisher,
         ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
       })
+      // Publish has recorded the version it attested (updateVersionUid): reflect it here too, as
+      // the versions liveQuery does in the browser. After a republish this is the new version.
+      const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
+      const head = await getLatestVersionRow(seedLocalId)
+      if (head?.localId) {
+        this._service.send({
+          type: 'updateContext',
+          latestVersionLocalId: head.localId,
+          latestVersionUid: head.uid ?? undefined,
+        })
+      }
     }
   }
 

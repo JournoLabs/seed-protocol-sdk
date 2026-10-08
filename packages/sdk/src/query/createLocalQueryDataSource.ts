@@ -298,18 +298,20 @@ async function listPublishedSeedRows(
   const out: AttestationLike[] = []
   for (const row of rows) {
     if (!row.uid || !isValidEasAttestationUid(row.uid)) continue
-    // Must have at least one published version
+    // Must have at least one published version that is not revoked: the SDK's latest published
+    // version skips revoked ones, so a seed whose versions were all revoked has none.
     const versionRows = await appDb
       .select({
         uid: versions.uid,
+        revokedAt: versions.revokedAt,
       })
       .from(versions)
       .where(eq(versions.seedUid, row.uid))
       .orderBy(desc(versions.createdAt))
 
     const hasPublished = versionRows.some(
-      (v: { uid: string | null }) =>
-        v.uid && isValidEasAttestationUid(v.uid),
+      (v: { uid: string | null; revokedAt: number | null }) =>
+        v.uid && isValidEasAttestationUid(v.uid) && !isRevokedLocally(v.revokedAt),
     )
     if (!hasPublished) continue
 
@@ -391,7 +393,10 @@ export function createLocalQueryDataSource(): QueryDataSource {
       return this.getVersionsForSeeds([seedUid])
     },
 
-    async getVersionsForSeeds(seedUids: string[]): Promise<AttestationLike[]> {
+    async getVersionsForSeeds(
+      seedUids: string[],
+      opts?: { includeRevoked?: boolean },
+    ): Promise<AttestationLike[]> {
       const appDb = BaseDb.getAppDb()
       if (!appDb || seedUids.length === 0) return []
 
@@ -407,10 +412,11 @@ export function createLocalQueryDataSource(): QueryDataSource {
         .from(versions)
         .where(inArray(versions.seedUid, seedUids))
 
-      // Like the remote source (EAS queries exclude revoked attestations by default).
+      // Like the remote source (EAS queries exclude revoked attestations by default; with
+      // includeRevoked they come back marked `revoked`).
       const out: AttestationLike[] = []
       for (const row of rows) {
-        if (isRevokedLocally(row.revokedAt)) continue
+        if (isRevokedLocally(row.revokedAt) && !opts?.includeRevoked) continue
         const att = versionRowToAttestation(row)
         if (att) out.push(att)
       }

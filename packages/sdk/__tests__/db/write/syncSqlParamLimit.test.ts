@@ -5,7 +5,7 @@ import {
   teardownTestEnvironment,
   SETUP_HOOK_TIMEOUT_MS,
 } from '../../test-utils/client-init'
-import { recordSqlParamCounts } from '../../test-utils/recordSqlParamCounts'
+import { recordSqlParamCounts, recordSqlStatements } from '../../test-utils/recordSqlParamCounts'
 
 /**
  * A sync with more than 999 seeds, versions and properties must not bind more than 999 parameters
@@ -59,6 +59,8 @@ vi.mock('@/events/files/download', () => ({
 }))
 
 const SQLITE_DEFAULT_MAX_VARIABLE_NUMBER = 999
+// SQLite's default SQLITE_MAX_SQL_LENGTH (bytes of SQL text per statement).
+const SQLITE_DEFAULT_MAX_SQL_LENGTH = 1_000_000
 const attester = '0x1234567890123456789012345678901234567890'
 const hex = (n: number) => '0x' + n.toString(16).padStart(64, '0')
 const COUNT = 1100
@@ -160,6 +162,65 @@ describe.sequential('EAS sync with more than 999 items', () => {
       expect(new Set(storedProperties.map((r: { uid: string | null }) => r.uid))).toEqual(
         new Set(newer.map((p) => p.id)),
       )
+    },
+    240_000,
+  )
+
+  it(
+    'binds synced property values as parameters: statements stay short and quotes round-trip',
+    async () => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      const seedUid = (i: number) => hex(0x5a600000 + i)
+      const versionUid = (i: number) => hex(0x5a700000 + i)
+      const propertyUid = (i: number) => hex(0x5a800000 + i)
+      // ~1 KB per value: inlined into one INSERT, 1100 of them exceed SQLITE_MAX_SQL_LENGTH.
+      const marker = 'sync-param-marker'
+      const value = (i: number) => `${marker} ${i}: it's "quoted" and ''doubled'' ${'x'.repeat(1_000)}`
+      fakeEas.seeds = Array.from({ length: COUNT }, (_, i) =>
+        attestation(seedUid(i), hex(0), fakeEas.modelSchema!.id, 60_000 + i),
+      )
+      fakeEas.versions = Array.from({ length: COUNT }, (_, i) =>
+        attestation(versionUid(i), seedUid(i), hex(0x5a1e0002), 70_000 + i),
+      )
+      fakeEas.properties = Array.from({ length: COUNT }, (_, i) =>
+        titleProperty(propertyUid(i), versionUid(i), value(i), 80_000 + i),
+      )
+
+      const statements = await recordSqlStatements(() => runSyncFromEas({ addresses: [attester] }))
+
+      expect(statements.length).toBeGreaterThan(0)
+      expect(Math.max(...statements.map((s) => s.paramCount))).toBeLessThanOrEqual(
+        SQLITE_DEFAULT_MAX_VARIABLE_NUMBER,
+      )
+      expect(Math.max(...statements.map((s) => s.sql.length))).toBeLessThan(
+        SQLITE_DEFAULT_MAX_SQL_LENGTH,
+      )
+      // Values are bound, never inlined into the SQL text.
+      expect(statements.filter((s) => s.sql.includes(marker)).length).toBe(0)
+
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { metadata } = await import('@/seedSchema')
+      const { selectInBatches } = await import('@/db/sqlParamBatches')
+      const db = BaseDb.getAppDb()
+      const stored = await selectInBatches(fakeEas.properties.map((p) => p.id), (chunk) =>
+        db
+          .select({
+            uid: metadata.uid,
+            propertyValue: metadata.propertyValue,
+            attestationRaw: metadata.attestationRaw,
+          })
+          .from(metadata)
+          .where(inArray(metadata.uid, chunk)),
+      )
+      expect(stored).toHaveLength(COUNT)
+      const byUid = new Map(stored.map((r: any) => [r.uid, r]))
+      for (const i of [0, 1, COUNT - 1]) {
+        const row: any = byUid.get(propertyUid(i))
+        expect(row.propertyValue).toBe(value(i))
+        const raw = JSON.parse(row.attestationRaw)
+        expect(raw.id).toBe(propertyUid(i))
+        expect(raw.decodedDataJson).toBe(fakeEas.properties[i].decodedDataJson)
+      }
     },
     240_000,
   )

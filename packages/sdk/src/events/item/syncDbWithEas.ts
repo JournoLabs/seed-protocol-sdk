@@ -15,7 +15,7 @@ import {
   versions,
   VersionsType,
 } from '@/seedSchema'
-import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm'
 import {
   generateId,
 } from '@/helpers'
@@ -33,7 +33,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
 import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
-import { selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
+import { rowsPerInsert, selectInBatches, writeInBatches } from '@/db/sqlParamBatches'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
 import { setSchemaUidForSchemaDefinition } from '@/stores/eas'
@@ -700,17 +700,11 @@ const insertSyncedProperties = async ({
 
   const appDb = BaseDb.getAppDb()
 
-  let insertPropertiesQuery = `INSERT INTO metadata (local_id, uid, schema_uid, property_id, property_name, property_value,
-                                                     eas_data_type, version_uid, version_local_id, seed_uid,
-                                                     seed_local_id, model_type, ref_value_type, ref_seed_type,
-                                                     ref_schema_uid,
-                                                     created_at, attestation_created_at, attestation_raw,
-                                                     local_storage_dir, ref_resolved_value, publisher,
-                                                     revoked_at)
-  VALUES `
+  // Bound as parameters, in batches of rowsPerInsert(metadata) rows, so no statement exceeds
+  // SQLite's parameter or statement-length limits however many properties a sync stores.
+  const rows: (typeof metadata.$inferInsert)[] = []
 
-  for (let i = 0; i < newProperties.length; i++) {
-    const property = newProperties[i]
+  for (const property of newProperties) {
     const propertyLocalId = generateId()
     
     // Validate and parse decodedDataJson
@@ -752,7 +746,6 @@ const insertSyncedProperties = async ({
     let refValueType
     let refSeedType
     let refSchemaUid
-    let refResolvedValue
     let isList = false
     const schemaUid = property.schemaId
 
@@ -811,17 +804,14 @@ const insertSyncedProperties = async ({
     }
 
     const propertyName = camelCase(propertyNameSnake)
-    propertyValue = escapeSqliteString(propertyValue)
     const easDataType = propertyMetadata.type
     const versionUid = property.refUID
     const versionLocalId = versionUidToLocalId.get(versionUid)
     const attestationCreatedAt = property.timeCreated * 1000
-    const attestationRaw = escapeSqliteString(JSON.stringify(property))
     const seedUid = versionUidToSeedUid.get(versionUid)
     const seedLocalId = seedUidToLocalId.get(seedUid!)
     const modelType = seedUidToModelType.get(seedUid!)
 
-    let localStorageDir
     const model =
       modelType != null
         ? await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
@@ -843,42 +833,36 @@ const insertSyncedProperties = async ({
             }),
           )) ?? null)
         : null
-    const propertyIdSql = propertyId != null ? String(propertyId) : 'NULL'
-
-    const publisher = escapeSqliteString(
-      property.attester ? normalizeHexAddress(property.attester) : '',
-    )
-    const valuesString = `('${propertyLocalId}', '${property.id}', 
-                         '${property.schemaId}', ${propertyIdSql}, '${propertyName}', 
-                         '${propertyValue}', '${easDataType}', '${versionUid}', 
-                         '${versionLocalId}', '${seedUid}', '${seedLocalId}', 
-                         '${modelType}', ${refValueType ? `'${refValueType}'` : 'NULL'}, 
-                         ${refSeedType ? `'${refSeedType}'` : 'NULL'},
-                         ${refSchemaUid ? `'${refSchemaUid}'` : 'NULL'},
-                         ${Date.now()}, ${attestationCreatedAt}, '${attestationRaw}',
-                         ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
-                         ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
-                         '${publisher}', ${revokedAtSeconds(property) ?? 'NULL'})`
-
-    if (i < newProperties.length - 1) {
-      insertPropertiesQuery += valuesString + ', '
-    }
-
-    if (i === newProperties.length - 1) {
-      insertPropertiesQuery += valuesString + ';'
-    }
-
+    rows.push({
+      localId: propertyLocalId,
+      uid: property.id,
+      schemaUid: property.schemaId,
+      propertyId,
+      propertyName,
+      propertyValue,
+      easDataType,
+      versionUid,
+      versionLocalId: versionLocalId ?? null,
+      seedUid: seedUid ?? null,
+      seedLocalId: seedLocalId ?? null,
+      modelType: modelType ?? null,
+      refValueType: refValueType || null,
+      refSeedType: refSeedType || null,
+      refModelUid: refSchemaUid || null,
+      createdAt: Date.now(),
+      attestationCreatedAt,
+      attestationRaw: JSON.stringify(property),
+      publisher: property.attester ? normalizeHexAddress(property.attester) : '',
+      revokedAt: revokedAtSeconds(property) ?? null,
+    })
   }
 
-  if (insertPropertiesQuery.endsWith('VALUES ')) {
-    return
+  // No conflict clause, as before: every row has a fresh local_id, and callers pass only
+  // attestations with no stored row.
+  const batchSize = rowsPerInsert(metadata)
+  for (let i = 0; i < rows.length; i += batchSize) {
+    await appDb.insert(metadata).values(rows.slice(i, i + batchSize))
   }
-
-  if (insertPropertiesQuery.endsWith(', ')) {
-    insertPropertiesQuery = insertPropertiesQuery.slice(0, -2) + ';'
-  }
-
-  await appDb.run(sql.raw(insertPropertiesQuery))
 }
 
 const saveEasPropertiesToDb: SaveEasPropertiesToDb = (params) => {

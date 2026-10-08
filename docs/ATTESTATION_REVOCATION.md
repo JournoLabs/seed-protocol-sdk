@@ -70,6 +70,8 @@ So a seed whose newest version is revoked but an older one is live reports the o
 
 `getSeedPublishState().status` is still `onchain` for an unpublished seed, because its revoked attestations stay on-chain. Use its `revokedAt` (or `item.isRevoked`) to show the item as unpublished.
 
+`@seedprotocol/query` follows the same rule in both sources. `queryBySchema`, `queryBySchemaForMonth` and `getSeed` (data) leave out a seed whose versions are all revoked, and they use the newest live version of a seed that has both live and revoked versions. To tell "every version revoked" from "no version", `assembleSeeds` asks the data source for revoked versions too, in the request that already fetches the seeds' versions (`getVersionsForSeeds(uids, { includeRevoked: true })`), and never uses them otherwise. The local source also drops such seeds before it pages, so its pages stay full. The remote source can only drop them after EAS has paged the seeds, so a remote page can hold fewer than `limit` items. Seeds with no version at all are unchanged: the remote source lists them with an empty `versionUid`, and the local source leaves them out.
+
 Code that needs the revoked versions on purpose reads the version rows directly instead of these helpers. This includes collecting attestation UIDs to revoke (`getVersionsForSeedUid`), EAS sync bookkeeping, and stamping `revoked_at`.
 
 ### EAS sync
@@ -79,6 +81,15 @@ Sync fetches revoked attestations too and keeps local metadata on the canonical 
 ## Republishing
 
 To make content visible again, call `item.publish()`. This creates **new** attestations (a new `seedUid`). There is no "unrevoke" – republishing is a fresh publish.
+
+When the item's seed is revoked (`seeds.revoked_at` set), the publish payload asks for a new seed (`seedUid` is zero) and a new version, and it attests every property, as a `new_version` publish does, because the new seed has no property attestations yet. `summarizePublishWork` counts the new seed and version. The local item stays the same item, with the same `seedLocalId`. After the publish:
+
+- The `seeds` row takes the new uid, and its `revoked_at` and stored `attestation_raw` (which belonged to the old seed) are cleared.
+- `item.seedUid` is the new uid, `item.revokedAt` is cleared (`item.isRevoked` is `false`), and the item instance cache's uid alias moves from the old uid to the new one.
+- The new version attestation is recorded on the local draft version, or on a new version row when there is no draft. `item.latestVersionUid` / `item.latestVersionLocalId` and the published version helpers report it.
+- The old version and property rows keep their old uids and `revoked_at`. They are history of the old seed. Readers prefer live rows, and EAS sync stores the new property attestations.
+
+Other items' relations to this item aren't updated. A relation stored as this item's `seedLocalId` (set locally) follows the item, and the next publish of the referring item attests the new uid. A relation stored as the old `seedUid` (synced from EAS, or set by uid) still points at the old, revoked seed, on-chain and locally, and the old uid no longer resolves to this item locally. To point such a referrer at the new seed, set its relation again and publish it.
 
 ## Suggested UX
 

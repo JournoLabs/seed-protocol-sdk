@@ -21,6 +21,7 @@ import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
+import { isSeedRevoked } from '@/db/read/isSeedRevoked'
 import {
   isStorageSeedRef,
   isPublishedSeedRef,
@@ -1439,7 +1440,12 @@ export const getPublishPayload = async (
 ): Promise<MultiPublishPayload> => {
   const validationCtx: PublishValidationContext = { errors: [] }
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const forceFullSnapshot = publishMode === 'new_version'
+  // A revoked seed can't be published under again: republishing creates a new seed attestation
+  // (new seedUid) and a new version carrying every property (see docs/ATTESTATION_REVOCATION.md).
+  const hasSeedUid = !!item.seedUid && item.seedUid !== ZERO_BYTES32
+  const republishRevokedSeed = hasSeedUid && (await isSeedRevoked(item.seedLocalId))
+  const rootSeedUid = republishRevokedSeed ? ZERO_BYTES32 : item.seedUid || ZERO_BYTES32
+  const forceFullSnapshot = publishMode === 'new_version' || republishRevokedSeed
 
   if (publishMode === 'new_version' && (!item.seedUid || item.seedUid === ZERO_BYTES32)) {
     addValidationError(
@@ -1471,16 +1477,16 @@ export const getPublishPayload = async (
   }
 
   let versionUid = getVersionUid(item)
-  if (versionUid === ZERO_BYTES32 && item.seedUid && item.seedUid !== ZERO_BYTES32) {
-    versionUid = await resolveVersionUid(item.seedLocalId, item.seedUid)
+  if (versionUid === ZERO_BYTES32 && rootSeedUid !== ZERO_BYTES32) {
+    versionUid = await resolveVersionUid(item.seedLocalId, rootSeedUid)
   }
-  if (forceFullSnapshot && item.seedUid && item.seedUid !== ZERO_BYTES32) {
+  if (forceFullSnapshot && hasSeedUid) {
     versionUid = ZERO_BYTES32
   }
 
   let itemPublishData: PublishPayload = {
     localId: item.seedLocalId,
-    seedUid: item.seedUid || ZERO_BYTES32,
+    seedUid: rootSeedUid,
     seedIsRevocable: true,
     seedSchemaUid: itemSchemaUid,
     versionSchemaUid: VERSION_SCHEMA_UID,

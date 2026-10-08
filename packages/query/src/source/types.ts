@@ -22,7 +22,16 @@ export type QueryDataSource = {
 
   getVersionsForSeed(seedUid: string): Promise<AttestationLike[]>
 
-  getVersionsForSeeds(seedUids: string[]): Promise<AttestationLike[]>
+  /**
+   * Version attestations of `seedUids`, live ones only. With `includeRevoked`, revoked versions
+   * are returned too, marked `revoked: true`, so callers can tell a seed whose versions were all
+   * revoked (no published version) from one that never had a version. A source that ignores the
+   * option returns live versions only, and such seeds are then treated like seeds with no version.
+   */
+  getVersionsForSeeds(
+    seedUids: string[],
+    opts?: { includeRevoked?: boolean },
+  ): Promise<AttestationLike[]>
 
   getPropertiesForVersionUids(versionUids: string[]): Promise<AttestationLike[]>
 
