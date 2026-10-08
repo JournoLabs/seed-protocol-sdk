@@ -24,6 +24,14 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   each Node file runs in its own forked process with its own temp project dir, so files on different
   workers don't share storage. Files on the *same* browser worker still run one after another against
   shared OPFS.
+- **Browser teardown clears the database.** `teardownTestEnvironment` (`test-utils/client-init.ts`)
+  runs `cleanupTestSchemaData({ items: true })` in the browser, not just the schema-file cleanup, so
+  the next file on the worker starts without this file's schemas, models, properties and items
+  (before, its `client.init` loaded them and their Model/ModelProperty work, finding 14). Measured
+  back to back against `main` (three rounds each, browser + browser-react together): summed file
+  time browser 292/286/287s → 286/283/297s, browser-react 232/219/227s → 219/214/233s, wall
+  155/148/150s → 143/144/149s. No slowdown: setup's own cleanup and the next `client.init` have
+  that much less to do.
 - **`TEST_WORKERS`** overrides the per-project worker count. `TEST_WORKERS=1 bun run test` restores
   one-file-at-a-time runs, which is what you want when chasing an order-dependent failure.
 - **`sequence.groupOrder`** is required: vitest refuses to run projects with different `maxWorkers`
@@ -250,24 +258,40 @@ their number so references to them stay valid.
     retries quietly at 0.4/1.2/2.5s while it finds nothing (test: "finds a property whose model is
     created after the hook first looked it up"). Recheck on the branch: `modelProperty.test.tsx`
     passed 12 of 12 runs alone and 6 of 6 full browser-react runs, with no timeouts. Reopen if the
-    timeout comes back. Earlier tests' stale writes still show up in this file (1–3 "Schema/Model
-    with id N does not exist … Cannot create join record" per run, on `main` too); they are
-    finding 14's SDK side.
+    timeout comes back. Earlier tests' stale writes showed up in this file (1–3 "Schema/Model
+    with id N does not exist … Cannot create join record" per run); they were finding 14's SDK
+    side, now fixed.
 13. **Fixed.** A stale `packages/eas/dist`; see "Workspace packages load from source".
-14. **Writes that start after test cleanup has evicted their model.** The React files now use the
+14. **Fixed** (first case by `dee7948`, the rest on branch `worktree-agent-a28d39046cf0b18dc`).
+    Writes that start after test cleanup has evicted their model. The React files now use the
     SDK's `cleanupTestSchemaData`, which waits for in-flight writes (`4863469`). That removed the
     writes that were already running: `model.test.tsx` went from 5 stale-write errors per run to
-    0–3. What's left are writes that *start* after the cleanup evicted and waited, so waiting can't
-    catch them. Logging write starts against the cleanup showed two kinds:
+    0–3. What was left were writes that *start* after the cleanup evicted and waited. Logging write
+    starts against the cleanup showed two kinds:
     - The next test's import of the same schema writes the model, and its property insert fails a
-      foreign key (`model_id` of a row the cleanup just deleted), so some cached state still holds the
-      old `models` row id after eviction.
-    - A runtime model that was already `stopped` (e.g. `NewItemModel`, created with `Model.create`
-      in `itemProperty.test.tsx`) starts a write ~60ms after the cleanup.
-    With a per-test delete-and-reimport, `itemProperty.test.tsx` showed 2 such errors per run where
-    `main` showed none: `main`'s cleanup never deleted model rows, so these writes landed on orphaned
-    rows silently. Importing that file's schema once (step 3) removed them there. Next step is in the
-    SDK: find which cache keeps the old row id, and what restarts a stopped model's write process.
+      foreign key (`model_id` of a row the cleanup just deleted). Fixed by `dee7948`: `Model.create`
+      no longer hands back a name-cached Model with a different id (`isOtherModelId`), and
+      `cleanupTestSchemaData` evicts again after deleting the rows. No FK failures in 10 full
+      browser + browser-react runs since.
+    - A model "already `stopped`" starting a write. Logging the actor behind each write showed that
+      no stopped actor ever started one (over 900 writes per run): the write came from a *new*
+      Model instance for the same id, built by work that was still running when the cleanup
+      evicted. That work (a Schema's live query or load, `Model.createById` / `getByNameAsync`,
+      `ModelProperty.createById`, a model's property creation, and a model write still validating,
+      whose `Schema.create` loaded the evicted schema again) finished after the eviction, re-created
+      the models from the rows being deleted, and each re-created model wrote itself and failed with
+      "Schema/Model with id N does not exist … Cannot create join record". Now
+      `Model.evictForSchema` records an eviction epoch per schema (`helpers/entity/evictionEpoch.ts`),
+      and that work drops its result when its schema was evicted since it started; the actors of a
+      stopped model or property no longer go on to create properties or load the schema; live
+      queries don't create children for a stopped parent; and `cleanupTestSchemaData` also stops
+      the test schemas' live `Schema` instances (`Schema.evict`), whose live query re-created their
+      models during the deletes. Tests: `Model/evictionInFlight.test.ts` (in-flight lookups, a model
+      stopped while creating its properties, a write validating during the eviction, and a guard
+      that a model stopped before its write starts never writes).
+    "Cannot create join record" errors per full browser + browser-react run: `main` 2, 2, 6, 4, 0;
+    the branch 0 in 4 runs. Teardown also clears the database now (see "How the suite is set up
+    now"), so a file's leftovers no longer reach the next file's `client.init`.
 15. **Fixed** (step 5). `useModelProperties` memoized the model's `_dbId` once per model instance,
     so a model first seen before its row was resolved never got the live query on the `properties`
     table. Properties added later then only appeared through the fixed refetches, which run only
@@ -317,8 +341,10 @@ Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 
   times unchanged back to back against `main` (browser-react summed 181/181s → 185/203/179s,
   browser 230s → 231s, with 2 and 7 more tests).
 - **Step 6 — done** (branch `claude/step6-getbyid-propschema`): 18 and 19 fixed.
-- **Not scheduled:** 14's SDK side. Its first case (a cached Model handing back a deleted row's id
-  after a re-import) is being worked on in a separate session as of 2026-10-08; look at the second
-  case (a stopped runtime model starting a write) after that lands.
+- **14's SDK side — done.** Its first case (a cached Model handing back a deleted row's id after a
+  re-import) was fixed by `dee7948` (`Model.create`'s `isOtherModelId` and the second eviction in
+  `cleanupTestSchemaData`). The second (a "stopped" model starting a write) turned out to be models
+  re-created by work still running at eviction; fixed with eviction epochs and stop checks on branch
+  `worktree-agent-a28d39046cf0b18dc`, which also made browser teardown clear the database (see 14).
 - **Shared browser `QueryClient` — done** (branches `claude/elegant-tu-ac5741`, merged in `b052762`,
   and `claude/shared-query-client`): see 3. Behavior fix only; suite times unchanged.

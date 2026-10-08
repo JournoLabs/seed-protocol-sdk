@@ -591,10 +591,18 @@ function scheduleTempDirCleanup(dir: string, fs: typeof import('fs')): void {
 export async function teardownTestEnvironment(): Promise<void> {
   const isNodeEnv = typeof window === 'undefined'
 
+  // Browser files on one worker share OPFS: whatever this file leaves in the database, the next
+  // file's client.init loads (its schemas, Model/ModelProperty instances and the work they start).
+  // Remove the file's test schema rows and items too, not just the schema files.
   if (!isNodeEnv) {
-    await cleanupTestSchemaFiles()
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    if (BaseDb.getAppDb()) {
+      await cleanupTestSchemaData({ items: true })
+    } else {
+      await cleanupTestSchemaFiles()
+    }
   }
-  
+
   if (isNodeEnv) {
     // Restore original working directory
     if (originalCwd) {
