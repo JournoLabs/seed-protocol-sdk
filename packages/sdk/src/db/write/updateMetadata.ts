@@ -2,11 +2,9 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { PropertyType } from '@/types'
-import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
+import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
 import { normalizeDataType } from '@/helpers/property'
 import { normalizePublisher } from '@/helpers/addresses'
 
@@ -53,10 +51,7 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
     (!metadataValues.schemaUid || metadataValues.schemaUid === 'undefined' )
   ) {
     try {
-      const queryClient = BaseQueryClient.getQueryClient()
-      const easClient = BaseEasClient.getEasClient()
-
-      if (queryClient && easClient && propertyRecordSchema.dataType) {
+      if (propertyRecordSchema.dataType) {
         // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
         const dataTypeKey = normalizeDataType(
           propertyRecordSchema.dataType,
@@ -65,24 +60,13 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
 
         if (easDataType) {
           const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
-        
-          const queryResult = await queryClient.fetchQuery({
-            queryKey: [`getSchemaByName${metadataValues.propertyName}`],
-            queryFn: async (): Promise<{schemas: EASSchema[]}> =>
-              easClient.request(GET_SCHEMA_BY_NAME, {
-                where: {
-                  schema: {
-                    equals: `${easDataType} ${propertyNameSnakeCase}`,
-                  },
-                },
-              }),
-          })
-
-          // Handle both { schemas: [...] } and { data: { schemas: [...] } } formats
-          const schemas = queryResult?.schemas || (queryResult as any)?.data?.schemas
-          if (schemas && Array.isArray(schemas) && schemas.length > 0) {
-            metadataValues.schemaUid = schemas[0].id
-            rest.schemaUid = schemas[0].id
+          // Cached, including misses: every item of a model looks up the same property schemas.
+          const schemaUid = await getEasSchemaUidForExactDefinition(
+            `${easDataType} ${propertyNameSnakeCase}`,
+          )
+          if (schemaUid) {
+            metadataValues.schemaUid = schemaUid
+            rest.schemaUid = schemaUid
           }
         }
       }

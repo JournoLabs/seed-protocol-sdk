@@ -6,6 +6,12 @@ export const waitForDb = fromCallback<
   EventObject,
   FromCallbackInput<ItemMachineContext<any>>
 >(({ sendBack }) => {
+  // Usually ready already: polling first cost every new Item 100ms.
+  if (BaseDb.getAppDb()) {
+    sendBack({ type: 'waitForDbSuccess' })
+    return
+  }
+
   const interval = setInterval(() => {
     if (BaseDb.getAppDb()) {
       clearInterval(interval)
