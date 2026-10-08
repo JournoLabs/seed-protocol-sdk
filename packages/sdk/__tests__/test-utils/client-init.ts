@@ -539,7 +539,17 @@ export async function setupTestEnvironment(options: {
   if (!isNodeEnv) {
     await cleanupTestSchemaData()
   }
-  
+
+  // Init no longer clears stored addresses when given none (persistInitAddresses), so addresses an
+  // earlier browser file connected would make this file's unstamped drafts read-only. Start each
+  // file without them unless it passes its own.
+  if (!isNodeEnv && !options.configOverrides?.addresses) {
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { appState } = await import('@/seedSchema')
+    const { eq } = await import('drizzle-orm')
+    await BaseDb.getAppDb()?.delete(appState).where(eq(appState.key, 'addresses'))
+  }
+
   // Store test project path for cleanup if it's a temporary directory
   if (isNodeEnv && testProjectPath && !options.projectPath) {
     const os = await import('os')

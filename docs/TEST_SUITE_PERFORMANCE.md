@@ -225,7 +225,15 @@ their number so references to them stay valid.
    UID, `6d78fca`; the ownership check finds an item's row by `localId` before `uid`, `d149b56`).
    As of 2026-10-08 the same error came back after one particular set of 24 earlier browser files;
    a separate session is looking into it (owned addresses persisted in OPFS appState leak between
-   files).
+   files). Multi-tab Phase A made that leak certain: init no longer saves an empty address list
+   (`persistInitAddresses`), so a file that connects an address leaves it stored for every later
+   file on the worker, and their unstamped drafts become read-only (seen in
+   `browser/db/read/getPublishPayload.test.ts`). Fixed on branch `claude/multi-tab-phase-b`:
+   `setupTestEnvironment` deletes the stored `addresses` row in browser files that pass none.
+20. **Flaky on `main`: `Item/getItems.test.ts`** — "returns only local items (no seedUid) by
+    default" and "does not turn publishedVersion* list metadata into ItemProperty…" fail together
+    in about 1 of 4 full browser-project runs (the item just created isn't in `getItemsData`'s
+    result); both pass when the file runs alone or with only `Item/`. Not investigated.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
