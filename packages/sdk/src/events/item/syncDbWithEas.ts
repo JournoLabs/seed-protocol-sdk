@@ -15,7 +15,7 @@ import {
   versions,
   VersionsType,
 } from '@/seedSchema'
-import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import {
   generateId,
 } from '@/helpers'
@@ -414,12 +414,15 @@ const createMetadataRecordsForStorageTransactionId = async (
       .from(metadata)
       .where(
         and(
+          isNotNull(metadata.derivedFromUid),
           eq(metadata.propertyName, _propertyName),
           eq(metadata.propertyValue, propertyValue),
           eq(metadata.versionUid, storageTransactionIdProperty.refUID),
         ),
       )
 
+    // Already derived from another attestation carrying this transaction id: syncDerivedStorageRows
+    // points that row at the canonical attestation.
     if (existingMetadataRecordRows && existingMetadataRecordRows.length > 0) {
       continue
     }
@@ -448,6 +451,10 @@ const createMetadataRecordsForStorageTransactionId = async (
       refValueType: 'file',
       refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix ?? ''}`,
       modelType: seedUidToModelType.get(seedUid),
+      derivedFromUid: storageTransactionIdProperty.id,
+      // Ranked like a synced row, at its attestation's time: a local edit made after that
+      // publish wins over it, a newer publish wins over an older edit.
+      attestationCreatedAt: storageTransactionIdProperty.timeCreated * 1000,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -563,25 +570,15 @@ const storageTransactionIdOf = (property: Attestation): string | undefined => {
 }
 
 /**
- * Rows `createMetadataRecordsForStorageTransactionId` derived from a `storage_transaction_id`
- * attestation. They have no uid of their own; what identifies them is what they're derived from,
- * the key their creation dedupes on: no uid, `ref_value_type` 'file', the attestation's version
- * and its transaction id as the value. Local edits of an ItemStorage property store a file name
- * (`<seed>.<ext>`), never a bare transaction id, so they don't match.
- */
-const derivedStorageRowsWhere = (versionUid: string, transactionId: string) =>
-  and(
-    isNull(metadata.uid),
-    eq(metadata.refValueType, 'file'),
-    eq(metadata.versionUid, versionUid),
-    eq(metadata.propertyValue, transactionId),
-  )
-
-/**
  * Make derived ItemStorage rows follow their `storage_transaction_id` attestation the way synced
- * rows follow theirs: rows derived from a fetched attestation that isn't canonical are deleted
- * (unless the canonical one carries the same transaction id), and rows derived from the canonical
- * one take its `revoked_at` once it has one (a stamp is never cleared, see `syncedRevokedAt`).
+ * rows follow theirs. Derived rows are identified by `derived_from_uid`, the attestation they were
+ * derived from:
+ * - A row derived from another fetched attestation with the canonical one's transaction id (on the
+ *   same version) is pointed at the canonical one; creation makes one row per transaction id.
+ * - Rows derived from a fetched attestation that isn't canonical are deleted.
+ * - Rows derived from the canonical one take its `revoked_at` once it has one (a stamp is never
+ *   cleared, see `syncedRevokedAt`).
+ * Local drafts (no uid, no `derived_from_uid`) are never touched.
  */
 const syncDerivedStorageRows = async ({
   fetchedProperties,
@@ -594,18 +591,36 @@ const syncDerivedStorageRows = async ({
     .map((property) => ({ property, transactionId: storageTransactionIdOf(property) }))
     .filter((c): c is { property: Attestation; transactionId: string } => !!c.transactionId)
   const canonicalUids = new Set(canonicalProperties.map((property) => property.id))
-  const canonicalTransactionIds = new Set(
-    canonical.map((c) => `${c.property.refUID}|${c.transactionId}`),
-  )
 
   const appDb = BaseDb.getAppDb()
 
-  for (const property of fetchedProperties) {
-    if (canonicalUids.has(property.id)) continue
-    const transactionId = storageTransactionIdOf(property)
-    if (!transactionId) continue
-    if (canonicalTransactionIds.has(`${property.refUID}|${transactionId}`)) continue
-    await appDb.delete(metadata).where(derivedStorageRowsWhere(property.refUID, transactionId))
+  for (const { property, transactionId } of canonical) {
+    const sameTransaction = fetchedProperties
+      .filter(
+        (other) =>
+          other.id !== property.id &&
+          other.refUID === property.refUID &&
+          storageTransactionIdOf(other) === transactionId,
+      )
+      .map((other) => other.id)
+    if (sameTransaction.length === 0) continue
+    // A stamp belongs to the attestation it came from; the new source's is applied below.
+    await appDb
+      .update(metadata)
+      .set({
+        derivedFromUid: property.id,
+        revokedAt: null,
+        attestationCreatedAt: property.timeCreated * 1000,
+        updatedAt: Date.now(),
+      })
+      .where(inArray(metadata.derivedFromUid, sameTransaction))
+  }
+
+  const staleSourceUids = fetchedProperties
+    .filter((property) => !canonicalUids.has(property.id) && storageTransactionIdOf(property))
+    .map((property) => property.id)
+  if (staleSourceUids.length > 0) {
+    await appDb.delete(metadata).where(inArray(metadata.derivedFromUid, staleSourceUids))
   }
 
   if (canonical.length === 0) return
@@ -617,7 +632,7 @@ const syncDerivedStorageRows = async ({
     .where(inArray(metadata.uid, canonical.map((c) => c.property.id)))
   const revokedAtByUid = new Map(sourceRows.map((row) => [row.uid, row.revokedAt ?? null]))
 
-  for (const { property, transactionId } of canonical) {
+  for (const { property } of canonical) {
     const revokedAt = revokedAtByUid.get(property.id) ?? null
     // The source's revoked_at already follows `syncedRevokedAt`. A live source leaves a derived
     // row's stamp alone: like a stamped synced row, it is only replaced by a revocation time.
@@ -627,7 +642,7 @@ const syncDerivedStorageRows = async ({
       .set({ revokedAt, updatedAt: Date.now() })
       .where(
         and(
-          derivedStorageRowsWhere(property.refUID, transactionId),
+          eq(metadata.derivedFromUid, property.id),
           or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
         ),
       )

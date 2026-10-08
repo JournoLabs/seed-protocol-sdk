@@ -73,6 +73,7 @@ describe.sequential(
     const version = uid('42')
     const olderTx = uid('43')
     const newerTx = uid('44')
+    const latestTx = uid('48')
 
     const attestation = (
       id: string,
@@ -200,45 +201,127 @@ describe.sequential(
         .where(eq(metadata.versionUid, version))
     }
 
-    /** [propertyValue, revokedAt] of the derived `html` rows (uid null, ref_value_type 'file'). */
+    /** [propertyValue, revokedAt] of the derived `html` rows (marked with `derivedFromUid`). */
     const derivedHtml = async () =>
       (await rows())
-        .filter(
-          (r) =>
-            r.propertyName === 'html' &&
-            !r.uid &&
-            r.refValueType === 'file' &&
-            r.localId !== 'local-html-edit',
-        )
+        .filter((r) => r.propertyName === 'html' && r.derivedFromUid != null)
         .map((r) => [r.propertyValue, r.revokedAt ?? null])
         .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
 
-    /** A local edit of the property, on the same version: sync must never touch it. */
+    /** The local edit (draft) of the property, on the same version: sync must never touch it. */
     const localEdit = async () => {
-      const draft = (await rows()).find((r) => r.localId === 'local-html-edit')
-      return draft && [draft.propertyValue, draft.revokedAt ?? null]
+      const drafts = (await rows()).filter(
+        (r) => r.propertyName === 'html' && !r.uid && r.derivedFromUid == null,
+      )
+      expect(drafts.length).toBeLessThanOrEqual(1)
+      return drafts[0] && [drafts[0].propertyValue, drafts[0].revokedAt ?? null]
     }
 
-    it('derives a row from the canonical storage transaction', async () => {
+    /** The html value readers would show, per the pending diff (which orders rows like they do). */
+    const pendingHtml = async () => {
+      const { getPublishPendingDiff } =
+        await import('@/db/read/getPublishPendingDiff')
+      const { pendingProperties } = await getPublishPendingDiff({
+        seedUid: seed,
+      })
+      return pendingProperties.find((p) => p.propertyName === 'html')
+    }
+
+    /** Run the ItemStorage save actor, as an ItemProperty loaded from `row` would. */
+    const saveHtml = async (row: MetadataType, newValue: string) => {
+      const { saveItemStorage } =
+        await import('@/ItemProperty/service/actors/saveValueToDb/saveItemStorage')
+      const { createActor, createMachine } = await import('xstate')
+      const events: { type: string; [key: string]: unknown }[] = []
+      const parent = createMachine({
+        invoke: {
+          src: saveItemStorage,
+          input: {
+            context: {
+              localId: row.localId,
+              seedLocalId: row.seedLocalId,
+              seedUid: seed,
+              propertyName: 'html',
+              modelName: MODEL_NAME,
+              propertyRecordSchema: {
+                dataType: 'Text',
+                storageType: 'ItemStorage',
+                localStorageDir: '/html',
+                filenameSuffix: '.html',
+              },
+            },
+            event: { type: 'save', newValue },
+          } as any,
+        },
+        on: { '*': { actions: ({ event }) => void events.push(event as any) } },
+      })
+      const actor = createActor(parent).start()
+      await vi.waitFor(
+        () => {
+          if (!events.some((e) => e.type.startsWith('saveItemStorage')))
+            throw new Error('save not done')
+        },
+        { timeout: 10_000 },
+      )
+      actor.stop()
+      return events
+    }
+
+    it('derives a row from the canonical storage transaction, marked with its source', async () => {
       await sync([storageTx(uid('45'), olderTx, 8_002)])
       expect(await derivedHtml()).toEqual([[olderTx, null]])
+      const derived = (await rows()).find((r) => r.derivedFromUid != null)!
+      expect(derived).toMatchObject({
+        derivedFromUid: uid('45'),
+        uid: null,
+        refValueType: 'file',
+      })
+    })
 
-      const { BaseDb } = await import('@/db/Db/BaseDb')
-      const { metadata } = await import('@/seedSchema')
-      const synced = (await rows()).find((r) => r.uid === uid('45'))!
-      await BaseDb.getAppDb()
-        .insert(metadata)
-        .values({
-          localId: 'local-html-edit',
-          propertyName: 'html',
-          propertyValue: `${seed}.html`,
-          refValueType: 'file',
-          seedLocalId: synced.seedLocalId,
-          seedUid: seed,
-          versionLocalId: synced.versionLocalId,
-          versionUid: version,
-          createdAt: Date.now(),
-        })
+    it("doesn't report the derived row as a pending local edit", async () => {
+      expect(await pendingHtml()).toBeUndefined()
+    })
+
+    it('saves an edit into a new local draft, not into the derived row or its file', async () => {
+      const derived = (await rows()).find((r) => r.derivedFromUid != null)!
+      const events = await saveHtml(derived, '<p>local edit</p>')
+      expect(events.map((e) => e.type)).toContain('saveItemStorageSuccess')
+
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+      const draft = (await rows()).find(
+        (r) => r.propertyName === 'html' && !r.uid && r.derivedFromUid == null,
+      )!
+      // The property now points at the draft row.
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'updateContext',
+          localId: draft.localId,
+        }),
+      )
+
+      // The derived row is as sync left it.
+      const derivedAfter = (await rows()).find(
+        (r) => r.localId === derived.localId,
+      )!
+      expect(derivedAfter).toEqual(derived)
+
+      const { BaseFileManager } =
+        await import('@/helpers/FileManager/BaseFileManager')
+      expect(
+        await BaseFileManager.readFileAsString(
+          BaseFileManager.getFilesPath('html', `${seed}.html`),
+        ),
+      ).toBe('<p>local edit</p>')
+      expect(
+        await BaseFileManager.pathExists(
+          BaseFileManager.getFilesPath('html', `${olderTx}.html`),
+        ),
+      ).toBe(false)
+
+      // Readers show the draft, made after the published storage transaction.
+      expect(await pendingHtml()).toMatchObject({
+        currentValue: `${seed}.html`,
+      })
     })
 
     it('replaces the derived row when a newer storage transaction becomes canonical', async () => {
@@ -248,6 +331,10 @@ describe.sequential(
       ])
       expect(await derivedHtml()).toEqual([[newerTx, null]])
       expect(await localEdit()).toEqual([`${seed}.html`, null])
+      // Still the value readers show: the edit is newer than either storage transaction.
+      expect(await pendingHtml()).toMatchObject({
+        currentValue: `${seed}.html`,
+      })
     })
 
     it('goes back to the older derived row when the newer storage transaction is revoked', async () => {
@@ -270,7 +357,6 @@ describe.sequential(
     })
 
     it('keeps an unpublish stamp on the source and its derived row until EAS reports a revocation time', async () => {
-      const latestTx = uid('48')
       const latest = (revocationTime = 0) => [
         storageTx(uid('45'), olderTx, 8_002, 1_700_008_100),
         storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
@@ -300,6 +386,23 @@ describe.sequential(
       await sync(latest(1_700_009_005))
       expect(await sourceRevokedAt()).toBe(1_700_009_005)
       expect(await derivedHtml()).toEqual([[latestTx, 1_700_009_005]])
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+    })
+
+    it('points the derived row at a newer attestation of the same transaction id', async () => {
+      await sync([
+        storageTx(uid('45'), olderTx, 8_002, 1_700_008_100),
+        storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
+        storageTx(uid('47'), latestTx, 8_004, 1_700_009_005),
+        storageTx(uid('49'), latestTx, 8_005),
+      ])
+      // One row for the transaction, now following the live attestation (and not its old stamp).
+      expect(await derivedHtml()).toEqual([[latestTx, null]])
+      const derived = (await rows()).find((r) => r.derivedFromUid != null)!
+      expect(derived).toMatchObject({
+        derivedFromUid: uid('49'),
+        attestationCreatedAt: 8_005_000,
+      })
       expect(await localEdit()).toEqual([`${seed}.html`, null])
     })
   },

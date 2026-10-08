@@ -38,7 +38,8 @@ function resolveSeedIds(
 
 /**
  * Per property: the **latest** metadata row (by `attestationCreatedAt` / `createdAt`) lacks a valid
- * EAS attestation `uid` — local edit or missing post-publish UID backfill. **Not** equivalent to
+ * EAS attestation `uid` — local edit or missing post-publish UID backfill. Rows sync derived for
+ * ItemStorage properties (`derivedFromUid` set) count as published. **Not** equivalent to
  * draft vs onchain for the whole seed; use `getSeedPublishState` for that.
  */
 export async function getPublishPendingDiff(
@@ -77,13 +78,17 @@ export async function getPublishPendingDiff(
     list.sort(compareMetadataRowsLatestFirst)
   }
 
+  // A row sync derived from a storage_transaction_id attestation (ItemStorage) is published
+  // content, not a local edit, though it has no uid of its own.
+  const isPublished = (row: MetadataType) =>
+    isValidEasAttestationUid(row.uid) || row.derivedFromUid != null
+
   const pendingProperties: PublishPendingPropertyDiff[] = []
   for (const [propertyName, list] of byProp) {
     const latest = list[0]
     if (!latest) continue
-    const hasUid = isValidEasAttestationUid(latest.uid)
-    if (!hasUid) {
-      const prevWithUid = list.find((r) => isValidEasAttestationUid(r.uid))
+    if (!isPublished(latest)) {
+      const prevWithUid = list.find(isPublished)
       pendingProperties.push({
         propertyName,
         currentValue: latest.propertyValue ?? null,
