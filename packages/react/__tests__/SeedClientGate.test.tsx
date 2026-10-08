@@ -81,6 +81,24 @@ describe('SeedClientGate', () => {
     initSpy.mockRestore()
   })
 
+  it('passes an init failure to onInitError', async () => {
+    const sdk = await import('@seedprotocol/sdk')
+    const lockedError = new sdk.FileSystemLockedError(new DOMException('busy', 'InvalidStateError'))
+    const initSpy = vi.spyOn(sdk.client, 'init').mockRejectedValueOnce(lockedError)
+    const onInitError = vi.fn()
+
+    render(
+      <SeedClientGate initConfig={initConfig} onInitError={onInitError}>
+        <div data-testid="gated-content">App Content</div>
+      </SeedClientGate>,
+      { container, wrapper: SeedProviderWrapper }
+    )
+
+    await waitFor(() => expect(onInitError).toHaveBeenCalledWith(lockedError))
+    expect(onInitError.mock.calls[0][0].code).toBe('OPFS_LOCKED')
+    initSpy.mockRestore()
+  })
+
   it('shows children when client is ready', async () => {
     render(
       <SeedClientGate initConfig={initConfig}>
