@@ -1,6 +1,7 @@
 import { addExcludedTransactions } from '@/db/write/addExcludedTransactions';
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
 import filesDownload from './filesDownload'
+import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
 import debug from 'debug'
 
 const logger = debug('seedSdk:browser:workers:FileDownloader')
@@ -33,6 +34,7 @@ export class FileDownloader {
     this.workersArchive.push(worker)
 
     const localExcludedTransactions = new Set(excludedTransactions)
+    const savedPaths: string[] = []
 
     return new Promise((resolve, reject) => {
       worker.onmessage = (e) => {
@@ -42,8 +44,14 @@ export class FileDownloader {
           localExcludedTransactions.add(e.data.transactionId)
         }
 
+        if (e.data.message === 'fileSaved') {
+          savedPaths.push(e.data.filePath)
+        }
+
         if (e.data.done) {
           addExcludedTransactions(localExcludedTransactions)
+          // The worker wrote to OPFS directly; refresh caches here and in other tabs.
+          .then(() => notifyFilesWrittenOutsideCache(savedPaths))
           .then(() => {
             resolve(e.data)
           })

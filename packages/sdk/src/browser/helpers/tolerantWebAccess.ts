@@ -59,6 +59,24 @@ export class TolerantWebAccessFS extends WebAccessFS {
   }
 
   /**
+   * Forgets what the mount cached for `path` (size, handle, contents) and reads it again from OPFS.
+   * For files written outside this ZenFS instance: by another tab, or by a worker writing to OPFS
+   * directly. A file that's gone stays forgotten. The in-memory copy is only refreshed when its
+   * directory is already cached; async reads re-index the file either way (WebAccessFS.stat).
+   */
+  async invalidate(path: string): Promise<void> {
+    if (path == '/') return
+    this.index.delete(path)
+    this._handles.delete(path)
+    try {
+      this._sync.unlinkSync(path)
+    } catch {
+      // Not cached.
+    }
+    await this.crossCopy(path)
+  }
+
+  /**
    * The Async mixin's ready() then copies every file's contents into an in-memory cache, a second
    * walk that reads the same busy entries. Skip those too; the root still fails the mount.
    */

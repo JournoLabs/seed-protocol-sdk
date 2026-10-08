@@ -12,7 +12,7 @@ import { addModelsToStore } from "./actors/addModelsToStore"
 import { addModelsToDb } from "./actors/addModelsToDb"
 import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
-import { eventEmitter } from "@/eventBus"
+import { emitAcrossTabs } from "@/helpers/tabEvents"
 import {
   ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
@@ -99,7 +99,7 @@ function emitAddressesPersistedIfAddressesKey(event: {
 }) {
   if (event.key !== "addresses") return
   const payload = parseAddressesPersistedPayload(event.value)
-  eventEmitter.emit(ADDRESSES_PERSISTED_EVENT, payload)
+  emitAcrossTabs(ADDRESSES_PERSISTED_EVENT, payload)
 }
 
 function errorFromEvent(event: unknown, fallbackMessage: string): Error {

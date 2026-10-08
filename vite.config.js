@@ -274,6 +274,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
+            'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,

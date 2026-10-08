@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { BaseFileManager, eventEmitter } from '@seedprotocol/sdk'
+import { BaseFileManager, eventEmitter, FILES_CHANGED_EVENT } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 
 export const FILES_QUERY_KEY_PREFIX = ['seed', 'files'] as const
@@ -45,11 +45,19 @@ export function useFiles(dir: string = 'files') {
     const downloadSuccessHandler = () => {
       queryClient.invalidateQueries({ queryKey })
     }
+    // Files written by workers or other tabs.
+    const filesChangedHandler = (filePaths: string[]) => {
+      if (filePaths.some((filePath) => filePath.includes(`/${dir}/`))) {
+        queryClient.invalidateQueries({ queryKey })
+      }
+    }
     eventEmitter.on('file-saved', fileSavedHandler)
     eventEmitter.on('fs.downloadAll.success', downloadSuccessHandler)
+    eventEmitter.on(FILES_CHANGED_EVENT, filesChangedHandler)
     return () => {
       eventEmitter.off('file-saved', fileSavedHandler)
       eventEmitter.off('fs.downloadAll.success', downloadSuccessHandler)
+      eventEmitter.off(FILES_CHANGED_EVENT, filesChangedHandler)
     }
   }, [queryClient, dir, queryKey])
 
