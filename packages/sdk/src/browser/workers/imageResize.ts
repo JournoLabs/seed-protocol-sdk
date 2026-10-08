@@ -58,19 +58,6 @@ export default `(
   ${
     function () {
 
-async function listFilesInDirectory(directoryHandle: FileSystemDirectoryHandle) {
-  const entries: { name: string; kind: FileSystemHandleKind }[] = [];
-
-  for await (const [name, handle] of directoryHandle.entries()) {
-      entries.push({
-        name,
-        kind: handle.kind,
-      })
-  }
-
-  return entries;
-}
-
 const getFileHandle = async (path: string, rootHandle: FileSystemDirectoryHandle | null = null): Promise<FileSystemFileHandle> => {
     // Split the path into segments
     const segments = path.split('/').filter(Boolean);
@@ -417,7 +404,13 @@ async function saveBlobToOPFS(filePath: string, blob: Blob): Promise<void> {
 
   // Write the Blob to the file
   const writableStream = await fileHandle.createWritable();
-  await writableStream.write(blob);
+  try {
+    await writableStream.write(blob);
+  } catch (error) {
+    // Discard the partial write and release the file's lock
+    await writableStream.abort().catch(() => {});
+    throw error;
+  }
   await writableStream.close();
 }
 
@@ -430,11 +423,6 @@ const imageResize = async (filePath: string, width: number, height: number) => {
     maxWidth: width,
     maxHeight: height,
   }
-
-  const rootHandle = await navigator.storage.getDirectory();
-
-  // List files in the root directory
-  const files = await listFilesInDirectory(rootHandle);
 
   const file = await getFileFromOPFS(filePath);
 
