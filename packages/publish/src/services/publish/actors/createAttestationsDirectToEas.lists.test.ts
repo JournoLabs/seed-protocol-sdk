@@ -54,10 +54,15 @@ let createdSeeds: string[] = []
 let uidCounter = 0
 const nextUid = (prefix: string) => `0x${prefix}${(++uidCounter).toString(16).padStart(64 - prefix.length, '0')}`
 
+type ApplyArgs = { seedLocalId: string; resolvedSeedUids?: Record<string, string> }
+const applyCalls: ApplyArgs[] = []
+
 mock.module('@seedprotocol/sdk', () => ({
   ...realSdk,
   updateVersionUid: async () => {},
-  applyPropertyAttestationUidsFromPublish: async () => {},
+  applyPropertyAttestationUidsFromPublish: async (args: ApplyArgs) => {
+    applyCalls.push(structuredClone(args))
+  },
   Item: { find: async () => undefined },
   clearHtmlEmbeddedImageCoPublishRows: async () => {},
 }))
@@ -235,6 +240,7 @@ const attested = (schema: string) =>
   )
 
 beforeEach(() => {
+  applyCalls.length = 0
   sentTxs.clear()
   createdSeeds = []
   uidCounter = 0
@@ -257,6 +263,11 @@ describe('createAttestationsDirectToEas: relation and list properties with draft
     // The list belongs to the Post: it references the Post's version, not a member's.
     expect(seedPost).toBeDefined()
     expect(lists[0]!.refUID).not.toBe(ZERO)
+
+    // The Post's property uids are recorded with the seeds its slots attested, so the local list
+    // row holds those uids (A and B record their own seed uids only after the loop).
+    const postApply = applyCalls.find((c) => c.seedLocalId === POST)
+    expect(postApply?.resolvedSeedUids).toEqual({ [A]: seedA!, [B]: seedB!, [POST]: seedPost! })
   })
 
   test('a single relation to a draft still attests the draft seed uid', async () => {
@@ -271,6 +282,7 @@ describe('createAttestationsDirectToEas: relation and list properties with draft
     const relations = attested(SCHEMA_AUTHOR)
     expect(relations).toHaveLength(1)
     expect(decodeOne(relations[0]!.data)).toBe(seedA!)
+    expect(applyCalls.find((c) => c.seedLocalId === POST)?.resolvedSeedUids?.[A]).toBe(seedA!)
   })
 
   test('a single relation filled only through propertiesToUpdate (no resolve hint) still updates', async () => {

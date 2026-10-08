@@ -310,6 +310,7 @@ export const createAttestations = fromPromise(
           useModularExecutor,
           contractAddressForEvents: routing.contractAddressForEvents,
           publisherAddress: address,
+          resolvedSeedUids: resolvedUids,
         })
 
         if (recorded?.versionUid && toHex32(recorded.versionUid) !== ZERO_BYTES32) {

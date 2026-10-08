@@ -34,6 +34,12 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
 
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
 
+4. **Local recording.** Each request records its own seed, version and property attestation uids
+   (`applyPropertyAttestationUidsFromPublish`). A relation or list-of-relation value that named seeds
+   by local id is recorded as attested, the way an EAS sync stores it: the seed uid (relation) or a
+   JSON array of seed uids in slot order (list, on its `<singular><Ref>Ids` row). The related seeds
+   get their uids too, so local ids keep resolving to the same items.
+
 You do not need to run schema setup yourself when using this flow.
 
 ## Domain ownership (tool sidecar)
