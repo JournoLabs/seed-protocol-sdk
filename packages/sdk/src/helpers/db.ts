@@ -27,6 +27,7 @@ import { resolveModelRecord, resolveRefModelRecord, type ModelScope } from '@/db
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
 import { linkModelToSchema } from '@/db/write/linkModelToSchema'
+import { AmbiguousModelError } from '@/Model/errors'
 
 const logger = debug('seedSdk:helpers:db')
 
@@ -455,6 +456,31 @@ const findOrCreateModelRecord = async (
     }
     throw error
   }
+}
+
+/**
+ * Find or create the models row a Relation property on ownerModelId points to. Model names are only
+ * unique per schema, so the ref is looked up in the owner's schema(s) first; a global name lookup
+ * (createOrUpdate by name) threw "Multiple records found" once two schemas defined the ref model.
+ */
+const findOrCreateRefModelRecord = async (
+  db: BetterSQLite3Database | SqliteRemoteDatabase,
+  refModelName: string,
+  ownerModelId: number,
+): Promise<{ id?: number | null }> => {
+  try {
+    const ref = await resolveRefModelRecord(refModelName, { modelId: ownerModelId }, db)
+    if (ref) return ref
+  } catch (error) {
+    // Not in the owner's schema and defined by several others: pick/create like an import does
+    if (!(error instanceof AmbiguousModelError)) throw error
+  }
+  const [ownerLink] = await (db as BetterSQLite3Database)
+    .select({ schemaId: modelSchemas.schemaId })
+    .from(modelSchemas)
+    .where(eq(modelSchemas.modelId, ownerModelId))
+    .limit(1)
+  return findOrCreateModelRecord(db, refModelName, undefined, ownerLink?.schemaId ?? undefined)
 }
 
 export const createOrUpdate = async <T>(
@@ -1715,13 +1741,7 @@ export const savePropertyToDb = async (
 
   // Handle ref property - create ref model if needed
   if (property.refModelName) {
-    const refModel = await createOrUpdate<NewModelRecord>(
-      db,
-      modelsTable,
-      {
-        name: property.refModelName,
-      },
-    )
+    const refModel = await findOrCreateRefModelRecord(db, property.refModelName, modelRecord.id!)
     propertyData.refModelId = refModel.id
   } else if (property.refModelId) {
     propertyData.refModelId = property.refModelId
@@ -2139,13 +2159,7 @@ export async function writePropertyToDb(
   // Check refModelName first, then ref (for backwards compatibility with schema files)
   const refModelName = data.refModelName || data.ref
   if (refModelName) {
-    const refModel = await createOrUpdate<NewModelRecord>(
-      db,
-      modelsTable,
-      {
-        name: refModelName,
-      },
-    )
+    const refModel = await findOrCreateRefModelRecord(db, refModelName, data.modelId)
     propertyData.refModelId = refModel.id
   } else if (data.refModelId) {
     propertyData.refModelId = data.refModelId
