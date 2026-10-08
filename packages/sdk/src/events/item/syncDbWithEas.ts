@@ -1,6 +1,6 @@
 import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
-import { camelCase, startCase } from 'lodash-es'
+import { camelCase } from 'lodash-es'
 import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
 import {
   parseEasPropertyMetadata,
@@ -649,6 +649,21 @@ const syncDerivedStorageRows = async ({
   }
 }
 
+/**
+ * The cached Model of a synced seed: its own model (seeds.model_file_id) when it has one, else by
+ * EAS schema name, the snake_case model name (`sync_storage_post` → SyncStoragePost; a
+ * `startCase` lookup never matched multi-word names). Throws AmbiguousModelError when several
+ * schemas define a model with that name; callers skip the seed (skipSeedOnAmbiguousModel).
+ */
+const resolveSyncedSeedModel = async (
+  Model: typeof import('../../Model/Model').Model,
+  modelType: string,
+  seed: { seedLocalId?: string | null; seedUid?: string | null },
+) => {
+  const modelFileId = await resolveItemModelFileId(seed)
+  return (modelFileId ? Model.getById(modelFileId) : undefined) ?? Model.findByModelType(modelType)
+}
+
 const insertSyncedProperties = async ({
   newProperties,
   itemSeeds,
@@ -663,8 +678,8 @@ const insertSyncedProperties = async ({
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
   const { Model } = modelMod
-  const allModels = await Model.all()
-  const models = Object.fromEntries(allModels.map(m => [m.modelName!, m]))
+  // Loads every model into Model's cache, where resolveSyncedSeedModel looks them up.
+  await Model.all()
 
   const appDb = BaseDb.getAppDb()
 
@@ -790,8 +805,12 @@ const insertSyncedProperties = async ({
     const modelType = seedUidToModelType.get(seedUid!)
 
     let localStorageDir
-    const modelName = startCase(modelType)
-    const model = models[modelName]
+    const model =
+      modelType != null
+        ? await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
+            resolveSyncedSeedModel(Model, modelType, { seedLocalId, seedUid }),
+          )
+        : undefined
     const modelSchema = model?.properties ? modelPropertiesToObject(model.properties) : undefined
 
     if (propertyNameSnake === 'storage_transaction_id') {
