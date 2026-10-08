@@ -101,6 +101,7 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     const item = await Item.create({
       modelName: 'Post',
+      schemaName,
       featureImage: 'test-value',
     })
     await waitForItemIdle(item)

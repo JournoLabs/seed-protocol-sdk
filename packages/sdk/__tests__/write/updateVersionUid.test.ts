@@ -18,12 +18,16 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const TEST_VERSION_UID = '0x' + 'd'.repeat(64)
 
 testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => {
+  // Model names are only unique per schema: scope createMetadata to this schema's Post.
+  let postModelFileId: string
+
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
       timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-    await createGetPublishPayloadTestSchema()
+    const { models } = await createGetPublishPayloadTestSchema()
+    postModelFileId = models.Post.id!
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
@@ -120,7 +124,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         propertyName: 'title',
         propertyValue: 'Test metadata publisher',
         modelName: 'Post',
-      })
+      }, undefined, { modelFileId: postModelFileId })
       const db = BaseDb.getAppDb()
       const { metadata } = await import('@/seedSchema')
       const [row] = await db

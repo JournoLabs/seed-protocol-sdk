@@ -368,7 +368,7 @@ function UseCreateItemTest({ onCreationComplete }: { onCreationComplete?: (resul
 
   const handleCreate = async () => {
     setStatus('creating')
-    const item = await createItem('Post', { title: 'Hook Created Post', content: 'Content from hook', author: 'Test' })
+    const item = await createItem('Post', { schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME, title: 'Hook Created Post', content: 'Content from hook', author: 'Test' })
     let result: 'created' | 'done' | 'error'
     if (item) {
       setCreatedItemId(item.seedLocalId)
@@ -549,6 +549,7 @@ describe('React Item Hooks Integration Tests', () => {
 
     testArticleItem = await Item.create({
       modelName: 'Article',
+      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
       headline: 'Test Article Headline',
       body: 'Test Article Body',
     } as any)

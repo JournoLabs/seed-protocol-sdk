@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll } from 'vitest'
+import { cleanup } from '@testing-library/react'
 
 /**
  * Check if OPFS (Origin Private File System) is available in the browser
@@ -65,6 +66,12 @@ beforeAll(async () => {
 })
 
 afterEach(() => {
+  // Unmount everything the test rendered. Testing Library only registers this itself when vitest
+  // runs with `globals: true`, which these projects don't. Clearing document.body (below, and in
+  // many tests) only detaches the containers: the React roots stay mounted, so earlier tests'
+  // hooks kept refetching and re-creating models while the next test's beforeEach deleted and
+  // re-imported the same schema.
+  cleanup()
   if (typeof document !== 'undefined') {
     document.body.innerHTML = ''
   }
