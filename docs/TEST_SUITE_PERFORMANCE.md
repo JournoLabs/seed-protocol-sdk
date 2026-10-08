@@ -55,6 +55,12 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   current snapshot, so if the entity is already in that state the wait never fires and sits out its
   whole fallback timeout. This cost 5s per test in `model.test.tsx`. Check the current snapshot first
   (xstate `waitFor`, or `waitUntil(() => svc.getSnapshot().value === 'idle')`).
+- **Wait for an entity's idle state with `test-utils/waitForIdle.ts`** (`waitForSchemaIdle`,
+  `waitForModelIdle`, `waitForItemIdle`, `waitForItemPropertyIdle`, `waitForModelPropertyIdle`;
+  React tests import it from `../../sdk/__tests__/test-utils/waitForIdle`). Don't throw inside an
+  xstate `waitFor` predicate: `waitFor` doesn't catch it, so the throw escapes as an uncaught
+  exception on every later snapshot and the wait only fails on its timeout. Wait for `idle` or
+  `error`, then reject after the wait, as the helper does.
 - **Don't drop readiness promises.** `Model.create` / `Schema.create` / `ModelProperty.create` without
   `waitForReady: false` return a promise that rejects if the entity isn't idle in time. If you don't
   await it, a slow run turns that into an unhandled rejection that fails the whole NodeJS run.
@@ -101,7 +107,7 @@ heavy tests can still time out, since each import still runs ~20k SQLite queries
 The file's `waitForSchemaIdle` also threw inside xstate `waitFor`'s predicate. `waitFor` doesn't
 catch that, so a schema in its `error` state raised an uncaught exception on every later snapshot
 (1001 in one run), and the wait itself timed out. The helper now waits for `idle` or `error` and then
-rejects with the loading stage. See open finding 17 for the other files with this pattern.
+rejects with the loading stage. It became the shared `test-utils/waitForIdle.ts` (finding 17).
 
 ## Open findings
 
@@ -191,14 +197,9 @@ findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`, and 17�
     them (`Item/getItems.test.ts`, react `item.test.tsx`) find their items by id, so they pass;
     `getItems.test.ts` also inserts a raw seed with no `model_file_id`, so scoping it would need that
     fixture changed.
-17. **Many test files throw inside a `waitFor` predicate** (`throw new Error('… failed to load')` when
-    the snapshot is `error`). As described in the large-schema section above, the throw escapes as an
-    uncaught exception on every later snapshot instead of failing the wait. Fixed in
-    `validation-timeout.test.ts` only; still present in `Schema/Schema.test.ts`, `Model/Model.test.ts`,
-    `Schema/schema-models-integration.test.ts`, `Item/Item.test.ts`, `Item/getItems.test.ts`,
-    `ItemProperty/*.test.ts`, `ModelProperty/ModelProperty.test.ts`,
-    `helpers/updateSchema-propertyRenameMetadata.test.ts`, `test-utils/getPublishPayloadIntegrationHelpers.ts`,
-    and several `packages/react/__tests__` files. A shared helper would fix them all.
+17. **Fixed:** test files threw inside a `waitFor` predicate (`throw new Error('… failed to load')`
+    when the snapshot is `error`). Every SDK and React test now uses the non-throwing helpers in
+    `packages/sdk/__tests__/test-utils/waitForIdle.ts` (see "Writing tests that stay fast").
 18. **`ModelProperty.getById` scans the whole instance cache** (~0.9s of a 1000-model import, since
     `Model._refreshPropertiesFromDb` calls it per property). An id index would have to follow id
     changes: a property is often created with a generated id and then gets its real one.
