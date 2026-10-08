@@ -183,6 +183,15 @@ export class Model {
   }
 
   /**
+   * True when a name-cached instance belongs to a different model than the requested modelFileId.
+   * A schema re-imported under the same name can give its models new ids while the previous
+   * instances are still cached by name; Model.create must not hand those back for the new id.
+   */
+  private static isOtherModelId(cachedId: string | undefined, requestedId: string | undefined): boolean {
+    return !!requestedId && !!cachedId && cachedId !== requestedId
+  }
+
+  /**
    * Find a unique model name by checking for duplicates (case-insensitive) in the cache
    * If duplicates are found, appends an incrementing number to make it unique
    * 
@@ -384,8 +393,8 @@ export class Model {
       const legacyKey = `${schemaName}:${modelName}`
       if (this.instanceCache.has(legacyKey)) {
         const { instance, refCount } = this.instanceCache.get(legacyKey)!
-        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean }
-        if (!ctx._idFromSchema) {
+        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean; id?: string }
+        if (!ctx._idFromSchema && !this.isOtherModelId(ctx.id, id)) {
           this.instanceCache.set(legacyKey, {
             instance,
             refCount: refCount + 1,
@@ -426,7 +435,10 @@ export class Model {
 
     // Step 6: Check legacy cache with unique name (backward compatibility during migration)
     // This is a fallback in case an instance was cached with a unique name
-    if (this.instanceCache.has(nameKey)) {
+    if (
+      this.instanceCache.has(nameKey) &&
+      !this.isOtherModelId((this.instanceCache.get(nameKey)!.instance._getSnapshotContext() as { id?: string }).id, id)
+    ) {
       const { instance, refCount } = this.instanceCache.get(nameKey)!
       this.instanceCache.set(nameKey, {
         instance,
