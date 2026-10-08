@@ -1991,8 +1991,6 @@ testDescribe('ItemProperty Integration Tests', () => {
       const seedLocalId = item.seedLocalId
       expect(seedLocalId).toBeDefined()
 
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
       ItemProperty.clearInstanceCacheForItem(seedLocalId!)
       item.unload()
 

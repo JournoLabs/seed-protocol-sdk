@@ -192,8 +192,6 @@ describe('Html property persistence integration tests', () => {
     if (htmlProperty) {
       await waitForItemPropertyIdle(htmlProperty)
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 2000))
   })
 
   afterEach(async () => {
