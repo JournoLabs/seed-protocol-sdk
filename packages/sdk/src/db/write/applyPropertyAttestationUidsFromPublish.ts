@@ -51,6 +51,8 @@ export async function applyPropertyAttestationUidsFromPublish(params: {
 
     const candidates = working
       .filter((r: MetadataType) => {
+        // Rows sync derived for ItemStorage properties aren't placeholders for an attestation.
+        if (r.derivedFromUid != null) return false
         if (pairName) {
           if (r.propertyName !== pairName) return false
           if (r.schemaUid) {

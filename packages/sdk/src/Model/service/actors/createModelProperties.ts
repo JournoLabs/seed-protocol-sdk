@@ -104,9 +104,10 @@ export const createModelProperties = fromCallback<
         refModelName: propData.refModelName,
         refModelId,
         refValueType: propData.refValueType,
-        storageType: propData.storageType,
-        localStorageDir: propData.localStorageDir,
-        filenameSuffix: propData.filenameSuffix,
+        // Definitions built from DB rows may lack storage settings; the row has them.
+        storageType: propData.storageType ?? propertyRecord?.storageType ?? undefined,
+        localStorageDir: propData.localStorageDir ?? propertyRecord?.localStorageDir ?? undefined,
+        filenameSuffix: propData.filenameSuffix ?? propertyRecord?.filenameSuffix ?? undefined,
         required: propData.required,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
         _dbId: propertyRecord?.schemaFileId === propertyFileId ? propertyRecord.id : undefined, // Already persisted: skip the write

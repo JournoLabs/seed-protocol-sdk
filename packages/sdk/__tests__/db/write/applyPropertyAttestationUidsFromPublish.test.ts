@@ -89,6 +89,46 @@ testDescribe('applyPropertyAttestationUidsFromPublish', () => {
     expect(stillPending).toHaveLength(0)
   })
 
+  it('never writes a UID onto a row sync derived from a storage_transaction_id attestation', async () => {
+    const { item } = await createItemWithBasicPropertiesOnly({
+      title: 'Derived row is no placeholder',
+      count: 3,
+    })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const rows = await db.select().from(metadata).where(eq(metadata.seedLocalId, seedLocalId))
+    const titleRow = rows.find((r) => r.propertyName === 'title')!
+
+    const t = Date.now()
+    await db
+      .update(metadata)
+      .set({ schemaUid: null, uid: null, attestationCreatedAt: null, createdAt: t })
+      .where(eq(metadata.localId, titleRow.localId!))
+    // Newer, no uid, same property: only the marker says it isn't a placeholder.
+    const derivedLocalId = `derived_title_${t}`
+    await db.insert(metadata).values({
+      localId: derivedLocalId,
+      uid: null,
+      propertyName: 'title',
+      propertyValue: 'tx-id',
+      refValueType: 'file',
+      seedLocalId,
+      derivedFromUid: '0x' + 'a'.repeat(64),
+      createdAt: t + 5,
+    })
+
+    await applyPropertyAttestationUidsFromPublish({
+      seedLocalId,
+      attestationCreatedAtMs: t + 10_000,
+      pairs: [{ schemaUid: SCHEMA_TITLE, attestationUid: ATTEST_TITLE, propertyName: 'title' }],
+    })
+
+    const [derived] = await db.select().from(metadata).where(eq(metadata.localId, derivedLocalId))
+    expect(derived?.uid).toBeNull()
+    const [title] = await db.select().from(metadata).where(eq(metadata.localId, titleRow.localId!))
+    expect(title?.uid).toBe(ATTEST_TITLE)
+  })
+
   it('with two placeholder title rows same timestamp, applies UID to local_id tie-break winner', async () => {
     const { item } = await createItemWithBasicPropertiesOnly({
       title: 'Two placeholders tie',

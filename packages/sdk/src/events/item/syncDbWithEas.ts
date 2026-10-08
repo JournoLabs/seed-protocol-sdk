@@ -21,12 +21,17 @@ import {
 } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { GET_SEEDS } from '@seedprotocol/eas'
-import { escapeSqliteString, getAllAddressesFromDb, getPropertyIdForModelAndName } from '@/helpers/db'
+import {
+  escapeSqliteString,
+  getAllAddressesFromDb,
+  getItemStoragePropertiesForModel,
+  getPropertyIdForModelAndName,
+} from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
-import { ModelSchema, PropertyType } from '@/types'
+import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
@@ -67,7 +72,7 @@ const revokedAtSeconds = (
 }
 
 /**
- * `revoked_at` to store for an attestation that already has a row (seed or version), given the
+ * `revoked_at` to store for an attestation that already has a row (seed, version or metadata), given the
  * stored value. EAS's `revocationTime` wins once EAS reports one. A stored stamp is otherwise kept:
  * local unpublish writes one only after its revoke transactions are mined, and revocation can't be
  * undone, so EAS reporting the attestation as live then just means its index hasn't caught up yet.
@@ -332,14 +337,6 @@ const createMetadataRecordsForStorageTransactionId = async (
   state: SyncRunState,
 ) => {
   const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
-  // Early return if modelSchema is not provided
-  if (!modelSchema) {
-    console.warn(
-      '[item/events] [syncDbWithEas] modelSchema is undefined for storageTransactionIdProperty: ',
-      storageTransactionIdProperty.id,
-    )
-    return
-  }
 
   // Validate and parse decodedDataJson
   const parsed = parseEasPropertyMetadata(
@@ -373,11 +370,35 @@ const createMetadataRecordsForStorageTransactionId = async (
       ? attestationData.value
       : JSON.stringify(attestationData.value)
 
-  const itemStorageProperties = new Map<string, PropertyType>()
+  const seedUid = versionUidToSeedUid.get(storageTransactionIdProperty.refUID) as string
+  const seedLocalId = seedUidToLocalId.get(seedUid)
+  const versionUid = storageTransactionIdProperty.refUID
+  const versionLocalId = versionUidToLocalId.get(versionUid)
+  const modelType = seedUidToModelType.get(seedUid)
 
-  for (const [_propertyName, propertyDef] of Object.entries(modelSchema)) {
-    if (propertyDef?.storageType && propertyDef.storageType === 'ItemStorage') {
-      itemStorageProperties.set(_propertyName, propertyDef)
+  // Storage settings come from the `properties` table. The model's property instances (modelSchema)
+  // are only a fallback: whether they have loaded, and with storage settings, depends on timing.
+  const itemStorageProperties = new Map<
+    string,
+    { id?: number; localStorageDir?: string | null; filenameSuffix?: string | null }
+  >()
+  if (modelType != null) {
+    const stored =
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
+        getItemStoragePropertiesForModel(modelType, {
+          modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+        }),
+      )) ?? []
+    for (const property of stored) itemStorageProperties.set(property.name, property)
+  }
+  if (itemStorageProperties.size === 0 && modelSchema) {
+    for (const [_propertyName, propertyDef] of Object.entries(modelSchema)) {
+      if (propertyDef?.storageType === 'ItemStorage') {
+        itemStorageProperties.set(_propertyName, {
+          localStorageDir: propertyDef.localStorageDir,
+          filenameSuffix: propertyDef.filenameSuffix,
+        })
+      }
     }
   }
 
@@ -389,35 +410,32 @@ const createMetadataRecordsForStorageTransactionId = async (
 
   for (const [_propertyName, propertyDef] of itemStorageProperties.entries()) {
     const existingMetadataRecordRows = await appDb
-      .select()
+      .select({ localId: metadata.localId })
       .from(metadata)
       .where(
         and(
+          isNotNull(metadata.derivedFromUid),
           eq(metadata.propertyName, _propertyName),
           eq(metadata.propertyValue, propertyValue),
           eq(metadata.versionUid, storageTransactionIdProperty.refUID),
         ),
       )
 
+    // Already derived from another attestation carrying this transaction id: syncDerivedStorageRows
+    // points that row at the canonical attestation.
     if (existingMetadataRecordRows && existingMetadataRecordRows.length > 0) {
       continue
     }
 
-    const seedUid = versionUidToSeedUid.get(
-      storageTransactionIdProperty.refUID,
-    ) as string
-    const seedLocalId = seedUidToLocalId.get(seedUid)
-    const versionUid = storageTransactionIdProperty.refUID
-    const versionLocalId = versionUidToLocalId.get(versionUid)
-    const modelType = seedUidToModelType.get(seedUid)
     const propertyId =
-      modelType != null
+      propertyDef.id ??
+      (modelType != null
         ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
             getPropertyIdForModelAndName(modelType, _propertyName, {
               modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
             }),
           )) ?? null)
-        : null
+        : null)
 
     const propertyLocalId = generateId()
     await appDb.insert(metadata).values({
@@ -425,14 +443,18 @@ const createMetadataRecordsForStorageTransactionId = async (
       propertyId: propertyId ?? undefined,
       propertyName: _propertyName,
       propertyValue,
-      localStorageDir: propertyDef.localStorageDir,
+      localStorageDir: propertyDef.localStorageDir ?? undefined,
       seedLocalId,
       seedUid,
       versionLocalId,
       versionUid,
       refValueType: 'file',
-      refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix}`,
+      refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix ?? ''}`,
       modelType: seedUidToModelType.get(seedUid),
+      derivedFromUid: storageTransactionIdProperty.id,
+      // Ranked like a synced row, at its attestation's time: a local edit made after that
+      // publish wins over it, a newer publish wins over an older edit.
+      attestationCreatedAt: storageTransactionIdProperty.timeCreated * 1000,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -505,11 +527,9 @@ const saveEasPropertiesToDbBody = async ({
       continue
     }
     existingPropertyRecordsUids.add(row.uid)
-    // Keep a stored revocation time when EAS has none (local unpublish records its own).
-    const revokedAt =
-      canonical.revoked && !(canonical.revocationTime > 0) && row.revokedAt != null
-        ? row.revokedAt
-        : (revokedAtSeconds(canonical) ?? null)
+    // Same policy as seeds and versions: a local unpublish stamp stays until EAS reports a
+    // revocationTime, even while EAS (its index lagging) still reports the attestation live.
+    const revokedAt = syncedRevokedAt(canonical, row.revokedAt)
     if ((row.revokedAt ?? null) !== revokedAt) {
       revokedAtUpdates.set(row.uid, revokedAt)
     }
@@ -550,25 +570,15 @@ const storageTransactionIdOf = (property: Attestation): string | undefined => {
 }
 
 /**
- * Rows `createMetadataRecordsForStorageTransactionId` derived from a `storage_transaction_id`
- * attestation. They have no uid of their own; what identifies them is what they're derived from,
- * the key their creation dedupes on: no uid, `ref_value_type` 'file', the attestation's version
- * and its transaction id as the value. Local edits of an ItemStorage property store a file name
- * (`<seed>.<ext>`), never a bare transaction id, so they don't match.
- */
-const derivedStorageRowsWhere = (versionUid: string, transactionId: string) =>
-  and(
-    isNull(metadata.uid),
-    eq(metadata.refValueType, 'file'),
-    eq(metadata.versionUid, versionUid),
-    eq(metadata.propertyValue, transactionId),
-  )
-
-/**
  * Make derived ItemStorage rows follow their `storage_transaction_id` attestation the way synced
- * rows follow theirs: rows derived from a fetched attestation that isn't canonical are deleted
- * (unless the canonical one carries the same transaction id), and rows derived from the canonical
- * one take its `revoked_at`.
+ * rows follow theirs. Derived rows are identified by `derived_from_uid`, the attestation they were
+ * derived from:
+ * - A row derived from another fetched attestation with the canonical one's transaction id (on the
+ *   same version) is pointed at the canonical one; creation makes one row per transaction id.
+ * - Rows derived from a fetched attestation that isn't canonical are deleted.
+ * - Rows derived from the canonical one take its `revoked_at` once it has one (a stamp is never
+ *   cleared, see `syncedRevokedAt`).
+ * Local drafts (no uid, no `derived_from_uid`) are never touched.
  */
 const syncDerivedStorageRows = async ({
   fetchedProperties,
@@ -581,18 +591,36 @@ const syncDerivedStorageRows = async ({
     .map((property) => ({ property, transactionId: storageTransactionIdOf(property) }))
     .filter((c): c is { property: Attestation; transactionId: string } => !!c.transactionId)
   const canonicalUids = new Set(canonicalProperties.map((property) => property.id))
-  const canonicalTransactionIds = new Set(
-    canonical.map((c) => `${c.property.refUID}|${c.transactionId}`),
-  )
 
   const appDb = BaseDb.getAppDb()
 
-  for (const property of fetchedProperties) {
-    if (canonicalUids.has(property.id)) continue
-    const transactionId = storageTransactionIdOf(property)
-    if (!transactionId) continue
-    if (canonicalTransactionIds.has(`${property.refUID}|${transactionId}`)) continue
-    await appDb.delete(metadata).where(derivedStorageRowsWhere(property.refUID, transactionId))
+  for (const { property, transactionId } of canonical) {
+    const sameTransaction = fetchedProperties
+      .filter(
+        (other) =>
+          other.id !== property.id &&
+          other.refUID === property.refUID &&
+          storageTransactionIdOf(other) === transactionId,
+      )
+      .map((other) => other.id)
+    if (sameTransaction.length === 0) continue
+    // A stamp belongs to the attestation it came from; the new source's is applied below.
+    await appDb
+      .update(metadata)
+      .set({
+        derivedFromUid: property.id,
+        revokedAt: null,
+        attestationCreatedAt: property.timeCreated * 1000,
+        updatedAt: Date.now(),
+      })
+      .where(inArray(metadata.derivedFromUid, sameTransaction))
+  }
+
+  const staleSourceUids = fetchedProperties
+    .filter((property) => !canonicalUids.has(property.id) && storageTransactionIdOf(property))
+    .map((property) => property.id)
+  if (staleSourceUids.length > 0) {
+    await appDb.delete(metadata).where(inArray(metadata.derivedFromUid, staleSourceUids))
   }
 
   if (canonical.length === 0) return
@@ -604,18 +632,18 @@ const syncDerivedStorageRows = async ({
     .where(inArray(metadata.uid, canonical.map((c) => c.property.id)))
   const revokedAtByUid = new Map(sourceRows.map((row) => [row.uid, row.revokedAt ?? null]))
 
-  for (const { property, transactionId } of canonical) {
-    if (!revokedAtByUid.has(property.id)) continue
+  for (const { property } of canonical) {
     const revokedAt = revokedAtByUid.get(property.id) ?? null
+    // The source's revoked_at already follows `syncedRevokedAt`. A live source leaves a derived
+    // row's stamp alone: like a stamped synced row, it is only replaced by a revocation time.
+    if (revokedAt == null) continue
     await appDb
       .update(metadata)
       .set({ revokedAt, updatedAt: Date.now() })
       .where(
         and(
-          derivedStorageRowsWhere(property.refUID, transactionId),
-          revokedAt == null
-            ? isNotNull(metadata.revokedAt)
-            : or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
+          eq(metadata.derivedFromUid, property.id),
+          or(isNull(metadata.revokedAt), ne(metadata.revokedAt, revokedAt)),
         ),
       )
   }

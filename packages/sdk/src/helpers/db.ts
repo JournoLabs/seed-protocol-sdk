@@ -25,11 +25,31 @@ import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
 import { resolveModelRecord, resolveRefModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
-import { normalizeDataType } from '@/helpers/property'
+import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
 import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 
 const logger = debug('seedSdk:helpers:db')
+
+type PropertyStorageColumns = Pick<NewPropertyRecord, 'storageType' | 'localStorageDir' | 'filenameSuffix'>
+
+/**
+ * The `properties` storage columns for a property definition, in either the internal shape
+ * (`storageType`, `localStorageDir`, `filenameSuffix`) or the schema-file shape
+ * (`storage: { type, path, extension }`). All null when the definition has no storage config.
+ */
+export function propertyStorageColumns(def: unknown): PropertyStorageColumns {
+  const normalized = normalizePropertyRecordSchema((def ?? {}) as Record<string, any>)
+  return {
+    storageType: normalized.storageType ?? null,
+    localStorageDir: normalized.localStorageDir ?? null,
+    filenameSuffix: normalized.filenameSuffix ?? null,
+  }
+}
+
+/** True when the definition carries any storage setting (so writing its columns can't wipe them by omission). */
+const hasStorageSettings = (columns: PropertyStorageColumns): boolean =>
+  columns.storageType != null || columns.localStorageDir != null || columns.filenameSuffix != null
 
 /**
  * Resolve property_id (integer properties.id) from a property's schemaFileId (the string `id` in
@@ -93,6 +113,30 @@ export async function getPropertyIdForModelAndName(
     }
   }
   return null
+}
+
+/**
+ * A model's ItemStorage properties as stored in `properties` (storage_type 'ItemStorage'), with
+ * their storage path and extension. Reads the table, not ModelProperty instances, so it doesn't
+ * depend on whether (or from where) the model's property instances have loaded.
+ */
+export async function getItemStoragePropertiesForModel(
+  modelNameOrType: string,
+  scope: ModelScope = {},
+): Promise<Array<{ id: number; name: string; localStorageDir: string | null; filenameSuffix: string | null }>> {
+  const db = BaseDb.getAppDb()
+  if (!db || !modelNameOrType) return []
+  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  if (!modelRecord) return []
+  return db
+    .select({
+      id: properties.id,
+      name: properties.name,
+      localStorageDir: properties.localStorageDir,
+      filenameSuffix: properties.filenameSuffix,
+    })
+    .from(properties)
+    .where(and(eq(properties.modelId, modelRecord.id), eq(properties.storageType, 'ItemStorage')))
 }
 
 /**
@@ -946,7 +990,15 @@ export const renameModelInDb = async (
 async function checkIfPropertyIsEdited(
   modelName: string,
   propertyName: string,
-  schemaFileValue?: { dataType?: string; ref?: string; refValueType?: string; required?: boolean },
+  schemaFileValue?: {
+    dataType?: string
+    ref?: string
+    refValueType?: string
+    required?: boolean
+    storageType?: string | null
+    localStorageDir?: string | null
+    filenameSuffix?: string | null
+  },
   /** The property's models row (model names are only unique per schema). */
   modelId?: number,
 ): Promise<boolean> {
@@ -1016,6 +1068,25 @@ async function checkIfPropertyIsEdited(
               const dbRequired = dbProperty.required === true
               if (dbRequired !== schemaRequired) {
                 logger(`Property ${modelName}:${propertyName} has been edited (required differs: DB=${dbRequired}, Schema=${schemaRequired})`)
+                return true
+              }
+            }
+
+            // Storage settings. Rows written before they were stored (all null) aren't edits: the
+            // schema file's values fill them in on this load.
+            const dbStorage = {
+              storageType: dbProperty.storageType ?? null,
+              localStorageDir: dbProperty.localStorageDir ?? null,
+              filenameSuffix: dbProperty.filenameSuffix ?? null,
+            }
+            if (hasStorageSettings(dbStorage)) {
+              const fileStorage = propertyStorageColumns(schemaFileValue)
+              if (
+                dbStorage.storageType !== fileStorage.storageType ||
+                dbStorage.localStorageDir !== fileStorage.localStorageDir ||
+                dbStorage.filenameSuffix !== fileStorage.filenameSuffix
+              ) {
+                logger(`Property ${modelName}:${propertyName} has been edited (storage settings differ)`)
                 return true
               }
             }
@@ -1187,6 +1258,8 @@ export const addModelsToDb = async (
         dataType: normalizeDataType(propertyValues.dataType),
         schemaFileId: propertyFileId || null,
         required: propertyValues.required ?? false,
+        // The schema file is the source of truth here: no storage config means none.
+        ...propertyStorageColumns(propertyValues),
       }
 
       // Handle ref property - create ref model if needed
@@ -1262,6 +1335,7 @@ export const addModelsToDb = async (
                 ref: propertyValues.ref,
                 refValueType: propertyValues.refValueType,
                 required: propertyValues.required,
+                ...propertyStorageColumns(propertyValues),
               },
               modelRecord.id,
             )
@@ -1293,6 +1367,9 @@ export const addModelsToDb = async (
           existingProperty.required === (updateData.required ?? false) &&
           existingProperty.refModelId === (updateData.refModelId ?? null) &&
           existingProperty.refValueType === (updateData.refValueType ?? null) &&
+          (existingProperty.storageType ?? null) === (updateData.storageType ?? null) &&
+          (existingProperty.localStorageDir ?? null) === (updateData.localStorageDir ?? null) &&
+          (existingProperty.filenameSuffix ?? null) === (updateData.filenameSuffix ?? null) &&
           existingProperty.isEdited === (updateData.isEdited ?? false)
         if (!unchanged) {
           await db
@@ -1451,6 +1528,10 @@ export const loadModelsFromDbForSchema = async (
         if (prop.refValueType) {
           propertyData.refValueType = normalizeDataType(prop.refValueType ?? undefined)
         }
+
+        if (prop.storageType) propertyData.storageType = prop.storageType
+        if (prop.localStorageDir) propertyData.localStorageDir = prop.localStorageDir
+        if (prop.filenameSuffix) propertyData.filenameSuffix = prop.filenameSuffix
 
         modelProperties[prop.name] = propertyData
       }
@@ -1677,6 +1758,13 @@ export const savePropertyToDb = async (
   }
 
   propertyData.required = property.required ?? false
+
+  // Only when the context has storage settings: a context built without them (e.g. loaded before
+  // they were stored) must not clear the row's.
+  const storage = propertyStorageColumns(property)
+  if (hasStorageSettings(storage)) {
+    Object.assign(propertyData, storage)
+  }
 
   if (existingProperties.length > 0) {
     // Property exists, update it with new values (including new name)
@@ -2093,8 +2181,12 @@ export async function writePropertyToDb(
     propertyData.required = data.required
   }
 
-  // Note: Additional property fields like storageType, localStorageDir, filenameSuffix
-  // are not stored in the properties table but may be in the schema JSON
+  // Storage settings, like `required`, only when the caller has them: the creation write's payload
+  // can lack them, and writing nulls would clear what the schema import stored.
+  const storage = propertyStorageColumns(data)
+  if (hasStorageSettings(storage)) {
+    Object.assign(propertyData, storage)
+  }
   
   if (existingProperties.length > 0) {
     // Property exists, update it with new values.

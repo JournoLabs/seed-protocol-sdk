@@ -821,9 +821,14 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           dataType: string
           refValueType: string | null
           refModelName: string | null
+          storageType: string | null
+          localStorageDir: string | null
+          filenameSuffix: string | null
         }>(
           (sql: any) => sql`
-            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName
+            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName,
+              p.storage_type as storageType, p.local_storage_dir as localStorageDir,
+              p.filename_suffix as filenameSuffix
             FROM properties p
             INNER JOIN models m ON p.model_id = m.id
             LEFT JOIN models ref ON p.ref_model_id = ref.id
@@ -851,9 +856,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               dataType: row.dataType,
               ref: row.refModelName || undefined,
               refValueType: row.refValueType || undefined,
-              storageType: undefined as string | undefined,
-              localStorageDir: undefined as string | undefined,
-              filenameSuffix: undefined as string | undefined,
+              storageType: row.storageType || undefined,
+              localStorageDir: row.localStorageDir || undefined,
+              filenameSuffix: row.filenameSuffix || undefined,
             }
 
             logger(`[ItemProperty._setupPropertySchemaLiveQuery] Schema updated for ${propertyName}: dataType=${row.dataType}`)
