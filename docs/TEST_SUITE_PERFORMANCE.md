@@ -180,12 +180,14 @@ their number so references to them stay valid.
    round). Full runs on the branch: browser twice (once with `--sequence.shuffle.files`), NodeJS
    once, no failures. On a quieter run, items after
    the first per model took ~125–230ms.
-   Not changed: the browser `QueryClient` helper still builds a new client per call. Building one
-   is cheap, and with `staleTime` 0 sharing one would not cache anything; it would dedupe
-   concurrent requests by query key, and several keys omit their variables
-   (`getPropertySchema${name}` is shared by model and property lookups and ignores the data type).
-   Sharing a client needs those keys fixed first. Each per-call client also schedules a 24h
-   `gcTime` timer per query, which keeps the result alive for a day in long-running apps.
+   Later (branch `claude/shared-query-client`): the browser `QueryClient` helper built a new
+   TanStack client on every call, so nothing was shared. It now keeps one per page. That needed
+   every query key to include its variables first (`b052762`; `getPropertySchema${name}` had been
+   shared by model and property lookups). No speed change, back to back against `main` (browser
+   summed 322/323s → 323/321s, browser-react 221/219s → 221/223s): this cache already removed the
+   repeated EAS requests, and most queries use `staleTime` 0. It fixes behavior instead: files
+   metadata's 2-minute `staleTime` and its `removeQueries` now take effect, and queries no longer
+   each schedule a 24h `gcTime` timer (now 5 minutes). Test: `browser/helpers/browserQueryClient.test.ts`.
 4. **Not a bug.** Html saves do have a completion signal (see "Writing tests that stay fast"); the 2s
    sleeps in `ItemProperty.test.ts` and `htmlPropertyPersistence.test.tsx` were removed.
 
@@ -305,5 +307,6 @@ Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 
 - **Step 6 — done** (branch `claude/step6-getbyid-propschema`): 18 and 19 fixed.
 - **Not scheduled:** 14's SDK side. Its first case (a cached Model handing back a deleted row's id
   after a re-import) is being worked on in a separate session as of 2026-10-08; look at the second
-  case (a stopped runtime model starting a write) after that lands. Also open: sharing one browser
-  `QueryClient` (see 3), which needs `claude/elegant-tu-ac5741`'s query-key fix merged first.
+  case (a stopped runtime model starting a write) after that lands.
+- **Shared browser `QueryClient` — done** (branches `claude/elegant-tu-ac5741`, merged in `b052762`,
+  and `claude/shared-query-client`): see 3. Behavior fix only; suite times unchanged.
