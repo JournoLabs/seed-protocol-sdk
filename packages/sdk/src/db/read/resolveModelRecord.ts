@@ -5,6 +5,8 @@ import { seeds } from '@/seedSchema/SeedSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { AmbiguousModelError } from '@/Model/errors'
+import { toSnakeCase } from 'drizzle-orm/casing'
+import { camelCase, upperFirst } from 'lodash-es'
 
 /**
  * What is known about which model an item, property or lookup belongs to. Model names are only
@@ -84,17 +86,19 @@ export const resolveModelRecord = async (
 /**
  * Name-only resolution. Rows linked to a schema win over unlinked stubs (null-schemaFileId rows
  * from ref resolution); if more than one linked row has the name it is ambiguous and this throws.
+ * `label` names the lookup in the error (defaults to the model name).
  */
 const resolveModelRecordByNameOnly = async (
-  modelName: string,
+  modelName: string | string[],
   db: NonNullable<Db>,
+  label: string = Array.isArray(modelName) ? modelName.join(', ') : modelName,
 ): Promise<ResolvedModelRecord | undefined> => {
   const rows = (await db
     .select({ ...columns, schemaName: schemasTable.name })
     .from(modelsTable)
     .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
     .leftJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-    .where(eq(modelsTable.name, modelName))
+    .where(Array.isArray(modelName) ? inArray(modelsTable.name, modelName) : eq(modelsTable.name, modelName))
     .orderBy(desc(modelsTable.id))) as (ResolvedModelRecord & { schemaName: string | null })[]
   if (rows.length === 0) return undefined
 
@@ -102,12 +106,65 @@ const resolveModelRecordByNameOnly = async (
   const linkedIds = new Set(linked.map((r) => r.id))
   if (linkedIds.size > 1) {
     throw new AmbiguousModelError(
-      modelName,
+      label,
       linked.map((r) => r.schemaName!),
     )
   }
   const chosen = linked[0] ?? rows[0]
   return { id: chosen.id, name: chosen.name, schemaFileId: chosen.schemaFileId }
+}
+
+/**
+ * The model names a model name or EAS model type can refer to: the name itself, names whose
+ * snake_case form is the type (`new_model` → "New model", as Model.findByModelType matches), and
+ * the PascalCase form older callers relied on (`sync_storage_post` → "SyncStoragePost").
+ */
+const modelNamesForNameOrType = async (nameOrType: string, db: NonNullable<Db>): Promise<string[]> => {
+  const pascal = upperFirst(camelCase(nameOrType))
+  const rows = (await db.selectDistinct({ name: modelsTable.name }).from(modelsTable)) as { name: string }[]
+  return rows
+    .map((r) => r.name)
+    .filter((name) => name === nameOrType || name === pascal || toSnakeCase(name) === nameOrType)
+}
+
+/**
+ * resolveModelRecord for a model name **or** an EAS model type (snake_case model name, what sync
+ * stores in seeds.type): "New model" resolves from `new_model`. Scope and ambiguity behave as in
+ * resolveModelRecord: modelFileId/modelId first, then the schema, then the name(s) alone, which throws
+ * AmbiguousModelError when models in several schemas match.
+ */
+export const resolveModelRecordByNameOrType = async (
+  nameOrType: string | undefined | null,
+  scope: ModelScope = {},
+  db: Db | undefined = BaseDb.getAppDb(),
+): Promise<ResolvedModelRecord | undefined> => {
+  if (!db) return undefined
+  if (scope.modelFileId || scope.modelId) {
+    const byId = await resolveModelRecord(undefined, scope, db)
+    if (byId) return byId
+  }
+  if (!nameOrType) return undefined
+
+  const names = await modelNamesForNameOrType(nameOrType, db)
+  if (names.length === 0) return undefined
+  if (names.length === 1) return resolveModelRecord(names[0], { ...scope, modelFileId: undefined, modelId: undefined }, db)
+
+  // Several model names map to this type (e.g. "New model" and "NewModel" in different schemas).
+  if (scope.schemaId || scope.schemaName) {
+    const rows = (await db
+      .select(columns)
+      .from(modelsTable)
+      .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+      .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+      .where(
+        and(
+          inArray(modelsTable.name, names),
+          scope.schemaId ? eq(schemasTable.id, scope.schemaId) : eq(schemasTable.name, scope.schemaName!),
+        ),
+      )) as ResolvedModelRecord[]
+    if (new Set(rows.map((r) => r.id)).size === 1) return rows[0]
+  }
+  return resolveModelRecordByNameOnly(names, db, nameOrType)
 }
 
 /**
