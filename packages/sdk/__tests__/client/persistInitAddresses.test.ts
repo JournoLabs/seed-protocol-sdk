@@ -33,19 +33,31 @@ describe('persistInitAddresses', () => {
     }
   })
 
-  it("keeps another tab's addresses when this tab inits with none", async () => {
-    const connected = JSON.stringify({ owned: ['0xabc'], watched: [] })
+  const connected = JSON.stringify({ owned: ['0xabc'], watched: [] })
+  const none = { addresses: [], ownedAddresses: [], watchedAddresses: [] }
+
+  it("keeps another tab's addresses when a second tab inits with none", async () => {
     await store(connected)
 
-    await persistInitAddresses(BaseDb.getAppDb()!, { addresses: [], ownedAddresses: [], watchedAddresses: [] })
+    await persistInitAddresses(BaseDb.getAppDb()!, none, { keepStoredWhenEmpty: true })
     expect(await stored()).toBe(connected)
 
-    await persistInitAddresses(BaseDb.getAppDb()!, { addresses: undefined })
+    await persistInitAddresses(BaseDb.getAppDb()!, { addresses: undefined }, { keepStoredWhenEmpty: true })
     expect(await stored()).toBe(connected)
   })
 
+  it('clears stored addresses when the first tab inits with none', async () => {
+    await store(connected)
+    await persistInitAddresses(BaseDb.getAppDb()!, none, { keepStoredWhenEmpty: false })
+    expect(JSON.parse((await stored())!)).toEqual({ owned: [], watched: [] })
+  })
+
   it('saves addresses passed to init', async () => {
-    await persistInitAddresses(BaseDb.getAppDb()!, { ownedAddresses: ['0xDEF'], watchedAddresses: ['0x123'] })
+    await persistInitAddresses(
+      BaseDb.getAppDb()!,
+      { ownedAddresses: ['0xDEF'], watchedAddresses: ['0x123'] },
+      { keepStoredWhenEmpty: true },
+    )
     expect(JSON.parse((await stored())!)).toEqual({ owned: ['0xdef'], watched: ['0x123'] })
   })
 })

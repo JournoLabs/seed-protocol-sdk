@@ -130,9 +130,11 @@ Ranked by damage:
     calls fail with "duplicate column name" (`concurrentPrepareDb.test.ts`).
   - `saveConfig`, `processSchemaFiles` and `ensureModelStubs` (from `addModelsToDb`) hold
     `seed:init:<db>`. Without it, concurrent stub inserts duplicate rows (`ensureModelStubs.test.ts`).
-  - **Behavior change:** init no longer saves an empty address list (`persistInitAddresses`).
-    Stored addresses survive a reload with `addresses: []` until `setAddresses` replaces or
-    clears them.
+  - Init with an empty address list no longer wipes another tab's stored addresses
+    (`persistInitAddresses`). Phase A skipped the write in every tab; Phase B narrowed it to
+    non-leader tabs. Keeping stale addresses in a lone tab made drafts created before the wallet
+    reconnected read-only (unstamped drafts aren't owned while owned addresses are stored), so
+    the first tab clears them as before.
   - The drizzle driver retries `SQLITE_BUSY` / `SQLITE_LOCKED` (`sqliteBusyRetry.ts`).
 - **Phase B: done.**
   - `packages/publish/src/services/publishManager/publishLocks.ts`: the tab running a publish holds
