@@ -734,6 +734,24 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(propertyNameEl.textContent).toBe('summary')
     })
 
+    // getPropertySchema read a schema-file model's properties only from the Schema context, which
+    // doesn't get properties added at runtime (finding 19).
+    it('finds a property added at runtime to a schema-file model', async () => {
+      const schemaName = 'Test Schema Properties'
+      const added = ModelProperty.create(
+        { name: 'addedAtRuntime', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      const view = render(
+        <UseModelPropertyTest schemaId={schemaName} modelName="Article" propertyName="addedAtRuntime" />,
+        { container, wrapper: SeedProviderWrapper },
+      )
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 15000 })
+      expect(propertyNameEl.textContent).toBe('addedAtRuntime')
+    })
+
     it('should update when modelName changes', async () => {
       const { rerender } = render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 

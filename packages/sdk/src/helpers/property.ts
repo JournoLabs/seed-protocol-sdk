@@ -83,7 +83,8 @@ export const getPropertySchema = async (
   }
   
   // Fallback to modelPropertiesToObject if Schema context doesn't have the data
-  if (Object.keys(schema).length === 0) {
+  const usingModelProperties = Object.keys(schema).length === 0
+  if (usingModelProperties) {
     const properties = model.properties || []
     if (properties.length === 0) {
       return undefined
@@ -121,7 +122,16 @@ export const getPropertySchema = async (
     return undefined
   }
   
-  const resolvedPropertyName = resolvePropertyName(propertyName)
+  let resolvedPropertyName = resolvePropertyName(propertyName)
+  if (!resolvedPropertyName && !usingModelProperties) {
+    // A property added at runtime (ModelProperty.create) to a schema-file model isn't in the
+    // Schema context, only in model.properties. The schema file's definitions still win.
+    const runtimeProperties = model.properties || []
+    if (runtimeProperties.length > 0) {
+      schema = { ...modelPropertiesToObject(runtimeProperties), ...schema }
+      resolvedPropertyName = resolvePropertyName(propertyName)
+    }
+  }
   if (!resolvedPropertyName) {
     return undefined
   }

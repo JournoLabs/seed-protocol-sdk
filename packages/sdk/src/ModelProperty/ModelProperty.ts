@@ -50,7 +50,17 @@ export class ModelProperty {
     string,
     { instance: ModelProperty; refCount: number }
   > = new Map()
-  
+
+  /**
+   * propertyFileId -> where the instance with that id is cached, so getById doesn't scan the cache
+   * (a model's properties are looked up one by one, which made loading one model O(n²)).
+   * Every cached instance's current id has an entry: it's added when the instance is cached and
+   * again whenever its context id changes (a property is often created with a generated id and
+   * then gets its real one). Entries aren't removed when an instance leaves the cache or changes
+   * id; getById checks an entry before using it.
+   */
+  private static idIndex = new Map<string, { cacheKey: string; instance: ModelProperty }>()
+
   // Pending writes tracking
   private static pendingWrites = new Map<string, {
     propertyFileId: string
@@ -668,7 +678,8 @@ export class ModelProperty {
       instance: proxiedInstance,
       refCount: 1,
     })
-    
+    this.indexCachedInstance(cacheKey, proxiedInstance)
+
     // Trigger write process if property has modelId (or modelName) and id (schemaFileId)
     // Wait for service to be ready (idle state) and have writeProcess spawned
     const propertyFileId = propertyWithId.id // id is now the schemaFileId (string)
@@ -799,22 +810,59 @@ export class ModelProperty {
     )
   }
 
+  /** Whether an idIndex entry still points at a cached instance with that id. */
+  private static isIndexEntryCurrent(
+    propertyFileId: string,
+    entry: { cacheKey: string; instance: ModelProperty },
+  ): boolean {
+    if (this.instanceCache.get(entry.cacheKey)?.instance !== entry.instance) return false
+    try {
+      return entry.instance._getSnapshotContext().id === propertyFileId
+    } catch {
+      return false
+    }
+  }
+
+  /** Add a newly cached instance to idIndex, and keep its entry current when its id changes. */
+  private static indexCachedInstance(cacheKey: string, instance: ModelProperty): void {
+    const index = (id: string | undefined) => {
+      if (!id) return
+      const existing = this.idIndex.get(id)
+      // Keep the instance cached first, as the old scan in insertion order returned
+      if (existing && existing.instance !== instance && this.isIndexEntryCurrent(id, existing)) return
+      this.idIndex.set(id, { cacheKey, instance })
+    }
+    let indexedId = instance._getSnapshotContext().id
+    index(indexedId)
+    instance._service.subscribe((snapshot) => {
+      const id = snapshot.context.id
+      if (id === indexedId) return
+      indexedId = id
+      index(id)
+    })
+  }
+
   /**
    * Get ModelProperty instance by propertyFileId from static cache
    */
   static getById(propertyFileId: string): ModelProperty | undefined {
     if (!propertyFileId) return undefined
-    
-    // Search through cache to find by propertyFileId
+
+    const indexed = this.idIndex.get(propertyFileId)
+    if (!indexed) return undefined
+    if (this.isIndexEntryCurrent(propertyFileId, indexed)) return indexed.instance
+
+    // The indexed instance left the cache or changed id; another cached instance may still have it.
     // Cache key might be "modelName:propertyName" or "id:propertyId"
+    this.idIndex.delete(propertyFileId)
     for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
-      const context = instance._getSnapshotContext()
       // id is now the schemaFileId (string)
-      if (context.id === propertyFileId) {
+      if (instance._getSnapshotContext().id === propertyFileId) {
+        this.idIndex.set(propertyFileId, { cacheKey, instance })
         return instance
       }
     }
-    
+
     return undefined
   }
 
