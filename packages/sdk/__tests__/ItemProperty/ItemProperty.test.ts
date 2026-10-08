@@ -20,63 +20,10 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
-import type { IItemProperty } from '@/interfaces'
+import { waitForIdle, type HasService, waitForItemIdle } from '../test-utils/waitForIdle'
 
-// Helper function to wait for ItemProperty to be in idle state
-async function waitForItemPropertyIdle(property: IItemProperty<any>, timeout: number = 10000): Promise<void> {
-  const service = property.getService()
-  
-  // Check current state first - if already idle, return immediately
-  const currentSnapshot = service.getSnapshot()
-  if (currentSnapshot.value === 'idle') {
-    return
-  }
-  
-  if (currentSnapshot.value === 'error') {
-    throw new Error('ItemProperty failed to load')
-  }
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for Item to be in idle state
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
+const waitForItemPropertyIdle = (property: HasService, timeout = 10000) =>
+  waitForIdle(property, 'ItemProperty', timeout)
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {

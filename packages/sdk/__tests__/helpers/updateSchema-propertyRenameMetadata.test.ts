@@ -11,18 +11,7 @@ import { importJsonSchema } from '@/imports/json'
 import { renameModelProperty } from '@/helpers/updateSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
-
-async function waitForItemIdle(item: Item<any>, timeout = 5000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout },
-  )
-}
+import { waitForItemIdle } from '../test-utils/waitForIdle'
 
 function createTestSchema(name: string, models: Record<string, any>): SchemaFileFormat {
   return {

@@ -18,6 +18,7 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
 
 const MINIMAL_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -36,32 +37,11 @@ function createPngFile(name: string): File {
   return new File([blob], name, { type: 'image/png' })
 }
 
-async function waitForItemIdle(item: Item<any>, timeout = 10000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+const waitForItemIdle = (item: HasService, timeout = 10000) =>
+  waitForIdle(item, 'Item', timeout)
 
-async function waitForItemPropertyIdle(
-  property: ItemProperty<any>,
-  timeout = 15000
-): Promise<void> {
-  const service = property.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('ItemProperty failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+const waitForItemPropertyIdle = (property: HasService, timeout = 15000) =>
+  waitForIdle(property, 'ItemProperty', timeout)
 
 /**
  * Wait until saveImage has finished: it replaces propertyValue with the image seed id and sets

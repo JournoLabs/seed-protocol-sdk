@@ -8,27 +8,14 @@ import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { eq } from 'drizzle-orm'
-import { waitFor } from 'xstate'
 import internalSchema from '@/seedSchema/SEEDPROTOCOL_Seed_Protocol_v1.json'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema, syncSchemaFromSource } from '@/imports/json'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
+import { waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 const internalModelNames = Object.keys((internalSchema as SchemaFileFormat).models)
-
-// Checks the current snapshot too: the Seed Protocol schema instance may already be idle from client init,
-// in which case a plain subscribe() would never fire.
-async function waitForSchemaIdle(schema: Schema, timeout = 5000): Promise<void> {
-  await waitFor(
-    schema.getService(),
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Schema failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout },
-  )
-}
 
 // This test should only run in Node.js environment
 const testDescribe = typeof window === 'undefined' 

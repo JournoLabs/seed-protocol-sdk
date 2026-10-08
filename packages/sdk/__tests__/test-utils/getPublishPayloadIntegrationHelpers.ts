@@ -4,7 +4,6 @@
  * Environment-agnostic: use from both Node and browser tests after setupTestEnvironment().
  */
 
-import { waitFor } from 'xstate'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import type { IItemProperty } from '@/interfaces'
@@ -21,33 +20,14 @@ import { normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { waitForIdle, type HasService, waitForModelIdle } from './waitForIdle'
 
 const SCHEMA_NAME = 'Test Schema getPublishPayload'
 const SCHEMA_NAME_OPTIONAL_AUTHOR = 'Test Schema getPublishPayload Optional Author'
 const SCHEMA_NAME_ENUM_VALIDATION = 'Test Schema getPublishPayload Enum'
 
-function waitForItemIdle(item: ItemClass<any>, timeout = 10000): Promise<void> {
-  const service = item.getService()
-  return waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  ).catch((err) => {
-    if (err?.message === 'Item failed to load') throw err
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  })
-}
-
-function waitForModelIdle(model: Model, timeout = 5000): Promise<void> {
-  return waitFor(
-    model.getService(),
-    (snapshot) => snapshot.value === 'idle',
-    { timeout }
-  )
-}
+const waitForItemIdle = (item: HasService, timeout = 10000) =>
+  waitForIdle(item, 'Item', timeout)
 
 export async function waitForPropertyInstances(item: ItemClass<any>, timeout = 10000): Promise<void> {
   return new Promise<void>((resolve) => {

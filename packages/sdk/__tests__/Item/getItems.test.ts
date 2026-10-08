@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { waitFor } from 'xstate'
 import { getItemsData } from '@/db/read/getItems'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
@@ -10,25 +9,14 @@ import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
+import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
 const VALID_V1 = '0x' + '1'.repeat(64)
 
-async function waitForItemIdle(item: Item<any>, timeout = 15000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout },
-  ).catch((err) => {
-    if (err?.message === 'Item failed to load') throw err
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  })
-}
+const waitForItemIdle = (item: HasService, timeout = 15000) =>
+  waitForIdle(item, 'Item', timeout)
 
 testDescribe('getItemsData', () => {
   beforeAll(async () => {

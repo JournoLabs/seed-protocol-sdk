@@ -19,29 +19,7 @@ import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import type { TProperty } from '@/Schema'
-
-// Helper function to wait for ModelProperty to be in idle state using xstate waitFor
-async function waitForModelPropertyIdle(property: ModelProperty, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ModelProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ModelProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ModelProperty loading timeout after ${timeout}ms`)
-  }
-}
+import { waitForModelPropertyIdle } from '../test-utils/waitForIdle'
 
 // Schema names here must not match other test files': in the browser all files share one OPFS store, and
 // importing a same-name/same-version schema loads the other file's schema instead.

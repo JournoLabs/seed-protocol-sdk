@@ -16,6 +16,7 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
+import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
 // Bounded wait for a condition that a lenient test tolerates never becoming true (replaces fixed sleeps)
@@ -30,51 +31,6 @@ async function waitUntil(condition: () => boolean | Promise<boolean>, timeout = 
     return true
   } catch {
     return false
-  }
-}
-
-async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
-  const service = model.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Model failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Model failed to load') {
-      throw error
-    }
-    throw new Error(`Model loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for schema to be in idle state using xstate waitFor
-async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
-  const service = schema.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Schema failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Schema failed to load') {
-      throw error
-    }
-    throw new Error(`Schema loading timeout after ${timeout}ms`)
   }
 }
 
