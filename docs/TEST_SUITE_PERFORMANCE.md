@@ -216,8 +216,8 @@ their number so references to them stay valid.
 
 ### Plan
 
-Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 13 are fixed on branch
-`fix/test-source-aliases`, not yet merged as of this writing.
+Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 13 were closed on branch
+`fix/test-source-aliases` (merged in `843bf4e`).
 
 - **Step 3 — test cleanup and weak tests: 5, 6, 7, 14, 16.** A shared seed-cleanup helper that deletes
   by `modelFileId` instead of `seeds.type`, used by every file listed under 5. The React files switch
