@@ -26,7 +26,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitFor as xstateWaitFor } from 'xstate'
-import { waitUntil } from './test-utils/waitUntil'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
@@ -464,13 +464,11 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // First get the model to get its ID
       const schema = Schema.create('Test Schema Properties', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
+      // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
-      if (!postModel || !postModel.id) {
-        // Skip if we can't get the model ID
-        return
-      }
+      expect(postModel?.id).toBeTruthy()
 
       render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container, wrapper: SeedProviderWrapper })
 

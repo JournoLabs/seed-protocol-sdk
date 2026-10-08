@@ -22,7 +22,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
-import { waitUntil } from './test-utils/waitUntil'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with multiple models
@@ -315,8 +315,8 @@ describe('React Model Hooks Integration Tests', () => {
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
     // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-    const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
-    schemaId = (schemaIdle ? schema.id : undefined) ?? testSchemaWithModels.id ?? null
+    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+    schemaId = schema.id ?? null
 
     // Wait for models to be populated (they're loaded asynchronously)
     await waitFor(
@@ -560,13 +560,11 @@ describe('React Model Hooks Integration Tests', () => {
       // First get the model by name to get its ID
       const schema = Schema.create('Test Schema Models', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
+      // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
-      if (!postModel || !postModel.id) {
-        // Skip if we can't get the model ID
-        return
-      }
+      expect(postModel?.id).toBeTruthy()
 
       render(<UseModelWithIdTest modelId={postModel.id} />, { container })
 
@@ -637,7 +635,7 @@ describe('React Model Hooks Integration Tests', () => {
       // Get schema instance
       const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
       // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
       render(<UseModelsTest schemaId="Test Schema Dynamic" />, {
