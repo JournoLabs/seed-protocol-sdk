@@ -675,6 +675,30 @@ testDescribe('ModelProperty Integration Tests', () => {
         trackPendingWrite.mockRestore()
       }
     })
+
+    // The Schema context only has the schema file's properties; getPropertySchema used to read only
+    // those for a schema-file model, so a property added at runtime was never found (finding 19).
+    it('getPropertySchema finds a property added at runtime to a schema-file model', async () => {
+      const schemaName = 'Test Schema Runtime Property Lookup'
+      const modelName = 'RuntimeLookupModel'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: { id: generateId(), properties: { title: { id: generateId(), type: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await waitForPropertySchema(modelName, 'title', schemaName)
+
+      const added = ModelProperty.create(
+        { name: 'subtitle', dataType: 'Text', modelName } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await waitForModelPropertyIdle(added)
+
+      const subtitle = await waitForPropertySchema(modelName, 'subtitle', schemaName)
+      expect(subtitle).toMatchObject({ name: 'subtitle', dataType: 'Text', modelName })
+      // The schema file's own properties still resolve as before
+      expect(await getPropertySchema(modelName, 'title', { schemaName })).toMatchObject({ name: 'title' })
+      expect(await getPropertySchema(modelName, 'missing', { schemaName })).toBeUndefined()
+    })
   })
 
   describe('ModelProperty property access', () => {
