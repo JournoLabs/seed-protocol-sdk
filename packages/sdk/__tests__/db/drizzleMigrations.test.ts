@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as seedSchema from '@/seedSchema'
 import * as drizzleFiles from '@/browser/db/drizzleFiles'
+import { DRIZZLE_FILES_TS, renderDrizzleFilesTs } from '../../scripts/drizzleFiles'
 
 /**
  * The migration folder is generated with `drizzle-kit generate`, which diffs the schema against
@@ -65,5 +66,9 @@ describe('drizzle migrations folder', () => {
       const sql = fs.readFileSync(path.join(drizzleDir, `${tag}.sql`), 'utf-8')
       expect(embedded[`migrationSql_${tag}`]?.trim(), tag).toBe(sql.trim())
     }
+  })
+
+  it('drizzleFiles.ts is exactly what `bun run drizzle:update --embed-only` writes', () => {
+    expect(renderDrizzleFilesTs(drizzleDir)).toBe(fs.readFileSync(DRIZZLE_FILES_TS, 'utf-8'))
   })
 })
