@@ -13,7 +13,6 @@ import {
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
-import { waitFor as xstateWaitFor } from 'xstate'
 import {
   createGetPublishPayloadTestSchema,
   createPublishedItemForUnpublish,
@@ -22,18 +21,7 @@ import {
 import { createTestRevokeExecutor } from '../../sdk/__tests__/test-utils/testRevokeExecutor'
 import type { Item as ItemClass } from '@seedprotocol/sdk'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
-
-async function waitForItemIdle(item: ItemClass<any>, timeout = 5000): Promise<void> {
-  const service = item.getService()
-  await xstateWaitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+import { waitForItemIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 
 function UnpublishTest({ item }: { item: ItemClass<any> | null }) {
   const [revoked, setRevoked] = useState(false)

@@ -39,6 +39,7 @@ import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
+import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -103,52 +104,6 @@ const emptyTestSchema: SchemaFileFormat = {
   models: {},
   enums: {},
   migrations: [],
-}
-
-// Helper function to wait for item to be in idle state
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for itemProperty to be in idle state
-async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
 }
 
 // Test component for useItemProperty with object props

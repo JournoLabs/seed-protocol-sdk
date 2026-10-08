@@ -27,6 +27,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
+import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -160,51 +161,6 @@ async function deleteTestSchemaItemsHooksFile(): Promise<void> {
     }
   } catch {
     // File may not exist
-  }
-}
-
-// Helper function to wait for item to be in idle state
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for item property to be in idle state
-async function waitForItemPropertyIdle(property: { getService: () => { getSnapshot: () => { value: string } } }, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
   }
 }
 

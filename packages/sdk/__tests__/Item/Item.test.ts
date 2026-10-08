@@ -20,52 +20,7 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
-
-// Helper function to wait for item to be in idle state using xstate waitFor
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for itemProperty to be in idle state
-async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
+import { waitForItemIdle } from '../test-utils/waitForIdle'
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -1237,6 +1192,14 @@ testDescribe('Item Integration Tests', () => {
       // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
       // a deleted DB id (no properties) while the other schema's Model is still cached.
       // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
+      // Let both Models' own writes finish first, or one can fail or recreate rows after the deletes.
+      for (const m of [otherModel, model]) {
+        const writeProcess = (await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess)).context
+          .writeProcess!
+        await waitFor(writeProcess, (snapshot) => snapshot.value === 'success' || snapshot.value === 'error', {
+          timeout: 5000,
+        })
+      }
       const db = BaseDb.getAppDb()
       const schemaIds: number[] = []
       const modelIds = new Set<number>()

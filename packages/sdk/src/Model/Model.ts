@@ -58,17 +58,10 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
-// Lazy import cache for Schema to avoid circular dependency
-let SchemaClass: any = null
+// Lazy import for Schema to avoid circular dependency
 const schemaImportPromise = import('@/Schema/Schema')
-  .then(module => {
-    SchemaClass = module.Schema
-    return SchemaClass
-  })
-  .catch(() => {
-    // If import fails, SchemaClass remains null
-    return null
-  })
+  .then(module => module.Schema)
+  .catch(() => null)
 
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
@@ -250,37 +243,6 @@ export class Model {
           }
         }
       }
-    }
-    
-    // Also check schema context models (case-insensitive)
-    // This ensures runtime-created models are renamed if they conflict with schema-defined models
-    try {
-      // Use lazy-loaded Schema class to avoid circular dependency
-      if (SchemaClass) {
-        const schema = SchemaClass.create(schemaName)
-        const schemaContext = schema.getService().getSnapshot().context
-        
-        if (schemaContext.models) {
-          for (const schemaModelName of Object.keys(schemaContext.models)) {
-            const lowerSchemaModelName = schemaModelName.toLowerCase()
-            
-            // If it matches the base name (case-insensitive), check if it has a number suffix
-            if (lowerSchemaModelName === lowerModelName) {
-              existingNumbers.add(0) // Base name exists in schema
-            } else if (lowerSchemaModelName.startsWith(lowerModelName + ' ')) {
-              // Check if it's the base name followed by a space and a number
-              const suffix = lowerSchemaModelName.slice(lowerModelName.length + 1)
-              const number = parseInt(suffix, 10)
-              if (!isNaN(number) && suffix === number.toString()) {
-                existingNumbers.add(number)
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // If schema check fails, continue with cache-only check
-      // This is a best-effort check and shouldn't block model creation
     }
     
     // If no duplicates found (no base name match and no numbered variants), return original name

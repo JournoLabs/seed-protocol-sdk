@@ -20,6 +20,7 @@ import {
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
+import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 
 const testSchemaHtmlPersistence: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -47,51 +48,6 @@ const testSchemaHtmlPersistence: SchemaFileFormat = {
   },
   enums: {},
   migrations: [],
-}
-
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-async function waitForItemPropertyIdle(
-  property: ItemProperty<any>,
-  timeout: number = 5000
-): Promise<void> {
-  const service = property.getService()
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
 }
 
 function HtmlValueDisplayTest({ seedLocalId }: { seedLocalId: string }) {
@@ -236,8 +192,6 @@ describe('Html property persistence integration tests', () => {
     if (htmlProperty) {
       await waitForItemPropertyIdle(htmlProperty)
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 2000))
   })
 
   afterEach(async () => {
