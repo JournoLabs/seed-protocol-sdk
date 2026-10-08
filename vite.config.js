@@ -16,6 +16,31 @@ import { seedVitePlugin } from '@seedprotocol/vite'
 // tens of thousands of log lines per run, slowing Node runs and burying failures.
 const debugNamespaces = process.env.DEBUG ?? ''
 
+// Real extra tabs for browser/multiTab.e2e.test.ts: pages opened in the test's own Playwright
+// context, so they share its OPFS, Web Locks and BroadcastChannels. Each loads
+// __tests__/e2e/multiTab/tab.html, which exposes `window.seedTab`.
+const seedTabPages = new Map()
+const seedTabCommands = {
+  async openSeedTab(ctx, url) {
+    const page = await ctx.context.newPage()
+    page.on('pageerror', (error) => console.error('[seed tab]', error))
+    await page.goto(url)
+    await page.waitForFunction(() => window.seedTabReady === true)
+    const id = `tab-${seedTabPages.size + 1}-${Date.now()}`
+    seedTabPages.set(id, page)
+    return id
+  },
+  async callSeedTab(ctx, id, method, ...args) {
+    const page = seedTabPages.get(id)
+    if (!page) throw new Error(`no seed tab ${id}`)
+    return page.evaluate(([m, a]) => window.seedTab[m](...a), [method, args])
+  },
+  async closeSeedTab(ctx, id) {
+    await seedTabPages.get(id)?.close()
+    seedTabPages.delete(id)
+  },
+}
+
 // Test files run in parallel. Each browser worker gets its own Playwright context (separate OPFS and
 // localStorage) and each Node file runs in its own forked process with its own temp project dir, so
 // files don't share storage. TEST_WORKERS overrides the per-project count; TEST_WORKERS=1 restores
@@ -147,6 +172,7 @@ export default defineConfig({
             instances: [
               {browser: 'chromium'}
             ],
+            commands: seedTabCommands,
           },
         },
       },
@@ -274,6 +300,8 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
+            'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
+            'packages/sdk/__tests__/browser/multiTab.e2e.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,

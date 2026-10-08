@@ -227,6 +227,21 @@ export class BrowserFileManager implements IFileManager {
     return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
   }
 
+  async invalidateCachedPaths(filePaths: string[]): Promise<void> {
+    const { mounts } = await this.getFs()
+    const { TolerantWebAccessFS } = await import('./tolerantWebAccess')
+    const mounted = mounts.get('/')
+    if (!(mounted instanceof TolerantWebAccessFS)) return
+    for (const filePath of filePaths) {
+      const absolute = filePath.startsWith('/') ? filePath : `/${filePath}`
+      try {
+        await mounted.invalidate(absolute)
+      } catch (error) {
+        logger(`could not refresh cached ${absolute}`, error)
+      }
+    }
+  }
+
   async pathExists(filePath: string): Promise<boolean> {
     try {
       const zenfs = await this.getFs()

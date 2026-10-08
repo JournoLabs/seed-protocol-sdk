@@ -17,7 +17,12 @@ const logger = debug('seedSdk:helpers:tabCoordinator')
 export type MultiTabMode = 'coordinate' | 'off'
 
 /** Messages between tabs of the same database. */
-export type TabMessage = { type: 'eas-sync-address-change'; addresses: string[] }
+export type TabMessage =
+  | { type: 'eas-sync-address-change'; addresses: string[] }
+  /** An event-bus event emitted in another tab (see helpers/tabEvents.ts). */
+  | { type: 'event'; name: string; payload?: unknown }
+  /** OPFS paths another tab (or its workers) wrote. */
+  | { type: 'files-changed'; paths: string[] }
 
 type CoordinationState = {
   dbKey: string
@@ -96,12 +101,11 @@ export function withDbTabLock<T>(scope: string, fn: () => Promise<T>, options?: 
   return state ? withTabLock(`seed:${scope}:${state.dbKey}`, fn, options) : fn()
 }
 
-/** Tests only. */
+/** Tests only. Keeps message handlers: modules register theirs once per page. */
 export function resetTabCoordinationForTests(): void {
   state?.releaseLeadership?.()
   state?.channel?.close()
   state = undefined
   leader = false
   leaderWaiters = []
-  messageHandlers.clear()
 }

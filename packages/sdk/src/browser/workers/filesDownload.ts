@@ -138,6 +138,9 @@ const saveBufferToOPFS = async (filePath: string, buffer: Uint8Array): Promise<v
   } else {
     await write();
   }
+
+  // Written past ZenFS: the page refreshes its cache for this path and tells other tabs.
+  globalThis.postMessage({ message: 'fileSaved', filePath });
 }
 
 const getFilesPath = (filesRoot: string, ...parts: string[]) => {

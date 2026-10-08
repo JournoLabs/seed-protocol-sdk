@@ -64,6 +64,7 @@ export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/It
 export { AmbiguousModelError } from './Model/errors'
 export { FileSystemLockedError } from './helpers/FileManager/errors'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
+export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
 export { TabLockTimeoutError } from './helpers/tabLocks'
 export {
   MODEL_AMBIGUOUS_EVENT,

@@ -234,6 +234,10 @@ their number so references to them stay valid.
     default" and "does not turn publishedVersion* list metadata into ItemProperty…" fail together
     in about 1 of 4 full browser-project runs (the item just created isn't in `getItemsData`'s
     result); both pass when the file runs alone or with only `Item/`. Not investigated.
+21. **Flaky under load: `react/__tests__/liveQueryTiming.test.tsx`** "should detect changes after
+    transaction commits" timed out (5 s) waiting for the reactive query once, in a slow full run
+    (395 s against the usual ~280 s) on branch `claude/multi-tab-phase-c`. It passed alone and in
+    a rerun of the whole browser-react project. Not investigated.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".

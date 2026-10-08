@@ -39,6 +39,9 @@ export class NodeFileManager implements IFileManager {
     return await fsAsync.access(filePath).then(() => true).catch(() => false)
   }
 
+  /** Node reads the real file system; nothing is cached. */
+  async invalidateCachedPaths(): Promise<void> {}
+
   async getFileSize(filePath: string): Promise<number | null> {
     try {
       const stat = await fsAsync.stat(filePath)

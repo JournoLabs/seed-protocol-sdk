@@ -97,6 +97,51 @@ describe('TolerantWebAccess', () => {
     expect(fs._sync.existsSync('/seed.db')).toBe(false)
   })
 
+  it('invalidate() re-reads a file another tab rewrote, and forgets one it removed', async () => {
+    let size = 3
+    const children: (FakeFile | FakeDir)[] = []
+    const rewritten: FakeFile = {
+      kind: 'file',
+      name: 'a.txt',
+      getFile: async () => ({ size, lastModified: 1, arrayBuffer: async () => new ArrayBuffer(size) }),
+    }
+    children.push(rewritten, file('gone.txt', 2))
+    const root: FakeDir = {
+      kind: 'directory',
+      name: '',
+      async *entries() {
+        for (const child of children) yield [child.name, child]
+      },
+      async *keys() {
+        for (const child of children) yield child.name
+      },
+      // invalidate() drops the cached handle, so lookups go back to the directory.
+      ...({
+        getFileHandle: async (name: string) => {
+          const found = children.find((child) => child.name === name)
+          if (!found) throw new DOMException('gone', 'NotFoundError')
+          return found
+        },
+        getDirectoryHandle: async () => {
+          throw new DOMException('not a directory', 'TypeMismatchError')
+        },
+      } as object),
+    }
+    const fs = await mount(root)
+    await fs.ready()
+    expect(fs.index.get('/a.txt')?.size).toBe(3)
+
+    size = 10
+    children.splice(1, 1)
+    await fs.invalidate('/a.txt')
+    await fs.invalidate('/gone.txt')
+
+    expect(fs.index.get('/a.txt')?.size).toBe(10)
+    expect(fs._sync.statSync('/a.txt').size).toBe(10)
+    expect(fs.index.get('/gone.txt')).toBeUndefined()
+    expect(fs._sync.existsSync('/gone.txt')).toBe(false)
+  })
+
   it('forgets a file removed between listing and getFile()', async () => {
     const fs = await mount(dir('', [file('seed.db-journal', 512, domError('NotFoundError'))]))
     expect(fs.index.get('/seed.db-journal')).toBeUndefined()

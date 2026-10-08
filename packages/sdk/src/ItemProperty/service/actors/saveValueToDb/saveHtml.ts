@@ -1,4 +1,5 @@
 import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
+import { notifyFileSaved } from '@/helpers/tabEvents'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import {
@@ -13,7 +14,6 @@ import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { toMetadataPropertyName } from '@/helpers'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { eventEmitter } from '@/eventBus'
 
 let htmlSchemaUid: string | undefined
 
@@ -79,11 +79,11 @@ export const saveHtml = fromCallback<
 
     try {
       await BaseFileManager.saveFile(filePath, htmlContent)
-      eventEmitter.emit('file-saved', filePath)
+      notifyFileSaved(filePath)
     } catch (e) {
       const fs = await BaseFileManager.getFs()
       fs.writeFileSync(filePath, htmlContent)
-      eventEmitter.emit('file-saved', filePath)
+      notifyFileSaved(filePath)
     }
 
     const refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)

@@ -46,9 +46,9 @@ import {
 import { pickLatestPropertyAttestationsByRefAndSchema } from '@/helpers/easPropertyCanonical'
 import { getGetAdditionalSyncAddresses } from '@/helpers/publishConfig'
 import { scheduleBulkFilesDownloadFromEasSync } from '@/events/files/download'
-import { eventEmitter } from '@/eventBus'
 import { assertLocalDbChain, waitForEasReadChain } from '@/helpers/localDbChain'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
+import { emitAcrossTabs } from '@/helpers/tabEvents'
 
 /**
  * Sync stores the newest non-revoked attestation per (version, property schema). When every
@@ -1091,6 +1091,7 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   } catch (err) {
     console.warn('[item/events] [syncDbWithEas] rehydrateCachedItemsFromDbAfterEasSync:', err)
   }
-  eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
+  // Other tabs reload their cached Items too (docs/MULTI_TAB.md).
+  emitAcrossTabs(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
 }
 

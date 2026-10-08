@@ -25,8 +25,8 @@ import {
   registerSeedQueryLocalSource,
   unregisterSeedQueryLocalSource,
 } from '@/query/registerSeedQueryLocalSource'
-import { eventEmitter } from '@/eventBus'
 import { LOCAL_COPIES_REMOVED_EVENT } from '@/client/events'
+import { emitAcrossTabs } from '@/helpers/tabEvents'
 import {
   findLocalOnchainCopiesForAddresses,
   hardDeleteLocalSeedsByLocalIds,
@@ -210,7 +210,8 @@ const clientInstance = {
       Item.dropCachedInstancesForSeedIds(cacheIds)
     }
     await hardDeleteLocalSeedsByLocalIds(matched.removedSeedLocalIds)
-    eventEmitter.emit(LOCAL_COPIES_REMOVED_EVENT, {
+    // Other tabs drop their cached instances of the removed seeds too.
+    emitAcrossTabs(LOCAL_COPIES_REMOVED_EVENT, {
       addresses: list,
       removedSeedLocalIds: matched.removedSeedLocalIds,
       removedSeedUids: matched.removedSeedUids,
