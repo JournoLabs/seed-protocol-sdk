@@ -185,12 +185,13 @@ findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`, and 17�
     `properties` table is never built and only the fixed refetches at 0.4/1.2/2.5s (line 107) can pick
     up properties. Under load, properties written after 2.5s would leave the list empty. Not observed
     failing; found while instrumenting finding 12.
-16. **Name-only item listing.** `getItemsData({ modelName })`, `Item.all(name)` and
+16. **Name-only item listing (test side only).** `getItemsData({ modelName })`, `Item.all(name)` and
     `useItems({ modelName })` without `schemaName` / `modelFileId` filter by `seeds.type`, so they
-    return items from every schema with that model name. They don't throw, and the tests that use
-    them (`Item/getItems.test.ts`, react `item.test.tsx`) find their items by id, so they pass;
-    `getItems.test.ts` also inserts a raw seed with no `model_file_id`, so scoping it would need that
-    fixture changed.
+    return items from every schema with that model name. **That's working as designed** (2026-10-07):
+    model types are global and a schema is a local lens over seeds, so an unscoped list spans schemas.
+    What's left is in the tests: `Item/getItems.test.ts` and react `item.test.tsx` call these unscoped
+    and only pass because they find their items by id. `getItems.test.ts` also inserts a raw seed with
+    no `model_file_id`, so scoping it needs that fixture changed.
 17. **Many test files throw inside a `waitFor` predicate** (`throw new Error('… failed to load')` when
     the snapshot is `error`). As described in the large-schema section above, the throw escapes as an
     uncaught exception on every later snapshot instead of failing the wait. Fixed in
@@ -202,3 +203,22 @@ findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`, and 17�
 18. **`ModelProperty.getById` scans the whole instance cache** (~0.9s of a 1000-model import, since
     `Model._refreshPropertiesFromDb` calls it per property). An id index would have to follow id
     changes: a property is often created with a generated id and then gets its real one.
+
+### Plan
+
+Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 13 are fixed on branch
+`fix/test-source-aliases`, not yet merged as of this writing.
+
+- **Step 3 — test cleanup and weak tests: 5, 6, 7, 14, 16.** A shared seed-cleanup helper that deletes
+  by `modelFileId` instead of `seeds.type`, used by every file listed under 5. The React files switch
+  to the SDK's `cleanupTestSchemaData()`, which drains in-flight writes (14), instead of their own
+  delete helpers. Scope the remaining unscoped item listings in tests (16). Exact counts in place of
+  "at least N", a real assertion for the no-op test, and `waitUntil` failing instead of returning
+  false where a test needs the condition. Starts after the finding-17 branch
+  (`claude/nifty-heyrovsky-08dd27`) merges, since both touch the same test files.
+- **Step 4 — finding 3.** Cache EAS schema lookups, including misses (~630 → ~200ms per item).
+- **Step 5 — hooks and caches: 2, 12, 15.** `ModelProperty` cache identity behind `model.properties`.
+  In `useModelProperties`, read `_dbId` from the model's live snapshot (or resolve by `modelFileId`)
+  instead of memoizing it once, with a test that delays the property write past the 2.5s refetches.
+  Recheck 12 after that.
+- **Not scheduled:** 8 (separate session), 17 (in progress on `claude/nifty-heyrovsky-08dd27`), 18.
