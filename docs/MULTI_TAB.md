@@ -120,5 +120,18 @@ Ranked by damage:
 
 ## Status
 
-- Phase A: in progress.
+- **Phase A: done.**
+  - `packages/sdk/src/helpers/tabLocks.ts` provides `withTabLock` / `withSeedDbLock`. Lock waits
+    time out after 60 s with `TabLockTimeoutError` (`code: 'TAB_LOCK_TIMEOUT'`), so a hung tab
+    can't block others' init forever. The `multiTab` option and leader election are deferred to
+    Phase B, where they're first needed; the Phase A locks are plain correctness fixes.
+  - `prepareDb` holds `seed:migrate:<db>`; each migration and its `__drizzle_migrations` row run
+    in one `SQLocal.transaction()` (0009 outside). Without the lock, two concurrent `prepareDb`
+    calls fail with "duplicate column name" (`concurrentPrepareDb.test.ts`).
+  - `saveConfig`, `processSchemaFiles` and `ensureModelStubs` (from `addModelsToDb`) hold
+    `seed:init:<db>`. Without it, concurrent stub inserts duplicate rows (`ensureModelStubs.test.ts`).
+  - **Behavior change:** init no longer saves an empty address list (`persistInitAddresses`).
+    Stored addresses survive a reload with `addresses: []` until `setAddresses` replaces or
+    clears them.
+  - The drizzle driver retries `SQLITE_BUSY` / `SQLITE_LOCKED` (`sqliteBusyRetry.ts`).
 - Phases B and C: not started.
