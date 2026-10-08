@@ -125,12 +125,15 @@ export const getPropertySchema = async (
   let resolvedPropertyName = resolvePropertyName(propertyName)
   if (!resolvedPropertyName && !usingModelProperties) {
     // A property added at runtime (ModelProperty.create) to a schema-file model isn't in the
-    // Schema context, only in model.properties. The schema file's definitions still win.
+    // Schema context. The schema file's definitions still win.
     const runtimeProperties = model.properties || []
     if (runtimeProperties.length > 0) {
       schema = { ...modelPropertiesToObject(runtimeProperties), ...schema }
       resolvedPropertyName = resolvePropertyName(propertyName)
     }
+    // model.properties can lag behind the properties table (in Node it never follows rows added
+    // after the model found its own), so also look for a row with this exact name below.
+    if (!resolvedPropertyName) resolvedPropertyName = propertyName
   }
   if (!resolvedPropertyName) {
     return undefined
