@@ -424,10 +424,12 @@ export const loadOrCreateItem = fromCallback<
     }
 
     const versionRecord = versionRecords[0]
-    const latestVersionLocalId = versionRecord.latestVersionLocalId
+    const latestVersionLocalId = versionRecord.latestVersionLocalId || undefined
     const latestVersionUid = versionRecord.latestVersionUid || undefined
 
-    if (!latestVersionLocalId) {
+    // A seed whose versions are all revoked (fully unpublished) has no latest version but still has
+    // its last property values; load those like any other item. Only a seed without versions stops here.
+    if (!latestVersionLocalId && !versionRecord.versionsCount) {
       logger(`No latest version found for seedLocalId: ${resolvedSeedLocalId}`)
       sendBack({
         type: 'loadOrCreateItemSuccess',

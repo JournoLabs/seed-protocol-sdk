@@ -11,6 +11,7 @@ import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
 import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
+import { isVersionRevoked } from "./subqueries/liveVersion"
 import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -132,20 +133,26 @@ export const getItemData: GetItemData = async ({
         uid: versions.uid,
         createdAt: versions.createdAt,
         attestationCreatedAt: versions.attestationCreatedAt,
+        revokedAt: versions.revokedAt,
       })
       .from(versions)
       .where(eq(versions.seedLocalId, resolvedSeedLocalId))
 
     if (allVersions.length > 0) {
-      const sorted = [...allVersions].sort((a, b) => {
+      // Revoked versions are never the latest one and don't count as published (same as the
+      // getVersionData subquery); versionsCount / lastLocalUpdateAt still cover every row.
+      const liveVersions = allVersions.filter(
+        (v: { revokedAt: number | null }) => !isVersionRevoked(v.revokedAt),
+      )
+      const sorted = [...liveVersions].sort((a, b) => {
         const ca = a.createdAt ?? 0
         const cb = b.createdAt ?? 0
         if (cb !== ca) return cb - ca
         return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
       })
-      const latest = sorted[0]!
+      const latest = sorted[0]
       let lastPub: number | null = null
-      for (const v of allVersions) {
+      for (const v of liveVersions) {
         const t = v.attestationCreatedAt
         if (t != null && (lastPub == null || t > lastPub)) lastPub = t
       }
@@ -158,8 +165,8 @@ export const getItemData: GetItemData = async ({
       versionRow = {
         versionsCount: allVersions.length,
         lastVersionPublishedAt: lastPub,
-        latestVersionUid: latest.uid ?? null,
-        latestVersionLocalId: latest.localId ?? null,
+        latestVersionUid: latest?.uid ?? null,
+        latestVersionLocalId: latest?.localId ?? null,
         publishedVersionUid: published?.uid ?? null,
         publishedVersionLocalId: published?.localId ?? null,
         lastLocalUpdateAt: lastLocal || null,

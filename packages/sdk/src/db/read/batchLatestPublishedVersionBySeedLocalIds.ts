@@ -1,13 +1,14 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
 import { inArray } from 'drizzle-orm'
+import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 
 export type PublishedVersionSummary = { uid: string; localId: string | null }
 
 /**
  * One round-trip for list views: for each seed, the same row as {@link getLatestPublishedVersionRow}
- * (newest `created_at` whose `uid` is a valid EAS attestation id).
+ * (newest `created_at` whose `uid` is a valid EAS attestation id and that isn't revoked).
  */
 export async function batchLatestPublishedVersionBySeedLocalIds(
   seedLocalIds: string[],
@@ -23,6 +24,7 @@ export async function batchLatestPublishedVersionBySeedLocalIds(
       localId: versions.localId,
       uid: versions.uid,
       createdAt: versions.createdAt,
+      revokedAt: versions.revokedAt,
     })
     .from(versions)
     .where(inArray(versions.seedLocalId, seedLocalIds))
@@ -43,7 +45,9 @@ export async function batchLatestPublishedVersionBySeedLocalIds(
       if (cb !== ca) return cb - ca
       return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
     })
-    const hit = sorted.find((r) => r.uid && isValidEasAttestationUid(r.uid))
+    const hit = sorted.find(
+      (r) => r.uid && isValidEasAttestationUid(r.uid) && !isVersionRevoked(r.revokedAt),
+    )
     if (hit?.uid) {
       out.set(sid, { uid: hit.uid, localId: hit.localId ?? null })
     }
