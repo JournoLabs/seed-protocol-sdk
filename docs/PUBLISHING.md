@@ -21,6 +21,17 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
 
 2. **getPublishPayload** builds the attestation payload for the item and any related seeds.
 
+   **Related drafts.** A publish carries along every draft item (no seed uid yet) reachable from the
+   item through relation and list properties, at any depth, each with its full property set (its own
+   relations, lists, files and Html-embedded images included). Already-published targets are
+   attested by their current seed uid and not published again; a revoked target anywhere in the graph
+   stops the publish with `RelatedItemUnpublishedError`. Uploads (`getPublishUploads`, the publish
+   package's `getPublishUploadData`), `summarizePublishWork` and `getUnpublishedRelatedItems` walk the
+   same graph (`getPublishDraftGraph`). In a cycle (A ↔ B, or a draft pointing back at the draft
+   being published), an item can only attest the uid of a seed created before it, so the reference
+   back to the item still being walked is left out of this publish; it keeps no attestation uid, and
+   the next publish of its item attests it with the target's uid.
+
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
 
 You do not need to run schema setup yourself when using this flow.

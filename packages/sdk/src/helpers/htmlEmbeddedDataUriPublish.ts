@@ -1,4 +1,4 @@
-import { INTERNAL_STORAGE_MODEL_FILE_IDS, ZERO_BYTES32 } from '@/helpers/constants'
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
 import { parseFragment, serialize } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
 import { eq } from 'drizzle-orm'
@@ -11,8 +11,6 @@ import type { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
-import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@/helpers/relationSeedRef'
 
 export const HTML_EMBEDDED_MAX_IMAGES_PER_DOC = 50
 export const HTML_EMBEDDED_MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -220,27 +218,14 @@ export async function prepareHtmlEmbeddedImagesForPublish(
 }
 
 /**
- * Draft items (no seed uid yet) that a publish of `item` publishes with it: the targets of its
- * relation properties, one level deep, as getPublishPayload and getPublishUploads walk them.
- * Html-embedded images of these items are co-published with `item` like its own.
+ * Draft items (no seed uid yet) that a publish of `item` publishes with it: every draft reachable
+ * through relation and list properties, as getPublishPayload and getPublishUploads walk them
+ * (publishDraftGraph.ts). Html-embedded images of these items are co-published with `item` like its own.
  */
 export async function getRelatedDraftsCoPublishedWith(item: IItem<any>): Promise<IItem<any>[]> {
-  const { itemRelationProperties } = await getSegmentedItemProperties(item)
-  const out: IItem<any>[] = []
-  const seen = new Set<string>([item.seedLocalId])
-  for (const relationProperty of itemRelationProperties) {
-    if (relationProperty.uid) continue
-    const snap = relationProperty.getService().getSnapshot()
-    const value = 'context' in snap ? (snap.context as { propertyValue?: unknown }).propertyValue : undefined
-    const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(normalizeRelationPropertyValue(value) ?? '')
-    if (!seedLocalId && !seedUid) continue
-    const related = await Item.find({ seedLocalId, seedUid })
-    if (!related?.seedLocalId || seen.has(related.seedLocalId)) continue
-    if (related.seedUid && related.seedUid !== ZERO_BYTES32) continue
-    seen.add(related.seedLocalId)
-    out.push(related)
-  }
-  return out
+  const { getPublishDraftGraph } = await import('@/db/read/publishDraftGraph')
+  const { drafts } = await getPublishDraftGraph(item)
+  return drafts.map((d) => d.item)
 }
 
 async function prepareHtmlEmbeddedImagesOfItem(

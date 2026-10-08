@@ -7,6 +7,7 @@ import {
   BaseDb,
   BaseFileManager,
   getCorrectId,
+  getPublishDraftGraph,
   getSegmentedItemProperties,
   htmlEmbeddedImageCoPublish,
   isPublishedSeedRef,
@@ -331,11 +332,12 @@ async function appendCoPublishedImageUploadData(
 const isDraftItem = (item: IItem<any>): boolean =>
   !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
 
-export const getPublishUploadData = async (
+/** One item's own upload data: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
+const getItemOwnPublishUploadData = async (
   item: IItem<any>,
-  uploads: PublishUploadData[] = [],
-  relatedItemProperty?: IItemProperty<any>,
-  options?: GetPublishUploadDataOptions,
+  uploads: PublishUploadData[],
+  relatedItemProperty: IItemProperty<any> | undefined,
+  options: GetPublishUploadDataOptions | undefined,
 ): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -369,7 +371,10 @@ export const getPublishUploadData = async (
     return uploads
   }
 
+  // Relations to Image/File/Html/Json items: their file, read through the relation property.
+  const storageProperties = new Set(itemImageProperties)
   for (const relationProperty of itemRelationProperties) {
+    if (!storageProperties.has(relationProperty)) continue
     const snapshot = relationProperty.getService().getSnapshot()
     const context = 'context' in snapshot ? snapshot.context : null
     if (!context) continue
@@ -391,7 +396,35 @@ export const getPublishUploadData = async (
       if (isPublishedSeedRef(propertyValue)) continue
       throw new Error(`No relatedItem found for ${relationProperty.propertyName}`)
     }
-    uploads = await getPublishUploadData(relatedItem, uploads, relationProperty, options)
+    uploads = await getItemOwnPublishUploadData(relatedItem, uploads, relationProperty, {
+      ...options,
+      skipRelationRecursion: true,
+    })
+  }
+
+  return uploads
+}
+
+/**
+ * Upload data for a publish of `item`: its own, and that of every draft item the publish carries
+ * along (reachable through relation and list properties; the SDK's getPublishDraftGraph, the same
+ * walk as getPublishUploads and getPublishPayload).
+ */
+export const getPublishUploadData = async (
+  item: IItem<any>,
+  uploads: PublishUploadData[] = [],
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadDataOptions,
+): Promise<PublishUploadData[]> => {
+  uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options)
+
+  if (options?.skipRelationRecursion) {
+    return uploads
+  }
+
+  const { drafts } = await getPublishDraftGraph(item, { strict: true })
+  for (const { item: draft, via, viaList } of drafts) {
+    uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options)
   }
 
   return uploads

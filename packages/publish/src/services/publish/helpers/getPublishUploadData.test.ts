@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Item } from '@seedprotocol/sdk'
+import { Item, importJsonSchema, generateId } from '@seedprotocol/sdk'
 import { getPublishUploadData } from './getPublishUploadData'
 import {
   setupTestEnvironment,
@@ -48,4 +48,52 @@ describe.sequential('getPublishUploadData with relations to published uids', () 
     await waitForPropertyInstances(postItem)
     await expect(getPublishUploadData(postItem)).rejects.toThrow('No relatedItem found for author')
   }, 30000)
+
+  it('walks every related draft: through lists, relations of drafts, and cycles', async () => {
+    const schemaName = 'Test Schema publishUploadDataGraph'
+    const schema = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: generateId(),
+      metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      models: {
+        UploadGraphNode: {
+          id: generateId(),
+          properties: {
+            label: { id: generateId(), type: 'Text' },
+            next: { id: generateId(), type: 'Relation', model: 'UploadGraphNode' },
+            body: { id: generateId(), type: 'Html' },
+          },
+        },
+        UploadGraphRoot: {
+          id: generateId(),
+          properties: {
+            title: { id: generateId(), type: 'Text' },
+            nodes: { id: generateId(), type: 'List', refValueType: 'Relation', ref: 'UploadGraphNode' },
+          },
+        },
+      },
+      enums: {},
+      migrations: [],
+    }
+    await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
+    const create = async (props: Record<string, unknown>) => {
+      const item = await Item.create({ schemaName, ...props } as any)
+      await waitForPropertyInstances(item as any)
+      return item
+    }
+    const b = await create({ modelName: 'UploadGraphNode', label: 'B', body: '<p>deep draft</p>' })
+    const a = await create({ modelName: 'UploadGraphNode', label: 'A', next: b.seedLocalId })
+    // B → A closes a cycle.
+    const bNext = b.allProperties.next!
+    bNext.value = a.seedLocalId
+    await bNext.save()
+    const root = await create({ modelName: 'UploadGraphRoot', title: 'root', nodes: [a.seedLocalId] })
+
+    const bHtmlSeed = (b.allProperties.body!.getService().getSnapshot() as any).context.propertyValue
+    expect(bHtmlSeed).toBeTruthy()
+    const uploads = await getPublishUploadData(root as any)
+    expect(uploads.map((u) => u.seedLocalId)).toContain(bHtmlSeed)
+  }, 60000)
 })
+
