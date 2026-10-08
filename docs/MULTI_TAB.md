@@ -123,8 +123,8 @@ Ranked by damage:
 - **Phase A: done.**
   - `packages/sdk/src/helpers/tabLocks.ts` provides `withTabLock` / `withSeedDbLock`. Lock waits
     time out after 60 s with `TabLockTimeoutError` (`code: 'TAB_LOCK_TIMEOUT'`), so a hung tab
-    can't block others' init forever. The `multiTab` option and leader election are deferred to
-    Phase B, where they're first needed; the Phase A locks are plain correctness fixes.
+    can't block others' init forever. The Phase A locks are plain correctness fixes and apply
+    regardless of `multiTab`.
   - `prepareDb` holds `seed:migrate:<db>`; each migration and its `__drizzle_migrations` row run
     in one `SQLocal.transaction()` (0009 outside). Without the lock, two concurrent `prepareDb`
     calls fail with "duplicate column name" (`concurrentPrepareDb.test.ts`).
@@ -134,4 +134,24 @@ Ranked by damage:
     Stored addresses survive a reload with `addresses: []` until `setAddresses` replaces or
     clears them.
   - The drizzle driver retries `SQLITE_BUSY` / `SQLITE_LOCKED` (`sqliteBusyRetry.ts`).
-- Phases B and C: not started.
+- **Phase B: done.**
+  - `packages/publish/src/services/publishManager/publishLocks.ts`: the tab running a publish holds
+    `seed:publish:<seedLocalId>`. Restore skips rows another tab holds; `PublishManager.createPublish`
+    resolves `undefined` for a seed publishing in another tab; done, `stopPublish`, `stopAll` and
+    tab close release it. `stopAll` leaves rows `in_progress`, so the next tab to restore may resume
+    them (as before).
+  - `packages/sdk/src/helpers/tabCoordinator.ts`: leader election (`isLeaderTab`, `whenLeaderTab`,
+    tab messages over `seed:tabs:<db>`), started in `platformClassesInit`.
+    `SeedConstructorOptions.multiTab` defaults to `'coordinate'`; `'off'` keeps every tab a leader.
+    Node and pre-init code act as leader.
+  - EAS sync: models-init and event-bus requests run in the leader; a non-leader remembers a skipped
+    request and runs it once if it takes over. Address changes are forwarded to the leader.
+    `client.syncFromEas()` runs in the calling tab (decision: run locally under the lock rather than
+    forward). Every run holds `seed:eas-sync:<db>` with no wait timeout.
+  - The L1 finalize worker starts from `whenLeaderTab()`.
+  - Files: instead of a per-transaction lock in the lazy-download path, the download worker locks
+    `seed:opfs-write:<path>` around each write, which covers bulk and lazy downloads in every tab.
+    `addExcludedTransactions` replaces the two whole-list overwrites.
+  - Bulk download and resize follow EAS sync, so automatic ones now run in the leader only. Until
+    Phase C, other tabs' ZenFS caches may not see files the leader downloads.
+- Phase C: not started.
