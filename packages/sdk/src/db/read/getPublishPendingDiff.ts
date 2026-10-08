@@ -3,7 +3,7 @@ import { metadata } from '@/seedSchema'
 import type { MetadataType } from '@/seedSchema/MetadataSchema'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isPublishedMetadataRow as isPublished } from '@/helpers/isPublishedMetadataRow'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
@@ -77,11 +77,6 @@ export async function getPublishPendingDiff(
   for (const list of byProp.values()) {
     list.sort(compareMetadataRowsLatestFirst)
   }
-
-  // A row sync derived from a storage_transaction_id attestation (ItemStorage) is published
-  // content, not a local edit, though it has no uid of its own.
-  const isPublished = (row: MetadataType) =>
-    isValidEasAttestationUid(row.uid) || row.derivedFromUid != null
 
   const pendingProperties: PublishPendingPropertyDiff[] = []
   for (const [propertyName, list] of byProp) {
