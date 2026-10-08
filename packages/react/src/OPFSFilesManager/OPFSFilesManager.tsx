@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
 import { useOPFSFiles, type OPFSFile } from '../useOPFSFiles'
-import { deleteOPFSEntry, getOPFSFile, isOPFSSupported } from '../opfsPaths'
-import { DeleteDialog } from './DeleteDialog'
+import { deleteOPFSEntry, getOPFSFile, isOPFSSupported, removeEmptyOPFSDirectories } from '../opfsPaths'
+import { DeleteDialog, FolderDeleteDialog } from './DeleteDialog'
 import { FileGrid } from './FileGrid'
 import { FileList } from './FileList'
 import { KIND_META } from './FileThumbnail'
@@ -14,6 +14,7 @@ import {
   sizeByKind,
   type FileEntry,
   type FileKind,
+  type FolderSummary,
   type SortKey,
 } from './fileModel'
 import { formatFileSize } from './format'
@@ -214,6 +215,7 @@ export function OPFSFilesManager({
   const [panelPath, setPanelPath] = useState<string | null>(null)
   const panelOpenerRef = useRef<HTMLElement | null>(null)
   const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null)
+  const [pendingFolder, setPendingFolder] = useState<FolderSummary | null>(null)
   const [busy, setBusy] = useState(false)
   const { toasts, showToast } = useToasts()
   const notify = (message: string, tone: OPFSFilesManagerNotifyTone, notice: OPFSFilesManagerNotice) => {
@@ -303,40 +305,48 @@ export function OPFSFilesManager({
     else triggerBrowserDownload(file.name, blob)
   }
 
-  const download = async (list: FileEntry[]) => {
-    if (list.length === 0) return
+  /**
+   * Save one file as-is, or several as a .zip. A folder is always zipped, with paths
+   * starting at the folder's name. Resolves true once saved.
+   */
+  const downloadFiles = async (list: OPFSFile[], folder?: FolderSummary): Promise<boolean> => {
+    if (list.length === 0) return false
     setBusy(true)
     try {
-      if (list.length === 1) {
-        const { file } = list[0]
+      if (list.length === 1 && !folder) {
+        const [file] = list
         await saveBlob(file, await getOPFSFile(file.path))
-        return
+        return true
       }
+      const folderParent = folder ? folder.path.slice(0, folder.path.length - folder.name.length) : ''
       const inputs = await Promise.all(
-        list.map(async ({ file }) => ({
-          name: relativeToRoot(file.path),
+        list.map(async (file) => ({
+          name: folder ? file.path.slice(folderParent.length) : relativeToRoot(file.path),
           data: await getOPFSFile(file.path),
           lastModified: file.lastModified,
         })),
       )
       const zip = await createZip(inputs)
-      const name = `${rootLabel}-${new Date().toISOString().slice(0, 10)}.zip`
+      const name = `${folder ? folder.name : rootLabel}-${new Date().toISOString().slice(0, 10)}.zip`
       await saveBlob({ name, path: name, size: zip.size, type: 'application/zip', lastModified: Date.now() }, zip)
       notify(`Saved ${name} with ${plural(list.length, 'file')}`, 'success', {
         kind: 'download',
-        paths: list.map((e) => e.file.path),
+        paths: list.map((f) => f.path),
         fileName: name,
       })
+      return true
     } catch (err) {
       notify(`Couldn’t download: ${errorMessage(err)}`, 'error', {
         kind: 'download',
-        paths: list.map((e) => e.file.path),
+        paths: list.map((f) => f.path),
         error: errorMessage(err),
       })
+      return false
     } finally {
       setBusy(false)
     }
   }
+  const download = (list: FileEntry[]) => downloadFiles(list.map((e) => e.file))
 
   const filesToDelete = (list: FileEntry[], includeVariants: boolean) =>
     list.flatMap((e) => [e.file, ...(includeVariants ? e.variants.map((v) => v.file) : [])])
@@ -347,11 +357,16 @@ export function OPFSFilesManager({
   }
   const deleteActionFor = (list: FileEntry[]) => resolveDeleteAction(filesToDelete(list, true))
 
-  const performDelete = async (targets: OPFSFile[]) => {
+  /**
+   * Delete `targets` one by one so onBeforeDelete can keep any of them. With `folder`, then
+   * removes the folders left empty; any that still hold kept, failed or hidden files stay.
+   */
+  const performDelete = async (targets: OPFSFile[], folder?: FolderSummary) => {
     setBusy(true)
     const deleted: string[] = []
     const failed: { path: string; error: string }[] = []
     const skipped: string[] = []
+    let folderRemoved = false
     try {
       const root = await navigator.storage.getDirectory()
       for (const file of targets) {
@@ -364,6 +379,13 @@ export function OPFSFilesManager({
           deleted.push(file.path)
         } catch (err) {
           failed.push({ path: file.path, error: errorMessage(err) })
+        }
+      }
+      if (folder) {
+        try {
+          folderRemoved = await removeEmptyOPFSDirectories(folder.path, root)
+        } catch (err) {
+          failed.push({ path: folder.path, error: errorMessage(err) })
         }
       }
     } catch (err) {
@@ -379,13 +401,26 @@ export function OPFSFilesManager({
     await refetch()
     setBusy(false)
 
-    const parts = [deleted.length > 0 ? `Deleted ${plural(deleted.length, 'file')}` : 'Nothing deleted']
+    const parts = [
+      folderRemoved
+        ? `Deleted the ${folder!.name} folder (${plural(deleted.length, 'file')})`
+        : deleted.length > 0
+          ? `Deleted ${plural(deleted.length, 'file')}`
+          : 'Nothing deleted',
+    ]
     if (skipped.length) parts.push(`${skipped.length} kept by onBeforeDelete`)
     if (failed.length) {
       const reasons = failed.map((f) => (f.path ? `${f.path.split('/').pop()}: ${f.error}` : f.error))
       parts.push(`${failed.length} failed (${reasons.join('; ')})`)
     }
-    notify(parts.join('. '), failed.length ? 'error' : 'success', { kind: 'delete', deleted, skipped, failed })
+    if (folder && !folderRemoved && !failed.length) parts.push(`The ${folder.name} folder still has files, so it was kept`)
+    notify(parts.join('. '), failed.length ? 'error' : 'success', {
+      kind: 'delete',
+      deleted,
+      skipped,
+      failed,
+      ...(folder && { folder: folder.path, folderRemoved }),
+    })
 
     if (deleted.length > 0) await onAfterDelete?.(deleted)
   }
@@ -398,6 +433,18 @@ export function OPFSFilesManager({
     }
     const targets = filesToDelete(list, true)
     if (await confirmDelete(targets)) await performDelete(targets)
+  }
+
+  // Raw files, not entries: grouped resized copies live in this folder too.
+  const filesInFolder = (folder: FolderSummary) => files.filter((f) => f.path.startsWith(`${folder.path}/`))
+
+  const requestFolderDelete = async (folder: FolderSummary) => {
+    if (!confirmDelete) {
+      setPendingFolder(folder)
+      return
+    }
+    const targets = filesInFolder(folder)
+    if (await confirmDelete(targets)) await performDelete(targets, folder)
   }
 
   const copyPath = (path: string) => {
@@ -416,7 +463,7 @@ export function OPFSFilesManager({
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (pendingDelete) return
+    if (pendingDelete || pendingFolder) return
     const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
     if (e.key === 'Escape') {
       if (panelPath) closePanel()
@@ -522,6 +569,16 @@ export function OPFSFilesManager({
                       </span>
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    className="seed-fm-btn seed-fm-btn--ghost seed-fm-btn--icon seed-fm-folder-delete"
+                    aria-label={`Delete folder ${folder.name}`}
+                    title="Delete folder"
+                    disabled={busy}
+                    onClick={() => requestFolderDelete(folder)}
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -561,6 +618,7 @@ export function OPFSFilesManager({
   }
 
   const pendingFiles = pendingDelete ? filesToDelete(pendingDelete, true) : []
+  const pendingFolderFiles = pendingFolder ? filesInFolder(pendingFolder) : []
   const batchDeleteAction = selected.size > 0 ? deleteActionFor(selectedEntries) : null
 
   return (
@@ -717,6 +775,24 @@ export function OPFSFilesManager({
             const targets = filesToDelete(pendingDelete, includeVariants)
             setPendingDelete(null)
             void performDelete(targets)
+          }}
+        />
+      )}
+
+      {pendingFolder && (
+        <FolderDeleteDialog
+          folder={pendingFolder}
+          files={pendingFolderFiles}
+          hiddenCount={rawFiles.filter((f) => f.path.startsWith(`${pendingFolder.path}/`)).length - pendingFolderFiles.length}
+          warning={deleteWarning(pendingFolderFiles)}
+          action={resolveDeleteAction(pendingFolderFiles)}
+          busy={busy}
+          className={classNames.dialog}
+          onDownload={() => downloadFiles(pendingFolderFiles, pendingFolder)}
+          onCancel={() => setPendingFolder(null)}
+          onConfirm={() => {
+            setPendingFolder(null)
+            void performDelete(pendingFolderFiles, pendingFolder)
           }}
         />
       )}
