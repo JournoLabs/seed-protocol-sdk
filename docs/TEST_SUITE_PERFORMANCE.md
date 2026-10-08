@@ -219,7 +219,11 @@ their number so references to them stay valid.
 
 8. **Order-dependent `Item/unpublish.integration.test.ts` failures** ("Item is read-only: you do not
    own this item") when certain files (e.g. `Item/getItems.test.ts`) run before it on the same
-   browser worker. Being fixed in a separate session as of 2026-10-07.
+   browser worker. Fixed in `9a41020` (each `createPublishedItemForUnpublish` call gets its own seed
+   UID, `6d78fca`; the ownership check finds an item's row by `localId` before `uid`, `d149b56`).
+   As of 2026-10-08 the same error came back after one particular set of 24 earlier browser files;
+   a separate session is looking into it (owned addresses persisted in OPFS appState leak between
+   files).
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
@@ -263,15 +267,22 @@ their number so references to them stay valid.
 17. **Fixed.** Test files threw inside a `waitFor` predicate (`throw new Error('… failed to load')`
     when the snapshot is `error`). Every SDK and React test now uses the non-throwing helpers in
     `packages/sdk/__tests__/test-utils/waitForIdle.ts` (see "Writing tests that stay fast").
-18. **`ModelProperty.getById` scans the whole instance cache** (~0.9s of a 1000-model import, since
-    `Model._refreshPropertiesFromDb` calls it per property). An id index would have to follow id
-    changes: a property is often created with a generated id and then gets its real one.
-19. **`getPropertySchema` doesn't see properties added at runtime to a schema-file model.** When
-    the Schema context defines the model, it reads properties only from there, and
-    `ModelProperty.create({ modelName, name })` doesn't add the new property to it. So
-    `useModelProperty(schema, model, newProperty)` stays `undefined` (checked for 4s after the
-    property was written). It falls back to `model.properties` only when the Schema context has no
-    definition for the model. Found in step 5; not scheduled.
+18. **Fixed** (step 6, branch `claude/step6-getbyid-propschema`). `ModelProperty.getById` scanned
+    the whole instance cache on every call, hit or miss. Loading a 1000-property model looks each
+    property up by id (2,000–4,000 calls), so `getById` cost ~480ms there. It now uses an id index.
+    Each cached instance subscribes to its actor to keep its entry current when its id changes (a
+    property is often created with a generated id and then gets its real one). Entries are checked
+    before use, and a stale one falls back to the old scan. Same load: ~2ms in `getById`. Test:
+    `ModelProperty/getByIdIndex.test.ts`. `validation-timeout.test.ts` never loads its models'
+    properties into the cache, so it didn't pay this cost.
+19. **Fixed** (step 6). `getPropertySchema` didn't find properties added at runtime to a schema-file
+    model. When the Schema context defines the model, it read properties only from there, and
+    `ModelProperty.create({ modelName, name })` doesn't add the new property to it, so
+    `useModelProperty(schema, model, newProperty)` stayed `undefined`. When the name isn't in the
+    Schema context, it now also looks in `model.properties`; the schema file's definitions still win.
+    The Schema context itself is unchanged (minimal fix, agreed 2026-10-08). Tests: "getPropertySchema
+    finds a property added at runtime to a schema-file model" (`ModelProperty.test.ts`) and "finds a
+    property added at runtime to a schema-file model" (`modelProperty.test.tsx`).
 
 ### Plan
 
@@ -287,4 +298,8 @@ Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 
   `useModelProperty` retries a lookup that found nothing. New finding 19. Correctness only: suite
   times unchanged back to back against `main` (browser-react summed 181/181s → 185/203/179s,
   browser 230s → 231s, with 2 and 7 more tests).
-- **Not scheduled:** 8 (separate session), 14's SDK side, 18, 19.
+- **Step 6 — done** (branch `claude/step6-getbyid-propschema`): 18 and 19 fixed.
+- **Not scheduled:** 14's SDK side. Its first case (a cached Model handing back a deleted row's id
+  after a re-import) is being worked on in a separate session as of 2026-10-08; look at the second
+  case (a stopped runtime model starting a write) after that lands. Also open: sharing one browser
+  `QueryClient` (see 3), which needs `claude/elegant-tu-ac5741`'s query-key fix merged first.
