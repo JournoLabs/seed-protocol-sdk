@@ -647,6 +647,44 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     })
   })
 
+  describe('useModelProperties when the model gets its _dbId late', () => {
+    // Finding 15: the hook memoized the model's _dbId once. A model first seen before its row was
+    // resolved never got the live query on the properties table, so with properties already listed
+    // (the fallback refetches only run while the list is empty) later properties never showed up.
+    it('picks up a property added after the model resolves its _dbId', async () => {
+      const schemaName = 'Test Schema Properties'
+      const model = await Model.find({ modelName: 'Article', schemaName })
+      expect(model).toBeDefined()
+      const dbId = (model as any)._getSnapshotContext()._dbId as number | undefined
+      expect(dbId).toBeGreaterThan(0)
+
+      model!.getService().send({ type: 'updateContext', _dbId: undefined })
+      render(<UseModelPropertiesTest schemaIdOrModelId={schemaName} modelName="Article" />, {
+        container,
+        wrapper: SeedProviderWrapper,
+      })
+      await waitFor(() => expect(screen.getByTestId('properties-count').textContent).toBe('2'), {
+        timeout: 15000,
+      })
+
+      model!.getService().send({ type: 'updateContext', _dbId: dbId })
+      const added = ModelProperty.create(
+        { name: 'addedLater', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('properties-count').textContent).toBe('3')
+          const names = screen.getAllByTestId(/^property-\d+$/).map((el) => el.textContent)
+          expect(names).toEqual(expect.arrayContaining(['headline', 'body', 'addedLater']))
+        },
+        { timeout: 10000 },
+      )
+    })
+  })
+
   describe('useModelProperty', () => {
     it('should return undefined when modelName or propertyName is null', async () => {
       render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName={null} propertyName={null} />, { container })

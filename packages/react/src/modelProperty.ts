@@ -54,16 +54,9 @@ export const useModelProperties = (
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
 
-  // Get _dbId (database ID) from model context
-  const dbModelId = useMemo(() => {
-    if (!model) return null
-    try {
-      const context = (model as any)._getSnapshotContext()
-      return context._dbId as number | undefined
-    } catch {
-      return null
-    }
-  }, [model])
+  // The model's database id. It can arrive after the model is first seen (the row is written later),
+  // so follow the model's snapshot: memoizing it once left the properties live query unbuilt.
+  const dbModelId = useModelDbId(model)
 
   const modelId = model?.id
   const modelPropertiesQueryKey = useMemo(
@@ -156,6 +149,27 @@ export const useModelProperties = (
     isLoading: effectiveIsLoading,
     error: queryError as Error | null,
   }
+}
+
+const readModelDbId = (model: Model | undefined | null): number | undefined => {
+  if (!model) return undefined
+  try {
+    return (model as any)._getSnapshotContext()._dbId as number | undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The model's `_dbId`, updated when the model's actor sets it. */
+const useModelDbId = (model: Model | undefined | null): number | undefined => {
+  const [dbModelId, setDbModelId] = useState(() => readModelDbId(model))
+  useEffect(() => {
+    setDbModelId(readModelDbId(model))
+    if (!model) return
+    const subscription = model.getService().subscribe(() => setDbModelId(readModelDbId(model)))
+    return () => subscription.unsubscribe()
+  }, [model])
+  return dbModelId
 }
 
 /**
