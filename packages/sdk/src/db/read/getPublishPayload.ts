@@ -43,7 +43,6 @@ import { IItem } from '@/interfaces'
 import debug from 'debug'
 import { encodeBytes32String } from '@/helpers/ethereumUtils'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
-import type { ValidationError } from '@/Schema/validation'
 const logger = debug('seedSdk:db:getPublishPayload')
 
 /** Case-insensitive dataType match (schema JSON may use "text" vs "Text"). */
@@ -52,11 +51,76 @@ const matchesDataType = (
   expected: ModelPropertyDataTypes | string,
 ): boolean => normalizeDataType(actual) === expected
 
-/** Validation error collected during publish payload building. */
-export type PublishValidationError = Pick<ValidationError, 'field' | 'message'> & { code?: string }
+import {
+  PublishValidationFailedError,
+  RelatedItemUnpublishedError,
+  type PublishValidationError,
+  type UnpublishedRelatedItem,
+} from '@/db/read/publishErrors'
+import {
+  findRelatedSeedRow,
+  isLivePublishedSeed,
+  isUnpublishedSeed,
+  relatedModelNameFromDef,
+  type RelatedSeedRow,
+} from '@/db/read/resolveRelatedSeedRef'
+
+export { PublishValidationFailedError, type PublishValidationError }
 
 /** Context for collecting validation errors instead of throwing on first error. */
-export type PublishValidationContext = { errors: PublishValidationError[] }
+export type PublishValidationContext = {
+  errors: PublishValidationError[]
+  /** Refs to seeds whose attestation was revoked; publish stops with RelatedItemUnpublishedError. */
+  unpublishedRelatedItems?: UnpublishedRelatedItem[]
+  /**
+   * Relation/list/image refs (local id, or a republished seed's old uid) to seeds that are
+   * published and live, mapped to their current uid: the parent attests that uid.
+   */
+  relatedRefUids?: Map<string, string>
+}
+
+/**
+ * Checks the seed a relation/list/image ref points at. A revoked (unpublished) seed is recorded in
+ * `ctx.unpublishedRelatedItems`; a live published one maps the ref to its current uid. Returns
+ * true when the caller must not walk into the related item (it is published, live or revoked).
+ */
+function noteRelatedSeed(
+  ctx: PublishValidationContext,
+  ref: string,
+  row: RelatedSeedRow | null,
+  propertyName: string,
+  modelName: string | undefined,
+): boolean {
+  if (isUnpublishedSeed(row)) {
+    ctx.unpublishedRelatedItems ??= []
+    if (
+      !ctx.unpublishedRelatedItems.some(
+        (r) => r.propertyName === propertyName && r.seedLocalId === row.seedLocalId,
+      )
+    ) {
+      ctx.unpublishedRelatedItems.push({
+        propertyName,
+        modelName: modelName ?? row.type ?? 'unknown',
+        seedLocalId: row.seedLocalId,
+        seedUid: row.seedUid,
+      })
+    }
+    return true
+  }
+  if (isLivePublishedSeed(row)) {
+    if (ref !== row.seedUid) {
+      ctx.relatedRefUids ??= new Map()
+      ctx.relatedRefUids.set(ref, row.seedUid)
+    }
+    return true
+  }
+  return false
+}
+
+/** Current uid for a ref noted by noteRelatedSeed, else the ref itself. */
+function currentRelatedRef(ctx: PublishValidationContext, ref: string): string {
+  return ctx.relatedRefUids?.get(ref.trim()) ?? ref
+}
 
 /** `patch` (default): new property attestations on the current Version. `new_version`: new Version attestation + attest all properties. */
 export type PublishMode = 'patch' | 'new_version'
@@ -457,6 +521,11 @@ const processBasicProperties = async (
         .filter(Boolean)
     }
 
+    // A ref to a published related item attests that item's current uid.
+    if (typeof value === 'string' && (isRelation || isFileImageHtml || isJsonStorage)) {
+      value = currentRelatedRef(ctx, value)
+    }
+
     if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
       addValidationError(
         ctx,
@@ -515,7 +584,7 @@ const processBasicProperties = async (
                 )
               : ''
         if (!idStr) continue
-        const trimmed = idStr.trim()
+        const trimmed = currentRelatedRef(ctx, idStr.trim())
         if (!trimmed) continue
         rawIds.push(trimmed)
         if (trimmed.length !== 66 && !trimmed.startsWith('0x')) {
@@ -767,13 +836,27 @@ const processRelationOrImageProperty = async (
     return multiPublishPayload
   }
 
+  // The local seed, also when the ref is the old uid of a seed published again since.
+  const relatedSeed = await findRelatedSeedRow({ seedLocalId, seedUid })
+
   // Use dynamic import to break circular dependency
   const getItemMod = await import('../../db/read/getItem')
   const { getItem } = getItemMod
-  const relatedItem = await getItem({
-    seedLocalId,
-    seedUid,
-  })
+  const relatedItem = await getItem(
+    relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
+  )
+
+  if (
+    noteRelatedSeed(
+      ctx,
+      normalizedRef!,
+      relatedSeed,
+      relationOrImageProperty.propertyName,
+      relatedItem?.modelName ?? relatedModelNameFromDef(relationOrImageProperty.propertyDef),
+    )
+  ) {
+    return multiPublishPayload
+  }
 
   // When related item not found (e.g. different DB, not yet created)
   if (!relatedItem) {
@@ -1125,13 +1208,26 @@ const processListProperty = async (
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(idStr)
     if (!seedLocalId && !seedUid) continue
 
+    const relatedSeed = await findRelatedSeedRow({ seedLocalId, seedUid })
+
     // Use dynamic import to break circular dependency
     const getItemMod = await import('../../db/read/getItem')
     const { getItem } = getItemMod
-    const relatedItem = await getItem({
-      seedLocalId,
-      seedUid,
-    })
+    const relatedItem = await getItem(
+      relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
+    )
+
+    if (
+      noteRelatedSeed(
+        ctx,
+        idStr.trim(),
+        relatedSeed,
+        listProperty.propertyName,
+        relatedItem?.modelName ?? relatedModelNameFromDef(listProperty.propertyDef),
+      )
+    ) {
+      continue
+    }
 
     if (!relatedItem) {
       // An attested uid with no local copy is already published; the list attests the uid as-is.
@@ -1422,17 +1518,6 @@ function findUploadedTxForSeedLocalId(
   )
 }
 
-/** Error thrown when publish validation fails. Includes all validation errors for user to fix. */
-export class PublishValidationFailedError extends Error {
-  constructor(
-    message: string,
-    public readonly validationErrors: PublishValidationError[],
-  ) {
-    super(message)
-    this.name = 'PublishValidationFailedError'
-  }
-}
-
 export const getPublishPayload = async (
   item: IItem<any>,
   uploadedTransactions: UploadedTransaction[],
@@ -1635,6 +1720,11 @@ export const getPublishPayload = async (
         'publish_new_version_empty_snapshot',
       )
     }
+  }
+
+  // Stop before anything is uploaded or attested: the payload would attest revoked seed uids.
+  if (validationCtx.unpublishedRelatedItems?.length) {
+    throw new RelatedItemUnpublishedError(validationCtx.unpublishedRelatedItems, validationCtx.errors)
   }
 
   if (validationCtx.errors.length > 0) {

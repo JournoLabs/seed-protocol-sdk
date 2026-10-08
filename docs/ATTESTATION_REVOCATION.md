@@ -89,7 +89,12 @@ When the item's seed is revoked (`seeds.revoked_at` set), the publish payload as
 - The new version attestation is recorded on the local draft version, or on a new version row when there is no draft. `item.latestVersionUid` / `item.latestVersionLocalId` and the published version helpers report it.
 - The old version and property rows keep their old uids and `revoked_at`. They are history of the old seed. Readers prefer live rows, and EAS sync stores the new property attestations.
 
-Other items' relations to this item aren't updated. A relation stored as this item's `seedLocalId` (set locally) follows the item, and the next publish of the referring item attests the new uid. A relation stored as the old `seedUid` (synced from EAS, or set by uid) still points at the old, revoked seed, on-chain and locally, and the old uid no longer resolves to this item locally. To point such a referrer at the new seed, set its relation again and publish it.
+Other items' relations to this item aren't rewritten. When a referring item is published, each relation, list member and image/file ref it attests is checked against the local seed it points at:
+
+- A ref to a published, live seed attests that seed's current uid. A ref stored as the `seedLocalId` follows the item, and so does a ref stored as the old `seedUid` while this database still has the old version rows (they record the old uid), so the next publish of the referrer attests the new uid. On-chain, the referrer's earlier attestation still points at the old, revoked seed until then.
+- A ref to a seed whose attestation is revoked (unpublished, not yet republished) stops the publish before anything is uploaded or attested: `getPublishPayload` and `validateItemForPublish` fail with `RelatedItemUnpublishedError` (validation code `related_item_unpublished`), whose `unpublishedRelatedItems` name each item (`propertyName`, `modelName`, `seedLocalId`, `seedUid`). Republish those items or remove the references. `summarizePublishWork` lists them in `unpublishedRelatedItems`, `getUnpublishedRelatedItems(item)` returns them, and the publish package's checking step fails with them before registering schemas.
+- Refs already attested on the referrer and not attested again (a patch publish skips them) aren't checked; a `new_version` publish or a republish attests every ref and checks them all.
+- A uid with no local seed (e.g. a server publishing on someone's behalf) is attested as is.
 
 ## Suggested UX
 

@@ -5,7 +5,13 @@ import { EventObject, fromCallback } from 'xstate'
 import { isContractDeployed } from '~/helpers/chainClient'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
-import { assertLocalDbChain, isItemOwned, validateItemForPublish } from '@seedprotocol/sdk'
+import {
+  assertLocalDbChain,
+  getUnpublishedRelatedItems,
+  isItemOwned,
+  RelatedItemUnpublishedError,
+  validateItemForPublish,
+} from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
@@ -45,6 +51,20 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         await assertLocalDbChain()
         // RPC chain id and contract deployments; cached after the first success.
         await verifyPublishChain()
+
+        // References to unpublished (revoked) items fail the publish before schemas are
+        // registered or anything is uploaded; validateItemForPublish below reports the same.
+        const unpublishedRelatedItems = await getUnpublishedRelatedItems(item, {
+          publishMode: publishMode ?? 'patch',
+        })
+        if (unpublishedRelatedItems.length > 0) {
+          activePublishProcesses.delete(item.seedLocalId)
+          sendBack({
+            type: 'validationFailed',
+            errors: new RelatedItemUnpublishedError(unpublishedRelatedItems).validationErrors,
+          })
+          return
+        }
 
         const publishWallet = wallet ?? account
         if (publishWallet) {
