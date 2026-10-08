@@ -13,93 +13,17 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   client,
   BaseDb,
-  schemas,
   models as modelsTable,
-  modelSchemas,
-  properties,
-  metadata,
-  propertyUids,
-  modelUids,
   importJsonSchema,
   Schema,
   Model,
-  ModelProperty,
-  BaseFileManager,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitUntil } from './test-utils/waitUntil'
-
-/**
- * Remove the schema JSON files importJsonSchema writes to the shared OPFS working dir. If they are left
- * behind, client.init in the next browser test file re-imports these schemas, and that file's own
- * Post/Article models then reuse these schemas' rows by name.
- */
-async function removeSchemaFilesByName(schemaName: string): Promise<void> {
-  try {
-    const fs = await BaseFileManager.getFs()
-    const path = BaseFileManager.getPathModule()
-    const workingDir = BaseFileManager.getWorkingDir()
-    const suffix = new RegExp(`_${schemaName.replace(/\s+/g, '_')}_v\\d+\\.json$`)
-    for (const file of await fs.promises.readdir(workingDir)) {
-      if (suffix.test(file)) await fs.promises.unlink(path.join(workingDir, file))
-    }
-  } catch {
-    // Working dir or file may not exist
-  }
-}
-
-/** Delete a schema row and all FK-dependent rows (matches Schema.destroy ordering). */
-async function removeSchemaByName(
-  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  schemaName: string,
-): Promise<void> {
-  // Evict cached instances and remove the schema file too, so later files can't resolve or
-  // re-import this schema's models (e.g. "Post").
-  ModelProperty.evictForModels(Model.evictForSchema(schemaName), schemaName)
-  await removeSchemaFilesByName(schemaName)
-
-  const schemaRows = await db
-    .select({ id: schemas.id })
-    .from(schemas)
-    .where(eq(schemas.name, schemaName))
-  const schemaIds = schemaRows.map((r) => r.id).filter((id): id is number => id != null)
-  if (schemaIds.length === 0) return
-
-  const joinRows = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(inArray(modelSchemas.schemaId, schemaIds))
-  const modelIds = [
-    ...new Set(joinRows.map((r) => r.modelId).filter((id): id is number => id != null)),
-  ]
-
-  await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
-
-  if (modelIds.length === 0) {
-    await db.delete(schemas).where(eq(schemas.name, schemaName))
-    return
-  }
-
-  await db.update(properties).set({ refModelId: null }).where(inArray(properties.refModelId, modelIds))
-
-  const propertyRows = await db
-    .select({ id: properties.id })
-    .from(properties)
-    .where(inArray(properties.modelId, modelIds))
-  const propertyIds = propertyRows.map((r) => r.id).filter((id): id is number => id != null)
-
-  if (propertyIds.length > 0) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, propertyIds))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, propertyIds))
-  }
-  await db.delete(properties).where(inArray(properties.modelId, modelIds))
-  await db.delete(modelUids).where(inArray(modelUids.modelId, modelIds))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, modelIds))
-  await db.delete(schemas).where(eq(schemas.name, schemaName))
-}
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with multiple models
 const testSchemaWithModels: SchemaFileFormat = {
@@ -354,11 +278,7 @@ describe('React Model Hooks Integration Tests', () => {
   })
 
   afterAll(async () => {
-    // Clean up schema from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await removeSchemaByName(db, 'Test Schema Models')
-    }
+    await cleanupTestSchemaData({ items: true })
 
     // Clear schema cache
     Schema.clearCache()
@@ -369,11 +289,9 @@ describe('React Model Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    // Clean up any existing test schema
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await removeSchemaByName(db, 'Test Schema Models')
-    }
+    // Removes every test schema, its items and schema files, after waiting for writes still running
+    // from the previous test.
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
 
     // Import test schema
@@ -695,12 +613,7 @@ describe('React Model Hooks Integration Tests', () => {
         migrations: [],
       }
 
-      // Clean up any existing schema
-      const db = BaseDb.getAppDb()
-      if (db) {
-        await removeSchemaByName(db, 'Test Schema Dynamic')
-      }
-      Schema.clearCache()
+      // beforeEach already removed every test schema
 
       // Import empty schema
       try {
@@ -812,11 +725,6 @@ describe('React Model Hooks Integration Tests', () => {
       const modelNames = modelElements.map((el) => el.textContent)
       expect(modelNames).toContain('DynamicModel')
 
-      // Clean up
-      if (db) {
-        await removeSchemaByName(db, 'Test Schema Dynamic')
-      }
-      Schema.clearCache()
     })
   })
 
