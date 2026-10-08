@@ -279,8 +279,12 @@ their number so references to them stay valid.
     model. When the Schema context defines the model, it read properties only from there, and
     `ModelProperty.create({ modelName, name })` doesn't add the new property to it, so
     `useModelProperty(schema, model, newProperty)` stayed `undefined`. When the name isn't in the
-    Schema context, it now also looks in `model.properties`; the schema file's definitions still win.
-    The Schema context itself is unchanged (minimal fix, agreed 2026-10-08). Tests: "getPropertySchema
+    Schema context, it now also looks in `model.properties`, and then for a `properties` row with that
+    exact name on the model; the schema file's definitions still win. The row lookup is needed
+    because `model.properties` lags the table: in Node, `setupEntityLiveQuery` only runs its initial
+    query (the Node live query is a stub), so a model never sees rows added after it found its own.
+    The first version of this fix relied on `model.properties` alone and failed ~1 in 4 runs under
+    load. The Schema context itself is unchanged (minimal fix, agreed 2026-10-08). Tests: "getPropertySchema
     finds a property added at runtime to a schema-file model" (`ModelProperty.test.ts`) and "finds a
     property added at runtime to a schema-file model" (`modelProperty.test.tsx`).
 

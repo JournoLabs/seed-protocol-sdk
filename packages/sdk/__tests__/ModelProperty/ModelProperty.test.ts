@@ -686,6 +686,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       await waitForPropertySchema(modelName, 'title', schemaName)
+      // Let the model load its properties first. In Node, model.properties then never picks up
+      // the row added below (no live query), so the lookup has to find it in the table.
+      const model = await Model.resolveAsync(modelName, { schemaName })
+      await vi.waitFor(() => expect(model?.properties.map((p) => p.name)).toEqual(['title']), { timeout: 15000 })
 
       const added = ModelProperty.create(
         { name: 'subtitle', dataType: 'Text', modelName } as Parameters<typeof ModelProperty.create>[0],
