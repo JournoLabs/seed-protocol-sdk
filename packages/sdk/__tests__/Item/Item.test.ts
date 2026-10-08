@@ -1237,6 +1237,14 @@ testDescribe('Item Integration Tests', () => {
       // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
       // a deleted DB id (no properties) while the other schema's Model is still cached.
       // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
+      // Let both Models' own writes finish first, or one can fail or recreate rows after the deletes.
+      for (const m of [otherModel, model]) {
+        const writeProcess = (await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess)).context
+          .writeProcess!
+        await waitFor(writeProcess, (snapshot) => snapshot.value === 'success' || snapshot.value === 'error', {
+          timeout: 5000,
+        })
+      }
       const db = BaseDb.getAppDb()
       const schemaIds: number[] = []
       const modelIds = new Set<number>()
