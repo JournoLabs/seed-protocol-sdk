@@ -36,7 +36,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
-import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -472,24 +472,12 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       },
       { timeout: 30000 }
     )
-  })
 
-  afterAll(async () => {
-    // Items too: leftover items whose models lose their schema links make Item.all() in later
-    // browser test files wait ~5s per item.
-    await cleanupTestSchemaData({ items: true })
-    Schema.clearCache()
-  })
-
-  beforeEach(async () => {
-    queryClientRef.current = null
-    container = document.createElement('div')
-    container.id = 'root'
-    document.body.appendChild(container)
-
-    // Removes every test schema, its items and schema files, after waiting for writes still running
-    // from the previous test. (This used to delete every model_schemas row, Seed Protocol's included,
-    // and every seed of type 'post' / 'article' whatever its schema.)
+    // The schema is imported once per file; each test gets fresh items (beforeEach). Re-importing per
+    // test meant evicting the cached models each time, which made every Item.create ~0.4s slower.
+    //
+    // Removes every test schema, its items and schema files. (This file's per-test cleanup used to
+    // delete every model_schemas row, Seed Protocol's included, and every 'post' / 'article' seed.)
     await cleanupTestSchemaData({ items: true })
 
     Schema.clearCache()
@@ -510,6 +498,22 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       },
       { timeout: 15000 }
     )
+  })
+
+  afterAll(async () => {
+    // Items too: leftover items whose models lose their schema links make Item.all() in later
+    // browser test files wait ~5s per item.
+    await cleanupTestSchemaData({ items: true })
+    Schema.clearCache()
+  })
+
+  beforeEach(async () => {
+    queryClientRef.current = null
+    container = document.createElement('div')
+    container.id = 'root'
+    document.body.appendChild(container)
+
+    await cleanupTestItems()
 
     // Create test items
     const model = Model.create('Post', 'Test Schema Items', { waitForReady: false })
@@ -542,8 +546,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
   afterEach(async () => {
     document.body.innerHTML = ''
-    Schema.clearCache()
-    
+
     // Clean up item instances
     if (testItem) {
       testItem.unload()

@@ -105,26 +105,7 @@ async function deleteTestRows(
     await db.select({ id: modelsTable.id }).from(modelsTable).where(isTestModel(modelsTable.id))
   ).map((row: { id: number }) => row.id)
 
-  if (items) {
-    const testModelFileIds = (
-      await db.select({ schemaFileId: modelsTable.schemaFileId }).from(modelsTable).where(isTestModel(modelsTable.id))
-    )
-      .map((row: { schemaFileId: string | null }) => row.schemaFileId)
-      .filter((id: string | null): id is string => !!id)
-    if (testModelFileIds.length > 0) {
-      const seedLocalIds = (
-        await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.modelFileId, testModelFileIds))
-      )
-        .map((row: { localId: string | null }) => row.localId)
-        .filter((id: string | null): id is string => !!id)
-      if (seedLocalIds.length > 0) {
-        await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
-        await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
-        await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
-        await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
-      }
-    }
-  }
+  if (items) await deleteTestItemRows(db, seedProtocolModelIds)
 
   await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
   if (testPropertyIds.length > 0) {
@@ -144,4 +125,57 @@ async function deleteTestRows(
     )
   await db.delete(modelsTable).where(isTestModel(modelsTable.id))
   await db.delete(schemas).where(or(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME), isNull(schemas.name)))
+}
+
+/**
+ * Deletes only the test models' items (seeds whose model_file_id is a non-Seed-Protocol model's, with
+ * their versions, metadata and publish processes) and leaves schemas, models and cached instances alone.
+ * For files that import their schema once and need an empty item table per test: re-importing and
+ * evicting per test makes the next import and every Item.create slower (cold Model instances).
+ */
+export async function cleanupTestItems(): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  const seedProtocolSchema = await db
+    .select({ id: schemas.id })
+    .from(schemas)
+    .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+    .limit(1)
+  const seedProtocolModelIds: number[] =
+    seedProtocolSchema[0]?.id == null
+      ? []
+      : (
+          await db
+            .select({ modelId: modelSchemas.modelId })
+            .from(modelSchemas)
+            .where(eq(modelSchemas.schemaId, seedProtocolSchema[0].id))
+        )
+          .map((link: { modelId: number | null }) => link.modelId)
+          .filter((id: number | null): id is number => id !== null)
+  await deleteTestItemRows(db, seedProtocolModelIds)
+}
+
+async function deleteTestItemRows(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  seedProtocolModelIds: number[],
+): Promise<void> {
+  const testModelFileIds = (
+    await db
+      .select({ schemaFileId: modelsTable.schemaFileId })
+      .from(modelsTable)
+      .where(seedProtocolModelIds.length > 0 ? notInArray(modelsTable.id, seedProtocolModelIds) : undefined)
+  )
+    .map((row: { schemaFileId: string | null }) => row.schemaFileId)
+    .filter((id: string | null): id is string => !!id)
+  if (testModelFileIds.length === 0) return
+  const seedLocalIds = (
+    await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.modelFileId, testModelFileIds))
+  )
+    .map((row: { localId: string | null }) => row.localId)
+    .filter((id: string | null): id is string => !!id)
+  if (seedLocalIds.length === 0) return
+  await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+  await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
+  await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
+  await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
 }

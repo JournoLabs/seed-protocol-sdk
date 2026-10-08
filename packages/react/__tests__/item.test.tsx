@@ -18,7 +18,7 @@ import { waitFor as xstateWaitFor } from 'xstate'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
-import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -326,18 +326,9 @@ describe('React Item Hooks Integration Tests', () => {
       },
       { timeout: 30000 }
     )
-  })
 
-  afterAll(async () => {
-    await cleanupTestSchemaData({ items: true })
-    Schema.clearCache()
-  })
-
-  beforeEach(async () => {
-    container = document.createElement('div')
-    container.id = 'root'
-    document.body.appendChild(container)
-
+    // The schema is imported once per file; each test gets fresh items (beforeEach). Re-importing per
+    // test meant evicting the cached models each time, which made every Item.create ~0.4s slower.
     await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
 
@@ -361,6 +352,19 @@ describe('React Item Hooks Integration Tests', () => {
       },
       { timeout: 10000 }
     )
+  })
+
+  afterAll(async () => {
+    await cleanupTestSchemaData({ items: true })
+    Schema.clearCache()
+  })
+
+  beforeEach(async () => {
+    container = document.createElement('div')
+    container.id = 'root'
+    document.body.appendChild(container)
+
+    await cleanupTestItems()
 
     // Create test items
     const postModel = Model.create('Post', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
@@ -419,7 +423,6 @@ describe('React Item Hooks Integration Tests', () => {
 
   afterEach(async () => {
     document.body.innerHTML = ''
-    Schema.clearCache()
 
     // Clean up item instances
     if (testItem1) {
