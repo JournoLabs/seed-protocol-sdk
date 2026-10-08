@@ -3,8 +3,7 @@ import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
 import type { PublishUpload } from '../../../types'
 import { resolvePublishPayloadValues } from '@seedprotocol/sdk'
-import { persistVersionUidFromPublishReceipt } from './persistVersionUid'
-import { persistPropertyMetadataUidsFromContractReceipt } from './persistPropertyMetadataUids'
+import { recordMultiPublishReceipt } from './recordMultiPublishReceipt'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
@@ -25,11 +24,7 @@ import { verifyArweaveTransactionsExist } from '../helpers/verifyArweaveTransact
 import { getPublishConfig } from '~/config'
 import { waitForItem } from './utils'
 import { ZERO_BYTES32 } from './utils'
-import {
-  seedUidFromCreatedAttestationEvents,
-  seedUidFromSeedPublished,
-  listCreatedAttestationPairsFromReceipt,
-} from './seedUidHelpers'
+import { listCreatedAttestationPairsFromReceipt } from './seedUidHelpers'
 import { attestationMsFromReceipt } from '../helpers/receiptAttestationMs'
 import {
   normalizePublishRequest,
@@ -281,6 +276,7 @@ export const createAttestations = fromPromise(
     if (needsSequential) {
       let workingPayload = structuredClone(reqs) as any[]
       const resolvedUids: Record<string, string> = {}
+      const resolvedVersionUids: Record<string, string> = {}
 
       for (let i = 0; i < workingPayload.length; i++) {
         workingPayload = await resolvePublishPayloadValues(workingPayload as any, resolvedUids)
@@ -302,46 +298,31 @@ export const createAttestations = fromPromise(
         }
 
         lastAttestationReceipt = receipt
-        const listOfAttestationsCount = normalizedOne?.listOfAttestations?.length ?? 0
         for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
           if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
         }
-        await persistVersionUidFromPublishReceipt({
+        const {
+          requests: [recorded],
+        } = await recordMultiPublishReceipt({
           receipt,
-          seedLocalId: rawReq.localId,
-          requestVersionUid: normalizedOne.versionUid,
-          versionSchemaUid: normalizedOne.versionSchemaUid,
-          contractAddressForEvents: routing.contractAddressForEvents,
-          listOfAttestationsCount,
+          requests: [normalizedOne],
+          rootSeedLocalId: item.seedLocalId,
           useModularExecutor,
+          contractAddressForEvents: routing.contractAddressForEvents,
           publisherAddress: address,
         })
 
+        if (recorded?.versionUid && toHex32(recorded.versionUid) !== ZERO_BYTES32) {
+          resolvedVersionUids[rawReq.localId] = recorded.versionUid
+        }
         const hadZeroSeedUid =
           !normalizedOne.seedUid || toHex32(normalizedOne.seedUid) === ZERO_BYTES32
-        const seedSchemaUid = normalizedOne?.seedSchemaUid
-        if (hadZeroSeedUid) {
-          const seedUidFromTx =
-            seedUidFromCreatedAttestationEvents(receipt, seedSchemaUid, useModularExecutor) ??
-            seedUidFromSeedPublished(
-              receipt,
-              routing.contractAddressForEvents,
-              listOfAttestationsCount,
-              useModularExecutor,
-            )
-          if (seedUidFromTx) {
-            resolvedUids[rawReq.localId] = seedUidFromTx
-            workingPayload[i] = { ...workingPayload[i], seedUid: seedUidFromTx }
-            batchExtraUids.push(seedUidFromTx)
-          }
+        const seedUidFromTx = hadZeroSeedUid ? recorded?.seedUid : undefined
+        if (seedUidFromTx && toHex32(seedUidFromTx) !== ZERO_BYTES32) {
+          resolvedUids[rawReq.localId] = seedUidFromTx
+          workingPayload[i] = { ...workingPayload[i], seedUid: seedUidFromTx }
+          batchExtraUids.push(seedUidFromTx)
         }
-
-        await persistPropertyMetadataUidsFromContractReceipt({
-          receipt,
-          normalizedRequests: [normalizedOne],
-          useModularExecutor,
-          contractAddressForEvents: routing.contractAddressForEvents,
-        })
       }
 
       for (const p of workingPayload) {
@@ -357,6 +338,7 @@ export const createAttestations = fromPromise(
         normalizePublishRequest({
           ...r,
           seedUid: resolvedUids[r.localId] ?? r.seedUid,
+          versionUid: resolvedVersionUids[r.localId] ?? r.versionUid,
         }),
       )
     } else {
@@ -377,45 +359,17 @@ export const createAttestations = fromPromise(
       for (const pair of listCreatedAttestationPairsFromReceipt(receipt, useModularExecutor)) {
         if (pair.attestationUid) batchExtraUids.push(pair.attestationUid)
       }
-      const rootReqSingle =
-        normalizedRequests.find((r: any) => r?.localId === item.seedLocalId) ?? normalizedRequests[0]
-      await persistVersionUidFromPublishReceipt({
+      // Every request in the transaction (the item and the related items published with it)
+      // records its own seed, version and property uids.
+      const recorded = await recordMultiPublishReceipt({
         receipt,
-        seedLocalId: rootReqSingle?.localId,
-        requestVersionUid: rootReqSingle?.versionUid,
-        versionSchemaUid: rootReqSingle?.versionSchemaUid,
-        contractAddressForEvents: routing.contractAddressForEvents,
-        listOfAttestationsCount: rootReqSingle?.listOfAttestations?.length ?? 0,
+        requests: payloadForContract,
+        rootSeedLocalId: item.seedLocalId,
         useModularExecutor,
+        contractAddressForEvents: routing.contractAddressForEvents,
         publisherAddress: address,
       })
-
-      await persistPropertyMetadataUidsFromContractReceipt({
-        receipt,
-        normalizedRequests: payloadForContract,
-        useModularExecutor,
-        contractAddressForEvents: routing.contractAddressForEvents,
-      })
-
-      const firstRequest = normalizedRequests[0]
-      const firstRequestSeedUid = firstRequest?.seedUid
-      const hadZeroSeedUid = firstRequestSeedUid === ZERO_BYTES32 || !firstRequestSeedUid
-      const listOfAttestationsCount = firstRequest?.listOfAttestations?.length ?? 0
-      const seedSchemaUid = firstRequest?.seedSchemaUid
-      const seedUidFromTx = hadZeroSeedUid
-        ? (seedUidFromCreatedAttestationEvents(receipt, seedSchemaUid, useModularExecutor) ??
-          seedUidFromSeedPublished(
-            receipt,
-            routing.contractAddressForEvents,
-            listOfAttestationsCount,
-            useModularExecutor,
-          ))
-        : undefined
-      if (seedUidFromTx) batchExtraUids.push(seedUidFromTx)
-      effectiveRequests =
-        seedUidFromTx && normalizedRequests.length > 0
-          ? [{ ...normalizedRequests[0], seedUid: seedUidFromTx }, ...normalizedRequests.slice(1)]
-          : normalizedRequests
+      effectiveRequests = recorded.requests
     }
 
     persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, effectiveRequests)

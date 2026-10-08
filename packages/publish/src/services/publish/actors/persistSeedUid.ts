@@ -21,10 +21,9 @@ export function persistSeedUidFromPublishResult(
   const match = seedLocalId
     ? normalizedRequests.find((r) => r?.localId === seedLocalId)
     : undefined
-  const uid =
-    match?.seedUid && match.seedUid !== ZERO_BYTES32
-      ? match.seedUid
-      : normalizedRequests[0]?.seedUid
+  // The first request is only a fallback when no request is the item's: in a batch it can be a
+  // related item (e.g. an Image published before its Post), whose seed uid is not the item's.
+  const uid = match ? match.seedUid : normalizedRequests[0]?.seedUid
   if (uid && uid !== ZERO_BYTES32) {
     item.seedUid = uid
   }
