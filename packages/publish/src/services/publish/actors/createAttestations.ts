@@ -5,8 +5,8 @@ import type { PublishUpload } from '../../../types'
 import {
   applyPropertyAttestationUidsFromPublish,
   resolvePublishPayloadValues,
-  updateVersionUid,
 } from '@seedprotocol/sdk'
+import { persistVersionUidFromPublishReceipt } from './persistVersionUid'
 import {
   isContractDeployed,
 } from '~/helpers/chainClient'
@@ -112,48 +112,6 @@ export function resolvePublishRouting(input: PublishRoutingInput): PublishRoutin
     txTargetAddress: publisherAddress,
     contractAddressForEvents: publisherAddress,
   }
-}
-
-async function persistVersionUidFromPublishReceipt(params: {
-  receipt: ReceiptLike
-  seedLocalId: string | undefined
-  versionSchemaUid: string | undefined
-  contractAddressForEvents: string
-  listOfAttestationsCount: number
-  useModularExecutor: boolean
-  publisherAddress: string
-}): Promise<void> {
-  const {
-    receipt,
-    seedLocalId,
-    versionSchemaUid,
-    contractAddressForEvents,
-    listOfAttestationsCount,
-    useModularExecutor,
-    publisherAddress,
-  } = params
-  if (!seedLocalId) return
-  const raw =
-    versionUidFromCreatedAttestationEvents(
-      receipt,
-      versionSchemaUid,
-      useModularExecutor,
-    ) ??
-    uidsFromSeedPublished(
-      receipt,
-      contractAddressForEvents,
-      listOfAttestationsCount,
-      useModularExecutor,
-    ).versionUid
-  const versionUid = raw ? toHex32(raw) : undefined
-  if (!versionUid || versionUid === ZERO_BYTES32) return
-  const attMs = await attestationMsFromReceipt(receipt)
-  await updateVersionUid({
-    seedLocalId,
-    versionUid,
-    publisher: publisherAddress,
-    attestationCreatedAt: attMs,
-  })
 }
 
 function schemaMatchesAttestationPair(
@@ -449,6 +407,7 @@ export const createAttestations = fromPromise(
         await persistVersionUidFromPublishReceipt({
           receipt,
           seedLocalId: rawReq.localId,
+          requestVersionUid: normalizedOne.versionUid,
           versionSchemaUid: normalizedOne.versionSchemaUid,
           contractAddressForEvents: routing.contractAddressForEvents,
           listOfAttestationsCount,
@@ -521,6 +480,7 @@ export const createAttestations = fromPromise(
       await persistVersionUidFromPublishReceipt({
         receipt,
         seedLocalId: rootReqSingle?.localId,
+        requestVersionUid: rootReqSingle?.versionUid,
         versionSchemaUid: rootReqSingle?.versionSchemaUid,
         contractAddressForEvents: routing.contractAddressForEvents,
         listOfAttestationsCount: rootReqSingle?.listOfAttestations?.length ?? 0,
