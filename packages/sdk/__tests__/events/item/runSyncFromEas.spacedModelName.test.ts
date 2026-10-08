@@ -59,12 +59,12 @@ const uid = (byte: string) => '0x' + byte.repeat(32)
 // Unique per file: browser test files in one worker share a DB.
 const MODEL_NAME = 'Spaced Sync Post'
 const MODEL_TYPE = 'spaced_sync_post'
-const STORAGE_SCHEMA_UID = uid('7c')
+const STORAGE_SCHEMA_UID = uid('8c')
 
 describe.sequential('runSyncFromEas: model names with spaces', () => {
-  const seed = uid('71')
-  const version = uid('72')
-  const txId = uid('73')
+  const seed = uid('81')
+  const version = uid('82')
+  const txId = uid('83')
 
   const attestation = (
     id: string,
@@ -118,7 +118,7 @@ describe.sequential('runSyncFromEas: model names with spaces', () => {
       if (!schemaString) await new Promise((r) => setTimeout(r, 100))
     }
     if (!schemaString) throw new Error(`Model ${MODEL_NAME} was not imported`)
-    fakeEas.modelSchema = { id: uid('7a'), schema: schemaString }
+    fakeEas.modelSchema = { id: uid('8a'), schema: schemaString }
   }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
@@ -128,10 +128,10 @@ describe.sequential('runSyncFromEas: model names with spaces', () => {
   it("links synced property rows to the model's properties", async () => {
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
     fakeEas.seeds = [attestation(seed, uid('00'), fakeEas.modelSchema!.id, 9_000)]
-    fakeEas.versions = [attestation(version, seed, uid('7b'), 9_001)]
+    fakeEas.versions = [attestation(version, seed, uid('8b'), 9_001)]
     fakeEas.properties = [
       attestation(
-        uid('74'),
+        uid('84'),
         version,
         STORAGE_SCHEMA_UID,
         9_002,
@@ -156,7 +156,7 @@ describe.sequential('runSyncFromEas: model names with spaces', () => {
     expect(propertyIds.get('html')).toBeDefined()
 
     const rows: MetadataType[] = await db.select().from(metadata).where(eq(metadata.versionUid, version))
-    expect(rows.find((r) => r.uid === uid('74'))).toMatchObject({
+    expect(rows.find((r) => r.uid === uid('84'))).toMatchObject({
       propertyName: 'storageTransactionId',
       modelType: MODEL_TYPE,
       propertyId: propertyIds.get('storageTransactionId'),
@@ -166,6 +166,6 @@ describe.sequential('runSyncFromEas: model names with spaces', () => {
       rows
         .filter((r) => r.propertyName === 'html')
         .map((r) => [r.propertyValue, r.derivedFromUid, r.refResolvedValue, r.propertyId]),
-    ).toEqual([[txId, uid('74'), `${txId}.html`, propertyIds.get('html')]])
+    ).toEqual([[txId, uid('84'), `${txId}.html`, propertyIds.get('html')]])
   })
 })
