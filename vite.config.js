@@ -25,6 +25,32 @@ const testWorkers = (defaultCount) => {
   return Number.isFinite(n) && n > 0 ? n : defaultCount
 }
 
+// Workspace packages load from source, not from their gitignored dist. Their package.json exports
+// point at dist, so without these aliases tests silently ran whatever was last built (a stale
+// packages/react/dist hid 8 hook failures; a stale packages/eas/dist failed easPropertyCanonical).
+// Regex finds match whole specifiers so `@seedprotocol/eas` doesn't also capture `@seedprotocol/eas/node`.
+// `platform` picks @seedprotocol/query's entry, which (like its exports map) differs for browser and Node.
+const workspaceSourceAliases = (platform) => {
+  const src = (path) => resolve(__dirname, 'packages', path)
+  const exact = (specifier, path) => ({
+    find: new RegExp(`^${specifier.replace('/', '\\/')}$`),
+    replacement: src(path),
+  })
+  return [
+    exact('@seedprotocol/eas/node', 'eas/src/node/index.ts'),
+    exact('@seedprotocol/eas', 'eas/src/index.ts'),
+    exact('@seedprotocol/arweave/node', 'arweave/src/node/index.ts'),
+    exact('@seedprotocol/arweave', 'arweave/src/index.ts'),
+    exact('@seedprotocol/query/node', 'query/src/node/index.ts'),
+    exact('@seedprotocol/query', platform === 'browser' ? 'query/src/index.ts' : 'query/src/index.node.ts'),
+    exact('@seedprotocol/react', 'react/src/index.ts'),
+  ]
+}
+
+// Vite's object alias form as an array, so it can be combined with workspaceSourceAliases.
+const aliasEntries = (aliases) =>
+  Object.entries(aliases).map(([find, replacement]) => ({ find, replacement }))
+
 export default defineConfig({
   plugins: [
     Inspect({
@@ -45,15 +71,18 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
         ],
         resolve: {
-          alias: {
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-            '~': resolve(__dirname, 'packages/publish/src'),
-            // Ensure fs modules are aliased to @zenfs/core in browser environment
-            'fs': '@zenfs/core',
-            'fs/promises': '@zenfs/core/promises',
-            'node:fs': '@zenfs/core',
-            'node:fs/promises': '@zenfs/core/promises',
-          },
+          alias: [
+            ...workspaceSourceAliases('browser'),
+            ...aliasEntries({
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+              '~': resolve(__dirname, 'packages/publish/src'),
+              // Ensure fs modules are aliased to @zenfs/core in browser environment
+              'fs': '@zenfs/core',
+              'fs/promises': '@zenfs/core/promises',
+              'node:fs': '@zenfs/core',
+              'node:fs/promises': '@zenfs/core/promises',
+            }),
+          ],
         },
         optimizeDeps: {
           exclude: [
@@ -66,6 +95,13 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
@@ -121,13 +157,16 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
         ],
         resolve: {
-          alias: {
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-            'fs': '@zenfs/core',
-            'fs/promises': '@zenfs/core/promises',
-            'node:fs': '@zenfs/core',
-            'node:fs/promises': '@zenfs/core/promises',
-          },
+          alias: [
+            ...workspaceSourceAliases('browser'),
+            ...aliasEntries({
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+              'fs': '@zenfs/core',
+              'fs/promises': '@zenfs/core/promises',
+              'node:fs': '@zenfs/core',
+              'node:fs/promises': '@zenfs/core/promises',
+            }),
+          ],
         },
         optimizeDeps: {
           exclude: [
@@ -139,6 +178,13 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
@@ -184,11 +230,14 @@ export default defineConfig({
           }),
         ],
         resolve: {
-          alias: {
-            '~': resolve(__dirname, 'packages/publish/src'),
-            '@seedprotocol/feed': resolve(__dirname, 'packages/feed/src/index.ts'),
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-          },
+          alias: [
+            ...workspaceSourceAliases('node'),
+            ...aliasEntries({
+              '~': resolve(__dirname, 'packages/publish/src'),
+              '@seedprotocol/feed': resolve(__dirname, 'packages/feed/src/index.ts'),
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+            }),
+          ],
         },
         optimizeDeps: {
           exclude: [
