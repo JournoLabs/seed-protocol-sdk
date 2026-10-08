@@ -621,6 +621,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           
           // For File/Image/Relation, query both propertyName and propertyNameId (metadata stores with Id suffix)
           // Build query with primitive params only (SQLocal bind rejects SQL fragment objects)
+          // ORDER BY spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason
           const [p0, p1, p2] = propertyNames
           const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }>(
             (sql: any) => {
@@ -632,7 +633,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -642,7 +643,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -652,7 +653,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
               } else if (resolvedSeedLocalId) {
@@ -663,7 +664,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -673,7 +674,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -683,7 +684,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
               }

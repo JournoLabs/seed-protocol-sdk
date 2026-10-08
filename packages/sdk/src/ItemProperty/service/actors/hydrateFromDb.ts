@@ -11,6 +11,7 @@ import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFr
 import { normalizeDataType } from '@/helpers/property'
 import { ensureImageLocal } from '@/helpers/ensureImageLocal'
 import { ImageSize } from '@/helpers/constants'
+import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import { downloadTransactionIdWithDedupe } from '@/events/files/download'
 import {
   readHtmlBodyForStorageSeedPropertyValue,
@@ -105,7 +106,7 @@ export const hydrateFromDb = fromCallback<
       .select()
       .from(metadata)
       .where(and(...whereClauses))
-      .orderBy(sql.raw('COALESCE(attestation_created_at, created_at) DESC'))
+      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
 
     if (!rows || !rows.length) {
       return

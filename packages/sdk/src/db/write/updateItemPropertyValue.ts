@@ -5,6 +5,7 @@ import { getSeedData } from '@/db/read/getSeedData'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
 import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
+import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
@@ -83,9 +84,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         .select()
         .from(metadata)
         .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId)))
-        .orderBy(
-          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
-        )) as (MetadataType & { localId?: string | null })[]
+        .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
     }
   } else if (localIdParam) {
     const localIdRows = await appDb
@@ -104,9 +103,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       .select()
       .from(metadata)
       .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId!)))
-      .orderBy(
-          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
-        )) as (MetadataType & { localId?: string | null })[]
+      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
   }
 
   // const mostRecentRecordStatement = `SELECT local_id,

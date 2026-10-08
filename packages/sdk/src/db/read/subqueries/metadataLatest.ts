@@ -1,7 +1,12 @@
 import { and, eq, getTableColumns, or, SQL, sql } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
+import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 
+/**
+ * Metadata rows of a seed numbered per property_name in reader order (`rowNum = 1` is the value to
+ * show): live rows before revoked ones, then newest first. See `compareMetadataRowsLatestFirst`.
+ */
 export const getMetadataLatest = ({seedLocalId, seedUid}: {seedLocalId?: string, seedUid?: string}) => {
   const appDb = BaseDb.getAppDb()
 
@@ -27,8 +32,8 @@ export const getMetadataLatest = ({seedLocalId, seedUid}: {seedLocalId?: string,
         ...metadataColumns,
         rowNum: sql.raw(`
            ROW_NUMBER() OVER (
-               PARTITION BY property_name 
-               ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC
+               PARTITION BY property_name
+               ORDER BY ${METADATA_LATEST_FIRST_ORDER_SQL}
            )
           `).as('rowNum')
       })
