@@ -2069,6 +2069,12 @@ export class Model {
           schemaFileId: row.schemaFileId,
         }))
       },
+      // The model writes from its writeProcess child while itself idle; wait for that write to end.
+      canRetryEntityId: (model) => {
+        const writeProcess = model._getSnapshotContext().writeProcess
+        const writeState = writeProcess?.getSnapshot().value
+        return writeState !== 'validating' && writeState !== 'writing'
+      },
       instanceState: modelInstanceState as WeakMap<Model, { liveQuerySubscription: Subscription | null }>,
       loggerName: 'seedSdk:model:liveQuery',
     })

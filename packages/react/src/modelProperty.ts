@@ -54,16 +54,9 @@ export const useModelProperties = (
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
 
-  // Get _dbId (database ID) from model context
-  const dbModelId = useMemo(() => {
-    if (!model) return null
-    try {
-      const context = (model as any)._getSnapshotContext()
-      return context._dbId as number | undefined
-    } catch {
-      return null
-    }
-  }, [model])
+  // The model's database id. It can arrive after the model is first seen (the row is written later),
+  // so follow the model's snapshot: memoizing it once left the properties live query unbuilt.
+  const dbModelId = useModelDbId(model)
 
   const modelId = model?.id
   const modelPropertiesQueryKey = useMemo(
@@ -156,6 +149,29 @@ export const useModelProperties = (
     isLoading: effectiveIsLoading,
     error: queryError as Error | null,
   }
+}
+
+const LOOKUP_RETRY_DELAYS_MS = [400, 1200, 2500]
+
+const readModelDbId = (model: Model | undefined | null): number | undefined => {
+  if (!model) return undefined
+  try {
+    return (model as any)._getSnapshotContext()._dbId as number | undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The model's `_dbId`, updated when the model's actor sets it. */
+const useModelDbId = (model: Model | undefined | null): number | undefined => {
+  const [dbModelId, setDbModelId] = useState(() => readModelDbId(model))
+  useEffect(() => {
+    setDbModelId(readModelDbId(model))
+    if (!model) return
+    const subscription = model.getService().subscribe(() => setDbModelId(readModelDbId(model)))
+    return () => subscription.unsubscribe()
+  }, [model])
+  return dbModelId
 }
 
 /**
@@ -277,7 +293,8 @@ export function useModelProperty(
     }
   }, [isClientReady, lookupMode])
 
-  const updateModelProperty = useCallback(async () => {
+  /** `quiet`: a background retry; leaves isLoading alone. */
+  const updateModelProperty = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
     if (!isClientReady) {
       setModelProperty(undefined)
       setIsLoading(false)
@@ -289,8 +306,10 @@ export function useModelProperty(
     let resolvedModelName: string | undefined
 
     try {
-      setIsLoading(true)
-      setError(null)
+      if (!quiet) {
+        setIsLoading(true)
+        setError(null)
+      }
 
       if (lookupMode.type === 'propertyFileId') {
         if (!lookupMode.propertyFileId) {
@@ -377,6 +396,22 @@ export function useModelProperty(
     }
     updateModelProperty()
   }, [shouldLoad, updateModelProperty])
+
+  // A schemaId/modelFileId lookup reads the model's properties, which can still be loading (or the
+  // property not yet written) when the hook mounts. Nothing would ask again, so retry a few times
+  // while it finds nothing, as useModelProperties does (skipped while a lookup is running, and once
+  // one found the property or failed).
+  const skipLookupRetryRef = useRef(false)
+  skipLookupRetryRef.current = isLoading || !!modelProperty || !!error
+  useEffect(() => {
+    if (!shouldLoad || lookupMode.type === 'propertyFileId') return
+    const timers = LOOKUP_RETRY_DELAYS_MS.map((ms) =>
+      setTimeout(() => {
+        if (!skipLookupRetryRef.current) updateModelProperty({ quiet: true })
+      }, ms),
+    )
+    return () => timers.forEach((t) => clearTimeout(t))
+  }, [shouldLoad, lookupMode.type, updateModelProperty])
 
   // Subscribe to service changes when modelProperty is available.
   // Skip subscription for schemaId/modelFileId lookups where we created the instance locally—
