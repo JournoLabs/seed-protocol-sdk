@@ -291,6 +291,11 @@ export {
   type PublishValidationError,
   type ValidateItemForPublishResult,
 } from './db/read/getPublishPayload'
+export {
+  RelatedItemUnpublishedError,
+  RELATED_ITEM_UNPUBLISHED_CODE,
+  type UnpublishedRelatedItem,
+} from './db/read/publishErrors'
 
 export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
 export {
@@ -299,6 +304,7 @@ export {
 } from './db/read/getPublishUploads'
 export {
   summarizePublishWork,
+  getUnpublishedRelatedItems,
   shouldAttestProperty,
   estimateDataUriByteLength,
   type PublishWorkSummary,

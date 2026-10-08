@@ -18,6 +18,12 @@ import { eq } from 'drizzle-orm'
 import type { UploadProperty } from '@/db/read/getPublishUploads'
 import type { PublishMode } from '@/db/read/getPublishPayload'
 import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
+import {
+  findRelatedSeedRow,
+  isUnpublishedSeed,
+  relatedModelNameFromDef,
+} from '@/db/read/resolveRelatedSeedRef'
 
 export type { PublishMode }
 
@@ -33,6 +39,11 @@ export type PublishWorkSummary = {
   attestationCount: number
   uploadCount: number
   uploadBytes: number
+  /**
+   * References the publish would attest to items whose seed was unpublished. When non-empty,
+   * publishing fails with RelatedItemUnpublishedError before anything is sent.
+   */
+  unpublishedRelatedItems: UnpublishedRelatedItem[]
 }
 
 const DATA_URI = /^data:[^;]+;base64,([\s\S]*)$/i
@@ -260,6 +271,53 @@ async function unpublishedListItems(listProperty: IItemProperty<any>): Promise<I
   return out
 }
 
+/** Seed refs held by a relation/image property (one) or a list property (each member). */
+function seedRefsOf(prop: IItemProperty<any>, isList: boolean): string[] {
+  const context = propertyContext(prop)
+  if (!context) return []
+  let value = context.propertyValue
+  if (isList) {
+    if (typeof value === 'string') value = parseListPropertyValueFromStorage(value)
+    return (Array.isArray(value) ? value : [])
+      .map((v) => normalizeRelationPropertyValue(v))
+      .filter((v): v is string => !!v)
+  }
+  const ref = normalizeRelationPropertyValue(value)
+  return ref ? [ref] : []
+}
+
+/** Like getPublishPayload: attested refs to revoked seeds block the publish. */
+async function collectUnpublishedRelatedItems(
+  props: IItemProperty<any>[],
+  isList: boolean,
+  forceFullSnapshot: boolean,
+  out: UnpublishedRelatedItem[],
+): Promise<void> {
+  for (const prop of props) {
+    if (!shouldAttestProperty(prop, forceFullSnapshot)) continue
+    for (const ref of seedRefsOf(prop, isList)) {
+      const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(ref)
+      if (!seedLocalId && !seedUid) continue
+      const row = await findRelatedSeedRow({ seedLocalId, seedUid })
+      if (!isUnpublishedSeed(row)) continue
+      if (
+        out.some(
+          (r) => r.propertyName === prop.propertyName && r.seedLocalId === row.seedLocalId,
+        )
+      ) {
+        continue
+      }
+      const related = await loadRelatedItem(row.seedLocalId)
+      out.push({
+        propertyName: prop.propertyName,
+        modelName: related?.modelName ?? relatedModelNameFromDef(prop.propertyDef) ?? row.type ?? 'unknown',
+        seedLocalId: row.seedLocalId,
+        seedUid: row.seedUid,
+      })
+    }
+  }
+}
+
 async function appendCoPublishImages(
   item: IItem<any>,
   acc: PublishWorkSummary,
@@ -331,6 +389,19 @@ async function summarizeItem(
     seenUploads,
   )
 
+  await collectUnpublishedRelatedItems(
+    [...itemRelationProperties, ...itemImageProperties],
+    false,
+    forceFullSnapshot,
+    acc.unpublishedRelatedItems,
+  )
+  await collectUnpublishedRelatedItems(
+    itemListProperties,
+    true,
+    forceFullSnapshot,
+    acc.unpublishedRelatedItems,
+  )
+
   for (const rel of itemRelationProperties) {
     const related = await relatedIfUnpublished(rel)
     if (related) {
@@ -366,15 +437,67 @@ async function summarizeItem(
  * Local measurement of what a publish would do: seed/version/attestation counts
  * and Arweave upload byte totals. Does not hit the network or create transactions.
  */
+const publishForcesFullSnapshot = async (
+  item: IItem<any>,
+  publishMode: PublishMode,
+): Promise<{ republishRevokedSeed: boolean; forceFullSnapshot: boolean }> => {
+  // Like getPublishPayload: an item whose seed was revoked republishes as a new seed with a full
+  // snapshot.
+  const republishRevokedSeed = !isZeroUid(item.seedUid) && (await isSeedRevoked(item.seedLocalId))
+  return { republishRevokedSeed, forceFullSnapshot: publishMode === 'new_version' || republishRevokedSeed }
+}
+
+async function collectUnpublishedRelatedItemsDeep(
+  item: IItem<any>,
+  forceFullSnapshot: boolean,
+  out: UnpublishedRelatedItem[],
+  visited: Set<string>,
+): Promise<void> {
+  const seedLocalId = item.seedLocalId
+  if (!seedLocalId || visited.has(seedLocalId)) return
+  visited.add(seedLocalId)
+  const { itemRelationProperties, itemListProperties, itemImageProperties } =
+    await getSegmentedItemProperties(item)
+  await collectUnpublishedRelatedItems(
+    [...itemRelationProperties, ...itemImageProperties],
+    false,
+    forceFullSnapshot,
+    out,
+  )
+  await collectUnpublishedRelatedItems(itemListProperties, true, forceFullSnapshot, out)
+  // Unpublished drafts the publish carries along are checked too.
+  for (const rel of itemRelationProperties) {
+    const related = await relatedIfUnpublished(rel)
+    if (related) await collectUnpublishedRelatedItemsDeep(related, forceFullSnapshot, out, visited)
+  }
+  for (const listProperty of itemListProperties) {
+    for (const related of await unpublishedListItems(listProperty)) {
+      await collectUnpublishedRelatedItemsDeep(related, forceFullSnapshot, out, visited)
+    }
+  }
+}
+
+/**
+ * References a publish of `item` would attest to items whose seed was unpublished (revoked), the
+ * same ones getPublishPayload rejects with RelatedItemUnpublishedError. Local reads only: the
+ * publish package checks this before registering schemas or uploading anything.
+ */
+export const getUnpublishedRelatedItems = async (
+  item: IItem<any>,
+  options?: SummarizePublishWorkOptions,
+): Promise<UnpublishedRelatedItem[]> => {
+  const { forceFullSnapshot } = await publishForcesFullSnapshot(item, options?.publishMode ?? 'patch')
+  const out: UnpublishedRelatedItem[] = []
+  await collectUnpublishedRelatedItemsDeep(item, forceFullSnapshot, out, new Set())
+  return out
+}
+
 export const summarizePublishWork = async (
   item: IItem<any>,
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishWorkSummary> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  // Like getPublishPayload: an item whose seed was revoked republishes as a new seed with a full
-  // snapshot.
-  const republishRevokedSeed = !isZeroUid(item.seedUid) && (await isSeedRevoked(item.seedLocalId))
-  const forceFullSnapshot = publishMode === 'new_version' || republishRevokedSeed
+  const { republishRevokedSeed, forceFullSnapshot } = await publishForcesFullSnapshot(item, publishMode)
   const acc: PublishWorkSummary = {
     publishMode,
     seedCount: 0,
@@ -383,6 +506,7 @@ export const summarizePublishWork = async (
     attestationCount: 0,
     uploadCount: 0,
     uploadBytes: 0,
+    unpublishedRelatedItems: [],
   }
   await summarizeItem(item, publishMode, forceFullSnapshot, acc, new Set(), new Set())
   // summarizeItem counts the root as an existing seed (it has a seedUid).

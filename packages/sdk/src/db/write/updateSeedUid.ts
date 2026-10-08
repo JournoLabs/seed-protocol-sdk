@@ -1,6 +1,6 @@
 import { BaseDb } from '@/db/Db/BaseDb'
-import { seeds } from '@/seedSchema'
-import { eq } from 'drizzle-orm'
+import { metadata, seeds, versions } from '@/seedSchema'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { normalizePublisher } from '@/helpers/addresses'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 
@@ -51,4 +51,21 @@ export const updateSeedUid = async ({
       updatedAt: Date.now(),
     })
     .where(eq(seeds.localId, seedLocalId))
+
+  // Attested version and property rows recorded before the seed uid was known (a republish records
+  // its new version and property attestations first) belong to this seed attestation.
+  if (isValidEasAttestationUid(seedUid)) {
+    await appDb
+      .update(versions)
+      .set({ seedUid })
+      .where(
+        and(eq(versions.seedLocalId, seedLocalId), isNotNull(versions.uid), isNull(versions.seedUid)),
+      )
+    await appDb
+      .update(metadata)
+      .set({ seedUid })
+      .where(
+        and(eq(metadata.seedLocalId, seedLocalId), isNotNull(metadata.uid), isNull(metadata.seedUid)),
+      )
+  }
 }

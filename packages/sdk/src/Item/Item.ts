@@ -1826,6 +1826,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
 
         const seedRecord = seedRecords[0]
+        // Set up from a uid alone, the item's local id comes from its seed row.
+        const watchedSeedLocalId = seedRecord.seedLocalId || seedLocalId
         const currentVersionLocalId = seedRecord.latestVersionLocalId
 
         // A seed whose versions are all revoked (unpublished) has no latest version, but its versions
@@ -1842,7 +1844,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             .from(metadata)
             .where(
               and(
-                eq(metadata.seedLocalId, seedLocalId),
+                eq(metadata.seedLocalId, watchedSeedLocalId),
                 eq(metadata.versionLocalId, currentVersionLocalId)
               )
             )
@@ -1863,8 +1865,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 try {
                   const property = await ItemProperty.find({
                     propertyName: metaRow.propertyName,
-                    seedLocalId,
-                    seedUid,
+                    seedLocalId: watchedSeedLocalId,
+                    seedUid: this._getSnapshotContext().seedUid ?? seedUid,
                     modelName: itemModelName,
                   })
                   if (property) {
@@ -1890,34 +1892,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
         // Only set up liveQuery subscription in browser environment
         if (isBrowser) {
-          // Set up liveQuery to watch seeds table
-          // Use proper SQL parameter binding - ensure values are strings, not objects
-          const resolvedSeedUid = seedUid || null
-          const resolvedSeedLocalId = seedLocalId || null
-          
-          const seeds$ = BaseDb.liveQuery<{ localId: string; uid: string | null; schemaUid: string | null }>(
-            (sql: any) => {
-              if (resolvedSeedUid) {
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE uid = ${resolvedSeedUid}
-                `
-              } else if (resolvedSeedLocalId) {
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE local_id = ${resolvedSeedLocalId}
-                `
-              } else {
-                // Fallback - should not happen, but handle gracefully
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE 1 = 0
-                `
-              }
-            }
+          // Watch the seed row by local id: its uid changes when an unpublished item is published
+          // again (a new seed attestation), and a watch on the uid would stop seeing the row.
+          const seeds$ = BaseDb.liveQuery<{
+            localId: string
+            uid: string | null
+            schemaUid: string | null
+            revokedAt: number | null
+          }>(
+            (sql: any) => sql`
+              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt
+              FROM seeds
+              WHERE local_id = ${watchedSeedLocalId}
+            `
           )
 
           // Set up liveQuery to watch versions table for this seed
@@ -1930,7 +1917,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             (sql: any) => sql`
               SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
               FROM versions
-              WHERE seed_local_id = ${seedLocalId}
+              WHERE seed_local_id = ${watchedSeedLocalId}
               ORDER BY COALESCE(attestation_created_at, created_at) DESC
             `
           )
@@ -1950,11 +1937,19 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               logger(`[Item._setupLiveQuerySubscription] Seed updated in database`)
               
               // Update context with seed data
+              const status = itemActor.getSnapshot().status
+              if (status === 'stopped' || status === 'done') return
+              // A new uid written elsewhere (sync, another tab's republish) goes through the tracked
+              // setter so the instance cache's uid alias follows it. A row without a uid (not yet
+              // persisted) never clears the item's uid.
+              if (seedRow.uid && seedRow.uid !== this._getSnapshotContext().seedUid) {
+                Item.sendTrackedPropertyUpdate(this, 'seedUid', seedRow.uid)
+              }
               sendToItemMachine({
                 type: 'updateContext',
                 seedLocalId: seedRow.localId,
-                seedUid: seedRow.uid || undefined,
                 schemaUid: seedRow.schemaUid || undefined,
+                revokedAt: seedRow.revokedAt ?? undefined,
               })
             },
             error: (error) => {
@@ -1988,7 +1983,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 .from(metadata)
                 .where(
                   and(
-                    eq(metadata.seedLocalId, seedLocalId),
+                    eq(metadata.seedLocalId, watchedSeedLocalId),
                     eq(metadata.versionLocalId, latestVersionLocalId)
                   )
                 )
@@ -2035,8 +2030,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                       }
                       const property = await ItemProperty.find({
                         propertyName,
-                        seedLocalId,
-                        seedUid,
+                        seedLocalId: watchedSeedLocalId,
+                        seedUid: this._getSnapshotContext().seedUid ?? seedUid,
                         modelName: itemModelName,
                       })
                       if (property) {

@@ -69,6 +69,42 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
     expect(row?.publisher).toBe(originalPublisher)
   })
 
+  it('ignores a version uid the seed already has (patch publish via the modular executor)', async () => {
+    // The executor's SeedPublished event reports the version a patch publish attached to: an
+    // existing version. A local draft version must not take that uid.
+    const { item } = await createItemWithBasicPropertiesOnly({ title: 'Existing version uid', count: 1 })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const publishedVersionUid = '0x' + '4c7e0a'.padEnd(64, '9')
+    await db
+      .update(versions)
+      .set({ uid: publishedVersionUid, attestationCreatedAt: Date.now() - 60_000 })
+      .where(eq(versions.seedLocalId, seedLocalId))
+    const draftLocalId = await createVersion({ seedLocalId, seedType: 'post' })
+    const rowsFor = () =>
+      db
+        .select({ localId: versions.localId, uid: versions.uid })
+        .from(versions)
+        .where(eq(versions.seedLocalId, seedLocalId))
+    const before = await rowsFor()
+
+    await updateVersionUid({ seedLocalId, versionUid: publishedVersionUid, publisher: '0x' + 'd'.repeat(40) })
+    // Same uid in another case (event decoding) is the same version.
+    await updateVersionUid({ seedLocalId, versionUid: publishedVersionUid.toUpperCase().replace('0X', '0x') })
+
+    const after = await rowsFor()
+    expect(after).toEqual(before)
+    expect(after.find((r: any) => r.localId === draftLocalId)?.uid ?? null).toBeNull()
+    expect(after.filter((r: any) => r.uid?.toLowerCase() === publishedVersionUid)).toHaveLength(1)
+
+    // A new version uid still goes onto the draft.
+    const newVersionUid = '0x' + '4c7e0b'.padEnd(64, '9')
+    await updateVersionUid({ seedLocalId, versionUid: newVersionUid })
+    const final = await rowsFor()
+    expect(final.find((r: any) => r.localId === draftLocalId)?.uid).toBe(newVersionUid)
+    expect(final).toHaveLength(before.length)
+  })
+
   it('createVersion sets publisher when getPublisherForNewSeeds is configured', async () => {
     const testPublisher = '0xCreateVersionPublisher1234567890abcdef12'
     const seedLocalId = await createSeed({ type: 'test_post', seedUid: '0x' + 'e'.repeat(64) })

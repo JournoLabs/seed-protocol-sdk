@@ -1,4 +1,4 @@
-import type { PublishMode } from '@seedprotocol/sdk'
+import type { PublishMode, UnpublishedRelatedItem } from '@seedprotocol/sdk'
 
 export type { PublishMode }
 
@@ -10,6 +10,8 @@ export type PublishWorkSummary = {
   attestationCount: number
   uploadCount: number
   uploadBytes: number
+  /** References to unpublished items; when non-empty the publish fails before sending anything. */
+  unpublishedRelatedItems?: UnpublishedRelatedItem[]
 }
 
 export type PublishCostEstimate = {
