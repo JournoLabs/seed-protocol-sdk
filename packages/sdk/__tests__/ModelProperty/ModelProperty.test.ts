@@ -686,9 +686,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       await waitForPropertySchema(modelName, 'title', schemaName)
-      // Let the import's delayed property refreshes (100-200ms after the model settles) run first, so
-      // that only the new property's own write can add it to the model below.
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      // Let the model load its properties first, so only the new property's own write can add it below.
+      // In Node there is no live query: the write itself has to put the property on the model.
+      const model = await Model.resolveAsync(modelName, { schemaName })
+      await vi.waitFor(() => expect(model?.properties.map((p) => p.name)).toEqual(['title']), { timeout: 15000 })
 
       const added = ModelProperty.create(
         { name: 'subtitle', dataType: 'Text', modelName } as Parameters<typeof ModelProperty.create>[0],
@@ -708,6 +709,8 @@ testDescribe('ModelProperty Integration Tests', () => {
         },
         { timeout: 15000, interval: 20 },
       )
+      // getPropertySchema also falls back to the properties table, so check the model itself too.
+      expect(model?.properties.map((p) => p.name)).toContain('subtitle')
       expect(await getPropertySchema(modelName, 'subtitle', { schemaName })).toMatchObject({ name: 'subtitle' })
 
       const subtitle = await waitForPropertySchema(modelName, 'subtitle', schemaName)

@@ -72,7 +72,7 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   }
 
   const modelSchemas = await queryClient.fetchQuery({
-    queryKey: [`getSchemasAllModels`],
+    queryKey: [`getSchemasAllModels`, [...modelNames].sort()],
     queryFn: async () =>
       easClient.request(GET_SCHEMAS, {
         where: {

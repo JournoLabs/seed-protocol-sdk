@@ -7,8 +7,46 @@ import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
 import { GET_SCHEMAS } from '@seedprotocol/eas'
+import { withSeedDbLock } from '@/helpers/tabLocks'
 
 const logger = debug('seedSdk:client:actors:addModelsToDb')
+
+type ModelRow = { id: number; name: string; schemaFileId: string | null }
+
+/**
+ * Returns every `models` row named in `modelNames`, inserting a null-schemaFileId stub for each name
+ * with no row yet (the schema import adopts stubs via findOrCreateModelRecord). Check-then-insert:
+ * another tab initializing at the same time would insert the same stubs, so tabs take turns
+ * (docs/MULTI_TAB.md).
+ */
+export async function ensureModelStubs(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  modelNames: string[],
+  filesDir: string | undefined,
+): Promise<ModelRow[]> {
+  return withSeedDbLock('init', filesDir, async () => {
+    // One query for all names. Model names are only unique per schema, so callers match each
+    // Model by its id (schemaFileId) first.
+    const rows = (await appDb
+      .select({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
+      .from(modelsTable)
+      .where(inArray(modelsTable.name, modelNames))) as ModelRow[]
+
+    const modelsToInsert = modelNames.filter((name) => !rows.some((m) => m.name === name))
+    if (modelsToInsert.length > 0) {
+      const newlyInserted = (await appDb
+        .insert(modelsTable)
+        .values(modelsToInsert.map((name) => ({ name })))
+        .returning({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })) as ModelRow[]
+
+      rows.push(...newlyInserted)
+      for (const name of modelsToInsert) {
+        logger('[client/actors] [addModelsToDb] inserted model:', name)
+      }
+    }
+    return rows
+  })
+}
 
 export const addModelsToDb = fromCallback<
   EventObject,
@@ -44,13 +82,8 @@ export const addModelsToDb = fromCallback<
       }
     >()
 
-    // Batch fetch all existing same-name models in one query (avoids N sequential queries).
     // Model names are only unique per schema, so match each Model by its id (schemaFileId) first.
-    type ModelRow = { id: number; name: string; schemaFileId: string | null }
-    const existingModels = (await appDb
-      .select({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
-      .from(modelsTable)
-      .where(inArray(modelsTable.name, modelNames))) as ModelRow[]
+    const existingModels = await ensureModelStubs(appDb, modelNames, context.filesDir)
 
     const rowFor = (modelName: string): ModelRow | undefined => {
       const modelFileId = (allModels[modelName] as { id?: string } | undefined)?.id
@@ -61,22 +94,6 @@ export const addModelsToDb = fromCallback<
         sameName.find((m) => !m.schemaFileId)
       )
     }
-    const modelsToInsert = modelNames.filter((name) => !existingModels.some((m) => m.name === name))
-
-    // Batch insert missing models
-    if (modelsToInsert.length > 0) {
-      const newlyInserted = (await appDb
-        .insert(modelsTable)
-        // Null schemaFileId stubs; the schema import adopts them (findOrCreateModelRecord).
-        .values(modelsToInsert.map((name) => ({ name })))
-        .returning({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })) as ModelRow[]
-
-      existingModels.push(...newlyInserted)
-      for (const name of modelsToInsert) {
-        logger('[client/actors] [addModelsToDb] inserted model:', name)
-      }
-    }
-
     let hasModelsInDb = true
     for (const modelName of modelNames) {
       const foundModel = rowFor(modelName)
@@ -111,7 +128,7 @@ export const addModelsToDb = fromCallback<
         const easClient = BaseEasClient.getEasClient()
 
         const queryPromise = queryClient.fetchQuery({
-          queryKey: [`getSchemasVersion`],
+          queryKey: [`getSchemasVersion`, [...schemaDefs].sort()],
           queryFn: async () =>
             easClient.request(GET_SCHEMAS, {
               where: {

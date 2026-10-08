@@ -43,12 +43,26 @@ export function getEmbeddedMigrations(): EmbeddedMigration[] {
 }
 
 /**
- * Same apply loop as drizzle-orm/sqlite-proxy/migrator, with in-memory migrations.
+ * Applies one migration's statements, including the row that records it in the migrations table.
+ * Pass an atomic runner (a transaction) so a crash or a racing tab can't leave it half-applied.
+ */
+export type MigrationRunner = (queries: string[], migration: EmbeddedMigration) => Promise<void>
+
+/** SQLite ignores `PRAGMA foreign_keys` inside a transaction, so such migrations must run outside one. */
+export function canRunInTransaction(migration: EmbeddedMigration): boolean {
+  return !migration.sql.some((query) => /^\s*PRAGMA\s+foreign_keys\b/im.test(query))
+}
+
+/**
+ * Same apply loop as drizzle-orm/sqlite-proxy/migrator, with in-memory migrations. Callers sharing
+ * the database across tabs must hold a cross-tab lock: the read of the last applied migration and
+ * the writes that follow aren't atomic.
  */
 export async function applyEmbeddedMigrations(
   db: SqliteRemoteDatabase<Record<string, unknown>>,
   migrations: EmbeddedMigration[],
   migrationsTable = '__drizzle_migrations',
+  runMigration?: MigrationRunner,
 ): Promise<void> {
   await db.run(sql`
 		CREATE TABLE IF NOT EXISTS ${sql.identifier(migrationsTable)} (
@@ -63,17 +77,19 @@ export async function applyEmbeddedMigrations(
   )
   const lastDbMigration = dbMigrations[0] ?? undefined
 
-  const queriesToRun: string[] = []
-  for (const migration of migrations) {
-    if (!lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis) {
-      queriesToRun.push(
-        ...migration.sql,
-        `INSERT INTO \`${migrationsTable}\` ("hash", "created_at") VALUES('${migration.hash}', '${migration.folderMillis}')`,
-      )
+  const runSequentially: MigrationRunner = async (queries) => {
+    for (const query of queries) {
+      await db.run(sql.raw(query))
     }
   }
 
-  for (const query of queriesToRun) {
-    await db.run(sql.raw(query))
+  for (const migration of migrations) {
+    if (!lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis) {
+      const queries = [
+        ...migration.sql,
+        `INSERT INTO \`${migrationsTable}\` ("hash", "created_at") VALUES('${migration.hash}', '${migration.folderMillis}')`,
+      ]
+      await (runMigration ?? runSequentially)(queries, migration)
+    }
   }
 }

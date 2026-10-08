@@ -2,7 +2,10 @@ import { BaseDb } from "@/db/Db/BaseDb";
 import { IDb } from "@/interfaces/IDb";
 import debug from "debug";
 import { drizzle, SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
-import { applyEmbeddedMigrations, getEmbeddedMigrations } from "./embeddedMigrations"
+import { applyEmbeddedMigrations, canRunInTransaction, getEmbeddedMigrations } from "./embeddedMigrations"
+import { withSqliteBusyRetry } from "./sqliteBusyRetry"
+import { withSeedDbLock } from "@/helpers/tabLocks"
+import { sql } from "drizzle-orm"
 import { BROWSER_FS_TOP_DIR } from "@/client/constants";
 import { BaseFileManager } from "@/helpers";
 import * as schema from '@/seedSchema'
@@ -40,6 +43,12 @@ export class BrowserDb implements IDb {
 
     this.filesDir = filesDir
 
+    // Another tab may be preparing the same database: run file copies, migrations and the
+    // one-time data fixes one tab at a time. See docs/MULTI_TAB.md.
+    return withSeedDbLock('migrate', filesDir, () => this.prepareDbLocked(filesDir))
+  }
+
+  private async prepareDbLocked(filesDir: string) {
     try {
       // Copy drizzle migration files from src/db/drizzle to filesDir/db
       await this.copyDrizzleFiles(filesDir)
@@ -76,7 +85,8 @@ export class BrowserDb implements IDb {
         }),
       )
 
-      const { driver, batchDriver } = sqlocalDrizzle
+      const { batchDriver } = sqlocalDrizzle
+      const driver = withSqliteBusyRetry(sqlocalDrizzle.driver)
 
       // Store SQLocalDrizzle instance for reactive queries
       this.sqlocalInstance = sqlocalDrizzle
@@ -270,12 +280,35 @@ export class BrowserDb implements IDb {
     try {
       const migrations = getEmbeddedMigrations()
       logger('[Db.runMigrations] embedded migrations', migrations.length)
-      await applyEmbeddedMigrations(db, migrations)
+      await applyEmbeddedMigrations(db, migrations, undefined, (queries, migration) =>
+        this.runMigrationQueries(db, queries, canRunInTransaction(migration)),
+      )
       logger('[Db.runMigrations] migrations completed')
     } catch (error) {
       logger('[Db.runMigrations] error', JSON.stringify(error))
       throw error
     }
+  }
+
+  /** Applies a migration atomically through SQLocal's transaction (exclusive across tabs) when SQLite allows. */
+  private async runMigrationQueries(
+    db: SqliteRemoteDatabase<Record<string, unknown>>,
+    queries: string[],
+    atomic: boolean,
+  ): Promise<void> {
+    const statements = queries.filter((query) => query.trim() !== '')
+    if (!atomic || !this.sqlocalInstance) {
+      for (const query of statements) {
+        await db.run(sql.raw(query))
+      }
+      return
+    }
+    type TransactionQuery = (statement: { sql: string; params: unknown[] }) => Promise<unknown>
+    await this.sqlocalInstance.transaction(async (tx: { query: TransactionQuery }) => {
+      for (const query of statements) {
+        await tx.query({ sql: query, params: [] })
+      }
+    })
   }
 
   async migrate(pathToDbDir: string, _dbName: string, _dbId: string): Promise<void> {

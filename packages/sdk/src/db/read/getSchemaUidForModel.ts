@@ -20,7 +20,7 @@ export const getEasSchemaUidForModel = async (
     const easClient = BaseEasClient.getEasClient()
 
     const modelSchemaQuery = await queryClient.fetchQuery({
-      queryKey: [`getPropertySchema${modelName}`],
+      queryKey: [`getEasSchemaUidForModel`, modeType],
       queryFn: async () =>
         easClient.request(GET_SCHEMAS, {
           where: {
