@@ -273,6 +273,7 @@ export default defineConfig({
             // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
+            'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,

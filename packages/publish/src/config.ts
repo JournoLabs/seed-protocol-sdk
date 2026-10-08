@@ -3,6 +3,7 @@ import {
   setAdditionalSyncAddresses,
   setGetPublisherForNewSeeds,
   setRevokeExecutor,
+  whenLeaderTab,
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
@@ -313,9 +314,13 @@ export function initPublish(c: PublishConfig): void {
     return undefined
   })
   setRevokeExecutor(revokeAttestations)
-  void import('./services/arweaveL1Finalize/worker').then((m) => {
-    m.startArweaveL1FinalizeWorker()
-  })
+  // Polls every 45 s; one tab is enough (docs/MULTI_TAB.md). Starts on takeover if this tab
+  // isn't the leader yet.
+  void whenLeaderTab()
+    .then(() => import('./services/arweaveL1Finalize/worker'))
+    .then((m) => {
+      m.startArweaveL1FinalizeWorker()
+    })
   setAdditionalSyncAddresses(async () => {
     if (c.useModularExecutor && c.modularAccountModuleContract) {
       return [c.modularAccountModuleContract]

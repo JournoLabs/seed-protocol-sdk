@@ -48,8 +48,10 @@ export async function withTabLock<T>(
   if (!locks) return fn()
 
   try {
-    // The timeout bounds the wait only; once granted, fn runs to completion.
-    return await locks.request(name, { mode: 'exclusive', signal: AbortSignal.timeout(timeoutMs) }, fn)
+    // The timeout bounds the wait only; once granted, fn runs to completion. Infinity waits for as
+    // long as the holder runs (it can't outlive its tab).
+    const signal = Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined
+    return await locks.request(name, { mode: 'exclusive', signal }, fn)
   } catch (error) {
     if ((error as DOMException | null)?.name === 'TimeoutError') {
       throw new TabLockTimeoutError(name, timeoutMs)

@@ -1,4 +1,4 @@
-import { saveAppState } from '@/db/write/saveAppState';
+import { addExcludedTransactions } from '@/db/write/addExcludedTransactions';
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
 import filesDownload from './filesDownload'
 import debug from 'debug'
@@ -43,7 +43,7 @@ export class FileDownloader {
         }
 
         if (e.data.done) {
-          saveAppState('excludedTransactions', JSON.stringify(Array.from(localExcludedTransactions)))
+          addExcludedTransactions(localExcludedTransactions)
           .then(() => {
             resolve(e.data)
           })

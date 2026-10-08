@@ -8,21 +8,25 @@ import debug                    from 'debug'
 import { normalizeAddressList } from '@/helpers/addresses'
 import { loadLocalDbChain } from '@/helpers/localDbChain'
 import { withSeedDbLock } from '@/helpers/tabLocks'
+import { isLeaderTab } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
 /**
- * Saves the addresses passed to init. An empty list isn't saved: hosts pass `addresses: []` before
- * a wallet connects, and writing it would wipe the addresses another tab (or the last session)
- * stored, which EAS sync, downloads and publishing read. Clearing them is `setAddresses([])`.
+ * Saves the addresses passed to init. Hosts pass `addresses: []` before a wallet connects. In the
+ * first (leader) tab that clears stored addresses, as it always has, so drafts made before the
+ * wallet reconnects stay editable. A tab opened while another is running (`keepStoredWhenEmpty`)
+ * keeps them instead: they're the other tab's connected wallet, which EAS sync, downloads and
+ * publishing read. See docs/MULTI_TAB.md.
  */
 export async function persistInitAddresses(
   appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
   { addresses, ownedAddresses, watchedAddresses }: Pick<ClientManagerContext, 'addresses' | 'ownedAddresses' | 'watchedAddresses'>,
+  { keepStoredWhenEmpty }: { keepStoredWhenEmpty: boolean },
 ): Promise<void> {
   const owned = normalizeAddressList(ownedAddresses ?? addresses ?? [])
   const watched = normalizeAddressList(watchedAddresses ?? [])
-  if (owned.length === 0 && watched.length === 0) return
+  if (owned.length === 0 && watched.length === 0 && keepStoredWhenEmpty) return
 
   const value = JSON.stringify({ owned, watched })
   await appDb
@@ -89,7 +93,11 @@ export const saveConfig = fromCallback<
           },
         })
 
-      await persistInitAddresses(appDb, { addresses, ownedAddresses, watchedAddresses })
+      await persistInitAddresses(
+        appDb,
+        { addresses, ownedAddresses, watchedAddresses },
+        { keepStoredWhenEmpty: !isLeaderTab() },
+      )
 
       await appDb
         .insert(appState)

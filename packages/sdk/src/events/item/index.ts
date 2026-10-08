@@ -1,5 +1,6 @@
 import { eventEmitter } from '@/eventBus'
 import {
+  listenForEasSyncRequestsFromOtherTabs,
   requestEasSyncFromEventBus,
   startEasSyncActor,
 } from '@/events/item/easSyncManager'
@@ -8,6 +9,7 @@ let areReady = false
 
 export const setupAllItemsEventHandlers = () => {
   startEasSyncActor()
+  listenForEasSyncRequestsFromOtherTabs()
   eventEmitter.addListener('syncDbWithEas', requestEasSyncFromEventBus)
   areReady = true
 }
