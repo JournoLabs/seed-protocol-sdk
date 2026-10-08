@@ -154,6 +154,27 @@ Ranked by damage:
   - Files: instead of a per-transaction lock in the lazy-download path, the download worker locks
     `seed:opfs-write:<path>` around each write, which covers bulk and lazy downloads in every tab.
     `addExcludedTransactions` replaces the two whole-list overwrites.
-  - Bulk download and resize follow EAS sync, so automatic ones now run in the leader only. Until
-    Phase C, other tabs' ZenFS caches may not see files the leader downloads.
-- Phase C: not started.
+  - Bulk download and resize follow EAS sync, so automatic ones now run in the leader only.
+- **Phase C: done.**
+  - `packages/sdk/src/helpers/tabEvents.ts`. `emitAcrossTabs` sends EAS sync finished, addresses
+    persisted and local copies removed to other tabs, which first reload
+    (`Item.rehydrateCachedItemsFromDbAfterEasSync`) or drop (`Item.dropCachedInstancesForSeedIds`)
+    cached Items, then emit the same event. Events are posted only where they originate, so
+    nothing is relayed twice.
+  - Files: `file-saved` stays a local event (the legacy resize listener in `browser/index.ts` would
+    otherwise spawn a worker in every tab); `notifyFileSaved` sends the path to other tabs instead.
+    The download and resize workers write to OPFS directly, so even the tab that ran them had stale
+    ZenFS entries for rewritten files; they now report saved paths, and
+    `notifyFilesWrittenOutsideCache` refreshes this tab and the others.
+  - `TolerantWebAccessFS.invalidate(path)` (via `BaseFileManager.invalidateCachedPaths`) drops a
+    path's index entry, handle and in-memory copy and reads it again. Without it, a file rewritten
+    elsewhere read back at its old size ("version two" → "ve"). The in-memory copy is refreshed only
+    when its directory is already cached; async reads work either way.
+  - `FILES_CHANGED_EVENT` (exported) tells `useFiles` / `useImageFiles` to refetch.
+  - Two-tab end-to-end test: `browser/multiTab.e2e.test.ts` opens real Playwright pages
+    (`__tests__/e2e/multiTab/tab.html`) through browser commands in `vite.config.js`. It checks
+    concurrent init, a single leader, a file rewritten behind ZenFS reading fresh in the other tab,
+    and leadership handover. Publish restore across tabs is covered by `publishLocks.node.test.ts`
+    rather than this test, since a real publish needs a chain.
+  - Still stale on purpose (step 11): Schema/Model metadata on existing instances, ModelProperty,
+    module-level lookup maps.
