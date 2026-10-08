@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { importJsonSchema } from '@/imports/json'
@@ -18,6 +18,7 @@ import {
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { getModelPropertiesData } from '@/db/read/getModelPropertiesData'
 import { generateId } from '@/helpers'
+import { savePropertyToDb, writePropertyToDb } from '@/helpers/db'
 import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -158,6 +159,59 @@ testDescribe('same-name models across schemas', () => {
     expect(postsInA).toEqual([itemA.seedLocalId])
     const postsInB = (await Item.all('Post', false, { modelFileId: postIdB })).map((i) => i.seedLocalId)
     expect(postsInB).toEqual([seedLocalIdB])
+  }, 60000)
+
+  // Regression: writePropertyToDb/savePropertyToDb found a Relation's target with a global name lookup,
+  // which threw "Multiple records found" once two schemas defined the target model (e.g. Author).
+  it('resolves a Relation target in the owning model\'s schema when the name is defined twice', async () => {
+    const suffix = generateId()
+    const buildAuthorSchema = (schemaName: string) => ({
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: generateId(),
+      metadata: { name: schemaName, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      models: {
+        Author: { id: generateId(), properties: { name: { id: generateId(), type: 'Text' } } },
+        Article: { id: generateId(), properties: { title: { id: generateId(), type: 'Text' } } },
+      },
+      enums: {},
+      migrations: [],
+    })
+    const schemaA = buildAuthorSchema(`Ref Scope A ${suffix}`)
+    const schemaB = buildAuthorSchema(`Ref Scope B ${suffix}`)
+    await importJsonSchema({ contents: JSON.stringify(schemaA) }, schemaA.version)
+    await importJsonSchema({ contents: JSON.stringify(schemaB) }, schemaB.version)
+
+    const db = BaseDb.getAppDb()!
+    const rowIdFor = async (modelFileId: string) =>
+      (await db.select({ id: modelsTable.id }).from(modelsTable).where(eq(modelsTable.schemaFileId, modelFileId)))[0]
+        .id as number
+    const articleB = await rowIdFor(schemaB.models.Article.id)
+    const authorB = await rowIdFor(schemaB.models.Author.id)
+    const refModelIdOf = async (propertyFileId: string) =>
+      (
+        await db
+          .select({ refModelId: propertiesTable.refModelId })
+          .from(propertiesTable)
+          .where(eq(propertiesTable.schemaFileId, propertyFileId))
+      )[0]?.refModelId
+
+    // Path of a runtime model's write (writeModelToDb → writePropertyToDb)
+    const writtenId = generateId()
+    await writePropertyToDb(writtenId, { modelId: articleB, name: 'author', dataType: 'Relation', refModelName: 'Author' })
+    expect(await refModelIdOf(writtenId)).toBe(authorB)
+
+    // Path of ModelProperty.save()
+    const savedId = generateId()
+    await savePropertyToDb({
+      id: savedId,
+      name: 'editor',
+      modelId: articleB,
+      modelName: 'Article',
+      dataType: 'Relation',
+      refModelName: 'Author',
+    } as Parameters<typeof savePropertyToDb>[0])
+    expect(await refModelIdOf(savedId)).toBe(authorB)
   }, 60000)
 
   it('clears item data once when legacy seeds have no model and their name is ambiguous', async () => {
