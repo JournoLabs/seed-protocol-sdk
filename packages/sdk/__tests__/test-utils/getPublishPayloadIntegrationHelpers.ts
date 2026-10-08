@@ -14,9 +14,9 @@ import type { SchemaFileFormat } from '@/types/import'
 import type { Item as ItemClass } from '@/Item/Item'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eq, and } from 'drizzle-orm'
-import { models as modelsTable, modelUids, metadata, seeds } from '@/seedSchema'
+import { models as modelsTable, modelUids, metadata, seeds, modelSchemas, schemas as schemasTable } from '@/seedSchema'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
-import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
+import { INTERNAL_DATA_TYPES, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
 import { toSnakeCase } from 'drizzle-orm/casing'
@@ -136,14 +136,35 @@ function testModelPlaceholderUid(index: number): string {
   return '0x' + (index + 1).toString(16).padStart(64, '0')
 }
 
-export async function ensureModelUidsForGetPublishPayloadTest(modelNames: string[] = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html']): Promise<void> {
+/**
+ * models row id for `modelName` in `schemaName`, or in the Seed Protocol schema (Image, File, Html).
+ * Model names are only unique per schema, so a bare name lookup can pick another test schema's Post.
+ */
+async function getTestModelId(modelName: string, schemaName: string): Promise<number | undefined> {
+  const db = BaseDb.getAppDb()
+  if (!db) return undefined
+  for (const name of [schemaName, SEED_PROTOCOL_SCHEMA_NAME]) {
+    const rows = await db
+      .select({ id: modelsTable.id })
+      .from(modelsTable)
+      .innerJoin(modelSchemas, eq(modelSchemas.modelId, modelsTable.id))
+      .innerJoin(schemasTable, eq(schemasTable.id, modelSchemas.schemaId))
+      .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, name)))
+      .limit(1)
+    if (rows.length > 0) return rows[0].id
+  }
+  return undefined
+}
+
+export async function ensureModelUidsForGetPublishPayloadTest(
+  modelNames: string[] = ['Author', 'Tag', 'Post', 'Image', 'File', 'Html'],
+  schemaName: string = SCHEMA_NAME,
+): Promise<void> {
   const db = BaseDb.getAppDb()
   if (!db) return
   for (let i = 0; i < modelNames.length; i++) {
-    const name = modelNames[i]
-    const rows = await db.select({ id: modelsTable.id }).from(modelsTable).where(eq(modelsTable.name, name)).limit(1)
-    if (rows.length === 0) continue
-    const modelId = rows[0].id
+    const modelId = await getTestModelId(modelNames[i], schemaName)
+    if (modelId == null) continue
     const existing = await db.select().from(modelUids).where(eq(modelUids.modelId, modelId)).limit(1)
     if (existing.length > 0) continue
     await db.insert(modelUids).values({ modelId, uid: testModelPlaceholderUid(i) })
@@ -295,7 +316,10 @@ export async function createGetPublishPayloadTestSchemaOptionalAuthor(): Promise
 }> {
   const schema = getGetPublishPayloadTestSchemaOptionalAuthor()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-  await ensureModelUidsForGetPublishPayloadTest(['Author', 'Tag', 'Post', 'Image', 'File', 'Html', OPTIONAL_AUTHOR_POST_MODEL_NAME])
+  await ensureModelUidsForGetPublishPayloadTest(
+    ['Author', 'Tag', 'Post', 'Image', 'File', 'Html', OPTIONAL_AUTHOR_POST_MODEL_NAME],
+    SCHEMA_NAME_OPTIONAL_AUTHOR,
+  )
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const authorModel = getSchemaModel(schema, 'Author', SCHEMA_NAME_OPTIONAL_AUTHOR)
   const tagModel = getSchemaModel(schema, 'Tag', SCHEMA_NAME_OPTIONAL_AUTHOR)
@@ -319,7 +343,7 @@ export async function createGetPublishPayloadTestSchemaWithEnum(): Promise<{
 }> {
   const schema = getGetPublishPayloadTestSchemaWithEnum()
   await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-  await ensureModelUidsForGetPublishPayloadTest(['Article'])
+  await ensureModelUidsForGetPublishPayloadTest(['Article'], SCHEMA_NAME_ENUM_VALIDATION)
   await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
   const articleModel = getSchemaModel(schema, 'Article', SCHEMA_NAME_ENUM_VALIDATION)
   await waitForModelIdle(articleModel)
@@ -634,13 +658,12 @@ export async function createPublishedItemForUnpublish(
   const db = BaseDb.getAppDb()
   if (!db) throw new Error('Database not available')
 
-  // Get schema UID for Post model from modelUids
-  const postModelRows = await db
-    .select({ uid: modelUids.uid })
-    .from(modelsTable)
-    .innerJoin(modelUids, eq(modelsTable.id, modelUids.modelId))
-    .where(eq(modelsTable.name, 'Post'))
-    .limit(1)
+  // Get schema UID for this schema's Post model from modelUids
+  const postModelId = await getTestModelId('Post', SCHEMA_NAME)
+  const postModelRows =
+    postModelId == null
+      ? []
+      : await db.select({ uid: modelUids.uid }).from(modelUids).where(eq(modelUids.modelId, postModelId)).limit(1)
   const schemaUid = postModelRows[0]?.uid ?? testModelPlaceholderUid(2)
 
   // Update seeds row with published state

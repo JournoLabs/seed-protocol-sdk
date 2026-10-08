@@ -65,7 +65,7 @@ testDescribe('List-of-relation EAS name', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = publicationSchema()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['Identity', 'Publication'])
+    await ensureModelUidsForGetPublishPayloadTest(['Identity', 'Publication'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
     // Stray schema-key schemas, like the ones the twin picked up.
     setSchemaUidForSchemaDefinition({ text: 'bytes32[] staff', schemaUid: DECOY_STAFF_UID })
