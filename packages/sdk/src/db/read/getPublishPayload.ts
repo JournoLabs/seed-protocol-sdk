@@ -1040,7 +1040,6 @@ async function processRelatedDraftStorageSeeds(
     relatedItem,
     multiPublishPayload,
     uploadedTransactions,
-    relatedItem.seedLocalId,
     ctx,
     buildOpts,
   )
@@ -1078,7 +1077,6 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
   item: IItem<any>,
   multiPublishPayload: MultiPublishPayload,
   uploadedTransactions: UploadedTransaction[],
-  originalSeedLocalId: string,
   ctx: PublishValidationContext,
   buildOpts?: PublishBuildOpts,
 ): Promise<MultiPublishPayload> {
@@ -1116,6 +1114,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
       continue
     }
 
+    // The row's Html seed must still be the value of one of the item's Html properties.
     const htmlSchemaUid = await resolveHtmlPropertySchemaUidByHtmlSeed(item, row.htmlSeedLocalId, ctx)
     if (!htmlSchemaUid) continue
 
@@ -1139,19 +1138,18 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
       continue
     }
 
-    if (
-      mergeChildPublishPayloadIfDuplicateInBatch(
-        multiPublishPayload,
-        relatedItem.seedLocalId,
-        originalSeedLocalId,
-        htmlSchemaUid,
-      )
-    ) {
+    // Already in the batch (e.g. also the value of an Image property): its payload is there.
+    if (multiPublishPayload.some((p) => p.localId === relatedItem.seedLocalId)) {
       continue
     }
 
     const versionUid = getVersionUid(relatedItem)
 
+    // No propertiesToUpdate: the Html refers to the image by its Arweave URL (the data URI is
+    // rewritten to it before the Html is uploaded), not by seed uid. The Html property holds the Html
+    // storage seed's uid, which the Html seed's own request writes into it; the contract writes each
+    // updater's seed uid into the same data[0] (SeedPublishLib.setSeedReference), so an image
+    // targeting the Html property too would overwrite that reference with the image's seed uid.
     let publishPayload: PublishPayload = {
       localId: relatedItem.seedLocalId,
       seedIsRevocable: true,
@@ -1160,12 +1158,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
       seedSchemaUid,
       versionUid,
       listOfAttestations: [],
-      propertiesToUpdate: [
-        {
-          publishLocalId: originalSeedLocalId,
-          propertySchemaUid: htmlSchemaUid,
-        },
-      ],
+      propertiesToUpdate: [],
     }
 
     await ensurePropertyDefs(relatedItem)
@@ -1728,7 +1721,6 @@ export const getPublishPayload = async (
     item,
     multiPublishPayload,
     uploadedTransactions,
-    item.seedLocalId,
     validationCtx,
     { forceFullSnapshot },
   )

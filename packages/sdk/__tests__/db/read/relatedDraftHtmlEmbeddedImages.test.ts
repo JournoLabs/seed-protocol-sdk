@@ -51,6 +51,13 @@ const schemaFile = () => ({
         noteBody: { id: generateId(), type: 'Html' },
       },
     },
+    EmbedPage: {
+      id: generateId(),
+      properties: {
+        title: { id: generateId(), type: 'Text' },
+        pageBody: { id: generateId(), type: 'Html' },
+      },
+    },
     EmbedArticle: {
       id: generateId(),
       properties: {
@@ -74,6 +81,40 @@ let txCounter = 0
 /** Upload results as the publish flow passes them to getPublishPayload (each upload's Arweave tx id). */
 const withTxIds = <U extends { seedLocalId: string }>(uploads: U[]) =>
   uploads.map((u) => ({ ...u, txId: `reldraftembedtx${(++txCounter).toString().padStart(4, '0')}`.padEnd(43, 'x') }))
+
+
+/**
+ * Applies each request's propertiesToUpdate the way multiPublish does (SeedPublishLib.setSeedReference):
+ * in request order, the request's new seed uid (here: its localId) is written into data[0] of the one
+ * attestation with that schema in the target request. Returns what each (target, schema) ends up holding.
+ */
+const applySeedReferencesLikeContract = (payload: any[]): Map<string, string> => {
+  const indexByLocalId = new Map(payload.map((p, i) => [p.localId, i]))
+  const written = new Map<string, string>()
+  payload.forEach((request, i) => {
+    for (const pu of request.propertiesToUpdate ?? []) {
+      const targetIndex = indexByLocalId.get(pu.publishLocalId)
+      if (targetIndex === undefined) throw new Error(`UnknownPublishLocalId ${pu.publishLocalId}`)
+      if (targetIndex < i) throw new Error(`PublishTargetAlreadyAttested(${i}, ${targetIndex})`)
+      const matches = payload[targetIndex].listOfAttestations.filter(
+        (a: any) => String(a.schema).toLowerCase() === String(pu.propertySchemaUid).toLowerCase(),
+      )
+      if (matches.length !== 1 || matches[0].data.length !== 1) {
+        throw new Error(`PropertyToUpdateNotFound/Ambiguous ${pu.publishLocalId} ${pu.propertySchemaUid}`)
+      }
+      written.set(`${pu.publishLocalId}:${String(pu.propertySchemaUid).toLowerCase()}`, request.localId)
+    }
+  })
+  return written
+}
+
+const htmlPropertySchemaUid = (payload: any[], localId: string, propertyName: string): string => {
+  const att = payload
+    .find((p) => p.localId === localId)
+    .listOfAttestations.find((a: any) => a._propertyName === propertyName)
+  expect(att).toBeDefined()
+  return String(att.schema).toLowerCase()
+}
 
 const createItem = async (props: Record<string, unknown>) => {
   const item = await Item.create({ schemaName: SCHEMA_NAME, ...props } as any)
@@ -99,7 +140,7 @@ testDescribe('Html-embedded images of related draft items', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['EmbedNote', 'EmbedArticle', 'Image', 'File', 'Html'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['EmbedNote', 'EmbedPage', 'EmbedArticle', 'Image', 'File', 'Html'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
   }, SETUP_HOOK_TIMEOUT_MS)
 
@@ -163,16 +204,58 @@ testDescribe('Html-embedded images of related draft items', () => {
     )
     const notePayload = byLocalId.get(note.seedLocalId) as any
     expect(notePayload.listOfAttestations.map((a: any) => a._propertyName).sort()).toEqual(['label', 'noteBody'])
+    // Only the Html seed fills in the note's Html property; the image is referenced by its Arweave
+    // URL inside the Html, so it updates no property (it would overwrite the Html seed reference).
     const imagePayload = byLocalId.get(imageSeedLocalId) as any
-    expect(imagePayload.propertiesToUpdate.map((u: any) => u.publishLocalId)).toEqual([note.seedLocalId])
-    expect((byLocalId.get(noteHtmlSeed) as any).propertiesToUpdate.map((u: any) => u.publishLocalId)).toEqual([
-      note.seedLocalId,
+    expect(imagePayload.propertiesToUpdate).toEqual([])
+    const noteBodySchema = htmlPropertySchemaUid(payload, note.seedLocalId, 'noteBody')
+    expect((byLocalId.get(noteHtmlSeed) as any).propertiesToUpdate).toEqual([
+      { publishLocalId: note.seedLocalId, propertySchemaUid: expect.any(String) },
     ])
+    expect(applySeedReferencesLikeContract(payload).get(`${note.seedLocalId}:${noteBodySchema}`)).toBe(noteHtmlSeed)
 
     const summary = await summarizePublishWork(article as any)
     expect(summary.unpublishedRelatedItems).toEqual([])
 
     await clearHtmlEmbeddedImageCoPublishRows(note.seedLocalId)
+  }, 90000)
+
+  it("a published item's own embedded image does not overwrite its Html seed reference", async () => {
+    vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(async () => ({ id: 'unsigned', tags: [] }) as any)
+    const page = await createItem({
+      modelName: 'EmbedPage',
+      title: 'root page',
+      pageBody: `<p>root <img src="${DATA_URI}"></p>`,
+    })
+    const pageHtmlSeed = htmlContext(page, 'pageBody').propertyValue!
+    expect(pageHtmlSeed).toBeTruthy()
+
+    const { deferredHtmlSeedLocalIds } = await prepareHtmlEmbeddedImagesForPublish(page as any, 'materialize')
+    expect(deferredHtmlSeedLocalIds).toEqual([pageHtmlSeed])
+    const [row] = await coPublishRows(page.seedLocalId)
+    const imageSeedLocalId = row!.imageSeedLocalId
+
+    const phase1 = withTxIds(
+      await getPublishUploads(page as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+    )
+    await rewriteHtmlEmbeddedImagesOnDisk(page.seedLocalId, phase1)
+    const phase2 = withTxIds(
+      await getPublishUploads(page as any, [], undefined, { onlyHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
+    )
+
+    const payload = (await getPublishPayload(page as any, [...phase1, ...phase2] as any)) as any[]
+    expect(payload.map((p) => p.localId).sort()).toEqual([page.seedLocalId, pageHtmlSeed, imageSeedLocalId].sort())
+    const pageBodySchema = htmlPropertySchemaUid(payload, page.seedLocalId, 'pageBody')
+    const updaters = payload.flatMap((p) =>
+      (p.propertiesToUpdate ?? [])
+        .filter((u: any) => u.publishLocalId === page.seedLocalId && String(u.propertySchemaUid).toLowerCase() === pageBodySchema)
+        .map(() => p.localId),
+    )
+    expect(updaters).toEqual([pageHtmlSeed])
+    expect(payload.find((p) => p.localId === imageSeedLocalId).propertiesToUpdate).toEqual([])
+    expect(applySeedReferencesLikeContract(payload).get(`${page.seedLocalId}:${pageBodySchema}`)).toBe(pageHtmlSeed)
+
+    await clearHtmlEmbeddedImageCoPublishRows(page.seedLocalId)
   }, 90000)
 
   it("a related draft's embedded image whose seed was revoked blocks the publish, naming its Html property", async () => {
