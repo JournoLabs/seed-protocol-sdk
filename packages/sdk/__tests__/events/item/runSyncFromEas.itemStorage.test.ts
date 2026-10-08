@@ -374,6 +374,8 @@ describe.sequential(
         revokedAt: 1_700_009_000,
         metadataUids: [uid('47')],
       })
+      // The derived row reads as revoked straight away, not only after the next sync.
+      expect(await derivedHtml()).toEqual([[latestTx, 1_700_009_000]])
 
       // EAS's index still reports it live: the stamp stays, and the derived row takes it.
       await sync(latest())
