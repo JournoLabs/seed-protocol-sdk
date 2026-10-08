@@ -686,12 +686,29 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       await waitForPropertySchema(modelName, 'title', schemaName)
+      // Let the import's delayed property refreshes (100-200ms after the model settles) run first, so
+      // that only the new property's own write can add it to the model below.
+      await new Promise((resolve) => setTimeout(resolve, 500))
 
       const added = ModelProperty.create(
         { name: 'subtitle', dataType: 'Text', modelName } as Parameters<typeof ModelProperty.create>[0],
         { waitForReady: false, schemaName },
       ) as ModelProperty
       await waitForModelPropertyIdle(added)
+      // Once the write has finished it is no longer a pending write: the model must still list it
+      // (in Node, where the Model has no reactive liveQuery, it used to drop out here).
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()
+            .select({ id: propertiesTable.id })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, added.id!))
+          if (rows.length === 0) throw new Error('subtitle not written yet')
+          if (ModelProperty.getPendingModelId(added.id!) !== undefined) throw new Error('write still pending')
+        },
+        { timeout: 15000, interval: 20 },
+      )
+      expect(await getPropertySchema(modelName, 'subtitle', { schemaName })).toMatchObject({ name: 'subtitle' })
 
       const subtitle = await waitForPropertySchema(modelName, 'subtitle', schemaName)
       expect(subtitle).toMatchObject({ name: 'subtitle', dataType: 'Text', modelName })

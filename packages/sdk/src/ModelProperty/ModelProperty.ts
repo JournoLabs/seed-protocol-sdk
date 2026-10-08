@@ -752,16 +752,15 @@ export class ModelProperty {
           const currentWriteState = writeProcess.getSnapshot()
           
           if (currentWriteState.value === 'success') {
-            // Write already succeeded, clear pending write immediately
-            this.clearPendingWrite(propertyFileId, 'success')
+            // Write already succeeded
+            void this.completePendingWrite(propertyFileId, resolvedModelId)
           } else {
             // Set up subscription to catch future state changes
             const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
               if (writeSnapshot.value === 'success') {
                 writeSubscription.unsubscribe()
                 logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
-                // Clear pending write on success
-                this.clearPendingWrite(propertyFileId, 'success')
+                void this.completePendingWrite(propertyFileId, resolvedModelId)
               } else if (writeSnapshot.value === 'error') {
                 writeSubscription.unsubscribe()
                 const errorContext = writeSnapshot.context
@@ -1045,6 +1044,20 @@ export class ModelProperty {
       status: 'pending',
       timestamp: Date.now(),
     })
+  }
+
+  /**
+   * A property write succeeded: add the property to its model's property ids, then drop the pending
+   * write. In that order, `Model.properties` (property ids + pending writes) never misses it; in Node,
+   * where the Model has no reactive liveQuery, nothing else would add it.
+   */
+  private static async completePendingWrite(propertyFileId: string, modelId: number): Promise<void> {
+    try {
+      await Model.refreshPropertiesForDbId(modelId)
+    } catch (error) {
+      logger(`Refreshing properties of model ${modelId} after writing "${propertyFileId}" failed: ${error}`)
+    }
+    this.clearPendingWrite(propertyFileId, 'success')
   }
 
   /**

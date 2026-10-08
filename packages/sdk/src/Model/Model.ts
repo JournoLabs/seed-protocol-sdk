@@ -2170,5 +2170,26 @@ export class Model {
     await this._refreshPropertiesFromDb()
   }
 
+  /**
+   * Refresh the property ids of every cached Model whose DB row is `dbId`. Called when a property
+   * write for that model finishes: until then `properties` includes it as a pending write, and in Node
+   * (no reactive liveQuery) nothing else adds it to `_liveQueryPropertyIds`.
+   */
+  static async refreshPropertiesForDbId(dbId: number): Promise<void> {
+    const instances = new Set<Model>()
+    for (const { instance } of this.instanceCacheById.values()) instances.add(instance)
+    for (const { instance } of this.instanceCache.values()) instances.add(instance)
+    for (const instance of instances) {
+      let context: ModelMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (context._dbId !== dbId) continue
+      await instance._refreshPropertiesFromDb()
+    }
+  }
+
 }
 
