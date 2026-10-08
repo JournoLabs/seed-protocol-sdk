@@ -59,8 +59,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   - `ModelProperty` edits: `compareAndMarkDraft` awaits the DB write before the machine returns to
     idle, so waiting for idle is enough.
   - If the test tolerates the condition never arriving, use `waitUntil(cond, timeout)`
-    (`packages/react/__tests__/test-utils/waitUntil.ts`, and a local copy in the SDK Schema/Model
-    tests). It returns as soon as the condition holds.
+    (`packages/react/__tests__/test-utils/waitUntil.ts`, `packages/sdk/__tests__/test-utils/waitUntil.ts`).
+    It returns `false` on timeout. If the test needs the condition, use
+    `waitUntilOrThrow(cond, description, timeout)` from the same files, so a timeout fails the test
+    instead of being ignored (finding 7).
 - **Don't wait for a state with `service.subscribe()` alone.** XState's `subscribe` doesn't replay the
   current snapshot, so if the entity is already in that state the wait never fires and sits out its
   whole fallback timeout. This cost 5s per test in `model.test.tsx`. Check the current snapshot first
@@ -81,6 +83,16 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   `Model.getByName`, `getPropertySchema`, `ModelProperty.create`, and join raw `models` queries
   through `model_schemas`. Note that the `models` table has no schema column: `dbModel.schemaName`
   on a `models` row is always `undefined`.
+- **Clean up with `cleanupTestSchemaData({ items: true })`** (`packages/sdk/__tests__/test-utils/cleanupTestDb.ts`;
+  React tests import it from `../../sdk/__tests__/test-utils/cleanupTestDb`). It evicts the test
+  schemas' cached models, waits for writes already running, deletes every test schema with its models,
+  properties and (with `items`) items by `model_file_id`, and deletes the schema files. Don't write
+  per-file delete helpers: the old ones matched items by `seeds.type` (which missed them, or deleted
+  other schemas' items) and several left models behind as orphans.
+  If every test needs the same schema, import it once in `beforeAll` and call `cleanupTestItems()`
+  per test (items only): evicting and re-importing per test makes the next import ~2s and each
+  `Item.create` ~0.4s slower, because the models are rebuilt cold. Old helpers that skipped eviction
+  looked faster only because they reused Model instances bound to rows they had just deleted.
 - **React tests are unmounted for you.** `packages/react/__tests__/setup.browser.ts` calls Testing
   Library's `cleanup()` after each test. Vitest runs without `globals`, so Testing Library doesn't
   register it itself; before that was added, every tree a test rendered stayed mounted for the rest
@@ -122,7 +134,8 @@ rejects with the loading stage. It became the shared `test-utils/waitForIdle.ts`
 ## Open findings
 
 Things noticed during this work. Line numbers are as of commit `627af7f`, except findings 14–16
-and the updates to 5 and 12, which are as of `ee8cec6`, and 17–18 (`c3cdcfd`). Fixed findings keep
+and the updates to 5 and 12, which are as of `ee8cec6`, 17–18 (`c3cdcfd`), and the step 3 updates
+to 5–7, 14 and 16 (branch `claude/step3-test-cleanup`). Fixed findings keep
 their number so references to them stay valid.
 
 ### SDK behavior
@@ -149,24 +162,29 @@ their number so references to them stay valid.
 
 ### Test bugs and weak tests
 
-5. **`item.test.tsx`'s cleanup never deletes its items.** `deleteTestSchemaItemsHooksRows`
-   (`packages/react/__tests__/item.test.tsx:80`) selects seeds with
-   `inArray(seeds.type, modelNames)` (line 114), but seed types are stored snake_cased (`'post'`,
-   model name `'Post'`). Items accumulate across tests; the tests pass because they assert
-   "at least N". Note: an attempt to import this file's schema once in `beforeAll` (and delete only
-   item rows per test, with the type fixed) made per-test setup *slower* (3.8s → 4.1s), so creating
-   items seems to get slower when models persist between tests — not investigated (live `Item` and
-   `ItemProperty` instances each hold liveQueries that re-run on every insert, which is a guess).
-   The same snake_case/PascalCase mismatch is in `modelProperty.test.tsx:80` and
-   `SeedImage.test.tsx:148`, and in the SDK `Item.test.ts:156` / `ItemProperty.test.ts:166` cleanup
-   subqueries (`seeds.type = models.name`), which therefore never match. Where the type *is* written
-   snake_cased (e.g. `itemProperty.test.tsx`, `htmlPropertyPersistence.test.tsx`), the cleanup
-   deletes every schema's seeds of that type, not just this file's.
-6. **A no-op test.** `packages/react/__tests__/modelProperty.test.tsx:796` ("…hook responds to
-   database changes via liveQuery") creates a model and asserts nothing about the hook afterwards.
-7. **Lenient tests.** Several tests accept the condition they test never happening, e.g.
-   `liveQueryTiming.test.tsx:481` only logs a warning if the reactive query misses the update, and
-   some Schema/Model tests note "models may not be loaded yet" and assert only `Array.isArray`.
+5. **Fixed** (step 3). `item.test.tsx`'s cleanup never deleted its items: it selected seeds with
+   `inArray(seeds.type, modelNames)`, but seed types are snake_case (`'post'`) and model names aren't
+   (`'Post'`). The same mismatch was in `modelProperty.test.tsx` and `SeedImage.test.tsx`, and in the
+   SDK `Item.test.ts` / `ItemProperty.test.ts` subqueries (`seeds.type = models.name`), which never
+   matched and so deleted every item. `itemProperty.test.tsx` and `htmlPropertyPersistence.test.tsx`
+   used snake_case types and deleted every schema's seeds of that type; `itemProperty.test.tsx` also
+   deleted every `model_schemas` row, Seed Protocol's links included. All of these React files and
+   `model.test.tsx` now call `cleanupTestSchemaData({ items: true })`, which matches items by
+   `model_file_id`; the SDK two now delete every item explicitly. `item.test.tsx`'s counts are exact.
+   An earlier note said importing the schema once in `beforeAll` made per-test setup slower
+   (3.8s → 4.1s). That compared against the old helper, whose `Item.create` ran on stale Model
+   instances (bound to deleted rows) and skipped work; against correctly bound models, importing once
+   is faster (see "Clean up with `cleanupTestSchemaData`").
+6. **Fixed** (step 3). `modelProperty.test.tsx`'s "should automatically update when properties
+   change (liveQuery integration)" asserted nothing after its setup. It now adds a property with
+   `ModelProperty.create` and waits for the hook's list to show both properties.
+7. **Fixed** (step 3). Tests that ignored a `waitUntil` timeout and passed anyway — by returning early
+   ("Skip if we can't get the model ID"), creating the model the import should have made, sleeping and
+   retrying, or logging a warning — now use `waitUntilOrThrow` and plain assertions: SDK `Schema.test`,
+   `Model.test`; React `model`, `modelProperty`, `schema`, `liveQueryTiming` (which now waits for an
+   emission containing the updated value). This turned up one wrong test: `Schema.test`'s `reload()`
+   test edited a published row's `schemaData`, which `reload()` never reads (a published schema loads
+   from its file; only draft rows load from `schemaData`); it now writes the edit as a draft.
 
 ### Failing on `main` (not caused by this work)
 
@@ -188,26 +206,31 @@ their number so references to them stay valid.
     schemaId lookup runs once and never retries if `getPropertySchema` comes back empty (which it can,
     via finding 2). See also finding 15.
 13. **Fixed.** A stale `packages/eas/dist`; see "Workspace packages load from source".
-14. **Stale model writes in `react/__tests__/model.test.tsx`** (5 per run, identical before and after
-    `22c3a7e`): `[writing] Write error for model "post-model-models-test-id" / "article-model-models-test-id":
-    Model with id N does not exist`. These are writes started by the schema import that are still
-    running when the next test's `beforeEach` deletes the rows. `4863469` added
-    `waitForInFlightWrites()` and calls it from `Schema.destroy` and the SDK's `cleanupTestSchemaData`,
-    but the React test files delete rows with their own helpers, and `waitForInFlightWrites` isn't
-    exported from `@seedprotocol/sdk`, so they can't drain them yet. The tests pass.
+14. **Writes that start after test cleanup has evicted their model.** The React files now use the
+    SDK's `cleanupTestSchemaData`, which waits for in-flight writes (`4863469`). That removed the
+    writes that were already running: `model.test.tsx` went from 5 stale-write errors per run to
+    0–3. What's left are writes that *start* after the cleanup evicted and waited, so waiting can't
+    catch them. Logging write starts against the cleanup showed two kinds:
+    - The next test's import of the same schema writes the model, and its property insert fails a
+      foreign key (`model_id` of a row the cleanup just deleted), so some cached state still holds the
+      old `models` row id after eviction.
+    - A runtime model that was already `stopped` (e.g. `NewItemModel`, created with `Model.create`
+      in `itemProperty.test.tsx`) starts a write ~60ms after the cleanup.
+    With a per-test delete-and-reimport, `itemProperty.test.tsx` showed 2 such errors per run where
+    `main` showed none: `main`'s cleanup never deleted model rows, so these writes landed on orphaned
+    rows silently. Importing that file's schema once (step 3) removed them there. Next step is in the
+    SDK: find which cache keeps the old row id, and what restarts a stopped model's write process.
 15. **`useModelProperties` can miss properties written late** (`packages/react/src/modelProperty.ts:58`).
     `dbModelId` is memoized on `[model]` from `model._getSnapshotContext()._dbId`. If `_dbId` isn't set
     when the model is first seen, the memo never updates (same object), so the live query on the
     `properties` table is never built and only the fixed refetches at 0.4/1.2/2.5s (line 107) can pick
     up properties. Under load, properties written after 2.5s would leave the list empty. Not observed
     failing; found while instrumenting finding 12.
-16. **Name-only item listing (test side only).** `getItemsData({ modelName })`, `Item.all(name)` and
-    `useItems({ modelName })` without `schemaName` / `modelFileId` filter by `seeds.type`, so they
-    return items from every schema with that model name. **That's working as designed** (2026-10-07):
-    model types are global and a schema is a local lens over seeds, so an unscoped list spans schemas.
-    What's left is in the tests: `Item/getItems.test.ts` and react `item.test.tsx` call these unscoped
-    and only pass because they find their items by id. `getItems.test.ts` also inserts a raw seed with
-    no `model_file_id`, so scoping it needs that fixture changed.
+16. **Fixed** (step 3, test side). `getItemsData({ modelName })`, `Item.all(name)` and
+    `useItems({ modelName })` without `schemaName` / `modelFileId` list every schema's items with that
+    model name. That's working as designed (2026-10-07): model types are global and a schema is a local
+    lens over seeds. `Item/getItems.test.ts` now passes its Post's `modelFileId` (and its raw EAS-style
+    seed records it), and react `item.test.tsx`'s `useItems` calls pass the file's `schemaName`.
 17. **Fixed.** Test files threw inside a `waitFor` predicate (`throw new Error('… failed to load')`
     when the snapshot is `error`). Every SDK and React test now uses the non-throwing helpers in
     `packages/sdk/__tests__/test-utils/waitForIdle.ts` (see "Writing tests that stay fast").
@@ -220,16 +243,12 @@ their number so references to them stay valid.
 Agreed order for the remaining findings (2026-10-07). Findings 1, 4, 9–11 and 13 were closed on branch
 `fix/test-source-aliases` (merged in `843bf4e`), and 17 on `claude/nifty-heyrovsky-08dd27`.
 
-- **Step 3 — test cleanup and weak tests: 5, 6, 7, 14, 16.** A shared seed-cleanup helper that deletes
-  by `modelFileId` instead of `seeds.type`, used by every file listed under 5. The React files switch
-  to the SDK's `cleanupTestSchemaData()`, which drains in-flight writes (14), instead of their own
-  delete helpers. Scope the remaining unscoped item listings in tests (16). Exact counts in place of
-  "at least N", a real assertion for the no-op test, and `waitUntil` failing instead of returning
-  false where a test needs the condition. The finding-17 branch it was waiting on has
-  merged.
+- **Step 3 — done** (branch `claude/step3-test-cleanup`): 5, 6, 7 and 16 fixed; 14 narrowed to writes
+  that start after eviction, which needs an SDK fix (see 14). `item.test.tsx` and
+  `itemProperty.test.tsx` now import their schema once per file.
 - **Step 4 — finding 3.** Cache EAS schema lookups, including misses (~630 → ~200ms per item).
 - **Step 5 — hooks and caches: 2, 12, 15.** `ModelProperty` cache identity behind `model.properties`.
   In `useModelProperties`, read `_dbId` from the model's live snapshot (or resolve by `modelFileId`)
   instead of memoizing it once, with a test that delays the property write past the 2.5s refetches.
   Recheck 12 after that.
-- **Not scheduled:** 8 (separate session), 18.
+- **Not scheduled:** 8 (separate session), 14's SDK side, 18.
