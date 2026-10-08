@@ -235,14 +235,6 @@ export async function migrateMetadataForPropertyRename(
   return total
 }
 
-export const escapeSqliteString = (value: string): string => {
-  if (typeof value !== 'string') {
-    throw new Error(
-      `Value must be a string, instead got: ${JSON.stringify(value)}`,
-    )
-  }
-  return value.replace(/'/g, "''")
-}
 export const getObjectForRow = (row: any): ResultObject => {
   const obj: ResultObject = {}
 

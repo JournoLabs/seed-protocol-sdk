@@ -22,7 +22,6 @@ import {
 import { modelPropertiesToObject } from '@/helpers/model'
 import { GET_SEEDS } from '@seedprotocol/eas'
 import {
-  escapeSqliteString,
   getAllAddressesFromDb,
   getItemStoragePropertiesForModel,
   getPropertyIdForModelAndName,
@@ -136,6 +135,34 @@ const collectRelatedSeedUids = (properties: Attestation[], into: Set<string>): v
   }
 }
 
+/**
+ * Earlier syncs SQL-escaped a seed's attestation JSON (`'` -> `''`) and then bound it as a
+ * parameter, so stored `seeds.attestation_raw` had every quote doubled. Doubled JSON still parses,
+ * so a legacy row is recognized by comparing with the attestation EAS returns now: it is legacy
+ * when it equals that attestation with quotes doubled, ignoring the revocation fields (EAS may have
+ * revoked it since). A row whose data legitimately contains `''` equals the fresh JSON itself and is
+ * left alone.
+ */
+export const isSqlEscapedAttestationRaw = (stored: string, fresh: Attestation): boolean => {
+  if (!stored.includes("''")) return false
+  const freshJson = JSON.stringify(fresh)
+  if (stored === freshJson || !freshJson.includes("'")) return false
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stored)
+  } catch {
+    return false
+  }
+  if (!parsed || typeof parsed !== 'object') return false
+  const stored_ = parsed as Record<string, unknown>
+  const withStoredRevocation = {
+    ...fresh,
+    ...('revoked' in stored_ && { revoked: stored_.revoked }),
+    ...('revocationTime' in stored_ && { revocationTime: stored_.revocationTime }),
+  }
+  return stored === JSON.stringify(withStoredRevocation).replace(/'/g, "''")
+}
+
 type SaveEasSeedsToDbProps = {
   itemSeeds: Attestation[]
   state: SyncRunState
@@ -190,6 +217,17 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
     await updateSeedRevokedAt({ seedLocalId: row.localId, revokedAt })
   }
 
+  // Repair seed rows an earlier sync stored with SQL-escaped (doubled) quotes.
+  for (const row of existingSeedRecordsRows) {
+    if (!row.uid || !row.attestationRaw) continue
+    const attestation = seedByUid.get(row.uid)
+    if (!attestation || !isSqlEscapedAttestationRaw(row.attestationRaw, attestation)) continue
+    await appDb
+      .update(seeds)
+      .set({ attestationRaw: JSON.stringify(attestation) })
+      .where(eq(seeds.uid, row.uid))
+  }
+
   if (newSeeds.length === 0) {
     return { seedUids }
   }
@@ -202,7 +240,8 @@ const saveEasSeedsToDb: SaveEasSeedsToDb = async ({ itemSeeds, state }) => {
     const seedLocalId = generateId()
     seedUidToLocalId.set(seed.id, seedLocalId)
 
-    const attestationRaw = escapeSqliteString(JSON.stringify(seed))
+    // createSeeds binds parameters: store the JSON as is.
+    const attestationRaw = JSON.stringify(seed)
     const revokedAt = revokedAtSeconds(seed)
 
     // EAS only knows the model by name; the seam may match it to a local model (not built yet).

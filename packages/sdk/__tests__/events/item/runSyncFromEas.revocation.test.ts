@@ -275,6 +275,54 @@ describe.sequential('runSyncFromEas: revocations', () => {
     expect((await seedRow(seed))?.revokedAt).toBe(1_700_000_907)
   })
 
+  describe.sequential('seeds.attestation_raw', () => {
+    const quotedSeed = (id: string, decodedDataJson: string): FakeAttestation => ({
+      ...attestation(id, uid('00'), fakeEas.modelSchema!.id, 1_500),
+      decodedDataJson,
+    })
+
+    it("stores a seed attestation containing ' as the same, valid JSON", async () => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      const seed = quotedSeed(uid('1a'), JSON.stringify([{ value: { name: 'note', value: "it's" } }]))
+      fakeEas.seeds = [seed]
+      fakeEas.versions = []
+      fakeEas.properties = []
+      await runSyncFromEas({ addresses: [attester] })
+
+      const raw = (await seedRow(seed.id))!.attestationRaw!
+      expect(raw).toBe(JSON.stringify(seed))
+      expect(JSON.parse(raw)).toEqual(seed)
+    })
+
+    it("repairs a row an earlier sync stored with doubled quotes, and leaves a legitimate '' alone", async () => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { seeds } = await import('@/seedSchema')
+      const doubled = quotedSeed(uid('1b'), JSON.stringify([{ value: { name: 'note', value: "it's" } }]))
+      const legit = quotedSeed(uid('1c'), JSON.stringify([{ value: { name: 'note', value: "it''s" } }]))
+      fakeEas.seeds = [doubled, legit]
+      fakeEas.versions = []
+      fakeEas.properties = []
+      await runSyncFromEas({ addresses: [attester] })
+
+      // What syncs before the fix stored: escaped SQL text bound as a parameter.
+      const legacyRaw = JSON.stringify(doubled).replace(/'/g, "''")
+      await BaseDb.getAppDb()
+        .update(seeds)
+        .set({ attestationRaw: legacyRaw })
+        .where(eq(seeds.uid, doubled.id))
+      expect(JSON.parse(legacyRaw)).not.toEqual(doubled)
+
+      // EAS revoked it since: the repaired row takes the fresh attestation.
+      const revokedNow = { ...doubled, revoked: true, revocationTime: 1_700_000_950 }
+      fakeEas.seeds = [revokedNow, legit]
+      await runSyncFromEas({ addresses: [attester] })
+
+      expect(JSON.parse((await seedRow(doubled.id))!.attestationRaw!)).toEqual(revokedNow)
+      expect((await seedRow(legit.id))!.attestationRaw).toBe(JSON.stringify(legit))
+    })
+  })
+
   const versionRow = async (versionUid: string): Promise<VersionsType | undefined> => {
     const { BaseDb } = await import('@/db/Db/BaseDb')
     const { versions } = await import('@/seedSchema')
