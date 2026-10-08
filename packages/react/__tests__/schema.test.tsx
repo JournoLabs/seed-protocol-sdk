@@ -28,7 +28,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import type { SnapshotFrom } from 'xstate'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
-import { waitUntil } from './test-utils/waitUntil'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
 
 // Test schema data
 const testSchema1: SchemaFileFormat = {
@@ -1353,7 +1353,11 @@ describe(
 
       // Wait for schema service to emit a new snapshot (this triggers React re-render)
       // The subscription in useSchema should pick this up
-      await waitUntil(() => (schemaInstance.models || []).some((m: any) => m.modelName === 'New model'), 5000)
+      await waitUntilOrThrow(
+        () => (schemaInstance.models || []).some((m: any) => m.modelName === 'New model'),
+        'the schema instance to list "New model"',
+        5000,
+      )
 
       // Wait for the model to appear in the UI (React component should re-render)
       await waitFor(

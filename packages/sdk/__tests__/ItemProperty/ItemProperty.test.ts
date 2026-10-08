@@ -13,13 +13,12 @@ import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
-import { eq, and, ne, notInArray, sql } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
-import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 import { waitForIdle, type HasService, waitForItemIdle } from '../test-utils/waitForIdle'
 
 const waitForItemPropertyIdle = (property: HasService, timeout = 10000) =>
@@ -76,76 +75,17 @@ testDescribe('ItemProperty Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
     const db = BaseDb.getAppDb()
     if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map(link => link.modelId)
-          .filter((id): id is number => id !== null && id !== undefined)
-        
-        // Delete metadata for non-Seed Protocol models
-        const seedProtocolSeeds = await db
-          .select({ localId: seeds.localId })
-          .from(seeds)
-          .where(
-            sql`EXISTS (
-              SELECT 1 FROM models 
-              WHERE models.id IN (${sql.join(seedProtocolModelIds.map(id => sql`${id}`), sql`, `)})
-              AND seeds.type = models.name
-            )`
-          )
-        
-        const seedProtocolSeedLocalIds = seedProtocolSeeds.map(s => s.localId).filter(Boolean)
-        
-        if (seedProtocolSeedLocalIds.length > 0) {
-          await db.delete(metadata).where(notInArray(metadata.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(versions).where(notInArray(versions.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(seeds).where(notInArray(seeds.localId, seedProtocolSeedLocalIds))
-        } else {
-          await db.delete(metadata)
-          await db.delete(versions)
-          await db.delete(seeds)
-        }
-        
-        // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema). The inline version
-        // deleted the model_schemas links before reading them to find the models to delete, so test
-        // models were left behind as orphans and later name lookups picked them up.
-        await cleanupTestSchemaData()
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.delete(metadata)
-        await db.delete(versions)
-        await db.delete(seeds)
-        await db.update(properties).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(properties)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
+      // Every item, Seed Protocol models' (Image, File, ...) included, so each test starts with none.
+      // (The old version meant to keep Seed Protocol items, but its seeds.type = models.name match
+      // compared snake_case types to model names and never matched, so it deleted them all anyway.)
+      await db.delete(metadata)
+      await db.delete(versions)
+      await db.delete(seeds)
     }
-
-    await cleanupTestSchemaFiles()
+    // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema), and schema files
+    await cleanupTestSchemaData()
   })
 
   afterEach(async () => {

@@ -16,11 +16,7 @@ import {
   client,
   BaseDb,
   schemas,
-  seeds,
   metadata,
-  versions,
-  publishProcesses,
-  modelSchemas,
   properties as propertiesTable,
   models as modelsTable,
   importJsonSchema,
@@ -33,13 +29,14 @@ import {
   getMetadataLatest,
 } from '@seedprotocol/sdk'
 import type { IItemProperty, SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { generateId } from '@seedprotocol/sdk'
-import { eq, and, inArray, sql } from 'drizzle-orm'
+
+import { eq, and, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -475,122 +472,14 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       },
       { timeout: 30000 }
     )
-  })
 
-  afterAll(async () => {
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
+    // The schema is imported once per file; each test gets fresh items (beforeEach). Re-importing per
+    // test meant evicting the cached models each time, which made every Item.create ~0.4s slower.
+    //
+    // Removes every test schema, its items and schema files. (This file's per-test cleanup used to
+    // delete every model_schemas row, Seed Protocol's included, and every 'post' / 'article' seed.)
+    await cleanupTestSchemaData({ items: true })
 
-    // Clean up items from database. Delete by seed type rather than via testItem/testItem2:
-    // afterEach has already nulled those, and leftover items (whose models lose their schema links
-    // below) make Item.all() in later browser test files wait ~5s per item.
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const leftoverSeeds = await db
-        .select({ localId: seeds.localId })
-        .from(seeds)
-        .where(inArray(seeds.type, ['post', 'article', 'new_item_model']))
-      const leftoverIds = leftoverSeeds.map((s) => s.localId).filter(Boolean) as string[]
-      if (leftoverIds.length) {
-        await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, leftoverIds))
-        await db.delete(metadata).where(inArray(metadata.seedLocalId, leftoverIds))
-        await db.delete(versions).where(inArray(versions.seedLocalId, leftoverIds))
-        await db.delete(seeds).where(inArray(seeds.localId, leftoverIds))
-      }
-    }
-
-    // Clean up schemas from database (model_schemas.schema_id FK must be cleared first)
-    if (db) {
-      await db.delete(modelSchemas)
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))
-    }
-
-    // Clean up schema files from file system
-    if (testSchemaWithItems.id) {
-      await deleteSchemaFileIfExists('Test Schema Items', testSchemaWithItems.version, testSchemaWithItems.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Items', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    await deleteSchemaFileIfExists('LiveQuery Test Schema Items', 1, 'livequery-test-schema-items')
-
-    // Clear schema cache
-    Schema.clearCache()
-  })
-
-  beforeEach(async () => {
-    queryClientRef.current = null
-    container = document.createElement('div')
-    container.id = 'root'
-    document.body.appendChild(container)
-
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
-
-    // Clean up any existing test schemas from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(metadata)
-      await db.delete(seeds).where(eq(seeds.type, 'post'))
-      await db.delete(seeds).where(eq(seeds.type, 'article'))
-      await db.delete(modelSchemas)
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))
-    }
-    
-    // Clean up schema files from file system
-    if (testSchemaWithItems.id) {
-      await deleteSchemaFileIfExists('Test Schema Items', testSchemaWithItems.version, testSchemaWithItems.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Items', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    
     Schema.clearCache()
 
     // Import test schemas
@@ -609,6 +498,22 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       },
       { timeout: 15000 }
     )
+  })
+
+  afterAll(async () => {
+    // Items too: leftover items whose models lose their schema links make Item.all() in later
+    // browser test files wait ~5s per item.
+    await cleanupTestSchemaData({ items: true })
+    Schema.clearCache()
+  })
+
+  beforeEach(async () => {
+    queryClientRef.current = null
+    container = document.createElement('div')
+    container.id = 'root'
+    document.body.appendChild(container)
+
+    await cleanupTestItems()
 
     // Create test items
     const model = Model.create('Post', 'Test Schema Items', { waitForReady: false })
@@ -641,8 +546,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
   afterEach(async () => {
     document.body.innerHTML = ''
-    Schema.clearCache()
-    
+
     // Clean up item instances
     if (testItem) {
       testItem.unload()
