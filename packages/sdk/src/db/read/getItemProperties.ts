@@ -1,8 +1,8 @@
 import { GetItemProperties, PropertyData } from '@/types'
-import { metadata, seeds, versions } from '@/seedSchema'
-import { and, eq, getTableColumns, isNotNull, isNull, sql, SQL } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getMetadataLatest } from './subqueries/metadataLatest'
+import { isPublishedMetadataRow } from '@/helpers/isPublishedMetadataRow'
 
 
 export const getItemProperties: GetItemProperties = async ({
@@ -12,29 +12,6 @@ export const getItemProperties: GetItemProperties = async ({
 }) => {
   const appDb = BaseDb.getAppDb()
 
-  const whereClauses: SQL[] = [isNotNull(metadata.propertyName)]
-
-  if (seedUid) {
-    whereClauses.push(eq(seeds.uid, seedUid))
-  }
-
-  if (seedLocalId) {
-    whereClauses.push(eq(seeds.localId, seedLocalId))
-  }
-
-  whereClauses.push(isNotNull(metadata.propertyName))
-
-  if (typeof edited !== 'undefined') {
-    if (edited) {
-      whereClauses.push(isNull(metadata.uid))
-    }
-    if (!edited) {
-      whereClauses.push(isNotNull(metadata.uid))
-    }
-  }
-
-  // const metadataColumns = getTableColumns(metadata)
-
   const metadataLatest = getMetadataLatest({seedLocalId, seedUid})
 
   const propertiesData = await appDb
@@ -43,7 +20,16 @@ export const getItemProperties: GetItemProperties = async ({
     .from(metadataLatest)
     .where(eq(metadataLatest.rowNum, 1))
 
-  return propertiesData.map((data: any) => ({
+  // `edited` picks properties by their current value (the row readers show): true = a local edit
+  // not yet attested, false = published. Same test as getPublishPendingDiff.
+  const selected =
+    typeof edited === 'undefined'
+      ? propertiesData
+      : propertiesData.filter(
+          (data: any) => isPublishedMetadataRow(data) !== edited,
+        )
+
+  return selected.map((data: any) => ({
     ...data,
     localId: data.localId || '',
     uid: data.uid || '',

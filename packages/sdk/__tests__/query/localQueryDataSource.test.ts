@@ -128,6 +128,117 @@ describe('createLocalQueryDataSource', () => {
     expect(await ds.getSeedByUid('NULL')).toBeNull()
   })
 
+  describe('revocation follows the local revoked_at columns', () => {
+    const seedUid = '0x' + 'c1'.repeat(32)
+    const versionLive = '0x' + 'c2'.repeat(32)
+    const versionRevoked = '0x' + 'c3'.repeat(32)
+    const propertyLive = '0x' + 'c4'.repeat(32)
+    const propertyRevoked = '0x' + 'c5'.repeat(32)
+    const titleSchema = '0x' + 'c6'.repeat(32)
+
+    // attestation_raw as stored at fetch time: still live, though the row was revoked since.
+    const staleRaw = (id: string, refUID: string, schemaId: string, timeCreated: number) =>
+      JSON.stringify({
+        id,
+        refUID,
+        schemaId,
+        timeCreated,
+        decodedDataJson: '',
+        revoked: false,
+        revocationTime: 0,
+      })
+
+    it('leaves out versions whose revoked_at is set, like the remote source (excludeRevoked)', async () => {
+      resetSelectChain([
+        {
+          uid: versionLive,
+          seedUid,
+          publisher: '0xpub',
+          attestationRaw: staleRaw(versionLive, seedUid, '0xv', 100),
+          attestationCreatedAt: 100_000,
+          revokedAt: null,
+        },
+        {
+          uid: versionRevoked,
+          seedUid,
+          publisher: '0xpub',
+          attestationRaw: staleRaw(versionRevoked, seedUid, '0xv', 200),
+          attestationCreatedAt: 200_000,
+          revokedAt: 1_700_000_500,
+        },
+      ])
+      const ds = createLocalQueryDataSource()
+      const out = await ds.getVersionsForSeeds([seedUid])
+      expect(out.map((v) => v.id)).toEqual([versionLive])
+      expect(out[0]).toMatchObject({ revoked: false, revocationTime: 0 })
+    })
+
+    it('leaves out revoked property rows, so the newest live one is canonical', async () => {
+      const { pickLatestPropertyAttestationsByRefAndSchema } = await import('@seedprotocol/eas')
+      resetSelectChain([
+        {
+          uid: propertyLive,
+          schemaUid: titleSchema,
+          propertyName: 'title',
+          propertyValue: 'live',
+          easDataType: 'string',
+          versionUid: versionLive,
+          publisher: '0xpub',
+          attestationRaw: staleRaw(propertyLive, versionLive, titleSchema, 100),
+          attestationCreatedAt: 100_000,
+          revokedAt: null,
+        },
+        {
+          uid: propertyRevoked,
+          schemaUid: titleSchema,
+          propertyName: 'title',
+          propertyValue: 'revoked',
+          easDataType: 'string',
+          versionUid: versionLive,
+          publisher: '0xpub',
+          attestationRaw: staleRaw(propertyRevoked, versionLive, titleSchema, 200),
+          attestationCreatedAt: 200_000,
+          revokedAt: 1_700_000_600,
+        },
+      ])
+      const ds = createLocalQueryDataSource()
+      const out = await ds.getPropertiesForVersionUids([versionLive])
+      expect(out.map((p) => p.id)).toEqual([propertyLive])
+      expect(out[0]).toMatchObject({ revoked: false, revocationTime: 0 })
+      expect(pickLatestPropertyAttestationsByRefAndSchema(out).map((p) => p.id)).toEqual([
+        propertyLive,
+      ])
+    })
+
+    it('reports a live seed as not revoked even when its stored attestation says otherwise', async () => {
+      resetSelectChain([
+        {
+          uid: seedUid,
+          schemaUid: '0xschema',
+          type: 'post',
+          publisher: '0xpub',
+          attestationRaw: JSON.stringify({
+            id: seedUid,
+            refUID: '0x' + '00'.repeat(32),
+            schemaId: '0xschema',
+            timeCreated: 50,
+            decodedDataJson: '',
+            revoked: true,
+            revocationTime: 60,
+          }),
+          attestationCreatedAt: 50_000,
+          revokedAt: null,
+        },
+      ])
+      const ds = createLocalQueryDataSource()
+      expect(await ds.getSeedByUid(seedUid)).toMatchObject({
+        id: seedUid,
+        revoked: false,
+        revocationTime: 0,
+      })
+    })
+  })
+
   it('registerSeedQueryLocalSource + getPublishedSeedRecord', async () => {
     const { getSeed } = await import('@seedprotocol/query')
     registerSeedQueryLocalSource({ force: true })
