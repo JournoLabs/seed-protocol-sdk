@@ -8,7 +8,7 @@ import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
-import { getContentHash, getDeterministicId } from '@/helpers/crypto'
+import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { getClient } from '@/client/ClientManager'
@@ -595,16 +595,17 @@ export async function importJsonSchema(
     // Generate missing model and property IDs.
     // Use deterministic IDs (from schema content hash) so addModelsToDb finds existing
     // records when processSchemaFiles runs multiple times with different DB/file contexts.
-    const schemaContent = getSchemaContentForComparison(schemaFile)
+    // Hash the schema content once: rehashing it per id is quadratic in schema size.
+    const getDeterministicId = getDeterministicIdsWithPrefix(getSchemaContentForComparison(schemaFile))
     for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
       if (!model.id) {
-        model.id = getDeterministicId(schemaContent + modelName)
+        model.id = getDeterministicId(modelName)
         logger(`Generated deterministic model ID for ${modelName}:`, model.id)
       }
       
       for (const [propName, prop] of Object.entries(model.properties || {})) {
         if (!prop.id) {
-          prop.id = getDeterministicId(schemaContent + modelName + propName)
+          prop.id = getDeterministicId(modelName + propName)
           logger(`Generated deterministic property ID for ${modelName}.${propName}:`, prop.id)
         }
       }

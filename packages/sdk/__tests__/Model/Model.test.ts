@@ -51,6 +51,14 @@ function createTestSchema(name: string, models: Record<string, any> = {}): Schem
   }
 }
 
+// The model an imported schema defines. (Model.create with a name the schema already defines makes a second,
+// renamed runtime model with no properties: "X 1".) Model.find waits for it to be idle.
+async function findImportedModel(modelName: string, schemaName: string): Promise<Model> {
+  const model = await Model.find({ modelName, schemaName })
+  expect(model).toBeDefined()
+  return model!
+}
+
 // This test should run in both browser and Node.js environments
 // Use sequential execution to avoid database locking issues in Node.js
 const testDescribe = typeof window === 'undefined' 
@@ -601,8 +609,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       const item = await model.create({
         name: 'Test Item',
@@ -645,6 +652,7 @@ testDescribe('Model Integration Tests', () => {
       expect(versionRecord.seedType).toBe(seedRecord.type)
 
       // All metadata records should reference the same seed and version
+      expect(metadataRecords.map((meta: { propertyName: string }) => meta.propertyName)).toContain('name')
       for (const meta of metadataRecords) {
         expect(meta.seedLocalId).toBe(seedRecord.localId)
         expect(meta.versionLocalId).toBe(versionRecord.localId)
@@ -664,8 +672,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       const item = await model.create({} as any)
 
@@ -727,8 +734,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       // Create multiple items
       const item1 = await model.create({ value: 'Item 1' } as any)
@@ -762,6 +768,9 @@ testDescribe('Model Integration Tests', () => {
       // Verify metadata records have unique localIds
       const allMetadata = await db.select().from(metadata)
       const metadataLocalIds = allMetadata.map((m: any) => m.localId).filter(Boolean)
+      expect(
+        allMetadata.filter((m: any) => m.propertyName === 'value' && [item1.seedLocalId, item2.seedLocalId].includes(m.seedLocalId)),
+      ).toHaveLength(2)
       expect(new Set(metadataLocalIds).size).toBe(metadataLocalIds.length)
     })
   })
@@ -814,9 +823,6 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
 
       // Find the model by name
       const foundModel = await Model.find({
@@ -853,9 +859,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
-      const modelFileId = model.id
+      const modelFileId = testSchema.models.TestPost.id
 
       // Find with waitForReady: false - should return immediately
       const foundModel = await Model.find({
@@ -930,8 +934,7 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      const model = Model.create('TestModelAll', schemaName, { waitForReady: false })
-      await waitForModelIdle(model)
+      await findImportedModel('TestModelAll', schemaName)
 
       const allModels = await Model.all()
       expect(allModels).toBeDefined()
@@ -953,10 +956,8 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema1) }, testSchema1.version)
       await importJsonSchema({ contents: JSON.stringify(testSchema2) }, testSchema2.version)
-      const model1 = Model.create('ModelA', schemaName1, { waitForReady: false })
-      const model2 = Model.create('ModelB', schemaName2, { waitForReady: false })
-      await waitForModelIdle(model1)
-      await waitForModelIdle(model2)
+      await findImportedModel('ModelA', schemaName1)
+      await findImportedModel('ModelB', schemaName2)
 
       const forSchema1 = await Model.all(schemaName1)
       expect(forSchema1.length).toBeGreaterThanOrEqual(1)
@@ -976,8 +977,7 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      const model = Model.create('TestModelWait', schemaName, { waitForReady: false })
-      await waitForModelIdle(model)
+      await findImportedModel('TestModelWait', schemaName)
 
       const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: 15000 })
       expect(allModels.length).toBeGreaterThanOrEqual(1)
@@ -1130,8 +1130,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       // Update database directly
       const db = BaseDb.getAppDb()
@@ -1677,8 +1676,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('DestroyTarget', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel('DestroyTarget', schemaName)
 
       const modelFileId = model.id
       expect(modelFileId).toBeDefined()

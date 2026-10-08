@@ -32,7 +32,8 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
 - **`DEBUG` is opt-in.** It used to be hard-coded to `'*'` (~400k log lines per NodeJS run). Use
   `DEBUG='seedSdk:*' bun run test` when you need it.
 - **Setup hooks use `SETUP_HOOK_TIMEOUT_MS` (30s)** from `test-utils/client-init.ts` in both
-  `packages/sdk/__tests__` and `packages/react/__tests__`, matching `hookTimeout` in `vite.config.js`.
+  `packages/sdk/__tests__` and `packages/react/__tests__`, matching `hookTimeout` in `vite.config.js`
+  (all three projects; the NodeJS project used vitest's 10s default until 2026-10-07).
   Healthy setup peaks around 9s; a hung setup now fails in 30s instead of 90–120s.
 
 ## Writing tests that stay fast
@@ -75,10 +76,37 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
 - Fixed sleeps are fine for: delays inside polling loops, windows that assert something does *not*
   happen (no extra callbacks/emissions), and Html property saves (see open findings).
 
+## Large schema imports (`validation-timeout.test.ts`)
+
+`validation-timeout.test.ts` imports schemas with 1000 models, 500 models, and one model with 1000
+properties. On 2026-10-07 it failed 1–3 of its 17 tests per run: those tests timed out, and the
+`beforeEach` cleanup after the 1000-model test hit the 10s hook timeout. Nothing merged that day
+caused it. The cause was SDK import cost, made worse by machine load (parallel workers, other
+sessions):
+
+- **Quadratic id hashing.** `importJsonSchema` derived each missing property id by hashing the whole
+  serialized schema plus the property name: ~100KB hashed 2000 times, ~6.6s. It now hashes the schema
+  once (`getDeterministicIdsWithPrefix`); the ids don't change.
+- **Every `ModelProperty` parsed every schema file.** Its schema-name lookup read `this.modelId`, a
+  field that is never assigned, so the DB lookup never ran. Every property fell back to
+  `getSchemaNameFromModel`, which reads and JSON-parses every schema file in the working dir. This
+  ran 2000 times after the import returned and blocked the event loop for ~10s. That stall is what
+  pushed the next test's cleanup past its timeout. Fixing it exposed a bug the slow lookup had hidden:
+  `initializeOriginalValues` was clearing `_schemaName`.
+
+The 1000-model test went from 22–33s to 7–10s, and the 500-model test from 23–50s to 4–8s. Cleanup
+after them now takes <0.1s instead of 0.5–2s+. Under extreme load (load average ~130 on 10 cores) the
+heavy tests can still time out, since each import still runs ~20k SQLite queries.
+
+The file's `waitForSchemaIdle` also threw inside xstate `waitFor`'s predicate. `waitFor` doesn't
+catch that, so a schema in its `error` state raised an uncaught exception on every later snapshot
+(1001 in one run), and the wait itself timed out. The helper now waits for `idle` or `error` and then
+rejects with the loading stage. See open finding 17 for the other files with this pattern.
+
 ## Open findings
 
 Things noticed during this work and not fixed. Line numbers are as of commit `627af7f`, except
-findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`.
+findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`, and 17–18 (`c3cdcfd`).
 
 ### SDK behavior
 
@@ -163,3 +191,14 @@ findings 14–16 and the updates to 5 and 12, which are as of `ee8cec6`.
     them (`Item/getItems.test.ts`, react `item.test.tsx`) find their items by id, so they pass;
     `getItems.test.ts` also inserts a raw seed with no `model_file_id`, so scoping it would need that
     fixture changed.
+17. **Many test files throw inside a `waitFor` predicate** (`throw new Error('… failed to load')` when
+    the snapshot is `error`). As described in the large-schema section above, the throw escapes as an
+    uncaught exception on every later snapshot instead of failing the wait. Fixed in
+    `validation-timeout.test.ts` only; still present in `Schema/Schema.test.ts`, `Model/Model.test.ts`,
+    `Schema/schema-models-integration.test.ts`, `Item/Item.test.ts`, `Item/getItems.test.ts`,
+    `ItemProperty/*.test.ts`, `ModelProperty/ModelProperty.test.ts`,
+    `helpers/updateSchema-propertyRenameMetadata.test.ts`, `test-utils/getPublishPayloadIntegrationHelpers.ts`,
+    and several `packages/react/__tests__` files. A shared helper would fix them all.
+18. **`ModelProperty.getById` scans the whole instance cache** (~0.9s of a 1000-model import, since
+    `Model._refreshPropertiesFromDb` calls it per property). An id index would have to follow id
+    changes: a property is often created with a generated id and then gets its real one.

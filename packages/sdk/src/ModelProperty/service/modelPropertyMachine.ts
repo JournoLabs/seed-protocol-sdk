@@ -161,7 +161,8 @@ export const modelPropertyMachine = setup({
       actions: assign(({ context, event }) => ({
         ...context,
         _originalValues: event.originalValues,
-        _schemaName: event.schemaName,
+        // Senders don't know the schema name; keep one setSchemaName already stored.
+        _schemaName: event.schemaName ?? context._schemaName,
         _isEdited: event.isEdited ?? false,
         _validationErrors: undefined,
       })),

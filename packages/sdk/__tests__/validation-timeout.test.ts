@@ -8,50 +8,43 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { cleanupTestSchemaData } from './test-utils/cleanupTestDb'
 
-// Helper function to wait for schema to be in idle state using xstate waitFor
-async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
-  const service = schema.getService()
-  
+// Waits for a schema or model service to reach idle, and rejects if it lands in error first.
+// The predicate must not throw: xstate's waitFor doesn't catch predicate errors, so a throw there escapes
+// as an uncaught exception on every later snapshot instead of failing this wait.
+async function waitForIdle(
+  service: ReturnType<Schema['getService']> | ReturnType<Model['getService']>,
+  label: string,
+  timeout: number,
+): Promise<void> {
+  let snapshot
   try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Schema failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
+    snapshot = await waitFor(
+      service as any,
+      (s: any) => s.value === 'idle' || s.value === 'error',
+      { timeout },
     )
-  } catch (error: any) {
-    if (error.message === 'Schema failed to load') {
-      throw error
-    }
-    throw new Error(`Schema loading timeout after ${timeout}ms`)
+  } catch (error) {
+    // A timeout, or the actor stopped before reaching idle
+    throw new Error(
+      `${label} did not reach idle within ${timeout}ms (state: ${JSON.stringify(service.getSnapshot().value)}): ` +
+        (error instanceof Error ? error.message : String(error)),
+    )
+  }
+  if (snapshot.value === 'error') {
+    const loadingError = (snapshot.context as { _loadingError?: { stage: string; error: Error } })._loadingError
+    throw new Error(
+      `${label} failed to load` +
+        (loadingError ? ` at stage ${loadingError.stage}: ${loadingError.error?.message ?? loadingError.error}` : ''),
+    )
   }
 }
 
-// Helper function to wait for model to be in idle state using xstate waitFor
-async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
-  const service = model.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Model failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Model failed to load') {
-      throw error
-    }
-    throw new Error(`Model loading timeout after ${timeout}ms`)
-  }
+function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
+  return waitForIdle(schema.getService(), 'Schema', timeout)
+}
+
+function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
+  return waitForIdle(model.getService(), 'Model', timeout)
 }
 
 // Helper to create a test schema
