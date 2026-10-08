@@ -13,7 +13,6 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { and, eq, isNull, SQL } from 'drizzle-orm'
-import { camelCase, upperFirst } from 'lodash-es'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas, ModelSchemaType } from '@/seedSchema/ModelSchemaSchema'
@@ -23,7 +22,12 @@ import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelProper
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
-import { resolveModelRecord, resolveRefModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
+import {
+  resolveModelRecord,
+  resolveModelRecordByNameOrType,
+  resolveRefModelRecord,
+  type ModelScope,
+} from '@/db/read/resolveModelRecord'
 import { normalizeAddressConfig, type NormalizedAddressConfig } from '@/helpers/addresses'
 import { normalizeDataType, normalizePropertyRecordSchema } from '@/helpers/property'
 import { linkModelToSchema } from '@/db/write/linkModelToSchema'
@@ -63,7 +67,7 @@ export async function getPropertyIdForSchemaFileId(
 ): Promise<number | null> {
   const db = BaseDb.getAppDb()
   if (!db || !modelNameOrType || !schemaFileId) return null
-  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
   if (!modelRecord) return null
   const rows = await db
     .select({ id: properties.id })
@@ -90,7 +94,7 @@ export async function getPropertyIdForModelAndName(
   if (!db) return null
   if (!modelNameOrType || !propertyName) return null
 
-  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
   if (!modelRecord) return null
 
   const propertyNamesToTry = [propertyName]
@@ -126,7 +130,7 @@ export async function getItemStoragePropertiesForModel(
 ): Promise<Array<{ id: number; name: string; localStorageDir: string | null; filenameSuffix: string | null }>> {
   const db = BaseDb.getAppDb()
   if (!db || !modelNameOrType) return []
-  const modelRecord = await resolveModelRecord(upperFirst(camelCase(modelNameOrType)), scope, db)
+  const modelRecord = await resolveModelRecordByNameOrType(modelNameOrType, scope, db)
   if (!modelRecord) return []
   return db
     .select({

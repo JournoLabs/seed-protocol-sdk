@@ -27,9 +27,10 @@ type GetItemsData = (props: GetItemsDataProps) => Promise<ItemData[]>
  *
  * - `includeEas: false` (default): drafts only — `seeds.uid` is null, empty, legacy `'NULL'`, or zero-bytes32.
  *   On-chain seeds (real EAS seed UID) require `includeEas: true`.
- * - `latestVersionUid` / `latestVersionLocalId`: head version **row** by `created_at` (may be unattested).
+ * - `latestVersionUid` / `latestVersionLocalId`: head version **row** by `created_at` (may be unattested),
+ *   skipping revoked versions; null when every version is revoked.
  * - `publishedVersionUid` / `publishedVersionLocalId`: filled in a second batched read (same rules as
- *   `getLatestPublishedVersionRow`).
+ *   `getLatestPublishedVersionRow`: attested and not revoked).
  */
 export const getItemsData: GetItemsData = async ({
   modelName,

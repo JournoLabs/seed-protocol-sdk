@@ -123,7 +123,6 @@
     "new-version": "node scripts/new-version.js",
     "version": "node scripts/sync-versions.js",
     "drizzle:update": "bun scripts/update-drizzle.ts",
-    "drizzle:track": "tsx scripts/track-drizzle-changes.ts",
     "check:dist:fragile": "node scripts/check-dist-fragile-dynamic-imports.js",
     "check:dist:imports": "node scripts/check-dist-fragile-imports.js",
     "check:browser-graph": "node scripts/check-browser-entry-graph.js --fail",

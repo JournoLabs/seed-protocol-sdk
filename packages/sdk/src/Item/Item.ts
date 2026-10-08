@@ -38,6 +38,7 @@ import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
+import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
@@ -1341,7 +1342,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       seedSchemaUid,
     })
     const revokedAt = Math.floor(Date.now() / 1000)
-    this._service.send({ type: 'updateContext', revokedAt })
+    // The executor stamps the revoked version rows; the latest version is now the newest one left
+    // (a local draft) or none, never a revoked one.
+    const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
+    const head = await getLatestVersionRow(this.seedLocalId)
+    this._service.send({
+      type: 'updateContext',
+      revokedAt,
+      latestVersionLocalId: head?.localId ?? undefined,
+      latestVersionUid: head?.uid ?? undefined,
+    })
   }
 
   publish = async (): Promise<void> => {
@@ -1768,6 +1778,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             schemaUid: seeds.schemaUid,
             latestVersionUid: versionData.latestVersionUid,
             latestVersionLocalId: versionData.latestVersionLocalId,
+            versionsCount: versionData.versionsCount,
           })
           .from(seeds)
           .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
@@ -1784,61 +1795,65 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         const seedRecord = seedRecords[0]
         const currentVersionLocalId = seedRecord.latestVersionLocalId
 
-        if (!currentVersionLocalId) {
+        // A seed whose versions are all revoked (unpublished) has no latest version, but its versions
+        // are still watched below so a new version (republish, new draft) is picked up.
+        if (!currentVersionLocalId && !seedRecord.versionsCount) {
           logger(`[Item._setupLiveQuerySubscription] No version found for seedLocalId: ${seedLocalId}`)
           return
         }
 
-        // Query initial metadata records for the latest version
-        const initialMetadata = await db
-          .select()
-          .from(metadata)
-          .where(
-            and(
-              eq(metadata.seedLocalId, seedLocalId),
-              eq(metadata.versionLocalId, currentVersionLocalId)
+        if (currentVersionLocalId) {
+          // Query initial metadata records for the latest version
+          const initialMetadata = await db
+            .select()
+            .from(metadata)
+            .where(
+              and(
+                eq(metadata.seedLocalId, seedLocalId),
+                eq(metadata.versionLocalId, currentVersionLocalId)
+              )
             )
-          )
 
-        const initialMetadataIds = initialMetadata
-          .map((row: any) => row.localId || row.uid)
-          .filter((id: string | null | undefined): id is string => Boolean(id))
+          const initialMetadataIds = initialMetadata
+            .map((row: any) => row.localId || row.uid)
+            .filter((id: string | null | undefined): id is string => Boolean(id))
 
-        logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
+          logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
 
-        // CRITICAL: Create ItemProperty instances BEFORE updating context
-        if (initialMetadataIds.length > 0) {
-          try {
-            const itemPropertyMod = await import('../ItemProperty/ItemProperty')
-            const { ItemProperty } = itemPropertyMod
-            const itemModelName = this._service.getSnapshot().context.modelName
-            const createPromises = initialMetadata.map(async (metaRow: any) => {
-              try {
-                const property = await ItemProperty.find({
-                  propertyName: metaRow.propertyName,
-                  seedLocalId,
-                  seedUid,
-                  modelName: itemModelName,
-                })
-                if (property) {
-                  logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+          // CRITICAL: Create ItemProperty instances BEFORE updating context
+          if (initialMetadataIds.length > 0) {
+            try {
+              const itemPropertyMod = await import('../ItemProperty/ItemProperty')
+              const { ItemProperty } = itemPropertyMod
+              const itemModelName = this._service.getSnapshot().context.modelName
+              const createPromises = initialMetadata.map(async (metaRow: any) => {
+                try {
+                  const property = await ItemProperty.find({
+                    propertyName: metaRow.propertyName,
+                    seedLocalId,
+                    seedUid,
+                    modelName: itemModelName,
+                  })
+                  if (property) {
+                    logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+                  }
+                } catch (error) {
+                  logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
                 }
-              } catch (error) {
-                logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
-              }
-            })
-            await Promise.all(createPromises)
-          } catch (error) {
-            logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
+              })
+              await Promise.all(createPromises)
+            } catch (error) {
+              logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
+            }
           }
-        }
 
-        // Update context with latest version info
-        sendToItemMachine({
-          type: 'updateContext',
-          latestVersionLocalId: currentVersionLocalId,
-          latestVersionUid: seedRecord.latestVersionUid,
-        })
+          // Update context with latest version info
+          sendToItemMachine({
+            type: 'updateContext',
+            latestVersionLocalId: currentVersionLocalId,
+            latestVersionUid: seedRecord.latestVersionUid,
+          })
+        }
 
         // Only set up liveQuery subscription in browser environment
         if (isBrowser) {
@@ -1873,9 +1888,14 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           )
 
           // Set up liveQuery to watch versions table for this seed
-          const versions$ = BaseDb.liveQuery<{ localId: string; uid: string | null; seedLocalId: string }>(
+          const versions$ = BaseDb.liveQuery<{
+            localId: string
+            uid: string | null
+            seedLocalId: string
+            revokedAt: number | null
+          }>(
             (sql: any) => sql`
-              SELECT local_id as localId, uid, seed_local_id as seedLocalId
+              SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
               FROM versions
               WHERE seed_local_id = ${seedLocalId}
               ORDER BY COALESCE(attestation_created_at, created_at) DESC
@@ -1913,9 +1933,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           const versionsSubscription = versions$.subscribe({
             next: async (versionRows) => {
               if (versionRows.length === 0) return
-              
-              // Get the most recent version
-              const latestVersion = versionRows[0]
+
+              // Get the most recent version that isn't revoked. When every version is revoked (the
+              // item was unpublished) there is no latest version any more.
+              const latestVersion = versionRows.find((v) => !isVersionRevoked(v.revokedAt))
+              if (!latestVersion) {
+                sendToItemMachine({
+                  type: 'updateContext',
+                  latestVersionLocalId: undefined,
+                  latestVersionUid: undefined,
+                })
+                return
+              }
               const latestVersionLocalId = latestVersion.localId
               
               logger(`[Item._setupLiveQuerySubscription] Versions updated, latest version: ${latestVersionLocalId}`)

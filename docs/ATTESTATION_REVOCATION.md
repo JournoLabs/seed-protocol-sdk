@@ -57,6 +57,21 @@ The `seedUid` is preserved. Revoked attestations remain on-chain but are marked 
 
 The item's version rows (`versions`) and property rows (`metadata`) keep their values and get `revoked_at` (Unix seconds) for the attestations that were revoked.
 
+### Latest version skips revoked versions
+
+A revoked version is never a seed's "latest version" or "latest published version":
+
+- `item.latestVersionUid` / `item.latestVersionLocalId`, and `latestVersionUid` / `latestVersionLocalId` on `getItemsData` / `getItemData` rows: the newest version row that isn't revoked, attested or a local draft.
+- `publishedVersionUid` / `publishedVersionLocalId`, `getLatestPublishedVersionRow`, `getSeedPublishState().versionAttestationUid` and `getPublishPendingDiff().lastPublishedVersionUid`: the newest version with a valid EAS uid that isn't revoked.
+- `lastVersionPublishedAt` is the newest attestation time among versions that aren't revoked.
+- A publish of an item attaches new property attestations to the latest version that isn't revoked. When there is none, the payload asks for a new version (`versionUid` is zero).
+
+So a seed whose newest version is revoked but an older one is live reports the older one. After a full unpublish (every version revoked), the item has no latest or published version: those fields are empty and `lastVersionPublishedAt` is unset. The item still loads with its last property values. `versionsCount` still counts every version row, revoked ones included, so the item stays in local lists while its seed isn't revoked. `item.unpublish()` refreshes `item.latestVersionUid` / `item.latestVersionLocalId` after it revokes. A local draft version newer than the revoked ones stays the latest version.
+
+`getSeedPublishState().status` is still `onchain` for an unpublished seed, because its revoked attestations stay on-chain. Use its `revokedAt` (or `item.isRevoked`) to show the item as unpublished.
+
+Code that needs the revoked versions on purpose reads the version rows directly instead of these helpers. This includes collecting attestation UIDs to revoke (`getVersionsForSeedUid`), EAS sync bookkeeping, and stamping `revoked_at`.
+
 ### EAS sync
 
 Sync fetches revoked attestations too and keeps local metadata on the canonical attestation per (version, property schema): the newest non-revoked one. When that attestation is later revoked, sync replaces the stored row with the next newest live attestation; when a newer one is published, it replaces the stored row. When every attestation of a property on a version is revoked (an unpublished item), sync keeps the newest one with `metadata.revoked_at` set, so a revoked item synced to a new device still has its last values. A non-null `revoked_at` therefore means "kept for its last value", not "present on the version". Readers pick each property's value across versions by preferring the newest row with `revoked_at` null (local drafts included), and fall back to the newest revoked row only when no live row is left, so a property revoked on a newer version doesn't hide a live value on an older one. Rows sync derives for ItemStorage properties from a `storage_transaction_id` attestation (marked by `metadata.derived_from_uid`, the attestation's uid) follow that attestation: they're removed when it stops being canonical and carry its `revoked_at`. They rank at that attestation's time and are published content, not local drafts: an edit of the property goes into a local draft row of its own. Seeds, versions and metadata record `revoked_at` from EAS `revocationTime`, for already-stored rows too. A stamp written by local unpublish (on the seed, its versions and its property rows) is kept until EAS reports a revocation time, which then replaces it: unpublish stamps only after its revoke transactions are mined and revocation is permanent, so EAS still reporting an attestation live means its index lags. Derived ItemStorage rows take their source row's stamp the same way and never lose one to a live report.
