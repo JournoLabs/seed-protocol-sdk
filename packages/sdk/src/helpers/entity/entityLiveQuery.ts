@@ -55,6 +55,11 @@ export interface LiveQueryConfig<T extends object> {
    * Called if isReady returns false
    */
   waitForReady?: (instance: T) => Promise<void>
+  /**
+   * Optional: whether the entity id may be retried on the timer now (it always is on snapshot
+   * changes). Return false while the entity is writing its own row, which ends with a snapshot.
+   */
+  canRetryEntityId?: (instance: T) => boolean
 }
 
 /**
@@ -155,13 +160,19 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
 
   // The entity's DB row can be written after the entity goes idle (e.g. a schema import writes its
   // models' rows after the Model instances loaded from the schema file). Nothing changes the
-  // entity's snapshot then, so the id is also retried on a timer until found or the actor stops.
+  // entity's snapshot then, so an idle entity's id is also retried on a timer until found or the
+  // actor stops. Only while idle and not writing (canRetryEntityId): a busy entity's own snapshots
+  // drive the lookup, and finding its row mid-write handed a Model its _dbId before its write (and
+  // its properties' rows) had finished.
   let retryIndex = 0
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   const scheduleRetry = () => {
     if (retryTimer !== undefined || retryIndex >= ENTITY_ID_RETRY_DELAYS_MS.length) return
     retryTimer = setTimeout(() => {
       retryTimer = undefined
+      // Busy: its next snapshot retries
+      if (instance.getService().getSnapshot().value !== 'idle') return
+      if (config.canRetryEntityId && !config.canRetryEntityId(instance)) return
       retryIndex++
       void trySetup()
     }, ENTITY_ID_RETRY_DELAYS_MS[retryIndex])
