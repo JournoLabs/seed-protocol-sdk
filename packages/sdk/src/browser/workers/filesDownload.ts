@@ -117,15 +117,26 @@ const saveBufferToOPFS = async (filePath: string, buffer: Uint8Array): Promise<v
 
   // Create or open the file in OPFS
   const fileHandleAsync = await currentDirHandle.getFileHandle(fileName, { create: true });
-  const fileHandle = await fileHandleAsync.createSyncAccessHandle();
-  try {
-    // Drop any previous, longer contents before writing from the start
-    fileHandle.truncate(0);
-    fileHandle.write(buffer, { at: 0 });
-    fileHandle.flush();
-  } finally {
-    // A leaked handle keeps the file locked for the worker's lifetime
-    fileHandle.close();
+
+  const write = async () => {
+    const fileHandle = await fileHandleAsync.createSyncAccessHandle();
+    try {
+      // Drop any previous, longer contents before writing from the start
+      fileHandle.truncate(0);
+      fileHandle.write(buffer, { at: 0 });
+      fileHandle.flush();
+    } finally {
+      // A leaked handle keeps the file locked for the worker's lifetime
+      fileHandle.close();
+    }
+  }
+
+  // A sync access handle is exclusive: a download of the same file in another tab or worker would
+  // make createSyncAccessHandle throw, so writers of one path take turns.
+  if (navigator.locks) {
+    await navigator.locks.request(`seed:opfs-write:${filePath}`, write);
+  } else {
+    await write();
   }
 }
 
