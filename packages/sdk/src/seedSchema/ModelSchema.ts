@@ -39,6 +39,11 @@ export const properties = sqliteTable(
     schemaFileId: text('schema_file_id'), // ID from JSON file for change tracking
     isEdited: integer('is_edited', { mode: 'boolean' }), // true if property has been edited locally, false if matches schema file
     required: integer('required', { mode: 'boolean' }), // true if relation/image property is required (publish fails when related item not found)
+    // Storage settings from the schema file's `storage: { type, path, extension }`, in the internal
+    // shape ModelProperty uses. Null when the property has no storage config.
+    storageType: text('storage_type'), // 'ItemStorage' | 'PropertyStorage'
+    localStorageDir: text('local_storage_dir'), // storage.path, e.g. '/html'
+    filenameSuffix: text('filename_suffix'), // storage.extension, e.g. '.html'
   },
   (table) => {
     return {

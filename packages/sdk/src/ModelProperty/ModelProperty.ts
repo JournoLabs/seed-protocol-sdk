@@ -873,8 +873,11 @@ export class ModelProperty {
       refModelId: propertyRecord.refModelId || undefined,
       refValueType: propertyRecord.refValueType ? (propertyRecord.refValueType as ModelPropertyDataTypes) : undefined,
       required: propertyRecord.required ?? false,
+      storageType: (propertyRecord.storageType as StorageType | null) ?? undefined,
+      localStorageDir: propertyRecord.localStorageDir ?? undefined,
+      filenameSuffix: propertyRecord.filenameSuffix ?? undefined,
     }
-    
+
     // Load isEdited from database
     const isEditedFromDb = propertyRecord.isEdited ?? false
 

@@ -21,12 +21,17 @@ import {
 } from '@/helpers'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { GET_SEEDS } from '@seedprotocol/eas'
-import { escapeSqliteString, getAllAddressesFromDb, getPropertyIdForModelAndName } from '@/helpers/db'
+import {
+  escapeSqliteString,
+  getAllAddressesFromDb,
+  getItemStoragePropertiesForModel,
+  getPropertyIdForModelAndName,
+} from '@/helpers/db'
 // Dynamic import to break circular dependency: Model -> BaseItem -> ... -> syncDbWithEas -> Model
 // import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getModelSchemas } from '@/db/read/getModelSchemas'
-import { ModelSchema, PropertyType } from '@/types'
+import { ModelSchema } from '@/types'
 import { createSeeds } from '@/db/write/createSeeds'
 import { normalizeHexAddress } from '@/helpers/addresses'
 import { updateSeedRevokedAt } from '@/db/write/updateSeedRevokedAt'
@@ -332,14 +337,6 @@ const createMetadataRecordsForStorageTransactionId = async (
   state: SyncRunState,
 ) => {
   const { seedUidToLocalId, seedUidToModelType, versionUidToLocalId, versionUidToSeedUid } = state
-  // Early return if modelSchema is not provided
-  if (!modelSchema) {
-    console.warn(
-      '[item/events] [syncDbWithEas] modelSchema is undefined for storageTransactionIdProperty: ',
-      storageTransactionIdProperty.id,
-    )
-    return
-  }
 
   // Validate and parse decodedDataJson
   const parsed = parseEasPropertyMetadata(
@@ -373,11 +370,35 @@ const createMetadataRecordsForStorageTransactionId = async (
       ? attestationData.value
       : JSON.stringify(attestationData.value)
 
-  const itemStorageProperties = new Map<string, PropertyType>()
+  const seedUid = versionUidToSeedUid.get(storageTransactionIdProperty.refUID) as string
+  const seedLocalId = seedUidToLocalId.get(seedUid)
+  const versionUid = storageTransactionIdProperty.refUID
+  const versionLocalId = versionUidToLocalId.get(versionUid)
+  const modelType = seedUidToModelType.get(seedUid)
 
-  for (const [_propertyName, propertyDef] of Object.entries(modelSchema)) {
-    if (propertyDef?.storageType && propertyDef.storageType === 'ItemStorage') {
-      itemStorageProperties.set(_propertyName, propertyDef)
+  // Storage settings come from the `properties` table. The model's property instances (modelSchema)
+  // are only a fallback: whether they have loaded, and with storage settings, depends on timing.
+  const itemStorageProperties = new Map<
+    string,
+    { id?: number; localStorageDir?: string | null; filenameSuffix?: string | null }
+  >()
+  if (modelType != null) {
+    const stored =
+      (await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
+        getItemStoragePropertiesForModel(modelType, {
+          modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
+        }),
+      )) ?? []
+    for (const property of stored) itemStorageProperties.set(property.name, property)
+  }
+  if (itemStorageProperties.size === 0 && modelSchema) {
+    for (const [_propertyName, propertyDef] of Object.entries(modelSchema)) {
+      if (propertyDef?.storageType === 'ItemStorage') {
+        itemStorageProperties.set(_propertyName, {
+          localStorageDir: propertyDef.localStorageDir,
+          filenameSuffix: propertyDef.filenameSuffix,
+        })
+      }
     }
   }
 
@@ -389,7 +410,7 @@ const createMetadataRecordsForStorageTransactionId = async (
 
   for (const [_propertyName, propertyDef] of itemStorageProperties.entries()) {
     const existingMetadataRecordRows = await appDb
-      .select()
+      .select({ localId: metadata.localId })
       .from(metadata)
       .where(
         and(
@@ -403,21 +424,15 @@ const createMetadataRecordsForStorageTransactionId = async (
       continue
     }
 
-    const seedUid = versionUidToSeedUid.get(
-      storageTransactionIdProperty.refUID,
-    ) as string
-    const seedLocalId = seedUidToLocalId.get(seedUid)
-    const versionUid = storageTransactionIdProperty.refUID
-    const versionLocalId = versionUidToLocalId.get(versionUid)
-    const modelType = seedUidToModelType.get(seedUid)
     const propertyId =
-      modelType != null
+      propertyDef.id ??
+      (modelType != null
         ? ((await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.storageTransactionId', async () =>
             getPropertyIdForModelAndName(modelType, _propertyName, {
               modelFileId: await resolveItemModelFileId({ seedLocalId, seedUid }),
             }),
           )) ?? null)
-        : null
+        : null)
 
     const propertyLocalId = generateId()
     await appDb.insert(metadata).values({
@@ -425,13 +440,13 @@ const createMetadataRecordsForStorageTransactionId = async (
       propertyId: propertyId ?? undefined,
       propertyName: _propertyName,
       propertyValue,
-      localStorageDir: propertyDef.localStorageDir,
+      localStorageDir: propertyDef.localStorageDir ?? undefined,
       seedLocalId,
       seedUid,
       versionLocalId,
       versionUid,
       refValueType: 'file',
-      refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix}`,
+      refResolvedValue: `${propertyValue}${propertyDef.filenameSuffix ?? ''}`,
       modelType: seedUidToModelType.get(seedUid),
       createdAt: Date.now(),
       updatedAt: Date.now(),

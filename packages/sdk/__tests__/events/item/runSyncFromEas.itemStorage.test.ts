@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { MetadataType } from '@/seedSchema'
 import {
   setupTestEnvironment,
@@ -64,219 +64,209 @@ const uid = (byte: string) => '0x' + byte.repeat(32)
 const MODEL_NAME = 'Zinepage'
 const STORAGE_SCHEMA_UID = uid('4c')
 
-// TODO(storage-settings-in-db): skipped. Property storage settings (storage.type/path/extension)
-// aren't persisted in the `properties` table, only in the schema file, so whether a model's
-// property instances expose `storageType` depends on how they were loaded. In the Node project they
-// never do; in the browser this file fails about half the time when it shares a worker with other
-// sync tests. Re-enable (and drop the Node-only skip) once storage settings are stored in the DB.
-describe
-  .skip
-  .sequential(
-    'runSyncFromEas: rows derived from storage_transaction_id',
-    () => {
-      const seed = uid('41')
-      const version = uid('42')
-      const olderTx = uid('43')
-      const newerTx = uid('44')
+// Runs in both projects: sync reads storage settings from the `properties` table, so it doesn't
+// depend on whether the model's property instances have loaded (it used to, and was skipped).
+describe.sequential(
+  'runSyncFromEas: rows derived from storage_transaction_id',
+  () => {
+    const seed = uid('41')
+    const version = uid('42')
+    const olderTx = uid('43')
+    const newerTx = uid('44')
 
-      const attestation = (
-        id: string,
-        refUID: string,
-        schemaId: string,
-        timeCreated: number,
-        revocationTime = 0,
-        decodedDataJson = '',
-      ): FakeAttestation => ({
+    const attestation = (
+      id: string,
+      refUID: string,
+      schemaId: string,
+      timeCreated: number,
+      revocationTime = 0,
+      decodedDataJson = '',
+    ): FakeAttestation => ({
+      id,
+      schemaId,
+      refUID,
+      attester,
+      timeCreated,
+      revoked: revocationTime > 0,
+      revocationTime,
+      decodedDataJson,
+      schema: { schemaNames: [{ name: MODEL_NAME }] },
+    })
+
+    const storageTx = (
+      id: string,
+      txId: string,
+      timeCreated: number,
+      revocationTime = 0,
+    ) =>
+      attestation(
         id,
-        schemaId,
-        refUID,
-        attester,
+        version,
+        STORAGE_SCHEMA_UID,
         timeCreated,
-        revoked: revocationTime > 0,
         revocationTime,
-        decodedDataJson,
-        schema: { schemaNames: [{ name: MODEL_NAME }] },
+        JSON.stringify([
+          {
+            value: {
+              name: 'storage_transaction_id',
+              value: txId,
+              type: 'string',
+            },
+          },
+        ]),
+      )
+
+    beforeAll(async () => {
+      await setupTestEnvironment({
+        testFileUrl: import.meta.url,
+        timeout: SETUP_HOOK_TIMEOUT_MS,
       })
 
-      const storageTx = (
-        id: string,
-        txId: string,
-        timeCreated: number,
-        revocationTime = 0,
-      ) =>
-        attestation(
-          id,
-          version,
-          STORAGE_SCHEMA_UID,
-          timeCreated,
-          revocationTime,
-          JSON.stringify([
-            {
-              value: {
-                name: 'storage_transaction_id',
-                value: txId,
-                type: 'string',
-              },
-            },
-          ]),
-        )
-
-      beforeAll(async () => {
-        await setupTestEnvironment({
-          testFileUrl: import.meta.url,
-          timeout: SETUP_HOOK_TIMEOUT_MS,
-        })
-
-        const { importJsonSchema } = await import('@/imports/json')
-        await importJsonSchema({
-          contents: JSON.stringify({
-            name: 'sync-item-storage-test',
-            models: {
-              [MODEL_NAME]: {
-                properties: {
-                  title: { type: 'Text' },
-                  html: {
-                    type: 'Text',
-                    storage: {
-                      type: 'ItemStorage',
-                      path: '/html',
-                      extension: '.html',
-                    },
+      const { importJsonSchema } = await import('@/imports/json')
+      await importJsonSchema({
+        contents: JSON.stringify({
+          name: 'sync-item-storage-test',
+          models: {
+            [MODEL_NAME]: {
+              properties: {
+                title: { type: 'Text' },
+                html: {
+                  type: 'Text',
+                  storage: {
+                    type: 'ItemStorage',
+                    path: '/html',
+                    extension: '.html',
                   },
-                  storageTransactionId: { type: 'Text' },
                 },
+                storageTransactionId: { type: 'Text' },
               },
             },
-          }),
+          },
+        }),
+      })
+
+      const { getModelSchemas } = await import('@/db/read/getModelSchemas')
+      const deadline = Date.now() + 15_000
+      let schemaString: string | undefined
+      while (!schemaString && Date.now() < deadline) {
+        const { schemaStringToModelRecord } = await getModelSchemas()
+        schemaString = [...schemaStringToModelRecord.entries()].find(
+          ([, record]) => record.name === MODEL_NAME,
+        )?.[0]
+        if (!schemaString) await new Promise((r) => setTimeout(r, 100))
+      }
+      if (!schemaString) throw new Error(`Model ${MODEL_NAME} was not imported`)
+      fakeEas.modelSchema = { id: uid('4a'), schema: schemaString }
+
+      // The import stored the storage settings with the property row; sync reads them from there.
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { properties, models } = await import('@/seedSchema')
+      const [htmlRow] = await BaseDb.getAppDb()
+        .select({
+          storageType: properties.storageType,
+          localStorageDir: properties.localStorageDir,
+          filenameSuffix: properties.filenameSuffix,
         })
-
-        const { getModelSchemas } = await import('@/db/read/getModelSchemas')
-        const deadline = Date.now() + 15_000
-        let schemaString: string | undefined
-        while (!schemaString && Date.now() < deadline) {
-          const { schemaStringToModelRecord } = await getModelSchemas()
-          schemaString = [...schemaStringToModelRecord.entries()].find(
-            ([, record]) => record.name === MODEL_NAME,
-          )?.[0]
-          if (!schemaString) await new Promise((r) => setTimeout(r, 100))
-        }
-        if (!schemaString)
-          throw new Error(`Model ${MODEL_NAME} was not imported`)
-        fakeEas.modelSchema = { id: uid('4a'), schema: schemaString }
-
-        // Sync reads storage settings from the model's property instances, which load asynchronously.
-        const { Model } = await import('@/Model/Model')
-        const { modelPropertiesToObject } = await import('@/helpers/model')
-        let storageType: string | undefined
-        while (storageType !== 'ItemStorage' && Date.now() < deadline) {
-          const model = (await Model.all()).find(
-            (m) => m.modelName === MODEL_NAME,
-          )
-          storageType = model?.properties
-            ? modelPropertiesToObject(model.properties).html?.storageType
-            : undefined
-          if (storageType !== 'ItemStorage')
-            await new Promise((r) => setTimeout(r, 100))
-        }
-        if (storageType !== 'ItemStorage') {
-          throw new Error(
-            `${MODEL_NAME}.html never loaded as ItemStorage (got ${storageType})`,
-          )
-        }
-      }, SETUP_HOOK_TIMEOUT_MS)
-
-      afterAll(async () => {
-        await teardownTestEnvironment()
+        .from(properties)
+        .innerJoin(models, eq(models.id, properties.modelId))
+        .where(and(eq(models.name, MODEL_NAME), eq(properties.name, 'html')))
+      expect(htmlRow).toEqual({
+        storageType: 'ItemStorage',
+        localStorageDir: '/html',
+        filenameSuffix: '.html',
       })
+    }, SETUP_HOOK_TIMEOUT_MS)
 
-      const sync = async (storageAttestations: FakeAttestation[]) => {
-        const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
-        fakeEas.seeds = [
-          attestation(seed, uid('00'), fakeEas.modelSchema!.id, 8_000),
-        ]
-        fakeEas.versions = [attestation(version, seed, uid('5b'), 8_001)]
-        fakeEas.properties = storageAttestations
-        await runSyncFromEas({ addresses: [attester] })
-      }
+    afterAll(async () => {
+      await teardownTestEnvironment()
+    })
 
-      const rows = async (): Promise<MetadataType[]> => {
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { metadata } = await import('@/seedSchema')
-        return BaseDb.getAppDb()
-          .select()
-          .from(metadata)
-          .where(eq(metadata.versionUid, version))
-      }
+    const sync = async (storageAttestations: FakeAttestation[]) => {
+      const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
+      fakeEas.seeds = [
+        attestation(seed, uid('00'), fakeEas.modelSchema!.id, 8_000),
+      ]
+      fakeEas.versions = [attestation(version, seed, uid('5b'), 8_001)]
+      fakeEas.properties = storageAttestations
+      await runSyncFromEas({ addresses: [attester] })
+    }
 
-      /** [propertyValue, revokedAt] of the derived `html` rows (uid null, ref_value_type 'file'). */
-      const derivedHtml = async () =>
-        (await rows())
-          .filter(
-            (r) =>
-              r.propertyName === 'html' &&
-              !r.uid &&
-              r.refValueType === 'file' &&
-              r.localId !== 'local-html-edit',
-          )
-          .map((r) => [r.propertyValue, r.revokedAt ?? null])
-          .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    const rows = async (): Promise<MetadataType[]> => {
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { metadata } = await import('@/seedSchema')
+      return BaseDb.getAppDb()
+        .select()
+        .from(metadata)
+        .where(eq(metadata.versionUid, version))
+    }
 
-      /** A local edit of the property, on the same version: sync must never touch it. */
-      const localEdit = async () => {
-        const draft = (await rows()).find(
-          (r) => r.localId === 'local-html-edit',
+    /** [propertyValue, revokedAt] of the derived `html` rows (uid null, ref_value_type 'file'). */
+    const derivedHtml = async () =>
+      (await rows())
+        .filter(
+          (r) =>
+            r.propertyName === 'html' &&
+            !r.uid &&
+            r.refValueType === 'file' &&
+            r.localId !== 'local-html-edit',
         )
-        return draft && [draft.propertyValue, draft.revokedAt ?? null]
-      }
+        .map((r) => [r.propertyValue, r.revokedAt ?? null])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
 
-      it('derives a row from the canonical storage transaction', async () => {
-        await sync([storageTx(uid('45'), olderTx, 8_002)])
-        expect(await derivedHtml()).toEqual([[olderTx, null]])
+    /** A local edit of the property, on the same version: sync must never touch it. */
+    const localEdit = async () => {
+      const draft = (await rows()).find((r) => r.localId === 'local-html-edit')
+      return draft && [draft.propertyValue, draft.revokedAt ?? null]
+    }
 
-        const { BaseDb } = await import('@/db/Db/BaseDb')
-        const { metadata } = await import('@/seedSchema')
-        const synced = (await rows()).find((r) => r.uid === uid('45'))!
-        await BaseDb.getAppDb()
-          .insert(metadata)
-          .values({
-            localId: 'local-html-edit',
-            propertyName: 'html',
-            propertyValue: `${seed}.html`,
-            refValueType: 'file',
-            seedLocalId: synced.seedLocalId,
-            seedUid: seed,
-            versionLocalId: synced.versionLocalId,
-            versionUid: version,
-            createdAt: Date.now(),
-          })
-      })
+    it('derives a row from the canonical storage transaction', async () => {
+      await sync([storageTx(uid('45'), olderTx, 8_002)])
+      expect(await derivedHtml()).toEqual([[olderTx, null]])
 
-      it('replaces the derived row when a newer storage transaction becomes canonical', async () => {
-        await sync([
-          storageTx(uid('45'), olderTx, 8_002),
-          storageTx(uid('46'), newerTx, 8_003),
-        ])
-        expect(await derivedHtml()).toEqual([[newerTx, null]])
-        expect(await localEdit()).toEqual([`${seed}.html`, null])
-      })
+      const { BaseDb } = await import('@/db/Db/BaseDb')
+      const { metadata } = await import('@/seedSchema')
+      const synced = (await rows()).find((r) => r.uid === uid('45'))!
+      await BaseDb.getAppDb()
+        .insert(metadata)
+        .values({
+          localId: 'local-html-edit',
+          propertyName: 'html',
+          propertyValue: `${seed}.html`,
+          refValueType: 'file',
+          seedLocalId: synced.seedLocalId,
+          seedUid: seed,
+          versionLocalId: synced.versionLocalId,
+          versionUid: version,
+          createdAt: Date.now(),
+        })
+    })
 
-      it('goes back to the older derived row when the newer storage transaction is revoked', async () => {
-        await sync([
-          storageTx(uid('45'), olderTx, 8_002),
-          storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
-        ])
-        expect(await derivedHtml()).toEqual([[olderTx, null]])
-        expect(await localEdit()).toEqual([`${seed}.html`, null])
-      })
+    it('replaces the derived row when a newer storage transaction becomes canonical', async () => {
+      await sync([
+        storageTx(uid('45'), olderTx, 8_002),
+        storageTx(uid('46'), newerTx, 8_003),
+      ])
+      expect(await derivedHtml()).toEqual([[newerTx, null]])
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+    })
 
-      it('marks the derived row revoked once every storage transaction is revoked', async () => {
-        await sync([
-          storageTx(uid('45'), olderTx, 8_002, 1_700_008_100),
-          storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
-        ])
-        // The newest revoked attestation is kept, so its derived row is the one left, revoked with it.
-        expect(await derivedHtml()).toEqual([[newerTx, 1_700_008_000]])
-        expect(await localEdit()).toEqual([`${seed}.html`, null])
-      })
-    },
-  )
+    it('goes back to the older derived row when the newer storage transaction is revoked', async () => {
+      await sync([
+        storageTx(uid('45'), olderTx, 8_002),
+        storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
+      ])
+      expect(await derivedHtml()).toEqual([[olderTx, null]])
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+    })
+
+    it('marks the derived row revoked once every storage transaction is revoked', async () => {
+      await sync([
+        storageTx(uid('45'), olderTx, 8_002, 1_700_008_100),
+        storageTx(uid('46'), newerTx, 8_003, 1_700_008_000),
+      ])
+      // The newest revoked attestation is kept, so its derived row is the one left, revoked with it.
+      expect(await derivedHtml()).toEqual([[newerTx, 1_700_008_000]])
+      expect(await localEdit()).toEqual([`${seed}.html`, null])
+    })
+  },
+)
