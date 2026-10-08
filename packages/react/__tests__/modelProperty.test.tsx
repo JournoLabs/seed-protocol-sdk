@@ -711,6 +711,29 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(propertyDataType.textContent).toBe('Text')
     })
 
+    it('finds a property whose model is created after the hook first looked it up', async () => {
+      const schemaName = 'Test Schema Properties'
+      const view = render(
+        <UseModelPropertyTest schemaId={schemaName} modelName="LateModel" propertyName="summary" />,
+        { container, wrapper: SeedProviderWrapper },
+      )
+      // The first lookup finds nothing: the model doesn't exist yet
+      await waitFor(() => expect(within(view.container).getByTestId('is-loading').textContent).toBe('false'), {
+        timeout: 15000,
+      })
+      expect(within(view.container).queryByTestId('property-name')).toBeNull()
+
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      const lateModel = Model.create('LateModel', schema, {
+        properties: { summary: { dataType: 'Text' } },
+        waitForReady: false,
+      })
+      await xstateWaitFor(lateModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 5000 })
+      expect(propertyNameEl.textContent).toBe('summary')
+    })
+
     it('should update when modelName changes', async () => {
       const { rerender } = render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
