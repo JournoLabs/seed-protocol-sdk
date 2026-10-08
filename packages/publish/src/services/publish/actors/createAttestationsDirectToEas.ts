@@ -406,8 +406,11 @@ export const createAttestationsDirectToEas = fromPromise(
     void enqueueArweaveL1FinalizeJobsFromPublishContext(context)
 
     try {
+      // The item's co-publish rows and those of the related drafts published with it.
       const { clearHtmlEmbeddedImageCoPublishRows } = await import('@seedprotocol/sdk')
-      await clearHtmlEmbeddedImageCoPublishRows(item.seedLocalId)
+      const published = new Set<string>([item.seedLocalId])
+      for (const r of normalizedRequests) if (r?.localId) published.add(r.localId)
+      for (const seedLocalId of published) await clearHtmlEmbeddedImageCoPublishRows(seedLocalId)
     } catch {
       /* best-effort cleanup */
     }
