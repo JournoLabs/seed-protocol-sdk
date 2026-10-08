@@ -5,6 +5,7 @@ import {
   Item,
   updateVersionUid,
   applyPropertyAttestationUidsFromPublish,
+  resolvePublishPayloadValues,
   type IItem,
 } from '@seedprotocol/sdk'
 import type { PublishUpload } from '../../../types'
@@ -87,6 +88,47 @@ const waitForItem = async (seedLocalId: string): Promise<IItem<any>> => {
   })
 }
 
+type RawAttestation = {
+  data?: Array<{ data?: unknown }> | { data?: unknown }
+  _rawListIdsForResolve?: string[]
+  _unresolvedValue?: string
+  _easDataType?: string
+  _schemaDef?: string
+}
+
+const isListAttestation = (att: RawAttestation | undefined): boolean =>
+  Array.isArray(att?._rawListIdsForResolve) ||
+  att?._easDataType === 'bytes32[]' ||
+  (typeof att?._schemaDef === 'string' && att._schemaDef.startsWith('bytes32[]'))
+
+const hasUnresolvedRef = (att: RawAttestation | undefined): boolean =>
+  (Array.isArray(att?._rawListIdsForResolve) && att._rawListIdsForResolve.length > 0) ||
+  !!att?._unresolvedValue
+
+/**
+ * Re-encodes the attestations of `rawReq` (the getPublishPayload request) whose relation/list value
+ * names seeds by localId once every one has a uid in `resolvedUids` (resolvePublishPayloadValues: a
+ * list keeps its slot order, published members their uid), writing the result into `request`.
+ */
+async function applyResolvedRefs(
+  rawReq: { listOfAttestations?: RawAttestation[] } | undefined,
+  request: NormalizedRequest,
+  resolvedUids: Record<string, string>,
+): Promise<void> {
+  const rawAtts = rawReq?.listOfAttestations ?? []
+  if (!rawAtts.some(hasUnresolvedRef)) return
+  const [resolved] = (await resolvePublishPayloadValues([rawReq] as any, resolvedUids)) as unknown as Array<{
+    listOfAttestations: RawAttestation[]
+  }>
+  rawAtts.forEach((raw, j) => {
+    const out = resolved?.listOfAttestations?.[j]
+    if (!hasUnresolvedRef(raw) || !out || hasUnresolvedRef(out)) return
+    const outData = Array.isArray(out.data) ? out.data[0]?.data : out.data?.data
+    const target = request.listOfAttestations[j]?.data?.[0]
+    if (target && outData != null) target.data = toBytesHex(outData)
+  })
+}
+
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
 
 type NormalizedRequest = {
@@ -108,6 +150,8 @@ type NormalizedRequest = {
     }>
     _propertyName?: string
     _propertyNameForSchema?: string
+    /** A List (bytes32[]) attestation: filled by resolving its slots, never by propertiesToUpdate. */
+    _isList?: boolean
   }>
   propertiesToUpdate: Array<{ publishLocalId: string; propertySchemaUid: string }>
 }
@@ -196,6 +240,7 @@ export const createAttestationsDirectToEas = fromPromise(
           ...(typeof att?._propertyNameForSchema === 'string' && att._propertyNameForSchema !== ''
             ? { _propertyNameForSchema: att._propertyNameForSchema }
             : {}),
+          ...(isListAttestation(att) ? { _isList: true } : {}),
         }
       })
       const propertiesToUpdate = (req?.propertiesToUpdate ?? []).map((p: any) => ({
@@ -232,7 +277,7 @@ export const createAttestationsDirectToEas = fromPromise(
         const att = targetReq.listOfAttestations.find(
           (a) => toHex32(a?.schema)?.toLowerCase() === schemaUid?.toLowerCase(),
         )
-        if (!att) continue
+        if (!att || att._isList) continue
         if (!Array.isArray(att.data) || att.data.length === 0) {
           att.data = [{ ...placeholderData, refUID: ZERO_BYTES32 }]
         }
@@ -243,6 +288,11 @@ export const createAttestationsDirectToEas = fromPromise(
     const batchExtraUids: string[] = []
     /** Seed attestations this publish created, by request localId, with their attestation time. */
     const createdSeeds = new Map<string, { seedUid: string; attestationMs: number }>()
+    /** Seed uid of every request with one so far, by localId: what relation/list refs resolve to. */
+    const resolvedUids: Record<string, string> = {}
+    for (const r of normalizedRequests) {
+      if (r.localId && r.seedUid !== ZERO_BYTES32) resolvedUids[r.localId] = r.seedUid
+    }
 
     for (let i = 0; i < normalizedRequests.length; i++) {
       const request = normalizedRequests[i] as NormalizedRequest
@@ -271,6 +321,7 @@ export const createAttestationsDirectToEas = fromPromise(
         request.seedUid = seedUidFromReceipt
         if (request.localId) {
           createdSeeds.set(request.localId, { seedUid: seedUidFromReceipt, attestationMs: lastAttestationMs })
+          resolvedUids[request.localId] = seedUidFromReceipt
         }
         batchExtraUids.push(seedUidFromReceipt)
         logger('created Seed attestation', newSeedUid)
@@ -316,6 +367,10 @@ export const createAttestationsDirectToEas = fromPromise(
         }
       }
 
+      // Relation and list values that name a seed of this publish by localId get its uid, as on the
+      // contract path (createAttestations): requests come referenced-first, so those seeds exist.
+      await applyResolvedRefs(reqs[i], request, resolvedUids)
+
       for (const pu of request.propertiesToUpdate ?? []) {
         const targetReq = byLocalId.get(pu.publishLocalId)
         if (!targetReq?.listOfAttestations) continue
@@ -323,7 +378,9 @@ export const createAttestationsDirectToEas = fromPromise(
         const att = targetReq.listOfAttestations.find(
           (a) => toHex32(a?.schema)?.toLowerCase() === schemaUid?.toLowerCase(),
         )
-        if (!att?.data?.[0]) continue
+        // A list is re-encoded whole from its resolved slots (applyResolvedRefs), as the contract
+        // leaves lists to the client (SeedPublishLib.setSeedReference fills single values only).
+        if (!att?.data?.[0] || att._isList) continue
         att.data[0].data = encodeBytes32(newSeedUid as `0x${string}`)
       }
 

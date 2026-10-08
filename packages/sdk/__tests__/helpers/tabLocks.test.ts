@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { TabLockTimeoutError, seedDbLockName, withTabLock } from '@/helpers/tabLocks'
 
 describe('withTabLock', () => {
@@ -34,9 +34,26 @@ describe('withTabLock', () => {
   })
 
   it('still runs the section when the wait timeout fires after the lock was granted', async () => {
-    await expect(
-      withTabLock(name(), () => new Promise((resolve) => setTimeout(() => resolve('done'), 50)), { timeoutMs: 10 }),
-    ).resolves.toBe('done')
+    // The wait timeout fires from inside the section, so it is certainly after the grant. (A real
+    // 10ms timer raced the grant: in Chromium an uncontended grant is asynchronous, and a worker
+    // stalled for over 10ms after the request timed out before it was granted.)
+    const timeout = new AbortController()
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    try {
+      const p = withTabLock(
+        name(),
+        async () => {
+          timeout.abort(new DOMException('The operation timed out.', 'TimeoutError'))
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          return 'done'
+        },
+        { timeoutMs: 10 },
+      )
+      await expect(p).resolves.toBe('done')
+      expect(spy).toHaveBeenCalledWith(10)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('names locks per database', () => {
