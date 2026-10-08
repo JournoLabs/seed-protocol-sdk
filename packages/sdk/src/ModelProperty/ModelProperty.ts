@@ -20,6 +20,7 @@ import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import debug from 'debug'
 
@@ -98,6 +99,15 @@ export class ModelProperty {
   }
 
   /**
+   * Send from fire-and-forget async work (DB lookups started in the constructor), which can finish
+   * after the instance was unloaded or evicted with its schema.
+   */
+  private _sendIfRunning(event: Parameters<ModelPropertyService['send']>[0]): void {
+    if (isActorStopped(this._service)) return
+    this._service.send(event)
+  }
+
+  /**
    * Initialize original values and schema name for tracking changes
    * This is called asynchronously after construction
    * If the property was loaded from the database and differs from the schema file,
@@ -111,7 +121,7 @@ export class ModelProperty {
       this._resolveRefModelId(refModelName, property).then((refModelId) => {
         if (refModelId) {
           // Update the context with the resolved refModelId
-          this._service.send({
+          this._sendIfRunning({
             type: 'updateContext',
             refModelId,
           })
@@ -180,7 +190,7 @@ export class ModelProperty {
       // Initialize with original values, including isEdited flag
       // Load isEdited from database if property exists in DB (async, fire-and-forget)
       this._loadIsEditedFromDb(property, isEdited).then((isEditedFromDb: boolean) => {
-        this._service.send({
+        this._sendIfRunning({
           type: 'initializeOriginalValues',
           originalValues,
           schemaName: undefined, // Will be set later if needed
@@ -188,7 +198,7 @@ export class ModelProperty {
         })
       }).catch(() => {
         // If we can't load from DB, use computed isEdited value
-        this._service.send({
+        this._sendIfRunning({
           type: 'initializeOriginalValues',
           originalValues,
           schemaName: undefined, // Will be set later if needed
@@ -204,7 +214,7 @@ export class ModelProperty {
         }
       })
 
-      this._service.send({
+      this._sendIfRunning({
         type: 'initializeOriginalValues',
         originalValues,
         schemaName: undefined,
@@ -436,7 +446,7 @@ export class ModelProperty {
 
       if (schemaName) {
         // Update the context with the schema name using dedicated event
-        this._service.send({
+        this._sendIfRunning({
           type: 'setSchemaName',
           schemaName,
         })
@@ -664,6 +674,8 @@ export class ModelProperty {
       const checkAndSend = async () => {
         const service = proxiedInstance.getService()
         const snapshot = service.getSnapshot()
+        // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
+        if (isActorStopped(service)) return
         
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
           const writeProcess = snapshot.context.writeProcess
@@ -705,6 +717,9 @@ export class ModelProperty {
             // Don't clear pending write here - it might resolve later
             return
           }
+
+          // Resolving the modelId awaited the DB; the instance may have been stopped meanwhile
+          if (isActorStopped(service)) return
           
           // Track pending write now that we have the resolved modelId
           this.trackPendingWrite(propertyFileId, resolvedModelId)
