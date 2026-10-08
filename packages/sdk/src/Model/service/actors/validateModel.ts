@@ -1,4 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { FromCallbackInput } from '@/types'
 import { ModelMachineContext } from '../modelMachine'
 // Dynamic imports to break circular dependencies:
@@ -16,7 +17,7 @@ const VALIDATION_TIMEOUT_MS = 10000
 export const validateModel = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   let hasResponded = false
   
   // Timeout handler to ensure we always respond
@@ -59,6 +60,8 @@ export const validateModel = fromCallback<
       // If we have schema name, validate against schema
       // CRITICAL: Use validateModelAgainstSchema which doesn't require the model to be in schema context
       // This allows validation BEFORE registration, preventing update loops
+      // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+      if (isActorStopped(self)) return
       if (context.schemaName) {
         try {
           const schema = Schema.create(context.schemaName, {

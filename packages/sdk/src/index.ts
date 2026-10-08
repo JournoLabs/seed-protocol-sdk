@@ -303,6 +303,12 @@ export {
 
 export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
 export {
+  getPublishDraftGraph,
+  type PublishDraftGraph,
+  type PublishDraftGraphNode,
+  type GetPublishDraftGraphOptions,
+} from './db/read/publishDraftGraph'
+export {
   itemHasPublishUploadCandidates,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'

@@ -1,6 +1,7 @@
 import { fromPromise } from 'xstate'
 import { ValidationError } from '@/Schema/validation'
 import debug from 'debug'
+import { currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:write:validateEntity')
 
@@ -24,6 +25,18 @@ export const validateEntity = fromPromise<
   // Type assertion to fix XState v5 type inference bug
   // Convert through unknown to avoid type overlap error
   const entityInput = input as unknown as ValidateEntityInput
+  // Validation awaits imports before looking up the schema; the entity can be evicted with its
+  // schema meanwhile (Schema.destroy, test cleanup). Schema.create would then load the evicted
+  // schema again, and its load re-creates the schema's models from rows being deleted.
+  const evictionEpoch = currentEvictionEpoch()
+  /** The schema to validate against; throws (validation then skips the schema check) once it was evicted. */
+  const schemaForValidation = async (schemaName: string) => {
+    const { Schema } = await import('../../../Schema/Schema')
+    if (schemaEvictedSince(schemaName, evictionEpoch)) {
+      throw new Error(`Schema "${schemaName}" was evicted during validation`)
+    }
+    return Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+  }
   
   const _validate = async (): Promise<ValidateEntityOutput> => {
     try {
@@ -55,11 +68,7 @@ export const validateEntity = fromPromise<
           if (entityInput.entityData.schemaName) {
             try {
               logger(`[validateEntity] Validating model against schema "${entityInput.entityData.schemaName}"`)
-              const schemaMod = await import('../../../Schema/Schema')
-              const { Schema } = schemaMod
-              const schema = Schema.create(entityInput.entityData.schemaName, {
-                waitForReady: false,
-              }) as import('../../../Schema/Schema').Schema
+              const schema = await schemaForValidation(entityInput.entityData.schemaName)
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               logger(`[validateEntity] Schema status: ${schemaStatus}`)
@@ -109,11 +118,7 @@ export const validateEntity = fromPromise<
           // If schema name and model name provided, validate against schema
           if (entityInput.entityData._schemaName && entityInput.entityData.modelName) {
             try {
-              const schemaMod = await import('../../../Schema/Schema')
-              const { Schema } = schemaMod
-              const schema = Schema.create(entityInput.entityData._schemaName, {
-                waitForReady: false,
-              }) as import('@/Schema/Schema').Schema
+              const schema = await schemaForValidation(entityInput.entityData._schemaName)
               const schemaSnapshot = schema.getService().getSnapshot()
               const schemaStatus = schemaSnapshot.value
               

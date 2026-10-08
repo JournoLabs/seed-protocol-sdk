@@ -1,4 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { FromCallbackInput } from '@/types'
 import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> compareAndMarkDraft -> helpers/db
@@ -11,7 +12,7 @@ const logger = debug('seedSdk:modelProperty:actors:compareAndMarkDraft')
 export const compareAndMarkDraft = fromCallback<
   EventObject,
   FromCallbackInput<ModelPropertyMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _compareAndMarkDraft = async (): Promise<void> => {
     // Fill modelName/dataType from _originalValues when missing, then from DB by schemaFileId
     let fullContext = {
@@ -142,6 +143,8 @@ export const compareAndMarkDraft = fromCallback<
         // Get the Schema instance and mark it as draft
         const schemaMod = await import('../../../Schema/Schema')
         const { Schema } = schemaMod
+        // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+        if (isActorStopped(self)) return
         const schema = Schema.create(fullContext._schemaName, {
           waitForReady: false,
         }) as import('@/Schema/Schema').Schema

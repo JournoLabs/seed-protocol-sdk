@@ -5,6 +5,7 @@ import { createModelProperties } from './actors/createModelProperties'
 import { ValidationError } from '@/Schema/validation'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:model:modelMachine')
 
@@ -146,17 +147,22 @@ export const modelMachine = setup({
         ({ context, event, self }) => {
           if ((event as any)._liveQueryPropertyIds !== undefined) {
             const newPropertyIds = (event as any)._liveQueryPropertyIds as string[]
+            // The model can be evicted with its schema (Schema.destroy, test cleanup) before the
+            // timer and import below run: then create nothing, and drop lookups an eviction overtakes.
+            const evictionEpoch = currentEvictionEpoch()
             // Use setTimeout to check after assign has been applied
             setTimeout(() => {
               const snapshot = self.getSnapshot()
+              if (snapshot.status === 'stopped') return
               
               // Create ModelProperty instances for any new property IDs
               if (Array.isArray(newPropertyIds) && newPropertyIds.length > 0) {
                 // Import and create instances asynchronously (fire-and-forget)
                 import('@/ModelProperty/ModelProperty').then(({ ModelProperty }) => {
+                  if (self.getSnapshot().status === 'stopped') return
                   const createPromises = newPropertyIds.map(async (propertyFileId) => {
                     try {
-                      const property = await ModelProperty.createById(propertyFileId)
+                      const property = await ModelProperty.createById(propertyFileId, { evictionEpoch })
                       if (property) {
                         logger(`[modelMachine] Created/cached ModelProperty instance for propertyFileId "${propertyFileId}" after _liveQueryPropertyIds update`)
                       }

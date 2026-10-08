@@ -21,6 +21,7 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import debug from 'debug'
 
@@ -82,6 +83,9 @@ export class ModelProperty {
   storageType?: StorageType
   localStorageDir?: string
   filenameSuffix?: string
+
+  /** currentEvictionEpoch() at construction: lookups started for this instance don't outlive an eviction. */
+  private readonly _evictionEpoch = currentEvictionEpoch()
 
   constructor(property: Static<typeof TProperty>) {
     // id is now the schemaFileId (string), _dbId is the database integer ID
@@ -367,9 +371,16 @@ export class ModelProperty {
         const modelFileId = (await resolveModelRecord(property.modelName, { modelId }))?.schemaFileId
         model = modelFileId ? Model.getById(modelFileId) : undefined
       }
+      // Evicted (with its schema) or unloaded while the lookups above ran: don't instantiate its model
+      // again from rows that are being deleted.
+      if (!model && isActorStopped(this._service)) return undefined
       if (!model) {
         try {
-          model = await Model.getByNameAsync(property.modelName)
+          // The epoch from when this instance was built: an eviction of the model's schema since
+          // then (this instance may already be stopped) must not re-create the model.
+          model = await Model.getByNameAsync(property.modelName, undefined, {
+            evictionEpoch: this._evictionEpoch,
+          })
         } catch {
           model = undefined
         }
@@ -869,7 +880,16 @@ export class ModelProperty {
    * Create or get ModelProperty instance by propertyFileId
    * Queries the database to find the property if not cached
    */
-  static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
+  static async createById(
+    propertyFileId: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started. An eviction of the property's
+       * schema since then makes this return undefined instead of re-creating it. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<ModelProperty | undefined> {
     if (!propertyFileId) {
       return undefined
     }
@@ -885,11 +905,7 @@ export class ModelProperty {
     if (!db) {
       return undefined
     }
-
-    const testRecords = await db
-      .select()
-      .from(propertiesTable)
-      .limit(100)
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
     const propertyRecords = await db
       .select()
@@ -947,6 +963,22 @@ export class ModelProperty {
       if (refModelRecords.length > 0) {
         propertyData.refModelName = refModelRecords[0].name
         propertyData.ref = refModelRecords[0].name
+      }
+    }
+
+    // Its model's schema was evicted while we read the rows (e.g. a model's property lookup in flight
+    // during Schema.destroy or test cleanup): don't bring the property back.
+    if (anyEvictionSince(evictionEpoch)) {
+      const schemaRows = await db
+        .select({ name: schemas.name })
+        .from(modelSchemas)
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
+        .where(eq(modelSchemas.modelId, propertyRecord.modelId))
+      if (
+        schemaRows.length === 0 ||
+        schemaRows.some((row: { name: string | null }) => schemaEvictedSince(row.name, evictionEpoch))
+      ) {
+        return undefined
       }
     }
 

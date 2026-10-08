@@ -11,6 +11,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 
 const logger = debug('seedSdk:schema:actors:checkExistingSchema')
@@ -67,7 +68,7 @@ const getSchemaFilePath = (name: string, version: number, schemaFileId: string):
 /**
  * Create Model instances for all model IDs to ensure they're cached
  */
-const createModelInstances = async (modelIds: string[]): Promise<void> => {
+const createModelInstances = async (modelIds: string[], evictionEpoch: number): Promise<void> => {
   if (modelIds.length === 0) {
     return
   }
@@ -81,7 +82,8 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
     }
     const createPromises = modelIds.map(async (modelFileId) => {
       try {
-        const model = await Model.createById(modelFileId)
+        // Not if the schema was evicted (Schema.destroy, test cleanup) since this check started
+        const model = await Model.createById(modelFileId, { evictionEpoch })
         if (model) {
           logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
         }
@@ -101,6 +103,7 @@ export const checkExistingSchema = fromCallback<
   EventObject,
   FromCallbackInput<SchemaMachineContext>
 >(({ sendBack, input: { context } }) => {
+  const evictionEpoch = currentEvictionEpoch()
   const _check = async (): Promise<void> => {
     const { schemaName } = context
     
@@ -140,7 +143,7 @@ export const checkExistingSchema = fromCallback<
             let modelIds: string[] = []
             if (schemaRecord.id) {
               modelIds = await getModelIdsForSchema(schemaRecord.id)
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             sendBack({
@@ -366,7 +369,7 @@ export const checkExistingSchema = fromCallback<
         let modelIds: string[] = []
         if (dbSchema.id) {
           modelIds = await getModelIdsForSchema(dbSchema.id)
-          await createModelInstances(modelIds)
+          await createModelInstances(modelIds, evictionEpoch)
         }
         
         const loadedAt = Date.now()
@@ -428,7 +431,7 @@ export const checkExistingSchema = fromCallback<
           let modelIds: string[] = []
           if (matchingDraft.id) {
             modelIds = await getModelIdsForSchema(matchingDraft.id)
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
           
           const loadedAt = Date.now()
@@ -470,7 +473,7 @@ export const checkExistingSchema = fromCallback<
           
           if (schemaRecords.length > 0 && schemaRecords[0].id) {
             modelIds = await getModelIdsForSchema(schemaRecords[0].id)
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
         }
       } catch (error) {

@@ -16,6 +16,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
+import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -343,9 +344,10 @@ async function uploadPropertyWouldUpload(
   return false
 }
 
-export async function itemHasPublishUploadCandidates(
+async function itemOwnUploadCandidates(
   item: IItem<any>,
-  relatedItemProperty?: IItemProperty<any>,
+  relatedItemProperty: IItemProperty<any> | undefined,
+  recurseStorageRelations: boolean,
 ): Promise<boolean> {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -360,7 +362,10 @@ export async function itemHasPublishUploadCandidates(
     return true
   }
 
+  if (!recurseStorageRelations) return false
+  const storageProperties = new Set(itemImageProperties)
   for (const relationProperty of itemRelationProperties) {
+    if (!storageProperties.has(relationProperty)) continue
     const snapshot = relationProperty.getService().getSnapshot()
     const context = 'context' in snapshot ? snapshot.context : null
     if (!context) {
@@ -394,11 +399,24 @@ export async function itemHasPublishUploadCandidates(
       )
     }
 
-    if (await itemHasPublishUploadCandidates(relatedItem, relationProperty)) {
+    if (await itemOwnUploadCandidates(relatedItem, relationProperty, false)) {
       return true
     }
   }
 
+  return false
+}
+
+/** Same walk as getPublishUploads: the item and the draft items its publish carries along. */
+export async function itemHasPublishUploadCandidates(
+  item: IItem<any>,
+  relatedItemProperty?: IItemProperty<any>,
+): Promise<boolean> {
+  if (await itemOwnUploadCandidates(item, relatedItemProperty, true)) return true
+  const { drafts } = await getPublishDraftGraph(item, { strict: true })
+  for (const { item: draft, via, viaList } of drafts) {
+    if (await itemOwnUploadCandidates(draft, viaList ? undefined : via, true)) return true
+  }
   return false
 }
 
@@ -532,11 +550,12 @@ const processUploadProperty = async (
 const isDraftItem = (item: IItem<any>): boolean =>
   !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
 
-export const getPublishUploads = async (
+/** One item's own uploads: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
+const getItemOwnPublishUploads = async (
   item: IItem<any>,
-  uploads: PublishUpload[] = [],
-  relatedItemProperty?: IItemProperty<any>,
-  options?: GetPublishUploadsOptions,
+  uploads: PublishUpload[],
+  relatedItemProperty: IItemProperty<any> | undefined,
+  options: GetPublishUploadsOptions | undefined,
 ) => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
@@ -570,7 +589,10 @@ export const getPublishUploads = async (
     return uploads
   }
 
+  // Relations to Image/File/Html/Json items: their file, read through the relation property.
+  const storageProperties = new Set(itemImageProperties)
   for (const relationProperty of itemRelationProperties) {
+    if (!storageProperties.has(relationProperty)) continue
     const snapshot = relationProperty.getService().getSnapshot()
     const context = 'context' in snapshot ? snapshot.context : null
     if (!context) {
@@ -604,7 +626,34 @@ export const getPublishUploads = async (
       )
     }
 
-    uploads = await getPublishUploads(relatedItem, uploads, relationProperty, options)
+    uploads = await getItemOwnPublishUploads(relatedItem, uploads, relationProperty, {
+      ...options,
+      skipRelationRecursion: true,
+    })
+  }
+
+  return uploads
+}
+
+/**
+ * Arweave uploads for a publish of `item`: its own, and those of every draft item the publish
+ * carries along (reachable through relation and list properties, see publishDraftGraph.ts).
+ */
+export const getPublishUploads = async (
+  item: IItem<any>,
+  uploads: PublishUpload[] = [],
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadsOptions,
+) => {
+  uploads = await getItemOwnPublishUploads(item, uploads, relatedItemProperty, options)
+
+  if (options?.skipRelationRecursion) {
+    return uploads
+  }
+
+  const { drafts } = await getPublishDraftGraph(item, { strict: true })
+  for (const { item: draft, via, viaList } of drafts) {
+    uploads = await getItemOwnPublishUploads(draft, uploads, viaList ? undefined : via, options)
   }
 
   return uploads

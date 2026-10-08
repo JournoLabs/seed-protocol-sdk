@@ -1,4 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { FromCallbackInput } from '@/types'
 import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // Dynamic imports to break circular dependencies:
@@ -13,7 +14,7 @@ const logger = debug('seedSdk:modelProperty:actors:validateProperty')
 export const validateProperty = fromCallback<
   EventObject,
   FromCallbackInput<ModelPropertyMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _validateProperty = async (): Promise<void> => {
     // Use full context for validation: fill modelName/dataType from _originalValues when missing, then
     // from DB by schemaFileId (context.id) so just-created renames don't fail structure validation.
@@ -91,6 +92,8 @@ export const validateProperty = fromCallback<
     }
 
     // If we have schema name and model name, validate against schema
+    // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+    if (isActorStopped(self)) return
     if (fullContext._schemaName && fullContext.modelName) {
       try {
         const schema = Schema.create(fullContext._schemaName, {

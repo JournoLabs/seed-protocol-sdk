@@ -9,6 +9,7 @@ import { eq, and, isNull } from 'drizzle-orm'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 
 const logger = debug('seedSdk:model:actors:loadOrCreateModel')
 
@@ -57,7 +58,7 @@ const createPropertyInstances = async (propertyFileIds: string[]): Promise<void>
 export const loadOrCreateModel = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _loadOrCreateModel = async (): Promise<void> => {
     const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
 
@@ -205,7 +206,8 @@ export const loadOrCreateModel = fromCallback<
             .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
 
           if (propertyFileIds.length > 0) {
-            await createPropertyInstances(propertyFileIds)
+            // Not for a model stopped meanwhile (unloaded, or evicted with its schema)
+            if (!isActorStopped(self)) await createPropertyInstances(propertyFileIds)
           }
 
           // Generate schemaFileId if not set
@@ -252,6 +254,8 @@ export const loadOrCreateModel = fromCallback<
     try {
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
+      // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+      if (isActorStopped(self)) return
       const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
       const schemaSnapshot = schema.getService().getSnapshot()
       
@@ -498,8 +502,10 @@ export const loadOrCreateModel = fromCallback<
     try {
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
-      const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
-      schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
+      if (!isActorStopped(self)) {
+        const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+        schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
+      }
     } catch (err) {
       logger(`Failed to mark schema as draft after creating model: ${err}`)
     }

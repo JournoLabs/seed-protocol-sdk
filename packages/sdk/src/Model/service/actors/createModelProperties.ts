@@ -4,13 +4,18 @@ import { ModelMachineContext } from '../modelMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import debug from 'debug'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 
 const logger = debug('seedSdk:model:actors:createModelProperties')
 
 export const createModelProperties = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext> & { propertyDefinitions: { [name: string]: any } }
->(({ sendBack, input }) => {
+>(({ sendBack, input, self }) => {
+  // The model was stopped (unloaded, or evicted with its schema by Schema.destroy / test cleanup) while
+  // this ran: stopping it stops this actor too, but can't cancel the awaits below. A stopped model
+  // creates no properties (they'd be cached for a model that's gone, and write rows under it).
+  const stopped = () => isActorStopped(self)
   const _createProperties = async (): Promise<void> => {
     const { context, propertyDefinitions } = input
     const { id, _dbId, modelName, schemaName } = context
@@ -90,6 +95,11 @@ export const createModelProperties = fromCallback<
         }
       }
       
+      if (stopped()) {
+        logger(`Model "${modelName}" was stopped while creating its properties; not creating the rest`)
+        return
+      }
+
       // Create ModelProperty instance
       // This will load from DB if it exists, or create new instance
       // The property should already be in DB from writeModelToDb
