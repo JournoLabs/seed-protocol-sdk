@@ -29,6 +29,10 @@ export const rewritingHtmlEmbedded = fromPromise(
       context.htmlEmbeddedPhase1ArweaveTransactions,
       context.htmlEmbeddedPhase1PublishUploads as PublishUpload[] | undefined,
     )
-    await rewriteHtmlEmbeddedImagesOnDisk(context.item.seedLocalId, pairs)
+    await rewriteHtmlEmbeddedImagesOnDisk(
+      context.item.seedLocalId,
+      pairs,
+      context.htmlEmbeddedDeferredHtmlSeedLocalIds,
+    )
   },
 )

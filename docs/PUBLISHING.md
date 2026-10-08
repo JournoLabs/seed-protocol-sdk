@@ -113,6 +113,33 @@ Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **a
 
 Very large tag sets can exceed Arweave limits and fail at transaction or DataItem creation.
 
+## Html: embedded images and property references
+
+Publish uploads an item's Html in two phases when the Html points at files published with it:
+phase 1 uploads everything else, the Html files are rewritten on disk with the resulting Arweave
+gateway URLs, then phase 2 uploads the Html.
+
+- **`data:image/...;base64,...` in `<img src>`** (policy `materialize`, the default): each image
+  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Policy
+  `preserve` leaves data URIs in place.
+- **`seed:property/<name>`** as the whole value of a `src`, `href` or `poster` attribute: the URL of
+  the same item's `<name>` property, which must be an Image, File or Json property (or a relation
+  to one) with a value. It becomes the URL of that property's phase-1 upload, or, when the property's
+  file is not uploaded in this publish, of the transaction it was published with. This lets Html show
+  a file published alongside it without embedding it a second time:
+
+  ```html
+  <img class="u-featured" src="seed:property/featureImage">
+  ```
+
+  A placeholder naming a missing, non-storage or empty property fails the publish before anything
+  is uploaded (`HtmlSeedPropertyRefError`). Placeholders are resolved under either data URI policy.
+
+The rewrite changes only those attribute values: the rest of the Html is kept byte for byte (it is
+not re-serialized), so the sealed Html is what the app wrote. The rewritten file replaces the local
+Html, so a placeholder is gone after the first publish; an app that wants to keep it should rebuild
+the Html before each publish.
+
 ## Custom publish flows
 
 If you call `item.getPublishPayload(uploadedTransactions)` directly (without the publish package):
