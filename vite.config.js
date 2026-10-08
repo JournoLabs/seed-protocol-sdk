@@ -270,6 +270,8 @@ export default defineConfig({
 
             // Browser-only: SQL-tag liveQuery isn't supported by the Node stub. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/db/Db.test.ts',
+            // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
+            'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
           ],
           hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
