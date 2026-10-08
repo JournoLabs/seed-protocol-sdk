@@ -5,22 +5,19 @@ import { useItem, useItemProperty, SeedProvider, createSeedQueryClient } from '@
 import type { QueryClient } from '@tanstack/react-query'
 import {
   client,
-  BaseDb,
-  schemas,
   metadata,
-  seeds,
   importJsonSchema,
   Schema,
   Model,
   Item,
   ItemProperty,
-  BaseFileManager,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq } from 'drizzle-orm'
+
 import { waitFor as xstateWaitFor } from 'xstate'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 const testSchemaHtmlPersistence: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -96,48 +93,7 @@ describe('Html property persistence integration tests', () => {
   })
 
   afterAll(async () => {
-    const deleteSchemaFileIfExists = async (
-      schemaName: string,
-      version: number,
-      schemaFileId: string
-    ) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch {
-        // Ignore
-      }
-    }
-
-    const db = BaseDb.getAppDb()
-    if (db && testItem) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem.seedLocalId))
-    }
-    if (db) {
-      try {
-        await db.delete(schemas).where(eq(schemas.name, 'Test Schema Html Persistence'))
-      } catch {
-        // Browser DB may still have FK references to this schema row.
-      }
-    }
-    await deleteSchemaFileIfExists(
-      'Test Schema Html Persistence',
-      testSchemaHtmlPersistence.version,
-      testSchemaHtmlPersistence.id
-    )
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
   })
 
@@ -147,12 +103,9 @@ describe('Html property persistence integration tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(metadata)
-      await db.delete(seeds).where(eq(seeds.type, 'post'))
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Html Persistence'))
-    }
+    // Removes every test schema, its items and schema files. (This used to delete every metadata
+    // row and every seed of type 'post' whatever its schema, and only the schema row itself.)
+    await cleanupTestSchemaData({ items: true })
 
     try {
       await importJsonSchema(
