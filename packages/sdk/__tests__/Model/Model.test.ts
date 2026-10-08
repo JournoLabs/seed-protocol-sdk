@@ -14,26 +14,12 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
-// Bounded wait for a condition that a lenient test tolerates never becoming true (replaces fixed sleeps)
-async function waitUntil(condition: () => boolean | Promise<boolean>, timeout = 2000): Promise<boolean> {
-  try {
-    await vi.waitFor(
-      async () => {
-        if (!(await condition())) throw new Error('condition not met yet')
-      },
-      { timeout, interval: 50 },
-    )
-    return true
-  } catch {
-    return false
-  }
-}
-
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
@@ -459,15 +445,13 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      await waitUntil(async () => !!(await Model.getByNameAsync(modelName, schemaName)), 5000)
-      
-      // Get the model that was imported (may be renamed if duplicate exists)
-      // Try getByNameAsync first, but if that fails, try Model.create which will handle renaming
-      let TestModel = await Model.getByNameAsync(modelName, schemaName)
-      if (!TestModel) {
-        // If not found, try creating it (will use the imported model from database or create new)
-        TestModel = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      }
+      // The imported model (creating one here when it was missing used to hide that failure)
+      await waitUntilOrThrow(
+        async () => !!(await Model.getByNameAsync(modelName, schemaName)),
+        `the imported model "${modelName}"`,
+        5000,
+      )
+      const TestModel = (await Model.getByNameAsync(modelName, schemaName))!
       
       await waitForModelIdle(TestModel)
       
@@ -1234,31 +1218,13 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      await waitUntil(async () => !!(await Model.getByNameAsync(modelName, schemaName)), 5000)
-      
-      // Get the existing model from the schema import (don't create a new one)
-      // Use getByNameAsync to ensure we get the model even if it's not in cache yet
-      let model = await Model.getByNameAsync(modelName, schemaName)
-      
-      // If model isn't found yet, wait a bit more and try again
-      if (!model) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-        model = await Model.getByNameAsync(modelName, schemaName)
-      }
-      
-      // If still not found, the model might not have been loaded yet, so we'll need to get it via the schema
-      if (!model) {
-        const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-        await waitForSchemaIdle(schema)
-        // Wait for models to be loaded
-        await new Promise(resolve => setTimeout(resolve, 500))
-        model = await Model.getByNameAsync(modelName, schemaName)
-      }
-      
-      // If model still doesn't exist, something went wrong
-      if (!model) {
-        throw new Error(`Model "${modelName}" not found after schema import`)
-      }
+      // The existing model from the schema import (don't create a new one)
+      await waitUntilOrThrow(
+        async () => !!(await Model.getByNameAsync(modelName, schemaName)),
+        `the imported model "${modelName}"`,
+        5000,
+      )
+      const model = (await Model.getByNameAsync(modelName, schemaName))!
       
       await waitForModelIdle(model)
       

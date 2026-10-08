@@ -9,6 +9,9 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
+import { seeds } from '@/seedSchema/SeedSchema'
+import { versions } from '@/seedSchema/VersionSchema'
+import { publishProcesses } from '@/seedSchema/PublishProcessSchema'
 import { cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
 import { waitForInFlightWrites } from '@/services/write/actors/writeToDatabase'
 
@@ -17,6 +20,12 @@ export type CleanupTestSchemaDataOptions = {
   retries?: number
   /** Delay between retries in ms (default 200). */
   retryDelayMs?: number
+  /**
+   * Also delete the test models' items: seeds whose model_file_id is a test model's, with their versions,
+   * metadata and publish processes. Matches by model_file_id, not seeds.type, so it neither misses items
+   * (types are snake_case, model names aren't) nor deletes another schema's same-named items.
+   */
+  items?: boolean
 }
 
 /**
@@ -30,12 +39,13 @@ export type CleanupTestSchemaDataOptions = {
  *    model_uids, properties, model_schemas, models, schemas.
  * 3. Waits for writes already running (stopping an actor can't cancel them), then retries briefly on
  *    failure in case a write still lands mid-cleanup.
+ * With `items: true`, first deletes the test models' items (see the option).
  * 4. Deletes the test schema JSON files from the working dir, or the next client.init re-imports the
  *    schemas whose rows were just removed. Matters most in the browser, where test files share one
  *    OPFS store; under Node each run gets a fresh temp dir.
  */
 export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOptions = {}): Promise<void> {
-  const { retries = 10, retryDelayMs = 200 } = options
+  const { retries = 10, retryDelayMs = 200, items = false } = options
   const db = BaseDb.getAppDb()
   if (!db) return
 
@@ -51,7 +61,7 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
 
   for (let attempt = 0; ; attempt++) {
     try {
-      await deleteTestRows(db)
+      await deleteTestRows(db, { items })
       await cleanupTestSchemaFiles()
       return
     } catch (error) {
@@ -61,7 +71,10 @@ export async function cleanupTestSchemaData(options: CleanupTestSchemaDataOption
   }
 }
 
-async function deleteTestRows(db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>): Promise<void> {
+async function deleteTestRows(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  { items }: { items: boolean },
+): Promise<void> {
   const seedProtocolSchema = await db
     .select({ id: schemas.id })
     .from(schemas)
@@ -92,6 +105,8 @@ async function deleteTestRows(db: NonNullable<ReturnType<typeof BaseDb.getAppDb>
     await db.select({ id: modelsTable.id }).from(modelsTable).where(isTestModel(modelsTable.id))
   ).map((row: { id: number }) => row.id)
 
+  if (items) await deleteTestItemRows(db, seedProtocolModelIds)
+
   await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
   if (testPropertyIds.length > 0) {
     await db.update(metadata).set({ propertyId: null }).where(inArray(metadata.propertyId, testPropertyIds))
@@ -110,4 +125,57 @@ async function deleteTestRows(db: NonNullable<ReturnType<typeof BaseDb.getAppDb>
     )
   await db.delete(modelsTable).where(isTestModel(modelsTable.id))
   await db.delete(schemas).where(or(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME), isNull(schemas.name)))
+}
+
+/**
+ * Deletes only the test models' items (seeds whose model_file_id is a non-Seed-Protocol model's, with
+ * their versions, metadata and publish processes) and leaves schemas, models and cached instances alone.
+ * For files that import their schema once and need an empty item table per test: re-importing and
+ * evicting per test makes the next import and every Item.create slower (cold Model instances).
+ */
+export async function cleanupTestItems(): Promise<void> {
+  const db = BaseDb.getAppDb()
+  if (!db) return
+  const seedProtocolSchema = await db
+    .select({ id: schemas.id })
+    .from(schemas)
+    .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
+    .limit(1)
+  const seedProtocolModelIds: number[] =
+    seedProtocolSchema[0]?.id == null
+      ? []
+      : (
+          await db
+            .select({ modelId: modelSchemas.modelId })
+            .from(modelSchemas)
+            .where(eq(modelSchemas.schemaId, seedProtocolSchema[0].id))
+        )
+          .map((link: { modelId: number | null }) => link.modelId)
+          .filter((id: number | null): id is number => id !== null)
+  await deleteTestItemRows(db, seedProtocolModelIds)
+}
+
+async function deleteTestItemRows(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  seedProtocolModelIds: number[],
+): Promise<void> {
+  const testModelFileIds = (
+    await db
+      .select({ schemaFileId: modelsTable.schemaFileId })
+      .from(modelsTable)
+      .where(seedProtocolModelIds.length > 0 ? notInArray(modelsTable.id, seedProtocolModelIds) : undefined)
+  )
+    .map((row: { schemaFileId: string | null }) => row.schemaFileId)
+    .filter((id: string | null): id is string => !!id)
+  if (testModelFileIds.length === 0) return
+  const seedLocalIds = (
+    await db.select({ localId: seeds.localId }).from(seeds).where(inArray(seeds.modelFileId, testModelFileIds))
+  )
+    .map((row: { localId: string | null }) => row.localId)
+    .filter((id: string | null): id is string => !!id)
+  if (seedLocalIds.length === 0) return
+  await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
+  await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
+  await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
+  await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
 }

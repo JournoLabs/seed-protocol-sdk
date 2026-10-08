@@ -16,101 +16,18 @@ import {
   BaseDb,
   schemas,
   properties as propertiesTable,
-  models as modelsTable,
-  modelSchemas,
-  metadata,
-  seeds,
-  versions,
-  propertyUids,
-  modelUids,
-  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
   ModelProperty,
-  BaseFileManager,
-  generateId,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitFor as xstateWaitFor } from 'xstate'
-import { waitUntil } from './test-utils/waitUntil'
-
-/** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
-async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
-  const db = BaseDb.getAppDb()
-  if (!db) return
-
-  // Evict cached instances first (stopping their actors) so the next import builds fresh ones bound
-  // to the new rows; otherwise Model.create returns the stale instance and its properties are never written.
-  ModelProperty.evictForModels(Model.evictForSchema(schemaName), schemaName)
-
-  const schemaRow = await db
-    .select()
-    .from(schemas)
-    .where(eq(schemas.name, schemaName))
-    .limit(1)
-  if (!schemaRow.length || schemaRow[0].id == null) return
-
-  const schemaId = schemaRow[0].id
-
-  const links = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(eq(modelSchemas.schemaId, schemaId))
-
-  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
-  if (mids.length === 0) {
-    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-    await db.delete(schemas).where(eq(schemas.id, schemaId))
-    return
-  }
-
-  const modelRows = await db
-    .select({ name: modelsTable.name })
-    .from(modelsTable)
-    .where(inArray(modelsTable.id, mids))
-  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
-
-  const seedRows = await db
-    .select({ localId: seeds.localId })
-    .from(seeds)
-    .where(inArray(seeds.type, modelNames))
-  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
-
-  if (seedLocalIds.length) {
-    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
-    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
-    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
-    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
-  }
-
-  const propRows = await db
-    .select({ id: propertiesTable.id })
-    .from(propertiesTable)
-    .where(inArray(propertiesTable.modelId, mids))
-  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
-
-  if (pids.length) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
-  }
-
-  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
-  await db.update(propertiesTable).set({ refModelId: null }).where(inArray(propertiesTable.modelId, mids))
-  await db.delete(propertiesTable).where(inArray(propertiesTable.modelId, mids))
-  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
-  await db.delete(schemas).where(eq(schemas.id, schemaId))
-}
-
-async function deleteModelPropertyTestSchemasFromDb(): Promise<void> {
-  await deleteTestSchemaRowsByName('Test Schema Properties')
-  await deleteTestSchemaRowsByName('Empty Test Schema Properties')
-  await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-}
+import { waitUntilOrThrow } from './test-utils/waitUntil'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
@@ -407,42 +324,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
   })
 
   afterAll(async () => {
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
-
-    await deleteModelPropertyTestSchemasFromDb()
-
-    // Clean up schema files from file system
-    if (testSchemaWithProperties.id) {
-      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    await deleteSchemaFileIfExists('LiveQuery Test Schema Properties', 1, 'livequery-test-schema-props')
-
-    // Clear schema cache
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
   })
 
@@ -451,40 +333,10 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
+    // Removes every test schema (incl. this file's three), its items and schema files, after
+    // waiting for writes still running from the previous test.
+    await cleanupTestSchemaData({ items: true })
 
-    await deleteModelPropertyTestSchemasFromDb()
-    
-    // Clean up schema files from file system
-    if (testSchemaWithProperties.id) {
-      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    
     Schema.clearCache()
 
     // Import test schemas
@@ -612,13 +464,11 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // First get the model to get its ID
       const schema = Schema.create('Test Schema Properties', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      const schemaIdle = await waitUntil(() => schema.getService().getSnapshot().value === 'idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
+      // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
-      if (!postModel || !postModel.id) {
-        // Skip if we can't get the model ID
-        return
-      }
+      expect(postModel?.id).toBeTruthy()
 
       render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container, wrapper: SeedProviderWrapper })
 
@@ -734,16 +584,8 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         migrations: [],
       }
 
-      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-      Schema.clearCache()
-
-      // Import schema
-      try {
-        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
-      } catch (error) {
-        await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
-      }
+      // beforeEach already removed every test schema, so this one can't exist yet
+      await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
 
       // Wait for schema to be available
       await waitFor(
@@ -787,17 +629,21 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { timeout: 5000, interval: 200 }
       )
 
-      // Get the model instance
-      const model = Model.create('TestModel', 'LiveQuery Test Schema Properties', { waitForReady: false })
-      await xstateWaitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      // Add a property; the hook's live query on the properties table should pick it up
+      const added = ModelProperty.create(
+        { name: 'addedLater', dataType: 'Text', modelName: 'TestModel' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName: 'LiveQuery Test Schema Properties' },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
 
-      // Add a new property to the model
-      // Note: This is a simplified test - in reality, properties are added through Model.create with properties option
-      // For this test, we'll verify that the hook responds to database changes via liveQuery
-
-      model.unload()
-      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-      Schema.clearCache()
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('properties-count').textContent).toBe('2')
+          const names = screen.getAllByTestId(/^property-\d+$/).map((el) => el.textContent)
+          expect(names).toEqual(expect.arrayContaining(['name', 'addedLater']))
+        },
+        { timeout: 15000 }
+      )
     })
   })
 

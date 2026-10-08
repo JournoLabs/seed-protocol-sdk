@@ -20,7 +20,7 @@ import { eq, and, isNotNull } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { Observable } from 'rxjs'
 import { waitForItemPersisted } from './test-utils/persistence'
-import { waitUntil } from './test-utils/waitUntil'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
 
 // Test schema
 const testSchema: SchemaFileFormat = {
@@ -237,13 +237,9 @@ describe('LiveQuery Timing Investigation', () => {
       expect(directQueryResults.length).toBeGreaterThan(0)
       expect(directQueryTime).toBeLessThan(1000) // Direct query should be fast
 
-      if (reactiveQueryFirstEmission !== null) {
-        console.log(`[Timing Test] Time difference: ${(reactiveQueryFirstEmission - directQueryTime).toFixed(2)}ms`)
-        expect(reactiveQueryFirstEmission).toBeLessThan(5000) // Should emit within 5 seconds
-      } else {
-        console.log('[Timing Test] WARNING: Reactive query did not emit within 5 seconds!')
-        // This is the issue we're investigating
-      }
+      // Used to log a warning and pass when the reactive query never emitted
+      expect(reactiveQueryFirstEmission).not.toBeNull()
+      expect(reactiveQueryFirstEmission!).toBeLessThan(5000) // Should emit within 5 seconds
 
       item.unload()
       model.unload()
@@ -400,6 +396,7 @@ describe('LiveQuery Timing Investigation', () => {
       let emissionCount = 0
       let initialEmission: any[] | null = null
       let updateEmission: any[] | null = null
+      let latestEmission: any[] | null = null
 
       const query = db
         .select({
@@ -420,6 +417,7 @@ describe('LiveQuery Timing Investigation', () => {
       const subscription = observable.subscribe({
         next: (results) => {
           emissionCount++
+          latestEmission = results
           if (emissionCount === 1) {
             initialEmission = results
             console.log(`[Transaction Test] Initial emission: ${results.length} records`)
@@ -434,7 +432,7 @@ describe('LiveQuery Timing Investigation', () => {
       })
 
       // Wait for initial emission
-      await waitUntil(() => emissionCount >= 1, 5000)
+      await waitUntilOrThrow(() => emissionCount >= 1, 'the reactive query to emit', 5000)
 
       console.log(`[Transaction Test] Initial emission count: ${emissionCount}`)
       console.log(`[Transaction Test] Initial emission records: ${initialEmission?.length || 0}`)
@@ -445,6 +443,7 @@ describe('LiveQuery Timing Investigation', () => {
         seedLocalId: item.seedLocalId,
       })
 
+      expect(nameProperty).toBeDefined()
       if (nameProperty) {
         const updateStart = performance.now()
         nameProperty.value = 'Updated Name'
@@ -459,7 +458,12 @@ describe('LiveQuery Timing Investigation', () => {
         console.log(`[Transaction Test] Property update took ${updateTime.toFixed(2)}ms`)
 
         // Wait for reactive query to detect change
-        await waitUntil(() => emissionCount >= 2) // the test tolerates the update emission not arriving
+        // Used to tolerate the update never arriving (it only logged a warning)
+        await waitUntilOrThrow(
+          () => !!latestEmission?.some((r: any) => r.propertyName === 'name' && r.propertyValue === 'Updated Name'),
+          'the reactive query to emit the updated name',
+          5000,
+        )
 
         console.log(`[Transaction Test] Total emissions: ${emissionCount}`)
         console.log(`[Transaction Test] Update emission records: ${updateEmission?.length || 0}`)
@@ -473,13 +477,8 @@ describe('LiveQuery Timing Investigation', () => {
       subscription.unsubscribe()
 
       // Assertions
-      expect(emissionCount).toBeGreaterThanOrEqual(1) // At least initial emission
-      if (emissionCount >= 2) {
-        expect(updateEmission).not.toBeNull()
-        expect(updateEmission!.length).toBeGreaterThan(0)
-      } else {
-        console.log('[Transaction Test] WARNING: Reactive query did not detect update!')
-      }
+      expect(emissionCount).toBeGreaterThanOrEqual(2) // initial + update
+      expect(updateEmission).not.toBeNull()
 
       item.unload()
       model.unload()
