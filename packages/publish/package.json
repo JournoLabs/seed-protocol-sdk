@@ -67,7 +67,8 @@
   "peerDependencies": {
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
-    "thirdweb": "^5"
+    "thirdweb": "^5",
+    "@tanstack/react-query": "^5"
   },
   "peerDependenciesMeta": {
     "thirdweb": {

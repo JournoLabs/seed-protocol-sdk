@@ -47,15 +47,13 @@
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
   "optionalDependencies": {
-    "@tanstack/query-sync-storage-persister": "5.90.15",
-    "@tanstack/react-query": "^5.90.15",
-    "@tanstack/react-query-persist-client": "5.90.15",
+    "@tanstack/react-query": "^5.104.1",
     "@zenfs/core": "2.5.6",
     "@zenfs/dom": "1.2.9",
     "fsevents": "^2.3.3"
   },
   "peerDependencies": {
-    "@tanstack/react-query": "^5.90.15",
+    "@tanstack/react-query": "^5.102.0",
     "@zenfs/core": "2.5.6",
     "@zenfs/dom": "1.2.9",
     "drizzle-orm": "^0.44.3",
