@@ -251,7 +251,16 @@ their number so references to them stay valid.
 21. **Flaky under load: `react/__tests__/liveQueryTiming.test.tsx`** "should detect changes after
     transaction commits" timed out (5 s) waiting for the reactive query once, in a slow full run
     (395 s against the usual ~280 s) on branch `claude/multi-tab-phase-c`. It passed alone and in
-    a rerun of the whole browser-react project. Not investigated.
+    a rerun of the whole browser-react project. **Not reproduced; the test now says which wait
+    failed.** Rechecked 2026-10-09: 0 failures in 3 full browser + browser-react runs (160–247 s),
+    where the property update took 22–32 ms and every live query emitted within 6–12 ms, so 5 s is
+    ~200× headroom. SQLocal's change notification has no gap that would drop an update (effects
+    are debounced 32 ms with a 180 ms `maxWait`), and Phase C didn't touch live queries. The failure
+    was more likely a stalled DB worker than a missed emission, but the old test couldn't tell
+    which wait timed out. Now the initial-emission wait is 10 s, the test first waits (10 s) for
+    the updated name to be in the database ("…to reach the database" = slow write), and only then
+    gives the live query 5 s, failing with the emission count and latest rows ("…emit the committed
+    updated name" = a real missed emission). Reopen with that message if it recurs.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
