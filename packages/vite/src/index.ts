@@ -151,6 +151,13 @@ const EAS_OPTIMIZE_INCLUDES = [
   '@seedprotocol/sdk > @ethereum-attestation-service/eas-sdk > @ethereum-attestation-service/eas-contracts',
 ] as const
 
+/**
+ * Prebundled only when the app itself can resolve them (they come from
+ * @seedprotocol/publish, not the SDK). Vite resolves `include` entries from the
+ * app root, so finding them elsewhere in node_modules is not enough.
+ */
+const APP_OPTIONAL_OPTIMIZE_INCLUDES = ['viem', 'isows'] as const
+
 /** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
 
@@ -211,6 +218,12 @@ function pushBunPackageCandidates(
     if (!entry.startsWith(`${bunPrefix}@`) && !entry.startsWith(`${packageName}@`)) continue
     candidates.push(path.join(bunDir, entry, `node_modules/${packageName}`, relativePath))
   }
+}
+
+/** Whether a package is installed where Vite's optimizer looks for it (the app root upward). */
+function isResolvableFromRoot(packageName: string, root: string): boolean {
+  const lookupDirs = createRequire(path.join(root, 'package.json')).resolve.paths(packageName) ?? []
+  return lookupDirs.some((dir) => fs.existsSync(path.join(dir, packageName, 'package.json')))
 }
 
 function resolvePackageFile(packageName: string, relativePath: string): string | undefined {
@@ -433,37 +446,6 @@ function resolveNodePolyfillShimPaths(): {
   return { paths, unresolved }
 }
 
-/**
- * Collapse repeated vite-plugin-node-polyfills globals banners (Vite 8 optimizer + serve).
- * Re-inject with absolute ESM paths: this runs in transform order "post" (after
- * import-analysis), so bare package ids would reach the browser unresolved
- * ("Relative references must start with /, ./, or ../").
- */
-function dedupeNodePolyfillBanner(
-  code: string,
-  paths: NodePolyfillShimPaths,
-): string | null {
-  const importCount = (code.match(/import\s+__buffer_polyfill\b/g) || []).length
-  if (importCount <= 1) return null
-  if (!paths.buffer || !paths.global || !paths.process) return null
-
-  const bannerRe =
-    /import\s+__buffer_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.Buffer\s*=\s*globalThis\.Buffer\s*\|\|\s*__buffer_polyfill;?\s*\n\s*import\s+__global_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.global\s*=\s*globalThis\.global\s*\|\|\s*__global_polyfill;?\s*\n\s*import\s+__process_polyfill\s+from\s+['"][^'"]+['"];?\s*\n\s*globalThis\.process\s*=\s*globalThis\.process\s*\|\|\s*__process_polyfill;?\s*\n?/g
-
-  const cleaned = code.replace(bannerRe, '')
-  if (cleaned === code) return null
-
-  const banner =
-    `import __buffer_polyfill from ${JSON.stringify(paths.buffer)};\n` +
-    'globalThis.Buffer = globalThis.Buffer || __buffer_polyfill;\n' +
-    `import __global_polyfill from ${JSON.stringify(paths.global)};\n` +
-    'globalThis.global = globalThis.global || __global_polyfill;\n' +
-    `import __process_polyfill from ${JSON.stringify(paths.process)};\n` +
-    'globalThis.process = globalThis.process || __process_polyfill;\n'
-
-  return banner + cleaned
-}
-
 /** Rewrite leftover bare shim package ids to absolute ESM files (post import-analysis). */
 function rewriteBarePolyfillShimImports(
   code: string,
@@ -641,71 +623,33 @@ function streamShimOptimizeAliasObject(): Record<string, string> {
 
 type OptimizeDepsConfig = NonNullable<UserConfig['optimizeDeps']>
 
-/** Read Rolldown optimizer options, falling back to deprecated rollup/esbuild shapes. */
-function readOptimizeDepsRolldownBase(
-  existing: OptimizeDepsConfig | undefined,
-): Record<string, unknown> {
-  const opt = existing ?? {}
-  return (
-    opt.rolldownOptions ??
-    (opt as { rollupOptions?: Record<string, unknown> }).rollupOptions ??
-    {}
-  ) as Record<string, unknown>
-}
-
 /**
- * Merge Vite 8 `optimizeDeps.rolldownOptions` without returning deprecated
- * `esbuildOptions` / `rollupOptions` keys from plugin config hooks.
+ * Build a Vite 8 `optimizeDeps.rolldownOptions` patch for a plugin `config()` hook.
+ *
+ * Returns only what this plugin adds. Vite deep-merges hook results into the
+ * user config and concatenates arrays, so echoing existing options back would
+ * duplicate them — e.g. vite-plugin-node-polyfills' optimizer banner plugin,
+ * which then declares `__buffer_polyfill` twice in every prebundled chunk.
+ * Legacy `esbuildOptions.define` is carried into `transform.define` so
+ * definitions survive the move off the deprecated key.
  */
-function mergeOptimizeDepsRolldownOptions(
+function optimizeDepsRolldownPatch(
   existing: OptimizeDepsConfig | undefined,
   patch: {
     define?: Record<string, string>
     alias?: Record<string, string>
   },
 ): OptimizeDepsConfig['rolldownOptions'] {
-  const base = readOptimizeDepsRolldownBase(existing)
-  const existingResolve = (base.resolve as { alias?: Record<string, string> } | undefined) ?? {}
-  const existingTransform = (base.transform as { define?: Record<string, string> } | undefined) ?? {}
-  const legacyDefine = existing?.esbuildOptions?.define ?? {}
-
-  const mergedDefine = {
-    ...legacyDefine,
-    ...existingTransform.define,
+  const define = {
+    ...existing?.esbuildOptions?.define,
     ...patch.define,
   }
-  const mergedAlias = {
-    ...existingResolve.alias,
-    ...patch.alias,
-  }
+  const alias = patch.alias ?? {}
 
   return {
-    ...base,
-    ...(Object.keys(mergedDefine).length > 0
-      ? {
-          transform: {
-            ...existingTransform,
-            define: mergedDefine,
-          },
-        }
-      : {}),
-    ...(Object.keys(mergedAlias).length > 0
-      ? {
-          resolve: {
-            ...existingResolve,
-            alias: mergedAlias,
-          },
-        }
-      : {}),
+    ...(Object.keys(define).length > 0 ? { transform: { define } } : {}),
+    ...(Object.keys(alias).length > 0 ? { resolve: { alias } } : {}),
   }
-}
-
-/** Spread optimizeDeps while omitting deprecated optimizer option keys. */
-function omitDeprecatedOptimizeDepsKeys(
-  existing: OptimizeDepsConfig | undefined,
-): Omit<OptimizeDepsConfig, 'esbuildOptions' | 'rollupOptions'> {
-  const { esbuildOptions: _e, rollupOptions: _r, ...rest } = existing ?? {}
-  return rest
 }
 
 /**
@@ -819,22 +763,21 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         'utilium',
         'memium',
         'readable-stream',
-        'viem',
-        'isows',
         ...FRAGILE_RENDERER_OPTIMIZE_INCLUDES,
       ]
-      const resolvableOptimizeIncludes = desiredOptimizeIncludes.filter(
-        (dep) => !!resolvePackageFile(dep, 'package.json'),
-      )
+      const appRoot = path.resolve(userConfig.root ?? process.cwd())
+      const resolvableOptimizeIncludes = [
+        ...desiredOptimizeIncludes.filter((dep) => !!resolvePackageFile(dep, 'package.json')),
+        ...APP_OPTIONAL_OPTIMIZE_INCLUDES.filter((dep) => isResolvableFromRoot(dep, appRoot)),
+      ]
 
       const existingOptimize = userConfig.optimizeDeps
       const debugOptimizeAliases = debugShimOptimizeAliasObject()
       const streamOptimizeAliases = streamShimOptimizeAliasObject()
 
+      // Only this plugin's additions: Vite concatenates them onto the user's arrays.
       const optimizeDeps: UserConfig['optimizeDeps'] = {
-        ...omitDeprecatedOptimizeDepsKeys(existingOptimize),
         exclude: [
-          ...(existingOptimize?.exclude ?? []),
           // Do not prebundle the SDK itself or clearly node-only tools
           '@seedprotocol/sdk',
           'drizzle-orm',
@@ -843,14 +786,13 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           'sqlocal',
         ],
         include: [
-          ...(existingOptimize?.include ?? []),
           ...resolvableOptimizeIncludes,
           ...EAS_OPTIMIZE_INCLUDES,
           ...CJS_OPTIMIZE_INCLUDES,
         ],
         // Keep `global` shim in optimizer Rolldown options; top-level Vite `define`
         // can be rejected by Rolldown in some consumer setups.
-        rolldownOptions: mergeOptimizeDepsRolldownOptions(existingOptimize, {
+        rolldownOptions: optimizeDepsRolldownPatch(existingOptimize, {
           define: { global: 'globalThis' },
           alias: {
             ...debugOptimizeAliases,
@@ -943,16 +885,15 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         polyfillShimPaths,
       )
 
-      const existingOptimize = userConfig.optimizeDeps
-
       return {
         resolve: {
-          ...existingResolve,
           alias: mergedAlias,
         },
         optimizeDeps: {
-          rolldownOptions: mergeOptimizeDepsRolldownOptions(existingOptimize, {
-            // Later merge overwrites bare shim ids from vite-plugin-node-polyfills.
+          rolldownOptions: optimizeDepsRolldownPatch(undefined, {
+            // Later merges overwrite vite-plugin-node-polyfills' serve-time
+            // `global: 'global'` define and its bare shim-id aliases.
+            define: { global: 'globalThis' },
             alias: polyfillShimAliasObj,
           }),
         },
@@ -982,30 +923,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     },
 
     transform: {
-      // After polyfills banner/inject so we collapse duplicates left in optimized deps.
       // Must emit absolute shim paths: order "post" runs after import-analysis.
       order: 'post',
       handler(code) {
-        const count = (code.match(/import\s+__buffer_polyfill\b/g) || []).length
-        let next = code
-        let mutated = false
-
-        if (count > 1) {
-          const deduped = dedupeNodePolyfillBanner(next, polyfillShimPaths)
-          if (deduped) {
-            next = deduped
-            mutated = true
-          }
-        }
-
-        const rewritten = rewriteBarePolyfillShimImports(next, polyfillShimPaths)
-        if (rewritten) {
-          next = rewritten
-          mutated = true
-        }
-
-        if (mutated) return { code: next, map: null }
-        return null
+        const rewritten = rewriteBarePolyfillShimImports(code, polyfillShimPaths)
+        return rewritten ? { code: rewritten, map: null } : null
       },
     },
   }

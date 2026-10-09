@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveConfig } from 'vite'
 import { seedVitePlugin } from '../src/index.js'
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
@@ -122,6 +124,44 @@ describe('seedVitePlugin renderer hardening', () => {
     })
   })
 
+  it('prebundles viem/isows only when the app root can resolve them', () => {
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
+    const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
+    try {
+      for (const dep of ['viem', 'isows']) {
+        const pkgDir = path.join(appRoot, 'node_modules', dep)
+        fs.mkdirSync(pkgDir, { recursive: true })
+        fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: dep }))
+      }
+      const configPlugin = getConfigPlugin()
+
+      const bare = callConfig(configPlugin, { root: bareRoot })
+      expect(bare.optimizeDeps.include).not.toContain('viem')
+      expect(bare.optimizeDeps.include).not.toContain('isows')
+
+      const withDeps = callConfig(configPlugin, { root: appRoot })
+      expect(withDeps.optimizeDeps.include).toContain('viem')
+      expect(withDeps.optimizeDeps.include).toContain('isows')
+    } finally {
+      fs.rmSync(bareRoot, { recursive: true, force: true })
+      fs.rmSync(appRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns only its own optimizeDeps additions (Vite concatenates arrays)', () => {
+    const configPlugin = getConfigPlugin()
+    const result = callConfig(configPlugin, {
+      optimizeDeps: {
+        include: ['user-include'],
+        exclude: ['user-exclude'],
+        rolldownOptions: { plugins: [{ name: 'user-optimizer-plugin' }] },
+      },
+    })
+    expect(result.optimizeDeps.include).not.toContain('user-include')
+    expect(result.optimizeDeps.exclude).not.toContain('user-exclude')
+    expect(result.optimizeDeps.rolldownOptions.plugins).toBeUndefined()
+  })
+
   it('includes sdk-import-fix post plugin', () => {
     const plugins = seedVitePlugin({ includeNodePolyfills: false })
     const fix = plugins.find((p) => p.name === 'seed-protocol:sdk-import-fix')
@@ -225,6 +265,53 @@ describe('seedVitePlugin renderer hardening', () => {
       middlewares: { use: () => { used = true } },
     })
     expect(used).toBe(false)
+  })
+})
+
+describe('seedVitePlugin resolved optimizer config (node polyfills on)', () => {
+  async function resolveServeConfig(userConfig: Record<string, unknown> = {}) {
+    return resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: seedVitePlugin({ includeNodePolyfills: true }),
+        ...userConfig,
+      },
+      'serve',
+    )
+  }
+
+  it('registers the polyfills optimizer banner plugin exactly once', async () => {
+    const config = await resolveServeConfig()
+    const names = ((config.optimizeDeps.rolldownOptions?.plugins ?? []) as Array<{ name?: string }>)
+      .flat()
+      .map((p) => p?.name)
+    expect(names.filter((n) => n === 'vite-plugin-node-polyfills:optimizer')).toHaveLength(1)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('keeps user optimizer plugins and defines without duplicating them', async () => {
+    const userPlugin = { name: 'user-optimizer-plugin' }
+    const config = await resolveServeConfig({
+      optimizeDeps: {
+        rolldownOptions: {
+          plugins: [userPlugin],
+          transform: { define: { __USER_FLAG__: 'true' } },
+        },
+      },
+    })
+    const rolldownOptions = config.optimizeDeps.rolldownOptions!
+    const names = ((rolldownOptions.plugins ?? []) as Array<{ name?: string }>)
+      .flat()
+      .map((p) => p?.name)
+    expect(names.filter((n) => n === 'user-optimizer-plugin')).toHaveLength(1)
+    expect(rolldownOptions.transform?.define).toMatchObject({ __USER_FLAG__: 'true' })
+  })
+
+  it('maps global to globalThis in the resolved optimizer define', async () => {
+    const config = await resolveServeConfig()
+    expect(config.optimizeDeps.rolldownOptions?.transform?.define?.global).toBe('globalThis')
   })
 })
 
