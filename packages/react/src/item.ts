@@ -11,7 +11,7 @@ import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
-import type { IItem } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
@@ -55,6 +55,8 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
   const id = seedLocalId || seedUid
   /** Bumped when EAS sync updates SQLite so cached `Item` instances re-render after in-place hydration. */
   const [, setEasHydrationTick] = useState(0)
+  /** Bumped when one of the item's property values changes. */
+  const [, setPropertyValuesTick] = useState(0)
   const [isMachineBusy, setIsMachineBusy] = useState(false)
   const [machineError, setMachineError] = useState<Error | null>(null)
   const hasSeenIdleRef = useRef(false)
@@ -127,6 +129,50 @@ export const useItem: UseItem = <T extends ModelValues<T>>({ modelName, seedLoca
       }
     })
     return () => subscription.unsubscribe()
+  }, [item])
+
+  // Re-render when a property's value changes: the item reads them from its property instances,
+  // which update without the item's own machine changing. The item adds instances as they load
+  // (same Map, mutated), so recheck the set on each item snapshot.
+  useEffect(() => {
+    if (!item) return
+    const itemService = item.getService()
+    const propertySubscriptions = new Map<unknown, Subscription>()
+
+    const followProperties = (propertyInstances: Map<PropertyKey, IItemProperty<any>> | undefined) => {
+      const current = new Set(propertyInstances?.values() ?? [])
+      for (const [instance, subscription] of propertySubscriptions) {
+        if (!current.has(instance as IItemProperty<any>)) {
+          subscription.unsubscribe()
+          propertySubscriptions.delete(instance)
+        }
+      }
+      for (const instance of current) {
+        if (propertySubscriptions.has(instance)) continue
+        const service = instance.getService()
+        let { propertyValue, renderValue } = (service.getSnapshot() as any).context ?? {}
+        propertySubscriptions.set(
+          instance,
+          service.subscribe((snapshot: any) => {
+            const ctx = snapshot?.context
+            if (!ctx) return
+            if (Object.is(ctx.propertyValue, propertyValue) && Object.is(ctx.renderValue, renderValue)) return
+            propertyValue = ctx.propertyValue
+            renderValue = ctx.renderValue
+            setPropertyValuesTick((n) => n + 1)
+          }),
+        )
+      }
+    }
+
+    followProperties(itemService.getSnapshot().context.propertyInstances)
+    const itemSubscription: Subscription = itemService.subscribe((snapshot: any) => {
+      followProperties(snapshot?.context?.propertyInstances)
+    })
+    return () => {
+      itemSubscription.unsubscribe()
+      for (const subscription of propertySubscriptions.values()) subscription.unsubscribe()
+    }
   }, [item])
 
   return {
