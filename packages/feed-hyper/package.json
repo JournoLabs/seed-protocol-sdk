@@ -4,6 +4,9 @@
   "description": "Hyperdrive / Hyperswarm distribution for Seed Protocol feeds",
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "seed-feed": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "import": {
