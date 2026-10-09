@@ -238,10 +238,16 @@ their number so references to them stay valid.
    file on the worker, and their unstamped drafts become read-only (seen in
    `browser/db/read/getPublishPayload.test.ts`). Fixed on branch `claude/multi-tab-phase-b`:
    `setupTestEnvironment` deletes the stored `addresses` row in browser files that pass none.
-20. **Flaky on `main`: `Item/getItems.test.ts`** — "returns only local items (no seedUid) by
-    default" and "does not turn publishedVersion* list metadata into ItemProperty…" fail together
-    in about 1 of 4 full browser-project runs (the item just created isn't in `getItemsData`'s
-    result); both pass when the file runs alone or with only `Item/`. Not investigated.
+20. **Fixed** by `dee7948` (finding 14's first case). `Item/getItems.test.ts`: "returns only local
+    items (no seedUid) by default" and "does not turn publishedVersion* list metadata into
+    ItemProperty…" failed together in about 1 of 4 full browser-project runs (the item just created
+    isn't in `getItemsData`'s result); both passed when the file ran alone or with only `Item/`. It
+    was recorded on the Phase B branch, which didn't have `dee7948` yet. The getPublishPayload
+    fixture generates new model ids on every import, and `importJsonSchema` ignores ids when it
+    matches a same-named schema, so a re-import could get the previous file's Post `Model` back:
+    the item was recorded under one id and the test filtered by another. Rechecked 2026-10-08 on
+    `cd25688`: 0 failures in 8 full browser-project runs (4 of them with `c21c443`'s teardown
+    cleanup reverted, so that change isn't what fixed it).
 21. **Flaky under load: `react/__tests__/liveQueryTiming.test.tsx`** "should detect changes after
     transaction commits" timed out (5 s) waiting for the reactive query once, in a slow full run
     (395 s against the usual ~280 s) on branch `claude/multi-tab-phase-c`. It passed alone and in
