@@ -146,7 +146,6 @@ vite/app-files
 !__mocks__/**/node_modules/**/*
 **/__screenshots__/
 
-packages/cli/dist
 packages/sdk/dist
 packages/feed/dist
 packages/query/dist

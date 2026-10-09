@@ -2,7 +2,7 @@
 
 Publish Seed Protocol RSS/Atom/JSON feeds into a **Hyperdrive**, announce them on **Hyperswarm**, and serve them to ordinary RSS readers over localhost HTTP.
 
-`seed feed serve` accepts both drive paths (`/posts/rss.xml`) and historical HTTP paths (`/posts/rss`).
+`seed-feed serve` accepts both drive paths (`/posts/rss.xml`) and historical HTTP paths (`/posts/rss`).
 
 Generation stays in [`@seedprotocol/feed`](../feed). This package is transport only (Node 20+). It pulls in Holepunch native modules (`sodium-native`, etc.).
 
@@ -10,7 +10,7 @@ Generation stays in [`@seedprotocol/feed`](../feed). This package is transport o
 
 - A feed’s identity is its **Hyperdrive public key** (z32), not a hostname.
 - Bytes are signed by that key. Peers and HTTP gateways are interchangeable mirrors.
-- `https://feed.seedprotocol.io` (or any `seed feed serve` process) is a **convenience gateway**, not the source of truth.
+- `https://feed.seedprotocol.io` (or any `seed-feed serve` process) is a **convenience gateway**, not the source of truth.
 - Official Seed feeds will use `DEFAULT_SEED_FEED_HYPER_KEY` once ops publish and back up the first keypair (empty string until then).
 
 ## Drive layout
@@ -72,12 +72,12 @@ console.log(localFeedUrl(gateway.baseUrl, 'post', 'rss'))
 
 Pass `fixtureContents: { '/posts/rss.xml': '...' }` to `publishFeed` to skip EAS generation.
 
-## CLI (via `@seedprotocol/cli`)
+## CLI (`seed-feed`)
 
 ```bash
-seed feed publish --schema post --format rss,atom,json --store .seed/feed-store
-seed feed seed <key> --store .seed/feed-store
-seed feed serve <key> --port 8080 --host 127.0.0.1
+seed-feed publish --schema post --format rss,atom,json --store .seed/feed-store
+seed-feed seed <key> --store .seed/feed-store
+seed-feed serve <key> --port 8080 --host 127.0.0.1
 ```
 
 Use `--no-announce` on publish/serve to stay offline (local store only).
@@ -85,8 +85,8 @@ Use `--no-announce` on publish/serve to stay offline (local store only).
 ## Operator notes
 
 1. Back up the Corestore directory for any key you care about (especially the official key).
-2. Run at least one always-on `seed feed seed <key>` (or leave `publish` announcing) so cold feeds resolve.
-3. Point RSS apps at `http://127.0.0.1:8080/posts/rss.xml` or `http://127.0.0.1:8080/posts/rss` after `seed feed serve`.
+2. Run at least one always-on `seed-feed seed <key>` (or leave `publish` announcing) so cold feeds resolve.
+3. Point RSS apps at `http://127.0.0.1:8080/posts/rss.xml` or `http://127.0.0.1:8080/posts/rss` after `seed-feed serve`.
 4. Unpublish/revocation: regenerating omits revoked items from the **current** drive version; Hypercore history retains prior versions.
 
 See [docs/FEED_HYPER.md](../../docs/FEED_HYPER.md) for the full runbook and manual validation checklist.

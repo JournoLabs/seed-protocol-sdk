@@ -4,9 +4,9 @@ export default defineConfig({
   build: {
     emptyOutDir: false,
     lib: {
-      entry: 'src/index.ts',
+      entry: { index: 'src/index.ts', bin: 'src/bin.ts' },
       formats: ['es'],
-      fileName: () => 'index.js',
+      fileName: (_format, entryName) => `${entryName}.js`,
     },
     target: 'node20',
     rollupOptions: {
@@ -14,6 +14,9 @@ export default defineConfig({
         id === '@seedprotocol/sdk' ||
         id === '@seedprotocol/feed' ||
         (!id.startsWith('.') && !id.startsWith('/') && !id.startsWith('\0')),
+      output: {
+        banner: (chunk) => (chunk.name === 'bin' ? '#!/usr/bin/env node' : ''),
+      },
     },
     sourcemap: true,
   },
