@@ -11,8 +11,6 @@ import {
   Schema,
   Model,
   Item,
-  eventEmitter,
-  EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { and, eq } from 'drizzle-orm'
@@ -726,12 +724,10 @@ describe('React Item Hooks Integration Tests', () => {
       render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
       expect(log[0].title).toBe('Test Post Title 1')
 
+      // A property value changes without the item's own machine changing.
       const titleProp = testItem1!.properties.find((p) => p.propertyName === 'title')!
       titleProp.value = 'Changed After Mount'
       await titleProp.save()
-      // useItem re-renders for EAS sync (which hydrates cached items in place) and for the item
-      // machine's own state, not for property values; those come from useItemProperty.
-      eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
 
       await waitFor(
         () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
