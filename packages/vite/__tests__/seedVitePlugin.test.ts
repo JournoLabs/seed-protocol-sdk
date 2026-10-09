@@ -124,11 +124,12 @@ describe('seedVitePlugin renderer hardening', () => {
     })
   })
 
-  it('prebundles viem/isows only when the app root can resolve them', () => {
+  it('prebundles app-optional deps only when the app root can resolve them', () => {
+    const appOptional = ['kerium', 'utilium', 'memium', 'readable-stream', 'viem', 'isows']
     const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
     const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
     try {
-      for (const dep of ['viem', 'isows']) {
+      for (const dep of appOptional) {
         const pkgDir = path.join(appRoot, 'node_modules', dep)
         fs.mkdirSync(pkgDir, { recursive: true })
         fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: dep }))
@@ -136,12 +137,10 @@ describe('seedVitePlugin renderer hardening', () => {
       const configPlugin = getConfigPlugin()
 
       const bare = callConfig(configPlugin, { root: bareRoot })
-      expect(bare.optimizeDeps.include).not.toContain('viem')
-      expect(bare.optimizeDeps.include).not.toContain('isows')
+      for (const dep of appOptional) expect(bare.optimizeDeps.include).not.toContain(dep)
 
       const withDeps = callConfig(configPlugin, { root: appRoot })
-      expect(withDeps.optimizeDeps.include).toContain('viem')
-      expect(withDeps.optimizeDeps.include).toContain('isows')
+      for (const dep of appOptional) expect(withDeps.optimizeDeps.include).toContain(dep)
     } finally {
       fs.rmSync(bareRoot, { recursive: true, force: true })
       fs.rmSync(appRoot, { recursive: true, force: true })
