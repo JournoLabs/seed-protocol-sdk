@@ -105,33 +105,6 @@
         "vitest": "^4.1.11",
       },
     },
-    "packages/cli": {
-      "name": "@seedprotocol/cli",
-      "version": "0.5.1",
-      "bin": {
-        "cli": "./dist/bin.js",
-        "seed": "./dist/bin.js",
-        "seed-init": "./dist/bin.js",
-        "seed-add-model": "./dist/addModel.js",
-      },
-      "dependencies": {
-        "@seedprotocol/feed-hyper": "workspace:*",
-        "@seedprotocol/gateway-hyper": "workspace:*",
-        "@seedprotocol/sdk": "workspace:*",
-        "commander": "^12.1.0",
-        "drizzle-orm": "^0.44.3",
-        "rimraf": "^6.0.1",
-      },
-      "devDependencies": {
-        "@rollup/plugin-commonjs": "^29.0.0",
-        "@rollup/plugin-node-resolve": "^16.0.0",
-        "@rollup/plugin-typescript": "^12.1.2",
-        "rollup": "^4.29.1",
-        "rollup-plugin-copy": "^3.5.0",
-        "rollup-plugin-preserve-shebang": "^1.0.1",
-        "typescript": "~5.9.3",
-      },
-    },
     "packages/eas": {
       "name": "@seedprotocol/eas",
       "version": "0.7.0",
@@ -1205,8 +1178,6 @@
 
     "@seedprotocol/arweave": ["@seedprotocol/arweave@workspace:packages/arweave"],
 
-    "@seedprotocol/cli": ["@seedprotocol/cli@workspace:packages/cli"],
-
     "@seedprotocol/eas": ["@seedprotocol/eas@workspace:packages/eas"],
 
     "@seedprotocol/feed": ["@seedprotocol/feed@workspace:packages/feed"],
@@ -1877,7 +1848,7 @@
 
     "command-exists": ["command-exists@1.2.9", "", {}, "sha512-LTQ/SGc+s0Xc0Fu5WaKnR0YiygZkm9eKFvyS+fRsU7/ZWFF8ykFM6Pc9aCVf1+xasOOZpO3BAVgVrKvsqKHV7w=="],
 
-    "commander": ["commander@12.1.0", "", {}, "sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA=="],
+    "commander": ["commander@2.20.3", "", {}, "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="],
 
     "common-tags": ["common-tags@1.8.2", "", {}, "sha512-gk/Z852D2Wtb//0I+kRFNKKE9dIIVirjoqPoA1wJU+XePVXZfGeBpk45+A1rKO4Q43prqWBNY/MiIeRLbPWUaA=="],
 
@@ -4114,8 +4085,6 @@
     "strip-ansi/ansi-regex": ["ansi-regex@6.3.0", "", {}, "sha512-WpDfL7NO6j7tH88IDBNVdUJxDh9nmCteAVW9dsep846XdwF4naCBK+/tGLX3KJgcpgMRXCFlTM2hKGoK9FsdrQ=="],
 
     "tar-stream/readable-stream": ["readable-stream@3.6.2", "", { "dependencies": { "inherits": "^2.0.3", "string_decoder": "^1.1.1", "util-deprecate": "^1.0.1" } }, "sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA=="],
-
-    "terser/commander": ["commander@2.20.3", "", {}, "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="],
 
     "thirdweb/@noble/hashes": ["@noble/hashes@1.7.2", "", {}, "sha512-biZ0NUSxyjLLqo6KxEJ1b+C2NAx0wtDoFvCaXHGgUkeHzf3Xc1xKumFKREuT7f7DARNZ/slvYUwFG6B0f2b6hQ=="],
 

@@ -21,10 +21,10 @@ Requires Node 20+ and Holepunch native addons. Prefer Node over Bun.
 
 ```bash
 # Operator
-seed gateway tunnel serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
+seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
 
 # Client sidecar (Path A)
-seed gateway tunnel connect <z32-key> --port 1984
+seed-gateway connect <z32-key> --port 1984
 ```
 
 ## Library
