@@ -1107,6 +1107,39 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
   }
 
+  /**
+   * The cached ItemProperty when it can be read right now (idle, not saving), the state
+   * `ItemProperty.find()` waits for. Otherwise undefined. Unlike `find`, it takes no cache hold, so
+   * React hooks can call it during render.
+   */
+  static peekReady({
+    propertyName,
+    seedLocalId,
+    seedUid,
+  }: {
+    propertyName?: string
+    seedLocalId?: string
+    seedUid?: string
+  }): ItemProperty<any> | undefined {
+    if (!propertyName) return undefined
+    // Same key order as find(), then the other id: instances are cached under both when both are known.
+    const keys = [seedUid, seedLocalId]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => this.cacheKey(id, propertyName))
+    for (const key of keys) {
+      const instance = this.instanceCache.get(key)?.instance
+      if (!instance) continue
+      const snap = instance.getService().getSnapshot() as {
+        status?: string
+        value?: unknown
+        context?: { isSaving?: boolean }
+      }
+      if (snap.status !== 'active' || snap.value !== 'idle' || snap.context?.isSaving) return undefined
+      return instance
+    }
+    return undefined
+  }
+
   static async find({
     propertyName,
     seedLocalId,

@@ -820,6 +820,40 @@ testDescribe('Item Integration Tests', () => {
       expect(item1).toBe(item2) // Same instance
       expect(item2.seedLocalId).toBe(seedLocalId)
     })
+
+    it('peekReady returns a ready cached item and its property without taking a cache hold', async () => {
+      const schemaName = 'Test Schema Item PeekReady'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const item = await Item.create({ modelName: 'TestPost', schemaName, title: 'Peek' })
+      await waitForItemIdle(item)
+      const { seedLocalId } = item
+      const holds = () => (Item as any).instanceCache.get(seedLocalId)?.refCount
+      const holdsBefore = holds()
+
+      expect(Item.peekReady(seedLocalId)).toBe(Item.getById(seedLocalId))
+      expect(holds()).toBe(holdsBefore + 1) // getById's hold, not peekReady's
+      expect(Item.peekReady(undefined)).toBeUndefined()
+      expect(Item.peekReady('not-a-cached-id')).toBeUndefined()
+
+      const title = ItemProperty.peekReady({ seedLocalId, propertyName: 'title' })
+      expect(title?.value).toBe('Peek')
+      expect(ItemProperty.peekReady({ seedLocalId, propertyName: 'notAProperty' })).toBeUndefined()
+
+      // A dropped (stopped) instance is gone from the cache, so it is never handed out.
+      Item.dropCachedInstancesForSeedIds([seedLocalId])
+      expect(Item.peekReady(seedLocalId)).toBeUndefined()
+    })
   })
 
   describe('Item properties', () => {
