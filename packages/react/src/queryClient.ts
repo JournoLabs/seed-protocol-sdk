@@ -1,7 +1,9 @@
+import { useContext } from 'react'
 import {
   type QueryClient,
   type DefaultOptions,
   QueryClient as ReactQueryClient,
+  QueryClientContext,
   type QueryClientConfig,
   NetworkMode,
 } from '@tanstack/react-query'
@@ -67,4 +69,18 @@ export function createSeedQueryClient(overrides?: Partial<QueryClientConfig>): Q
       ? mergeSeedQueryDefaults(userDefaultOptions as DefaultOptions)
       : defaults,
   })
+}
+
+let fallbackQueryClient: QueryClient | undefined
+
+/**
+ * The QueryClient from the nearest QueryClientProvider (SeedProvider sets one), or else one shared
+ * client with Seed defaults. For hooks that worked without SeedProvider before they used React
+ * Query (useItem, useItemProperty), so they keep working there.
+ */
+export function useSeedQueryClient(): QueryClient {
+  const fromProvider = useContext(QueryClientContext)
+  if (fromProvider) return fromProvider
+  fallbackQueryClient ??= createSeedQueryClient()
+  return fallbackQueryClient
 }
