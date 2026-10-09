@@ -11,6 +11,8 @@ import {
   Schema,
   Model,
   Item,
+  eventEmitter,
+  EAS_SEED_DATA_SYNCED_TO_DB_EVENT,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { and, eq } from 'drizzle-orm'
@@ -174,6 +176,16 @@ function UseItemTest({
 const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => (
   <SeedProvider>{children}</SeedProvider>
 )
+
+type ItemRender = { requestedId?: string; itemId?: string; title?: unknown; isLoading: boolean }
+
+/** Records what useItem returned on every render, so tests can check the first one. */
+function UseItemRenderLog({ seedLocalId, log }: { seedLocalId?: string; log: ItemRender[] }) {
+  const { item, isLoading } = useItem({ modelName: 'Post', seedLocalId })
+  const title = item?.properties.find((p) => p.propertyName === 'title')?.value
+  log.push({ requestedId: seedLocalId, itemId: item?.seedLocalId, title, isLoading })
+  return <div data-testid="render-log-title">{String(title ?? '')}</div>
+}
 
 // Test component for useItems
 function UseItemsTest({
@@ -685,6 +697,79 @@ describe('React Item Hooks Integration Tests', () => {
 
       const itemDataBody = withinContainer.getByTestId('item-data-body')
       expect(itemDataBody.textContent).toBe('Test Article Body')
+    })
+  })
+
+  describe('useItem with the item instance cache', () => {
+    it('returns a cached, ready item on the first render', async () => {
+      const id = testItem1!.seedLocalId
+      expect(Item.peekReady(id)).toBeDefined()
+      const log: ItemRender[] = []
+
+      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
+
+      expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
+    })
+
+    it('returns a cached, ready item on the first render under SeedProvider', async () => {
+      const id = testItem1!.seedLocalId
+      const log: ItemRender[] = []
+
+      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+
+      expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
+    })
+
+    it('still updates after mounting when the item changes', async () => {
+      const id = testItem1!.seedLocalId
+      const log: ItemRender[] = []
+      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
+      expect(log[0].title).toBe('Test Post Title 1')
+
+      const titleProp = testItem1!.properties.find((p) => p.propertyName === 'title')!
+      titleProp.value = 'Changed After Mount'
+      await titleProp.save()
+      // useItem re-renders for EAS sync (which hydrates cached items in place) and for the item
+      // machine's own state, not for property values; those come from useItemProperty.
+      eventEmitter.emit(EAS_SEED_DATA_SYNCED_TO_DB_EVENT)
+
+      await waitFor(
+        () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
+        { timeout: 10000 },
+      )
+    })
+
+    it('never returns the previous item after the id changes', async () => {
+      const id1 = testItem1!.seedLocalId
+      const id2 = testItem2!.seedLocalId
+      const log: ItemRender[] = []
+      const { rerender } = render(<UseItemRenderLog seedLocalId={id1} log={log} />, { container })
+
+      rerender(<UseItemRenderLog seedLocalId={id2} log={log} />)
+
+      const afterSwitch = log.filter((r) => r.requestedId === id2)
+      expect(afterSwitch.length).toBeGreaterThan(0)
+      // id2 is cached and ready too, so every render for it has it, with no loading state between.
+      for (const r of afterSwitch) {
+        expect(r).toEqual({ requestedId: id2, itemId: id2, title: 'Test Post Title 2', isLoading: false })
+      }
+    })
+
+    it('loads an item that is not in the cache, as before', async () => {
+      const id = testItem3!.seedLocalId
+      Item.dropCachedInstancesForSeedIds([id])
+      testItem3 = null // dropped instances are already stopped; afterEach must not unload it
+      expect(Item.peekReady(id)).toBeUndefined()
+      const log: ItemRender[] = []
+
+      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+
+      expect(log[0]).toEqual({ requestedId: id, itemId: undefined, title: undefined, isLoading: true })
+      await waitFor(
+        () => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 3'),
+        { timeout: 15000 },
+      )
+      expect(log[log.length - 1]).toMatchObject({ itemId: id, isLoading: false })
     })
   })
 

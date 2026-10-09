@@ -403,6 +403,8 @@ The SDK supports three ways to supply a React Query client:
    })
    ```
 
+`useItem` and `useItemProperty` also use React Query, but they work without any provider (they fall back to a shared client with Seed defaults). Their cache is the SDK's instance cache: an item or property that is already loaded and ready (for example a row `useItems` just returned) comes back on the first render with `isLoading: false`, and is refreshed in the background.
+
 Example: create a schema and model in a component, then create and display an item and update its title.
 
 ```tsx

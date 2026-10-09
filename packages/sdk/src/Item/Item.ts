@@ -441,6 +441,37 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
+   * Idle, and not the shell the item machine can be in when it reaches `idle` before
+   * `propertyInstances` is merged (an item with a version but no property instances yet).
+   */
+  private static isItemSnapshotReadyForRead(snap: any): boolean {
+    if (!snap || !('value' in snap) || snap.value !== 'idle') {
+      return false
+    }
+    const ctx = snap.context || {}
+    const versionsCount = ctx.versionsCount ?? 0
+    const hasHeadVersion = !!ctx.latestVersionLocalId
+    if (versionsCount === 0 && !hasHeadVersion) {
+      return true
+    }
+    return (ctx.propertyInstances?.size ?? 0) > 0
+  }
+
+  /**
+   * The cached Item for a seedLocalId or seedUid when it can be read right now: idle and hydrated,
+   * so at least what `Item.find()` would wait for. Otherwise undefined. Unlike `getById`, it takes
+   * no cache hold, so React hooks can call it during render.
+   */
+  static peekReady(id: string | undefined): Item<any> | undefined {
+    if (!id) return undefined
+    const instance = this.findItemInstanceCacheEntryById(id)?.instance
+    if (!instance) return undefined
+    const snap = instance.getService().getSnapshot()
+    if ((snap as { status?: string }).status !== 'active') return undefined
+    return this.isItemSnapshotReadyForRead(snap) ? instance : undefined
+  }
+
+  /**
    * Item machine can reach `idle` before `propertyInstances` is merged (race) or while
    * child ItemProperty actors are still hydrating. useItems / Item.all must not return that shell.
    */
@@ -457,16 +488,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           if ('value' in snap && snap.value === 'error') {
             throw new Error('Entity failed to load')
           }
-          if (!('value' in snap) || snap.value !== 'idle') {
-            return false
-          }
-          const ctx = snap.context || {}
-          const versionsCount = ctx.versionsCount ?? 0
-          const hasHeadVersion = !!ctx.latestVersionLocalId
-          if (versionsCount === 0 && !hasHeadVersion) {
-            return true
-          }
-          return (ctx.propertyInstances?.size ?? 0) > 0
+          return Item.isItemSnapshotReadyForRead(snap)
         },
         { timeout: readyTimeout },
       )

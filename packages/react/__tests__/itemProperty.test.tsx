@@ -145,6 +145,15 @@ function UseItemPropertyWithPropsTest({
   )
 }
 
+type PropertyRender = { requestedId: string; seedLocalId?: string; value?: unknown; isLoading: boolean }
+
+/** Records what useItemProperty returned on every render, so tests can check the first one. */
+function UseItemPropertyRenderLog({ seedLocalId, log }: { seedLocalId: string; log: PropertyRender[] }) {
+  const { property, isLoading } = useItemProperty({ seedLocalId, propertyName: 'title' })
+  log.push({ requestedId: seedLocalId, seedLocalId: property?.seedLocalId, value: property?.value, isLoading })
+  return <div data-testid="render-log-value">{String(property?.value ?? '')}</div>
+}
+
 // Test component for useItemProperty with itemId and propertyName
 // Uses seedLocalId when itemId is provided so we hit the same code path as the working identifiers form
 function UseItemPropertyWithIdTest({
@@ -556,6 +565,49 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       testItem2.unload()
       testItem2 = null
     }
+  })
+
+  describe('useItemProperty with the property instance cache', () => {
+    it('returns a cached, ready property on the first render', async () => {
+      const id = testItem!.seedLocalId
+      expect(ItemProperty.peekReady({ seedLocalId: id, propertyName: 'title' })).toBeDefined()
+      const log: PropertyRender[] = []
+
+      render(<UseItemPropertyRenderLog seedLocalId={id} log={log} />, { container })
+
+      expect(log[0]).toEqual({ requestedId: id, seedLocalId: id, value: 'Test Post Title', isLoading: false })
+    })
+
+    it('never returns the previous item\'s property after the id changes', async () => {
+      const id1 = testItem!.seedLocalId
+      const id2 = testItem2!.seedLocalId
+      const log: PropertyRender[] = []
+      const { rerender } = render(<UseItemPropertyRenderLog seedLocalId={id1} log={log} />, { container })
+
+      rerender(<UseItemPropertyRenderLog seedLocalId={id2} log={log} />)
+
+      const afterSwitch = log.filter((r) => r.requestedId === id2)
+      expect(afterSwitch.length).toBeGreaterThan(0)
+      for (const r of afterSwitch) {
+        expect(r).toEqual({ requestedId: id2, seedLocalId: id2, value: 'Test Post Title 2', isLoading: false })
+      }
+    })
+
+    it('still updates after mounting when the property changes', async () => {
+      const id = testItem!.seedLocalId
+      const log: PropertyRender[] = []
+      render(<UseItemPropertyRenderLog seedLocalId={id} log={log} />, { container })
+      expect(log[0].value).toBe('Test Post Title')
+
+      const titleProp = testItem!.properties.find((p) => p.propertyName === 'title')!
+      titleProp.value = 'Changed After Mount'
+      await titleProp.save()
+
+      await waitFor(
+        () => expect(screen.getByTestId('render-log-value').textContent).toBe('Changed After Mount'),
+        { timeout: 10000 },
+      )
+    })
   })
 
   describe('useItemProperty', () => {
