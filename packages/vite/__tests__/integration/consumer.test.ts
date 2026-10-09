@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, createServer, type ViteDevServer } from 'vite'
@@ -137,6 +139,65 @@ describe('seedVitePlugin consumer integration', () => {
     expect(code).not.toContain('stream-browserify')
     expect(code).not.toMatch(/from ['"]node:crypto['"]/)
     expect(code).not.toMatch(/from ['"]node:path['"]/)
+  }, 60_000)
+
+  it('serves cold-cache prebundled deps that parse with node polyfills on', async () => {
+    // Regression: the polyfills optimizer banner was registered twice, so every
+    // .vite/deps chunk declared __buffer_polyfill twice and failed to parse.
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-deps-'))
+    const polyfillServer = await createServer({
+      root: fixtureRoot,
+      configFile: false,
+      mode: 'development',
+      logLevel: 'error',
+      cacheDir,
+      plugins: consumerPlugins(true),
+      resolve: { alias: consumerAliases() },
+      server: {
+        host: '127.0.0.1',
+        port: 0,
+        strictPort: false,
+        fs: { allow: [repoRoot, cacheDir] },
+      },
+    })
+    try {
+      await polyfillServer.listen()
+      const optimizer = polyfillServer.environments.client.depsOptimizer
+      expect(optimizer).toBeTruthy()
+      await polyfillServer.transformRequest('/main.tsx')
+      await optimizer!.scanProcessing
+      const depsDir = path.join(cacheDir, 'deps')
+      // The optimizer commits deps/ (with _metadata.json) once the first crawl settles.
+      await vi.waitFor(
+        () => {
+          if (!fs.existsSync(path.join(depsDir, '_metadata.json'))) {
+            throw new Error('deps not committed yet')
+          }
+        },
+        { timeout: 30_000, interval: 100 },
+      )
+
+      const chunks = fs.readdirSync(depsDir).filter((f) => f.endsWith('.js'))
+      expect(chunks.length).toBeGreaterThan(0)
+
+      const failures: string[] = []
+      for (const chunk of chunks) {
+        const file = path.join(depsDir, chunk)
+        const source = fs.readFileSync(file, 'utf8')
+        // Rolldown ≥1.2 merges repeated banner imports, so count the assignments instead.
+        const banners = source.match(/globalThis\.Buffer\s*=\s*globalThis\.Buffer\b/g) ?? []
+        if (banners.length > 1) failures.push(`${chunk}: ${banners.length} polyfill banners`)
+        try {
+          await polyfillServer.transformRequest(`/@fs${file}`)
+        } catch (err) {
+          failures.push(`${chunk}: ${String(err).split('\n')[0]}`)
+        }
+      }
+      expect(failures).toEqual([])
+    } finally {
+      await polyfillServer.close()
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
   }, 60_000)
 
   it('ssrLoadModule still works with default polyfills (no stream in include)', async () => {
