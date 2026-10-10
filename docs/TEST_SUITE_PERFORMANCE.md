@@ -71,6 +71,16 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
     It returns `false` on timeout. If the test needs the condition, use
     `waitUntilOrThrow(cond, description, timeout)` from the same files, so a timeout fails the test
     instead of being ignored (finding 7).
+- **Use `WAIT_TIMEOUT_MS` for waits on things that should happen** (`test-utils/timeouts.ts`, 15s;
+  React tests import it from `../../sdk/__tests__/test-utils/timeouts`). It's the default for
+  `waitForIdle` and `waitUntilOrThrow`; pass it to xstate `waitFor`, `vi.waitFor` (whose default is
+  only 1s) and Testing Library's `waitFor`. The Release workflow's GitHub runner takes ~2× as long
+  as a dev machine for the suite, and 1–5s waits sized locally failed there. A wait that never
+  succeeds still fails before the 30s `testTimeout`, with its own message.
+- **Don't wait for a transient state.** The write process's `success` state returns to `idle` after
+  2s, so a test that waits for `success` after doing other work hangs on a slow run: the write
+  already finished. Wait on something that stays put (`context.writeStatus`), or start waiting
+  before triggering the work.
 - **Don't wait for a state with `service.subscribe()` alone.** XState's `subscribe` doesn't replay the
   current snapshot, so if the entity is already in that state the wait never fires and sits out its
   whole fallback timeout. This cost 5s per test in `model.test.tsx`. Check the current snapshot first
@@ -261,6 +271,24 @@ their number so references to them stay valid.
     the updated name to be in the database ("…to reach the database" = slow write), and only then
     gives the live query 5 s, failing with the emission count and latest rows ("…emit the committed
     updated name" = a real missed emission). Reopen with that message if it recurs.
+22. **Fixed** (2026-10-10). The Release workflow's first test runs (GitHub `ubuntu-latest`, suite
+    ~485–525s against ~265s locally) failed on one test each:
+    - `Item.test.ts` "should not take properties from another schema when its own cached model was
+      reimported" failed in both attempts of run 38069952544 (browser project, `Timeout of 5000 ms
+      exceeded`). It waited for each model's write process to be in `success`, which returns to
+      `idle` after 2s; on the slow runner the first model's write was done before the test looked.
+      With a 3s delay added before the wait, the old check timed out locally even at 15s. It now
+      waits on `context.writeStatus`.
+    - `browser/helpers/tabEvents.test.ts` "tells other tabs about events and saves from this tab"
+      saw nothing from the other tab in one local full run. Its `vi.waitFor` used the 1s default.
+      A lost BroadcastChannel subscription (the worker's channel not registered yet when this tab
+      posts) didn't happen in 400 tries, with or without the CPU saturated, so the timeout was
+      the likely cause. All test waits that should succeed now use `WAIT_TIMEOUT_MS` (see "Writing
+      tests that stay fast").
+    After the fix: 4 full runs with `CI=true` passed (274–398s, load average 30–80), and
+    `validation-timeout.test.ts` passed in all of them.
+    `packages/query`'s tests also couldn't import `@seedprotocol/eas` / `arweave` in CI, which builds
+    only the vite plugin. They now load those packages from source.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
