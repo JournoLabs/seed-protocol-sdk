@@ -1,10 +1,12 @@
 # @seedprotocol/query
 
-Canonical **Seed JSON** reads from remote EAS or a registered local SQLite/files adapter (Seed → Version → property attestations).
+[![npm](https://img.shields.io/npm/v/@seedprotocol/query.svg)](https://www.npmjs.com/package/@seedprotocol/query)
+
+Canonical **Seed JSON** reads from remote EAS or a registered local SQLite/files adapter (Seed → Version → property attestations). Part of [Seed Protocol](https://seedprotocol.io); works standalone or alongside [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk).
 
 Feed generation (`@seedprotocol/feed`) uses this package to assemble items; RSS/Atom/JSON Feed formatting and **HTTP / serialized content** caching stay in feed.
 
-SDK `runSyncFromEas` / `syncDbWithEas` persists the same EAS graph into SQLite using shared **`parseEasPropertyMetadata`**, **`parseEasRelationPropertyName`**, and **`pickLatestPropertyAttestationsByRefAndSchema`** — one definition of property decode/canonicalization for reads and sync writes.
+SDK EAS sync (`client.syncFromEas()`) persists the same EAS graph into SQLite using shared **`parseEasPropertyMetadata`**, **`parseEasRelationPropertyName`**, and **`pickLatestPropertyAttestationsByRefAndSchema`** — one definition of property decode/canonicalization for reads and sync writes.
 
 ## Scope
 
@@ -20,10 +22,18 @@ SDK `runSyncFromEas` / `syncDbWithEas` persists the same EAS graph into SQLite u
 | Need | Use |
 |------|-----|
 | Published / canonical Seed JSON | `getSeed` / `queryBySchema` / SDK `getPublishedSeedRecord` |
-| Drafts, edits, liveQuery, publish | SDK `Item` / `getItemData` (local-head) |
-| Populate local DB from EAS | SDK `Client.syncFromEas` / `runSyncFromEas` (shared parse + pickLatest) |
+| Drafts, edits, liveQuery, publish | SDK `Item` (`Item.find` / `Item.all`, local-head) |
+| Populate local DB from EAS | SDK `client.syncFromEas()` (shared parse + pickLatest) |
 
 The Query API conversion (remote assemble → cache → changelog → local source → sync consolidation) is **complete**. Optional follow-ons (HTTP JSON routes, `auto` freshness TTL) are outside this package’s core read surface.
+
+## Installation
+
+```bash
+npm install @seedprotocol/query
+```
+
+No peer dependencies. The package root resolves to a browser build under the `browser` condition and to a Node build (with the on-disk `FileCache`) otherwise; `@seedprotocol/query/node` exposes the Node-only init and `FileCache` explicitly.
 
 ## Usage
 
@@ -152,3 +162,7 @@ Feed still owns serialized RSS/Atom/JSON bodies, HTTP `ETag` / 304, and image-me
 Call `initializeQueryPlatform()` once (registers Node EAS + Arweave clients), or rely on `getSeed` / `queryBySchema` which initialize automatically.
 
 For local reads, also ensure the SDK client has initialized (registers `registerLocalQuerySource`) or call `registerSeedQueryLocalSource()` / `registerLocalQuerySource` yourself.
+
+## License
+
+MIT

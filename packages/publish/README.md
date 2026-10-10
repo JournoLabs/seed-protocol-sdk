@@ -1,12 +1,24 @@
 # @seedprotocol/publish
 
-Publish UI components and helpers for Seed Protocol.
+[![npm](https://img.shields.io/npm/v/@seedprotocol/publish.svg)](https://www.npmjs.com/package/@seedprotocol/publish)
+
+Publish UI components and helpers for [Seed Protocol](https://seedprotocol.io): upload item content to Arweave and attest it on EAS from [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk) items, with React providers/hooks and optional Thirdweb wallets.
 
 The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `getPublishPayload`, which registers EAS schemas and adds naming attestations so EASSCAN displays them. If you build a custom publish flow that calls `item.getPublishPayload()` directly, you must run schema setup first or use this package's flow.
 
-`initPublish()` or `PublishProvider` registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
+`initPublish()` or `PublishProvider` registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
 
-**Badges / on-chain vs pending:** use `@seedprotocol/sdk` `getSeedPublishState` for “any on-chain anchor for this seed”, `getPublishPendingDiff` for per-property heads missing attestation UIDs, and `getItemsData` (`includeEas`, `publishedVersionUid` vs `latestVersionUid`) for list rows. When a publish run finishes, observe `usePublishProcess(seedLocalId)` or the `publishProcesses` table instead of ad hoc window events.
+**Badges / on-chain vs pending:** use `@seedprotocol/sdk` `getSeedPublishState` for “any on-chain anchor for this seed”, `getPublishPendingDiff` for per-property heads missing attestation UIDs, and `Item.all` (or `useItems` from `@seedprotocol/react`) with `includeEas` (compare `publishedVersionUid` vs `latestVersionUid`) for list rows. When a publish run finishes, observe `usePublishProcess(seedLocalId)` or the `publishProcesses` table instead of ad hoc window events.
+
+## Installation
+
+```bash
+npm install @seedprotocol/publish @seedprotocol/sdk react react-dom @tanstack/react-query
+# Optional, only for @seedprotocol/publish/thirdweb (ConnectButton, in-app / managed wallets):
+npm install thirdweb
+```
+
+Peer dependencies: `react` / `react-dom` 18 or 19, `@tanstack/react-query` 5, and optionally `thirdweb` 5.
 
 ## Setup
 
@@ -161,7 +173,7 @@ Twin quirks the SDK handles: automation pre-flight simulations retry with a bala
 
 When using your own gateway with an Arweave bundler, you can enable instant uploads instead of the default reimbursement + chunk upload flow. **This is experimental and not yet validated for production.**
 
-**Memory:** Large publishes hold signed DataItems and a single packed batch body in memory briefly. Electron and other Chromium renderers often cap near ~4 GB JS heap. See [docs/PUBLISH_MEMORY.md](../../docs/PUBLISH_MEMORY.md) for scaling, `publishMode`, and path differences (`signDataItems` vs `dataItemSigner`).
+**Memory:** Large publishes hold signed DataItems and a single packed batch body in memory briefly. Electron and other Chromium renderers often cap near ~4 GB JS heap. See [docs/PUBLISH_MEMORY.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_MEMORY.md) for scaling, `publishMode`, and path differences (`signDataItems` vs `dataItemSigner`).
 
 Set `useArweaveBundler: true`. The bundler uses the same `uploadApiBaseUrl` (e.g. `${uploadApiBaseUrl}/upload/batch`).
 
@@ -196,7 +208,7 @@ PublishManager.createPublish(item, address, account, {
 
 You can also provide `signDataItems` or `dataItemSigner` in the PublishProvider config as a fallback when the signer is available at startup.
 
-**Html properties with embedded `data:image/...;base64,...` (materialization):** When `useArweaveBundler: true`, the publish machine runs the same two-phase flow as L1: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase, unless the Html has `seed:property/<name>` placeholders (see docs/PUBLISHING.md), which always take the two-phase path.
+**Html properties with embedded `data:image/...;base64,...` (materialization):** When `useArweaveBundler: true`, the publish machine runs the same two-phase flow as L1: phase 1 uploads non-deferred payloads (including materialized Image DataItems), rewrites Html files on disk with Arweave URLs, then phase 2 builds and uploads Html-only DataItems. **`signDataItems` is invoked twice per publish** in that scenario (once per phase)—implementations should sign/upload the `uploads` array they receive each time. The in-process **`dataItemSigner`** path performs two HTTP batch uploads to your bundler API. Per-property `htmlEmbeddedDataUriPolicy: 'preserve'` skips materialization and keeps a single phase, unless the Html has `seed:property/<name>` placeholders (see [docs/PUBLISHING.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISHING.md)), which always take the two-phase path.
 
 ### Arweave upload tags
 
@@ -234,7 +246,7 @@ await deletePublishProcessById(runId) // numeric row id from `records`
 
 ### Publish automation (ManagedAccount grants)
 
-Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](../../docs/PUBLISH_AUTOMATION.md).
+Apps can enroll a server-held session key to publish/revoke on a user’s ManagedAccount without taking the user’s root key. Requires `modularAccountModuleContract` (executor-module-only `approvedTargets`). See [docs/PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md).
 
 APIs live on `@seedprotocol/publish` (sidecar attest/revoke) and `@seedprotocol/publish/thirdweb` (`enrollPublishAutomation`, `revokePublishAutomation`, session-key helpers, `assertStorageBoundToIdentity`).
 
@@ -254,7 +266,7 @@ With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 **Session keys** may only target the executor (`approvedTargetsForAutomationPublish`). `ensureManagedSignerSessionKey` and `defaultApprovedTargetsForModularPublish` are deprecated: interactive publishing needs no session key, and both now grant the executor only, never the account (which would allow any self-call) or EAS.
 
-**Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](../../docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
+**Automation** session keys publish through the executor only (see [PUBLISH_AUTOMATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/PUBLISH_AUTOMATION.md)) and cannot revoke. **Revocation** is owner-only: `revokeAttestations` sends `multiRevoke` to EAS from the publishing account.
 
 **Routing:** `multiPublish` calldata uses the ABI generated from the reference deployment `MULTI_PUBLISH_ABI_REFERENCE_ADDRESS_OP_SEPOLIA` (`0xcd8c…`). The transaction `to` is the managed account for interactive publish, or the executor module for automation keys. Non-modular publish targets the deployed publisher contract. **EOAs** (no contract at `address`) never use `multiPublish`; they attest on EAS directly (`createAttestationsDirectToEas`). Set **`useDirectEas: true`** to force that path.
 
@@ -264,7 +276,13 @@ With **`useModularExecutor`**, two Thirdweb in-app wallets share one login:
 
 ## Development
 
+From a checkout of the monorepo:
+
 ```bash
 bun install
 bun run build
 ```
+
+## License
+
+MIT
