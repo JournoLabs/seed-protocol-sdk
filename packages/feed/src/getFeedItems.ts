@@ -241,45 +241,55 @@ function looksLikeSeedClone(value: unknown): value is Record<string, unknown> {
   return typeof rec.seedUid === 'string' || typeof rec.SeedUid === 'string'
 }
 
+function withNestedCloneDefaults(
+  clone: Record<string, unknown>,
+  parentSchemaName: string,
+  options: SetFeedItemDefaultsOptions,
+): Record<string, unknown> {
+  const copy = { ...clone }
+  const nestedUid = (copy.seedUid || copy.SeedUid || '') as string
+  const nestedSchema =
+    typeof copy.schemaName === 'string' ? copy.schemaName : parentSchemaName
+  if (nestedSchema === 'image') {
+    setImageRelationCloneForFeed(copy, nestedUid)
+  } else {
+    setFeedItemDefaults(copy, nestedUid, nestedSchema, options)
+  }
+  return copy
+}
+
 /**
  * Apply feed defaults to a root item and nested expanded seed clones.
  * Image relation clones get media-only link defaults (no EAS explorer URLs).
+ *
+ * Returns a copy and leaves `item` untouched: `item` may be a record held by the
+ * `@seedprotocol/query` collection cache. Only the objects the defaults write to
+ * (the root, expanded seed clones, and arrays holding them) are shallow-copied;
+ * other values, notably hydrated HTML strings, are shared rather than cloned.
  */
 function applyFeedDefaultsDeep(
   item: Record<string, unknown>,
   schemaName: string,
   options: SetFeedItemDefaultsOptions,
-): void {
-  const seedUid = (item.seedUid || item.SeedUid || '') as string
-  setFeedItemDefaults(item, seedUid, schemaName, options)
+): Record<string, unknown> {
+  const out = { ...item }
+  const seedUid = (out.seedUid || out.SeedUid || '') as string
+  setFeedItemDefaults(out, seedUid, schemaName, options)
 
-  for (const key of Object.keys(item)) {
+  for (const key of Object.keys(out)) {
     if (key.startsWith('_')) continue
-    const value = item[key]
+    const value = out[key]
     if (Array.isArray(value)) {
-      for (const el of value) {
-        if (looksLikeSeedClone(el)) {
-          const nestedUid = (el.seedUid || el.SeedUid || '') as string
-          const nestedSchema =
-            typeof el.schemaName === 'string' ? el.schemaName : schemaName
-          if (nestedSchema === 'image') {
-            setImageRelationCloneForFeed(el, nestedUid)
-          } else {
-            setFeedItemDefaults(el, nestedUid, nestedSchema, options)
-          }
-        }
+      if (value.some(looksLikeSeedClone)) {
+        out[key] = value.map((el) =>
+          looksLikeSeedClone(el) ? withNestedCloneDefaults(el, schemaName, options) : el,
+        )
       }
     } else if (looksLikeSeedClone(value)) {
-      const nestedUid = (value.seedUid || value.SeedUid || '') as string
-      const nestedSchema =
-        typeof value.schemaName === 'string' ? value.schemaName : schemaName
-      if (nestedSchema === 'image') {
-        setImageRelationCloneForFeed(value, nestedUid)
-      } else {
-        setFeedItemDefaults(value, nestedUid, nestedSchema, options)
-      }
+      out[key] = withNestedCloneDefaults(value, schemaName, options)
     }
   }
+  return out
 }
 
 function seedRecordsToFeedItems(
@@ -293,11 +303,9 @@ function seedRecordsToFeedItems(
     siteUrl: feedConfig.siteUrl,
   }
 
-  return records.map((record) => {
-    const item = record.data
-    applyFeedDefaultsDeep(item, schemaName, defaultsOptions)
-    return item
-  })
+  return records.map((record) =>
+    applyFeedDefaultsDeep(record.data, schemaName, defaultsOptions),
+  )
 }
 
 export const getFeedItemsBySchemaName = async (
