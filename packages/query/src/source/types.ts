@@ -1,4 +1,4 @@
-import type { AttestationLike } from '../types.js'
+import type { AttestationChange, AttestationLike } from '../types.js'
 
 /**
  * Pluggable backend for Seed / Version / property attestation reads.
@@ -36,6 +36,17 @@ export type QueryDataSource = {
   getPropertiesForVersionUids(versionUids: string[]): Promise<AttestationLike[]>
 
   getSeedsByUids(uids: string[]): Promise<AttestationLike[]>
+
+  /**
+   * Optional: attestations created or revoked after `since` (unix seconds) that reference one of
+   * `refUIDs` or are one of `ids`. The query cache uses it to tell which cached seeds changed;
+   * without it, a cache hit re-assembles everything.
+   */
+  listChangesSince?(opts: {
+    refUIDs: string[]
+    ids: string[]
+    since: number
+  }): Promise<AttestationChange[]>
 
   /**
    * Optional: read html/image bodies from local files instead of Arweave gateway.

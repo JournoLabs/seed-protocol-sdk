@@ -97,3 +97,12 @@ export type AttestationLike = {
   /** Whether the attestation is revoked (EAS `revoked`; the local source sets it from `revoked_at`). */
   revoked?: boolean
 }
+
+/** An attestation created or revoked after some time (see QueryDataSource.listChangesSince). */
+export type AttestationChange = {
+  id: string
+  refUID: string
+  timeCreated: number
+  /** Unix seconds; 0 when not revoked. */
+  revocationTime: number
+}

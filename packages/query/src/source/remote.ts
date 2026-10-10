@@ -1,6 +1,7 @@
 import {
   getSeedsBySchemaName,
   getSeedsByUidsFromEas,
+  getAttestationChangesSince,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   EasClient,
@@ -109,6 +110,10 @@ export function createRemoteQueryDataSource(): QueryDataSource {
     async getSeedsByUids(uids: string[]): Promise<AttestationLike[]> {
       if (uids.length === 0) return []
       return (await getSeedsByUidsFromEas({ uids })) as AttestationLike[]
+    },
+
+    async listChangesSince(opts) {
+      return getAttestationChangesSince(opts)
     },
   }
 }

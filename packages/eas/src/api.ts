@@ -8,6 +8,7 @@ import {
   GET_PROPERTIES,
   GET_SCHEMAS,
   GET_SEEDS,
+  GET_ATTESTATION_CHANGES,
   GET_SEEDS_LEAN,
   GET_VERSIONS,
 } from './queries.js'
@@ -290,6 +291,63 @@ export const getSeedsByUidsFromEas = async ({
   const seeds = itemSeeds ?? []
   const namesBySchemaUid = await getSchemaNamesBySchemaUids(seeds.map((seed) => seed.schemaId))
   return seeds.map((seed) => withSchemaNames(seed, namesBySchemaUid.get(seed.schemaId) ?? []))
+}
+
+export type AttestationChange = {
+  id: string
+  refUID: string
+  timeCreated: number
+  /** Unix seconds; 0 when not revoked. */
+  revocationTime: number
+}
+
+/** UIDs per `in` filter, so a request body stays a few dozen KB. */
+const CHANGES_UIDS_PER_REQUEST = 400
+
+/**
+ * Attestations created or revoked after `since` (unix seconds) that either reference one of
+ * `refUIDs` (new or revoked Versions of a Seed, properties of a Version) or are one of `ids`
+ * (a revoked Seed). Revoked ones are included: a revocation is a change. Large lists are split
+ * over several requests, run concurrently.
+ */
+export const getAttestationChangesSince = async ({
+  refUIDs,
+  ids,
+  since,
+}: {
+  refUIDs: string[]
+  ids: string[]
+  since: number
+}): Promise<AttestationChange[]> => {
+  const changedSince = { OR: [{ timeCreated: { gt: since } }, { revocationTime: { gt: since } }] }
+  const filters: Record<string, unknown>[] = []
+  const pushChunks = (field: 'refUID' | 'id', uids: string[]) => {
+    const unique = [...new Set(uids)].sort()
+    for (let i = 0; i < unique.length; i += CHANGES_UIDS_PER_REQUEST) {
+      filters.push({ [field]: { in: unique.slice(i, i + CHANGES_UIDS_PER_REQUEST) } })
+    }
+  }
+  pushChunks('refUID', refUIDs)
+  pushChunks('id', ids)
+  if (filters.length === 0) return []
+
+  const queryClient = BaseQueryClient.getQueryClient()
+  const easClient = BaseEasClient.getEasClient()
+  const responses = await Promise.all(
+    filters.map((filter) =>
+      queryClient.fetchQuery({
+        queryKey: [`getAttestationChangesSince`, filter, since],
+        queryFn: async () =>
+          easClient.request(GET_ATTESTATION_CHANGES, { where: { AND: [filter, changedSince] } }),
+      }) as Promise<{ changes: AttestationChange[] }>,
+    ),
+  )
+
+  const byId = new Map<string, AttestationChange>()
+  for (const { changes } of responses) {
+    for (const change of changes ?? []) byId.set(change.id, change)
+  }
+  return [...byId.values()]
 }
 
 export const getSeedUidsBySchemaName = async (schemaName: string, limit: number = 10) => {

@@ -46,6 +46,8 @@ const toCamelCase = (str: string): string => {
 type AssembleContext = {
   seedUidToModelType: Map<string, string>
   relatedSeedUids: Set<string>
+  /** Related seeds each seed's properties name (what its record depends on besides itself). */
+  relatedSeedUidsBySeedUid: Map<string, Set<string>>
   versionUidToSeedUid: Map<string, string>
   assembledItems: Map<string, Record<string, unknown>>
   versionsBySeedUid: Map<string, AttestationLike[]>
@@ -58,6 +60,7 @@ function createAssembleContext(): AssembleContext {
   return {
     seedUidToModelType: new Map(),
     relatedSeedUids: new Set(),
+    relatedSeedUidsBySeedUid: new Map(),
     versionUidToSeedUid: new Map(),
     assembledItems: new Map(),
     versionsBySeedUid: new Map(),
@@ -80,6 +83,19 @@ function ensureSeedIdentity(clone: Record<string, unknown>, seedUid: string): vo
   } else if (clone.Attester && !clone.attester) {
     clone.attester = clone.Attester
   }
+}
+
+function addRelatedSeedUid(
+  ctx: AssembleContext,
+  property: AttestationLike,
+  relatedSeedUid: string,
+): void {
+  ctx.relatedSeedUids.add(relatedSeedUid)
+  const seedUid = ctx.versionUidToSeedUid.get(property.refUID)
+  if (!seedUid) return
+  const related = ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? new Set<string>()
+  related.add(relatedSeedUid)
+  ctx.relatedSeedUidsBySeedUid.set(seedUid, related)
 }
 
 async function processItemProperty(
@@ -152,10 +168,10 @@ async function processItemProperty(
         }
       }
       metadata.value.forEach((value: string) => {
-        if (!relationValuesToExclude.includes(value)) ctx.relatedSeedUids.add(value)
+        if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
       })
     } else if (!relationValuesToExclude.includes(metadata.value as string)) {
-      ctx.relatedSeedUids.add(metadata.value as string)
+      addRelatedSeedUid(ctx, property, metadata.value as string)
     }
   }
 
@@ -476,15 +492,33 @@ function toSeedRecords(
 }
 
 /**
- * Assemble canonical SeedRecords from Seed attestations (latest Version + canonical properties).
- * Uses per-call state (safe for concurrent requests).
+ * What an assembled record was built from, so a cache can tell when it changed: an attestation
+ * created or revoked later that references one of `refUIDs` (a new or revoked Version of the seed
+ * or of a seed it relates to, a property of one of their head Versions) or is one of `ids` (the
+ * seed or a related seed, revoked).
  */
-export async function assembleSeeds(
+export type SeedDependencies = {
+  refUIDs: string[]
+  ids: string[]
+}
+
+function dependenciesOf(ctx: AssembleContext, seedUid: string): SeedDependencies {
+  const seedUids = [seedUid, ...(ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? [])]
+  const headVersionUids = seedUids
+    .map((uid) => ctx.latestVersionUidsBySeedUid.get(uid))
+    .filter((uid): uid is string => !!uid)
+  return { refUIDs: [...seedUids, ...headVersionUids], ids: seedUids }
+}
+
+/**
+ * Like assembleSeeds, plus each record's dependencies by seedUid (see SeedDependencies).
+ */
+export async function assembleSeedsWithDependencies(
   schemaName: string,
   seeds: AttestationLike[],
   options?: AssembleOptions,
   dataSource: QueryDataSource = getRemoteQueryDataSource(),
-): Promise<SeedRecord[]> {
+): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
   const expandRelations = options?.expandRelations !== false
   const hydrateStorage = options?.hydrateStorage !== false
 
@@ -514,5 +548,21 @@ export async function assembleSeeds(
     )
   }
 
-  return records
+  const dependencies = new Map(
+    records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid)]),
+  )
+  return { records, dependencies }
+}
+
+/**
+ * Assemble canonical SeedRecords from Seed attestations (latest Version + canonical properties).
+ * Uses per-call state (safe for concurrent requests).
+ */
+export async function assembleSeeds(
+  schemaName: string,
+  seeds: AttestationLike[],
+  options?: AssembleOptions,
+  dataSource: QueryDataSource = getRemoteQueryDataSource(),
+): Promise<SeedRecord[]> {
+  return (await assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)).records
 }

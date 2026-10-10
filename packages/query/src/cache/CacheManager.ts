@@ -1,4 +1,4 @@
-import type { GetSeedResult, SeedRecord } from '../types.js'
+import { generateCollectionETag, generateItemETag } from './etag.js'
 import { MemoryCache } from './MemoryCache.js'
 import type {
   CachedCollectionData,
@@ -23,7 +23,35 @@ export function configurePersistentCacheFactory(
 }
 
 /**
+ * Entries written before change tracking (or by another version) lack its bookkeeping and can't
+ * be checked for changes, so they are treated as misses.
+ */
+function isCurrentCollection(data: unknown): data is CachedCollectionData {
+  const d = data as Partial<CachedCollectionData> | null
+  return (
+    !!d &&
+    Array.isArray(d.items) &&
+    typeof d.meta === 'object' &&
+    d.meta !== null &&
+    typeof d.checkedAt === 'number' &&
+    Array.isArray(d.seenChangeKeys)
+  )
+}
+
+function isCurrentItem(data: unknown): data is CachedItemData {
+  const d = data as Partial<CachedItemData> | null
+  return (
+    !!d &&
+    !!d.record &&
+    !!d.dependencies &&
+    typeof d.checkedAt === 'number' &&
+    Array.isArray(d.seenChangeKeys)
+  )
+}
+
+/**
  * Unified query cache: memory, with optional persistent (disk) layer.
+ * Collections are kept per schema and assemble-options key.
  */
 export class CacheManager {
   private memoryCache: MemoryCache
@@ -56,21 +84,22 @@ export class CacheManager {
 
   async getCollection(
     schemaName: string,
+    optionsKey: string,
   ): Promise<CachedCollectionData | null> {
     if (!this.config.enabled) return null
 
     try {
-      let cached = this.memoryCache.getCollection(schemaName)
+      let cached = this.memoryCache.getCollection(schemaName, optionsKey)
       if (cached) {
         this.stats.hits++
         return cached
       }
 
-      cached = (await this.persistent?.getCollection(schemaName)) ?? null
-      if (cached) {
-        this.memoryCache.setCollection(schemaName, cached.items)
+      const persisted = (await this.persistent?.getCollection(schemaName, optionsKey)) ?? null
+      if (isCurrentCollection(persisted)) {
+        this.memoryCache.setCollection(schemaName, optionsKey, persisted)
         this.stats.hits++
-        return cached
+        return persisted
       }
 
       this.stats.misses++
@@ -85,15 +114,24 @@ export class CacheManager {
     }
   }
 
+  /** Stores a collection; its ETag is derived from the records' content. */
   async setCollection(
     schemaName: string,
-    items: SeedRecord[],
+    optionsKey: string,
+    data: Omit<CachedCollectionData, 'etag'>,
   ): Promise<CachedCollectionData | null> {
     if (!this.config.enabled) return null
 
     try {
-      const cached = this.memoryCache.setCollection(schemaName, items)
-      await this.persistent?.setCollection(schemaName, cached)
+      const items = data.items.map((r) => ({ ...r, data: { ...r.data } }))
+      const etag = generateCollectionETag(
+        schemaName,
+        optionsKey,
+        items.map((r) => generateItemETag(r, optionsKey)),
+      )
+      const cached: CachedCollectionData = { ...data, items, etag }
+      this.memoryCache.setCollection(schemaName, optionsKey, cached)
+      await this.persistent?.setCollection(schemaName, optionsKey, cached)
       return cached
     } catch (error) {
       console.error(
@@ -118,11 +156,11 @@ export class CacheManager {
         return cached
       }
 
-      cached = (await this.persistent?.getItem(seedUid, optionsKey)) ?? null
-      if (cached) {
-        this.memoryCache.setItem(cached.record, optionsKey)
+      const persisted = (await this.persistent?.getItem(seedUid, optionsKey)) ?? null
+      if (isCurrentItem(persisted)) {
+        this.memoryCache.setItem(persisted)
         this.stats.hits++
-        return cached
+        return persisted
       }
 
       this.stats.misses++
@@ -134,19 +172,26 @@ export class CacheManager {
     }
   }
 
+  /** Stores an item; its ETag is derived from the record's content. */
   async setItem(
-    record: GetSeedResult,
-    optionsKey: string,
+    data: Omit<CachedItemData, 'etag'>,
   ): Promise<CachedItemData | null> {
     if (!this.config.enabled) return null
 
     try {
-      const cached = this.memoryCache.setItem(record, optionsKey)
+      const record = { ...data.record, data: { ...data.record.data } }
+      if (data.record.changelog) record.changelog = [...data.record.changelog]
+      const cached: CachedItemData = {
+        ...data,
+        record,
+        etag: generateItemETag(record, data.optionsKey),
+      }
+      this.memoryCache.setItem(cached)
       await this.persistent?.setItem(cached)
       return cached
     } catch (error) {
       console.error(
-        `Error setting query item cache for ${record.seedUid}:`,
+        `Error setting query item cache for ${data.record.seedUid}:`,
         error,
       )
       this.stats.errors++
@@ -154,16 +199,19 @@ export class CacheManager {
     }
   }
 
-  async writeThroughItems(
-    items: SeedRecord[],
-    optionsKey: string,
-  ): Promise<void> {
+  async writeThroughItems(items: Array<Omit<CachedItemData, 'etag'>>): Promise<void> {
     if (!this.config.enabled) return
     for (const item of items) {
-      await this.setItem(item, optionsKey)
+      await this.setItem(item)
     }
   }
 
+  async clearItem(seedUid: string, optionsKey: string): Promise<void> {
+    this.memoryCache.clearItem(seedUid, optionsKey)
+    await this.persistent?.clearItem(seedUid, optionsKey)
+  }
+
+  /** Every options variant of the schema's collection. */
   async clearCollection(schemaName: string): Promise<void> {
     this.memoryCache.clearCollection(schemaName)
     await this.persistent?.clearCollection(schemaName)
@@ -175,47 +223,15 @@ export class CacheManager {
   }
 
   async withRefreshLock<T>(
-    schemaName: string,
+    key: string,
     fn: () => Promise<T>,
   ): Promise<T> {
-    return this.memoryCache.withRefreshLock(schemaName, fn)
+    return this.memoryCache.withRefreshLock(key, fn)
   }
 
-  /**
-   * Merge records by seedUid; new wins. Sort by timeCreated descending.
-   */
-  mergeRecords(
-    cachedItems: SeedRecord[],
-    newItems: SeedRecord[],
-  ): SeedRecord[] {
-    const itemMap = new Map<string, SeedRecord>()
-
-    for (const item of cachedItems) {
-      if (item.seedUid) itemMap.set(item.seedUid, item)
-    }
-    for (const item of newItems) {
-      if (item.seedUid) {
-        itemMap.set(item.seedUid, item)
-      } else {
-        itemMap.set(`temp-${Date.now()}-${Math.random()}`, item)
-      }
-    }
-
-    const merged = Array.from(itemMap.values())
-    merged.sort((a, b) => (b.timeCreated || 0) - (a.timeCreated || 0))
-    return merged
-  }
-
-  /**
-   * Keep only records newer than lastProcessedTimestamp.
-   */
-  filterNewRecords(
-    items: SeedRecord[],
-    lastProcessedTimestamp: number,
-  ): SeedRecord[] {
-    return items.filter(
-      (item) => item.timeCreated && item.timeCreated > lastProcessedTimestamp,
-    )
+  /** Counts a cache hit that was checked against changes and refreshed in part. */
+  recordRefresh(): void {
+    this.stats.refreshes++
   }
 
   updateConfig(config: Partial<QueryCacheConfig>): void {

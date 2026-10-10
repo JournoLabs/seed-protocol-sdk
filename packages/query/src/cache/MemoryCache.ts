@@ -1,5 +1,3 @@
-import type { GetSeedResult, SeedRecord } from '../types.js'
-import { generateCollectionETag, generateItemETag } from './etag.js'
 import type {
   CachedCollectionData,
   CachedItemData,
@@ -8,6 +6,7 @@ import type {
 
 /**
  * In-memory collection + item cache with TTL and refresh locks.
+ * Entries expire `ttl` seconds after their `lastUpdated` (their last full assembly).
  */
 export class MemoryCache {
   private collectionCache: Map<string, CachedCollectionData> = new Map()
@@ -19,96 +18,53 @@ export class MemoryCache {
     this.config = config
   }
 
+  private collectionKey(schemaName: string, optionsKey: string): string {
+    return `${schemaName}\n${optionsKey}`
+  }
+
   private itemKey(seedUid: string, optionsKey: string): string {
     return `${seedUid}:${optionsKey}`
   }
 
-  getCollection(schemaName: string): CachedCollectionData | null {
-    const cached = this.collectionCache.get(schemaName)
-    if (!cached) return null
+  private expired(lastUpdated: number): boolean {
+    return Math.floor(Date.now() / 1000) - lastUpdated > this.config.ttl
+  }
 
-    const now = Math.floor(Date.now() / 1000)
-    if (now - cached.lastUpdated > this.config.ttl) {
-      this.collectionCache.delete(schemaName)
+  getCollection(schemaName: string, optionsKey: string): CachedCollectionData | null {
+    const key = this.collectionKey(schemaName, optionsKey)
+    const cached = this.collectionCache.get(key)
+    if (!cached) return null
+    if (this.expired(cached.lastUpdated)) {
+      this.collectionCache.delete(key)
       return null
     }
     return cached
   }
 
-  setCollection(schemaName: string, items: SeedRecord[]): CachedCollectionData {
-    const now = Math.floor(Date.now() / 1000)
-    let lastProcessedTimestamp = 0
-    let lastProcessedItemId = ''
-
-    for (const item of items) {
-      if (item.timeCreated && item.timeCreated > lastProcessedTimestamp) {
-        lastProcessedTimestamp = item.timeCreated
-        lastProcessedItemId = item.seedUid
-      }
-    }
-    if (lastProcessedTimestamp === 0) {
-      lastProcessedTimestamp = now
-    }
-
-    const etag = generateCollectionETag(
-      schemaName,
-      lastProcessedTimestamp,
-      items.length,
-    )
-
-    const cached: CachedCollectionData = {
-      items: items.map((r) => ({ ...r, data: { ...r.data } })),
-      lastProcessedTimestamp,
-      lastProcessedItemId,
-      lastUpdated: now,
-      etag,
-    }
-    this.collectionCache.set(schemaName, cached)
-    return cached
+  setCollection(schemaName: string, optionsKey: string, data: CachedCollectionData): void {
+    this.collectionCache.set(this.collectionKey(schemaName, optionsKey), data)
   }
 
   getItem(seedUid: string, optionsKey: string): CachedItemData | null {
-    const cached = this.itemCache.get(this.itemKey(seedUid, optionsKey))
+    const key = this.itemKey(seedUid, optionsKey)
+    const cached = this.itemCache.get(key)
     if (!cached) return null
-
-    const now = Math.floor(Date.now() / 1000)
-    if (now - cached.lastUpdated > this.config.ttl) {
-      this.itemCache.delete(this.itemKey(seedUid, optionsKey))
+    if (this.expired(cached.lastUpdated)) {
+      this.itemCache.delete(key)
       return null
     }
     return cached
   }
 
-  setItem(
-    record: GetSeedResult,
-    optionsKey: string,
-  ): CachedItemData {
-    const now = Math.floor(Date.now() / 1000)
-    const etag = generateItemETag(
-      record.seedUid,
-      record.versionUid,
-      record.timeCreated,
-      optionsKey,
-    )
-    const cachedRecord: GetSeedResult = {
-      ...record,
-      data: { ...record.data },
-    }
-    if (record.changelog) {
-      cachedRecord.changelog = [...record.changelog]
-    }
-    const cached: CachedItemData = {
-      record: cachedRecord,
-      lastUpdated: now,
-      etag,
-      optionsKey,
-    }
-    this.itemCache.set(this.itemKey(record.seedUid, optionsKey), cached)
-    return cached
+  setItem(data: CachedItemData): void {
+    this.itemCache.set(this.itemKey(data.record.seedUid, data.optionsKey), data)
   }
 
+  /** Every options variant of the schema's collection. */
   clearCollection(schemaName: string): void {
-    this.collectionCache.delete(schemaName)
+    for (const key of this.collectionCache.keys()) {
+      if (key.startsWith(`${schemaName}\n`)) this.collectionCache.delete(key)
+    }
   }
 
   clearItem(seedUid: string, optionsKey?: string): void {
@@ -129,13 +85,13 @@ export class MemoryCache {
   }
 
   /**
-   * Single-flight: concurrent callers for the same schema share one in-flight promise.
+   * Single-flight: concurrent callers with the same key share one in-flight promise.
    */
   async withRefreshLock<T>(
-    schemaName: string,
+    key: string,
     fn: () => Promise<T>,
   ): Promise<T> {
-    const existingLock = this.refreshLocks.get(schemaName)
+    const existingLock = this.refreshLocks.get(key)
     if (existingLock) {
       return existingLock as Promise<T>
     }
@@ -144,11 +100,11 @@ export class MemoryCache {
       try {
         return await fn()
       } finally {
-        this.refreshLocks.delete(schemaName)
+        this.refreshLocks.delete(key)
       }
     })()
 
-    this.refreshLocks.set(schemaName, lockPromise)
+    this.refreshLocks.set(key, lockPromise)
     return lockPromise
   }
 

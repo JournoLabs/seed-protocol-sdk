@@ -164,3 +164,17 @@ export const GET_IMAGE_VERSIONS = graphql(/* GraphQL */ `
     }
   }
 `) as TypedDocumentNode<{ imageVersions: Attestation[] }>
+
+/** Just enough of each attestation to tell what changed: see getAttestationChangesSince. */
+export const GET_ATTESTATION_CHANGES = graphql(/* GraphQL */ `
+  query GetAttestationChanges($where: AttestationWhereInput!) {
+    changes: attestations(where: $where) {
+      id
+      refUID
+      timeCreated
+      revocationTime
+    }
+  }
+`) as TypedDocumentNode<{
+  changes: Array<Pick<Attestation, 'id' | 'refUID' | 'timeCreated' | 'revocationTime'>>
+}>

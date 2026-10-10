@@ -44,6 +44,7 @@ export type {
   PropertyChangelogEntry,
   QueryBySchemaOptions,
   QueryBySchemaResult,
+  AttestationChange,
   AttestationLike,
 } from './types.js'
 

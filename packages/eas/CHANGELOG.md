@@ -9,6 +9,7 @@
 
 - **`GET_SEEDS_LEAN`**: `GET_SEEDS` without `schema { schemaNames }`.
 - **`getSeedsByUidsFromEas({ uids, excludeRevoked })`**: seeds by UID, with `schema.schemaNames` attached from `schemaId`.
+- **`getAttestationChangesSince({ refUIDs, ids, since })`** and **`GET_ATTESTATION_CHANGES`**: attestations created or revoked after `since` that reference one of `refUIDs` or are one of `ids` (one request per 400 UIDs). Used by `@seedprotocol/query` to check cached seeds for changes.
 - **`getSchemaNamesBySchemaUids(schemaUids)`**: schema names by schema UID, cached per EAS endpoint for the process (`resetSchemaNamesCache` for tests).
 
 - **Publish authorization helpers:** `PUBLISH_AUTHORIZATION_*`, `decodePublishAuthorizationData`, `assessPublishAuthorization`, and `getPublishAuthorizationFromEas` for the `seedprotocol.publishAuthorization` sidecar.
