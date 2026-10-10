@@ -2,6 +2,8 @@
 
 ### Changed
 
+- **`NodeQueryClient` is a real TanStack Query client** (`@tanstack/query-core`, now a dependency) instead of a passthrough: concurrent requests with the same key share one fetch (5 concurrent `getSeed` calls for one post: 30 EAS requests → 6). Nothing is kept once a request settles unless the caller passes `staleTime`; no retries; keys are scoped to the EAS endpoint. The SDK's Node platform uses it too. `networkMode: 'onlineOnly'` maps to TanStack v5's `'online'`.
+
 - **Faster Version and property reads:** the `attestationFields` fragment (used by `GET_VERSIONS`, `GET_PROPERTIES`, `GET_ALL_PROPERTIES_FOR_ALL_VERSIONS`, `GET_FILES_METADATA`, `GET_IMAGE_VERSIONS`) no longer selects `schema { schemaNames }`. easscan resolves that join slowly (properties for ~170 versions: ~1.8 s with it, ~0.26 s without). Version and property attestations from these queries no longer carry `schema`; read `schemaId` instead.
 - **`getSeedsBySchemaName`** fetches seeds without the schema join and sets `schema.schemaNames` to the requested name. A new optional 4th argument `{ uidPrefix }` limits it to seeds whose UID starts with the prefix (easscan matches case-sensitively: pass lowercase with `0x`).
 

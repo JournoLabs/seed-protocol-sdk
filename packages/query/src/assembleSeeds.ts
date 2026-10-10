@@ -200,7 +200,14 @@ async function processSeeds(
   ctx: AssembleContext,
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
-  opts: { dropSeedsWithOnlyRevokedVersions?: boolean } = {},
+  opts: {
+    dropSeedsWithOnlyRevokedVersions?: boolean
+    /**
+     * Versions already fetched with `getVersionsForSeeds(…, { includeRevoked: true })` for these
+     * seeds (and possibly others, which are ignored), so the request isn't made again.
+     */
+    versions?: AttestationLike[]
+  } = {},
 ): Promise<void> {
   const seedUids: string[] = []
 
@@ -224,13 +231,15 @@ async function processSeeds(
 
   // Revoked versions come back too (marked), in the same request, only so a seed whose versions
   // were all revoked can be told from one that never had a version; they are never used below.
-  const allVersions = await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  const requested = new Set(seedUids)
+  const allVersions = opts.versions
+    ? opts.versions.filter((v) => requested.has(v.refUID))
+    : await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
   const itemVersions = allVersions.filter((v) => v.revoked !== true)
 
   if (opts.dropSeedsWithOnlyRevokedVersions) {
     // Like the SDK (latest published version skips revoked ones): every version revoked means
     // no published version, so the seed is left out. A seed with no version at all is kept.
-    const requested = new Set(seedUids)
     const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
     for (const version of allVersions) {
       const seedUid = version.refUID
@@ -521,20 +530,30 @@ export async function assembleSeedsWithDependencies(
   seeds: AttestationLike[],
   options?: AssembleOptions,
   dataSource: QueryDataSource = getRemoteQueryDataSource(),
+  /** Versions of `seeds` already fetched with `includeRevoked: true` (see getSeed). */
+  prefetched?: { versions?: AttestationLike[] },
 ): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
   const expandRelations = options?.expandRelations !== false
   const hydrateStorage = options?.hydrateStorage !== false
 
   const ctx = createAssembleContext()
 
-  await processSeeds(ctx, seeds, dataSource, { dropSeedsWithOnlyRevokedVersions: true })
+  await processSeeds(ctx, seeds, dataSource, {
+    dropSeedsWithOnlyRevokedVersions: true,
+    versions: prefetched?.versions,
+  })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
     (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
   )
   if (relatedSeedUidsArray.length > 0) {
-    const relatedSeeds = await dataSource.getSeedsByUids(relatedSeedUidsArray)
-    await processSeeds(ctx, relatedSeeds, dataSource)
+    // Their versions only need the UIDs, so they are fetched alongside the seeds. Versions of a
+    // related seed that isn't returned (revoked, or not found) are ignored by processSeeds.
+    const [relatedSeeds, relatedVersions] = await Promise.all([
+      dataSource.getSeedsByUids(relatedSeedUidsArray),
+      dataSource.getVersionsForSeeds(relatedSeedUidsArray, { includeRevoked: true }),
+    ])
+    await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
   resolveRelationPropertiesToUrls(ctx, schemaName)

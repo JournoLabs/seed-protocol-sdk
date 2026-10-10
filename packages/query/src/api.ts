@@ -314,8 +314,16 @@ export async function getSeed(
     if (cached) return cached
   }
 
+  // The seed's versions only need its UID, so they are fetched alongside the seed (assembly
+  // would otherwise ask for them after it).
+  const fetchSeedAndVersions = (ds: QueryDataSource) =>
+    Promise.all([
+      ds.getSeedByUid(trimmed),
+      ds.getVersionsForSeeds([trimmed], { includeRevoked: true }),
+    ])
+
   const startedAt = nowSeconds()
-  let seed = await dataSource.getSeedByUid(trimmed)
+  let [seed, versions] = await fetchSeedAndVersions(dataSource)
 
   // auto: local miss → remote
   if (!seed && mode === 'auto' && dataSource.kind === 'local') {
@@ -325,7 +333,7 @@ export async function getSeed(
       const cached = await getUnchangedCachedItem(trimmed, optionsKey, dataSource)
       if (cached) return cached
     }
-    seed = await dataSource.getSeedByUid(trimmed)
+    ;[seed, versions] = await fetchSeedAndVersions(dataSource)
   }
 
   if (!seed) return null
@@ -337,7 +345,9 @@ export async function getSeed(
   let dependencies: SeedDependencies = { refUIDs: [trimmed], ids: [trimmed] }
 
   const assembleData = async (): Promise<SeedRecord | null> => {
-    const assembled = await assembleSeedsWithDependencies(schemaName, [seed], options, dataSource)
+    const assembled = await assembleSeedsWithDependencies(schemaName, [seed], options, dataSource, {
+      versions,
+    })
     const record = assembled.records[0]
     if (record) dependencies = assembled.dependencies.get(record.seedUid) ?? dependencies
     return record ?? null

@@ -111,6 +111,7 @@
       "dependencies": {
         "@graphql-typed-document-node/core": "^3.2.0",
         "@noble/hashes": "^1.8.0",
+        "@tanstack/query-core": "^5.104.1",
         "debug": "^4.4.1",
         "graphql": "^16.10.0",
         "graphql-request": "^7.3.5",
