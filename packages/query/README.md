@@ -43,7 +43,12 @@ const { items, limit, skip, etag } = await queryBySchema('post', {
   limit: 20,
   skip: 0,
 })
+
+// Seeds whose UID starts with a prefix (e.g. the 8-hex-digit trunc in a URL), newest first
+const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', limit: 16 })
 ```
+
+`uidPrefix` takes at least 4 hex digits, with or without `0x`, in any case (it is lowercased: EAS matches UIDs case-sensitively); anything else returns no items. It filters like a schema listing (schema name, not revoked, seeds whose versions were all revoked left out) in one EAS request, or a `LIKE` on the local source. It never reads or writes the collection cache; matched items are written through to the item cache. `normalizeUidPrefix` is exported for callers that want the same validation.
 
 `SeedRecord` shape:
 

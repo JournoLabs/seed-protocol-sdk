@@ -42,6 +42,16 @@ export function createRemoteQueryDataSource(): QueryDataSource {
       )) as AttestationLike[]
     },
 
+    async listSeedsByUidPrefix(
+      schemaName: string,
+      uidPrefix: string,
+      opts: { limit: number; skip: number },
+    ): Promise<AttestationLike[]> {
+      return (await getSeedsBySchemaName(schemaName, opts.limit, opts.skip, {
+        uidPrefix,
+      })) as AttestationLike[]
+    },
+
     async listSeedsBySchemaNameForMonth(
       schemaName: string,
       year: number,

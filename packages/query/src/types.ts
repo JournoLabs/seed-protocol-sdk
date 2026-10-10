@@ -76,6 +76,12 @@ export type GetSeedResult = SeedRecord & {
 export type QueryBySchemaOptions = AssembleOptions & {
   limit?: number
   skip?: number
+  /**
+   * Only seeds whose UID starts with this: at least 4 hex digits, with or without `0x`, any case.
+   * Reads don't use the collection cache (the result isn't the schema's working set); the item
+   * cache is written through as usual. An invalid prefix returns no items.
+   */
+  uidPrefix?: string
 }
 
 export type QueryBySchemaResult = {

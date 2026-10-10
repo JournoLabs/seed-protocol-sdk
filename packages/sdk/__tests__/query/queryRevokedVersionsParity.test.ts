@@ -122,6 +122,7 @@ const matches = (att: Record<string, any>, where: Record<string, any>): boolean 
     if (key === 'id' || key === 'refUID' || key === 'revoked') {
       if ('equals' in cond) return att[key] === cond.equals
       if ('in' in cond) return cond.in.includes(att[key])
+      if ('startsWith' in cond) return String(att[key]).startsWith(cond.startsWith)
     }
     throw new Error(`fake EAS: unsupported where ${key}: ${JSON.stringify(cond)}`)
   })
@@ -262,6 +263,17 @@ describe.sequential('local and remote query sources: seeds with revoked versions
       expect(await getOne(ds, allRevoked.seed.uid)).toEqual([])
       expect(await getOne(ds, revokedSeed.seed.uid)).toEqual([])
       expect(await getOne(ds, mixed.seed.uid)).toEqual([expectedPublished[1]])
+    }
+  })
+
+  it('lists by uid prefix the same way in both sources, leaving out all-revoked seeds', async () => {
+    const byPrefix = async (ds: QueryDataSource, prefix: string) =>
+      summarize(ds, await ds.listSeedsByUidPrefix(SCHEMA, prefix, { limit: 16, skip: 0 }))
+    for (const ds of [local, remote]) {
+      expect(await byPrefix(ds, '0xd5d5')).toEqual([expectedPublished[0]])
+      expect(await byPrefix(ds, '0xdada')).toEqual([expectedPublished[1]])
+      expect(await byPrefix(ds, '0xd7d7')).toEqual([])
+      expect(await byPrefix(ds, '0xd0d0')).toEqual([])
     }
   })
 

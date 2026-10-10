@@ -14,6 +14,16 @@ export type QueryDataSource = {
     opts: { limit: number; skip: number },
   ): Promise<AttestationLike[]>
 
+  /**
+   * Like listSeedsBySchemaName, limited to seeds whose UID starts with `uidPrefix`
+   * (normalized: `0x` + lowercase hex).
+   */
+  listSeedsByUidPrefix(
+    schemaName: string,
+    uidPrefix: string,
+    opts: { limit: number; skip: number },
+  ): Promise<AttestationLike[]>
+
   listSeedsBySchemaNameForMonth(
     schemaName: string,
     year: number,

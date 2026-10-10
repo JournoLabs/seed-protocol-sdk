@@ -8,7 +8,7 @@ export type { InitializeQueryPlatformOptions } from './bootstrap.js'
 
 export { assembleSeeds } from './assembleSeeds.js'
 export { assembleSeedChangelog } from './assembleChangelog.js'
-export { getSeed, queryBySchema, queryBySchemaForMonth } from './api.js'
+export { getSeed, normalizeUidPrefix, queryBySchema, queryBySchemaForMonth } from './api.js'
 
 export {
   registerLocalQuerySource,

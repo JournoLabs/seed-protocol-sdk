@@ -172,14 +172,22 @@ export const getSeedsFromSchemaUids = async ({
   return itemSeeds
 }
 
+/**
+ * Seeds of the schema named `schemaName`, newest first, revoked ones left out. With `uidPrefix`,
+ * only seeds whose UID starts with it; easscan matches it case-sensitively, so pass it lowercase
+ * with `0x`.
+ */
 export const getSeedsBySchemaName = async (
   schemaName: string,
   limit: number = 10,
   skip?: number,
+  options?: { uidPrefix?: string },
 ) => {
   const skipVal = skip ?? 0
+  const uidPrefix = options?.uidPrefix
   const variables = {
     where: withExcludeRevokedFilter({
+      ...(uidPrefix !== undefined ? { id: { startsWith: uidPrefix } } : {}),
       schema: {
         is: {
           schemaNames: {
@@ -200,7 +208,7 @@ export const getSeedsBySchemaName = async (
   const easClient = BaseEasClient.getEasClient()
 
   const { itemSeeds } = (await queryClient.fetchQuery({
-    queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal],
+    queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal, uidPrefix ?? null],
     queryFn: async () => easClient.request(GET_SEEDS_LEAN, variables),
   })) as { itemSeeds: Attestation[] }
 

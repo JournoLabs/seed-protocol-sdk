@@ -467,6 +467,43 @@ describe('queryBySchema / getSeed caching', () => {
     expect(await getQueryCacheManager().getItem('0xseed1', optionsKey)).toBeNull()
   })
 
+  describe('uidPrefix', () => {
+    const SEED = '0xfd8c50ca' + '0'.repeat(56)
+
+    it('lists by normalized prefix, skips the collection cache, writes items through', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Found', 100)
+      const result = await queryBySchema('post', { ...uncachedOpts, uidPrefix: 'FD8C50CA', limit: 16 })
+
+      expect(result.items.map((r) => r.data.title)).toEqual(['Found'])
+      expect(result.etag).toBeUndefined()
+      expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 16, 0, { uidPrefix: '0xfd8c50ca' })
+      expect(await getQueryCacheManager().getCollection('post', optionsKey)).toBeNull()
+      expect((await getQueryCacheManager().getItem(SEED, optionsKey))?.record.data.title).toBe('Found')
+    })
+
+    it('does not touch an existing collection', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Listed', 100)
+      const listed = await queryBySchema('post', uncachedOpts)
+      await queryBySchema('post', { ...uncachedOpts, uidPrefix: '0xfd8c' })
+      expect((await getQueryCacheManager().getCollection('post', optionsKey))?.etag).toBe(listed.etag)
+    })
+
+    it('returns no items, without a request, for an invalid prefix', async () => {
+      for (const uidPrefix of ['', '0x', 'fd8', 'xyz12345', '0x' + 'a'.repeat(65)]) {
+        expect((await queryBySchema('post', { ...uncachedOpts, uidPrefix })).items).toEqual([])
+      }
+      expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+    })
+
+    it('drops a matching seed whose versions were all revoked', async () => {
+      mockAssembledPost(SEED, '0xver1', 'Gone', 100)
+      mockGetItemVersionsFromEas.mockResolvedValue([
+        { id: '0xver1', decodedDataJson: '', refUID: SEED, schemaId: '0xversion', timeCreated: 110, revoked: true },
+      ])
+      expect((await queryBySchema('post', { ...uncachedOpts, uidPrefix: '0xfd8c50ca' })).items).toEqual([])
+    })
+  })
+
   it('data+changelog does not share cache with data-only', async () => {
     const seedUid = '0xseedSep'
     const v1 = '0xvsep1'

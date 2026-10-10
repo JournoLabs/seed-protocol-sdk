@@ -192,6 +192,20 @@ async function refreshCollection(
   return { items, limit, skip: 0, etag: stored?.etag }
 }
 
+/** Hex digits a uid prefix needs, so a stray short value can't list most of a schema. */
+const MIN_UID_PREFIX_HEX_DIGITS = 4
+
+/**
+ * `0x` + lowercase hex for a seed UID prefix given with or without `0x`, in any case (EAS indexes
+ * UIDs lowercase and matches prefixes case-sensitively). Null when it isn't 4–64 hex digits.
+ */
+export function normalizeUidPrefix(prefix: string): string | null {
+  const hex = prefix.trim().toLowerCase().replace(/^0x/, '')
+  if (hex.length < MIN_UID_PREFIX_HEX_DIGITS || hex.length > 64) return null
+  if (!/^[0-9a-f]+$/.test(hex)) return null
+  return `0x${hex}`
+}
+
 export async function queryBySchema(
   schemaName: string,
   options?: QueryBySchemaOptions,
@@ -203,11 +217,21 @@ export async function queryBySchema(
   const resolved = resolveQuerySource(mode)
   const optionsKey = buildAssembleOptionsKey(options)
 
-  const runAssemble = (ds: QueryDataSource) =>
-    fetchAndAssemble(schemaName, limit, skip, options, ds)
+  let uidPrefix: string | null = null
+  if (options?.uidPrefix !== undefined) {
+    uidPrefix = normalizeUidPrefix(options.uidPrefix)
+    if (!uidPrefix) return { items: [], limit, skip }
+  }
 
-  // Collection cache only for remote + skip=0 working set
+  const runAssemble = async (ds: QueryDataSource): Promise<Assembled> => {
+    if (!uidPrefix) return fetchAndAssemble(schemaName, limit, skip, options, ds)
+    const seeds = await ds.listSeedsByUidPrefix(schemaName, uidPrefix, { limit, skip })
+    return assembleSeedsWithDependencies(schemaName, seeds, options, ds)
+  }
+
+  // Collection cache only for remote + skip=0 working set (a uid-prefix match isn't one)
   if (
+    !uidPrefix &&
     shouldUseCache(options, resolved.useQueryCache) &&
     skip === 0 &&
     resolved.dataSource.kind === 'remote'

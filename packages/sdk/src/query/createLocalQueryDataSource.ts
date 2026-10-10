@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
 import { startCase } from 'lodash-es'
 import type {
   AttestationLike,
@@ -254,7 +254,7 @@ function monthBoundsUnix(year: number, month: number): {
 
 async function listPublishedSeedRows(
   schemaName: string,
-  opts?: { startTs?: number; endTs?: number },
+  opts?: { startTs?: number; endTs?: number; uidPrefix?: string },
 ): Promise<AttestationLike[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return []
@@ -286,6 +286,8 @@ async function listPublishedSeedRows(
       and(
         inArray(seeds.type, typeCandidates),
         isNotNull(seeds.uid),
+        // The query layer passes `0x` + hex only, so no LIKE wildcards to escape.
+        opts?.uidPrefix ? like(seeds.uid, `${opts.uidPrefix}%`) : undefined,
         or(isNull(seeds.revokedAt), eq(seeds.revokedAt, 0)),
         or(
           isNull(seeds._markedForDeletion),
@@ -378,6 +380,15 @@ export function createLocalQueryDataSource(): QueryDataSource {
     ): Promise<AttestationLike[]> {
       const all = await listPublishedSeedRows(schemaName)
       return all.slice(opts.skip, opts.skip + opts.limit)
+    },
+
+    async listSeedsByUidPrefix(
+      schemaName: string,
+      uidPrefix: string,
+      opts: { limit: number; skip: number },
+    ): Promise<AttestationLike[]> {
+      const matching = await listPublishedSeedRows(schemaName, { uidPrefix })
+      return matching.slice(opts.skip, opts.skip + opts.limit)
     },
 
     async listSeedsBySchemaNameForMonth(

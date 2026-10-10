@@ -86,6 +86,10 @@ function makeLocalFixture(opts: {
       if (name !== schemaName) return []
       return [seed].slice(skip, skip + limit)
     },
+    async listSeedsByUidPrefix(name, uidPrefix, { limit, skip }) {
+      if (name !== schemaName || !opts.seedUid.startsWith(uidPrefix)) return []
+      return [seed].slice(skip, skip + limit)
+    },
     async listSeedsBySchemaNameForMonth(name) {
       if (name !== schemaName) return []
       return [seed]
@@ -199,6 +203,20 @@ describe('query source local / remote / auto', () => {
     const one = await getSeed('0xautoseed', { source: 'auto' })
     expect(one?.data.title).toBe('Auto Local')
     expect(mockRequest).not.toHaveBeenCalled()
+  })
+
+  it('uidPrefix reads the local source, and auto falls back to remote when nothing matches', async () => {
+    const localUid = '0xabcd' + '1'.repeat(60)
+    registerLocalQuerySource(
+      makeLocalFixture({ seedUid: localUid, versionUid: '0xv', title: 'Local Match', timeCreated: 1 }),
+    )
+
+    const local = await queryBySchema('post', { source: 'local', uidPrefix: 'ABCD' })
+    expect(local.items.map((r) => r.data.title)).toEqual(['Local Match'])
+    expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
+
+    await queryBySchema('post', { source: 'auto', uidPrefix: '0xffff' })
+    expect(mockGetSeedsBySchemaName).toHaveBeenCalledWith('post', 100, 0, { uidPrefix: '0xffff' })
   })
 
   it('source auto falls back to remote on local miss', async () => {
