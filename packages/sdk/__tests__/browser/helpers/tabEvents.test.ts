@@ -11,6 +11,7 @@ import {
 } from '@/helpers/tabEvents'
 import { Item } from '@/Item/Item'
 import { otherTab, type OtherTab } from '../../test-utils/otherTab'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 describe('events across tabs', () => {
   const testDir = `tab-events-${Math.random().toString(36).slice(2, 8)}`
@@ -73,7 +74,7 @@ describe('events across tabs', () => {
       await vi.waitFor(() => {
         expect(filesChanged).toHaveBeenCalledWith(paths)
         expect(synced).toHaveBeenCalled()
-      })
+      }, { timeout: WAIT_TIMEOUT_MS })
       expect(invalidated).toHaveBeenCalledWith(paths)
       // Cached Items reload before listeners hear the sync finished.
       expect(rehydrated.mock.invocationCallOrder[0]).toBeLessThan(synced.mock.invocationCallOrder[0])
@@ -96,11 +97,14 @@ describe('events across tabs', () => {
 
       // Local listeners still hear file-saved; the other tab gets a cache refresh instead.
       expect(fileSaved).toHaveBeenCalledWith(`${filesDir}/files/html/x.html`)
-      await vi.waitFor(() =>
-        expect(tab!.heard).toEqual([
-          { type: 'event', name: EAS_SEED_DATA_SYNCED_TO_DB_EVENT, payload: undefined },
-          { type: 'files-changed', paths: [`${filesDir}/files/html/x.html`] },
-        ]),
+      // vi.waitFor's 1s default isn't enough for a round trip through another thread on a loaded runner
+      await vi.waitFor(
+        () =>
+          expect(tab!.heard).toEqual([
+            { type: 'event', name: EAS_SEED_DATA_SYNCED_TO_DB_EVENT, payload: undefined },
+            { type: 'files-changed', paths: [`${filesDir}/files/html/x.html`] },
+          ]),
+        { timeout: WAIT_TIMEOUT_MS },
       )
     } finally {
       eventEmitter.off('file-saved', fileSaved)

@@ -37,6 +37,7 @@ import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -529,7 +530,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',
-      { timeout: 5000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
 
     testItem = await Item.create({
@@ -624,7 +625,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('property-status')
           expect(['not-loaded', 'loaded']).toContain(status.textContent)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -765,7 +766,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -782,7 +783,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const isLoading = screen.getByTestId('is-loading')
           expect(isLoading.textContent).toBe('false')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -888,7 +889,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('properties-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('properties-count')
@@ -1015,7 +1016,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -1027,7 +1028,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const isLoading = screen.getByTestId('is-loading')
           expect(isLoading.textContent).toBe('false')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -1080,7 +1081,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const initialCount = parseInt(scoped.getByTestId('properties-count').textContent || '0')
           expect(initialCount).toBeGreaterThanOrEqual(3)
         },
-        { timeout: 5000, interval: 200 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 200 }
       )
 
       // Update a property value
@@ -1232,7 +1233,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const finalCount = scopedList.getByTestId('properties-count')
           expect(parseInt(finalCount.textContent || '0')).toBeGreaterThan(0)
         },
-        { timeout: 5000, interval: 200 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 200 }
       )
 
       // Verify specific properties appear
@@ -1257,7 +1258,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const statusEl = screen.getByTestId('create-item-property-status')
           expect(statusEl).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('create-item-property-is-loading').textContent).toBe('false')
@@ -1274,7 +1275,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(false)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-item-property-button').click()
@@ -1302,7 +1303,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(true)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
@@ -1317,7 +1318,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -1325,7 +1326,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('destroy-item-property-error').textContent).toBe('stub destroy failed')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-item-property-reset-error').click()
@@ -1352,7 +1353,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(false)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-item-property-button').click()
@@ -1361,7 +1362,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -1371,7 +1372,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           expect(isLoading.textContent).toBe('false')
           expect(['destroyed', 'error']).toContain(status.textContent)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
   })

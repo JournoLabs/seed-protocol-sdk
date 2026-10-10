@@ -3,6 +3,7 @@ import { createActor, fromCallback, fromPromise, waitFor, type AnyActorRef } fro
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { cleanupTestSchemaData } from '../../test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 describe('writeProcessMachine', () => {
 
@@ -58,7 +59,7 @@ describe('writeProcessMachine', () => {
       await waitFor(
         actor,
         (snapshot) => snapshot.value === 'validating',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Should eventually transition to writing or error
@@ -130,7 +131,7 @@ describe('writeProcessMachine', () => {
       await waitFor(
         actor,
         (snapshot) => snapshot.value === 'validating',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const finalSnapshot = await waitFor(
@@ -165,7 +166,7 @@ describe('writeProcessMachine', () => {
     )
     actor.start()
     actor.send({ type: 'startWrite', data: { modelName: 'TestModel', schemaName: 'TestSchema' } })
-    await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: 5000 })
+    await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
     return actor
   }
 
@@ -174,7 +175,7 @@ describe('writeProcessMachine', () => {
       const actor = await startStubbedWrite()
 
       actor.send({ type: 'writeError', error: new Error('Test error') })
-      const errorSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 })
+      const errorSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: WAIT_TIMEOUT_MS })
       expect(errorSnapshot.context.retryCount).toBe(1)
       expect(errorSnapshot.context.error?.message).toBe('Test error')
       // A failed persist is otherwise only visible to debug logging
@@ -185,7 +186,7 @@ describe('writeProcessMachine', () => {
 
       // Retry goes back through validation (stubbed to pass) and into writing again
       actor.send({ type: 'retry' })
-      const retried = await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: 5000 })
+      const retried = await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
       expect(retried.context.error).toBeNull()
     })
 
@@ -194,11 +195,11 @@ describe('writeProcessMachine', () => {
 
       for (let i = 1; i <= 3; i++) {
         actor.send({ type: 'writeError', error: new Error(`Test error ${i}`) })
-        const snapshot = await waitFor(actor, (s) => s.value === 'error', { timeout: 5000 })
+        const snapshot = await waitFor(actor, (s) => s.value === 'error', { timeout: WAIT_TIMEOUT_MS })
         expect(snapshot.context.retryCount).toBe(i)
         if (i < 3) {
           actor.send({ type: 'retry' })
-          await waitFor(actor, (s) => s.value === 'writing', { timeout: 5000 })
+          await waitFor(actor, (s) => s.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
         }
       }
 
@@ -215,11 +216,11 @@ describe('writeProcessMachine', () => {
       const actor = await startStubbedWrite()
 
       actor.send({ type: 'writeSuccess' })
-      const successSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'success', { timeout: 5000 })
+      const successSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'success', { timeout: WAIT_TIMEOUT_MS })
       expect(successSnapshot.context.pendingWrite).toBeNull()
 
       actor.send({ type: 'reset' })
-      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
     })
 
     it('should revert from error state', async () => {
@@ -227,10 +228,10 @@ describe('writeProcessMachine', () => {
       expect(actor.getSnapshot().context.pendingWrite).not.toBeNull()
 
       actor.send({ type: 'writeError', error: new Error('Test error') })
-      await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 })
+      await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: WAIT_TIMEOUT_MS })
 
       actor.send({ type: 'revert' })
-      const finalSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      const finalSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
       expect(finalSnapshot.context.pendingWrite).toBeNull()
       expect(finalSnapshot.context.error).toBeNull()
     })

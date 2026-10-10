@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { commands } from 'vitest/browser'
 import { getEmbeddedMigrations } from '@/browser/db/embeddedMigrations'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /**
  * Two real tabs of one app (Playwright pages in this test's browser context: shared OPFS, Web
@@ -46,12 +47,12 @@ describe('two tabs of one app', () => {
     await vi.waitFor(async () => {
       const changed: string[][] = await tabs.callSeedTab(follower, 'filesChanged')
       expect(changed.flat()).toContain(notePath)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
     expect(await tabs.callSeedTab(follower, 'readFile', notePath)).toBe('version two')
 
     // Closing the leader hands leadership to the other tab.
     await tabs.closeSeedTab(leader)
     open.splice(open.indexOf(leader), 1)
-    await vi.waitFor(async () => expect(await tabs.callSeedTab(follower, 'isLeader')).toBe(true))
+    await vi.waitFor(async () => expect(await tabs.callSeedTab(follower, 'isLeader')).toBe(true), { timeout: WAIT_TIMEOUT_MS })
   }, 120_000)
 })

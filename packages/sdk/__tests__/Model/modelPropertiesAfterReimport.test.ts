@@ -51,7 +51,6 @@ describe('model.properties after re-importing a schema', () => {
       await waitUntilOrThrow(
         () => model!.properties.length === 2,
         'model.properties to list headline and body',
-        5000,
       )
       expect(model!.properties.map((p) => p.name).sort()).toEqual(['body', 'headline'])
     })

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 const VALID_ARWEAVE_TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 
@@ -143,7 +144,7 @@ describe('events/files/download dedupe', () => {
 
     await vi.waitFor(() => {
       expect(mocks.downloadFileByTransactionId).toHaveBeenCalledTimes(1)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
     expect(mocks.downloadAllFiles).toHaveBeenCalledTimes(0)
 
     deferred.resolve()
@@ -160,7 +161,7 @@ describe('events/files/download dedupe', () => {
 
     await vi.waitFor(() => {
       expect(mocks.downloadFileByTransactionId).toHaveBeenCalledTimes(1)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
 
     deferred.resolve()
     const [r1, r2] = await Promise.all([p1, p2])

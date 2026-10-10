@@ -19,6 +19,7 @@ import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/clien
 import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
 import { waitForSchemaIdle, waitForModelIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Helper function to wait for schema to be in idle state using xstate waitFor
 // A runtime Model writes itself and its properties to the DB in the background. Wait for those rows, or a
@@ -1104,7 +1105,7 @@ testDescribe('Schema Integration Tests', () => {
       // Update name
       schema.name = newName
       
-      await vi.waitFor(() => expect(schema.schemaName).toBe(newName), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect(schema.schemaName).toBe(newName), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       
       // Verify name changed
       expect(schema.name).toBe(newName)
@@ -1122,7 +1123,7 @@ testDescribe('Schema Integration Tests', () => {
               .limit(1)
             expect(dbSchemas.length).toBeGreaterThan(0)
           },
-          { timeout: 5000, interval: 50 },
+          { timeout: WAIT_TIMEOUT_MS, interval: 50 },
         )
       }
     })
@@ -1193,7 +1194,7 @@ testDescribe('Schema Integration Tests', () => {
       // Make a change
       schema.name = 'Test Schema Draft Updated'
       
-      await vi.waitFor(() => expect(schema.getService().getSnapshot().context._isDraft).toBe(true), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect(schema.getService().getSnapshot().context._isDraft).toBe(true), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       
       // Should now be a draft
       context = schema.getService().getSnapshot().context

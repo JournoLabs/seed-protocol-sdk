@@ -24,6 +24,7 @@ import { eq } from 'drizzle-orm'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitUntilOrThrow } from './test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with multiple models
 const testSchemaWithModels: SchemaFileFormat = {
@@ -315,7 +316,7 @@ describe('React Model Hooks Integration Tests', () => {
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
     // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
     schemaId = schema.id ?? null
 
     // Wait for models to be populated (they're loaded asynchronously)
@@ -390,7 +391,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('models-count')
@@ -445,7 +446,7 @@ describe('React Model Hooks Integration Tests', () => {
           const count = screen.getByTestId('models-count')
           expect(parseInt(count.textContent || '0')).toBe(0)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
   })
@@ -463,7 +464,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const nullIndicator = screen.getByTestId('model-null')
@@ -545,7 +546,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const nullIndicator = screen.getByTestId('model-null')
@@ -560,7 +561,7 @@ describe('React Model Hooks Integration Tests', () => {
       // First get the model by name to get its ID
       const schema = Schema.create('Test Schema Models', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
 
       // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
@@ -635,7 +636,7 @@ describe('React Model Hooks Integration Tests', () => {
       // Get schema instance
       const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
 
       // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
       render(<UseModelsTest schemaId="Test Schema Dynamic" />, {
@@ -735,7 +736,7 @@ describe('React Model Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-model-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('create-model-is-loading').textContent).toBe('false')
@@ -750,7 +751,7 @@ describe('React Model Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-model-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-model-button').click()
@@ -760,7 +761,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('create-model-status')
           expect(status.textContent).toBe('created')
         },
-        { timeout: 3000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const createdName = screen.getByTestId('created-model-name')
@@ -778,7 +779,7 @@ describe('React Model Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(true)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
@@ -793,7 +794,7 @@ describe('React Model Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -801,7 +802,7 @@ describe('React Model Hooks Integration Tests', () => {
           expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('destroy-model-error').textContent).toBe('stub destroy failed')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-model-reset-error').click()
@@ -827,7 +828,7 @@ describe('React Model Hooks Integration Tests', () => {
             expect(btn).toBeTruthy()
             expect(btn.hasAttribute('disabled')).toBe(false)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         screen.getByTestId('destroy-model-button').click()
@@ -836,7 +837,7 @@ describe('React Model Hooks Integration Tests', () => {
           () => {
             expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
           },
-          { timeout: 2000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         await waitFor(

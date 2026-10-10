@@ -19,6 +19,7 @@ import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 const testSchemaWithImage: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -123,7 +124,7 @@ describe('SeedImage integration tests', () => {
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',
-      { timeout: 5000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
 
     testItem = await Item.create({
@@ -170,7 +171,7 @@ describe('SeedImage integration tests', () => {
 
     await waitFor(
       () => true,
-      { timeout: 3000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
   })
 

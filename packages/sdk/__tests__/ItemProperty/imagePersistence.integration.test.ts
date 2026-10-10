@@ -19,6 +19,7 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const MINIMAL_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -146,7 +147,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('saves Blob to file and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with Blob image' })
     await waitForItemIdle(item)
@@ -178,7 +179,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('saves blob URL to file and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with blob URL image' })
     await waitForItemIdle(item)
@@ -212,7 +213,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('Image displays after reload when saved from Blob', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for reload test' })
     await waitForItemIdle(item)
@@ -248,7 +249,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('Image displays after reload when saved from blob URL', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for blob URL reload test' })
     await waitForItemIdle(item)
@@ -288,7 +289,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('data URL still works and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with data URL' })
     await waitForItemIdle(item)
@@ -325,7 +326,7 @@ testDescribe('Image property persistence integration tests', () => {
 
   it('File input still works', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with File' })
     await waitForItemIdle(item)

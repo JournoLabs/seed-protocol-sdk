@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { WAIT_TIMEOUT_MS } from './timeouts'
 
 /**
  * Bounded wait for a condition the calling test tolerates never becoming true: returns as soon as the
@@ -23,7 +24,7 @@ export async function waitUntil(condition: () => boolean | Promise<boolean>, tim
 export async function waitUntilOrThrow(
   condition: () => boolean | Promise<boolean>,
   description: string,
-  timeout = 2000,
+  timeout = WAIT_TIMEOUT_MS,
 ): Promise<void> {
   if (!(await waitUntil(condition, timeout))) {
     throw new Error(`Timed out after ${timeout}ms waiting for ${description}`)

@@ -20,6 +20,7 @@ import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import type { TProperty } from '@/Schema'
 import { waitForModelPropertyIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Schema names here must not match other test files': in the browser all files share one OPFS store, and
 // importing a same-name/same-version schema loads the other file's schema instead.
@@ -254,7 +255,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Find the property
@@ -299,7 +300,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Find with waitForReady: false - should return immediately
@@ -338,7 +339,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const allProperties = await ModelProperty.all(modelFileId)
@@ -367,7 +368,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const allProperties = await ModelProperty.all(modelFileId, {
@@ -643,7 +644,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const testSchema = createTestSchema(schemaName)
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       const schema = Schema.create(schemaName, { waitForReady: false })
-      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
       try {
@@ -666,7 +667,7 @@ testDescribe('ModelProperty Integration Tests', () => {
           const instance = ModelProperty.getById(propertyFileId)
           if (!instance) throw new Error('content property instance not created yet')
           return instance
-        })
+        }, { timeout: WAIT_TIMEOUT_MS })
         await waitForModelPropertyIdle(property)
         await settleInitialWrite()
 
@@ -1010,7 +1011,7 @@ testDescribe('ModelProperty Integration Tests', () => {
             .from(propertiesTable)
             .where(eq(propertiesTable.schemaFileId, propertyFileId))
           expect(row?.dataType).toBe('Number')
-        }, { timeout: 5000 })
+        }, { timeout: WAIT_TIMEOUT_MS })
       }
     })
   })
@@ -1614,7 +1615,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       // The edit is compared against _originalValues, which are initialized after the first idle
       await vi.waitFor(
         () => expect((property as any)._getSnapshotContext()._originalValues).toBeDefined(),
-        { timeout: 5000, interval: 50 },
+        { timeout: WAIT_TIMEOUT_MS, interval: 50 },
       )
 
       property.dataType = 'Number'
