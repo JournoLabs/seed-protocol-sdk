@@ -3,7 +3,14 @@ import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanon
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
-import { GET_PROPERTIES, GET_SCHEMAS, GET_SEEDS, GET_VERSIONS } from './queries.js'
+import { getEasEndpoint } from './easEndpoint.js'
+import {
+  GET_PROPERTIES,
+  GET_SCHEMAS,
+  GET_SEEDS,
+  GET_SEEDS_LEAN,
+  GET_VERSIONS,
+} from './queries.js'
 import type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 
 export type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
@@ -193,10 +200,96 @@ export const getSeedsBySchemaName = async (
 
   const { itemSeeds } = (await queryClient.fetchQuery({
     queryKey: [`getSeedsBySchemaName`, schemaName, limit, skipVal],
-    queryFn: async () => easClient.request(GET_SEEDS, variables),
+    queryFn: async () => easClient.request(GET_SEEDS_LEAN, variables),
   })) as { itemSeeds: Attestation[] }
 
-  return itemSeeds
+  // Every seed matched `schemaName`, so it is attached here instead of selected (see GET_SEEDS_LEAN).
+  return itemSeeds.map((seed) => withSchemaNames(seed, [schemaName]))
+}
+
+const withSchemaNames = (seed: Attestation, names: string[]): Attestation =>
+  ({ ...seed, schema: { schemaNames: names.map((name) => ({ name })) } }) as Attestation
+
+/** Found schema names by endpoint and schema UID. A schema's names don't change once found. */
+const schemaNamesBySchemaUid = new Map<string, string[]>()
+
+const schemaNamesCacheKey = (schemaUid: string): string => {
+  let endpoint = ''
+  try {
+    endpoint = getEasEndpoint()
+  } catch {
+    // Misconfigured chain: the request itself will fail.
+  }
+  return `${endpoint}\n${schemaUid.toLowerCase()}`
+}
+
+/** Clears the schema-name cache of getSchemaNamesBySchemaUids. For tests. */
+export const resetSchemaNamesCache = (): void => {
+  schemaNamesBySchemaUid.clear()
+}
+
+/**
+ * Names of each EAS schema in `schemaUids`, in EAS order, keyed by the UID as given. Schemas with
+ * no name are left out. Found names are cached for the process; schemas without one are asked
+ * again next time.
+ */
+export const getSchemaNamesBySchemaUids = async (
+  schemaUids: string[],
+): Promise<Map<string, string[]>> => {
+  const result = new Map<string, string[]>()
+  const missing: string[] = []
+  for (const uid of new Set(schemaUids)) {
+    const cached = schemaNamesBySchemaUid.get(schemaNamesCacheKey(uid))
+    if (cached) result.set(uid, cached)
+    else missing.push(uid)
+  }
+  if (missing.length === 0) return result
+
+  const queryClient = BaseQueryClient.getQueryClient()
+  const easClient = BaseEasClient.getEasClient()
+  const { schemas } = (await queryClient.fetchQuery({
+    queryKey: [`getSchemaNamesBySchemaUids`, [...missing].sort()],
+    queryFn: async () =>
+      easClient.request(GET_SCHEMAS, {
+        where: { id: { in: missing } },
+      }),
+  })) as { schemas: Array<{ id: string; schemaNames?: Array<{ name: string }> }> }
+
+  const byLowerUid = new Map(missing.map((uid) => [uid.toLowerCase(), uid]))
+  for (const schema of schemas ?? []) {
+    const names = (schema.schemaNames ?? []).map((n) => n.name)
+    const uid = byLowerUid.get(schema.id.toLowerCase())
+    if (!uid || names.length === 0) continue
+    schemaNamesBySchemaUid.set(schemaNamesCacheKey(uid), names)
+    result.set(uid, names)
+  }
+  return result
+}
+
+/**
+ * Seed attestations whose UID is in `uids`, newest first, with `schema.schemaNames` attached from
+ * their `schemaId` (the seeds themselves are fetched without that join, which is slow on easscan).
+ */
+export const getSeedsByUidsFromEas = async ({
+  uids,
+  excludeRevoked = true,
+}: {
+  uids: string[]
+  excludeRevoked?: boolean
+}): Promise<Attestation[]> => {
+  if (uids.length === 0) return []
+  const where = excludeRevoked ? withExcludeRevokedFilter({ id: { in: uids } }) : { id: { in: uids } }
+
+  const queryClient = BaseQueryClient.getQueryClient()
+  const easClient = BaseEasClient.getEasClient()
+  const { itemSeeds } = (await queryClient.fetchQuery({
+    queryKey: [`getSeedsByUidsFromEas`, [...uids].sort(), excludeRevoked],
+    queryFn: async () => easClient.request(GET_SEEDS_LEAN, { where, take: uids.length, skip: 0 }),
+  })) as { itemSeeds: Attestation[] }
+
+  const seeds = itemSeeds ?? []
+  const namesBySchemaUid = await getSchemaNamesBySchemaUids(seeds.map((seed) => seed.schemaId))
+  return seeds.map((seed) => withSchemaNames(seed, namesBySchemaUid.get(seed.schemaId) ?? []))
 }
 
 export const getSeedUidsBySchemaName = async (schemaName: string, limit: number = 10) => {

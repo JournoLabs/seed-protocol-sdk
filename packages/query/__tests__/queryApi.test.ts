@@ -15,6 +15,9 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     getSeedsBySchemaName: (...args: unknown[]) => mockGetSeedsBySchemaName(...args),
     getItemVersionsFromEas: (...args: unknown[]) => mockGetItemVersionsFromEas(...args),
     getItemPropertiesFromEas: (...args: unknown[]) => mockGetItemPropertiesFromEas(...args),
+    // Seeds by uid answer from the same mocked request as before (fixtures carry their schema names).
+    getSeedsByUidsFromEas: async (...args: unknown[]) =>
+      ((await mockRequest(...args)) as { itemSeeds?: unknown[] } | undefined)?.itemSeeds ?? [],
     EasClient: {
       getEasClient: () => ({ request: mockRequest }),
     },

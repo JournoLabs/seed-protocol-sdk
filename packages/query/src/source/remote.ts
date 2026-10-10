@@ -1,10 +1,11 @@
 import {
   getSeedsBySchemaName,
+  getSeedsByUidsFromEas,
   getItemVersionsFromEas,
   getItemPropertiesFromEas,
   EasClient,
   withExcludeRevokedFilter,
-  GET_SEEDS,
+  GET_SEEDS_LEAN,
 } from '@seedprotocol/eas'
 import type { AttestationLike } from '../types.js'
 import type { QueryDataSource } from './types.js'
@@ -25,15 +26,8 @@ export function createRemoteQueryDataSource(): QueryDataSource {
     kind: 'remote',
 
     async getSeedByUid(seedUid: string): Promise<AttestationLike | null> {
-      const easClient = EasClient.getEasClient()
-      const { itemSeeds } = await easClient.request(GET_SEEDS, {
-        where: withExcludeRevokedFilter({
-          id: { equals: seedUid },
-        }),
-        take: 1,
-        skip: 0,
-      })
-      return ((itemSeeds ?? [])[0] as AttestationLike | undefined) ?? null
+      const [seed] = await getSeedsByUidsFromEas({ uids: [seedUid] })
+      return (seed as AttestationLike | undefined) ?? null
     },
 
     async listSeedsBySchemaName(
@@ -73,12 +67,16 @@ export function createRemoteQueryDataSource(): QueryDataSource {
       })
 
       const easClient = EasClient.getEasClient()
-      const { itemSeeds } = await easClient.request(GET_SEEDS, {
+      const { itemSeeds } = await easClient.request(GET_SEEDS_LEAN, {
         where,
         take: 1000,
         skip: 0,
       })
-      return (itemSeeds ?? []) as AttestationLike[]
+      // Every seed matched `schemaName`; the lean query doesn't select it.
+      return (itemSeeds ?? []).map((seed) => ({
+        ...seed,
+        schema: { schemaNames: [{ name: schemaName }] },
+      })) as AttestationLike[]
     },
 
     async getVersionsForSeed(seedUid: string): Promise<AttestationLike[]> {
@@ -110,15 +108,7 @@ export function createRemoteQueryDataSource(): QueryDataSource {
 
     async getSeedsByUids(uids: string[]): Promise<AttestationLike[]> {
       if (uids.length === 0) return []
-      const easClient = EasClient.getEasClient()
-      const { itemSeeds } = await easClient.request(GET_SEEDS, {
-        where: withExcludeRevokedFilter({
-          id: { in: uids },
-        }),
-        take: uids.length || 1,
-        skip: 0,
-      })
-      return (itemSeeds ?? []) as AttestationLike[]
+      return (await getSeedsByUidsFromEas({ uids })) as AttestationLike[]
     },
   }
 }
