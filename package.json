@@ -104,7 +104,7 @@
     "build:feed-hyper": "node scripts/build-with-tests.js \"cd packages/feed-hyper && bun run build\"",
     "build:gateway-hyper": "node scripts/build-with-tests.js \"cd packages/gateway-hyper && bun run build\"",
     "build:react": "node scripts/build-with-tests.js \"bun run --filter @seedprotocol/react build\"",
-    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:eas && bun run build:arweave && bun run build:query && bun run build:feed && bun run build:feed-hyper && bun run build:gateway-hyper && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev && bun run build:publish && bun run build:mapping && bun run build:react\"",
+    "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && bun run build:eas && bun run build:arweave && bun run build:query && bun run build:feed && bun run build:feed-hyper && bun run build:gateway-hyper && bun run build:vite && bun run --filter @seedprotocol/sdk build:dev && bun run build:react && bun run build:publish && bun run build:mapping\"",
     "clean": "rimraf coverage build tmp",
     "lint": "eslint .",
     "test": "vitest run --reporter=default && bun run --filter @seedprotocol/vite test && bun run --filter @seedprotocol/query test && bun run --filter @seedprotocol/eas test && node scripts/check-tier1-package-boundary.js && node scripts/check-browser-entry-graph.js --fail && node scripts/check-eas-sdk-node-import.js && bun run test:scripts",
