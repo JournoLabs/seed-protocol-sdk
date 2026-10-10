@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/feed",
   "version": "0.7.1",
-  "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
+  "description": "RSS 2.0, Atom and JSON Feed generation for Seed Protocol items, with HTTP handlers, ETag caching and RFC 5005 archives",
+  "keywords": [
+    "seed-protocol",
+    "rss",
+    "atom",
+    "json-feed",
+    "feed",
+    "syndication",
+    "eas",
+    "arweave"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

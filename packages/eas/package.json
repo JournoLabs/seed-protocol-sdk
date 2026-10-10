@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/eas",
   "version": "0.7.1",
-  "description": "EAS GraphQL read client and helpers for Seed Protocol",
+  "description": "Read-only Ethereum Attestation Service (EAS) GraphQL client for Seed Protocol: seed, version and property attestation queries plus chain/indexer resolution",
+  "keywords": [
+    "seed-protocol",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "easscan",
+    "graphql",
+    "ethereum",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

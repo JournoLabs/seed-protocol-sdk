@@ -1,7 +1,16 @@
 {
   "name": "@seedprotocol/mapping",
   "version": "0.7.1",
-  "description": "Source-to-model-property field mapping helpers and UI for Seed Protocol",
+  "description": "Map markdown and RSS/Atom sources onto Seed Protocol model properties: headless mapping helpers plus an optional React FieldMapper UI",
+  "keywords": [
+    "seed-protocol",
+    "mapping",
+    "field-mapping",
+    "rss",
+    "markdown",
+    "import",
+    "react"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

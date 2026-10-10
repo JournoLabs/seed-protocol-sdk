@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/query",
   "version": "0.7.1",
-  "description": "Canonical Seed JSON query (remote EAS + local SQLite adapters) for Seed Protocol",
+  "description": "Read canonical Seed Protocol JSON (seeds, collections, changelogs) from EAS attestations or a local SQLite source, with memory and disk caching",
+  "keywords": [
+    "seed-protocol",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "query",
+    "arweave",
+    "sqlite",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

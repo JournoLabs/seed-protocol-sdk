@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/gateway-hyper",
   "version": "0.7.1",
-  "description": "Hyperswarm HTTP tunnel for Seed Protocol gateway + upload API infrastructure",
+  "description": "HyperDHT HTTP tunnel that exposes a Seed Protocol gateway and upload API through a local sidecar or app-server proxy",
+  "keywords": [
+    "seed-protocol",
+    "hyperdht",
+    "holepunch",
+    "p2p",
+    "tunnel",
+    "gateway",
+    "arweave",
+    "cli"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

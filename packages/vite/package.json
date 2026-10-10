@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/vite",
   "version": "0.7.1",
-  "description": "Vite plugin for Seed Protocol browser/renderer apps",
+  "description": "Vite plugin for browser apps using @seedprotocol/sdk: Node polyfills, ZenFS aliases, CJS interop fixes and cross-origin isolation headers",
+  "keywords": [
+    "seed-protocol",
+    "vite",
+    "vite-plugin",
+    "zenfs",
+    "opfs",
+    "sqlite-wasm",
+    "polyfills",
+    "cross-origin-isolation"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

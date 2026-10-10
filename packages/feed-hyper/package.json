@@ -1,7 +1,17 @@
 {
   "name": "@seedprotocol/feed-hyper",
   "version": "0.7.1",
-  "description": "Hyperdrive / Hyperswarm distribution for Seed Protocol feeds",
+  "description": "Publish, seed and serve Seed Protocol feeds over Hyperdrive and Hyperswarm, with a localhost HTTP gateway and the seed-feed CLI",
+  "keywords": [
+    "seed-protocol",
+    "rss",
+    "feed",
+    "hyperdrive",
+    "hyperswarm",
+    "holepunch",
+    "p2p",
+    "cli"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

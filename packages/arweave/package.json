@@ -1,7 +1,15 @@
 {
   "name": "@seedprotocol/arweave",
   "version": "0.7.1",
-  "description": "Arweave gateway client and helpers for Seed Protocol",
+  "description": "Arweave gateway client for Seed Protocol: transaction reads, read-gateway selection with health probing, and gateway endpoint resolution",
+  "keywords": [
+    "seed-protocol",
+    "arweave",
+    "arweave-gateway",
+    "permaweb",
+    "decentralized-storage",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
