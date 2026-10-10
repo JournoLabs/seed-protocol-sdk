@@ -460,10 +460,13 @@ function expandRelationProperties(
   }
 }
 
+/** A record still being assembled (hydration fills in its data); read-only once returned. */
+type AssembledRecord = Omit<SeedRecord, 'data'> & { data: Record<string, unknown> }
+
 function toSeedRecords(
   ctx: AssembleContext,
   schemaName: string,
-): SeedRecord[] {
+): AssembledRecord[] {
   return Array.from(ctx.assembledItems.entries())
     .filter(([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName)
     .map(([seedUid, item]) => {

@@ -3,10 +3,14 @@ import type {
   CachedItemData,
   QueryCacheConfig,
 } from './types.js'
+import { defaultFreezeRecords } from './config.js'
+import { deepFreeze } from './freeze.js'
 
 /**
  * In-memory collection + item cache with TTL and refresh locks.
  * Entries expire `ttl` seconds after their `lastUpdated` (their last full assembly).
+ * Stored records are returned to callers by reference; with `freezeRecords` they are deep-frozen
+ * on the way in so a caller can't mutate them silently.
  */
 export class MemoryCache {
   private collectionCache: Map<string, CachedCollectionData> = new Map()
@@ -26,6 +30,10 @@ export class MemoryCache {
     return `${seedUid}:${optionsKey}`
   }
 
+  private get freezeRecords(): boolean {
+    return this.config.freezeRecords ?? defaultFreezeRecords()
+  }
+
   private expired(lastUpdated: number): boolean {
     return Math.floor(Date.now() / 1000) - lastUpdated > this.config.ttl
   }
@@ -42,6 +50,7 @@ export class MemoryCache {
   }
 
   setCollection(schemaName: string, optionsKey: string, data: CachedCollectionData): void {
+    if (this.freezeRecords) for (const item of data.items) deepFreeze(item)
     this.collectionCache.set(this.collectionKey(schemaName, optionsKey), data)
   }
 
@@ -57,6 +66,7 @@ export class MemoryCache {
   }
 
   setItem(data: CachedItemData): void {
+    if (this.freezeRecords) deepFreeze(data.record)
     this.itemCache.set(this.itemKey(data.record.seedUid, data.optionsKey), data)
   }
 

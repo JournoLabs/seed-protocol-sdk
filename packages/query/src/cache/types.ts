@@ -55,6 +55,11 @@ export type QueryCacheConfig = {
   enabled: boolean
   backgroundRefresh: boolean
   refreshInterval: number
+  /**
+   * Deep-freeze records as they enter the memory cache (set, or loaded from the persistent layer).
+   * Default: on unless NODE_ENV=production.
+   */
+  freezeRecords?: boolean
 }
 
 export type QueryCacheStats = {
