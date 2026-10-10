@@ -13,7 +13,9 @@
     "web3"
   ],
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.node.js",
+  "types": "./dist/index.node.d.ts",
+  "browser": "./dist/index.js",
   "exports": {
     ".": {
       "browser": {
