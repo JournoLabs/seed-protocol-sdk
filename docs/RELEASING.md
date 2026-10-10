@@ -108,7 +108,9 @@ Done by a maintainer with publish rights and 2FA.
    | `release.yml` | `preview` | Yes | Yes |
    | `cleanup-dist-tags.yml` | — | No (stage-only if npm requires one) | Yes |
 
-   The publish configurations can be created with npm 11.15 or later:
+   The publish configurations can be created with npm 11.15 or later (`--allow-publish`
+   is unknown before that). npm 12 needs Node 22 or 24 LTS or Node 26+, so on another
+   Node line use `npm install -g npm@11`:
 
    ```bash
    for p in eas arweave vite query sdk feed feed-hyper gateway-hyper react publish mapping; do
