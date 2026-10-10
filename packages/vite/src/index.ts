@@ -152,11 +152,20 @@ const EAS_OPTIMIZE_INCLUDES = [
 ] as const
 
 /**
- * Prebundled only when the app itself can resolve them (they come from
- * @seedprotocol/publish, not the SDK). Vite resolves `include` entries from the
- * app root, so finding them elsewhere in node_modules is not enough.
+ * Prebundled only when the app itself can resolve them. Vite resolves `include`
+ * entries from the app root, so finding them under a linked SDK is not enough
+ * (Vite would skip them with "Failed to resolve dependency"). The zenfs helpers
+ * are bundled into the @zenfs chunks anyway; viem/isows come from
+ * @seedprotocol/publish, not the SDK.
  */
-const APP_OPTIONAL_OPTIMIZE_INCLUDES = ['viem', 'isows'] as const
+const APP_OPTIONAL_OPTIMIZE_INCLUDES = [
+  'kerium',
+  'utilium',
+  'memium',
+  'readable-stream',
+  'viem',
+  'isows',
+] as const
 
 /** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
@@ -759,10 +768,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       const desiredOptimizeIncludes = [
         '@zenfs/core',
         '@zenfs/dom',
-        'kerium',
-        'utilium',
-        'memium',
-        'readable-stream',
         ...FRAGILE_RENDERER_OPTIMIZE_INCLUDES,
       ]
       const appRoot = path.resolve(userConfig.root ?? process.cwd())
