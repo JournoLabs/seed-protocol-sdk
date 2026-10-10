@@ -5,6 +5,7 @@ import {
   teardownTestEnvironment,
   SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /**
  * A property's storage settings (schema file `storage: { type, path, extension }`) are stored with
@@ -118,6 +119,6 @@ describe.sequential('ModelProperty storage settings from the DB', () => {
         localStorageDir: '/html',
         filenameSuffix: '.html',
       })
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
   })
 })

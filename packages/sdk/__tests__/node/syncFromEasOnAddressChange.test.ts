@@ -6,6 +6,7 @@ import {
   teardownTestEnvironment,
   SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const ownedAddr = '0x1234567890123456789012345678901234567890'
 const watchedAddr = '0x0987654321098765432109876543210987654321'
@@ -48,7 +49,7 @@ describe.sequential('syncFromEasOnAddressChange', () => {
       () => {
         expect(runSyncSpy).toHaveBeenCalled()
       },
-      { timeout: 5000 },
+      { timeout: WAIT_TIMEOUT_MS },
     )
     expect(runSyncSpy).toHaveBeenCalledWith({
       addresses: [ownedAddr, watchedAddr],

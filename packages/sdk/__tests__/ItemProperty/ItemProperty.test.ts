@@ -20,6 +20,7 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { waitForIdle, type HasService, waitForItemIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const waitForItemPropertyIdle = (property: HasService, timeout = 10000) =>
   waitForIdle(property, 'ItemProperty', timeout)
@@ -133,7 +134,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -218,7 +219,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -316,7 +317,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -363,7 +364,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           statusProperty.getService(),
           (snapshot) => !snapshot.context.isSaving,
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         const errors = statusProperty.saveValidationErrors
@@ -380,7 +381,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           statusProperty.getService(),
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         expect(statusProperty.saveValidationErrors).toHaveLength(0)
       }
@@ -403,7 +404,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Get property schema from model
@@ -490,7 +491,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -538,7 +539,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -606,7 +607,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -652,7 +653,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       const item = await Item.create({
         modelName: 'TestPost',
@@ -687,7 +688,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       const item = await Item.create({
         modelName: 'TestPost',
@@ -725,7 +726,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -788,7 +789,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -834,7 +835,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Set new value
         titleProperty.value = 'Updated Value'
 
-        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       }
     })
 
@@ -855,7 +856,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -934,7 +935,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1009,7 +1010,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1084,7 +1085,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1169,14 +1170,14 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         authorModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create author first
@@ -1289,14 +1290,14 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         tagModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const postModel = Model.create('Post', schemaName, { waitForReady: false })
       await waitFor(
         postModel.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create tags first
@@ -1411,7 +1412,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1529,7 +1530,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1602,7 +1603,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1656,7 +1657,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'New Value'
         
-        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
         
         // Unsubscribe
         subscription.unsubscribe()
@@ -1685,7 +1686,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1765,7 +1766,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1833,7 +1834,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1880,7 +1881,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         titleProperty.value = 'Updated'
         
         // Property value should be updated
-        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: 5000, interval: 50 })
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       }
     })
   })
@@ -1908,7 +1909,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const htmlContent = '<p>Hello World</p>'

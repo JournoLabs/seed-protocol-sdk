@@ -12,6 +12,7 @@ import { renameModelProperty } from '@/helpers/updateSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForItemIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 function createTestSchema(name: string, models: Record<string, any>): SchemaFileFormat {
   return {
@@ -86,7 +87,7 @@ testDescribe('Property Rename Metadata Migration', () => {
     await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
     const model = Model.create('Post', schemaName, { waitForReady: false })
-    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
     const item = await Item.create({
       modelName: 'Post',

@@ -8,6 +8,7 @@ import {
 } from '@/helpers/tabCoordinator'
 import { easSyncActor, requestEasSyncFromAddressChange, requestEasSyncFromModelsInit } from '@/events/item/easSyncManager'
 import { otherTab } from '../../test-utils/otherTab'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 describe('tab coordination', () => {
   const filesDir = `/tab-coord-${Math.random().toString(36).slice(2, 8)}`
@@ -66,7 +67,7 @@ describe('tab coordination', () => {
     tab = otherTab()
     const message = { type: 'eas-sync-address-change', addresses: ['0xdef'] }
     await tab.send({ type: 'post', channel: `seed:tabs:${dbKey}`, message }, 'posted')
-    await vi.waitFor(() => expect(received).toEqual([message]))
+    await vi.waitFor(() => expect(received).toEqual([message]), { timeout: WAIT_TIMEOUT_MS })
     unsubscribe()
   })
 

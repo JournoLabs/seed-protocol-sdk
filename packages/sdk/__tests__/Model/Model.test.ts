@@ -18,6 +18,7 @@ import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
 // Helper to create a test schema
@@ -193,7 +194,7 @@ testDescribe('Model Integration Tests', () => {
       
       // model.properties only returns ModelProperty instances already in the cache, which can lag the
       // liveQuery ids above, so poll for the instances
-      await vi.waitFor(() => expect((model.properties || []).length).toBe(2), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect((model.properties || []).length).toBe(2), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       expect(model.properties).toBeDefined()
       const modelProperties = model.properties || []
       expect(Array.isArray(modelProperties)).toBe(true)
@@ -449,7 +450,6 @@ testDescribe('Model Integration Tests', () => {
       await waitUntilOrThrow(
         async () => !!(await Model.getByNameAsync(modelName, schemaName)),
         `the imported model "${modelName}"`,
-        5000,
       )
       const TestModel = (await Model.getByNameAsync(modelName, schemaName))!
       
@@ -1015,7 +1015,7 @@ testDescribe('Model Integration Tests', () => {
       
       model.modelName = newName
 
-      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       
       expect(model.modelName).toBe(newName)
       expect(model.name).toBe(newName)
@@ -1186,7 +1186,7 @@ testDescribe('Model Integration Tests', () => {
       
       model.modelName = newName
 
-      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       
       // Model should still be accessible by new name
       const modelByName = Model.getByName(newName, schemaName)
@@ -1222,7 +1222,6 @@ testDescribe('Model Integration Tests', () => {
       await waitUntilOrThrow(
         async () => !!(await Model.getByNameAsync(modelName, schemaName)),
         `the imported model "${modelName}"`,
-        5000,
       )
       const model = (await Model.getByNameAsync(modelName, schemaName))!
       
@@ -1251,7 +1250,7 @@ testDescribe('Model Integration Tests', () => {
       model.modelName = newName
       
       // Verify name changed in memory
-      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: WAIT_TIMEOUT_MS, interval: 50 })
       expect(model.name).toBe(newName)
 
       // Verify database was updated with new name (the save is asynchronous, so poll)
@@ -1266,7 +1265,7 @@ testDescribe('Model Integration Tests', () => {
             expect(rows.length).toBeGreaterThan(0)
             return rows
           },
-          { timeout: 5000, interval: 50 },
+          { timeout: WAIT_TIMEOUT_MS, interval: 50 },
         )
         expect(dbModels[0].name).toBe(newName)
 

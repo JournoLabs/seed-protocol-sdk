@@ -339,7 +339,7 @@ testDescribe('republish after unpublish', () => {
 
     // Unpublish, then republish (as in the test above): the seed gets a new uid.
     await updateSeedRevokedAt({ seedLocalId, revokedAt: Math.floor(Date.now() / 1000) })
-    await waitUntilOrThrow(() => loaded.isRevoked, 'the item to observe the unpublish', 5000)
+    await waitUntilOrThrow(() => loaded.isRevoked, 'the item to observe the unpublish')
     const newSeedUid = nextUid()
     await updateVersionUid({ seedLocalId, versionUid: nextUid(), publisher })
     ;(loaded as { seedUid?: string }).seedUid = newSeedUid
@@ -353,7 +353,6 @@ testDescribe('republish after unpublish', () => {
     await waitUntilOrThrow(
       () => loaded.revokedAt === revokedAgainAt,
       'the item to observe revoked_at on its republished seed',
-      5000,
     )
 
     const syncedSeedUid = nextUid()
@@ -361,7 +360,6 @@ testDescribe('republish after unpublish', () => {
     await waitUntilOrThrow(
       () => loaded.seedUid === syncedSeedUid && !loaded.isRevoked,
       'the item to observe a seed uid written elsewhere',
-      5000,
     )
     const cache = (Item as any).instanceCache as Map<string, unknown>
     expect(cache.has(newSeedUid)).toBe(false)
@@ -381,7 +379,7 @@ testDescribe('republish after unpublish', () => {
 
     // Unpublished; the item's seed liveQuery observes it.
     await updateSeedRevokedAt({ seedLocalId, revokedAt: Math.floor(Date.now() / 1000) })
-    await waitUntilOrThrow(() => item.isRevoked, 'the item to observe the unpublish', 5000)
+    await waitUntilOrThrow(() => item.isRevoked, 'the item to observe the unpublish')
 
     // A second watch on the same row tells the test when an emission was delivered.
     const watched: { uid: string | null; updatedAt: number | null }[] = []
@@ -410,7 +408,6 @@ testDescribe('republish after unpublish', () => {
       await waitUntilOrThrow(
         () => watched.some((r) => r.updatedAt === staleAt && r.uid === oldSeedUid),
         'the liveQuery to deliver the old seed row',
-        5000,
       )
       // Both watches are notified by the same change; let the item's handler run.
       await new Promise((r) => setTimeout(r, 50))
@@ -426,14 +423,12 @@ testDescribe('republish after unpublish', () => {
       await waitUntilOrThrow(
         () => watched.some((r) => r.uid === newSeedUid),
         'the liveQuery to deliver the persisted seed row',
-        5000,
       )
       const revokedAgainAt = Math.floor(Date.now() / 1000) + 11
       await updateSeedRevokedAt({ seedLocalId, revokedAt: revokedAgainAt })
       await waitUntilOrThrow(
         () => item.revokedAt === revokedAgainAt,
         'the item to observe revoked_at on its republished seed',
-        5000,
       )
       expect(item.seedUid).toBe(newSeedUid)
     } finally {

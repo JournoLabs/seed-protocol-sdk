@@ -20,6 +20,7 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { waitForItemIdle } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -126,7 +127,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -166,7 +167,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -237,7 +238,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -277,7 +278,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await model.create()
@@ -312,7 +313,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await model.create({ title: 'Initial Title' })
@@ -354,7 +355,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item - should work even if Model instance is not passed
@@ -389,7 +390,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -444,7 +445,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item first
@@ -525,7 +526,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const createdItem = await Item.create({
@@ -571,7 +572,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create multiple items
@@ -649,7 +650,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item1 = await Item.create({
@@ -696,7 +697,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -735,7 +736,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item
@@ -796,7 +797,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item
@@ -833,7 +834,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       const model = Model.create('TestPost', schemaName, { waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const item = await Item.create({ modelName: 'TestPost', schemaName, title: 'Peek' })
       await waitForItemIdle(item)
@@ -876,7 +877,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item
@@ -941,7 +942,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item
@@ -987,7 +988,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 },
+        { timeout: WAIT_TIMEOUT_MS },
       )
 
       const item = await Item.create({
@@ -1056,7 +1057,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       // Create item without passing modelInstance
@@ -1111,7 +1112,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(staleSchema) }, staleSchema.version)
       const staleModel = Model.create('SharedPost', staleSchemaName, { modelFileId: staleModelId, waitForReady: false })
-      await waitFor(staleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(staleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const db = BaseDb.getAppDb()
       const [staleSchemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, staleSchemaName))
@@ -1133,7 +1134,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
       const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const item = await Item.create({ modelName: 'SharedPost', title: 'Shared name' })
       await waitForItemIdle(item)
@@ -1151,7 +1152,7 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(otherSchema) }, otherSchema.version)
       const otherModel = Model.create('SharedPost', otherSchemaName, { modelFileId: otherModelId, waitForReady: false })
-      await waitFor(otherModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(otherModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const schemaName = 'Test Schema Item Reimported Shared Name'
       const modelId = generateId()
@@ -1160,18 +1161,23 @@ testDescribe('Item Integration Tests', () => {
       })
       await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
       const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
-      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
       // a deleted DB id (no properties) while the other schema's Model is still cached.
       // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
       // Let both Models' own writes finish first, or one can fail or recreate rows after the deletes.
+      // Check writeStatus, not the state: `success` returns to `idle` after 2s, so on a slow run the
+      // first model's write has often finished before we look, and waiting for the state never ends.
       for (const m of [otherModel, model]) {
-        const writeProcess = (await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess)).context
-          .writeProcess!
-        await waitFor(writeProcess, (snapshot) => snapshot.value === 'success' || snapshot.value === 'error', {
-          timeout: 5000,
-        })
+        const writeProcess = (
+          await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess, { timeout: WAIT_TIMEOUT_MS })
+        ).context.writeProcess!
+        await waitFor(
+          writeProcess,
+          (snapshot) => snapshot.context.writeStatus === 'success' || snapshot.context.writeStatus === 'error',
+          { timeout: WAIT_TIMEOUT_MS },
+        )
       }
       const db = BaseDb.getAppDb()
       const schemaIds: number[] = []
@@ -1221,7 +1227,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1259,7 +1265,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({
@@ -1324,7 +1330,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -1368,7 +1374,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const createdItem = await Item.create({
@@ -1413,7 +1419,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -1443,7 +1449,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -1477,7 +1483,7 @@ testDescribe('Item Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       
       const item = await Item.create({

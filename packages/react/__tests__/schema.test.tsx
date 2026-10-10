@@ -29,6 +29,7 @@ import type { SnapshotFrom } from 'xstate'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { waitUntilOrThrow } from './test-utils/waitUntil'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema data
 const testSchema1: SchemaFileFormat = {
@@ -614,7 +615,7 @@ describe(
           const status = screen.getByTestId('schema-status')
           expect(status.textContent).toBe('not-loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -756,7 +757,7 @@ describe(
           const isLoading = screen.getByTestId('is-loading')
           expect(isLoading.textContent).toBe('false')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -1087,7 +1088,7 @@ describe(
             }
             expect(dbSchemas.length).toBeGreaterThan(0)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         
         // Also verify it's visible in a full query (same as loadAllSchemasFromDb uses)
@@ -1162,7 +1163,7 @@ describe(
           const createButton = screen.getByTestId('create-button')
           expect(createButton).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const createButton = screen.getByTestId('create-button')
@@ -1173,7 +1174,7 @@ describe(
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('true')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for completion (either success or error)
@@ -1219,14 +1220,14 @@ describe(
           const resetBtn = screen.getByTestId('reset-error-button')
           expect(resetBtn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       // If there was an error from a previous test, resetError should clear it
       const resetBtn = screen.getByTestId('reset-error-button')
       resetBtn.click()
       await waitFor(() => {
         expect(screen.queryByTestId('create-error')).toBeNull()
-      }, { timeout: 1000 })
+      }, { timeout: WAIT_TIMEOUT_MS })
     })
   })
 
@@ -1239,7 +1240,7 @@ describe(
           const createBtn = screen.getByTestId('create-for-destroy-button')
           expect(createBtn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-for-destroy-button').click()
@@ -1248,7 +1249,7 @@ describe(
         () => {
           expect(screen.getByTestId('destroy-status').textContent).toBe('created')
         },
-        { timeout: 3000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-button').click()
@@ -1257,7 +1258,7 @@ describe(
         () => {
           expect(screen.getByTestId('destroy-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -1265,7 +1266,7 @@ describe(
           expect(screen.getByTestId('destroy-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('destroy-status').textContent).toBe('destroyed')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const status = screen.getByTestId('destroy-status')
@@ -1356,7 +1357,6 @@ describe(
       await waitUntilOrThrow(
         () => (schemaInstance.models || []).some((m: any) => m.modelName === 'New model'),
         'the schema instance to list "New model"',
-        5000,
       )
 
       // Wait for the model to appear in the UI (React component should re-render)

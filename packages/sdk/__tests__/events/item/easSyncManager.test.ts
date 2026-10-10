@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createActor } from 'xstate'
 import { easSyncMachine } from '@/events/item/easSyncManager'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 // vi.mock rather than vi.spyOn on the module namespace: ESM namespaces aren't configurable in browser
 // mode ("Module namespace is not configurable in ESM").
@@ -46,7 +47,7 @@ describe('easSyncMachine', () => {
       options: { addresses: ['0xAa'] },
       source: 'client_api',
     })
-    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1), { timeout: WAIT_TIMEOUT_MS })
 
     actor.send({
       type: 'REQUEST',
@@ -58,7 +59,7 @@ describe('easSyncMachine', () => {
     expect(runSpy).toHaveBeenCalledTimes(1)
 
     releaseFirst!()
-    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(2), { timeout: WAIT_TIMEOUT_MS })
     expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xAa', '0xbb'] })
 
     actor.stop()

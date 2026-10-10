@@ -19,6 +19,7 @@ import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 const TEST_SCHEMA_ITEMS_HOOKS_NAME = 'Test Schema Items Hooks'
 
@@ -381,7 +382,7 @@ describe('React Item Hooks Integration Tests', () => {
     await xstateWaitFor(
       postModel.getService(),
       (snapshot) => snapshot.value === 'idle',
-      { timeout: 5000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
 
     testItem1 = await Item.create({
@@ -418,7 +419,7 @@ describe('React Item Hooks Integration Tests', () => {
     await xstateWaitFor(
       articleModel.getService(),
       (snapshot) => snapshot.value === 'idle',
-      { timeout: 5000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
 
     testArticleItem = await Item.create({
@@ -462,7 +463,7 @@ describe('React Item Hooks Integration Tests', () => {
           const status = screen.getByTestId('item-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const nullIndicator = screen.queryByTestId('item-null')
@@ -488,7 +489,7 @@ describe('React Item Hooks Integration Tests', () => {
               .limit(1)
             expect(seedRows.length).toBeGreaterThan(0)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
       }
 
@@ -797,7 +798,7 @@ describe('React Item Hooks Integration Tests', () => {
           const status = screen.getByTestId('items-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('items-count')
@@ -1050,7 +1051,7 @@ describe('React Item Hooks Integration Tests', () => {
 
       // 2. Edit the ItemProperty via the React component (simulates user editing)
       // Use findByTestId to avoid race where item unmounts between waitFor and getByTestId
-      const editButton = await screen.findByTestId('edit-title-button', {}, { timeout: 5000 })
+      const editButton = await screen.findByTestId('edit-title-button', {}, { timeout: WAIT_TIMEOUT_MS })
       editButton.click()
 
       // 3. Wait for edit/save to complete
@@ -1079,7 +1080,7 @@ describe('React Item Hooks Integration Tests', () => {
             )
             expect(rows.length).toBeGreaterThan(0)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
       }
 
@@ -1153,7 +1154,7 @@ describe('React Item Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-item-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('create-item-is-loading').textContent).toBe('false')
@@ -1176,7 +1177,7 @@ describe('React Item Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-item-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-item-button').click()
@@ -1185,7 +1186,7 @@ describe('React Item Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('create-item-is-loading').textContent).toBe('true')
         },
-        { timeout: 3000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const result = await Promise.race([
@@ -1208,7 +1209,7 @@ describe('React Item Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(true)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
@@ -1223,7 +1224,7 @@ describe('React Item Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -1231,7 +1232,7 @@ describe('React Item Hooks Integration Tests', () => {
           expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('delete-item-error').textContent).toBe('stub delete failed')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('delete-item-reset-error').click()
@@ -1253,7 +1254,7 @@ describe('React Item Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(false)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       scope.getByTestId('delete-item-button').click()
@@ -1262,7 +1263,7 @@ describe('React Item Hooks Integration Tests', () => {
         () => {
           expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('true')
         },
-        { timeout: 3000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for final status (deleted or error) to appear
@@ -1275,7 +1276,7 @@ describe('React Item Hooks Integration Tests', () => {
         () => {
           expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('false')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
   })

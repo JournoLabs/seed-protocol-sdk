@@ -18,6 +18,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { waitFor as xstateWaitFor } from 'xstate'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 const testSchemaHtmlPersistence: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -128,7 +129,7 @@ describe('Html property persistence integration tests', () => {
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',
-      { timeout: 5000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
 
     testItem = await Item.create({
