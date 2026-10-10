@@ -46,6 +46,11 @@
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
+    "directory": "packages/sdk"
+  },
   "optionalDependencies": {
     "@tanstack/react-query": "^5.104.1",
     "@zenfs/core": "2.5.6",

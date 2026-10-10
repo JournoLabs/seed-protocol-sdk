@@ -1,0 +1,43 @@
+# Removes a deleted branch's dist-tag from every public package. See docs/RELEASING.md.
+#
+# `delete` runs this file from the default branch. npm trusted publishing names
+# this file (dist-tag permission only), so keep the filename.
+
+name: Clean up branch dist-tags
+
+on: delete
+
+permissions:
+  contents: read
+
+concurrency:
+  # Same group as release.yml for this branch, so a running publish finishes first.
+  group: release-refs/heads/${{ github.event.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  NPM_VERSION: '12.2.0'
+
+jobs:
+  cleanup:
+    name: Remove branch dist-tag
+    if: github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install -g "npm@$NPM_VERSION"
+
+      - env:
+          DELETED_BRANCH: ${{ github.event.ref }}
+          MAIN_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/cleanup-dist-tags.js

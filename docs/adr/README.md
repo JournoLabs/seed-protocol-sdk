@@ -15,6 +15,7 @@ ADR records the decision a study led to.
 | [0004](0004-opfs-files-manager-behavior.md) | OPFSFilesManager: thumbnails, grouping, downloads, and deletes | Accepted |
 | [0005](0005-shared-design-system.md) | A shared design system for exported UI | Proposed |
 | [0006](0006-schema-scoped-seeds.md) | Schemas scope seeds on the client, not on-chain | Accepted |
+| [0007](0007-ci-publishing-and-branch-prereleases.md) | Publish from CI with trusted publishing, and prerelease every branch | Accepted |
 
 ## Writing one
 
