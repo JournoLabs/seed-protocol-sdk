@@ -117,5 +117,6 @@ export {
   hydrateArweaveRichTextInItems,
   hydrateArweaveRichTextInFeedItems,
   isArweaveTransactionGatewayUrl,
+  resetArweaveBodyCache,
 } from './hydrateArweaveRichText.js'
 export type { HydrateStorageOptions } from './hydrateArweaveRichText.js'
