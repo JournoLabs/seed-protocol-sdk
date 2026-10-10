@@ -51,8 +51,6 @@
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
-    "@seedprotocol/react": "workspace:*",
-    "@seedprotocol/sdk": "workspace:*",
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
@@ -65,6 +63,8 @@
     "xstate": "^5.28.0"
   },
   "devDependencies": {
+    "@seedprotocol/react": "workspace:*",
+    "@seedprotocol/sdk": "workspace:*",
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -76,6 +76,8 @@
     "vite": "^8.0.0"
   },
   "peerDependencies": {
+    "@seedprotocol/sdk": "^0.7.0",
+    "@seedprotocol/react": "^0.7.0",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
     "thirdweb": "^5",

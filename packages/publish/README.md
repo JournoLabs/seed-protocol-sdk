@@ -13,12 +13,12 @@ The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `ge
 ## Installation
 
 ```bash
-npm install @seedprotocol/publish @seedprotocol/sdk react react-dom @tanstack/react-query
+npm install @seedprotocol/publish @seedprotocol/sdk @seedprotocol/react react react-dom @tanstack/react-query
 # Optional, only for @seedprotocol/publish/thirdweb (ConnectButton, in-app / managed wallets):
 npm install thirdweb
 ```
 
-Peer dependencies: `react` / `react-dom` 18 or 19, `@tanstack/react-query` 5, and optionally `thirdweb` 5.
+Peer dependencies: `@seedprotocol/sdk` and `@seedprotocol/react` (same minor version as this package), `react` / `react-dom` 18 or 19, `@tanstack/react-query` 5, and optionally `thirdweb` 5. The SDK is a peer so your app and this package share one SDK instance (one client, one local database).
 
 ## Setup
 
