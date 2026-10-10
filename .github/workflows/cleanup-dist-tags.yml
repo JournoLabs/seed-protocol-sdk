@@ -1,7 +1,9 @@
 # Removes a deleted branch's dist-tag from every public package. See docs/RELEASING.md.
 #
 # `delete` runs this file from the default branch. npm trusted publishing names
-# this file (dist-tag permission only), so keep the filename.
+# this file and the `cleanup` environment (dist-tag permission only), so keep the
+# filename. The environment is limited to the default branch, so a branch can't
+# borrow the configuration by pushing its own copy of this file.
 
 name: Clean up branch dist-tags
 
@@ -24,6 +26,7 @@ jobs:
     name: Remove branch dist-tag
     if: github.event.ref_type == 'branch'
     runs-on: ubuntu-latest
+    environment: cleanup
     permissions:
       contents: read
       id-token: write

@@ -106,9 +106,9 @@ Done by a maintainer with publish rights and 2FA.
    |---|---|---|---|
    | `release.yml` | `release` | Yes | Yes |
    | `release.yml` | `preview` | Yes | Yes |
-   | `cleanup-dist-tags.yml` | — | No (stage-only if npm requires one) | Yes |
+   | `cleanup-dist-tags.yml` | `cleanup` | Stage publish only (npm requires one) | Yes |
 
-   The publish configurations can be created with npm 11.15 or later (`--allow-publish`
+   The configurations can be created with npm 11.15 or later (`--allow-publish`
    is unknown before that). npm 12 needs Node 22 or 24 LTS or Node 26+, so on another
    Node line use `npm install -g npm@11`:
 
@@ -116,14 +116,18 @@ Done by a maintainer with publish rights and 2FA.
    for p in eas arweave vite query sdk feed feed-hyper gateway-hyper react publish mapping; do
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env release --allow-publish -y
      npm trust github "@seedprotocol/$p" --file release.yml --repo JournoLabs/seed-protocol-sdk --env preview --allow-publish -y
+     npm trust github "@seedprotocol/$p" --file cleanup-dist-tags.yml --repo JournoLabs/seed-protocol-sdk --env cleanup --allow-stage-publish -y
    done
    ```
 
-   "Allow npm dist-tag" is off by default; turn it on for each configuration in the
+   The CLI can't grant dist-tag rights and needs at least one publish permission, so the
+   cleanup configuration gets stage publish, which can't go live without 2FA approval.
+   "Allow npm dist-tag" is off by default; turn it on for every configuration in the
    package's settings on npmjs.com.
 2. **GitHub environments** (Settings → Environments):
    - `release`, with deployment tags limited to `v*`.
    - `preview`, allowing all branches.
+   - `cleanup`, with deployment branches limited to `main`.
 3. **After the first CI publish succeeds:**
    - Revoke the old npm token and delete the `NPM_TOKEN` repository secret.
    - Set each package to "Require two-factor authentication and disallow tokens".

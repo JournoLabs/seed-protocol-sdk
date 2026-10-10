@@ -51,8 +51,9 @@ Publish only from CI, as described in [RELEASING.md](../RELEASING.md):
 - **Trusted publishing, no token.**
   - Tag builds use a configuration bound to the `release` environment (`v*` tags only).
   - Branch builds use one bound to `preview`.
-  - Branch deletion runs `cleanup-dist-tags.yml` under a configuration that can only
-    manage dist-tags.
+  - Branch deletion runs `cleanup-dist-tags.yml` under a configuration bound to the
+    `cleanup` environment (`main` only) that can manage dist-tags and stage, but not
+    publish.
 
 ## Consequences
 
