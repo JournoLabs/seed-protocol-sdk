@@ -1,12 +1,7 @@
 import { assign, setup } from 'xstate'
 import { MachineIds } from '@/client/constants'
-import { ItemMachineContext, HydrateExistingItemEvent } from '@/types'
+import { ItemMachineContext } from '@/types'
 import { waitForDb } from './actors/waitForDb'
-import { initialize } from './actors/initialize'
-import { hydrateExistingItem } from './actors/hydrateExistingItem'
-import { hydrateNewItem } from './actors/hydrateNewItem'
-import { fetchDataFromEas } from './actors/fetchDataFromEas'
-import { reload } from './actors/reload'
 import { loadOrCreateItem } from './actors/loadOrCreateItem'
 import { runPublish } from './actors/runPublish'
 import { IItemProperty } from '@/interfaces'
@@ -20,11 +15,6 @@ export const itemMachineSingle = setup({
   actors: {
     waitForDb,
     loadOrCreateItem,
-    initialize,
-    hydrateExistingItem,
-    hydrateNewItem,
-    fetchDataFromEas,
-    reload,
     runPublish,
   },
 }).createMachine({
@@ -106,16 +96,11 @@ export const itemMachineSingle = setup({
         }
       }),
     },
-    reload: '.reloading',
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           (event as { type: 'destroyError'; error: unknown }).error instanceof Error
             ? {
@@ -124,9 +109,6 @@ export const itemMachineSingle = setup({
               }
             : { message: String((event as { type: 'destroyError'; error: unknown }).error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
   },
   states: {
@@ -194,6 +176,7 @@ export const itemMachineSingle = setup({
               seedLocalId: item.seedLocalId || context.seedLocalId,
               seedUid: item.seedUid || context.seedUid,
               schemaUid: item.schemaUid || context.schemaUid,
+              modelFileId: item.modelFileId || context.modelFileId,
               latestVersionLocalId: item.latestVersionLocalId || context.latestVersionLocalId,
               latestVersionUid: item.latestVersionUid || context.latestVersionUid,
               versionsCount: item.versionsCount || context.versionsCount,
@@ -216,73 +199,5 @@ export const itemMachineSingle = setup({
       },
     },
     error: {},
-    initializing: {
-      on: {
-        hasExistingItem: {
-          target: 'idle',
-          actions: assign({
-            modelTableName: ({ event }) => event.modelTableName,
-            modelNamePlural: ({ event }) => event.modelNamePlural,
-            modelName: ({ event }) => event.modelName,
-            existingItem: ({ event }) => event.existingItem,
-          }),
-        },
-        isNewItem: {
-          target: 'idle',
-          actions: assign({
-            modelTableName: ({ event }) => event.modelTableName,
-            modelNamePlural: ({ event }) => event.modelNamePlural,
-            modelName: ({ event }) => event.modelName,
-          }),
-        },
-      },
-      invoke: {
-        src: 'initialize',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    hydratingExistingItem: {
-      on: {
-        hydrateExistingItemSuccess: 'idle',
-        hydrateExistingItemFailure: 'destroying',
-      },
-      invoke: {
-        src: 'hydrateExistingItem',
-        input: ({ event, context }) => ({ 
-          event: event as HydrateExistingItemEvent, 
-          context 
-        }),
-      },
-    },
-    hydratingNewItem: {
-      on: {
-        hydrateNewItemSuccess: 'idle',
-      },
-      invoke: {
-        src: 'hydrateNewItem',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    fetchingRemoteData: {
-      on: {
-        fetchDataFromEasSuccess: 'idle',
-      },
-      invoke: {
-        src: 'fetchDataFromEas',
-        input: ({ context }: { context: ItemMachineContext<any> }) => ({ context }),
-      },
-    },
-    reloading: {
-      on: {
-        reloadSuccess: 'idle',
-      },
-      invoke: {
-        src: 'reload',
-        input: ({ context }) => ({ context }),
-      },
-    },
-    destroying: {
-      type: 'final',
-    },
   },
 })

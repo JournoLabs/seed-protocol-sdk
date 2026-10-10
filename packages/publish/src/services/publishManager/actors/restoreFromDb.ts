@@ -3,6 +3,7 @@ import { createActor, EventObject, fromCallback } from 'xstate'
 import { eq } from 'drizzle-orm'
 import { publishMachine } from '../../publish'
 import { subscribe } from './subscribe'
+import { tryHoldPublishLock } from '../publishLocks'
 
 const RESTORE_DB_WAIT_MS = 60_000
 const RESTORE_DB_POLL_MS = 2_000
@@ -169,6 +170,8 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
         const seedLocalId = parsed.context?.item?.seedLocalId ?? publishProcessRecord.seedLocalId
         if (!seedLocalId) continue
         if (!isRestorableSnapshot(parsed)) continue
+        // Another open tab is already running this publish; it keeps it.
+        if (!(await tryHoldPublishLock(seedLocalId))) continue
 
         // Item is an SDK class instance; persistence loses getters. Also strip mistaken XState actor stubs on item.
         patchPublishContextItemForRestore(parsed, seedLocalId, publishProcessRecord)

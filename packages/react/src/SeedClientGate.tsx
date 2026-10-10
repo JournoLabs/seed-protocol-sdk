@@ -1,4 +1,4 @@
-import React, { useEffect, type ReactNode } from 'react'
+import React, { useEffect, useRef, type ReactNode } from 'react'
 import { client } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SeedConfig, SchemaFileFormat } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
@@ -31,6 +31,12 @@ export type SeedClientGateProps = {
   loadingComponent?: ReactNode
   /** @deprecated Schema is now loaded at init via config.schema; no separate import. Kept for backward compatibility. */
   onSchemaImportError?: (err: unknown) => void
+  /**
+   * Called when client init fails; children stay hidden behind the loading UI. A
+   * `FileSystemLockedError` (`code === 'OPFS_LOCKED'`) means another tab is using the app's
+   * storage: offer "close other tabs / retry", where retry calls `client.init` again.
+   */
+  onInitError?: (err: unknown) => void
   /** Class for the root wrapper. e.g. "relative flex h-screen w-screen" */
   wrapperClassName?: string
   /** Class for the loading overlay. e.g. "absolute inset-0 z-50 flex items-center justify-center bg-zinc-950" */
@@ -50,9 +56,13 @@ export function SeedClientGate({
   loadingComponent,
   wrapperClassName,
   loadingClassName,
+  onInitError,
   children,
 }: SeedClientGateProps) {
   const isClientReady = useIsClientReady()
+  // Kept in a ref so an inline callback doesn't re-run init on every render.
+  const onInitErrorRef = useRef(onInitError)
+  onInitErrorRef.current = onInitError
 
   useEffect(() => {
     const effectiveConfig: SeedConstructorOptions = schema
@@ -64,7 +74,13 @@ export function SeedClientGate({
           } as SeedConfig,
         }
       : initConfig
-    client.init(effectiveConfig)
+    client.init(effectiveConfig).catch((err: unknown) => {
+      if (onInitErrorRef.current) {
+        onInitErrorRef.current(err)
+      } else {
+        console.error('[SeedClientGate] client init failed', err)
+      }
+    })
   }, [initConfig, schema])
 
   const loadingContent = loadingComponent ?? <DefaultLoading />

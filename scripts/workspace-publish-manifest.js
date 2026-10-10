@@ -68,7 +68,7 @@ function writePackageJson(manifestPath, data) {
 
 /**
  * @param {string} rootDir - monorepo root (directory containing packages/)
- * @param {string} packageDir - relative path e.g. packages/cli
+ * @param {string} packageDir - relative path e.g. packages/sdk
  * @returns {{ manifestPath: string, backup: string }}
  */
 export function preparePublishManifest(rootDir, packageDir) {

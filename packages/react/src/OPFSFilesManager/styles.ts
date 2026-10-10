@@ -151,6 +151,12 @@ const CSS = `
 .seed-fm-folder > span { min-width: 0; display: flex; flex-direction: column; }
 .seed-fm-folder-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seed-fm-folder-meta { font-size: 11.5px; color: var(--seed-fg-muted); font-variant-numeric: tabular-nums; }
+.seed-fm-folders li { position: relative; }
+.seed-fm-folders li .seed-fm-folder { padding-right: 40px; }
+.seed-fm-folder-delete.seed-fm-btn { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); width: 28px; height: 28px; color: var(--seed-fg-muted); opacity: 0; }
+.seed-fm-folders li:hover .seed-fm-folder-delete, .seed-fm-folder-delete.seed-fm-btn:focus-visible { opacity: 1; }
+.seed-fm-folder-delete.seed-fm-btn:hover:not(:disabled) { color: var(--seed-danger); }
+@media (hover: none) { .seed-fm-folder-delete.seed-fm-btn { opacity: 1; } }
 
 .seed-fm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
 .seed-fm-tile { position: relative; border-radius: var(--seed-radius-lg); cursor: pointer; min-width: 0; outline: none; }
@@ -271,6 +277,9 @@ const CSS = `
 .seed-fm-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .seed-fm-warning { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--seed-radius-md); background: var(--seed-warn-soft); color: var(--seed-warn); font-size: 12.5px; }
 .seed-fm-warning svg { margin-top: 1px; }
+.seed-fm-irreversible { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--seed-radius-md); background: var(--seed-danger-soft); color: var(--seed-danger); font-size: 12.5px; }
+.seed-fm-irreversible svg { flex: none; margin-top: 1px; }
+.seed-fm-keepcopy { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px dashed var(--seed-border); border-radius: var(--seed-radius-md); font-size: 12.5px; color: var(--seed-fg-muted); }
 
 .seed-fm-toasts { position: fixed; left: 16px; bottom: 16px; z-index: 1001; display: flex; flex-direction: column; gap: 8px; pointer-events: none; margin: 0; padding: 0; list-style: none; }
 .seed-fm-toast { display: flex; align-items: center; gap: 8px; max-width: min(420px, calc(100vw - 32px)); padding: 9px 12px; background: var(--seed-surface); color: var(--seed-fg); border: 1px solid var(--seed-border); border-radius: var(--seed-radius-md); box-shadow: var(--seed-shadow); font-size: 13px; animation: seed-fm-toast-in 0.18s ease-out; }

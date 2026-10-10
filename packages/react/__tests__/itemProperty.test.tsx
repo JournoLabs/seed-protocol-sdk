@@ -16,9 +16,7 @@ import {
   client,
   BaseDb,
   schemas,
-  seeds,
   metadata,
-  modelSchemas,
   properties as propertiesTable,
   models as modelsTable,
   importJsonSchema,
@@ -31,10 +29,14 @@ import {
   getMetadataLatest,
 } from '@seedprotocol/sdk'
 import type { IItemProperty, SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { generateId } from '@seedprotocol/sdk'
+
 import { eq, and, sql } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { useQueryClient } from '@tanstack/react-query'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitForItemPersisted } from './test-utils/persistence'
+import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
 const testSchemaWithItems: SchemaFileFormat = {
@@ -101,52 +103,6 @@ const emptyTestSchema: SchemaFileFormat = {
   migrations: [],
 }
 
-// Helper function to wait for item to be in idle state
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for itemProperty to be in idle state
-async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
-
 // Test component for useItemProperty with object props
 function UseItemPropertyWithPropsTest({
   seedLocalId,
@@ -187,6 +143,15 @@ function UseItemPropertyWithPropsTest({
       )}
     </div>
   )
+}
+
+type PropertyRender = { requestedId: string; seedLocalId?: string; value?: unknown; isLoading: boolean }
+
+/** Records what useItemProperty returned on every render, so tests can check the first one. */
+function UseItemPropertyRenderLog({ seedLocalId, log }: { seedLocalId: string; log: PropertyRender[] }) {
+  const { property, isLoading } = useItemProperty({ seedLocalId, propertyName: 'title' })
+  log.push({ requestedId: seedLocalId, seedLocalId: property?.seedLocalId, value: property?.value, isLoading })
+  return <div data-testid="render-log-value">{String(property?.value ?? '')}</div>
 }
 
 // Test component for useItemProperty with itemId and propertyName
@@ -512,119 +477,18 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
-  })
 
-  afterAll(async () => {
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
+    // The schema is imported once per file; each test gets fresh items (beforeEach). Re-importing per
+    // test meant evicting the cached models each time, which made every Item.create ~0.4s slower.
+    //
+    // Removes every test schema, its items and schema files. (This file's per-test cleanup used to
+    // delete every model_schemas row, Seed Protocol's included, and every 'post' / 'article' seed.)
+    await cleanupTestSchemaData({ items: true })
 
-    // Clean up items from database
-    const db = BaseDb.getAppDb()
-    if (db && testItem) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem.seedLocalId))
-    }
-    if (db && testItem2) {
-      await db.delete(metadata).where(eq(metadata.seedLocalId, testItem2.seedLocalId))
-      await db.delete(seeds).where(eq(seeds.localId, testItem2.seedLocalId))
-    }
-
-    // Clean up schemas from database (model_schemas.schema_id FK must be cleared first)
-    if (db) {
-      await db.delete(modelSchemas)
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))
-    }
-
-    // Clean up schema files from file system
-    if (testSchemaWithItems.id) {
-      await deleteSchemaFileIfExists('Test Schema Items', testSchemaWithItems.version, testSchemaWithItems.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Items', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    await deleteSchemaFileIfExists('LiveQuery Test Schema Items', 1, 'livequery-test-schema-items')
-
-    // Clear schema cache
-    Schema.clearCache()
-  })
-
-  beforeEach(async () => {
-    queryClientRef.current = null
-    container = document.createElement('div')
-    container.id = 'root'
-    document.body.appendChild(container)
-
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
-
-    // Clean up any existing test schemas from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(metadata)
-      await db.delete(seeds).where(eq(seeds.type, 'post'))
-      await db.delete(seeds).where(eq(seeds.type, 'article'))
-      await db.delete(modelSchemas)
-      await db.delete(schemas).where(eq(schemas.name, 'Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'Empty Test Schema Items'))
-      await db.delete(schemas).where(eq(schemas.name, 'LiveQuery Test Schema Items'))
-    }
-    
-    // Clean up schema files from file system
-    if (testSchemaWithItems.id) {
-      await deleteSchemaFileIfExists('Test Schema Items', testSchemaWithItems.version, testSchemaWithItems.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Items', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    
     Schema.clearCache()
 
     // Import test schemas
@@ -639,13 +503,26 @@ describe('React ItemProperty Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Items')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Items')).toBe(true)
       },
       { timeout: 15000 }
     )
-    
-    // Give a small delay to ensure database operations are processed
-    await new Promise(resolve => setTimeout(resolve, 100))
+  })
+
+  afterAll(async () => {
+    // Items too: leftover items whose models lose their schema links make Item.all() in later
+    // browser test files wait ~5s per item.
+    await cleanupTestSchemaData({ items: true })
+    Schema.clearCache()
+  })
+
+  beforeEach(async () => {
+    queryClientRef.current = null
+    container = document.createElement('div')
+    container.id = 'root'
+    document.body.appendChild(container)
+
+    await cleanupTestItems()
 
     // Create test items
     const model = Model.create('Post', 'Test Schema Items', { waitForReady: false })
@@ -657,31 +534,28 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema Items',
       title: 'Test Post Title',
       content: 'Test Post Content',
       author: 'Test Author',
     })
     await waitForItemIdle(testItem)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+    await waitForItemPersisted(testItem!, { title: 'Test Post Title', content: 'Test Post Content', author: 'Test Author' })
 
       testItem2 = await Item.create({
         modelName: 'Post',
+        schemaName: 'Test Schema Items',
         title: 'Test Post Title 2',
         content: 'Test Post Content 2',
         author: 'Test Author 2',
       })
       await waitForItemIdle(testItem2)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(testItem2!, { title: 'Test Post Title 2', content: 'Test Post Content 2', author: 'Test Author 2' })
   })
 
   afterEach(async () => {
     document.body.innerHTML = ''
-    Schema.clearCache()
-    
+
     // Clean up item instances
     if (testItem) {
       testItem.unload()
@@ -691,6 +565,49 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       testItem2.unload()
       testItem2 = null
     }
+  })
+
+  describe('useItemProperty with the property instance cache', () => {
+    it('returns a cached, ready property on the first render', async () => {
+      const id = testItem!.seedLocalId
+      expect(ItemProperty.peekReady({ seedLocalId: id, propertyName: 'title' })).toBeDefined()
+      const log: PropertyRender[] = []
+
+      render(<UseItemPropertyRenderLog seedLocalId={id} log={log} />, { container })
+
+      expect(log[0]).toEqual({ requestedId: id, seedLocalId: id, value: 'Test Post Title', isLoading: false })
+    })
+
+    it('never returns the previous item\'s property after the id changes', async () => {
+      const id1 = testItem!.seedLocalId
+      const id2 = testItem2!.seedLocalId
+      const log: PropertyRender[] = []
+      const { rerender } = render(<UseItemPropertyRenderLog seedLocalId={id1} log={log} />, { container })
+
+      rerender(<UseItemPropertyRenderLog seedLocalId={id2} log={log} />)
+
+      const afterSwitch = log.filter((r) => r.requestedId === id2)
+      expect(afterSwitch.length).toBeGreaterThan(0)
+      for (const r of afterSwitch) {
+        expect(r).toEqual({ requestedId: id2, seedLocalId: id2, value: 'Test Post Title 2', isLoading: false })
+      }
+    })
+
+    it('still updates after mounting when the property changes', async () => {
+      const id = testItem!.seedLocalId
+      const log: PropertyRender[] = []
+      render(<UseItemPropertyRenderLog seedLocalId={id} log={log} />, { container })
+      expect(log[0].value).toBe('Test Post Title')
+
+      const titleProp = testItem!.properties.find((p) => p.propertyName === 'title')!
+      titleProp.value = 'Changed After Mount'
+      await titleProp.save()
+
+      await waitFor(
+        () => expect(screen.getByTestId('render-log-value').textContent).toBe('Changed After Mount'),
+        { timeout: 10000 },
+      )
+    })
   })
 
   describe('useItemProperty', () => {
@@ -727,8 +644,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
       await waitFor(
         () => {
-          const el = scoped.queryByTestId('property-value')
-          return el !== null && el.textContent === 'Test Post Content'
+          expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Content')
         },
         { timeout: 10000 }
       )
@@ -755,8 +671,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
       await waitFor(
         () => {
-          const el = scoped.queryByTestId('property-value')
-          return el !== null && el.textContent === 'Test Post Title'
+          expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Title')
         },
         { timeout: 10000 }
       )
@@ -778,8 +693,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null && propertyName.textContent === 'title'
+          expect(screen.queryByTestId('property-name')?.textContent).toBe('title')
         },
         { timeout: 15000 }
       )
@@ -808,8 +722,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyValue = screen.queryByTestId('property-value')
-          return propertyValue !== null && propertyValue.textContent === 'Test Post Title'
+          expect(screen.queryByTestId('property-value')?.textContent).toBe('Test Post Title')
         },
         { timeout: 15000 }
       )
@@ -840,14 +753,9 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // We'll check that it becomes false when loaded
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('property-status')
+          expect(screen.getByTestId('property-status').textContent).toBe('loaded')
           // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
@@ -856,7 +764,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
-          return true
         },
         { timeout: 2000 }
       )
@@ -948,8 +855,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         { timeout: 10000 }
       )
 
-      // Allow DB write to complete
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await waitForItemPersisted(testItem, { title: testValue })
 
       // Strict DB verification - no fallback to in-memory checks
       const db = BaseDb.getAppDb()
@@ -997,7 +903,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1009,7 +915,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Post model has at least 3 properties: title, content, author
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
         },
         { timeout: 30000 }
       )
@@ -1031,7 +936,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1042,7 +947,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
         },
         { timeout: 30000 }
       )
@@ -1059,7 +963,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -1067,7 +971,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1080,7 +984,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
         },
         { timeout: 30000 }
       )
@@ -1100,14 +1003,9 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // We'll check that it becomes false when loaded
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('is-loading')
-          const status = screen.getByTestId('properties-status')
+          expect(screen.getByTestId('properties-status').textContent).toBe('loaded')
           // Once status is loaded, isLoading should be false
-          if (status.textContent === 'loaded') {
-            expect(isLoading.textContent).toBe('false')
-            return true
-          }
-          return false
+          expect(screen.getByTestId('is-loading').textContent).toBe('false')
         },
         { timeout: 15000 }
       )
@@ -1116,7 +1014,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           expect(screen.getByTestId('is-loading').textContent).toBe('false')
-          return true
         },
         { timeout: 2000 }
       )
@@ -1140,10 +1037,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Isolate from previous tests: clear instance cache for this item so we don't reuse instances from earlier tests in the group
       ItemProperty.clearInstanceCacheForItem(testItem.seedLocalId)
 
-      // Ensure properties are saved to database before rendering
-      // Wait a bit more to ensure all properties are persisted
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
       // Verify properties are actually in the database
       const db = BaseDb.getAppDb()
       if (db) {
@@ -1162,7 +1055,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .select()
               .from(metadataLatest)
               .where(eq(metadataLatest.rowNum, 1))
-            return records.length >= 3
+            expect(records.length).toBeGreaterThanOrEqual(3)
           },
           { timeout: 10000 }
         )
@@ -1176,8 +1069,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = scoped.getByTestId('properties-count')
-          const countValue = parseInt(count.textContent || '0')
-          return countValue >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -1187,7 +1079,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const initialCount = parseInt(scoped.getByTestId('properties-count').textContent || '0')
           expect(initialCount).toBeGreaterThanOrEqual(3)
-          return true
         },
         { timeout: 5000, interval: 200 }
       )
@@ -1226,12 +1117,8 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               await qc.refetchQueries({ queryKey: key })
               const data = qc.getQueryData(key) as IItemProperty[] | undefined
               const titleProp = Array.isArray(data) ? data.find((p) => p.propertyName === 'title') : undefined
-              if (titleProp != null && String((titleProp as IItemProperty).value ?? '') === 'Updated Title') {
-                expect(titleProp).toBeTruthy()
-                expect(String((titleProp as IItemProperty).value ?? '')).toBe('Updated Title')
-                return true
-              }
-              return false
+              expect(titleProp).toBeTruthy()
+              expect(String((titleProp as IItemProperty).value ?? '')).toBe('Updated Title')
             },
             { timeout: 10000, interval: 150 }
           )
@@ -1239,7 +1126,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
             () => {
               const propertyElements = scoped.getAllByTestId(/^property-\d+$/)
               const propertyTexts = propertyElements.map((el) => el.textContent)
-              return propertyTexts.some(text => text?.includes('Updated Title'))
+              expect(propertyTexts.some(text => text?.includes('Updated Title'))).toBe(true)
             },
             { timeout: 15000 }
           )
@@ -1265,7 +1152,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Items')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Items')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1276,8 +1163,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Wait for schema to be ready
       await waitFor(
         () => {
-          const snapshot = schemaInstance.getService().getSnapshot()
-          return snapshot.value === 'idle'
+          expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1294,8 +1180,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       // Wait for model to be idle
       await waitFor(
         () => {
-          const modelSnapshot = newModel.getService().getSnapshot()
-          return modelSnapshot.value === 'idle'
+          expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1307,9 +1192,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         description: 'Test Item Description',
       })
       await waitForItemIdle(newItem)
-
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(newItem!, { name: 'Test Item Name', description: 'Test Item Description' })
 
       // Verify properties are actually in the database
       const db = BaseDb.getAppDb()
@@ -1324,7 +1207,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .select()
               .from(metadataLatest)
               .where(eq(metadataLatest.rowNum, 1))
-            return records.length > 0
+            expect(records.length).toBeGreaterThan(0)
           },
           { timeout: 10000 }
         )
@@ -1338,7 +1221,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = scopedList.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') > 0
+          expect(parseInt(count.textContent || '0')).toBeGreaterThan(0)
         },
         { timeout: 30000 }
       )
@@ -1348,7 +1231,6 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const finalCount = scopedList.getByTestId('properties-count')
           expect(parseInt(finalCount.textContent || '0')).toBeGreaterThan(0)
-          return true
         },
         { timeout: 5000, interval: 200 }
       )
@@ -1400,7 +1282,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('create-item-property-status')
-          return status.textContent === 'created' || status.textContent === 'error'
+          expect(status.textContent === 'created' || status.textContent === 'error').toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1424,6 +1306,33 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
 
       expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
+    })
+
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyItemPropertyTest property={createFastDestroyStub<IItemProperty>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-item-property-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-item-property-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-item-property-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-item-property-error')).toBeNull()
+      })
     })
 
     it('should destroy an item property and set loading state during destroy', async () => {
@@ -1450,8 +1359,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const isLoading = screen.getByTestId('destroy-item-property-is-loading')
-          return isLoading.textContent === 'true'
+          expect(screen.getByTestId('destroy-item-property-is-loading').textContent).toBe('true')
         },
         { timeout: 2000 }
       )
@@ -1504,11 +1412,8 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const prop = testItem!.properties.find(
             (p) => p.propertyName === 'coverImage' || p.propertyName === 'coverImageId'
           ) as ItemProperty<any> | undefined
-          if (prop?.refResolvedValue === TEST_IMAGE_FILENAME) {
-            savedProp = prop
-            return true
-          }
-          return false
+          expect(prop?.refResolvedValue).toBe(TEST_IMAGE_FILENAME)
+          savedProp = prop
         },
         { timeout: 20000 }
       )
@@ -1534,16 +1439,14 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const loadingEl = screen.getByTestId('item-property-loading')
-          return loadingEl.textContent === 'false'
+          expect(screen.getByTestId('item-property-loading').textContent).toBe('false')
         },
         { timeout: 10000 }
       )
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.getByTestId('item-property-datatype')
-          return dataTypeEl.textContent === 'Text'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Text')
         },
         { timeout: 15000 }
       )
@@ -1573,8 +1476,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.getByTestId('item-property-datatype')
-          return dataTypeEl.textContent === 'Number'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Number')
         },
         { timeout: 15000 }
       )
@@ -1599,7 +1501,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           const modelDataTypeEl = screen.getByTestId('model-property-datatype')
           const itemDataTypeEl = screen.getByTestId('item-property-datatype')
-          return modelDataTypeEl.textContent === 'Text' && itemDataTypeEl.textContent === 'Text'
+          expect(modelDataTypeEl.textContent === 'Text' && itemDataTypeEl.textContent === 'Text').toBe(true)
         },
         { timeout: 15000 }
       )
@@ -1608,8 +1510,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const itemDataTypeEl = screen.getByTestId('item-property-datatype')
-          return itemDataTypeEl.textContent === 'Number'
+          expect(screen.getByTestId('item-property-datatype').textContent).toBe('Number')
         },
         { timeout: 15000 }
       )

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createGetPublishPayloadTestSchemaOptionalAuthor,
@@ -16,6 +16,7 @@ import {
   createPublishedTestAuthor,
   createImageItemWithMissingStorageTxMetadata,
   waitForPropertyInstances,
+  OPTIONAL_AUTHOR_POST_MODEL_NAME,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -24,11 +25,11 @@ testDescribe('getPublishPayload integration', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
     await createGetPublishPayloadTestSchemaWithEnum()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -129,7 +130,7 @@ testDescribe('getPublishPayload integration', () => {
   it('skips (no throw) when related item not found for optional relation', async () => {
     const { schemaName } = await createGetPublishPayloadTestSchemaOptionalAuthor()
     const postItem = await Item.create({
-      modelName: 'Post',
+      modelName: OPTIONAL_AUTHOR_POST_MODEL_NAME,
       schemaName,
       title: 'Post with optional author',
       author: '0000000000', // Non-existent author - optional so should skip
@@ -153,6 +154,7 @@ testDescribe('getPublishPayload integration', () => {
     const author = await createPublishedTestAuthor()
     const postItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema getPublishPayload',
       author: author.seedLocalId,
       title: 'Post with image placeholder',
       coverImage: imageSeedLocalId,

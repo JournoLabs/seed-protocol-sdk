@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import Database from 'better-sqlite3'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -10,25 +8,41 @@ import {
   saveModelsFromMarkdown,
 } from '@/imports/markdown'
 import { models, properties } from '@/seedSchema'
-import * as schema from '@/seedSchema'
+import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import type { ModelDefinitions } from '@/types'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// processSeedConfig returns lightweight stand-ins (not real Model instances) that carry the property
+// definitions on `schema`.
+const propertyDefs = (result: ModelDefinitions, modelName: string): Record<string, any> =>
+  (result[modelName] as unknown as { schema: Record<string, any> }).schema
+
 describe('processMarkdownFrontmatter', () => {
-  let db: ReturnType<typeof drizzle>
-  let sqlite: Database
-  let dbPath: string
   let tempDir: string
 
-  beforeAll(() => {
-    // Create a temporary directory for test databases
+  // saveModelsFromMarkdown writes through addModelsToDb, which always uses the app DB (BaseDb.getAppDb());
+  // its `db` argument is unused. So these tests set up the client and read back from the app DB.
+  // (Typed as the drizzle SQLite DB saveModelsFromMarkdown accepts; BaseDb.getAppDb() returns any.)
+  let db: BetterSQLite3Database<any>
+
+  beforeAll(async () => {
+    // Create a temporary directory for test files
     tempDir = path.join(__dirname, '..', '..', '.test-temp')
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true })
     }
-  })
+    await setupTestEnvironment({
+      testFileUrl: import.meta.url,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
+    })
+    db = BaseDb.getAppDb()!
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(() => {
     // Clean up temporary directory
@@ -37,26 +51,8 @@ describe('processMarkdownFrontmatter', () => {
     }
   })
 
-  beforeEach(() => {
-    // Create a fresh database for each test
-    dbPath = path.join(tempDir, `test-${Date.now()}.db`)
-    sqlite = new Database(dbPath)
-    db = drizzle(sqlite, { schema })
-  })
-
-  afterEach(() => {
-    // Close database connection
-    if (sqlite) {
-      sqlite.close()
-    }
-    // Remove test database file
-    if (fs.existsSync(dbPath)) {
-      try {
-        fs.unlinkSync(dbPath)
-      } catch (e) {
-        // Ignore errors if file is already deleted
-      }
-    }
+  afterEach(async () => {
+    await cleanupTestSchemaData()
   })
 
   describe('parseMarkdownFrontmatter', () => {
@@ -151,14 +147,14 @@ describe('processMarkdownFrontmatter', () => {
       const result = processSeedConfig(config as any)
 
       expect(result).toHaveProperty('Post')
-      expect(result.Post.schema).toHaveProperty('title')
-      expect(result.Post.schema).toHaveProperty('views')
-      expect(result.Post.schema).toHaveProperty('isPublished')
-      expect(result.Post.schema).toHaveProperty('publishedAt')
-      expect(result.Post.schema.title.dataType).toBe('Text')
-      expect(result.Post.schema.views.dataType).toBe('Number')
-      expect(result.Post.schema.isPublished.dataType).toBe('Boolean')
-      expect(result.Post.schema.publishedAt.dataType).toBe('Date')
+      expect(propertyDefs(result, 'Post')).toHaveProperty('title')
+      expect(propertyDefs(result, 'Post')).toHaveProperty('views')
+      expect(propertyDefs(result, 'Post')).toHaveProperty('isPublished')
+      expect(propertyDefs(result, 'Post')).toHaveProperty('publishedAt')
+      expect(propertyDefs(result, 'Post').title.dataType).toBe('Text')
+      expect(propertyDefs(result, 'Post').views.dataType).toBe('Number')
+      expect(propertyDefs(result, 'Post').isPublished.dataType).toBe('Boolean')
+      expect(propertyDefs(result, 'Post').publishedAt.dataType).toBe('Date')
     })
 
     it('should handle Relation type with target', () => {
@@ -173,8 +169,8 @@ describe('processMarkdownFrontmatter', () => {
 
       const result = processSeedConfig(config as any)
 
-      expect(result.Post.schema.author.dataType).toBe('Relation')
-      expect(result.Post.schema.author.ref).toBe('Identity')
+      expect(propertyDefs(result, 'Post').author.dataType).toBe('Relation')
+      expect(propertyDefs(result, 'Post').author.ref).toBe('Identity')
     })
 
     it('should handle List type with target', () => {
@@ -189,8 +185,8 @@ describe('processMarkdownFrontmatter', () => {
 
       const result = processSeedConfig(config as any)
 
-      expect(result.Post.schema.tags.dataType).toBe('List')
-      expect(result.Post.schema.tags.ref).toBe('Tag')
+      expect(propertyDefs(result, 'Post').tags.dataType).toBe('List')
+      expect(propertyDefs(result, 'Post').tags.ref).toBe('Tag')
     })
 
     it('should handle all property types', () => {
@@ -213,15 +209,15 @@ describe('processMarkdownFrontmatter', () => {
 
       const result = processSeedConfig(config as any)
 
-      expect(result.Post.schema.text.dataType).toBe('Text')
-      expect(result.Post.schema.number.dataType).toBe('Number')
-      expect(result.Post.schema.boolean.dataType).toBe('Boolean')
-      expect(result.Post.schema.date.dataType).toBe('Date')
-      expect(result.Post.schema.image.dataType).toBe('Image')
-      expect(result.Post.schema.json.dataType).toBe('Json')
-      expect(result.Post.schema.file.dataType).toBe('File')
-      expect(result.Post.schema.relation.dataType).toBe('Relation')
-      expect(result.Post.schema.list.dataType).toBe('List')
+      expect(propertyDefs(result, 'Post').text.dataType).toBe('Text')
+      expect(propertyDefs(result, 'Post').number.dataType).toBe('Number')
+      expect(propertyDefs(result, 'Post').boolean.dataType).toBe('Boolean')
+      expect(propertyDefs(result, 'Post').date.dataType).toBe('Date')
+      expect(propertyDefs(result, 'Post').image.dataType).toBe('Image')
+      expect(propertyDefs(result, 'Post').json.dataType).toBe('Json')
+      expect(propertyDefs(result, 'Post').file.dataType).toBe('File')
+      expect(propertyDefs(result, 'Post').relation.dataType).toBe('Relation')
+      expect(propertyDefs(result, 'Post').list.dataType).toBe('List')
     })
 
     it('should throw error when seed config is missing', () => {
@@ -316,9 +312,9 @@ describe('processMarkdownFrontmatter', () => {
 
       const result = processSeedConfig(config as any)
 
-      expect(result.Post.schema.keywords.dataType).toBe('List')
-      expect(result.Post.schema.keywords.refValueType).toBe('Text')
-      expect(result.Post.schema.keywords.ref).toBeUndefined()
+      expect(propertyDefs(result, 'Post').keywords.dataType).toBe('List')
+      expect(propertyDefs(result, 'Post').keywords.refValueType).toBe('Text')
+      expect(propertyDefs(result, 'Post').keywords.ref).toBeUndefined()
     })
 
     it('should throw error for unknown property type', () => {
@@ -349,8 +345,8 @@ describe('processMarkdownFrontmatter', () => {
       const result = await saveModelsFromMarkdown(filePath, db)
 
       expect(result).toHaveProperty('Article')
-      expect(result.Article.schema).toHaveProperty('title')
-      expect(result.Article.schema).toHaveProperty('body')
+      expect(propertyDefs(result, 'Article')).toHaveProperty('title')
+      expect(propertyDefs(result, 'Article')).toHaveProperty('body')
 
       // Verify model was saved to database
       const savedModels = await db.select().from(models)
@@ -508,7 +504,8 @@ seed:
       await saveModelsFromMarkdown(tempFilePath, db)
 
       const savedModels = await db.select().from(models)
-      expect(savedModels.length).toBe(2)
+      expect(savedModels.filter((m) => m.name === 'Article')).toHaveLength(1)
+      expect(savedModels.filter((m) => m.name === 'BlogPost')).toHaveLength(1)
 
       const articleModel = savedModels.find((m) => m.name === 'Article')
       const blogPostModel = savedModels.find((m) => m.name === 'BlogPost')

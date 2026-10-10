@@ -1,32 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { setupTestEnvironment } from '../test-utils/client-init'
 
+// Pending-write tracking is purely in-memory static state on Model and ModelProperty; these tests never touch
+// the DB, so they need no client/DB setup. Each test resets the private maps so ids don't leak between tests.
 describe('Pending Writes Tracking', () => {
-  beforeAll(async () => {
-    await setupTestEnvironment({
-      testFileUrl: import.meta.url,
-      timeout: 30000,
-    })
-  }, 30000)
-
-  afterEach(async () => {
-    // Clean up database after each test
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { models: modelsTable, properties, schemas: schemasTable } = await import('@/seedSchema')
-      await db.delete(properties)
-      await db.delete(modelsTable)
-      await db.delete(schemasTable)
-    }
-
-    // Clear Model and ModelProperty caches
-    Model.clearCache?.()
-    if (typeof (ModelProperty as any).clearCache === 'function') {
-      (ModelProperty as any).clearCache()
-    }
+  afterEach(() => {
+    ;((Model as any).pendingWrites as Map<string, unknown>).clear()
+    ;((ModelProperty as any).pendingWrites as Map<string, unknown>).clear()
   })
 
   describe('Model pending writes', () => {

@@ -2,6 +2,7 @@ import type { AnyActorRef } from 'xstate'
 import { enqueueActions } from 'xstate'
 import { stopScopedOrStandaloneChild } from './stopScopedOrStandaloneChild'
 import { markInProgressPublishInterrupted } from '../actors/savePublish'
+import { releasePublishLock } from '../publishLocks'
 
 export const stopPublish = enqueueActions(({ context, event, enqueue, self }) => {
   const { publishProcesses, subscriptions } = context
@@ -13,6 +14,8 @@ export const stopPublish = enqueueActions(({ context, event, enqueue, self }) =>
       error,
     )
   })
+
+  releasePublishLock(seedLocalId)
 
   const publishProcess = publishProcesses.get(seedLocalId)
   if (!publishProcess) {

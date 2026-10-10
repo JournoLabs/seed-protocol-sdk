@@ -19,6 +19,7 @@ import { configureEasReadChain } from '@seedprotocol/eas'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
 import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
+import { startTabCoordination } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:ClientManager:initialize')
 
@@ -174,7 +175,12 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       schema,
       syncFromEasOnAddressChange: options.syncFromEasOnAddressChange ?? true,
     } })
-    
+
+    // Elect a leader tab for background work before anything requests it (docs/MULTI_TAB.md).
+    if (normalizedFilesDir) {
+      startTabCoordination({ filesDir: normalizedFilesDir, mode: options.multiTab })
+    }
+
     if (resolvedGateway.activePath !== 'hyper-sidecar' && resolvedGateway.activePath !== 'http-proxy') {
       void ensureReadGatewaySelected().catch(() => {
         /* non-blocking warm-up for read gateway probe */

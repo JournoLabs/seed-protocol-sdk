@@ -4,14 +4,34 @@ import type {
   GetSeedResult,
   SeedRecord,
 } from '../types.js'
+import type { SeedDependencies } from '../assembleSeeds.js'
 
 /**
- * Cached collection working set for a schema (skip=0 page).
+ * How a cached entry is kept current: changes (see QueryDataSource.listChangesSince) after
+ * `checkedAt` have not been looked at yet. Each check's window overlaps the previous one, so a
+ * change already applied can be seen again; `seenChangeKeys` lists those to skip.
  */
-export type CachedCollectionData = {
+export type ChangeCheck = {
+  /** Unix seconds. */
+  checkedAt: number
+  seenChangeKeys: string[]
+}
+
+/** Per-record bookkeeping in a cached collection. */
+export type CachedRecordMeta = {
+  dependencies: SeedDependencies
+  /** Unix seconds when the record was assembled. */
+  builtAt: number
+}
+
+/**
+ * Cached collection working set for a schema and assemble options (skip=0 page).
+ */
+export type CachedCollectionData = ChangeCheck & {
   items: SeedRecord[]
-  lastProcessedTimestamp: number
-  lastProcessedItemId: string
+  /** By seedUid. */
+  meta: Record<string, CachedRecordMeta>
+  /** Unix seconds of the last full assembly; the TTL counts from here. */
   lastUpdated: number
   etag: string
 }
@@ -19,8 +39,10 @@ export type CachedCollectionData = {
 /**
  * Cached single-seed assembly result (may include changelog).
  */
-export type CachedItemData = {
+export type CachedItemData = ChangeCheck & {
   record: GetSeedResult
+  dependencies: SeedDependencies
+  /** Unix seconds when the record was assembled; the TTL counts from here. */
   lastUpdated: number
   etag: string
   /** Fingerprint of assemble options used when caching. */
@@ -33,6 +55,11 @@ export type QueryCacheConfig = {
   enabled: boolean
   backgroundRefresh: boolean
   refreshInterval: number
+  /**
+   * Deep-freeze records as they enter the memory cache (set, or loaded from the persistent layer).
+   * Default: on unless NODE_ENV=production.
+   */
+  freezeRecords?: boolean
 }
 
 export type QueryCacheStats = {
@@ -44,10 +71,12 @@ export type QueryCacheStats = {
 
 /** Optional disk (or other) layer under CacheManager. Browser graphs omit this. */
 export type PersistentCache = {
-  getCollection(schemaName: string): Promise<CachedCollectionData | null>
-  setCollection(schemaName: string, data: CachedCollectionData): Promise<void>
+  getCollection(schemaName: string, optionsKey: string): Promise<CachedCollectionData | null>
+  setCollection(schemaName: string, optionsKey: string, data: CachedCollectionData): Promise<void>
   getItem(seedUid: string, optionsKey: string): Promise<CachedItemData | null>
   setItem(data: CachedItemData): Promise<void>
+  clearItem(seedUid: string, optionsKey: string): Promise<void>
+  /** Every options variant of the schema's collection. */
   clearCollection(schemaName: string): Promise<void>
   clearAll(): Promise<void>
 }

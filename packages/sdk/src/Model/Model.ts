@@ -19,6 +19,8 @@ import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { currentEvictionEpoch, recordSchemaEviction, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -26,7 +28,8 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
 import { toSnakeCase } from 'drizzle-orm/casing'
-import { eq, or } from 'drizzle-orm'
+import { and, desc, eq, or } from 'drizzle-orm'
+import { AmbiguousModelError } from './errors'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -56,17 +59,10 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
-// Lazy import cache for Schema to avoid circular dependency
-let SchemaClass: any = null
+// Lazy import for Schema to avoid circular dependency
 const schemaImportPromise = import('@/Schema/Schema')
-  .then(module => {
-    SchemaClass = module.Schema
-    return SchemaClass
-  })
-  .catch(() => {
-    // If import fails, SchemaClass remains null
-    return null
-  })
+  .then(module => module.Schema)
+  .catch(() => null)
 
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
@@ -188,6 +184,15 @@ export class Model {
   }
 
   /**
+   * True when a name-cached instance belongs to a different model than the requested modelFileId.
+   * A schema re-imported under the same name can give its models new ids while the previous
+   * instances are still cached by name; Model.create must not hand those back for the new id.
+   */
+  private static isOtherModelId(cachedId: string | undefined, requestedId: string | undefined): boolean {
+    return !!requestedId && !!cachedId && cachedId !== requestedId
+  }
+
+  /**
    * Find a unique model name by checking for duplicates (case-insensitive) in the cache
    * If duplicates are found, appends an incrementing number to make it unique
    * 
@@ -248,37 +253,6 @@ export class Model {
           }
         }
       }
-    }
-    
-    // Also check schema context models (case-insensitive)
-    // This ensures runtime-created models are renamed if they conflict with schema-defined models
-    try {
-      // Use lazy-loaded Schema class to avoid circular dependency
-      if (SchemaClass) {
-        const schema = SchemaClass.create(schemaName)
-        const schemaContext = schema.getService().getSnapshot().context
-        
-        if (schemaContext.models) {
-          for (const schemaModelName of Object.keys(schemaContext.models)) {
-            const lowerSchemaModelName = schemaModelName.toLowerCase()
-            
-            // If it matches the base name (case-insensitive), check if it has a number suffix
-            if (lowerSchemaModelName === lowerModelName) {
-              existingNumbers.add(0) // Base name exists in schema
-            } else if (lowerSchemaModelName.startsWith(lowerModelName + ' ')) {
-              // Check if it's the base name followed by a space and a number
-              const suffix = lowerSchemaModelName.slice(lowerModelName.length + 1)
-              const number = parseInt(suffix, 10)
-              if (!isNaN(number) && suffix === number.toString()) {
-                existingNumbers.add(number)
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // If schema check fails, continue with cache-only check
-      // This is a best-effort check and shouldn't block model creation
     }
     
     // If no duplicates found (no base name match and no numbered variants), return original name
@@ -420,8 +394,8 @@ export class Model {
       const legacyKey = `${schemaName}:${modelName}`
       if (this.instanceCache.has(legacyKey)) {
         const { instance, refCount } = this.instanceCache.get(legacyKey)!
-        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean }
-        if (!ctx._idFromSchema) {
+        const ctx = instance._getSnapshotContext() as { _idFromSchema?: boolean; id?: string }
+        if (!ctx._idFromSchema && !this.isOtherModelId(ctx.id, id)) {
           this.instanceCache.set(legacyKey, {
             instance,
             refCount: refCount + 1,
@@ -462,7 +436,10 @@ export class Model {
 
     // Step 6: Check legacy cache with unique name (backward compatibility during migration)
     // This is a fallback in case an instance was cached with a unique name
-    if (this.instanceCache.has(nameKey)) {
+    if (
+      this.instanceCache.has(nameKey) &&
+      !this.isOtherModelId((this.instanceCache.get(nameKey)!.instance._getSnapshotContext() as { id?: string }).id, id)
+    ) {
       const { instance, refCount } = this.instanceCache.get(nameKey)!
       this.instanceCache.set(nameKey, {
         instance,
@@ -751,6 +728,8 @@ export class Model {
             }, 10000)
           })
           
+          // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
+          if (isActorStopped(proxiedInstance._service)) return
           // Only write if validation passed (model is in idle state, not error)
           const finalSnapshot = proxiedInstance._service.getSnapshot()
           if (finalSnapshot.value === 'idle' && (!finalSnapshot.context._validationErrors || finalSnapshot.context._validationErrors.length === 0)) {
@@ -878,16 +857,19 @@ export class Model {
                 logger(`WARNING: Could not verify schema exists in database: ${error}. Proceeding anyway.`)
               }
               
-              // Track pending write
-              Model.trackPendingWrite(finalSnapshot.context.id, schemaId) // id is now the schemaFileId (string)
-              
+              const pendingModelFileId = finalSnapshot.context.id
+              const pendingSchemaId = schemaId
               // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
               // Retry a few times if writeProcess isn't available yet
               let retries = 0
               const maxRetries = 10
               const checkAndSend = async () => {
+                // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
+                if (isActorStopped(proxiedInstance._service)) return
                 const currentSnapshot = proxiedInstance._service.getSnapshot()
                 if (currentSnapshot.context.writeProcess) {
+                  // Track pending write (only once it really starts: a stopped model leaves none behind)
+                  Model.trackPendingWrite(pendingModelFileId, pendingSchemaId) // id is now the schemaFileId (string)
                   logger(`Triggering write process for model "${finalSnapshot.context.modelName}" (schemaId: ${schemaId})`)
                   
                   // Use pending property definitions if available, otherwise convert from ModelProperty instances
@@ -1012,14 +994,50 @@ export class Model {
       }
       return this.getById(id)
     }
-    // If schemaName not provided, try to find in cache by searching all name keys
+    // If schemaName not provided, search all name keys. Model names are only unique per schema, so
+    // this throws AmbiguousModelError when cached models from several schemas share the name.
+    // Callers that know the schema or model id should use Model.resolve() instead.
+    return this._getUniqueCachedModel(modelName, (cachedModelName) => cachedModelName === modelName)
+  }
+
+  /** The one cached Model whose name matches, or AmbiguousModelError if models from several schemas do. */
+  private static _getUniqueCachedModel(
+    label: string,
+    matches: (cachedModelName: string) => boolean,
+  ): Model | undefined {
+    const matchesById = new Map<string, string>() // modelFileId -> schemaName
     for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const [, cachedModelName] = nameKey.split(':')
-      if (cachedModelName === modelName) {
-        return this.getById(id)
+      const separator = nameKey.lastIndexOf(':')
+      const cachedModelName = nameKey.slice(separator + 1)
+      if (id && cachedModelName && matches(cachedModelName) && this.instanceCacheById.has(id)) {
+        matchesById.set(id, nameKey.slice(0, separator))
       }
     }
-    return undefined
+    if (matchesById.size > 1) {
+      throw new AmbiguousModelError(label, [...matchesById.values()])
+    }
+    const [matchId] = matchesById.keys()
+    return matchId ? this.getById(matchId) : undefined
+  }
+
+  /**
+   * Resolve a cached Model from the most specific scope available: modelFileId (Model.id), then
+   * schemaName + modelName, then modelName alone.
+   */
+  static resolve(
+    modelName: string | undefined,
+    scope: { modelFileId?: string | null; schemaName?: string | null } = {},
+  ): Model | undefined {
+    if (scope.modelFileId) {
+      const byId = this.getById(scope.modelFileId)
+      if (byId) return byId
+    }
+    if (!modelName) return undefined
+    if (scope.schemaName) {
+      const bySchema = this.getByName(modelName, scope.schemaName)
+      if (bySchema) return bySchema
+    }
+    return this.getByName(modelName)
   }
 
   /**
@@ -1028,14 +1046,7 @@ export class Model {
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
-    for (const [nameKey, id] of this.instanceCacheByName.entries()) {
-      const parts = nameKey.split(':', 2)
-      const cachedModelName = parts[1]
-      if (cachedModelName && toSnakeCase(cachedModelName) === modelType) {
-        return this.getById(id)
-      }
-    }
-    return undefined
+    return this._getUniqueCachedModel(modelType, (cachedModelName) => toSnakeCase(cachedModelName) === modelType)
   }
 
   /**
@@ -1070,6 +1081,56 @@ export class Model {
   }
 
   /**
+   * Async Model.resolve(): exact cache hit by modelFileId or schemaName+modelName, else the DB row for
+   * that scope (instantiating the Model), and only then the name-only fallback.
+   */
+  static async resolveAsync(
+    modelName: string | undefined,
+    scope: { modelFileId?: string | null; schemaName?: string | null } = {},
+  ): Promise<Model | undefined> {
+    if (scope.modelFileId) {
+      const byId = this.getById(scope.modelFileId)
+      if (byId) return byId
+    }
+    if (modelName && scope.schemaName) {
+      const bySchema = this.getByName(modelName, scope.schemaName)
+      if (bySchema) return bySchema
+    }
+    if (scope.modelFileId || scope.schemaName) {
+      const db = BaseDb.getAppDb()
+      if (db) {
+        const evictionEpoch = currentEvictionEpoch()
+        try {
+          const rows = await db
+            .select({
+              modelFileId: modelsTable.schemaFileId,
+              modelName: modelsTable.name,
+              schemaName: schemasTable.name,
+            })
+            .from(modelsTable)
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(
+              scope.modelFileId
+                ? eq(modelsTable.schemaFileId, scope.modelFileId)
+                : and(eq(modelsTable.name, modelName ?? ''), eq(schemasTable.name, scope.schemaName!)),
+            )
+            .limit(1)
+          const record = rows[0]
+          if (record?.modelName && record.schemaName && record.modelFileId) {
+            // Its schema was evicted while we read the row: don't bring the model back.
+            if (schemaEvictedSince(record.schemaName, evictionEpoch)) return undefined
+            return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
+          }
+        } catch (error) {
+          logger(`Model.resolveAsync: scoped lookup failed for "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+    return modelName ? this.getByNameAsync(modelName) : undefined
+  }
+
+  /**
    * Get Model instance by name, querying database if not in cache
    * This is an async version that can query the database when schemaName is not provided
    * 
@@ -1077,7 +1138,17 @@ export class Model {
    * @param schemaName - Optional schema name (will query DB if not provided)
    * @returns The Model instance if found, undefined otherwise
    */
-  static async getByNameAsync(modelName: string, schemaName?: string): Promise<Model | undefined> {
+  static async getByNameAsync(
+    modelName: string,
+    schemaName?: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started. An eviction of the model's
+       * schema since then makes this return undefined instead of re-creating the model. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<Model | undefined> {
     // First try cache
     const cached = this.getByName(modelName, schemaName)
     if (cached) {
@@ -1090,10 +1161,16 @@ export class Model {
       if (!db) {
         return undefined
       }
+      const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
       try {
 
-        // Query model by name
+        // Query model by name (throws AmbiguousModelError when several schemas define it)
+        const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+        const resolved = await resolveModelRecord(modelName, {}, db)
+        if (!resolved?.schemaFileId) {
+          return undefined
+        }
         const modelRecords = await db
           .select({
             modelFileId: modelsTable.schemaFileId,
@@ -1103,7 +1180,7 @@ export class Model {
           .from(modelsTable)
           .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
           .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(eq(modelsTable.name, modelName))
+          .where(eq(modelsTable.id, resolved.id))
           .limit(1)
 
         if (modelRecords.length === 0) {
@@ -1114,12 +1191,17 @@ export class Model {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
           return undefined
         }
+        // Its schema was evicted while we read the row: don't bring the model back.
+        if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
+          return undefined
+        }
 
         // Create model instance (will be cached)
         return this.create(record.modelName, record.schemaName, {
           id: record.modelFileId, // id is now the schemaFileId (string)
         })
       } catch (error) {
+        if (error instanceof AmbiguousModelError) throw error
         logger(`Model.getByNameAsync: Error looking up model by name "${modelName}": ${error instanceof Error ? error.message : String(error)}`)
         return undefined
       }
@@ -1135,7 +1217,17 @@ export class Model {
    * @param modelFileId - The model file ID to look up
    * @returns The Model instance if found, undefined otherwise
    */
-  static async createById(modelFileId: string): Promise<Model | undefined> {
+  static async createById(
+    modelFileId: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started (e.g. a Schema actor that read the
+       * model ids). An eviction of the model's schema since then makes this return undefined instead
+       * of re-creating the model. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<Model | undefined> {
     if (!modelFileId) {
       return undefined
     }
@@ -1153,6 +1245,7 @@ export class Model {
       logger(`Model.createById: Database not available for ID "${modelFileId}"`)
       return undefined
     }
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
     try {
 
@@ -1177,6 +1270,12 @@ export class Model {
       const { modelName, schemaName } = modelRecords[0]
       if (!modelName || !schemaName) {
         logger(`Model.createById: Missing modelName or schemaName for ID "${modelFileId}"`)
+        return undefined
+      }
+      // Its schema was evicted while we read the row (e.g. a Schema live query in flight during
+      // Schema.destroy or test cleanup): don't bring the model back.
+      if (schemaEvictedSince(schemaName, evictionEpoch)) {
+        logger(`Model.createById: schema "${schemaName}" was evicted during the lookup of "${modelFileId}"`)
         return undefined
       }
 
@@ -1252,6 +1351,7 @@ export class Model {
       logger(`Model.createBySchemaId: Database not available for schema "${schemaIdentifier}"`)
       return []
     }
+    const evictionEpoch = currentEvictionEpoch()
 
     try {
 
@@ -1281,6 +1381,10 @@ export class Model {
       const modelInstances: Model[] = []
       for (const record of modelRecords) {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
+          continue
+        }
+        // Its schema was evicted while we read the rows: don't bring its models back.
+        if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
           continue
         }
 
@@ -1367,9 +1471,10 @@ export class Model {
     const seen = new Set<string>()
 
     for (const row of rows) {
-      if (row.schemaFileId) {
+      // A model can appear more than once (e.g. duplicate model_schemas links); return it once.
+      if (row.schemaFileId && !seen.has(row.schemaFileId)) {
         const instance = await this.createById(row.schemaFileId)
-        if (instance) {
+        if (instance && !seen.has(instance.id ?? row.schemaFileId)) {
           instances.push(instance)
           seen.add(instance.id ?? row.schemaFileId)
         }
@@ -1785,6 +1890,8 @@ export class Model {
    * @returns names of the evicted models (so callers can evict their ModelProperty instances)
    */
   static evictForSchema(schemaName: string): string[] {
+    // Work already running for this schema's models must not re-cache them when it finishes.
+    recordSchemaEviction(schemaName)
     const instances = new Set<Model>()
     for (const { instance } of this.instanceCacheById.values()) instances.add(instance)
     for (const { instance } of this.instanceCache.values()) instances.add(instance)
@@ -1942,19 +2049,22 @@ export class Model {
               return undefined
             }
 
-            const modelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
+            // Model names are only unique per schema: find this model's row by its id (schemaFileId).
+            const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+            const modelRecord = await resolveModelRecord(
+              modelName,
+              { modelFileId: context.id, schemaName: context.schemaName },
+              db,
+            )
 
-            if (modelRecords.length === 0 || !modelRecords[0].id) {
+            if (!modelRecord?.id) {
               return undefined
             }
 
-            dbId = modelRecords[0].id
+            dbId = modelRecord.id
 
-            // Update context with _dbId
+            // Update context with _dbId (unless the model was stopped while the lookup ran)
+            if (isActorStopped(model._service)) return undefined
             model._service.send({
               type: 'updateContext',
               _dbId: dbId,
@@ -2017,6 +2127,12 @@ export class Model {
           schemaFileId: row.schemaFileId,
         }))
       },
+      // The model writes from its writeProcess child while itself idle; wait for that write to end.
+      canRetryEntityId: (model) => {
+        const writeProcess = model._getSnapshotContext().writeProcess
+        const writeState = writeProcess?.getSnapshot().value
+        return writeState !== 'validating' && writeState !== 'writing'
+      },
       instanceState: modelInstanceState as WeakMap<Model, { liveQuerySubscription: Subscription | null }>,
       loggerName: 'seedSdk:model:liveQuery',
     })
@@ -2044,6 +2160,9 @@ export class Model {
         .select({ schemaFileId: propertiesTable.schemaFileId })
         .from(propertiesTable)
         .where(eq(propertiesTable.modelId, dbId)) // Use _dbId (database integer ID)
+
+      // Stopped while querying: don't re-cache ModelProperty instances for an evicted/unloaded model
+      if (isActorStopped(this._service)) return
 
       const propertyIds = propertyRows
         .map((row: { schemaFileId: string | null }) => row.schemaFileId)
@@ -2077,7 +2196,9 @@ export class Model {
         }
       }
 
-      // Update context with refreshed property IDs AFTER creating instances
+      // Update context with refreshed property IDs AFTER creating instances (the awaits above can
+      // outlive the instance)
+      if (isActorStopped(this._service)) return
       this._service.send({
         type: 'updateContext',
         _liveQueryPropertyIds: propertyIds,
@@ -2093,6 +2214,27 @@ export class Model {
    */
   async refreshProperties(): Promise<void> {
     await this._refreshPropertiesFromDb()
+  }
+
+  /**
+   * Refresh the property ids of every cached Model whose DB row is `dbId`. Called when a property
+   * write for that model finishes: until then `properties` includes it as a pending write, and in Node
+   * (no reactive liveQuery) nothing else adds it to `_liveQueryPropertyIds`.
+   */
+  static async refreshPropertiesForDbId(dbId: number): Promise<void> {
+    const instances = new Set<Model>()
+    for (const { instance } of this.instanceCacheById.values()) instances.add(instance)
+    for (const { instance } of this.instanceCache.values()) instances.add(instance)
+    for (const instance of instances) {
+      let context: ModelMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (context._dbId !== dbId) continue
+      await instance._refreshPropertiesFromDb()
+    }
   }
 
 }

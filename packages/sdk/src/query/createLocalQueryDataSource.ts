@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
 import { startCase } from 'lodash-es'
 import type {
   AttestationLike,
@@ -43,6 +43,31 @@ function parsePropertyValue(raw: string | null | undefined): unknown {
   return raw
 }
 
+/**
+ * Revocation as this database knows it. `revoked_at` (unix seconds) is the local truth: sync keeps
+ * EAS's revocationTime there and unpublish stamps it before EAS's index catches up, while
+ * `attestation_raw` only records what EAS said when the row was fetched.
+ */
+function isRevokedLocally(revokedAt: number | null | undefined): boolean {
+  return revokedAt != null && revokedAt !== 0
+}
+
+/** Overrides the fetch-time `revoked`/`revocationTime` of a stored attestation with `revoked_at`. */
+function withLocalRevocation(
+  att: AttestationLike,
+  revokedAt: number | null | undefined,
+): LocalAttestation {
+  const revoked = isRevokedLocally(revokedAt)
+  return { ...att, revoked, revocationTime: revoked ? revokedAt! : 0 }
+}
+
+/**
+ * The remote source carries EAS's `revoked`/`revocationTime`, which the query layer reads (e.g.
+ * `pickLatestPropertyAttestationsByRefAndSchema` skips revoked properties); the local source sets
+ * them from `revoked_at`.
+ */
+type LocalAttestation = AttestationLike & { revoked: boolean; revocationTime: number }
+
 function attestationFromRaw(raw: string | null | undefined): AttestationLike | null {
   if (!raw || !raw.trim()) return null
   try {
@@ -61,8 +86,9 @@ function seedRowToAttestation(row: {
   publisher: string | null
   attestationRaw: string | null
   attestationCreatedAt: number | null
+  revokedAt?: number | null
   schemaName?: string | null
-}): AttestationLike | null {
+}): LocalAttestation | null {
   if (!row.uid || !isValidEasAttestationUid(row.uid)) return null
   const fromRaw = attestationFromRaw(row.attestationRaw)
   if (fromRaw) {
@@ -71,30 +97,36 @@ function seedRowToAttestation(row: {
       fromRaw.schema?.schemaNames?.[0]?.name ??
       row.type ??
       'unknown'
-    return {
-      ...fromRaw,
-      id: row.uid,
-      schema: {
-        schemaNames: [{ name: schemaName }],
+    return withLocalRevocation(
+      {
+        ...fromRaw,
+        id: row.uid,
+        schema: {
+          schemaNames: [{ name: schemaName }],
+        },
+        timeCreated:
+          fromRaw.timeCreated ||
+          msToUnixSeconds(row.attestationCreatedAt),
+        attester: fromRaw.attester ?? row.publisher ?? undefined,
+        schemaId: fromRaw.schemaId || row.schemaUid || '',
       },
-      timeCreated:
-        fromRaw.timeCreated ||
-        msToUnixSeconds(row.attestationCreatedAt),
-      attester: fromRaw.attester ?? row.publisher ?? undefined,
-      schemaId: fromRaw.schemaId || row.schemaUid || '',
-    }
+      row.revokedAt,
+    )
   }
 
   const schemaName = row.schemaName ?? row.type ?? 'unknown'
-  return {
-    id: row.uid,
-    decodedDataJson: '',
-    refUID: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    schemaId: row.schemaUid || '',
-    timeCreated: msToUnixSeconds(row.attestationCreatedAt),
-    attester: row.publisher ?? undefined,
-    schema: { schemaNames: [{ name: schemaName }] },
-  }
+  return withLocalRevocation(
+    {
+      id: row.uid,
+      decodedDataJson: '',
+      refUID: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      schemaId: row.schemaUid || '',
+      timeCreated: msToUnixSeconds(row.attestationCreatedAt),
+      attester: row.publisher ?? undefined,
+      schema: { schemaNames: [{ name: schemaName }] },
+    },
+    row.revokedAt,
+  )
 }
 
 function versionRowToAttestation(row: {
@@ -103,29 +135,36 @@ function versionRowToAttestation(row: {
   publisher: string | null
   attestationRaw: string | null
   attestationCreatedAt: number | null
-}): AttestationLike | null {
+  revokedAt?: number | null
+}): LocalAttestation | null {
   if (!row.uid || !isValidEasAttestationUid(row.uid)) return null
   if (!row.seedUid) return null
   const fromRaw = attestationFromRaw(row.attestationRaw)
   if (fromRaw) {
-    return {
-      ...fromRaw,
+    return withLocalRevocation(
+      {
+        ...fromRaw,
+        id: row.uid,
+        refUID: row.seedUid,
+        timeCreated:
+          fromRaw.timeCreated ||
+          msToUnixSeconds(row.attestationCreatedAt),
+        attester: fromRaw.attester ?? row.publisher ?? undefined,
+      },
+      row.revokedAt,
+    )
+  }
+  return withLocalRevocation(
+    {
       id: row.uid,
+      decodedDataJson: '',
       refUID: row.seedUid,
-      timeCreated:
-        fromRaw.timeCreated ||
-        msToUnixSeconds(row.attestationCreatedAt),
-      attester: fromRaw.attester ?? row.publisher ?? undefined,
-    }
-  }
-  return {
-    id: row.uid,
-    decodedDataJson: '',
-    refUID: row.seedUid,
-    schemaId: '',
-    timeCreated: msToUnixSeconds(row.attestationCreatedAt),
-    attester: row.publisher ?? undefined,
-  }
+      schemaId: '',
+      timeCreated: msToUnixSeconds(row.attestationCreatedAt),
+      attester: row.publisher ?? undefined,
+    },
+    row.revokedAt,
+  )
 }
 
 function metadataRowToAttestation(row: {
@@ -138,22 +177,26 @@ function metadataRowToAttestation(row: {
   publisher: string | null
   attestationRaw: string | null
   attestationCreatedAt: number | null
-}): AttestationLike | null {
+  revokedAt?: number | null
+}): LocalAttestation | null {
   if (!row.uid || !isValidEasAttestationUid(row.uid)) return null
   if (!row.versionUid) return null
 
   const fromRaw = attestationFromRaw(row.attestationRaw)
   if (fromRaw) {
-    return {
-      ...fromRaw,
-      id: row.uid,
-      refUID: row.versionUid,
-      schemaId: fromRaw.schemaId || row.schemaUid || '',
-      timeCreated:
-        fromRaw.timeCreated ||
-        msToUnixSeconds(row.attestationCreatedAt),
-      attester: fromRaw.attester ?? row.publisher ?? undefined,
-    }
+    return withLocalRevocation(
+      {
+        ...fromRaw,
+        id: row.uid,
+        refUID: row.versionUid,
+        schemaId: fromRaw.schemaId || row.schemaUid || '',
+        timeCreated:
+          fromRaw.timeCreated ||
+          msToUnixSeconds(row.attestationCreatedAt),
+        attester: fromRaw.attester ?? row.publisher ?? undefined,
+      },
+      row.revokedAt,
+    )
   }
 
   const name = row.propertyName
@@ -161,19 +204,24 @@ function metadataRowToAttestation(row: {
     : 'unknown'
   const value = parsePropertyValue(row.propertyValue)
   const type = row.easDataType || 'string'
-  return {
-    id: row.uid,
-    decodedDataJson: JSON.stringify([{ value: { name, value, type } }]),
-    refUID: row.versionUid,
-    schemaId: row.schemaUid || '',
-    timeCreated: msToUnixSeconds(row.attestationCreatedAt),
-    attester: row.publisher ?? undefined,
-  }
+  return withLocalRevocation(
+    {
+      id: row.uid,
+      decodedDataJson: JSON.stringify([{ value: { name, value, type } }]),
+      refUID: row.versionUid,
+      schemaId: row.schemaUid || '',
+      timeCreated: msToUnixSeconds(row.attestationCreatedAt),
+      attester: row.publisher ?? undefined,
+    },
+    row.revokedAt,
+  )
 }
 
 async function resolveSchemaNameForSeedType(
   appDb: any,
   seedType: string | null,
+  /** seeds.model_file_id: the seed's own model (model names are only unique per schema). */
+  modelFileId?: string | null,
 ): Promise<string | null> {
   if (!seedType) return null
   const normalized = startCase(seedType)
@@ -183,7 +231,8 @@ async function resolveSchemaNameForSeedType(
       .from(models)
       .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
       .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-      .where(eq(models.name, normalized))
+      .where(modelFileId ? eq(models.schemaFileId, modelFileId) : eq(models.name, normalized))
+      .orderBy(desc(models.id))
       .limit(1)
     if (schemaRows[0]?.schemaName) return schemaRows[0].schemaName as string
   } catch {
@@ -205,7 +254,7 @@ function monthBoundsUnix(year: number, month: number): {
 
 async function listPublishedSeedRows(
   schemaName: string,
-  opts?: { startTs?: number; endTs?: number },
+  opts?: { startTs?: number; endTs?: number; uidPrefix?: string },
 ): Promise<AttestationLike[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return []
@@ -225,6 +274,7 @@ async function listPublishedSeedRows(
       uid: seeds.uid,
       schemaUid: seeds.schemaUid,
       type: seeds.type,
+      modelFileId: seeds.modelFileId,
       publisher: seeds.publisher,
       attestationRaw: seeds.attestationRaw,
       attestationCreatedAt: seeds.attestationCreatedAt,
@@ -236,6 +286,8 @@ async function listPublishedSeedRows(
       and(
         inArray(seeds.type, typeCandidates),
         isNotNull(seeds.uid),
+        // The query layer passes `0x` + hex only, so no LIKE wildcards to escape.
+        opts?.uidPrefix ? like(seeds.uid, `${opts.uidPrefix}%`) : undefined,
         or(isNull(seeds.revokedAt), eq(seeds.revokedAt, 0)),
         or(
           isNull(seeds._markedForDeletion),
@@ -248,22 +300,24 @@ async function listPublishedSeedRows(
   const out: AttestationLike[] = []
   for (const row of rows) {
     if (!row.uid || !isValidEasAttestationUid(row.uid)) continue
-    // Must have at least one published version
+    // Must have at least one published version that is not revoked: the SDK's latest published
+    // version skips revoked ones, so a seed whose versions were all revoked has none.
     const versionRows = await appDb
       .select({
         uid: versions.uid,
+        revokedAt: versions.revokedAt,
       })
       .from(versions)
       .where(eq(versions.seedUid, row.uid))
       .orderBy(desc(versions.createdAt))
 
     const hasPublished = versionRows.some(
-      (v: { uid: string | null }) =>
-        v.uid && isValidEasAttestationUid(v.uid),
+      (v: { uid: string | null; revokedAt: number | null }) =>
+        v.uid && isValidEasAttestationUid(v.uid) && !isRevokedLocally(v.revokedAt),
     )
     if (!hasPublished) continue
 
-    const schemaResolved = await resolveSchemaNameForSeedType(appDb, row.type)
+    const schemaResolved = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
     const att = seedRowToAttestation({
       ...row,
       schemaName: schemaResolved === schemaName ? schemaName : (schemaResolved ?? schemaName),
@@ -284,6 +338,10 @@ async function listPublishedSeedRows(
 
 /**
  * SDK local QueryDataSource: published Seeds/Versions/metadata from SQLite.
+ *
+ * Revocation follows the local `revoked_at` columns, not the stored `attestation_raw`: rows with
+ * `revoked_at` set are left out (as the remote source leaves out revoked attestations) and returned
+ * attestations carry `revoked`/`revocationTime` from those columns.
  */
 export function createLocalQueryDataSource(): QueryDataSource {
   return {
@@ -298,6 +356,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
+          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -309,9 +368,9 @@ export function createLocalQueryDataSource(): QueryDataSource {
 
       const row = rows[0]
       if (!row?.uid || !isValidEasAttestationUid(row.uid)) return null
-      if (row.revokedAt != null && row.revokedAt !== 0) return null
+      if (isRevokedLocally(row.revokedAt)) return null
 
-      const schemaName = await resolveSchemaNameForSeedType(appDb, row.type)
+      const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
       return seedRowToAttestation({ ...row, schemaName })
     },
 
@@ -321,6 +380,15 @@ export function createLocalQueryDataSource(): QueryDataSource {
     ): Promise<AttestationLike[]> {
       const all = await listPublishedSeedRows(schemaName)
       return all.slice(opts.skip, opts.skip + opts.limit)
+    },
+
+    async listSeedsByUidPrefix(
+      schemaName: string,
+      uidPrefix: string,
+      opts: { limit: number; skip: number },
+    ): Promise<AttestationLike[]> {
+      const matching = await listPublishedSeedRows(schemaName, { uidPrefix })
+      return matching.slice(opts.skip, opts.skip + opts.limit)
     },
 
     async listSeedsBySchemaNameForMonth(
@@ -336,7 +404,10 @@ export function createLocalQueryDataSource(): QueryDataSource {
       return this.getVersionsForSeeds([seedUid])
     },
 
-    async getVersionsForSeeds(seedUids: string[]): Promise<AttestationLike[]> {
+    async getVersionsForSeeds(
+      seedUids: string[],
+      opts?: { includeRevoked?: boolean },
+    ): Promise<AttestationLike[]> {
       const appDb = BaseDb.getAppDb()
       if (!appDb || seedUids.length === 0) return []
 
@@ -347,12 +418,16 @@ export function createLocalQueryDataSource(): QueryDataSource {
           publisher: versions.publisher,
           attestationRaw: versions.attestationRaw,
           attestationCreatedAt: versions.attestationCreatedAt,
+          revokedAt: versions.revokedAt,
         })
         .from(versions)
         .where(inArray(versions.seedUid, seedUids))
 
+      // Like the remote source (EAS queries exclude revoked attestations by default; with
+      // includeRevoked they come back marked `revoked`).
       const out: AttestationLike[] = []
       for (const row of rows) {
+        if (isRevokedLocally(row.revokedAt) && !opts?.includeRevoked) continue
         const att = versionRowToAttestation(row)
         if (att) out.push(att)
       }
@@ -376,12 +451,16 @@ export function createLocalQueryDataSource(): QueryDataSource {
           publisher: metadata.publisher,
           attestationRaw: metadata.attestationRaw,
           attestationCreatedAt: metadata.attestationCreatedAt,
+          revokedAt: metadata.revokedAt,
         })
         .from(metadata)
         .where(inArray(metadata.versionUid, versionUids))
 
+      // Like the remote source, revoked property attestations are left out, so the query layer's
+      // canonical pick (newest live per version and schema) matches the SDK's live-first readers.
       const out: AttestationLike[] = []
       for (const row of rows) {
+        if (isRevokedLocally(row.revokedAt)) continue
         const att = metadataRowToAttestation(row)
         if (att) out.push(att)
       }
@@ -397,6 +476,7 @@ export function createLocalQueryDataSource(): QueryDataSource {
           uid: seeds.uid,
           schemaUid: seeds.schemaUid,
           type: seeds.type,
+          modelFileId: seeds.modelFileId,
           publisher: seeds.publisher,
           attestationRaw: seeds.attestationRaw,
           attestationCreatedAt: seeds.attestationCreatedAt,
@@ -407,8 +487,8 @@ export function createLocalQueryDataSource(): QueryDataSource {
 
       const out: AttestationLike[] = []
       for (const row of rows) {
-        if (row.revokedAt != null && row.revokedAt !== 0) continue
-        const schemaName = await resolveSchemaNameForSeedType(appDb, row.type)
+        if (isRevokedLocally(row.revokedAt)) continue
+        const schemaName = await resolveSchemaNameForSeedType(appDb, row.type, row.modelFileId)
         const att = seedRowToAttestation({ ...row, schemaName })
         if (att) out.push(att)
       }

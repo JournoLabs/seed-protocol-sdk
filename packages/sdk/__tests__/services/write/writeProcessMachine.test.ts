@@ -1,32 +1,40 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
-import { createActor, waitFor } from 'xstate'
+import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest'
+import { createActor, fromCallback, fromPromise, waitFor, type AnyActorRef } from 'xstate'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { setupTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
+import { cleanupTestSchemaData } from '../../test-utils/cleanupTestDb'
 
 describe('writeProcessMachine', () => {
 
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 30000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 30000)
+  }, SETUP_HOOK_TIMEOUT_MS)
+
+  // Stop every actor a test started so no validation/write keeps running into the next test's cleanup.
+  const actors: AnyActorRef[] = []
+  const track = <T extends AnyActorRef>(actor: T): T => {
+    actors.push(actor)
+    return actor
+  }
+
+  // Write failures are always logged with console.error; keep the deliberate ones out of the output.
+  let consoleError: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
 
   afterEach(async () => {
-    // Clean up database after each test
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { models: modelsTable, properties, schemas: schemasTable } = await import('@/seedSchema')
-      await db.delete(properties)
-      await db.delete(modelsTable)
-      await db.delete(schemasTable)
-    }
+    consoleError.mockRestore()
+    for (const actor of actors.splice(0)) actor.stop()
+    await cleanupTestSchemaData()
   })
 
   describe('Model write process', () => {
     it('should transition through write states for a model', async () => {
-      const actor = createActor(writeProcessMachine, {
+      const actor = track(createActor(writeProcessMachine, {
         input: {
           entityType: 'model',
           entityId: 'test-model-id',
@@ -36,7 +44,7 @@ describe('writeProcessMachine', () => {
             properties: {},
           },
         },
-      })
+      }))
 
       actor.start()
 
@@ -64,7 +72,7 @@ describe('writeProcessMachine', () => {
     })
 
     it('should handle validation errors', async () => {
-      const actor = createActor(writeProcessMachine, {
+      const actor = track(createActor(writeProcessMachine, {
         input: {
           entityType: 'model',
           entityId: 'test-model-id',
@@ -73,7 +81,7 @@ describe('writeProcessMachine', () => {
             schemaName: 'TestSchema',
           },
         },
-      })
+      }))
 
       actor.start()
       actor.send({ type: 'startWrite', data: { modelName: '' } })
@@ -85,16 +93,19 @@ describe('writeProcessMachine', () => {
         { timeout: 10000 }
       )
 
-      // If validation fails, should have errors
-      if (snapshot.context.validationErrors) {
-        expect(snapshot.context.validationErrors.length).toBeGreaterThan(0)
-      }
+      expect(snapshot.value).toBe('error')
+      expect(snapshot.context.validationErrors.map((e) => e.code)).toContain('missing_model_name')
     })
   })
 
   describe('ModelProperty write process', () => {
-    it('should transition through write states for a property', async () => {
-      const actor = createActor(writeProcessMachine, {
+    it('should validate a property and move on to writing', async () => {
+      // Real validation, stubbed DB write: modelId 1 belongs to the Seed Protocol schema, so a real write
+      // would add a stray property to it.
+      const machine = writeProcessMachine.provide({
+        actors: { writeToDatabase: fromCallback(() => () => {}) as any },
+      })
+      const actor = track(createActor(machine, {
         input: {
           entityType: 'modelProperty',
           entityId: 'test-property-id',
@@ -105,7 +116,7 @@ describe('writeProcessMachine', () => {
             modelName: 'TestModel',
           },
         },
-      })
+      }))
 
       actor.start()
 
@@ -121,148 +132,107 @@ describe('writeProcessMachine', () => {
         (snapshot) => snapshot.value === 'validating',
         { timeout: 5000 }
       )
+
+      const finalSnapshot = await waitFor(
+        actor,
+        (snapshot) => snapshot.value === 'writing' || snapshot.value === 'error',
+        { timeout: 10000 }
+      )
+      expect(finalSnapshot.value).toBe('writing')
+      expect(finalSnapshot.context.validationErrors).toEqual([])
     })
   })
 
-  describe('Retry logic', () => {
-    it('should retry on write error', async () => {
-      const actor = createActor(writeProcessMachine, {
+  // writeSuccess / writeError are only handled in the `writing` state (they're sent by the writeToDatabase
+  // actor). To exercise the retry/reset/revert transitions deterministically, stub the two invoked actors:
+  // validation always passes and the write never reports back, so the test drives the outcome itself.
+  const stubbedMachine = writeProcessMachine.provide({
+    actors: {
+      validateEntity: fromPromise(async () => ({ isValid: true, errors: [] })) as any,
+      writeToDatabase: fromCallback(() => () => {}) as any,
+    },
+  })
+
+  const startStubbedWrite = async () => {
+    const actor = track(
+      createActor(stubbedMachine, {
         input: {
           entityType: 'model',
           entityId: 'test-model-id',
-          entityData: {
-            modelName: 'TestModel',
-            schemaName: 'TestSchema',
-          },
+          entityData: { modelName: 'TestModel', schemaName: 'TestSchema' },
         },
-      })
+      }),
+    )
+    actor.start()
+    actor.send({ type: 'startWrite', data: { modelName: 'TestModel', schemaName: 'TestSchema' } })
+    await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: 5000 })
+    return actor
+  }
 
-      actor.start()
+  describe('Retry logic', () => {
+    it('should retry on write error', async () => {
+      const actor = await startStubbedWrite()
 
-      // Manually trigger error state
       actor.send({ type: 'writeError', error: new Error('Test error') })
-
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'error',
-        { timeout: 5000 }
+      const errorSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 })
+      expect(errorSnapshot.context.retryCount).toBe(1)
+      expect(errorSnapshot.context.error?.message).toBe('Test error')
+      // A failed persist is otherwise only visible to debug logging
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Write error for model "test-model-id": Error: Test error'),
+        expect.any(Error),
       )
 
-      // Should be able to retry
-      const errorSnapshot = actor.getSnapshot()
-      expect(errorSnapshot.value).toBe('error')
-      expect(errorSnapshot.context.retryCount).toBeGreaterThanOrEqual(0)
-
-      // Retry should transition back to validating
+      // Retry goes back through validation (stubbed to pass) and into writing again
       actor.send({ type: 'retry' })
-
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'validating' || snapshot.value === 'error',
-        { timeout: 5000 }
-      )
+      const retried = await waitFor(actor, (snapshot) => snapshot.value === 'writing', { timeout: 5000 })
+      expect(retried.context.error).toBeNull()
     })
 
     it('should not retry more than 3 times', async () => {
-      const actor = createActor(writeProcessMachine, {
-        input: {
-          entityType: 'model',
-          entityId: 'test-model-id',
-          entityData: {
-            modelName: 'TestModel',
-            schemaName: 'TestSchema',
-          },
-        },
-      })
+      const actor = await startStubbedWrite()
 
-      actor.start()
-
-      // Manually set retry count to 3
-      actor.send({ type: 'writeError', error: new Error('Test error') })
-      
-      // Simulate multiple retries
-      for (let i = 0; i < 4; i++) {
-        const snapshot = actor.getSnapshot()
-        if (snapshot.context.retryCount >= 3) {
-          break
+      for (let i = 1; i <= 3; i++) {
+        actor.send({ type: 'writeError', error: new Error(`Test error ${i}`) })
+        const snapshot = await waitFor(actor, (s) => s.value === 'error', { timeout: 5000 })
+        expect(snapshot.context.retryCount).toBe(i)
+        if (i < 3) {
+          actor.send({ type: 'retry' })
+          await waitFor(actor, (s) => s.value === 'writing', { timeout: 5000 })
         }
-        actor.send({ type: 'retry' })
-        await new Promise(resolve => setTimeout(resolve, 100))
       }
 
+      // retryCount is now 3: the guard blocks a further retry
+      actor.send({ type: 'retry' })
       const finalSnapshot = actor.getSnapshot()
-      expect(finalSnapshot.context.retryCount).toBeLessThanOrEqual(3)
+      expect(finalSnapshot.value).toBe('error')
+      expect(finalSnapshot.context.retryCount).toBe(3)
     })
   })
 
   describe('State transitions', () => {
     it('should reset from success state', async () => {
-      const actor = createActor(writeProcessMachine, {
-        input: {
-          entityType: 'model',
-          entityId: 'test-model-id',
-          entityData: {
-            modelName: 'TestModel',
-            schemaName: 'TestSchema',
-          },
-        },
-      })
+      const actor = await startStubbedWrite()
 
-      actor.start()
-
-      // Manually set to success state
       actor.send({ type: 'writeSuccess' })
+      const successSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'success', { timeout: 5000 })
+      expect(successSnapshot.context.pendingWrite).toBeNull()
 
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'success',
-        { timeout: 5000 }
-      )
-
-      // Should be able to reset
       actor.send({ type: 'reset' })
-
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
-      )
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
     })
 
     it('should revert from error state', async () => {
-      const actor = createActor(writeProcessMachine, {
-        input: {
-          entityType: 'model',
-          entityId: 'test-model-id',
-          entityData: {
-            modelName: 'TestModel',
-            schemaName: 'TestSchema',
-          },
-        },
-      })
+      const actor = await startStubbedWrite()
+      expect(actor.getSnapshot().context.pendingWrite).not.toBeNull()
 
-      actor.start()
-
-      // Manually set to error state
       actor.send({ type: 'writeError', error: new Error('Test error') })
+      await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 })
 
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'error',
-        { timeout: 5000 }
-      )
-
-      // Should be able to revert
       actor.send({ type: 'revert' })
-
-      await waitFor(
-        actor,
-        (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
-      )
-
-      const finalSnapshot = actor.getSnapshot()
+      const finalSnapshot = await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
       expect(finalSnapshot.context.pendingWrite).toBeNull()
+      expect(finalSnapshot.context.error).toBeNull()
     })
   })
 })

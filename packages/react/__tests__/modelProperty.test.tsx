@@ -16,98 +16,18 @@ import {
   BaseDb,
   schemas,
   properties as propertiesTable,
-  models as modelsTable,
-  modelSchemas,
-  metadata,
-  seeds,
-  versions,
-  propertyUids,
-  modelUids,
-  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
   ModelProperty,
-  BaseFileManager,
-  generateId,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq, inArray } from 'drizzle-orm'
-
-/** Remove schema row + dependent rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
-async function deleteTestSchemaRowsByName(schemaName: string): Promise<void> {
-  const db = BaseDb.getAppDb()
-  if (!db) return
-
-  // Evict cached instances first (stopping their actors) so the next import builds fresh ones bound
-  // to the new rows; otherwise Model.create returns the stale instance and its properties are never written.
-  ModelProperty.evictForModels(Model.evictForSchema(schemaName), schemaName)
-
-  const schemaRow = await db
-    .select()
-    .from(schemas)
-    .where(eq(schemas.name, schemaName))
-    .limit(1)
-  if (!schemaRow.length || schemaRow[0].id == null) return
-
-  const schemaId = schemaRow[0].id
-
-  const links = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(eq(modelSchemas.schemaId, schemaId))
-
-  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
-  if (mids.length === 0) {
-    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-    await db.delete(schemas).where(eq(schemas.id, schemaId))
-    return
-  }
-
-  const modelRows = await db
-    .select({ name: modelsTable.name })
-    .from(modelsTable)
-    .where(inArray(modelsTable.id, mids))
-  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
-
-  const seedRows = await db
-    .select({ localId: seeds.localId })
-    .from(seeds)
-    .where(inArray(seeds.type, modelNames))
-  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
-
-  if (seedLocalIds.length) {
-    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
-    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
-    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
-    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
-  }
-
-  const propRows = await db
-    .select({ id: propertiesTable.id })
-    .from(propertiesTable)
-    .where(inArray(propertiesTable.modelId, mids))
-  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
-
-  if (pids.length) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
-  }
-
-  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
-  await db.update(propertiesTable).set({ refModelId: null }).where(inArray(propertiesTable.modelId, mids))
-  await db.delete(propertiesTable).where(inArray(propertiesTable.modelId, mids))
-  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
-  await db.delete(schemas).where(eq(schemas.id, schemaId))
-}
-
-async function deleteModelPropertyTestSchemasFromDb(): Promise<void> {
-  await deleteTestSchemaRowsByName('Test Schema Properties')
-  await deleteTestSchemaRowsByName('Empty Test Schema Properties')
-  await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-}
+import { eq } from 'drizzle-orm'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitFor as xstateWaitFor } from 'xstate'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
@@ -397,49 +317,14 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
   })
 
   afterAll(async () => {
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
-
-    await deleteModelPropertyTestSchemasFromDb()
-
-    // Clean up schema files from file system
-    if (testSchemaWithProperties.id) {
-      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    await deleteSchemaFileIfExists('LiveQuery Test Schema Properties', 1, 'livequery-test-schema-props')
-
-    // Clear schema cache
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
   })
 
@@ -448,40 +333,10 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    // Helper function to delete schema file if it exists
-    const deleteSchemaFileIfExists = async (schemaName: string, version: number, schemaFileId: string) => {
-      try {
-        const path = BaseFileManager.getPathModule()
-        const workingDir = BaseFileManager.getWorkingDir()
-        // Sanitize schema name (same logic as in helpers/schema.ts)
-        const sanitizedName = schemaName
-          .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-          .replace(/\s+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .replace(/_+/g, '_')
-        const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-        const filePath = path.join(workingDir, filename)
-        
-        const exists = await BaseFileManager.pathExists(filePath)
-        if (exists) {
-          const fs = await BaseFileManager.getFs()
-          await fs.promises.unlink(filePath)
-        }
-      } catch (error) {
-        // Ignore errors when deleting files (file might not exist)
-      }
-    }
+    // Removes every test schema (incl. this file's three), its items and schema files, after
+    // waiting for writes still running from the previous test.
+    await cleanupTestSchemaData({ items: true })
 
-    await deleteModelPropertyTestSchemasFromDb()
-    
-    // Clean up schema files from file system
-    if (testSchemaWithProperties.id) {
-      await deleteSchemaFileIfExists('Test Schema Properties', testSchemaWithProperties.version, testSchemaWithProperties.id)
-    }
-    if (emptyTestSchema.id) {
-      await deleteSchemaFileIfExists('Empty Test Schema Properties', emptyTestSchema.version, emptyTestSchema.id)
-    }
-    
     Schema.clearCache()
 
     // Import test schemas
@@ -496,13 +351,10 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Properties')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Properties')).toBe(true)
       },
       { timeout: 15000 }
     )
-    
-    // Give a small delay to ensure database operations are processed
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(() => {
@@ -538,14 +390,12 @@ describe('React ModelProperty Hooks Integration Tests', () => {
             () => {
               const listA = screen.getByTestId('list-a')
               const listB = screen.getByTestId('list-b')
-              const statusA = within(listA).getByTestId('properties-status').textContent
-              const statusB = within(listB).getByTestId('properties-status').textContent
-              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              expect(within(listA).getByTestId('properties-status').textContent).toBe('loaded')
+              expect(within(listB).getByTestId('properties-status').textContent).toBe('loaded')
               const countA = parseInt(within(listA).getByTestId('properties-count').textContent || '0')
               const countB = parseInt(within(listB).getByTestId('properties-count').textContent || '0')
               expect(countA).toBe(countB)
               expect(countA).toBeGreaterThanOrEqual(3)
-              return true
             },
             { timeout: 30000 }
           )
@@ -585,7 +435,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -597,7 +447,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Post model has 3 properties: title, content, author
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
         },
         { timeout: 30000 }
       )
@@ -614,31 +463,19 @@ describe('React ModelProperty Hooks Integration Tests', () => {
     it('should return properties when modelId provided', async () => {
       // First get the model to get its ID
       const schema = Schema.create('Test Schema Properties', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
+      // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
-      if (!postModel || !postModel.id) {
-        // Skip if we can't get the model ID
-        return
-      }
+      expect(postModel?.id).toBeTruthy()
 
       render(<UseModelPropertiesTest schemaIdOrModelId={postModel.id} />, { container, wrapper: SeedProviderWrapper })
 
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -649,7 +486,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const count = screen.getByTestId('properties-count')
           const countValue = parseInt(count.textContent || '0')
           expect(countValue).toBeGreaterThanOrEqual(3)
-          return countValue >= 3
         },
         { timeout: 30000 }
       )
@@ -664,7 +500,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -672,7 +508,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') >= 3
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(3)
         },
         { timeout: 30000 }
       )
@@ -686,7 +522,6 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const countValue = parseInt(count.textContent || '0')
           // Article model has 2 properties: headline, body
           expect(countValue).toBeGreaterThanOrEqual(2)
-          return countValue >= 2
         },
         { timeout: 30000 }
       )
@@ -749,22 +584,14 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         migrations: [],
       }
 
-      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-      Schema.clearCache()
-
-      // Import schema
-      try {
-        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
-      } catch (error) {
-        await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-        await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
-      }
+      // beforeEach already removed every test schema, so this one can't exist yet
+      await importJsonSchema({ contents: JSON.stringify(emptySchema) }, emptySchema.version)
 
       // Wait for schema to be available
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Test Schema Properties')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Test Schema Properties')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -779,7 +606,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 15000 }
       )
@@ -788,7 +615,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const count = screen.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') >= 1
+          expect(parseInt(count.textContent || '0')).toBeGreaterThanOrEqual(1)
         },
         { timeout: 30000 }
       )
@@ -798,25 +625,63 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         () => {
           const initialCount = parseInt(screen.getByTestId('properties-count').textContent || '0')
           expect(initialCount).toBeGreaterThanOrEqual(1)
-          return true
         },
         { timeout: 5000, interval: 200 }
       )
 
-      // Get the model instance
-      const model = Model.create('TestModel', 'LiveQuery Test Schema Properties', { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // Add a property; the hook's live query on the properties table should pick it up
+      const added = ModelProperty.create(
+        { name: 'addedLater', dataType: 'Text', modelName: 'TestModel' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName: 'LiveQuery Test Schema Properties' },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
 
-      // Add a new property to the model
-      // Note: This is a simplified test - in reality, properties are added through Model.create with properties option
-      // For this test, we'll verify that the hook responds to database changes via liveQuery
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('properties-count').textContent).toBe('2')
+          const names = screen.getAllByTestId(/^property-\d+$/).map((el) => el.textContent)
+          expect(names).toEqual(expect.arrayContaining(['name', 'addedLater']))
+        },
+        { timeout: 15000 }
+      )
+    })
+  })
 
-      // Wait for liveQuery to detect the change (if any)
-      await new Promise(resolve => setTimeout(resolve, 2000))
+  describe('useModelProperties when the model gets its _dbId late', () => {
+    // Finding 15: the hook memoized the model's _dbId once. A model first seen before its row was
+    // resolved never got the live query on the properties table, so with properties already listed
+    // (the fallback refetches only run while the list is empty) later properties never showed up.
+    it('picks up a property added after the model resolves its _dbId', async () => {
+      const schemaName = 'Test Schema Properties'
+      const model = await Model.find({ modelName: 'Article', schemaName })
+      expect(model).toBeDefined()
+      const dbId = (model as any)._getSnapshotContext()._dbId as number | undefined
+      expect(dbId).toBeGreaterThan(0)
 
-      model.unload()
-      await deleteTestSchemaRowsByName('LiveQuery Test Schema Properties')
-      Schema.clearCache()
+      model!.getService().send({ type: 'updateContext', _dbId: undefined })
+      render(<UseModelPropertiesTest schemaIdOrModelId={schemaName} modelName="Article" />, {
+        container,
+        wrapper: SeedProviderWrapper,
+      })
+      await waitFor(() => expect(screen.getByTestId('properties-count').textContent).toBe('2'), {
+        timeout: 15000,
+      })
+
+      model!.getService().send({ type: 'updateContext', _dbId: dbId })
+      const added = ModelProperty.create(
+        { name: 'addedLater', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('properties-count').textContent).toBe('3')
+          const names = screen.getAllByTestId(/^property-\d+$/).map((el) => el.textContent)
+          expect(names).toEqual(expect.arrayContaining(['headline', 'body', 'addedLater']))
+        },
+        { timeout: 10000 },
+      )
     })
   })
 
@@ -846,13 +711,53 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(propertyDataType.textContent).toBe('Text')
     })
 
+    it('finds a property whose model is created after the hook first looked it up', async () => {
+      const schemaName = 'Test Schema Properties'
+      const view = render(
+        <UseModelPropertyTest schemaId={schemaName} modelName="LateModel" propertyName="summary" />,
+        { container, wrapper: SeedProviderWrapper },
+      )
+      // The first lookup finds nothing: the model doesn't exist yet
+      await waitFor(() => expect(within(view.container).getByTestId('is-loading').textContent).toBe('false'), {
+        timeout: 15000,
+      })
+      expect(within(view.container).queryByTestId('property-name')).toBeNull()
+
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      const lateModel = Model.create('LateModel', schema, {
+        properties: { summary: { dataType: 'Text' } },
+        waitForReady: false,
+      })
+      await xstateWaitFor(lateModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 5000 })
+      expect(propertyNameEl.textContent).toBe('summary')
+    })
+
+    // getPropertySchema read a schema-file model's properties only from the Schema context, which
+    // doesn't get properties added at runtime (finding 19).
+    it('finds a property added at runtime to a schema-file model', async () => {
+      const schemaName = 'Test Schema Properties'
+      const added = ModelProperty.create(
+        { name: 'addedAtRuntime', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+
+      const view = render(
+        <UseModelPropertyTest schemaId={schemaName} modelName="Article" propertyName="addedAtRuntime" />,
+        { container, wrapper: SeedProviderWrapper },
+      )
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 15000 })
+      expect(propertyNameEl.textContent).toBe('addedAtRuntime')
+    })
+
     it('should update when modelName changes', async () => {
       const { rerender } = render(<UseModelPropertyTest schemaId="Test Schema Properties" modelName="Post" propertyName="title" />, { container })
 
       await waitFor(
         () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null && propertyName.textContent === 'title'
+          expect(screen.queryByTestId('property-name')?.textContent).toBe('title')
         },
         { timeout: 15000 }
       )
@@ -874,8 +779,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null && propertyName.textContent === 'title'
+          expect(screen.queryByTestId('property-name')?.textContent).toBe('title')
         },
         { timeout: 15000 }
       )
@@ -897,8 +801,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const propertyName = screen.queryByTestId('property-name')
-          return propertyName !== null
+          expect(screen.queryByTestId('property-name')).not.toBeNull()
         },
         { timeout: 15000 }
       )
@@ -907,10 +810,8 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const validationErrorsCount = screen.queryByTestId('validation-errors-count')
-          if (validationErrorsCount === null) return false
-          const count = parseInt(validationErrorsCount.textContent || '0', 10)
-          expect(count).toBeGreaterThanOrEqual(0)
-          return true
+          expect(validationErrorsCount).not.toBeNull()
+          expect(parseInt(validationErrorsCount!.textContent || '0', 10)).toBeGreaterThanOrEqual(0)
         },
         { timeout: 15000 }
       )
@@ -923,8 +824,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.queryByTestId('property-data-type')
-          return dataTypeEl !== null && dataTypeEl.textContent === 'Text'
+          expect(screen.queryByTestId('property-data-type')?.textContent).toBe('Text')
         },
         { timeout: 15000 }
       )
@@ -934,8 +834,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.queryByTestId('property-data-type')
-          return dataTypeEl !== null && dataTypeEl.textContent === 'Number'
+          expect(screen.queryByTestId('property-data-type')?.textContent).toBe('Number')
         },
         { timeout: 15000 }
       )
@@ -948,8 +847,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.queryByTestId('property-data-type')
-          return dataTypeEl !== null && dataTypeEl.textContent === 'Text'
+          expect(screen.queryByTestId('property-data-type')?.textContent).toBe('Text')
         },
         { timeout: 15000 }
       )
@@ -959,13 +857,10 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const dataTypeEl = screen.queryByTestId('property-data-type')
-          return dataTypeEl !== null && dataTypeEl.textContent === 'Number'
+          expect(screen.queryByTestId('property-data-type')?.textContent).toBe('Number')
         },
         { timeout: 15000 }
       )
-
-      await new Promise(resolve => setTimeout(resolve, 2000))
 
       const db = BaseDb.getAppDb()
       expect(db).toBeTruthy()
@@ -977,7 +872,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
               .from(propertiesTable)
               .where(eq(propertiesTable.schemaFileId, 'title-prop-id'))
               .limit(1)
-            return rows.length > 0 && rows[0].dataType === 'Number'
+            expect(rows.length > 0 && rows[0].dataType === 'Number').toBe(true)
           },
           { timeout: 20000 }
         )
@@ -1007,7 +902,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Properties')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Properties')).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -1022,7 +917,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('properties-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
@@ -1037,8 +932,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // Wait for schema to be ready
       await waitFor(
         () => {
-          const snapshot = schemaInstance.getService().getSnapshot()
-          return snapshot.value === 'idle'
+          expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
@@ -1055,20 +949,16 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // Wait for model to be idle
       await waitFor(
         () => {
-          const modelSnapshot = newModel.getService().getSnapshot()
-          return modelSnapshot.value === 'idle'
+          expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
         { timeout: 10000 }
       )
-
-      // Give useModels poll/refetch time to pick up the new model before waiting for properties
-      await new Promise((r) => setTimeout(r, 800))
 
       // Wait for properties to appear in the UI
       await waitFor(
         () => {
           const count = screen.getByTestId('properties-count')
-          return parseInt(count.textContent || '0') > 0
+          expect(parseInt(count.textContent || '0')).toBeGreaterThan(0)
         },
         { timeout: 30000 }
       )
@@ -1115,7 +1005,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('create-property-status')
-          return status.textContent === 'created'
+          expect(status.textContent).toBe('created')
         },
         { timeout: 5000 }
       )
@@ -1141,13 +1031,39 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyModelPropertyTest modelProperty={createFastDestroyStub<ModelProperty>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-property-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-property-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-property-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-property-error')).toBeNull()
+      })
+    })
+
     it('should destroy a model property and set loading state during destroy', async () => {
       const model = Model.create('Post', 'Test Schema Properties', { waitForReady: false })
       try {
         await waitFor(
           () => {
-            const snapshot = model.getService().getSnapshot()
-            return snapshot.value === 'idle'
+            expect(model.getService().getSnapshot().value).toBe('idle')
           },
           { timeout: 10000 }
         )
@@ -1172,23 +1088,18 @@ describe('React ModelProperty Hooks Integration Tests', () => {
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-property-is-loading')
-            return isLoading.textContent === 'true'
+            expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
           },
           { timeout: 2000 }
         )
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-property-is-loading')
-            const status = screen.getByTestId('destroy-property-status')
-            return isLoading.textContent === 'false' && (status.textContent === 'destroyed' || status.textContent === 'error')
+            expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
+            expect(['destroyed', 'error']).toContain(screen.getByTestId('destroy-property-status').textContent)
           },
           { timeout: 5000 }
         )
-
-        const status = screen.getByTestId('destroy-property-status')
-        expect(['destroyed', 'error']).toContain(status.textContent)
       } finally {
         model.unload()
       }

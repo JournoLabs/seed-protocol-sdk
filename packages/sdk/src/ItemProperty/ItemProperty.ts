@@ -56,13 +56,16 @@ const HTML_PROP_SEED_UID_RE = /^0x[a-fA-F0-9]{64}$/
 const resolvePropertyRecordSchemaFromSchemaData = async (
   modelName: string,
   propertyName: string,
-  modelType?: string
+  modelType?: string,
+  schemaName?: string,
 ): Promise<SchemaPropertyType | undefined> => {
   try {
     const { loadAllSchemasFromDb } = await import('@/helpers/schema')
     const allSchemas = await loadAllSchemasFromDb()
     const modelNameAlt = modelType ? upperFirst(camelCase(modelType)) : ''
     for (const { schema } of allSchemas) {
+      // Model names are only unique per schema: when the owning schema is known, only look there.
+      if (schemaName && schema.metadata?.name !== schemaName) continue
       const models = schema.models as Record<string, { properties?: Record<string, any> }> | undefined
       if (!models) continue
       const model = models[modelName] ?? (modelNameAlt ? models[modelNameAlt] : undefined)
@@ -102,7 +105,9 @@ const resolvePropertyRecordSchemaFromSchemaData = async (
 const resolvePropertyRecordSchemaFromModel = async (
   modelName: string,
   propertyName: string,
-  modelType?: string
+  modelType?: string,
+  /** Hints identifying the owning item's model (model names are only unique per schema). */
+  hints: { modelFileId?: string | null; seedLocalId?: string | null; seedUid?: string | null; propertyId?: number | null } = {},
 ): Promise<SchemaPropertyType | undefined> => {
   if (!modelName && !modelType) {
     return undefined
@@ -110,7 +115,14 @@ const resolvePropertyRecordSchemaFromModel = async (
   try {
     const { Model } = await import('@/Model/Model')
     const { modelPropertiesToObject } = await import('@/helpers/model')
-    let model = modelName ? Model.getByName(modelName) : undefined
+    const { resolveItemModelFileId } = await import('@/db/read/resolveModelRecord')
+    const modelFileId = await resolveItemModelFileId(hints)
+    let model = modelFileId
+      ? await Model.resolveAsync(modelName || modelTypeToModelName(modelType ?? ''), { modelFileId })
+      : undefined
+    if (!model?.properties?.length && modelName) {
+      model = Model.getByName(modelName)
+    }
     if (!model?.properties?.length && modelType) {
       model = Model.findByModelType(modelType)
     }
@@ -123,7 +135,12 @@ const resolvePropertyRecordSchemaFromModel = async (
     }
     if (!model?.properties?.length) {
       // Fallback: resolve from schema JSON when Model not in cache/DB (e.g. PermaPress sync failed but schema in DB)
-      const schemaProp = await resolvePropertyRecordSchemaFromSchemaData(modelName, propertyName, modelType)
+      const schemaProp = await resolvePropertyRecordSchemaFromSchemaData(
+        modelName,
+        propertyName,
+        modelType,
+        model?.schemaName,
+      )
       if (schemaProp) {
         // Schema JSON uses file shape ({ type: 'Html' }); callers read dataType.
         return normalizePropertyRecordSchema(schemaProp)
@@ -239,6 +256,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       versionLocalId,
       versionUid,
       modelName,
+      modelFileId: initialValues.modelFileId,
+      propertyId: initialValues.propertyId,
       storageTransactionId,
       // propertyRecordSchema will be loaded from database via loadOrCreateProperty actor
       // or can be provided in initialValues if available
@@ -602,6 +621,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           
           // For File/Image/Relation, query both propertyName and propertyNameId (metadata stores with Id suffix)
           // Build query with primitive params only (SQLocal bind rejects SQL fragment objects)
+          // ORDER BY spells out METADATA_LATEST_FIRST_ORDER_SQL (compareMetadataRowsLatestFirst) for the same reason
           const [p0, p1, p2] = propertyNames
           const metadata$ = BaseDb.liveQuery<{ localId: string | null; uid: string | null; propertyName: string; propertyValue: string; versionLocalId: string | null; versionUid: string | null; schemaUid: string | null; refResolvedValue: string | null; refResolvedDisplayValue: string | null; localStorageDir: string | null }>(
             (sql: any) => {
@@ -613,7 +633,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -623,7 +643,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -633,7 +653,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_uid = ${resolvedSeedUid} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
               } else if (resolvedSeedLocalId) {
@@ -644,7 +664,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND property_name = ${p0} AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length === 2) {
@@ -654,7 +674,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
                 if (propertyNames.length >= 3) {
@@ -664,7 +684,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
                            ref_resolved_value as refResolvedValue, ref_resolved_display_value as refResolvedDisplayValue, local_storage_dir as localStorageDir
                     FROM metadata
                     WHERE seed_local_id = ${resolvedSeedLocalId} AND (property_name = ${p0} OR property_name = ${p1} OR property_name = ${p2}) AND property_name IS NOT NULL
-                    ORDER BY COALESCE(attestation_created_at, created_at) DESC LIMIT 1
+                    ORDER BY (revoked_at IS NOT NULL), COALESCE(attestation_created_at, created_at) DESC, local_id DESC LIMIT 1
                   `
                 }
               }
@@ -770,6 +790,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
       setupState.subscriptionSetUp = true
       logger(`[ItemProperty._setupPropertySchemaLiveQuery] Setting up for modelName: ${modelName}, propertyName: ${propertyName}`)
+      // Model names are only unique per schema; pin the query to the owning item's model when known.
+      const ctx = this._service.getSnapshot().context
+      let modelFileId: string | undefined
+      try {
+        const { resolveItemModelFileId } = await import('../db/read/resolveModelRecord')
+        modelFileId = await resolveItemModelFileId({
+          modelFileId: ctx.modelFileId,
+          seedLocalId: ctx.seedLocalId,
+          seedUid: ctx.seedUid,
+          propertyId: ctx.propertyId,
+        })
+      } catch {
+        modelFileId = undefined
+      }
 
       try {
         const db = BaseDb.getAppDb()
@@ -787,13 +821,22 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
           dataType: string
           refValueType: string | null
           refModelName: string | null
+          storageType: string | null
+          localStorageDir: string | null
+          filenameSuffix: string | null
         }>(
           (sql: any) => sql`
-            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName
+            SELECT p.data_type as dataType, p.ref_value_type as refValueType, ref.name as refModelName,
+              p.storage_type as storageType, p.local_storage_dir as localStorageDir,
+              p.filename_suffix as filenameSuffix
             FROM properties p
             INNER JOIN models m ON p.model_id = m.id
             LEFT JOIN models ref ON p.ref_model_id = ref.id
-            WHERE m.name = ${modelName} AND p.name = ${propertyName}
+            WHERE p.name = ${propertyName}
+              AND (CASE WHEN ${modelFileId ?? null} IS NOT NULL
+                THEN m.schema_file_id = ${modelFileId ?? null}
+                ELSE m.name = ${modelName} END)
+            ORDER BY m.id DESC
             LIMIT 1
           `
         )
@@ -813,9 +856,9 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               dataType: row.dataType,
               ref: row.refModelName || undefined,
               refValueType: row.refValueType || undefined,
-              storageType: undefined as string | undefined,
-              localStorageDir: undefined as string | undefined,
-              filenameSuffix: undefined as string | undefined,
+              storageType: row.storageType || undefined,
+              localStorageDir: row.localStorageDir || undefined,
+              filenameSuffix: row.filenameSuffix || undefined,
             }
 
             logger(`[ItemProperty._setupPropertySchemaLiveQuery] Schema updated for ${propertyName}: dataType=${row.dataType}`)
@@ -1064,6 +1107,39 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     )
   }
 
+  /**
+   * The cached ItemProperty when it can be read right now (idle, not saving), the state
+   * `ItemProperty.find()` waits for. Otherwise undefined. Unlike `find`, it takes no cache hold, so
+   * React hooks can call it during render.
+   */
+  static peekReady({
+    propertyName,
+    seedLocalId,
+    seedUid,
+  }: {
+    propertyName?: string
+    seedLocalId?: string
+    seedUid?: string
+  }): ItemProperty<any> | undefined {
+    if (!propertyName) return undefined
+    // Same key order as find(), then the other id: instances are cached under both when both are known.
+    const keys = [seedUid, seedLocalId]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => this.cacheKey(id, propertyName))
+    for (const key of keys) {
+      const instance = this.instanceCache.get(key)?.instance
+      if (!instance) continue
+      const snap = instance.getService().getSnapshot() as {
+        status?: string
+        value?: unknown
+        context?: { isSaving?: boolean }
+      }
+      if (snap.status !== 'active' || snap.value !== 'idle' || snap.context?.isSaving) return undefined
+      return instance
+    }
+    return undefined
+  }
+
   static async find({
     propertyName,
     seedLocalId,
@@ -1113,7 +1189,12 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       const propertyRecordSchema = await resolvePropertyRecordSchemaFromModel(
         modelName,
         propertyName,
-        data.modelType
+        data.modelType,
+        {
+          seedLocalId: (propertyData as { seedLocalId?: string }).seedLocalId ?? seedLocalId,
+          seedUid: (propertyData as { seedUid?: string }).seedUid ?? seedUid,
+          propertyId: (propertyData as { propertyId?: number }).propertyId,
+        },
       )
       foundProperty = ItemProperty.create(
         { ...propertyData, modelName, propertyRecordSchema },
@@ -1150,10 +1231,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     const instances: ItemProperty<any>[] = []
     const seenNormalized = new Set<string>()
 
+    const { resolveItemModelFileId } = await import('../db/read/resolveModelRecord')
+    const itemModelFileId = await resolveItemModelFileId({ seedLocalId, seedUid })
     for (const data of propertiesData) {
-      const d = data as { modelName?: string; modelType?: string; propertyName?: string; refSeedType?: string }
+      const d = data as {
+        modelName?: string
+        modelType?: string
+        propertyName?: string
+        refSeedType?: string
+        propertyId?: number
+      }
       const modelName =
         d.modelName ?? (d.modelType ? modelTypeToModelName(d.modelType) : '') ?? ''
+      const modelFileId =
+        itemModelFileId ?? (await resolveItemModelFileId({ propertyId: d.propertyId }))
       // Normalize Id-suffix for File/Image/Relation: metadata stores "textId" but schema defines "text"
       let propertyName = d.propertyName ?? ''
       const baseName = propertyName.endsWith('Id') ? propertyName.slice(0, -2) : undefined
@@ -1165,7 +1256,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         try {
           const { Model } = await import('../Model/Model')
           const { modelPropertiesToObject } = await import('../helpers/model')
-          const model = await Model.getByNameAsync(modelName)
+          const model = await Model.resolveAsync(modelName, { modelFileId })
           if (model?.properties) {
             const schemas = modelPropertiesToObject(model.properties)
             if (schemas[baseName]) propertyName = baseName
@@ -1178,7 +1269,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         try {
           const { Model } = await import('../Model/Model')
           const { modelPropertiesToObject } = await import('../helpers/model')
-          const model = await Model.getByNameAsync(modelName)
+          const model = await Model.resolveAsync(modelName, { modelFileId })
           if (model?.properties?.length) {
             const schemas = modelPropertiesToObject(model.properties)
             const listKey = resolveStorageNameToSchemaName(schemas, propertyName)
@@ -1192,12 +1283,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       seenNormalized.add(propertyName)
       // Fix 6: resolve propertyRecordSchema from Model so value setter can persist
       const propertyRecordSchema = propertyName
-        ? await resolvePropertyRecordSchemaFromModel(modelName, propertyName, d.modelType)
+        ? await resolvePropertyRecordSchemaFromModel(modelName, propertyName, d.modelType, { modelFileId })
         : undefined
       const createProps = {
         ...data,
         propertyName,
         modelName,
+        modelFileId,
         propertyRecordSchema,
       }
       const instance = this.create(createProps, { waitForReady: false })
@@ -1369,8 +1461,13 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
     // If no propertyRecordSchema, try to resolve from Model before persisting (fixes external app persistence)
     if (!context.propertyRecordSchema) {
-      const { modelName, propertyName, modelType } = context as { modelName?: string; propertyName?: string; modelType?: string }
-      const pending = resolvePropertyRecordSchemaFromModel(modelName ?? '', propertyName ?? '', modelType).then(
+      const { modelName, propertyName, modelType, modelFileId, seedLocalId, seedUid, propertyId } = context
+      const pending = resolvePropertyRecordSchemaFromModel(modelName ?? '', propertyName ?? '', modelType ?? undefined, {
+        modelFileId,
+        seedLocalId,
+        seedUid,
+        propertyId,
+      }).then(
         (schema) => {
           if (!schema) return false
           this._service.send({ type: 'updateContext', propertyRecordSchema: schema })

@@ -8,12 +8,13 @@ import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
-import { getContentHash, getDeterministicId } from '@/helpers/crypto'
+import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
 // import { getClient } from '@/client/ClientManager'
 import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { linkModelToSchema } from '@/db/write/linkModelToSchema'
 
 const logger = debug('seedSdk:imports:json')
 
@@ -594,16 +595,17 @@ export async function importJsonSchema(
     // Generate missing model and property IDs.
     // Use deterministic IDs (from schema content hash) so addModelsToDb finds existing
     // records when processSchemaFiles runs multiple times with different DB/file contexts.
-    const schemaContent = getSchemaContentForComparison(schemaFile)
+    // Hash the schema content once: rehashing it per id is quadratic in schema size.
+    const getDeterministicId = getDeterministicIdsWithPrefix(getSchemaContentForComparison(schemaFile))
     for (const [modelName, model] of Object.entries(schemaFile.models || {})) {
       if (!model.id) {
-        model.id = getDeterministicId(schemaContent + modelName)
+        model.id = getDeterministicId(modelName)
         logger(`Generated deterministic model ID for ${modelName}:`, model.id)
       }
       
       for (const [propName, prop] of Object.entries(model.properties || {})) {
         if (!prop.id) {
-          prop.id = getDeterministicId(schemaContent + modelName + propName)
+          prop.id = getDeterministicId(modelName + propName)
           logger(`Generated deterministic property ID for ${modelName}.${propName}:`, prop.id)
         }
       }
@@ -838,7 +840,7 @@ export async function importJsonSchema(
           const modelSchemaMod = await import('../seedSchema/ModelSchema')
           const { models: modelsTable } = modelSchemaMod
           const drizzleMod = await import('drizzle-orm')
-          const { eq, and } = drizzleMod
+          const { eq, and, isNull } = drizzleMod
           
           const modelLinks = await db
             .select({
@@ -886,21 +888,20 @@ export async function importJsonSchema(
                         .limit(1)
                       
                       if (existingJoin.length === 0) {
-                        await db.insert(modelSchemas).values({
-                          modelId: missingModel[0].id,
-                          schemaId: schemaRecord.id,
-                        })
+                        await linkModelToSchema(db, missingModel[0].id, schemaRecord.id)
                       } else {
                       }
                     } else {
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" with schemaFileId "${modelFileId}" in database`)
                     }
                   } else {
-                    // Fallback: find by name
+                    // Fallback: find by name, but only a stub no schema claims (model names are only
+                    // unique per schema; an unlinked row with a schemaFileId is a deleted schema's leftover)
                     const missingModel = await db
-                      .select()
+                      .select({ id: modelsTable.id })
                       .from(modelsTable)
-                      .where(eq(modelsTable.name, missingModelName))
+                      .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+                      .where(and(eq(modelsTable.name, missingModelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
                       .limit(1)
                     
                     if (missingModel.length > 0 && missingModel[0].id) {
@@ -916,10 +917,7 @@ export async function importJsonSchema(
                         .limit(1)
                       
                       if (existingJoin.length === 0) {
-                        await db.insert(modelSchemas).values({
-                          modelId: missingModel[0].id,
-                          schemaId: schemaRecord.id,
-                        })
+                        await linkModelToSchema(db, missingModel[0].id, schemaRecord.id)
                       }
                     } else {
                       console.warn(`[importJsonSchema] Could not find model "${missingModelName}" by name in database`)

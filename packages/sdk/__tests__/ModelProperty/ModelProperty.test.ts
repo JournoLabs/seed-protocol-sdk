@@ -4,42 +4,38 @@ import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { modelUids } from '@/seedSchema/ModelUidSchema'
 import { propertyUids } from '@/seedSchema/PropertyUidSchema'
-import { eq, and, ne, notInArray } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import type { TProperty } from '@/Schema'
+import { waitForModelPropertyIdle } from '../test-utils/waitForIdle'
 
-// Helper function to wait for ModelProperty to be in idle state using xstate waitFor
-async function waitForModelPropertyIdle(property: ModelProperty, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ModelProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ModelProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ModelProperty loading timeout after ${timeout}ms`)
-  }
+// Schema names here must not match other test files': in the browser all files share one OPFS store, and
+// importing a same-name/same-version schema loads the other file's schema instead.
+// Schema imports settle asynchronously (slower under a busy browser run). Wait for the property's schema
+// instead of relying on the fixed sleeps after importJsonSchema. Pass the schema: model names such as
+// 'Post' are also used by other test files, and a name-only lookup throws AmbiguousModelError when
+// one of their models is still cached.
+async function waitForPropertySchema(modelName: string, propertyName: string, schemaName: string) {
+  return vi.waitFor(
+    async () => {
+      const data = await getPropertySchema(modelName, propertyName, { schemaName })
+      if (!data) throw new Error(`Property schema ${modelName}.${propertyName} not loaded yet`)
+      return data
+    },
+    { timeout: 15000, interval: 100 },
+  )
 }
 
 // Helper to create a test schema
@@ -66,23 +62,13 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('ModelProperty Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000) // Increased timeout to allow for full initialization
+  }, SETUP_HOOK_TIMEOUT_MS) // Increased timeout to allow for full initialization
 
   afterAll(async () => {
     // Clean up - delete in order to respect foreign key constraints
@@ -101,88 +87,10 @@ testDescribe('ModelProperty Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        // Evict cached instances of the test schemas first. This stops their actors (no new writes) and
-        // makes the next import build fresh instances instead of reusing ones bound to deleted rows.
-        const testSchemaRows = await db
-          .select({ name: schemas.name })
-          .from(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        for (const { name } of testSchemaRows) {
-          if (name) ModelProperty.evictForModels(Model.evictForSchema(name), name)
-        }
+    // FK-safe cleanup that keeps the Seed Protocol schema (required for client initialization)
+    await cleanupTestSchemaData()
 
-        // Then delete in FK order, scoped to every model that isn't a Seed Protocol model
-        // (including orphans not linked to any schema).
-        const isTestModel = (column: typeof propertiesTable.modelId | typeof modelsTable.id) =>
-          seedProtocolModelIds.length > 0 ? notInArray(column, seedProtocolModelIds) : undefined
-
-        // A write the previous test started (e.g. writeModelToDb inserting a model_schemas row) can't be
-        // cancelled by stopping its actor and may land mid-cleanup, failing an FK check. Retry until it settles.
-        for (let attempt = 0; ; attempt++) {
-          try {
-            await db.update(propertiesTable).set({ refModelId: null }).where(isTestModel(propertiesTable.modelId))
-            await db.delete(propertyUids)
-            await db.delete(modelUids)
-            await db.delete(propertiesTable).where(isTestModel(propertiesTable.modelId))
-            await db.delete(modelSchemas).where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-            await db.delete(modelsTable).where(isTestModel(modelsTable.id))
-            await db.delete(schemas).where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-            break
-          } catch (error) {
-            if (attempt >= 10) throw error
-            await new Promise((resolve) => setTimeout(resolve, 200))
-          }
-        }
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.update(propertiesTable).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(propertiesTable)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
-    }
-
-    // Clean up property files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Property') || file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    await cleanupTestSchemaFiles()
   })
 
   afterEach(async () => {
@@ -191,7 +99,13 @@ testDescribe('ModelProperty Integration Tests', () => {
     // The cache will be cleared when models are unloaded
     const db = BaseDb.getAppDb()
     if (db) {
-      const dbModels = await db.select().from(modelsTable)
+      // models has no schema column; read it from model_schemas so the lookup is scoped (a bare name
+      // throws AmbiguousModelError once two schemas define it, and the catch below would hide that).
+      const dbModels = await db
+        .select({ name: modelsTable.name, schemaName: schemas.name })
+        .from(modelsTable)
+        .innerJoin(modelSchemas, eq(modelSchemas.modelId, modelsTable.id))
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
       for (const dbModel of dbModels) {
         try {
           const model = Model.getByName(dbModel.name, dbModel.schemaName)
@@ -207,7 +121,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty.create()', () => {
     it('should create a new ModelProperty instance with property data', async () => {
-      const schemaName = 'Test Schema Property Create'
+      const schemaName = 'Test Schema ModelProperty Create'
       const modelName = 'TestModel Property Create'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -222,15 +136,11 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      // Wait for schema to be imported
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Get property schema data
-      const propertyData = await getPropertySchema(modelName, 'title')
+      const propertyData = await waitForPropertySchema(modelName, 'title', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -244,7 +154,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
 
     it('should return the same instance when called multiple times (caching)', async () => {
-      const schemaName = 'Test Schema Property Cache'
+      const schemaName = 'Test Schema ModelProperty Cache'
       const modelName = 'TestModel Property Cache'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -259,12 +169,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'content')
+      const propertyData = await waitForPropertySchema(modelName, 'content', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -304,12 +212,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'name')
+      const propertyData = await waitForPropertySchema(modelName, 'name', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData && propertyData.id) {
@@ -328,7 +234,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty.find()', () => {
     it('should find existing ModelProperty by propertyFileId and wait for idle by default', async () => {
-      const schemaName = 'Test Schema Property Find'
+      const schemaName = 'Test Schema ModelProperty Find'
       const propertyFileId = generateId()
       const testSchema = createTestSchema(schemaName, {
         'TestPost': {
@@ -373,7 +279,7 @@ testDescribe('ModelProperty Integration Tests', () => {
     })
 
     it('should support waitForReady: false option', async () => {
-      const schemaName = 'Test Schema Property Find No Wait'
+      const schemaName = 'Test Schema ModelProperty Find No Wait'
       const propertyFileId = generateId()
       const testSchema = createTestSchema(schemaName, {
         'TestPost': {
@@ -492,12 +398,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'description')
+      const propertyData = await waitForPropertySchema(modelName, 'description', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -544,40 +448,39 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Wait for model to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const db = BaseDb.getAppDb()
       if (!db) {
         throw new Error('Database not available')
       }
 
-      // Get model from database
-      const dbModels = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.name, modelName))
-        .limit(1)
+      // The model and its properties are written asynchronously; poll until they're in the database
+      await vi.waitFor(
+        async () => {
+          const dbModels = await db
+            .select()
+            .from(modelsTable)
+            .where(eq(modelsTable.name, modelName))
+            .limit(1)
 
-      expect(dbModels.length).toBeGreaterThan(0)
-      const dbModel = dbModels[0]
+          expect(dbModels.length).toBeGreaterThan(0)
+          const dbModel = dbModels[0]
 
-      // Verify properties exist in database
-      const dbProperties = await db
-        .select()
-        .from(propertiesTable)
-        .where(eq(propertiesTable.modelId, dbModel.id!))
+          const dbProperties = await db
+            .select()
+            .from(propertiesTable)
+            .where(eq(propertiesTable.modelId, dbModel.id!))
 
-      expect(dbProperties.length).toBeGreaterThanOrEqual(2)
-      
-      const propertyNames = dbProperties.map(p => p.name)
-      expect(propertyNames).toContain('title')
-      expect(propertyNames).toContain('body')
+          expect(dbProperties.length).toBeGreaterThanOrEqual(2)
+
+          const propertyNames = dbProperties.map(p => p.name)
+          expect(propertyNames).toContain('title')
+          expect(propertyNames).toContain('body')
+        },
+        { timeout: 15000, interval: 100 },
+      )
     })
 
     it('should load property from database', async () => {
@@ -597,32 +500,24 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      // Wait for schema to be imported and model to be created
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       // Create the model to ensure it's written to database
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Wait for model and properties to be written to database
-      // We need to wait for the write process to complete
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      // Verify property exists in database before trying to load it
+
+      // The model's properties are written asynchronously; wait for this one before loading it
       const db = BaseDb.getAppDb()
       if (db) {
-        const propertyRecords = await db
-          .select()
-          .from(propertiesTable)
-          .where(eq(propertiesTable.schemaFileId, propertyFileId))
-          .limit(1)
-        
-          console.log('propertyRecords', propertyRecords)
-        // If property is not in database yet, wait a bit more
-        if (propertyRecords.length === 0) {
-          await new Promise(resolve => setTimeout(resolve, 2000))
-        }
+        await vi.waitFor(
+          async () => {
+            const propertyRecords = await db
+              .select()
+              .from(propertiesTable)
+              .where(eq(propertiesTable.schemaFileId, propertyFileId))
+              .limit(1)
+            expect(propertyRecords.length).toBe(1)
+          },
+          { timeout: 15000, interval: 100 },
+        )
       }
 
       console.log('propertyFileId', propertyFileId)
@@ -683,30 +578,15 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const postModel = Model.create(postModelName, schemaName)
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Wait for models to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      const db = BaseDb.getAppDb()
-      if (db) {
-        const allProperties = await db.select().from(propertiesTable)
-        console.log('All properties in database:', allProperties.map(p => ({ 
-          name: p.name, 
-          schemaFileId: p.schemaFileId,
-          modelId: p.modelId 
-        })))
-      }
-      
-      const propertyData = await getPropertySchema(postModelName, 'author')
+      const postModel = Model.create(postModelName, schemaName, { waitForReady: false })
+
+      const propertyData = await waitForPropertySchema(postModelName, 'author', schemaName)
       expect(propertyData).toBeDefined()
       console.log('[TEST] propertyData from getPropertySchema:', JSON.stringify(propertyData, null, 2))
       
       if (propertyData) {
-        const property = ModelProperty.create(propertyData, { waitForReady: false })
+        const property = ModelProperty.create(propertyData, { waitForReady: false, schemaName })
         expect(property).toBeDefined()
         console.log('[TEST] property after create:', property)
         console.log('[TEST] property.ref:', property.ref)
@@ -721,6 +601,123 @@ testDescribe('ModelProperty Integration Tests', () => {
         
         await waitForModelPropertyIdle(property)
       }
+    })
+
+    // ModelProperty.create() starts its initial write on a timer once the instance is idle (setTimeout 0,
+    // retried every 50ms). Give it that long to show up before asserting it never did.
+    const settleInitialWrite = () => new Promise((resolve) => setTimeout(resolve, 100))
+
+    it('does not write back a property loaded from its existing row (createById)', async () => {
+      const db = BaseDb.getAppDb()!
+      const [modelRow] = await db
+        .insert(modelsTable)
+        .values({ name: 'TestModel Property No Rewrite', schemaFileId: generateId() })
+        .returning()
+      const propertyFileId = generateId()
+      await db.insert(propertiesTable).values({
+        name: 'content',
+        dataType: 'Text',
+        modelId: modelRow.id!,
+        schemaFileId: propertyFileId,
+      })
+
+      const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
+      try {
+        const property = await ModelProperty.createById(propertyFileId)
+        expect(property).toBeDefined()
+        await waitForModelPropertyIdle(property!)
+        await settleInitialWrite()
+
+        expect(trackPendingWrite).not.toHaveBeenCalledWith(propertyFileId, expect.anything())
+        expect(property!.getService().getSnapshot().context.writeProcess?.getSnapshot().value).toBe('idle')
+      } finally {
+        trackPendingWrite.mockRestore()
+      }
+    })
+
+    // Model.create() with runtime properties writes the property rows itself. Its ModelProperty instances used
+    // to write them again afterwards, so a test that deleted the model right after it was persisted got a late
+    // FOREIGN KEY failure from that second write.
+    it('writes a runtime model property once, with the model', async () => {
+      const schemaName = 'Test Schema Property Single Write'
+      const testSchema = createTestSchema(schemaName)
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
+      try {
+        const model = Model.create('Article Single Write', schema, {
+          properties: { content: { dataType: 'Text' } },
+          waitForReady: false,
+        })
+        const modelSnapshot = await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle' && snapshot.context._dbId != null, {
+          timeout: 10000,
+        })
+        const modelId = modelSnapshot.context._dbId as number
+
+        const db = BaseDb.getAppDb()!
+        const rows = await db.select().from(propertiesTable).where(eq(propertiesTable.modelId, modelId))
+        expect(rows.map((row: { name: string }) => row.name)).toEqual(['content'])
+        const propertyFileId = rows[0].schemaFileId!
+
+        // The property's instance carries the id of the row the model wrote, not a second generated one
+        const property = await vi.waitFor(() => {
+          const instance = ModelProperty.getById(propertyFileId)
+          if (!instance) throw new Error('content property instance not created yet')
+          return instance
+        })
+        await waitForModelPropertyIdle(property)
+        await settleInitialWrite()
+
+        expect(trackPendingWrite.mock.calls.filter(([, writeModelId]) => writeModelId === modelId)).toEqual([])
+      } finally {
+        trackPendingWrite.mockRestore()
+      }
+    })
+
+    // The Schema context only has the schema file's properties; getPropertySchema used to read only
+    // those for a schema-file model, so a property added at runtime was never found (finding 19).
+    it('getPropertySchema finds a property added at runtime to a schema-file model', async () => {
+      const schemaName = 'Test Schema Runtime Property Lookup'
+      const modelName = 'RuntimeLookupModel'
+      const testSchema = createTestSchema(schemaName, {
+        [modelName]: { id: generateId(), properties: { title: { id: generateId(), type: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      await waitForPropertySchema(modelName, 'title', schemaName)
+      // Let the model load its properties first, so only the new property's own write can add it below.
+      // In Node there is no live query: the write itself has to put the property on the model.
+      const model = await Model.resolveAsync(modelName, { schemaName })
+      await vi.waitFor(() => expect(model?.properties.map((p) => p.name)).toEqual(['title']), { timeout: 15000 })
+
+      const added = ModelProperty.create(
+        { name: 'subtitle', dataType: 'Text', modelName } as Parameters<typeof ModelProperty.create>[0],
+        { waitForReady: false, schemaName },
+      ) as ModelProperty
+      await waitForModelPropertyIdle(added)
+      // Once the write has finished it is no longer a pending write: the model must still list it
+      // (in Node, where the Model has no reactive liveQuery, it used to drop out here).
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()
+            .select({ id: propertiesTable.id })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, added.id!))
+          if (rows.length === 0) throw new Error('subtitle not written yet')
+          if (ModelProperty.getPendingModelId(added.id!) !== undefined) throw new Error('write still pending')
+        },
+        { timeout: 15000, interval: 20 },
+      )
+      // getPropertySchema also falls back to the properties table, so check the model itself too.
+      expect(model?.properties.map((p) => p.name)).toContain('subtitle')
+      expect(await getPropertySchema(modelName, 'subtitle', { schemaName })).toMatchObject({ name: 'subtitle' })
+
+      const subtitle = await waitForPropertySchema(modelName, 'subtitle', schemaName)
+      expect(subtitle).toMatchObject({ name: 'subtitle', dataType: 'Text', modelName })
+      // The schema file's own properties still resolve as before
+      expect(await getPropertySchema(modelName, 'title', { schemaName })).toMatchObject({ name: 'title' })
+      expect(await getPropertySchema(modelName, 'missing', { schemaName })).toBeUndefined()
     })
   })
 
@@ -741,12 +738,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'title')
+      const propertyData = await waitForPropertySchema(modelName, 'title', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -775,12 +770,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'description')
+      const propertyData = await waitForPropertySchema(modelName, 'description', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -791,7 +784,7 @@ testDescribe('ModelProperty Integration Tests', () => {
         property.dataType = 'Number'
         
         // Wait for update to propagate
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await waitForModelPropertyIdle(property)
         
         expect(property.dataType).toBe('Number')
       }
@@ -815,12 +808,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'value')
+      const propertyData = await waitForPropertySchema(modelName, 'value', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -849,12 +840,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'field')
+      const propertyData = await waitForPropertySchema(modelName, 'field', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -866,7 +855,7 @@ testDescribe('ModelProperty Integration Tests', () => {
         
         // Update property
         property.dataType = 'Number'
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await waitForModelPropertyIdle(property)
         
         // Should now be marked as edited
         expect(property.isEdited).toBe(true)
@@ -889,12 +878,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'status')
+      const propertyData = await waitForPropertySchema(modelName, 'status', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -928,12 +915,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'valid')
+      const propertyData = await waitForPropertySchema(modelName, 'valid', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -964,12 +949,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'test')
+      const propertyData = await waitForPropertySchema(modelName, 'test', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -987,7 +970,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty save', () => {
     it('should save property to schema', async () => {
-      const schemaName = 'Test Schema Property Save'
+      const schemaName = 'Test Schema ModelProperty Save'
       const modelName = 'TestModel Property Save'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -1002,12 +985,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'saved')
+      const propertyData = await waitForPropertySchema(modelName, 'saved', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1016,7 +997,7 @@ testDescribe('ModelProperty Integration Tests', () => {
         
         // Update property
         property.dataType = 'Number'
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await waitForModelPropertyIdle(property)
         
         // Save property. Regression: save() used to loop forever inside the machine and exhaust memory.
         property.save()
@@ -1051,12 +1032,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'reload')
+      const propertyData = await waitForPropertySchema(modelName, 'reload', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1074,7 +1053,7 @@ testDescribe('ModelProperty Integration Tests', () => {
 
   describe('ModelProperty unload', () => {
     it('should unload property and clean up resources', async () => {
-      const schemaName = 'Test Schema Property Unload'
+      const schemaName = 'Test Schema ModelProperty Unload'
       const modelName = 'TestModel Property Unload'
       const testSchema = createTestSchema(schemaName, {
         [modelName]: {
@@ -1089,12 +1068,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'unload')
+      const propertyData = await waitForPropertySchema(modelName, 'unload', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1132,12 +1109,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'oldName')
+      const propertyData = await waitForPropertySchema(modelName, 'oldName', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {
@@ -1150,7 +1125,7 @@ testDescribe('ModelProperty Integration Tests', () => {
         property.name = newName
         
         // Wait for update to complete
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await waitForModelPropertyIdle(property)
         
         expect(property.name).toBe(newName)
       }
@@ -1172,12 +1147,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'oldPropertyName')
+      const propertyData = await waitForPropertySchema(modelName, 'oldPropertyName', schemaName)
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1197,9 +1170,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       const propertyContext = (property as any)._getSnapshotContext()
       const modelId = propertyContext.modelId
       const schemaFileId = propertyContext._propertyFileId || (typeof propertyContext.id === 'string' ? propertyContext.id : undefined)
-      
-      // Wait a bit for property to be written to database if it wasn't already
-      await new Promise(resolve => setTimeout(resolve, 300))
       
       // Verify property exists in database with old name first
       const db = BaseDb.getAppDb()
@@ -1225,7 +1195,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       // Wait for update to complete (including database save via compareAndMarkDraft)
       // Need to wait for the state machine to complete the compareAndMarkDraft state
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Verify name changed in memory
       expect(property.name).toBe(newName)
@@ -1312,12 +1281,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'initialName')
+      const propertyData = await waitForPropertySchema(modelName, 'initialName', schemaName)
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1333,7 +1300,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       
       // Now wait for the state machine to process the change
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Verify name changed in memory
       expect(property.name).toBe(newName)
@@ -1396,12 +1362,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'originalPropertyName')
+      const propertyData = await waitForPropertySchema(modelName, 'originalPropertyName', schemaName)
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1417,7 +1381,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       
       // Wait for database save to complete
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Verify name changed in memory
       expect(property.name).toBe(newName)
@@ -1425,9 +1388,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       // "Reload" - unload the property and reload it from database
       property.unload()
       
-      // Wait a bit to ensure unload completed
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
+
       // Reload property from database using schemaFileId (simulating useModelProperties)
       const reloadedProperty = await ModelProperty.createById(propertyFileId)
       expect(reloadedProperty).toBeDefined()
@@ -1466,12 +1427,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'beforeName')
+      const propertyData = await waitForPropertySchema(modelName, 'beforeName', schemaName)
       expect(propertyData).toBeDefined()
       
       if (!propertyData) {
@@ -1492,7 +1451,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       
       // Wait for state machine to process (validating -> compareAndMarkDraft -> idle)
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Verify name changed
       expect(property.name).toBe(newName)
@@ -1545,12 +1503,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'initialName')
+      const propertyData = await waitForPropertySchema(modelName, 'initialName', schemaName)
       expect(propertyData).toBeDefined()
       if (!propertyData) throw new Error('Property data not found')
 
@@ -1561,7 +1517,6 @@ testDescribe('ModelProperty Integration Tests', () => {
 
       // Wait for machine to process (validation + compareAndMarkDraft + write) and settle
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 800))
 
       // In-memory name must be updated
       expect(property.name).toBe(newName)
@@ -1571,7 +1526,6 @@ testDescribe('ModelProperty Integration Tests', () => {
 
       // Simulate page reload: unload and load from DB by schemaFileId
       property.unload()
-      await new Promise(resolve => setTimeout(resolve, 200))
 
       const reloaded = await ModelProperty.createById(propertyFileId)
       expect(reloaded).toBeDefined()
@@ -1601,12 +1555,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'original')
+      const propertyData = await waitForPropertySchema(modelName, 'original', schemaName)
       expect(propertyData).toBeDefined()
       if (!propertyData) throw new Error('Property data not found')
 
@@ -1640,12 +1592,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'score')
+      const propertyData = await waitForPropertySchema(modelName, 'score', schemaName)
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1661,12 +1611,15 @@ testDescribe('ModelProperty Integration Tests', () => {
       const modelId = propertyContext.modelId
       const schemaFileId = propertyContext._propertyFileId || (typeof propertyContext.id === 'string' ? propertyContext.id : undefined)
 
-      await new Promise(resolve => setTimeout(resolve, 300))
+      // The edit is compared against _originalValues, which are initialized after the first idle
+      await vi.waitFor(
+        () => expect((property as any)._getSnapshotContext()._originalValues).toBeDefined(),
+        { timeout: 5000, interval: 50 },
+      )
 
       property.dataType = 'Number'
 
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       expect(property.dataType).toBe('Number')
 
@@ -1715,12 +1668,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'amount')
+      const propertyData = await waitForPropertySchema(modelName, 'amount', schemaName)
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1733,13 +1684,11 @@ testDescribe('ModelProperty Integration Tests', () => {
       property.dataType = 'Number'
 
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       expect(property.dataType).toBe('Number')
 
       property.unload()
 
-      await new Promise(resolve => setTimeout(resolve, 200))
 
       const reloadedProperty = await ModelProperty.createById(propertyFileId)
       expect(reloadedProperty).toBeDefined()
@@ -1775,12 +1724,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const propertyData = await getPropertySchema(modelName, 'value')
+      const propertyData = await waitForPropertySchema(modelName, 'value', schemaName)
       expect(propertyData).toBeDefined()
 
       if (!propertyData) {
@@ -1802,7 +1749,6 @@ testDescribe('ModelProperty Integration Tests', () => {
       property.dataType = 'Number'
 
       await waitForModelPropertyIdle(property)
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       expect(property.dataType).toBe('Number')
       expect(property.isEdited).toBe(true)
@@ -1849,12 +1795,10 @@ testDescribe('ModelProperty Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       const model = Model.create(modelName, schemaName, { waitForReady: false })
-      await new Promise(resolve => setTimeout(resolve, 500))
       
-      const propertyData = await getPropertySchema(modelName, 'sub')
+      const propertyData = await waitForPropertySchema(modelName, 'sub', schemaName)
       expect(propertyData).toBeDefined()
       
       if (propertyData) {

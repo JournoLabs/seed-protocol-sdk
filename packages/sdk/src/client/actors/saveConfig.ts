@@ -7,8 +7,33 @@ import { appState } from '@/seedSchema'
 import debug                    from 'debug'
 import { normalizeAddressList } from '@/helpers/addresses'
 import { loadLocalDbChain } from '@/helpers/localDbChain'
+import { withSeedDbLock } from '@/helpers/tabLocks'
+import { isLeaderTab } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
+
+/**
+ * Saves the addresses passed to init. Hosts pass `addresses: []` before a wallet connects. In the
+ * first (leader) tab that clears stored addresses, as it always has, so drafts made before the
+ * wallet reconnects stay editable. A tab opened while another is running (`keepStoredWhenEmpty`)
+ * keeps them instead: they're the other tab's connected wallet, which EAS sync, downloads and
+ * publishing read. See docs/MULTI_TAB.md.
+ */
+export async function persistInitAddresses(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  { addresses, ownedAddresses, watchedAddresses }: Pick<ClientManagerContext, 'addresses' | 'ownedAddresses' | 'watchedAddresses'>,
+  { keepStoredWhenEmpty }: { keepStoredWhenEmpty: boolean },
+): Promise<void> {
+  const owned = normalizeAddressList(ownedAddresses ?? addresses ?? [])
+  const watched = normalizeAddressList(watchedAddresses ?? [])
+  if (owned.length === 0 && watched.length === 0 && keepStoredWhenEmpty) return
+
+  const value = JSON.stringify({ owned, watched })
+  await appDb
+    .insert(appState)
+    .values({ key: 'addresses', value })
+    .onConflictDoUpdate({ target: appState.key, set: { value } })
+}
 
 export const saveConfig = fromCallback<
   EventObject,
@@ -53,9 +78,6 @@ export const saveConfig = fromCallback<
       }
       
       const endpointsValueString = JSON.stringify(endpoints)
-      const owned = normalizeAddressList(ownedAddresses ?? addresses ?? [])
-      const watched = normalizeAddressList(watchedAddresses ?? [])
-      const addressesValueString = JSON.stringify({ owned, watched })
 
       // TODO: Figure out how to define on conflict with multiple rows added
       await appDb
@@ -71,18 +93,11 @@ export const saveConfig = fromCallback<
           },
         })
 
-      await appDb
-        .insert(appState)
-        .values({
-          key: 'addresses',
-          value: addressesValueString,
-        })
-        .onConflictDoUpdate({
-          target: appState.key,
-          set: {
-            value: addressesValueString,
-          },
-        })
+      await persistInitAddresses(
+        appDb,
+        { addresses, ownedAddresses, watchedAddresses },
+        { keepStoredWhenEmpty: !isLeaderTab() },
+      )
 
       await appDb
         .insert(appState)
@@ -130,7 +145,8 @@ export const saveConfig = fromCallback<
     }
   }
 
-  _saveConfig()
+  // Init writes run one tab at a time (docs/MULTI_TAB.md).
+  withSeedDbLock('init', context.filesDir, _saveConfig)
     .then(() => {
       logger('[internal/actors] [saveConfig] saveConfig success')
       return sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })

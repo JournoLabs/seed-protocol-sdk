@@ -1,11 +1,12 @@
+import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { metadata, MetadataType } from '@/seedSchema'
-import { BaseEasClient, BaseQueryClient, generateId } from '@/helpers'
+import { generateId } from '@/helpers'
 import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
 import { PropertyType } from '@/types'
 import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
 import { normalizePublisher } from '@/helpers/addresses'
 import { BaseDb } from '../Db/BaseDb'
-import { GET_SCHEMA_BY_NAME, type EASSchema } from '@seedprotocol/eas'
+import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -25,7 +26,11 @@ export class MetadataValidationError extends Error {
   }
 }
 
-type CreateMetadataOptions = { skipValidation?: boolean }
+type CreateMetadataOptions = {
+  skipValidation?: boolean
+  /** schemaFileId of the item's models row; otherwise read from the seed (seeds.model_file_id). */
+  modelFileId?: string
+}
 
 type CreateMetadata = (
   metadataValues: Partial<MetadataType> & { modelName?: string },
@@ -113,10 +118,7 @@ export const createMetadata: CreateMetadata = async (
 
   if (!isItemStorage && !metadataValues.schemaUid && propertyRecordSchema && metadataValues.propertyName) {
     try {
-      const queryClient = BaseQueryClient.getQueryClient()
-      const easClient = BaseEasClient.getEasClient()
-
-      if (queryClient && easClient && propertyRecordSchema.dataType) {
+      if (propertyRecordSchema.dataType) {
         // Type-safe lookup of EAS data type (normalize for case-insensitive schema JSON)
         const dataTypeKey = normalizeDataType(
           propertyRecordSchema.dataType,
@@ -125,23 +127,12 @@ export const createMetadata: CreateMetadata = async (
 
         if (easDataType) {
           const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
-        
-          const queryResult = await queryClient.fetchQuery({
-            queryKey: [`getSchemaByName${metadataValues.propertyName}`],
-            queryFn: async (): Promise<{schemas: EASSchema[]}> =>
-              easClient.request(GET_SCHEMA_BY_NAME, {
-                where: {
-                  schema: {
-                    equals: `${easDataType} ${propertyNameSnakeCase}`,
-                  },
-                },
-              }),
-          })
-
-          // Handle both { schemas: [...] } and { data: { schemas: [...] } } formats
-          const schemas = queryResult?.schemas || (queryResult as any)?.data?.schemas
-          if (schemas && Array.isArray(schemas) && schemas.length > 0) {
-            metadataValues.schemaUid = schemas[0].id
+          // Cached, including misses: every item of a model looks up the same property schemas.
+          const schemaUid = await getEasSchemaUidForExactDefinition(
+            `${easDataType} ${propertyNameSnakeCase}`,
+          )
+          if (schemaUid) {
+            metadataValues.schemaUid = schemaUid
           }
         }
       }
@@ -163,13 +154,20 @@ export const createMetadata: CreateMetadata = async (
     if (typeof schemaId === 'number' && Number.isInteger(schemaId)) {
       metadataValues.propertyId = schemaId
     } else if (modelKey) {
+      // Model names are only unique per schema: resolve against the item's own model row.
+      const modelFileId = await resolveItemModelFileId({
+        modelFileId: options?.modelFileId,
+        seedLocalId: metadataValues.seedLocalId,
+        seedUid: metadataValues.seedUid,
+      })
       if (typeof schemaId === 'string' && schemaId) {
         metadataValues.propertyId =
-          (await getPropertyIdForSchemaFileId(modelKey, schemaId)) ?? undefined
+          (await getPropertyIdForSchemaFileId(modelKey, schemaId, { modelFileId })) ?? undefined
       }
       if (metadataValues.propertyId == null && metadataValues.propertyName) {
         metadataValues.propertyId =
-          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName)) ?? undefined
+          (await getPropertyIdForModelAndName(modelKey, metadataValues.propertyName, { modelFileId })) ??
+          undefined
       }
     }
   }

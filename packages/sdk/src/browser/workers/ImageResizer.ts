@@ -1,5 +1,6 @@
 import imageResize from './imageResize'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
+import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
 import debug from 'debug'
 
 const logger = debug('seedSdk:browser:workers:ImageResizer')
@@ -38,7 +39,11 @@ export class ImageResizer {
           savedWorker?.terminate()
           logger('[ImageResizer.resize] Terminated worker for filePath due to done', filePath)
           this.workersArchive.delete(filePath)
-          resolve(e.data)
+          // The worker wrote the variant to OPFS directly; refresh caches here and in other tabs.
+          notifyFilesWrittenOutsideCache([e.data.filePath]).then(
+            () => resolve(e.data),
+            () => resolve(e.data),
+          )
         }
 
         if (e.data.error) {

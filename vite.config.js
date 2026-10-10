@@ -12,6 +12,70 @@ import { seedVitePlugin } from '@seedprotocol/vite'
 // import vitePlugin from './vite-plugin'
 // import commonjs from '@rollup/plugin-commonjs'
 
+// Debug logging is opt-in: `DEBUG='seedSdk:*' bun run test`. Leaving it on by default ('*') produced
+// tens of thousands of log lines per run, slowing Node runs and burying failures.
+const debugNamespaces = process.env.DEBUG ?? ''
+
+// Real extra tabs for browser/multiTab.e2e.test.ts: pages opened in the test's own Playwright
+// context, so they share its OPFS, Web Locks and BroadcastChannels. Each loads
+// __tests__/e2e/multiTab/tab.html, which exposes `window.seedTab`.
+const seedTabPages = new Map()
+const seedTabCommands = {
+  async openSeedTab(ctx, url) {
+    const page = await ctx.context.newPage()
+    page.on('pageerror', (error) => console.error('[seed tab]', error))
+    await page.goto(url)
+    await page.waitForFunction(() => window.seedTabReady === true)
+    const id = `tab-${seedTabPages.size + 1}-${Date.now()}`
+    seedTabPages.set(id, page)
+    return id
+  },
+  async callSeedTab(ctx, id, method, ...args) {
+    const page = seedTabPages.get(id)
+    if (!page) throw new Error(`no seed tab ${id}`)
+    return page.evaluate(([m, a]) => window.seedTab[m](...a), [method, args])
+  },
+  async closeSeedTab(ctx, id) {
+    await seedTabPages.get(id)?.close()
+    seedTabPages.delete(id)
+  },
+}
+
+// Test files run in parallel. Each browser worker gets its own Playwright context (separate OPFS and
+// localStorage) and each Node file runs in its own forked process with its own temp project dir, so
+// files don't share storage. TEST_WORKERS overrides the per-project count; TEST_WORKERS=1 restores
+// one-file-at-a-time runs for debugging order-dependent failures.
+const testWorkers = (defaultCount) => {
+  const n = Number.parseInt(process.env.TEST_WORKERS ?? '', 10)
+  return Number.isFinite(n) && n > 0 ? n : defaultCount
+}
+
+// Workspace packages load from source, not from their gitignored dist. Their package.json exports
+// point at dist, so without these aliases tests silently ran whatever was last built (a stale
+// packages/react/dist hid 8 hook failures; a stale packages/eas/dist failed easPropertyCanonical).
+// Regex finds match whole specifiers so `@seedprotocol/eas` doesn't also capture `@seedprotocol/eas/node`.
+// `platform` picks @seedprotocol/query's entry, which (like its exports map) differs for browser and Node.
+const workspaceSourceAliases = (platform) => {
+  const src = (path) => resolve(__dirname, 'packages', path)
+  const exact = (specifier, path) => ({
+    find: new RegExp(`^${specifier.replace('/', '\\/')}$`),
+    replacement: src(path),
+  })
+  return [
+    exact('@seedprotocol/eas/node', 'eas/src/node/index.ts'),
+    exact('@seedprotocol/eas', 'eas/src/index.ts'),
+    exact('@seedprotocol/arweave/node', 'arweave/src/node/index.ts'),
+    exact('@seedprotocol/arweave', 'arweave/src/index.ts'),
+    exact('@seedprotocol/query/node', 'query/src/node/index.ts'),
+    exact('@seedprotocol/query', platform === 'browser' ? 'query/src/index.ts' : 'query/src/index.node.ts'),
+    exact('@seedprotocol/react', 'react/src/index.ts'),
+  ]
+}
+
+// Vite's object alias form as an array, so it can be combined with workspaceSourceAliases.
+const aliasEntries = (aliases) =>
+  Object.entries(aliases).map(([find, replacement]) => ({ find, replacement }))
+
 export default defineConfig({
   plugins: [
     Inspect({
@@ -32,20 +96,22 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
         ],
         resolve: {
-          alias: {
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-            '~': resolve(__dirname, 'packages/publish/src'),
-            // Ensure fs modules are aliased to @zenfs/core in browser environment
-            'fs': '@zenfs/core',
-            'fs/promises': '@zenfs/core/promises',
-            'node:fs': '@zenfs/core',
-            'node:fs/promises': '@zenfs/core/promises',
-          },
+          alias: [
+            ...workspaceSourceAliases('browser'),
+            ...aliasEntries({
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+              '~': resolve(__dirname, 'packages/publish/src'),
+              // Ensure fs modules are aliased to @zenfs/core in browser environment
+              'fs': '@zenfs/core',
+              'fs/promises': '@zenfs/core/promises',
+              'node:fs': '@zenfs/core',
+              'node:fs/promises': '@zenfs/core/promises',
+            }),
+          ],
         },
         optimizeDeps: {
           exclude: [
             '@sqlite.org/sqlite-wasm',
-            '@seedprotocol/cli',
             'drizzle-orm',
             'sqlocal'
           ],
@@ -53,13 +119,20 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
           name: 'browser',
           dir: './packages/sdk/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/sdk/__tests__/setup.browser.ts',
@@ -75,7 +148,7 @@ export default defineConfig({
             'scripts/**',
             'db/**',
             'services/**',
-            'Schema/schema-models-integration.test.ts',
+            'Schema/schema-models-integration.test.ts', // Node-only (reads/writes schema files with fs); runs in NodeJS
             'imports/**',
             'fromCallbackActors.test.ts',
             'validation-timeout.test.ts',
@@ -86,9 +159,11 @@ export default defineConfig({
             // Mocks global Worker; run as a Node unit test only
             'browser/db/createSqlocalDrizzle.test.ts',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
-          maxWorkers: 1,
+          maxWorkers: testWorkers(3),
+          // Both browser projects share a group so they run at the same time, after the Node group
+          sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
             provider: playwright(),
@@ -96,6 +171,7 @@ export default defineConfig({
             instances: [
               {browser: 'chromium'}
             ],
+            commands: seedTabCommands,
           },
         },
       },
@@ -106,13 +182,16 @@ export default defineConfig({
           ...seedVitePlugin({ autoInit: false, debug: false }),
         ],
         resolve: {
-          alias: {
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-            'fs': '@zenfs/core',
-            'fs/promises': '@zenfs/core/promises',
-            'node:fs': '@zenfs/core',
-            'node:fs/promises': '@zenfs/core/promises',
-          },
+          alias: [
+            ...workspaceSourceAliases('browser'),
+            ...aliasEntries({
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+              'fs': '@zenfs/core',
+              'fs/promises': '@zenfs/core/promises',
+              'node:fs': '@zenfs/core',
+              'node:fs/promises': '@zenfs/core/promises',
+            }),
+          ],
         },
         optimizeDeps: {
           exclude: [
@@ -124,13 +203,20 @@ export default defineConfig({
             '@testing-library/react',
             'react',
             'react-dom',
+            // Imported lazily (some through workspace sources); discovering them mid-run reloads the
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
+            // parse5 (SDK dependencies) are root devDependencies too.
+            '@tanstack/react-query',
+            'arweave/bundles/web.bundle.js',
+            'js-yaml',
+            'parse5',
           ],
         },
         test: {
           name: 'browser-react',
           dir: './packages/react/__tests__',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [
             './packages/react/__tests__/setup.browser.ts',
@@ -142,9 +228,11 @@ export default defineConfig({
             ...configDefaults.exclude,
             'dist/**',
           ],
-          hookTimeout: 90000,
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
-          maxWorkers: 1,
+          maxWorkers: testWorkers(3),
+          // Both browser projects share a group so they run at the same time, after the Node group
+          sequence: { groupOrder: 1 },
           browser: {
             enabled: true,
             provider: playwright(),
@@ -167,15 +255,13 @@ export default defineConfig({
           }),
         ],
         resolve: {
-          alias: {
-            '~': resolve(__dirname, 'packages/publish/src'),
-            '@seedprotocol/feed': resolve(__dirname, 'packages/feed/src/index.ts'),
-            '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
-          },
-        },
-        optimizeDeps: {
-          exclude: [
-            '@seedprotocol/cli',
+          alias: [
+            ...workspaceSourceAliases('node'),
+            ...aliasEntries({
+              '~': resolve(__dirname, 'packages/publish/src'),
+              '@seedprotocol/feed': resolve(__dirname, 'packages/feed/src/index.ts'),
+              '@seedprotocol/sdk': resolve(__dirname, 'packages/sdk/src'),
+            }),
           ],
         },
         test: {
@@ -183,7 +269,7 @@ export default defineConfig({
           environment: 'node',
           dir: '.',
           env: {
-            DEBUG: '*',
+            DEBUG: debugNamespaces,
           },
           setupFiles: [],
           include: [
@@ -195,27 +281,31 @@ export default defineConfig({
             'packages/publish/src/services/publish/helpers/getPublishUploadData.test.ts',
             'packages/react/__tests__/**/*.node.test.tsx',
           ],
+          // Paths are relative to `dir: '.'` (the repo root). The old `node/**`-style patterns were written for
+          // dir './packages/sdk/__tests__' and silently stopped matching when dir changed in v0.4.21.
           exclude: [
             ...configDefaults.exclude,
             '**/node_modules/**',
             'dist/**',
-            'packages/sdk/src/browser/**',
-            'browser/**',
-            'node/**',
-            'scripts/**',
-            'db/**',
-            'services/**',
-            'Schema/schema-models-integration.test.ts',
-            'imports/**',
-            'fromCallbackActors.test.ts',
-            'validation-timeout.test.ts',
-            'commonjs-compatibility.test.ts',
+
+            // Browser-only: SQL-tag liveQuery isn't supported by the Node stub. Runs in the `browser` project.
+            'packages/sdk/__tests__/browser/db/Db.test.ts',
+            // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
+            'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
+            'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
+            'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
+            'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',
+            'packages/sdk/__tests__/browser/multiTab.e2e.test.ts',
           ],
+          hookTimeout: 30000, // keep in sync with SETUP_HOOK_TIMEOUT_MS in test-utils/client-init.ts
           testTimeout: 30000,
           pool: 'forks',
-          maxWorkers: 1,
-          isolate: false,
-          fileParallelism: false,
+          maxWorkers: testWorkers(4),
+          sequence: { groupOrder: 0 },
+          // Several files vi.mock core modules (@/helpers/environment, BaseDb, BaseFileManager). With
+          // isolate: false those mocks and the shared client leaked into later files, and every DB-backed
+          // suite after them failed in beforeAll ("Seed Protocol schema not found").
+          isolate: true,
         },
       },
       // {

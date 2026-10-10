@@ -11,7 +11,7 @@ import { metadata } from '@/seedSchema/MetadataSchema'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import type { SchemaFileFormat } from '@/types/import'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   ensureModelUidsForGetPublishPayloadTest,
   ensurePropertySchemaUidsForGetPublishPayloadTest,
@@ -62,10 +62,10 @@ testDescribe('List-of-relation EAS name', () => {
   let adminsUid: string
 
   beforeAll(async () => {
-    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: 90000 })
+    await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = publicationSchema()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['Identity', 'Publication'])
+    await ensureModelUidsForGetPublishPayloadTest(['Identity', 'Publication'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema)
     // Stray schema-key schemas, like the ones the twin picked up.
     setSchemaUidForSchemaDefinition({ text: 'bytes32[] staff', schemaUid: DECOY_STAFF_UID })
@@ -75,7 +75,7 @@ testDescribe('List-of-relation EAS name', () => {
     for (const name of ['Identity', 'Publication']) {
       await waitForEntityIdle(Model.create(name, SCHEMA_NAME, { waitForReady: false }), { timeout: 10_000 })
     }
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

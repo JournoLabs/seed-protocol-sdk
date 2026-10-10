@@ -148,6 +148,9 @@ export const processSeedConfig = (config: SeedConfig): ModelDefinitions => {
   // This is a simplified version that works with addModelsToInternalDb
   const modelClass = {
     schema,
+    // addModelsToDb reads property definitions from the model's snapshot context, not from `schema`;
+    // without this it saves the model with no properties (and no Relation/List ref models).
+    _getSnapshotContext: () => ({ properties: schema }),
     create: async () => {
       throw new Error('Model.create() should not be called directly')
     },

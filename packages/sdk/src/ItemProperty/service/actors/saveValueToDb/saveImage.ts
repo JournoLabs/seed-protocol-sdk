@@ -1,3 +1,5 @@
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
+import { notifyFileSaved } from '@/helpers/tabEvents'
 import { EventObject, fromCallback } from 'xstate'
 import { FromCallbackInput } from '@/types/machines'
 import {
@@ -13,25 +15,8 @@ import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { eventEmitter } from '@/eventBus'
 import { ImageSize } from '@/helpers/constants'
 
-
-const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      if (!e.target || !e.target.result) {
-        throw new Error('FileReader result is null')
-      }
-      const arrayBuffer = e.target.result as ArrayBuffer
-
-      resolve(arrayBuffer)
-    }
-
-    reader.readAsArrayBuffer(file)
-  })
-}
 
 /** Fetch image from URL (including blob:) and return { buffer, mimeType } for saving as binary. */
 const fetchImageAsBuffer = async (url: string): Promise<{ buffer: ArrayBuffer; mimeType?: string }> => {
@@ -86,7 +71,19 @@ export const saveImage = fromCallback<
       imageSchemaUid = fetchedSchemaUid ?? undefined
     }
 
-    if (typeof newValue === 'string') {
+    // Handle existing file reference: filename from listImageFiles() that exists in images folder.
+    // Check before classifying the string: a filename like "photo.png" also matches the URL regex
+    // and would otherwise be fetched relative to the page.
+    let isExistingFileReference = false
+    if (typeof newValue === 'string' && !newValue.includes('/') && !newValue.startsWith('data:')) {
+      const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
+      if (await BaseFileManager.pathExists(existingFilePath)) {
+        isExistingFileReference = true
+        fileName = newValue
+      }
+    }
+
+    if (typeof newValue === 'string' && !isExistingFileReference) {
       newValueType = getDataTypeFromString(newValue)
     }
 
@@ -112,25 +109,12 @@ export const saveImage = fromCallback<
     if (newValue instanceof File) {
       fileName = newValue.name
       mimeType = newValue.type
-      fileData = await readFileAsArrayBuffer(newValue)
+      fileData = await newValue.arrayBuffer() // Blob API: works in browsers and Node (no FileReader in Node)
     }
 
     if (newValue instanceof Blob) {
       mimeType = newValue.type || 'image/png'
       fileData = await newValue.arrayBuffer()
-    }
-
-    // Handle existing file reference: filename from listImageFiles() that exists in images folder
-    let isExistingFileReference = false
-    if (
-      typeof newValue === 'string' &&
-      getDataTypeFromString(newValue) === null
-    ) {
-      const existingFilePath = BaseFileManager.getFilesPath('images', newValue)
-      if (await BaseFileManager.pathExists(existingFilePath)) {
-        isExistingFileReference = true
-        fileName = newValue
-      }
     }
 
     if (!fileData && !isExistingFileReference) {
@@ -139,6 +123,7 @@ export const saveImage = fromCallback<
 
     const newImageSeedLocalId = await createSeed({
       type: 'image',
+      modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
     })
 
     if (!fileName) {
@@ -160,22 +145,22 @@ export const saveImage = fromCallback<
     if (fileData instanceof ArrayBuffer) {
       try {
         await BaseFileManager.saveFile(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
+        notifyFileSaved(filePath)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, new Uint8Array(fileData))
-        eventEmitter.emit('file-saved', filePath)
+        notifyFileSaved(filePath)
       }
     }
 
     if (typeof fileData === 'string') {
       try {
         await BaseFileManager.saveFile(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
+        notifyFileSaved(filePath)
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fs.writeFileSync(filePath, fileData)
-        eventEmitter.emit('file-saved', filePath)
+        notifyFileSaved(filePath)
       }
     }
 

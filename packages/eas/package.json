@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/eas",
-  "version": "0.6.10",
+  "version": "0.7.1",
   "description": "EAS GraphQL read client and helpers for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@graphql-typed-document-node/core": "^3.2.0",
     "@noble/hashes": "^1.8.0",
+    "@tanstack/query-core": "^5.104.1",
     "debug": "^4.4.1",
     "graphql": "^16.10.0",
     "graphql-request": "^7.3.5"
@@ -47,7 +48,7 @@
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

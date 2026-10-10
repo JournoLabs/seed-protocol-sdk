@@ -2,6 +2,7 @@ import { UploadProperty } from '@/db/read/getPublishUploads'
 import { IItem } from '@/interfaces'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
 import { getPropertySchema, TProperty } from '@/helpers/property'
+import { getItemModelScope, resolveModelRecord, type ModelScope } from '@/db/read/resolveModelRecord'
 import type { Static } from '@sinclair/typebox'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models, properties } from '@/seedSchema'
@@ -15,18 +16,16 @@ const matchesDataType = (
 async function resolvePropertyDef(
   modelName: string,
   propertyName: string,
+  scope: ModelScope,
 ): Promise<{ dataType?: string; ref?: string; refValueType?: string; storageType?: string; localStorageDir?: string; filenameSuffix?: string; required?: boolean } | undefined> {
-  let schema = await getPropertySchema(modelName, propertyName)
+  let schema = await getPropertySchema(modelName, propertyName, scope)
   if (schema) return schema
   const db = BaseDb.getAppDb()
   if (!db) return undefined
   try {
     const normalizedModelName = upperFirst(camelCase(modelName))
-    const modelRecords = await db
-      .select({ id: models.id })
-      .from(models)
-      .where(eq(models.name, normalizedModelName))
-      .limit(1)
+    const modelRecord = await resolveModelRecord(normalizedModelName, scope, db)
+    const modelRecords = modelRecord ? [modelRecord] : []
     if (modelRecords.length === 0 || !modelRecords[0].id) return undefined
     const propertyRecords = await db
       .select()
@@ -71,13 +70,15 @@ export const getSegmentedItemProperties = async (item: IItem<any>) => {
   const itemImageProperties = []
   const itemStorageProperties = []
   let itemStorageTransactionProperty: UploadProperty | undefined
+  let itemScope: ModelScope | undefined
 
   for (const itemProperty of item.properties) {
     let propertyDef = itemProperty.propertyDef
     // When propertyDef is missing (e.g. external app, Model not registered), resolve inline
     // so properties are not skipped and metadata attestations can be created
     if (!propertyDef && item.modelName) {
-      const resolved = await resolvePropertyDef(item.modelName, itemProperty.propertyName)
+      itemScope ??= await getItemModelScope(item as any)
+      const resolved = await resolvePropertyDef(item.modelName, itemProperty.propertyName, itemScope)
       if (resolved) {
         itemProperty.getService().send({ type: 'updateContext', propertyRecordSchema: resolved })
         propertyDef = resolved as Static<typeof TProperty>

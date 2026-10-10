@@ -269,47 +269,34 @@ export type UseDestroySchemaReturn = {
 }
 
 export const useDestroySchema = (): UseDestroySchemaReturn => {
-  const [currentInstance, setCurrentInstance] = useState<Schema | null>(null)
-  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
-    isLoading: false,
-    error: null,
-  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!currentInstance) {
-      setDestroyState({ isLoading: false, error: null })
-      return
-    }
-    const service = currentInstance.getService()
-    const update = () => {
-      const snap = service.getSnapshot()
-      const ctx = snap.context as { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
-      setDestroyState({
-        isLoading: !!ctx._destroyInProgress,
-        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
-      })
-    }
-    update()
-    const sub = service.subscribe(update)
-    return () => sub.unsubscribe()
-  }, [currentInstance])
-
+  // Loading state is tracked here: the schema's service doesn't record destroy progress, and
+  // destroy() stops the service, often within a few microtasks.
   const destroy = useCallback(async (schema: Schema) => {
     if (!schema) return
-    setCurrentInstance(schema)
-    await schema.destroy()
+    setError(null)
+    setIsLoading(true)
+    try {
+      await schema.destroy()
+      // destroy() reports DB failures via the service context instead of throwing
+      const ctx = schema.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
+      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  const resetError = useCallback(() => {
-    if (currentInstance) {
-      currentInstance.getService().send({ type: 'clearDestroyError' })
-    }
-  }, [currentInstance])
+  const resetError = useCallback(() => setError(null), [])
 
   return {
     destroy,
-    isLoading: destroyState.isLoading,
-    error: destroyState.error,
+    isLoading,
+    error,
     resetError,
   }
 }

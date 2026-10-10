@@ -22,7 +22,7 @@ export const getVersionData: GetVersionData = async ({
   const whereClauses = []
 
   if (seedLocalId) {
-    whereClauses.push(eq(versions.localId, seedLocalId))
+    whereClauses.push(eq(versions.seedLocalId, seedLocalId))
   }
 
   if (localId) {

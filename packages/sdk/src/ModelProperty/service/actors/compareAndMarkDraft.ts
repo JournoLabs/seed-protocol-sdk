@@ -1,4 +1,5 @@
 import { EventObject, fromCallback } from 'xstate'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { FromCallbackInput } from '@/types'
 import { ModelPropertyMachineContext } from '../modelPropertyMachine'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> compareAndMarkDraft -> helpers/db
@@ -11,7 +12,7 @@ const logger = debug('seedSdk:modelProperty:actors:compareAndMarkDraft')
 export const compareAndMarkDraft = fromCallback<
   EventObject,
   FromCallbackInput<ModelPropertyMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _compareAndMarkDraft = async (): Promise<void> => {
     // Fill modelName/dataType from _originalValues when missing, then from DB by schemaFileId
     let fullContext = {
@@ -142,6 +143,8 @@ export const compareAndMarkDraft = fromCallback<
         // Get the Schema instance and mark it as draft
         const schemaMod = await import('../../../Schema/Schema')
         const { Schema } = schemaMod
+        // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+        if (isActorStopped(self)) return
         const schema = Schema.create(fullContext._schemaName, {
           waitForReady: false,
         }) as import('@/Schema/Schema').Schema
@@ -165,12 +168,17 @@ export const compareAndMarkDraft = fromCallback<
         
         const db = BaseDb.getAppDb()
         if (db && fullContext.modelName && fullContext.name) {
-          // Find model by name
-          const modelRecords = await db
-            .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .where(eq(modelsTable.name, fullContext.modelName))
-            .limit(1)
+          // Find this property's model (model names are only unique per schema)
+          const { resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+          const modelRecord = await resolveModelRecord(
+            fullContext.modelName,
+            {
+              modelId: typeof fullContext.modelId === 'number' ? fullContext.modelId : undefined,
+              schemaName: fullContext._schemaName,
+            },
+            db,
+          )
+          const modelRecords = modelRecord ? [modelRecord] : []
           
           if (modelRecords.length > 0) {
             // Find property by name and modelId

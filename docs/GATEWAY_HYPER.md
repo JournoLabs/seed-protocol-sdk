@@ -11,8 +11,8 @@ See [GATEWAY_HYPER_SERVER_HANDOFF.md](./GATEWAY_HYPER_SERVER_HANDOFF.md) for opt
 | Concept | Role |
 |---------|------|
 | Operator key (z32) | Stable infrastructure identity (operator Ed25519 public key) |
-| `seed gateway tunnel serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
-| `seed gateway tunnel connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
+| `seed-gateway serve` | Operator: proxy Hyper connections → Traefik/upstream HTTP |
+| `seed-gateway connect` | Client: dial operator key → `http://127.0.0.1:1984` sidecar (Path A) |
 | `createGatewayProxy` | App server: dial operator key → Node HTTP handlers for a mount path (Path B) |
 | `DEFAULT_SEED_GATEWAY_HYPER_KEY` | Well-known official operator key (empty until ops publish one) |
 
@@ -24,7 +24,7 @@ Browsers **cannot** run Holepunch natives. They always speak plain HTTP to eithe
 
 | Scenario | What to run | Web `seed.config` |
 |----------|-------------|-------------------|
-| Local dev / Electron | `seed gateway tunnel connect <z32>` | `transport: 'hyper' \| 'hybrid'`, sidecar defaults |
+| Local dev / Electron | `seed-gateway connect <z32>` | `transport: 'hyper' \| 'hybrid'`, sidecar defaults |
 | Hosted web app | Node route using `createGatewayProxy` | `proxyBaseUrl: '/api/seed-gateway'` (Hyper key **server-only**) |
 | Public HTTP only | nothing | `transport: 'http-gateway'` |
 
@@ -35,7 +35,7 @@ Browsers **cannot** run Holepunch natives. They always speak plain HTTP to eithe
 Run on the same machine as the browser (or inside Electron):
 
 ```bash
-seed gateway tunnel connect <z32-key> --port 1984
+seed-gateway connect <z32-key> --port 1984
 ```
 
 ```typescript
@@ -105,7 +105,7 @@ Prefer **Node.js** for `@seedprotocol/gateway-hyper` (Bun may crash on Holepunch
 ## Developer tiers
 
 1. **HTTP on-prem** — `transport: 'http-gateway'`, point `arweaveDomain` / `uploadApiBaseUrl` at your LAN or Tailscale URLs.
-2. **Hyper sidecar** — run `seed gateway tunnel connect <key>`; set `transport: 'hyper'` in seed.config.
+2. **Hyper sidecar** — run `seed-gateway connect <key>`; set `transport: 'hyper'` in seed.config.
 3. **App-server proxy** — `createGatewayProxy` + `proxyBaseUrl` (hosted browsers).
 4. **Hybrid (recommended early cohort)** — `transport: 'hybrid'`: try proxy, then sidecar, then HTTP gateways.
 5. **Library** — `import { serveTunnel, connectTunnel, createGatewayProxy } from '@seedprotocol/gateway-hyper'`.
@@ -188,14 +188,14 @@ initPublish({
 2. On the operator host:
 
    ```bash
-   seed gateway tunnel serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
+   seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
 
 3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional).
 4. Each SDK user (Path A) runs:
 
    ```bash
-   seed gateway tunnel connect <z32-key> --port 1984
+   seed-gateway connect <z32-key> --port 1984
    ```
 
    Or each app server (Path B) mounts `createGatewayProxy` with that key.
@@ -203,7 +203,7 @@ initPublish({
 
 ## Developer key swap
 
-Each developer runs their own `seed gateway tunnel serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed gateway tunnel connect` when using Path A.
+Each developer runs their own `seed-gateway serve`, puts their z32 in `gateway.gatewayHyperKey` (Path A) or `SEED_GATEWAY_HYPER_KEY` on the app server (Path B), and shares the key with their app's users for `seed-gateway connect` when using Path A.
 
 ## CI / tests
 
@@ -213,7 +213,7 @@ Each developer runs their own `seed gateway tunnel serve`, puts their z32 in `ga
 
 ## Manual validation
 
-1. Operator: docker stack + `seed gateway tunnel serve`.
-2. Path A: `seed gateway tunnel connect <key>` then `curl http://127.0.0.1:1984/info`.
+1. Operator: docker stack + `seed-gateway serve`.
+2. Path A: `seed-gateway connect <key>` then `curl http://127.0.0.1:1984/info`.
 3. Path B: mount `createGatewayProxy`, then `curl https://your-app/api/seed-gateway/info`.
 4. Publish via app; confirm `GET /raw/{txId}` through the chosen path serves new uploads immediately.

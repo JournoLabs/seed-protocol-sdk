@@ -85,6 +85,7 @@ function dedupeMetadataRowsByInstanceKey(
  * @param modelName - Model name for resolving propertyRecordSchema from Model
  * @param versionLocalId - Latest version local ID (for placeholder properties)
  * @param versionUid - Latest version UID (for placeholder properties)
+ * @param modelScope - modelFileId / schemaName of the item's model (model names are only unique per schema)
  * @returns Map of propertyName -> ItemProperty instance
  */
 const createItemPropertyInstances = async (
@@ -93,9 +94,11 @@ const createItemPropertyInstances = async (
   seedUid: string | undefined,
   modelName: string,
   versionLocalId?: string,
-  versionUid?: string
+  versionUid?: string,
+  modelScope: { modelFileId?: string; schemaName?: string } = {},
 ): Promise<Map<string, any>> => {
   const propertyInstances = new Map<string, any>()
+  const schemaName = modelScope.schemaName
 
   try {
     const itemPropertyMod = await import('../../../ItemProperty/ItemProperty')
@@ -105,9 +108,9 @@ const createItemPropertyInstances = async (
 
     // Resolve Model and build property schemas (use getByNameAsync for models not yet in cache)
     let propertySchemas: Record<string, any> = {}
-    let model = Model.getByName(modelName)
+    let model = Model.resolve(modelName, modelScope)
     if (!model?.properties?.length) {
-      model = await Model.getByNameAsync(modelName) ?? undefined
+      model = await Model.resolveAsync(modelName, modelScope) ?? undefined
     }
     if (model?.properties?.length) {
       propertySchemas = modelPropertiesToObject(model.properties)
@@ -115,7 +118,7 @@ const createItemPropertyInstances = async (
     // Fallback: when Model has no properties (e.g. schema not yet loaded), get schemas from Schema context or loadAllSchemasFromDb.
     // This fixes persistence when useItem returns items with empty propertyInstances.
     if (Object.keys(propertySchemas).length === 0) {
-      const schemaNameToTry = model?.schemaName
+      const schemaNameToTry = schemaName ?? model?.schemaName
       if (schemaNameToTry) {
         try {
           const { Schema } = await import('../../../Schema/Schema')
@@ -134,6 +137,7 @@ const createItemPropertyInstances = async (
           const { loadAllSchemasFromDb } = await import('../../../helpers/schema')
           const allSchemas = await loadAllSchemasFromDb()
           for (const { schema: schemaFile } of allSchemas) {
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             const models = schemaFile.models as Record<string, { properties?: Record<string, any> }> | undefined
             if (models?.[modelName]?.properties) {
               propertySchemas = models[modelName].properties as Record<string, any>
@@ -152,7 +156,11 @@ const createItemPropertyInstances = async (
           const schemaFiles = await listCompleteSchemaFiles()
           for (const { filePath } of schemaFiles) {
             const content = await BaseFileManager.readFileAsString(filePath)
-            const schemaFile = JSON.parse(content) as { models?: Record<string, { properties?: Record<string, any> }> }
+            const schemaFile = JSON.parse(content) as {
+              metadata?: { name?: string }
+              models?: Record<string, { properties?: Record<string, any> }>
+            }
+            if (schemaName && schemaFile.metadata?.name !== schemaName) continue
             if (schemaFile.models?.[modelName]?.properties) {
               propertySchemas = schemaFile.models[modelName].properties as Record<string, any>
               logger(`Fallback: got ${Object.keys(propertySchemas).length} property schemas from schema file for ${modelName}`)
@@ -239,6 +247,8 @@ const createItemPropertyInstances = async (
           seedLocalId,
           seedUid,
           modelName,
+          modelFileId: modelScope.modelFileId,
+          propertyId: metaRow.propertyId ?? undefined,
           propertyValue: metaRow.propertyValue ?? undefined,
           versionLocalId: metaRow.versionLocalId ?? undefined,
           versionUid: metaRow.versionUid ?? undefined,
@@ -272,6 +282,7 @@ const createItemPropertyInstances = async (
           seedLocalId,
           seedUid,
           modelName,
+          modelFileId: modelScope.modelFileId,
           propertyValue: undefined,
           versionLocalId: versionLocalId ?? undefined,
           versionUid: versionUid ?? undefined,
@@ -369,6 +380,8 @@ export const loadOrCreateItem = fromCallback<
     const resolvedSeedLocalId = seedRecord.localId
     const resolvedSeedUid = seedRecord.uid || undefined
     const schemaUid = seedRecord.schemaUid || undefined
+    const modelFileId = seedRecord.modelFileId || context.modelFileId || undefined
+    const modelScope = { modelFileId, schemaName: context.schemaName }
 
     // Step 2: Query versions table to find all versions for that seed
     const versionData = getVersionData()
@@ -396,6 +409,7 @@ export const loadOrCreateItem = fromCallback<
           seedUid: resolvedSeedUid,
           modelName,
           schemaUid,
+          modelFileId,
           latestVersionLocalId: undefined,
           latestVersionUid: undefined,
           versionsCount: 0,
@@ -410,10 +424,12 @@ export const loadOrCreateItem = fromCallback<
     }
 
     const versionRecord = versionRecords[0]
-    const latestVersionLocalId = versionRecord.latestVersionLocalId
+    const latestVersionLocalId = versionRecord.latestVersionLocalId || undefined
     const latestVersionUid = versionRecord.latestVersionUid || undefined
 
-    if (!latestVersionLocalId) {
+    // A seed whose versions are all revoked (fully unpublished) has no latest version but still has
+    // its last property values; load those like any other item. Only a seed without versions stops here.
+    if (!latestVersionLocalId && !versionRecord.versionsCount) {
       logger(`No latest version found for seedLocalId: ${resolvedSeedLocalId}`)
       sendBack({
         type: 'loadOrCreateItemSuccess',
@@ -422,6 +438,7 @@ export const loadOrCreateItem = fromCallback<
           seedUid: resolvedSeedUid,
           modelName,
           schemaUid,
+          modelFileId,
           latestVersionLocalId: undefined,
           latestVersionUid: undefined,
           versionsCount: versionRecord.versionsCount || 0,
@@ -459,7 +476,8 @@ export const loadOrCreateItem = fromCallback<
       resolvedSeedUid,
       modelName,
       latestVersionLocalId,
-      latestVersionUid
+      latestVersionUid,
+      modelScope,
     )
 
     // Step 4b: Wait for all property machines to reach idle so HTML/File content is loaded before Item is ready.
@@ -480,6 +498,7 @@ export const loadOrCreateItem = fromCallback<
         seedUid: resolvedSeedUid,
         modelName,
         schemaUid,
+        modelFileId,
         latestVersionLocalId,
         latestVersionUid,
         versionsCount: versionRecord.versionsCount || 0,

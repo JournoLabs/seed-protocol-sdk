@@ -3,7 +3,7 @@ import { metadata } from '@/seedSchema'
 import type { MetadataType } from '@/seedSchema/MetadataSchema'
 import { eq, or } from 'drizzle-orm'
 import type { IItem } from '@/interfaces'
-import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { isPublishedMetadataRow as isPublished } from '@/helpers/isPublishedMetadataRow'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
@@ -38,7 +38,8 @@ function resolveSeedIds(
 
 /**
  * Per property: the **latest** metadata row (by `attestationCreatedAt` / `createdAt`) lacks a valid
- * EAS attestation `uid` — local edit or missing post-publish UID backfill. **Not** equivalent to
+ * EAS attestation `uid` — local edit or missing post-publish UID backfill. Rows sync derived for
+ * ItemStorage properties (`derivedFromUid` set) count as published. **Not** equivalent to
  * draft vs onchain for the whole seed; use `getSeedPublishState` for that.
  */
 export async function getPublishPendingDiff(
@@ -81,9 +82,8 @@ export async function getPublishPendingDiff(
   for (const [propertyName, list] of byProp) {
     const latest = list[0]
     if (!latest) continue
-    const hasUid = isValidEasAttestationUid(latest.uid)
-    if (!hasUid) {
-      const prevWithUid = list.find((r) => isValidEasAttestationUid(r.uid))
+    if (!isPublished(latest)) {
+      const prevWithUid = list.find(isPublished)
       pendingProperties.push({
         propertyName,
         currentValue: latest.propertyValue ?? null,

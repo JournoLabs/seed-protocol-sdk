@@ -1,10 +1,10 @@
-import { escapeSqliteString } from '@/helpers/db'
 import { metadata, MetadataType } from '@/seedSchema'
 import { and, eq, or, sql } from 'drizzle-orm'
 import { getSeedData } from '@/db/read/getSeedData'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
 import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyNames'
+import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
@@ -47,15 +47,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     return
   }
 
-  let safeNewValue = newValue
-
-  if (
-    typeof newValue === 'string' &&
-    !refResolvedDisplayValue &&
-    !refResolvedValue
-  ) {
-    safeNewValue = escapeSqliteString(newValue)
-  }
+  // Every write below binds parameters: store the value as given (no SQL escaping).
+  const safeNewValue = newValue
 
   const appDb = BaseDb.getAppDb()
 
@@ -83,9 +76,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         .select()
         .from(metadata)
         .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId)))
-        .orderBy(
-          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
-        )) as (MetadataType & { localId?: string | null })[]
+        .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
     }
   } else if (localIdParam) {
     const localIdRows = await appDb
@@ -104,28 +95,8 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       .select()
       .from(metadata)
       .where(and(propertyNameWhere, eq(metadata.seedLocalId, seedLocalId!)))
-      .orderBy(
-          sql.raw('COALESCE(attestation_created_at, created_at) DESC, local_id DESC'),
-        )) as (MetadataType & { localId?: string | null })[]
+      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
   }
-
-  // const mostRecentRecordStatement = `SELECT local_id,
-  //                                           uid,
-  //                                           property_name,
-  //                                           property_value,
-  //                                           model_type,
-  //                                           seed_uid,
-  //                                           seed_local_id,
-  //                                           version_local_id,
-  //                                           version_uid,
-  //                                           schema_uid,
-  //                                           eas_data_type
-  //                                    FROM metadata
-  //                                    WHERE property_name = '${propertyName}'
-  //                                      AND seed_local_id = '${seedLocalId}'
-  //                                    ORDER BY COALESCE(attestation_created_at, created_at) DESC, local_id DESC;`
-  //
-  // const { rows } = await runQueryForStatement(mostRecentRecordStatement)
 
   if (rows && rows.length > 0) {
     const {
@@ -186,38 +157,23 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     // Here we don't have a local-only record so we need to create a new one
     const newLocalId = generateId()
 
-    const newPropertyStatement = `INSERT INTO metadata (local_id,
-                                                        property_name,
-                                                        property_value,
-                                                        model_type,
-                                                        seed_uid,
-                                                        seed_local_id,
-                                                        version_local_id,
-                                                        version_uid,
-                                                        schema_uid,
-                                                        eas_data_type,
-                                                        ref_seed_type,
-                                                        ref_resolved_value,
-                                                        ref_resolved_display_value,
-                                                        local_storage_dir,
-                                                        created_at)
-                                  VALUES ('${newLocalId}',
-                                          '${propertyNameFromDb}',
-                                          '${safeNewValue}',
-                                          '${modelType || modelName?.toLowerCase()}',
-                                          ${seedDataFromDb?.uid ? `'${seedDataFromDb.uid}'` : 'NULL'},
-                                          '${seedLocalIdFromDb}',
-                                          '${versionLocalId}',
-                                          ${versionDataFromDb?.uid ? `'${versionDataFromDb.uid}'` : 'NULL'},
-                                          '${schemaUid}',
-                                          ${easDataType ? `'${easDataType}'` : 'NULL'},
-                                          ${refSeedType ? `'${refSeedType}'` : 'NULL'},
-                                          ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
-                                          ${refResolvedDisplayValue ? `'${refResolvedDisplayValue}'` : 'NULL'},
-                                          ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
-                                          ${Date.now()});`
-
-    await appDb.run(sql.raw(newPropertyStatement))
+    await appDb.insert(metadata).values({
+      localId: newLocalId,
+      propertyName: propertyNameFromDb,
+      propertyValue: safeNewValue ?? null,
+      modelType: modelType || modelName?.toLowerCase() || null,
+      seedUid: seedDataFromDb?.uid || null,
+      seedLocalId: seedLocalIdFromDb,
+      versionLocalId,
+      versionUid: versionDataFromDb?.uid || null,
+      schemaUid,
+      easDataType: easDataType || null,
+      refSeedType: refSeedType || null,
+      refResolvedValue: refResolvedValue || null,
+      refResolvedDisplayValue: refResolvedDisplayValue || null,
+      localStorageDir: localStorageDir || null,
+      createdAt: Date.now(),
+    })
 
     return {
       localId: newLocalId,
@@ -243,36 +199,22 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     }
   }
 
-  const newPropertyStatement = `INSERT INTO metadata (local_id,
-                                                      property_name,
-                                                      property_value,
-                                                      model_type,
-                                                      seed_uid,
-                                                      seed_local_id,
-                                                      version_local_id,
-                                                      version_uid,
-                                                      schema_uid,
-                                                      ref_seed_type,
-                                                      ref_resolved_value,
-                                                      ref_resolved_display_value,
-                                                      local_storage_dir,
-                                                      created_at)
-                                VALUES ('${newLocalId}',
-                                        '${propertyName}',
-                                        '${safeNewValue}',
-                                        '${modelName?.toLowerCase() || ''}',
-                                        ${seedUid ? `'${seedUid}'` : 'NULL'},
-                                        '${seedLocalId || ''}',
-                                        '${versionLocalId || ''}',
-                                        ${versionUid ? `'${versionUid}'` : 'NULL'},
-                                        '${schemaUid || ''}',
-                                        ${refSeedType ? `'${refSeedType}'` : 'NULL'},
-                                        ${refResolvedValue ? `'${refResolvedValue}'` : 'NULL'},
-                                        ${refResolvedDisplayValue ? `'${refResolvedDisplayValue}'` : 'NULL'},
-                                        ${localStorageDir ? `'${localStorageDir}'` : 'NULL'},
-                                        ${Date.now()});`
-
-    await appDb.run(sql.raw(newPropertyStatement))
+  await appDb.insert(metadata).values({
+    localId: newLocalId,
+    propertyName,
+    propertyValue: safeNewValue ?? null,
+    modelType: modelName?.toLowerCase() || '',
+    seedUid: seedUid || null,
+    seedLocalId: seedLocalId || '',
+    versionLocalId: versionLocalId || '',
+    versionUid: versionUid || null,
+    schemaUid: schemaUid || '',
+    refSeedType: refSeedType || null,
+    refResolvedValue: refResolvedValue || null,
+    refResolvedDisplayValue: refResolvedDisplayValue || null,
+    localStorageDir: localStorageDir || null,
+    createdAt: Date.now(),
+  })
 
   return {
     localId: newLocalId,

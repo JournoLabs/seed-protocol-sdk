@@ -771,6 +771,7 @@ export async function renameModelProperty(
     oldPropertyName,
     newPropertyName,
     oldProperty.id,
+    { schemaName },
   )
   if (migratedCount > 0) {
     logger(`Migrated ${migratedCount} metadata rows for property rename`)

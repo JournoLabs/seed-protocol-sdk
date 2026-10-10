@@ -1,23 +1,27 @@
 {
+  "$schema": "https://seedprotocol.org/schemas/data-model/v1",
   "version": 1,
-  "models": [
-    {
-      "name": "Post",
-      "properties": [
-        {
-          "name": "title",
-          "type": "string"
+  "metadata": {
+    "name": "Example",
+    "createdAt": "2025-11-10T00:00:00Z",
+    "updatedAt": "2026-10-07T00:00:00Z"
+  },
+  "models": {
+    "Post": {
+      "properties": {
+        "title": {
+          "type": "Text"
         }
-      ]
+      }
     },
-    {
-      "name": "Identity",
-      "properties": [
-        {
-          "name": "name",
-          "type": "string"
+    "Identity": {
+      "properties": {
+        "name": {
+          "type": "Text"
         }
-      ]
+      }
     }
-  ]
+  },
+  "enums": {},
+  "migrations": []
 }

@@ -1,60 +1,12 @@
 import { describe, it, expect, beforeEach, afterAll, beforeAll } from 'vitest'
-import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
-import { BaseDb } from '@/db/Db/BaseDb'
-import { schemas } from '@/seedSchema/SchemaSchema'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from './test-utils/client-init'
-
-// Helper function to wait for schema to be in idle state using xstate waitFor
-async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
-  const service = schema.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Schema failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Schema failed to load') {
-      throw error
-    }
-    throw new Error(`Schema loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for model to be in idle state using xstate waitFor
-async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
-  const service = model.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Model failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Model failed to load') {
-      throw error
-    }
-    throw new Error(`Model loading timeout after ${timeout}ms`)
-  }
-}
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { cleanupTestSchemaData } from './test-utils/cleanupTestDb'
+import { waitForSchemaIdle, waitForModelIdle } from './test-utils/waitForIdle'
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -67,10 +19,26 @@ function createTestSchema(name: string, models: Record<string, any> = {}): Schem
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
-    models,
+    // Give each model an id so the test can open the imported schema model (Model.create without a
+    // modelFileId makes a new runtime model with a unique name instead).
+    models: Object.fromEntries(
+      Object.entries(models).map(([modelName, model]) => [modelName, { id: generateId(), ...model }]),
+    ),
     enums: {},
     migrations: [],
   }
+}
+
+async function importSchema(schemaData: SchemaFileFormat): Promise<void> {
+  await importJsonSchema({ contents: JSON.stringify(schemaData) }, schemaData.version)
+}
+
+// The imported schema's model instance (not a new runtime model).
+function getSchemaModel(schemaData: SchemaFileFormat, modelName: string): Model {
+  return Model.create(modelName, schemaData.metadata.name, {
+    modelFileId: schemaData.models[modelName].id,
+    waitForReady: false,
+  })
 }
 
 // Helper to wait for validation to complete with timeout
@@ -102,40 +70,20 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('Validation Timeout and Failure Scenarios', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
-    // Clean up
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(modelsTable)
-      await db.delete(schemas)
-    }
+    await cleanupTestSchemaData()
   })
 
   beforeEach(async () => {
-    // Clean up database before each test
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await db.delete(modelsTable)
-      await db.delete(schemas)
-    }
+    await cleanupTestSchemaData()
   })
 
   describe('Schema Validation - Always Returns', () => {
@@ -149,8 +97,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         },
       })
 
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
       const result = await waitForValidation(() => schema.validate(), 15000)
@@ -162,7 +110,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
     it('should always return validation result for invalid schema (missing metadata)', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Manually set invalid context (missing metadata)
       schema.getService().send({
@@ -183,7 +131,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
     it('should always return validation result for invalid schema (missing schemaName)', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Manually set invalid context (empty schemaName)
       schema.getService().send({
@@ -204,12 +152,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
     it('should return timeout error if validation takes too long', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
-      
-      // Mock the validation service to hang
-      const originalValidate = schema.getService().getSnapshot().context
-      const validationService = await import('@/Schema/service/validation/SchemaValidationService')
-      
+
       // Create a schema with a very large number of models to potentially slow down validation
       const largeModels: Record<string, any> = {}
       for (let i = 0; i < 1000; i++) {
@@ -222,8 +165,10 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       }
 
       const schemaData = createTestSchema(schemaName, largeModels)
-      await importJsonSchema(schemaData)
-      await waitForSchemaIdle(schema)
+      await importSchema(schemaData)
+      // Open the schema only after the import lands; created first, it races the import to make the record
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      await waitForSchemaIdle(schema, 30000) // importing 1000 models is slow; validation is what is timed
 
       // Validation should still complete within timeout (10 seconds)
       const result = await waitForValidation(() => schema.validate(), 15000)
@@ -232,11 +177,11 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       // Should either be valid or have errors, but never hang
       expect(typeof result.isValid).toBe('boolean')
       expect(Array.isArray(result.errors)).toBe(true)
-    }, 30000)
+    }, 60000)
 
     it('should handle validation errors gracefully and always return', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Set context with invalid model structure
       schema.getService().send({
@@ -249,8 +194,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         },
         models: {
           InvalidModel: {
-            // Missing properties - should cause validation error
-            properties: null,
+            // Property without a type - should cause a validation error
+            properties: { title: {} },
           },
         },
       })
@@ -278,11 +223,11 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         },
       })
 
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
-      const model = Model.create(modelName, schema)
+      const model = getSchemaModel(schemaData, modelName)
       await waitForModelIdle(model)
 
       const result = await waitForValidation(() => model.validate(), 15000)
@@ -292,42 +237,23 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(result.errors).toEqual([])
     }, 30000)
 
-    it('should always return validation result for invalid model (missing modelName)', async () => {
+    // Model.create now rejects a missing model or schema name up front instead of producing a model whose
+    // validate() reports the problem.
+    it('should reject a model with no modelName', () => {
       const schemaName = `test-schema-${generateId()}`
-      const model = Model.create('', schemaName)
-      
-      // Wait a bit for validation to trigger
-      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(() => Model.create('', schemaName, { waitForReady: false })).toThrow('Model name is required')
+    })
 
-      const result = await waitForValidation(() => model.validate(), 15000)
-      
-      expect(result).toBeDefined()
-      expect(result.isValid).toBe(false)
-      expect(result.errors.length).toBeGreaterThan(0)
-      expect(result.errors.some(e => e.field === 'modelName')).toBe(true)
-    }, 30000)
-
-    it('should always return validation result for invalid model (missing schemaName)', async () => {
-      const modelName = 'TestModel'
-      const model = Model.create(modelName, '')
-      
-      // Wait a bit for validation to trigger
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      const result = await waitForValidation(() => model.validate(), 15000)
-      
-      expect(result).toBeDefined()
-      expect(result.isValid).toBe(false)
-      expect(result.errors.length).toBeGreaterThan(0)
-      expect(result.errors.some(e => e.field === 'schemaName')).toBe(true)
-    }, 30000)
+    it('should reject a model with no schemaName', () => {
+      expect(() => Model.create('TestModel', '', { waitForReady: false })).toThrow('Schema name is required')
+    })
 
     it('should always return validation result when schema is not loaded', async () => {
       const schemaName = `test-schema-${generateId()}`
       const modelName = 'TestModel'
       
       // Create model without creating schema first
-      const model = Model.create(modelName, schemaName)
+      const model = Model.create(modelName, schemaName, { waitForReady: false })
       
       // Wait a bit for validation to trigger
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -340,6 +266,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       expect(Array.isArray(result.errors)).toBe(true)
     }, 30000)
 
+    // properties: null, which this test used to set, is valid now; a non-object value is not.
     it('should handle validation errors gracefully and always return', async () => {
       const schemaName = `test-schema-${generateId()}`
       const modelName = 'TestModel'
@@ -351,17 +278,17 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         },
       })
 
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
-      const model = Model.create(modelName, schema)
+      const model = getSchemaModel(schemaData, modelName)
       await waitForModelIdle(model)
 
       // Set invalid properties
       model.getService().send({
         type: 'updateContext',
-        properties: null, // Invalid - should cause validation error
+        properties: 'not-an-object', // Invalid - should cause validation error
       })
 
       // Wait a bit for validation to trigger
@@ -395,11 +322,11 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       }
 
       const schemaData = createTestSchema(schemaName, largeModels)
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
-      await waitForSchemaIdle(schema)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
+      await waitForSchemaIdle(schema, 30000)
 
-      const model = Model.create(modelName, schema)
+      const model = getSchemaModel(schemaData, modelName)
       await waitForModelIdle(model)
 
       // Validation should still complete within timeout (10 seconds)
@@ -409,7 +336,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       // Should either be valid or have errors, but never hang
       expect(typeof result.isValid).toBe('boolean')
       expect(Array.isArray(result.errors)).toBe(true)
-    }, 30000)
+    }, 60000)
   })
 
   describe('Concurrent Validation - Never Gets Stuck', () => {
@@ -425,8 +352,8 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
               },
             },
           })
-          await importJsonSchema(schemaData)
-          const schema = Schema.create(name)
+          await importSchema(schemaData)
+          const schema = Schema.create(name, { waitForReady: false })
           await waitForSchemaIdle(schema)
           return schema
         })
@@ -464,11 +391,11 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         )
       )
 
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
-      const models = modelNames.map(name => Model.create(name, schema))
+      const models = modelNames.map(name => getSchemaModel(schemaData, name))
       await Promise.all(models.map(model => waitForModelIdle(model)))
 
       // Run all validations concurrently
@@ -489,23 +416,31 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
       const schemaName = `test-schema-${generateId()}`
       
       // Create valid schema
+      const invalidModelNames = Array.from({ length: 5 }, (_, i) => `InvalidModel${i}`)
       const schemaData = createTestSchema(schemaName, {
         ValidModel: {
           properties: {
             title: { dataType: 'String' },
           },
         },
+        ...Object.fromEntries(
+          invalidModelNames.map(name => [name, { properties: { title: { dataType: 'String' } } }]),
+        ),
       })
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
       // Create valid model
-      const validModel = Model.create('ValidModel', schema)
+      const validModel = getSchemaModel(schemaData, 'ValidModel')
       await waitForModelIdle(validModel)
 
-      // Create invalid models (missing schemaName)
-      const invalidModels = Array.from({ length: 5 }, () => Model.create('InvalidModel', ''))
+      // Make the rest invalid. (Model.create with an empty schema name, the old way, now throws.)
+      const invalidModels = invalidModelNames.map(name => getSchemaModel(schemaData, name))
+      await Promise.all(invalidModels.map(model => waitForModelIdle(model)))
+      invalidModels.forEach(model => {
+        model.getService().send({ type: 'updateContext', properties: 'not-an-object' })
+      })
 
       // Run all validations concurrently
       const validations = [
@@ -534,7 +469,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
   describe('Edge Cases - Never Gets Stuck', () => {
     it('should handle validation with circular references gracefully', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Try to create a schema with potentially problematic structure
       schema.getService().send({
@@ -584,11 +519,11 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
         },
       })
 
-      await importJsonSchema(schemaData)
-      const schema = Schema.create(schemaName)
+      await importSchema(schemaData)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
 
-      const model = Model.create('LargeModel', schema)
+      const model = getSchemaModel(schemaData, 'LargeModel')
       await waitForModelIdle(model)
 
       const result = await waitForValidation(() => model.validate(), 15000)
@@ -600,7 +535,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
 
     it('should handle validation errors during schema loading', async () => {
       const schemaName = `test-schema-${generateId()}`
-      const schema = Schema.create(schemaName)
+      const schema = Schema.create(schemaName, { waitForReady: false })
       
       // Trigger validation while schema is still loading
       const validationPromise = waitForValidation(() => schema.validate(), 15000)
@@ -616,7 +551,7 @@ testDescribe('Validation Timeout and Failure Scenarios', () => {
           },
         },
       })
-      await importJsonSchema(schemaData)
+      await importSchema(schemaData)
       await waitForSchemaIdle(schema)
 
       const result = await validationPromise

@@ -250,6 +250,116 @@ export const migrationSql_0013_eas_sync_processes = `CREATE TABLE \`eas_sync_pro
 export const migrationSql_0014_add_error_code_to_publish_processes = `ALTER TABLE \`publish_processes\` ADD \`error_code\` text;
 `
 
+export const migrationSql_0015_add_model_file_id_to_seeds = `ALTER TABLE \`seeds\` ADD \`model_file_id\` text;
+--> statement-breakpoint
+UPDATE \`seeds\` SET \`model_file_id\` = (
+	SELECT \`models\`.\`schema_file_id\`
+	FROM \`metadata\`
+	INNER JOIN \`properties\` ON \`properties\`.\`id\` = \`metadata\`.\`property_id\`
+	INNER JOIN \`models\` ON \`models\`.\`id\` = \`properties\`.\`model_id\`
+	WHERE \`metadata\`.\`seed_local_id\` = \`seeds\`.\`local_id\`
+		AND \`models\`.\`schema_file_id\` IS NOT NULL
+	LIMIT 1
+) WHERE \`model_file_id\` IS NULL;
+`
+
+export const migrationSql_0016_add_revoked_at_to_metadata = `ALTER TABLE \`metadata\` ADD \`revoked_at\` integer;
+`
+
+export const migrationSql_0017_add_revoked_at_to_versions = `ALTER TABLE \`versions\` ADD \`revoked_at\` integer;`
+
+export const migrationSql_0018_add_storage_settings_to_properties = `ALTER TABLE \`properties\` ADD \`storage_type\` text;
+--> statement-breakpoint
+ALTER TABLE \`properties\` ADD \`local_storage_dir\` text;
+--> statement-breakpoint
+ALTER TABLE \`properties\` ADD \`filename_suffix\` text;
+--> statement-breakpoint
+UPDATE \`properties\` SET (\`storage_type\`, \`local_storage_dir\`, \`filename_suffix\`) = (
+	SELECT
+		CASE
+			WHEN json_type(\`p\`.\`def\`, '$.storage') = 'object' THEN
+				CASE WHEN json_extract(\`p\`.\`def\`, '$.storage.type') = 'ItemStorage' THEN 'ItemStorage' ELSE 'PropertyStorage' END
+			ELSE json_extract(\`p\`.\`def\`, '$.storageType')
+		END,
+		CASE
+			WHEN json_type(\`p\`.\`def\`, '$.storage') = 'object' THEN json_extract(\`p\`.\`def\`, '$.storage.path')
+			ELSE json_extract(\`p\`.\`def\`, '$.localStorageDir')
+		END,
+		CASE
+			WHEN json_type(\`p\`.\`def\`, '$.storage') = 'object' THEN json_extract(\`p\`.\`def\`, '$.storage.extension')
+			ELSE json_extract(\`p\`.\`def\`, '$.filenameSuffix')
+		END
+	FROM (
+		SELECT json_extract(
+			\`schemas\`.\`schema_data\`,
+			'$.models."' || \`models\`.\`name\` || '".properties."' || \`properties\`.\`name\` || '"'
+		) AS \`def\`
+		FROM \`models\`
+		INNER JOIN \`model_schemas\` ON \`model_schemas\`.\`model_id\` = \`models\`.\`id\`
+		INNER JOIN \`schemas\` ON \`schemas\`.\`id\` = \`model_schemas\`.\`schema_id\`
+		WHERE \`models\`.\`id\` = \`properties\`.\`model_id\`
+			AND \`models\`.\`name\` NOT LIKE '%"%'
+			AND json_valid(\`schemas\`.\`schema_data\`)
+			AND json_type(
+				\`schemas\`.\`schema_data\`,
+				'$.models."' || \`models\`.\`name\` || '".properties."' || \`properties\`.\`name\` || '"'
+			) = 'object'
+		ORDER BY \`schemas\`.\`id\` DESC
+		LIMIT 1
+	) AS \`p\`
+) WHERE \`storage_type\` IS NULL
+	AND \`name\` NOT LIKE '%"%'
+	AND EXISTS (
+		SELECT 1 FROM \`models\`
+		INNER JOIN \`model_schemas\` ON \`model_schemas\`.\`model_id\` = \`models\`.\`id\`
+		INNER JOIN \`schemas\` ON \`schemas\`.\`id\` = \`model_schemas\`.\`schema_id\`
+		WHERE \`models\`.\`id\` = \`properties\`.\`model_id\`
+			AND \`models\`.\`name\` NOT LIKE '%"%'
+			AND json_valid(\`schemas\`.\`schema_data\`)
+			AND json_type(
+				\`schemas\`.\`schema_data\`,
+				'$.models."' || \`models\`.\`name\` || '".properties."' || \`properties\`.\`name\` || '"'
+			) = 'object'
+	);
+`
+
+export const migrationSql_0019_add_derived_from_uid_to_metadata = `ALTER TABLE \`metadata\` ADD \`derived_from_uid\` text;
+--> statement-breakpoint
+UPDATE \`metadata\` SET
+	\`derived_from_uid\` = (
+		SELECT \`source\`.\`uid\`
+		FROM \`metadata\` AS \`source\`
+		WHERE \`source\`.\`version_uid\` = \`metadata\`.\`version_uid\`
+			AND \`source\`.\`property_name\` = 'storageTransactionId'
+			AND \`source\`.\`uid\` IS NOT NULL
+			AND \`source\`.\`property_value\` = \`metadata\`.\`property_value\`
+		ORDER BY COALESCE(\`source\`.\`attestation_created_at\`, \`source\`.\`created_at\`) DESC
+		LIMIT 1
+	),
+	\`attestation_created_at\` = COALESCE(\`attestation_created_at\`, (
+		SELECT \`source\`.\`attestation_created_at\`
+		FROM \`metadata\` AS \`source\`
+		WHERE \`source\`.\`version_uid\` = \`metadata\`.\`version_uid\`
+			AND \`source\`.\`property_name\` = 'storageTransactionId'
+			AND \`source\`.\`uid\` IS NOT NULL
+			AND \`source\`.\`property_value\` = \`metadata\`.\`property_value\`
+		ORDER BY COALESCE(\`source\`.\`attestation_created_at\`, \`source\`.\`created_at\`) DESC
+		LIMIT 1
+	))
+WHERE \`uid\` IS NULL
+	AND \`ref_value_type\` = 'file'
+	AND \`version_uid\` IS NOT NULL
+	AND \`derived_from_uid\` IS NULL
+	AND EXISTS (
+		SELECT 1
+		FROM \`metadata\` AS \`source\`
+		WHERE \`source\`.\`version_uid\` = \`metadata\`.\`version_uid\`
+			AND \`source\`.\`property_name\` = 'storageTransactionId'
+			AND \`source\`.\`uid\` IS NOT NULL
+			AND \`source\`.\`property_value\` = \`metadata\`.\`property_value\`
+	);
+`
+
 // Journal JSON file
 export const journalJson = `{
   "version": "7",
@@ -359,6 +469,41 @@ export const journalJson = `{
       "when": 1774400000000,
       "tag": "0014_add_error_code_to_publish_processes",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1774500000000,
+      "tag": "0015_add_model_file_id_to_seeds",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1774600000000,
+      "tag": "0016_add_revoked_at_to_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1774700000000,
+      "tag": "0017_add_revoked_at_to_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1774800000000,
+      "tag": "0018_add_storage_settings_to_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1774900000000,
+      "tag": "0019_add_derived_from_uid_to_metadata",
+      "breakpoints": true
     }
   ]
 }`
@@ -368,8 +513,8 @@ export const journalJson = `{
 export const snapshotJson = `{
   "version": "6",
   "dialect": "sqlite",
-  "id": "14e73eef-092a-4310-a86f-2f815470bdce",
-  "prevId": "a9e8f7d6-c5b4-4321-a0b9-c8d7e6f5a4b3",
+  "id": "dd5a777b-e1a9-4b35-82c6-b0c2c7a8ef4d",
+  "prevId": "ab739b16-741c-4ac4-b3bc-a894ef2582a1",
   "tables": {
     "appState": {
       "name": "appState",
@@ -408,6 +553,108 @@ export const snapshotJson = `{
           "name": "appState_key_unique",
           "columns": [
             "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "arweave_l1_finalize_jobs": {
+      "name": "arweave_l1_finalize_jobs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "seed_local_id": {
+          "name": "seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "data_item_id": {
+          "name": "data_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "l1_transaction_id": {
+          "name": "l1_transaction_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bundle_id": {
+          "name": "bundle_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version_local_id": {
+          "name": "version_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_property_name": {
+          "name": "item_property_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status_json": {
+          "name": "status_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "arweave_l1_finalize_jobs_data_item_id_unique": {
+          "name": "arweave_l1_finalize_jobs_data_item_id_unique",
+          "columns": [
+            "data_item_id"
           ],
           "isUnique": true
         }
@@ -457,6 +704,148 @@ export const snapshotJson = `{
         }
       },
       "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "eas_sync_processes": {
+      "name": "eas_sync_processes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request_payload": {
+          "name": "request_payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_details": {
+          "name": "error_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "persisted_snapshot": {
+          "name": "persisted_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "html_embedded_image_co_publish": {
+      "name": "html_embedded_image_co_publish",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "parent_seed_local_id": {
+          "name": "parent_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "html_seed_local_id": {
+          "name": "html_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "image_seed_local_id": {
+          "name": "image_seed_local_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stable_key": {
+          "name": "stable_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "html_embed_co_pub_parent_html_stable": {
+          "name": "html_embed_co_pub_parent_html_stable",
+          "columns": [
+            "parent_seed_local_id",
+            "html_seed_local_id",
+            "stable_key"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -632,6 +1021,20 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "derived_from_uid": {
+          "name": "derived_from_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -770,6 +1173,27 @@ export const snapshotJson = `{
         "required": {
           "name": "required",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "storage_type": {
+          "name": "storage_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "local_storage_dir": {
+          "name": "local_storage_dir",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "filename_suffix": {
+          "name": "filename_suffix",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1222,6 +1646,13 @@ export const snapshotJson = `{
           "notNull": false,
           "autoincrement": false
         },
+        "model_file_id": {
+          "name": "model_file_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "publisher": {
           "name": "publisher",
           "type": "text",
@@ -1424,6 +1855,13 @@ export const snapshotJson = `{
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1435,188 +1873,6 @@ export const snapshotJson = `{
           "isUnique": true
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "arweave_l1_finalize_jobs": {
-      "name": "arweave_l1_finalize_jobs",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "seed_local_id": {
-          "name": "seed_local_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "data_item_id": {
-          "name": "data_item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "l1_transaction_id": {
-          "name": "l1_transaction_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "bundle_id": {
-          "name": "bundle_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "version_local_id": {
-          "name": "version_local_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "item_property_name": {
-          "name": "item_property_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "phase": {
-          "name": "phase",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status_json": {
-          "name": "status_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "arweave_l1_finalize_jobs_data_item_id_unique": {
-          "name": "arweave_l1_finalize_jobs_data_item_id_unique",
-          "columns": [
-            "data_item_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "eas_sync_processes": {
-      "name": "eas_sync_processes",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "request_payload": {
-          "name": "request_payload",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "error_details": {
-          "name": "error_details",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "persisted_snapshot": {
-          "name": "persisted_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Seed multi-tab test tab</title>
+  </head>
+  <body>
+    <!-- Opened by browser/multiTab.e2e.test.ts as a real extra tab; see tab.ts. -->
+    <!-- The vitest server instruments dynamic imports for its test pages; this is its own shim
+         for pages outside a test run (@vitest/browser does the same). -->
+    <script>
+      globalThis.__vitest_browser_runner__ = { wrapDynamicImport: (f) => f() }
+    </script>
+    <script type="module" src="./tab.ts"></script>
+  </body>
+</html>

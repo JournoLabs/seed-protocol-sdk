@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { resetArweaveBodyCache } from '@seedprotocol/query'
 import {
   hydrateArweaveRichTextInFeedItems,
   isArweaveTransactionGatewayUrl,
@@ -7,6 +8,8 @@ import {
 describe('hydrateArweaveRichText', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Bodies are cached by transaction id; these tests reuse one id with different bodies.
+    resetArweaveBodyCache()
   })
 
   it('isArweaveTransactionGatewayUrl accepts standard gateway tx URL', () => {

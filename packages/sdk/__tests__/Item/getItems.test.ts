@@ -1,43 +1,36 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { waitFor } from 'xstate'
 import { getItemsData } from '@/db/read/getItems'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { seeds, versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
 } from '../test-utils/getPublishPayloadIntegrationHelpers'
+import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
 const VALID_V1 = '0x' + '1'.repeat(64)
 
-async function waitForItemIdle(item: Item<any>, timeout = 15000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout },
-  ).catch((err) => {
-    if (err?.message === 'Item failed to load') throw err
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  })
-}
+const waitForItemIdle = (item: HasService, timeout = 15000) =>
+  waitForIdle(item, 'Item', timeout)
 
 testDescribe('getItemsData', () => {
+  // An unscoped getItemsData({ modelName: 'Post' }) lists every schema's Post items by design; scope
+  // to this file's Post so other files' leftovers can't show up.
+  let postModelFileId: string
+
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-    await createGetPublishPayloadTestSchema()
-  }, 90000)
+    const { models } = await createGetPublishPayloadTestSchema()
+    postModelFileId = models.Post.id!
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -50,7 +43,7 @@ testDescribe('getItemsData', () => {
     })
     expect(item.seedLocalId).toBeTruthy()
 
-    const items = await getItemsData({ modelName: 'Post', includeEas: false })
+    const items = await getItemsData({ modelName: 'Post', modelFileId: postModelFileId, includeEas: false })
     expect(Array.isArray(items)).toBe(true)
     // All returned items should have no seedUid (local only)
     for (const i of items) {
@@ -75,6 +68,7 @@ testDescribe('getItemsData', () => {
       localId: easSeedLocalId,
       uid: easSeedUid,
       type: 'post',
+      modelFileId: postModelFileId,
       schemaUid: null,
       createdAt: Date.now(),
     })
@@ -87,11 +81,11 @@ testDescribe('getItemsData', () => {
       createdAt: Date.now(),
     })
 
-    const itemsWithEas = await getItemsData({ modelName: 'Post', includeEas: true })
+    const itemsWithEas = await getItemsData({ modelName: 'Post', modelFileId: postModelFileId, includeEas: true })
     const easItem = itemsWithEas.find((i) => i.seedUid === easSeedUid)
     expect(easItem).toBeDefined()
 
-    const itemsLocalOnly = await getItemsData({ modelName: 'Post', includeEas: false })
+    const itemsLocalOnly = await getItemsData({ modelName: 'Post', modelFileId: postModelFileId, includeEas: false })
     const easItemInLocalOnly = itemsLocalOnly.find((i) => i.seedUid === easSeedUid)
     expect(easItemInLocalOnly).toBeUndefined()
   })
@@ -128,7 +122,7 @@ testDescribe('getItemsData', () => {
       createdAt: t - 500,
     })
 
-    const items = await getItemsData({ modelName: 'Post', includeEas: false })
+    const items = await getItemsData({ modelName: 'Post', modelFileId: postModelFileId, includeEas: false })
     const row = items.find((i) => i.seedLocalId === seedLocalId)
     expect(row?.publishedVersionUid).toBe(VALID_V1)
     expect(row?.publishedVersionLocalId).toBe('vd-old-' + t)

@@ -32,6 +32,11 @@ export interface IFileManager {
   resizeImage(params: ResizeImageParams): Promise<void>
   resizeAllImages(params: ResizeAllImagesParams): Promise<void>
   pathExists(filePath: string): Promise<boolean>
+  /**
+   * Re-reads paths another tab or a worker changed outside this file system's cache (browser).
+   * A no-op where nothing is cached (Node).
+   */
+  invalidateCachedPaths(filePaths: string[]): Promise<void>
   /** File size in bytes, or null if the path does not exist / cannot be stated. */
   getFileSize(filePath: string): Promise<number | null>
   listFiles(dir: string): Promise<string[]>

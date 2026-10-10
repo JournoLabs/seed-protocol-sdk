@@ -2,7 +2,7 @@ import { GET_SCHEMAS } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
-import { getSchemaUidForModelFromCache, setSchemaUidForModel } from '@/stores/eas'
+import { cachedSchemaLookup, getSchemaUidForModelFromCache, setSchemaUidForModel } from '@/stores/eas'
 import { eq } from 'drizzle-orm'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 
@@ -12,31 +12,34 @@ export const getEasSchemaUidForModel = async (
   const cached = getSchemaUidForModelFromCache(modelName)
   if (cached) return cached
 
-  const queryClient = BaseQueryClient.getQueryClient()
-  const easClient = BaseEasClient.getEasClient()
-
   const modeType = modelName.toLowerCase()
 
-  const modelSchemaQuery = await queryClient.fetchQuery({
-    queryKey: [`getPropertySchema${modelName}`],
-    queryFn: async () =>
-      easClient.request(GET_SCHEMAS, {
-        where: {
-          schemaNames: {
-            some: {
-              name: {
-                equals: modeType,
+  // Misses are cached too (most local models have no EAS schema); the DB fallback below still runs.
+  const easSchemaUid = await cachedSchemaLookup(`model:${modeType}`, async () => {
+    const queryClient = BaseQueryClient.getQueryClient()
+    const easClient = BaseEasClient.getEasClient()
+
+    const modelSchemaQuery = await queryClient.fetchQuery({
+      queryKey: [`getEasSchemaUidForModel`, modeType],
+      queryFn: async () =>
+        easClient.request(GET_SCHEMAS, {
+          where: {
+            schemaNames: {
+              some: {
+                name: {
+                  equals: modeType,
+                },
               },
             },
           },
-        },
-      }),
-  })
+        }),
+    })
 
-  const foundSchema = modelSchemaQuery.schemas[0]
-  if (foundSchema) {
-    setSchemaUidForModel({ modelName, schemaUid: foundSchema.id })
-    return foundSchema.id
+    return modelSchemaQuery.schemas[0]?.id
+  })
+  if (easSchemaUid) {
+    setSchemaUidForModel({ modelName, schemaUid: easSchemaUid })
+    return easSchemaUid
   }
 
   // Fallback: use schema UID from local DB when EAS has no schema (e.g. test schemas)

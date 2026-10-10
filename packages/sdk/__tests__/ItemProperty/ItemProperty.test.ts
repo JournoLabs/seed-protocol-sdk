@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -14,68 +13,16 @@ import { propertyUids } from '@/seedSchema/PropertyUidSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
-import { eq, and, ne, notInArray, sql } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
-import type { IItemProperty } from '@/interfaces'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
+import { waitForIdle, type HasService, waitForItemIdle } from '../test-utils/waitForIdle'
 
-// Helper function to wait for ItemProperty to be in idle state
-async function waitForItemPropertyIdle(property: IItemProperty<any>, timeout: number = 10000): Promise<void> {
-  const service = property.getService()
-  
-  // Check current state first - if already idle, return immediately
-  const currentSnapshot = service.getSnapshot()
-  if (currentSnapshot.value === 'idle') {
-    return
-  }
-  
-  if (currentSnapshot.value === 'error') {
-    throw new Error('ItemProperty failed to load')
-  }
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for Item to be in idle state
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
+const waitForItemPropertyIdle = (property: HasService, timeout = 10000) =>
+  waitForIdle(property, 'ItemProperty', timeout)
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -101,23 +48,13 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('ItemProperty Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Clean up - delete in order to respect foreign key constraints
@@ -138,128 +75,17 @@ testDescribe('ItemProperty Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
     const db = BaseDb.getAppDb()
     if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map(link => link.modelId)
-          .filter((id): id is number => id !== null && id !== undefined)
-        
-        // Delete metadata for non-Seed Protocol models
-        const seedProtocolSeeds = await db
-          .select({ localId: seeds.localId })
-          .from(seeds)
-          .where(
-            sql`EXISTS (
-              SELECT 1 FROM models 
-              WHERE models.id IN (${sql.join(seedProtocolModelIds.map(id => sql`${id}`), sql`, `)})
-              AND seeds.type = models.name
-            )`
-          )
-        
-        const seedProtocolSeedLocalIds = seedProtocolSeeds.map(s => s.localId).filter(Boolean)
-        
-        if (seedProtocolSeedLocalIds.length > 0) {
-          await db.delete(metadata).where(notInArray(metadata.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(versions).where(notInArray(versions.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(seeds).where(notInArray(seeds.localId, seedProtocolSeedLocalIds))
-        } else {
-          await db.delete(metadata)
-          await db.delete(versions)
-          await db.delete(seeds)
-        }
-        
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map(link => link.modelId)
-          .filter((id): id is number => id !== null && id !== undefined)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.delete(metadata)
-        await db.delete(versions)
-        await db.delete(seeds)
-        await db.update(properties).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(properties)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
+      // Every item, Seed Protocol models' (Image, File, ...) included, so each test starts with none.
+      // (The old version meant to keep Seed Protocol items, but its seeds.type = models.name match
+      // compared snake_case types to model names and never matched, so it deleted them all anyway.)
+      await db.delete(metadata)
+      await db.delete(versions)
+      await db.delete(seeds)
     }
-
-    // Clean up property files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Property') || file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema), and schema files
+    await cleanupTestSchemaData()
   })
 
   afterEach(async () => {
@@ -312,6 +138,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -396,6 +223,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         content: 'Test Content',
       })
       
@@ -493,6 +321,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         status: 'draft',
       })
 
@@ -577,9 +406,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         { timeout: 5000 }
       )
       
-      // Wait for model properties to be loaded
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       // Get property schema from model
       const modelProperties = model.properties
       const descriptionProperty = modelProperties.find(p => p.name === 'description' || p.name === 'Description')
@@ -587,6 +413,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // If model property not found, we can still test ItemProperty creation directly
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         description: 'Test Description',
       })
       
@@ -669,14 +496,12 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create item first
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me',
       })
       
       await waitForItemIdle(item)
       const seedLocalId = item.seedLocalId
-      
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
       
       // Find property
       const property = await ItemProperty.find({
@@ -719,6 +544,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create item first
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         content: 'Find By Uid',
       })
       
@@ -727,9 +553,6 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Publish item to get seedUid (if not already published)
       // For now, we'll use seedLocalId if seedUid is not available
       const seedUid = item.seedUid || item.seedLocalId
-      
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
       
       // Find property by seedUid
       const property = await ItemProperty.find({
@@ -788,14 +611,12 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me No Wait',
       })
       
       await waitForItemIdle(item)
       const seedLocalId = item.seedLocalId
-      
-      // Wait for properties to be saved to database
-      await new Promise(resolve => setTimeout(resolve, 2000))
       
       // Find with waitForReady: false - should return immediately
       const property = await ItemProperty.find({
@@ -835,11 +656,11 @@ testDescribe('ItemProperty Integration Tests', () => {
       )
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'All Test Title',
         content: 'All Test Content',
       })
       await waitForItemIdle(item)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
 
       const allProperties = await ItemProperty.all({ seedLocalId: item.seedLocalId })
       expect(allProperties).toBeDefined()
@@ -870,10 +691,10 @@ testDescribe('ItemProperty Integration Tests', () => {
       )
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'WaitForReady Test',
       })
       await waitForItemIdle(item)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
 
       const allProperties = await ItemProperty.all(
         { seedLocalId: item.seedLocalId },
@@ -909,6 +730,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Get Value Test',
       })
       
@@ -971,6 +793,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial Value',
       })
       
@@ -1010,11 +833,8 @@ testDescribe('ItemProperty Integration Tests', () => {
         
         // Set new value
         titleProperty.value = 'Updated Value'
-        
-        // Wait a bit for the value to update
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        expect(titleProperty.value).toBe('Updated Value')
+
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated Value'), { timeout: 5000, interval: 50 })
       }
     })
 
@@ -1040,6 +860,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Same Value',
       })
       
@@ -1118,6 +939,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Text Property',
       })
       
@@ -1192,6 +1014,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         rating: 5,
       })
       
@@ -1266,6 +1089,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         published: true,
       })
       
@@ -1358,6 +1182,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create author first
       const author = await Item.create({
         modelName: 'Author',
+        schemaName,
         name: 'John Doe',
       })
       
@@ -1366,6 +1191,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create post with author relation
       const post = await Item.create({
         modelName: 'Post',
+        schemaName,
         title: 'My Post',
         author: author.seedLocalId,
       })
@@ -1476,6 +1302,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create tags first
       const tag1 = await Item.create({
         modelName: 'Tag',
+        schemaName,
         name: 'Tag 1',
       })
       
@@ -1483,6 +1310,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const tag2 = await Item.create({
         modelName: 'Tag',
+        schemaName,
         name: 'Tag 2',
       })
       
@@ -1491,6 +1319,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       // Create post with tags list
       const post = await Item.create({
         modelName: 'Post',
+        schemaName,
         title: 'My Post',
         tags: JSON.stringify([tag1.seedLocalId, tag2.seedLocalId]),
       })
@@ -1587,6 +1416,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial Title',
       })
       
@@ -1627,9 +1457,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'Updated Title'
         
-        // Wait a bit for the value to be set
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
         // Save property
         await titleProperty.save()
         
@@ -1639,9 +1466,6 @@ testDescribe('ItemProperty Integration Tests', () => {
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
           { timeout: 10000 }
         )
-        
-        // Wait longer for database write to complete (save is async)
-        await new Promise(resolve => setTimeout(resolve, 2000))
         
         // Verify value was saved in the property
         expect(titleProperty.value).toBe('Updated Title')
@@ -1710,6 +1534,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Reactive Test',
       })
       
@@ -1782,6 +1607,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Subscribe Test',
       })
       
@@ -1830,8 +1656,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update value
         titleProperty.value = 'New Value'
         
-        // Wait for subscription to fire
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await vi.waitFor(() => expect(values.length).toBeGreaterThan(0), { timeout: 5000, interval: 50 })
         
         // Unsubscribe
         subscription.unsubscribe()
@@ -1865,6 +1690,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Unload Test',
       })
       
@@ -1912,7 +1738,6 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Note: XState services don't have a direct "stopped" state we can check,
         // but unload() calls service.stop() which should stop the service
         // We can verify by checking that the service is no longer active
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Property should still be accessible (unload doesn't delete the instance)
         expect(titleProperty.propertyName).toBe('title')
@@ -1945,6 +1770,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Integration Test',
         content: 'Content',
         author: 'Author',
@@ -2012,6 +1838,7 @@ testDescribe('ItemProperty Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Initial',
       })
       
@@ -2052,11 +1879,8 @@ testDescribe('ItemProperty Integration Tests', () => {
         // Update property value
         titleProperty.value = 'Updated'
         
-        // Wait for update
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
         // Property value should be updated
-        expect(titleProperty.value).toBe('Updated')
+        await vi.waitFor(() => expect(titleProperty.value).toBe('Updated'), { timeout: 5000, interval: 50 })
       }
     })
   })
@@ -2064,8 +1888,12 @@ testDescribe('ItemProperty Integration Tests', () => {
   describe('Html property persistence', () => {
     it('Html property returns HTML content (not seedLocalId) after load from DB', async () => {
       const schemaName = 'Test Schema Html Persistence'
+      // Unique model name: earlier tests in this file import other schemas with a 'Post' model, and
+      // beforeEach deletes their rows without evicting the cached Model instances. Item.create resolves
+      // the model by name only (Model.getByName('Post')), which returns the first cached '*:Post' --
+      // the Relation test's Post (title, author) -- so 'html' never got a property instance.
       const testSchema = createTestSchema(schemaName, {
-        Post: {
+        HtmlPost: {
           id: generateId(),
           properties: {
             title: { dataType: 'Text' },
@@ -2076,7 +1904,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('Post', schemaName, { waitForReady: false })
+      const model = Model.create('HtmlPost', schemaName, { waitForReady: false })
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -2085,7 +1913,7 @@ testDescribe('ItemProperty Integration Tests', () => {
 
       const htmlContent = '<p>Hello World</p>'
       const item = await Item.create({
-        modelName: 'Post',
+        modelName: 'HtmlPost',
         title: 'Test Post',
         html: htmlContent,
       })
@@ -2103,13 +1931,11 @@ testDescribe('ItemProperty Integration Tests', () => {
       const seedLocalId = item.seedLocalId
       expect(seedLocalId).toBeDefined()
 
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
       ItemProperty.clearInstanceCacheForItem(seedLocalId!)
       item.unload()
 
       const reloadedItem = await Item.find({
-        modelName: 'Post',
+        modelName: 'HtmlPost',
         seedLocalId: seedLocalId!,
       })
       expect(reloadedItem).toBeDefined()

@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Subscription, SnapshotFrom } from 'xstate'
 import debug from 'debug'
 import { ItemProperty } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import type { IItemProperty } from '@seedprotocol/sdk'
 import { useLiveQuery } from './liveQuery'
+import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { metadata } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, isNotNull } from 'drizzle-orm'
 import { getMetadataLatest } from '@seedprotocol/sdk'
+import { pickLatestMetadataRowPerProperty } from '@seedprotocol/sdk'
 import { propertyMachine } from '@seedprotocol/sdk'
 import { debounce, startCase } from 'lodash-es'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -25,20 +27,30 @@ type UseItemPropertyReturn = {
   error: Error | null
 }
 
+/** Query key for one item property: `useItemProperty`'s query. */
+export const getItemPropertyQueryKey = (
+  seedLocalId: string | undefined,
+  seedUid: string | undefined,
+  propertyName: string,
+) => ['seed', 'itemProperty', seedLocalId ?? null, seedUid ?? null, propertyName] as const
+
 /**
  * Hook to get a specific ItemProperty instance
  * Can be called in multiple ways:
  * 1. With seedLocalId/seedUid and propertyName: useItemProperty({ seedLocalId, propertyName }) or useItemProperty({ seedUid, propertyName })
  * 2. With itemId and propertyName: useItemProperty(itemId, propertyName) or useItemProperty({ itemId, propertyName })
- * 
+ *
+ * A property already in the instance cache and ready (`ItemProperty.peekReady`) comes back on the
+ * first render with `isLoading: false`. Changing the lookup never returns the previous property.
+ *
  * @overload
  * @param props - Object with seedLocalId or seedUid, and propertyName
  * @returns Object with property, isLoading, and error
- * 
+ *
  * @overload
  * @param props - Object with itemId and propertyName
  * @returns Object with property, isLoading, and error
- * 
+ *
  * @overload
  * @param itemId - The item ID (seedLocalId or seedUid)
  * @param propertyName - The name of the property
@@ -65,10 +77,7 @@ export function useItemProperty(
   arg2?: string
 ) {
   const isClientReady = useIsClientReady()
-  const [property, setProperty] = useState<IItemProperty | undefined>(undefined)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-  const subscriptionRef = useRef<Subscription | undefined>(undefined)
+  const queryClient = useSeedQueryClient()
   const [, setVersion] = useState(0) // Version counter to force re-renders
 
   // Extract primitives so useMemo/useCallback deps are stable when caller passes inline objects
@@ -92,141 +101,69 @@ export function useItemProperty(
   const lookupMode = useMemo(() => {
     const resolvedSeedLocalId = (itemId !== undefined && itemId !== '') ? itemId : seedLocalId
     const resolvedSeedUid = (itemId !== undefined && itemId !== '') ? undefined : seedUid
-    if ((resolvedSeedLocalId != null || resolvedSeedUid != null) && propertyName != null && propertyName !== '') {
+    if ((resolvedSeedLocalId || resolvedSeedUid) && propertyName) {
       return {
         type: 'identifiers' as const,
-        seedLocalId: resolvedSeedLocalId ?? undefined,
-        seedUid: resolvedSeedUid,
+        seedLocalId: resolvedSeedLocalId || undefined,
+        seedUid: resolvedSeedUid || undefined,
         propertyName,
       }
     }
     return null
   }, [itemId, propertyName, seedLocalId, seedUid])
 
-  // Determine initial loading state
-  const initialLoadingState = useMemo(() => {
-    if (!lookupMode) return false
-    return !!(
-      (lookupMode.seedLocalId || lookupMode.seedUid) &&
-      lookupMode.propertyName
-    )
-  }, [lookupMode])
+  const queryKey = useMemo(
+    () => getItemPropertyQueryKey(lookupMode?.seedLocalId, lookupMode?.seedUid, lookupMode?.propertyName ?? ''),
+    [lookupMode],
+  )
 
-  // Determine if we should be loading based on parameters
-  const shouldLoad = useMemo(() => {
-    if (!isClientReady) return false
-    if (!lookupMode) return false
-    return !!(
-      (lookupMode.seedLocalId || lookupMode.seedUid) &&
-      lookupMode.propertyName
-    )
-  }, [isClientReady, lookupMode])
+  const query = useQuery(
+    {
+      queryKey,
+      queryFn: async (): Promise<IItemProperty | null> => {
+        if (!lookupMode) return null
+        // A ready cached property is what find() would return, minus the cache hold find() takes.
+        const found =
+          ItemProperty.peekReady(lookupMode) ??
+          (await ItemProperty.find({
+            propertyName: lookupMode.propertyName,
+            seedLocalId: lookupMode.seedLocalId,
+            seedUid: lookupMode.seedUid,
+          }))
+        if (!found) {
+          logger(
+            `[useItemProperty] no property found for Item.${lookupMode.seedLocalId || lookupMode.seedUid}.${lookupMode.propertyName}`,
+          )
+        }
+        return (found as IItemProperty | undefined) ?? null
+      },
+      // The ItemProperty instance cache is the cache; see useItem.
+      initialData: () =>
+        (lookupMode ? ItemProperty.peekReady(lookupMode) : undefined) as IItemProperty | undefined,
+      staleTime: 0,
+      gcTime: 0,
+      // An ItemProperty is a live actor-backed object, not data to compare field by field.
+      structuralSharing: false,
+      // find() throws when the property fails to load or times out; report that, as before.
+      retry: false,
+      enabled: isClientReady && !!lookupMode,
+    },
+    queryClient,
+  )
+  const property = query.data ?? undefined
 
-  // Avoid one frame where isLoading is false while a fetch is about to start (default useState(false)).
-  useLayoutEffect(() => {
-    if (shouldLoad) {
-      setIsLoading(true)
-    }
-  }, [shouldLoad])
-
-  const updateItemProperty = useCallback(async () => {
-    if (!isClientReady || !lookupMode) {
-      setProperty(undefined)
-      setIsLoading(false)
-      setError(null)
-      return
-    }
-
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      const seedLocalId = lookupMode.seedLocalId
-      const seedUid = lookupMode.seedUid
-
-      if (!seedLocalId && !seedUid) {
-        setProperty(undefined)
-        setIsLoading(false)
-        setError(null)
-        return
-      }
-
-      const foundProperty = await ItemProperty.find({
-        propertyName: lookupMode.propertyName,
-        seedLocalId,
-        seedUid,
-      })
-
-      if (!foundProperty) {
-        logger(
-          `[useItemProperty] [updateItemProperty] no property found for Item.${seedLocalId || seedUid}.${lookupMode.propertyName}`,
-        )
-        setProperty(undefined)
-        setIsLoading(false)
-        setError(null)
-        return
-      }
-
-      // ItemProperty.find() now waits for idle by default, so the property should be ready
-      setProperty(foundProperty)
-      setIsLoading(false) // Property is ready since find() waited for idle
-      setError(null)
-    } catch (error) {
-      logger('[useItemProperty] Error updating item property:', error)
-      setProperty(undefined)
-      setIsLoading(false)
-      setError(error as Error)
-    }
-  }, [isClientReady, lookupMode])
-
-  // Fetch/refetch when lookup parameters change or client becomes ready.
-  // Skip refetch when we already have the property for this lookup (avoids setting loading true
-  // again when effect re-runs e.g. from Strict Mode or updateItemProperty identity change).
-  // Match by the active identifier only: when looking up by seedLocalId both must match;
-  // when looking up by seedUid both must match. Do not use (seedUid === undefined) as a match
-  // when seedLocalIds differ, which would incorrectly skip refetch after seedLocalId change.
+  // Re-render on the property's own changes (value updates after it loaded).
   useEffect(() => {
-    if (!shouldLoad) {
-      setProperty(undefined)
-      setIsLoading(false)
-      setError(null)
-      return
-    }
-    const alreadyHavePropertyGuard =
-      property &&
-      lookupMode &&
-      property.propertyName === lookupMode.propertyName &&
-      ((lookupMode.seedLocalId != null && property.seedLocalId === lookupMode.seedLocalId) ||
-        (lookupMode.seedUid != null && (property as any).seedUid === lookupMode.seedUid))
-    if (alreadyHavePropertyGuard) return
-    updateItemProperty()
-  }, [shouldLoad, updateItemProperty, property, lookupMode])
+    if (!property) return
 
-  // Subscribe to service changes when property is available
-  useEffect(() => {
-    if (!property) {
-      // Clean up subscription if property is not available
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-      return
-    }
-
-    // Clean up previous subscription
-    subscriptionRef.current?.unsubscribe()
-
-    // Subscribe to service changes. Only set isLoading to false when idle; never set to true
-    // here so we never overwrite the loaded state when the machine emits any non-idle state
-    // (e.g. loading, initializing, resolvingRelatedValue) after the initial fetch.
     let lastVersionAt = 0
     let wasIdle = false
     /** Idle snapshots repeat often; only re-render when context values actually change (e.g. liveQuery/updateContext after idle). */
     let lastIdleValueSig: string | undefined
     const THROTTLE_MS = 50
-    const subscription = property.getService().subscribe((snapshot: any) => {
+    const subscription: Subscription = property.getService().subscribe((snapshot: any) => {
       const isIdle = snapshot && typeof snapshot === 'object' && 'value' in snapshot && snapshot.value === 'idle'
       if (isIdle) {
-        setIsLoading(false)
-        setError(null)
         const ctx = snapshot.context
         const sig = JSON.stringify([ctx.renderValue, ctx.propertyValue])
         const shouldBump = !wasIdle || sig !== lastIdleValueSig
@@ -246,19 +183,14 @@ export function useItemProperty(
         setVersion(prev => prev + 1)
       }
     })
-    
-    subscriptionRef.current = subscription
 
-    return () => {
-      subscriptionRef.current?.unsubscribe()
-      subscriptionRef.current = undefined
-    }
+    return () => subscription.unsubscribe()
   }, [property])
 
   return {
     property,
-    isLoading,
-    error,
+    isLoading: !!lookupMode && query.isPending,
+    error: query.error as Error | null,
   }
 }
 
@@ -369,22 +301,22 @@ async function fetchItemPropertiesList(
     modelName = first.modelName ?? (first as any).modelType
     if (modelName && typeof modelName === 'string') modelName = startCase(modelName)
   }
-  if (!modelName) {
-    const seedRecords = await db
-      .select({ type: seeds.type })
-      .from(seeds)
-      .where(seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!))
-      .limit(1)
-    if (seedRecords.length > 0 && seedRecords[0].type) {
-      modelName = startCase(seedRecords[0].type)
-    }
+  // The seed records which model it belongs to (model names are only unique per schema)
+  const seedRecords = await db
+    .select({ type: seeds.type, modelFileId: seeds.modelFileId })
+    .from(seeds)
+    .where(seedUid ? eq(seeds.uid, seedUid) : eq(seeds.localId, seedLocalId!))
+    .limit(1)
+  const modelFileId: string | undefined = seedRecords[0]?.modelFileId ?? undefined
+  if (!modelName && seedRecords.length > 0 && seedRecords[0].type) {
+    modelName = startCase(seedRecords[0].type)
   }
 
   const modelProperties: string[] = []
   if (modelName) {
     try {
       const { Model } = await import('@seedprotocol/sdk')
-      const model = await Model.getByNameAsync(modelName)
+      const model = await Model.resolveAsync(modelName, { modelFileId })
       if (model?.properties) {
         for (const modelProperty of model.properties) {
           if (modelProperty.name) modelProperties.push(modelProperty.name)
@@ -563,6 +495,8 @@ export function useItemProperties(
             schemaUid: metadata.schemaUid,
             createdAt: metadata.createdAt,
             attestationCreatedAt: metadata.attestationCreatedAt,
+            localId: metadata.localId,
+            revokedAt: metadata.revokedAt,
           })
           .from(metadata)
           .where(
@@ -582,6 +516,8 @@ export function useItemProperties(
                 schemaUid: metadata.schemaUid,
                 createdAt: metadata.createdAt,
                 attestationCreatedAt: metadata.attestationCreatedAt,
+                localId: metadata.localId,
+                revokedAt: metadata.revokedAt,
               })
               .from(metadata)
               .where(
@@ -605,6 +541,8 @@ export function useItemProperties(
     schemaUid: string | null
     createdAt: number | null
     attestationCreatedAt: number | null
+    localId: string | null
+    revokedAt: number | null
   }>(propertiesQuery)
   
   // Filter for latest records (one per propertyName) in JavaScript
@@ -613,26 +551,8 @@ export function useItemProperties(
       return []
     }
 
-    // Group by propertyName and keep only the latest record for each
-    const latestByProperty = new Map<string, typeof rawPropertiesTableData[0]>()
-    
-    for (const record of rawPropertiesTableData) {
-      if (!record.propertyName) continue
-      
-      const existing = latestByProperty.get(record.propertyName)
-      if (!existing) {
-        latestByProperty.set(record.propertyName, record)
-      } else {
-        // Compare timestamps to find the latest
-        const existingTime = existing.attestationCreatedAt || existing.createdAt || 0
-        const currentTime = record.attestationCreatedAt || record.createdAt || 0
-        if (currentTime > existingTime) {
-          latestByProperty.set(record.propertyName, record)
-        }
-      }
-    }
-
-    return Array.from(latestByProperty.values())
+    // One record per propertyName, in the SDK's reader order (live before revoked, then newest)
+    return pickLatestMetadataRowPerProperty(rawPropertiesTableData)
   }, [rawPropertiesTableData])
 
   // Invalidate when metadata table data actually changes so useQuery refetches
@@ -758,49 +678,36 @@ export type UseDestroyItemPropertyReturn = {
 }
 
 export const useDestroyItemProperty = (): UseDestroyItemPropertyReturn => {
-  const [currentInstance, setCurrentInstance] = useState<IItemProperty | null>(null)
-  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
-    isLoading: false,
-    error: null,
-  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!currentInstance) {
-      setDestroyState({ isLoading: false, error: null })
-      return
-    }
-    const service = currentInstance.getService()
-    const update = () => {
-      const snap = service.getSnapshot() as unknown as {
-        context: { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
-      }
-      const ctx = snap.context
-      setDestroyState({
-        isLoading: !!ctx._destroyInProgress,
-        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
-      })
-    }
-    update()
-    const sub = service.subscribe(update)
-    return () => sub.unsubscribe()
-  }, [currentInstance])
-
+  // Loading state is tracked here: the item property's service doesn't record destroy progress, and
+  // destroy() stops the service, often within a few microtasks.
   const destroy = useCallback(async (itemProperty: IItemProperty) => {
     if (!itemProperty) return
-    setCurrentInstance(itemProperty)
-    await itemProperty.destroy()
+    setError(null)
+    setIsLoading(true)
+    try {
+      await itemProperty.destroy()
+      // destroy() reports DB failures via the service context instead of throwing
+      const ctx = (itemProperty.getService().getSnapshot() as unknown as {
+        context: { _destroyError?: { message: string } | null }
+      }).context
+      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  const resetError = useCallback(() => {
-    if (currentInstance) {
-      currentInstance.getService().send({ type: 'clearDestroyError' })
-    }
-  }, [currentInstance])
+  const resetError = useCallback(() => setError(null), [])
 
   return {
     destroy,
-    isLoading: destroyState.isLoading,
-    error: destroyState.error,
+    isLoading,
+    error,
     resetError,
   }
 }

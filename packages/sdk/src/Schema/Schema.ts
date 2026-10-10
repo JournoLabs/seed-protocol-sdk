@@ -29,6 +29,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
@@ -40,7 +41,6 @@ type SchemaSnapshot = SnapshotFrom<typeof schemaMachine>
 // Only stores resources that cannot be serialized (subscriptions, timers, etc.)
 export const schemaInstanceState = new WeakMap<Schema, {
   liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance model updates
-  modelInstances?: Map<string, Model> // Model instances cache
 }>()
 
 // Cache client initialization state globally to avoid repeated checks
@@ -137,7 +137,6 @@ export class Schema {
     // Initialize instance state in WeakMap (only non-serializable resources)
     schemaInstanceState.set(this, {
       liveQuerySubscription: null,
-      modelInstances: new Map<string, Model>(),
     })
     
     // Set up liveQuery subscription for cross-instance model updates
@@ -381,143 +380,12 @@ export class Schema {
             logger(`Schema name unchanged: "${oldName}"`)
           }
         } else if (prop === 'models') {
-          // Models are read-only computed values from Model instances
-          // Cannot be set directly - models are managed via Model instances
-          throw new Error('Cannot set schema.models directly. Models are computed from Model instances.')
-          // DISABLED: Array assignment to schema.models is temporarily disabled
-          // 
-          // REASON: This approach had race condition issues where _saveDraftToDb() would run
-          // before Model instances were fully created, causing models to not be saved to the database.
-          // 
-          // NEW APPROACH: Use Model.create() instead:
-          //   const model = Model.create('ModelName', schemaInstance, {
-          //     properties: {...},
-          //     description: '...'
-          //   })
-          // 
-          // This ensures:
-          //   1. Model instance is created first with its _modelFileId
-          //   2. Model automatically registers with the schema
-          //   3. Schema saves to database with complete model data
-          //   4. No race conditions between model creation and schema persistence
-          //
-          // TODO: Re-enable this if we can fix the race condition, or if we need backward compatibility
-          
+          // Models are read-only, computed from Model instances. Array assignment was removed because
+          // the draft save could run before the new Model instances existed, losing them.
           throw new Error(
-            'Direct assignment to schema.models is disabled. ' +
-            'Please use Model.create() instead: ' +
-            'const model = Model.create("ModelName", schemaInstance, { properties: {...}, description: "..." })'
+            'Cannot set schema.models directly. Models are computed from Model instances; ' +
+              'use Model.create(modelName, schema, { properties }) to add one.',
           )
-          
-          /* DISABLED CODE - See comment above
-          // Convert array of Model instances or plain objects back to object format
-          let modelsObject: { [key: string]: any }
-          if (Array.isArray(value)) {
-            modelsObject = {}
-            const seenNames = new Set<string>()
-            
-            // Check for duplicate model names
-            for (const model of value) {
-              // Handle Model instances
-              if (model instanceof Model) {
-                const modelName = model.modelName!
-                if (seenNames.has(modelName)) {
-                  throw new Error(
-                    `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                  )
-                }
-                seenNames.add(modelName)
-                modelsObject[modelName] = {
-                  properties: model.properties || {},
-                }
-              } else if (model && typeof model === 'object' && 'name' in model) {
-                // Handle plain objects
-                const modelName = model.name as string
-                if (seenNames.has(modelName)) {
-                  throw new Error(
-                    `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                  )
-                }
-                seenNames.add(modelName)
-                const { name, ...modelData } = model
-                modelsObject[name] = modelData
-              }
-            }
-          } else {
-            modelsObject = value || {}
-            // Check for duplicates in object format too
-            const modelNames = Object.keys(modelsObject)
-            const seenNames = new Set<string>()
-            for (const modelName of modelNames) {
-              if (seenNames.has(modelName)) {
-                throw new Error(
-                  `Duplicate model name detected: "${modelName}". Each model must have a unique name.`
-                )
-              }
-              seenNames.add(modelName)
-            }
-          }
-          
-          const context = newInstance._getSnapshotContext()
-          
-          // Check if service is still running before sending events
-          let snapshot = newInstance._service.getSnapshot()
-          const wasServiceStopped = snapshot.status === 'stopped'
-          
-          if (wasServiceStopped) {
-            logger(`Service is stopped, will restart before adding models`)
-            newInstance._service.start()
-            snapshot = newInstance._service.getSnapshot()
-          }
-          
-          // Check current state after potential restart
-          const currentState = snapshot.value
-          // Check if state is a loading state object (XState v5 nested states)
-          const isServiceLoading = typeof currentState === 'object' && 'loading' in currentState
-          
-          // If service is loading, wait for it to finish before adding models
-          if (isServiceLoading || wasServiceStopped) {
-            logger(`Service is ${isServiceLoading ? 'loading' : 'was stopped'}, will add models after loading completes`)
-            
-            const loadingSubscription = newInstance._service.subscribe((snapshot) => {
-              if (snapshot.value === 'idle') {
-                loadingSubscription.unsubscribe()
-                logger(`Service finished loading, sending addModels event`)
-                newInstance._service.send({
-                  type: 'addModels',
-                  models: modelsObject,
-                })
-              } else if (snapshot.value === 'error') {
-                loadingSubscription.unsubscribe()
-                logger(`Service failed to load, cannot add models`)
-              }
-            })
-          } else {
-            // Service is ready, send addModels event immediately
-            // The state machine will handle all the complexity (validation, instance creation, ID collection, persistence)
-            logger(`Service is ready, sending addModels event`)
-            newInstance._service.send({
-              type: 'addModels',
-              models: modelsObject,
-            })
-          }
-          
-          // Mark schema as draft when models change
-          newInstance._service.send({
-            type: 'markAsDraft',
-            propertyKey: 'schema:models',
-          })
-          
-          // Save draft to database immediately so changes persist
-          newInstance._saveDraftToDb().catch((error) => {
-            logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-          })
-          
-          // Update client context so useSchema and useSchemas hooks reflect the change
-          newInstance._updateClientContext().catch(() => {
-            // Silently fail if not in browser environment
-          })
-          */
         } else if (prop === 'createdAt' || prop === 'updatedAt') {
           // Update metadata object
           const metadataContext = newInstance._getSnapshotContext()
@@ -570,7 +438,12 @@ export class Schema {
       () => schema,
     )
     this.pendingSchemaByName.set(schemaName, readyPromise)
-    readyPromise.finally(() => this.pendingSchemaByName.delete(schemaName))
+    // Clear on both outcomes without a .finally() chain: that derived promise would reject unhandled
+    // whenever readyPromise does, even when the caller handles the rejection.
+    const clearPending = () => {
+      this.pendingSchemaByName.delete(schemaName)
+    }
+    readyPromise.then(clearPending, clearPending)
     return readyPromise
   }
 
@@ -1255,13 +1128,21 @@ export class Schema {
     const { ModelProperty } = modelPropertyMod
     for (const propertyKey of context._editedProperties) {
       const [modelName, propertyName] = propertyKey.split(':')
-      const cacheKey = `${modelName}:${propertyName}`
       
       const ModelPropertyClass = ModelProperty as typeof ModelProperty & {
         instanceCache: Map<string, { instance: InstanceType<typeof ModelProperty>; refCount: number }>
       }
       
-      const cachedInstance = ModelPropertyClass.instanceCache.get(cacheKey)
+      // Model names are only unique per schema: pick this schema's instance, which may be keyed by id.
+      const thisSchemaName = this.schemaName
+      const cachedInstance = [...ModelPropertyClass.instanceCache.values()].find(({ instance }) => {
+        const ctx = instance.getService().getSnapshot().context
+        return (
+          ctx.modelName === modelName &&
+          ctx.name === propertyName &&
+          (!ctx._schemaName || ctx._schemaName === thisSchemaName)
+        )
+      })
       
       if (cachedInstance) {
         const modelProperty = cachedInstance.instance
@@ -1275,12 +1156,10 @@ export class Schema {
         // Clear isEdited flag in database
         try {
           if (db && modelName && propertyName) {
-            // Find model by name
-            const modelRecords = await db
-              .select({ id: modelsTable.id })
-              .from(modelsTable)
-              .where(eq(modelsTable.name, modelName))
-              .limit(1)
+            // Find this schema's model by name
+            const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+            const modelRecord = await resolveModelRecord(modelName, { schemaName: thisSchemaName }, db)
+            const modelRecords = modelRecord ? [modelRecord] : []
             
             if (modelRecords.length > 0) {
               // Find property by name and modelId
@@ -1836,6 +1715,43 @@ export class Schema {
   }
 
 
+  /**
+   * Force-evict the cached Schema instance(s) named `schemaName`, ignoring refCounts: stop their live
+   * query and service. Schema.destroy does the same for itself. For code that deletes a schema's rows
+   * without destroying it (test cleanup): a live Schema keeps re-creating its models from its live
+   * query while their rows are being deleted.
+   */
+  static evict(schemaName: string): void {
+    const instances = new Set<Schema>()
+    for (const { instance } of Schema.instanceCacheById.values()) instances.add(instance)
+    for (const { instance } of Schema.instanceCacheByName.values()) instances.add(instance)
+    for (const instance of instances) {
+      let context: SchemaMachineContext
+      try {
+        context = instance._getSnapshotContext()
+      } catch {
+        continue
+      }
+      if (context.schemaName !== schemaName) continue
+      clearDestroySubscriptions(instance, {
+        instanceState: schemaInstanceState,
+        onUnload: () => schemaInstanceState.delete(instance),
+      })
+      forceRemoveFromCaches(instance, {
+        getCacheKeys: () => [context.id, context.schemaName].filter((k): k is string => !!k),
+        caches: [
+          Schema.instanceCacheById as Map<string, unknown>,
+          Schema.instanceCacheByName as Map<string, unknown>,
+        ],
+      })
+      try {
+        instance._service.stop()
+      } catch {
+        // Service might already be stopped
+      }
+    }
+  }
+
   unload(): void {
     try {
       const context = this._getSnapshotContext()
@@ -1907,6 +1823,9 @@ export class Schema {
       const evictedModelNames = Model.evictForSchema(schemaName)
       const { ModelProperty } = await import('../ModelProperty/ModelProperty')
       ModelProperty.evictForModels(evictedModelNames, schemaName)
+      // Evicting stops new writes but not ones already running; let those land before deleting their rows
+      const { waitForInFlightWrites } = await import('../services/write/actors/writeToDatabase')
+      await waitForInFlightWrites()
     }
 
     await runDestroyLifecycle(this, {
@@ -2071,8 +1990,10 @@ export class Schema {
         }
       },
       createChildInstances: async (ids) => {
+        // One at a time: an eviction of this schema part way through stops the rest
+        const evictionEpoch = currentEvictionEpoch()
         for (const id of ids) {
-          await Model.createById(id)
+          await Model.createById(id, { evictionEpoch })
         }
       },
       queryInitialData: async (schemaId) => {

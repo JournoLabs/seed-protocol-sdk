@@ -15,6 +15,10 @@ const state = {
   automationActive: false,
   sent: [] as Array<{ to: string; data: `0x${string}` }>,
   revokedAt: null as number | null,
+  revokedMetadataUids: null as string[] | null,
+  revokedVersionUids: null as string[] | null,
+  versions: [] as { uid: string }[],
+  metadata: [] as { uid: string; schemaUid: string }[],
 }
 
 const sdkActual = await import('@seedprotocol/sdk')
@@ -22,11 +26,21 @@ mock.module('@seedprotocol/sdk', () => ({
   ...sdkActual,
   assertLocalDbChain: async () => {},
   getAttesterForSeed: async () => state.attester,
-  getVersionsForSeedUid: async () => [],
-  getMetadataAttestationUidsForSeedUid: async () => [],
+  getVersionsForSeedUid: async () => state.versions,
+  getMetadataAttestationUidsForSeedUid: async () => state.metadata,
   getGetAdditionalSyncAddresses: () => async () => [EXECUTOR],
-  updateSeedRevokedAt: async ({ revokedAt }: { revokedAt: number }) => {
+  updateSeedRevokedAt: async ({
+    revokedAt,
+    metadataUids,
+    versionUids,
+  }: {
+    revokedAt: number
+    metadataUids?: string[]
+    versionUids?: string[]
+  }) => {
     state.revokedAt = revokedAt
+    state.revokedMetadataUids = metadataUids ?? null
+    state.revokedVersionUids = versionUids ?? null
   },
 }))
 
@@ -70,11 +84,35 @@ afterEach(() => {
   state.automationActive = false
   state.sent = []
   state.revokedAt = null
+  state.revokedMetadataUids = null
+  state.revokedVersionUids = null
+  state.versions = []
+  state.metadata = []
 })
 
 const params = { seedLocalId: 'seed1', seedUid: SEED_UID, seedSchemaUid: SEED_SCHEMA }
 
 describe('revokeAttestations', () => {
+  test('marks the revoked property attestations along with the seed', async () => {
+    const titleUid = `0x${'31'.repeat(32)}`
+    const bodyUid = `0x${'32'.repeat(32)}`
+    state.metadata = [
+      { uid: titleUid, schemaUid: `0x${'41'.repeat(32)}` },
+      { uid: bodyUid, schemaUid: `0x${'42'.repeat(32)}` },
+    ]
+    await revokeAttestations(params)
+    expect(state.revokedAt).not.toBeNull()
+    expect(state.revokedMetadataUids?.slice().sort()).toEqual([titleUid, bodyUid].sort())
+  })
+
+  test('marks the revoked version attestations along with the seed', async () => {
+    const v1 = `0x${'51'.repeat(32)}`
+    const v2 = `0x${'52'.repeat(32)}`
+    state.versions = [{ uid: v1 }, { uid: v2 }]
+    await revokeAttestations(params)
+    expect(state.revokedVersionUids?.slice().sort()).toEqual([v1, v2].sort())
+  })
+
   test('the owner revokes through EAS, never the executor', async () => {
     await revokeAttestations(params)
     expect(state.sent).toHaveLength(1)

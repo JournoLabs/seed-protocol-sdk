@@ -4,16 +4,21 @@ import { ModelMachineContext } from '../modelMachine'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import debug from 'debug'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 
 const logger = debug('seedSdk:model:actors:createModelProperties')
 
 export const createModelProperties = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext> & { propertyDefinitions: { [name: string]: any } }
->(({ sendBack, input }) => {
+>(({ sendBack, input, self }) => {
+  // The model was stopped (unloaded, or evicted with its schema by Schema.destroy / test cleanup) while
+  // this ran: stopping it stops this actor too, but can't cancel the awaits below. A stopped model
+  // creates no properties (they'd be cached for a model that's gone, and write rows under it).
+  const stopped = () => isActorStopped(self)
   const _createProperties = async (): Promise<void> => {
     const { context, propertyDefinitions } = input
-    const { id, _dbId, modelName } = context
+    const { id, _dbId, modelName, schemaName } = context
 
     
     if (!id || !_dbId || !modelName) {
@@ -36,14 +41,31 @@ export const createModelProperties = fromCallback<
       return
     }
     const drizzleMod = await import('drizzle-orm')
-    const { eq } = drizzleMod
+    const { and, eq } = drizzleMod
     const db = BaseDb.getAppDb()
     
         for (const [propName, propData] of Object.entries(propertyDefinitions)) {
-          // Use provided ID or generate a random one
+          // The model's own write (writeModelToDb) normally stored this property already, under
+          // propData.id or an id it generated. Reuse that row so the instance gets the same id
+          // and doesn't write the property a second time.
+          const propertyRecord = db
+            ? (
+                await db
+                  .select()
+                  .from(propertiesTable)
+                  .where(
+                    propData.id
+                      ? eq(propertiesTable.schemaFileId, propData.id)
+                      : and(eq(propertiesTable.modelId, _dbId), eq(propertiesTable.name, propName)),
+                  )
+                  .limit(1)
+              )[0]
+            : undefined
+
+          // Otherwise use provided ID or generate a random one
           // IDs should be generated in the import process before creating properties
           const { generateId } = await import('../../../helpers/generateId')
-          const propertyFileId = propData.id || generateId()
+          const propertyFileId = propData.id || propertyRecord?.schemaFileId || generateId()
           
           logger(`Creating property "${propName}" with fileId "${propertyFileId}"`)
       
@@ -54,25 +76,16 @@ export const createModelProperties = fromCallback<
         try {
           const refModelName = propData.refModelName || propData.ref
           // First try to get refModelId from the property record in the database
-          const propertyRecords = await db
-            .select()
-            .from(propertiesTable)
-            .where(eq(propertiesTable.schemaFileId, propertyFileId))
-            .limit(1)
-          
-          if (propertyRecords.length > 0 && propertyRecords[0].refModelId) {
-            refModelId = propertyRecords[0].refModelId
+          if (propertyRecord?.refModelId) {
+            refModelId = propertyRecord.refModelId
             logger(`Found refModelId ${refModelId} from database for property "${propName}"`)
           } else if (refModelName) {
-            // Fallback: query models table directly by name
-            const refModelRecords = await db
-              .select()
-              .from(modelsTable)
-              .where(eq(modelsTable.name, refModelName))
-              .limit(1)
+            // Fallback: resolve the ref by name within this model's schema
+            const { resolveModelRecord } = await import('../../../db/read/resolveModelRecord')
+            const refModelRecord = await resolveModelRecord(refModelName, { schemaName }, db)
             
-            if (refModelRecords.length > 0 && refModelRecords[0].id) {
-              refModelId = refModelRecords[0].id
+            if (refModelRecord?.id) {
+              refModelId = refModelRecord.id
               logger(`Resolved refModelId ${refModelId} from model name "${refModelName}" for property "${propName}"`)
             }
           }
@@ -82,6 +95,11 @@ export const createModelProperties = fromCallback<
         }
       }
       
+      if (stopped()) {
+        logger(`Model "${modelName}" was stopped while creating its properties; not creating the rest`)
+        return
+      }
+
       // Create ModelProperty instance
       // This will load from DB if it exists, or create new instance
       // The property should already be in DB from writeModelToDb
@@ -96,12 +114,14 @@ export const createModelProperties = fromCallback<
         refModelName: propData.refModelName,
         refModelId,
         refValueType: propData.refValueType,
-        storageType: propData.storageType,
-        localStorageDir: propData.localStorageDir,
-        filenameSuffix: propData.filenameSuffix,
+        // Definitions built from DB rows may lack storage settings; the row has them.
+        storageType: propData.storageType ?? propertyRecord?.storageType ?? undefined,
+        localStorageDir: propData.localStorageDir ?? propertyRecord?.localStorageDir ?? undefined,
+        filenameSuffix: propData.filenameSuffix ?? propertyRecord?.filenameSuffix ?? undefined,
         required: propData.required,
         _propertyFileId: propertyFileId, // Store schemaFileId for getById() lookups
-      } as any) // Use 'as any' because _propertyFileId is not in TProperty type
+        _dbId: propertyRecord?.schemaFileId === propertyFileId ? propertyRecord.id : undefined, // Already persisted: skip the write
+      } as any, { schemaName }) // Use 'as any' because _propertyFileId is not in TProperty type
     }
     
     logger(`Successfully created all properties for model "${modelName}"`)

@@ -3,7 +3,6 @@ import { SchemaFileFormat } from '@/types/import'
 import { loadOrCreateSchema } from './actors/loadOrCreateSchema'
 import { validateSchema } from './actors/validateSchema'
 import { ValidationError } from '@/Schema/validation'
-import { addModelsMachine } from './addModelsMachine'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import { checkExistingSchema } from './actors/checkExistingSchema'
 import { writeSchemaToDb } from './actors/writeSchemaToDb'
@@ -56,9 +55,6 @@ export type SchemaMachineContext = {
   _loadedAt?: number // Timestamp when data was loaded from DB
   _dbVersion?: number // DB version at load time
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
-  // Model addition queue and tracking
-  _pendingModelAdditions?: Array<{ models: { [modelName: string]: any }; timestamp: number }>
-  _modelAdditionErrors?: Array<{ error: Error; timestamp: number }>
   writeProcess?: ActorRefFrom<typeof writeProcessMachine> | null
   // Store model IDs from liveQuery for reactive updates
   _liveQueryModelIds?: string[]
@@ -68,8 +64,7 @@ export type SchemaMachineContext = {
   _loadingStage?: string  // Current stage for debugging
   _loadingError?: { stage: string; error: Error }  // Stage-specific errors
   _schemaRecord?: any  // Schema database record
-  // Destroy lifecycle (for destroy hooks)
-  _destroyInProgress?: boolean
+  // Destroy failure from the last destroy() (read by destroy hooks)
   _destroyError?: { message: string; name?: string } | null
 }
 
@@ -88,7 +83,6 @@ export const schemaMachine = setup({
       | { type: 'validationSuccess'; errors: ValidationError[] }
       | { type: 'validationError'; errors: ValidationError[] }
       | { type: 'reloadFromDb' }
-      | { type: 'addModels'; models: { [modelName: string]: any } }
       | { type: 'requestWrite'; data: any }
       // Staged loading events
       | { type: 'schemaFound'; schema: SchemaFileFormat; schemaRecord: any; modelIds?: string[]; loadedAt?: number; dbVersion?: number; dbUpdatedAt?: number }
@@ -104,14 +98,11 @@ export const schemaMachine = setup({
       | { type: 'verificationFailed'; stage: string; error: Error }
       | { type: 'writeError'; error: Error }
       | { type: 'destroyStarted' }
-      | { type: 'destroyDone' }
-      | { type: 'destroyError'; error: unknown }
-      | { type: 'clearDestroyError' },
+      | { type: 'destroyError'; error: unknown },
   },
   actors: {
     loadOrCreateSchema,
     validateSchema,
-    addModelsMachine,
     writeProcessMachine,
     // Staged loading actors
     checkExistingSchema,
@@ -129,9 +120,6 @@ export const schemaMachine = setup({
   guards: {
     isSchemaValid: ({ context }) => {
       return !context._validationErrors || context._validationErrors.length === 0
-    },
-    hasValidationErrors: ({ context }) => {
-      return !!context._validationErrors && context._validationErrors.length > 0
     },
   },
 }).createMachine({
@@ -226,22 +214,15 @@ export const schemaMachine = setup({
       }),
     },
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           event.error instanceof Error
             ? { message: event.error.message, name: event.error.name }
             : { message: String(event.error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
   },
   states: {
@@ -631,9 +612,6 @@ export const schemaMachine = setup({
         },
       }),
       on: {
-        addModels: {
-          target: 'addingModels',
-        },
         validateSchema: {
           target: 'validating',
         },
@@ -651,122 +629,27 @@ export const schemaMachine = setup({
           },
         },
       },
-      always: {
-        guard: 'hasValidationErrors',
-        target: 'validating',
-      },
-    },
-    addingModels: {
-      entry: assign({
-        // Move first pending item to current if not already set
-        _pendingModelAdditions: ({ context, event }) => {
-          const pending = context._pendingModelAdditions || []
-          // If event has models, it's a new request - add to queue if we're already processing
-          if ((event as any).models) {
-            return [
-              ...pending,
-              {
-                models: (event as any).models,
-                timestamp: Date.now(),
-              },
-            ]
-          }
-          return pending
-        },
-      }),
-      invoke: {
-        src: 'addModelsMachine',
-        input: ({ context }) => {
-          // Get models from first item in pending queue, or from context if queue is empty
-          const pending = context._pendingModelAdditions || []
-          const models = pending.length > 0 ? pending[0].models : {}
-          return {
-            schemaContext: context,
-            models,
-            existingModels: context.models || {},
-          }
-        },
-        onDone: {
-          actions: [
-            assign({
-              models: ({ context, event }) => {
-                const addedModels = (event.output as any)?.addedModels || {}
-                return {
-                  ...(context.models || {}),
-                  ...addedModels,
-                }
-              },
-              _pendingModelAdditions: ({ context }) => {
-                // Remove first item from queue (the one we just processed)
-                const pending = context._pendingModelAdditions || []
-                return pending.length > 1 ? pending.slice(1) : undefined
-              },
-            }),
-            // Trigger validation after models are added
-            ({ self }) => {
-              self.send({ type: 'validateSchema' })
-            },
-          ],
-        },
-        onError: {
-          actions: assign({
-            _modelAdditionErrors: ({ context, event }) => {
-              const existing = context._modelAdditionErrors || []
-              return [
-                ...existing,
-                {
-                  error: event.error instanceof Error ? event.error : new Error(String(event.error)),
-                  timestamp: Date.now(),
-                },
-              ]
-            },
-            _pendingModelAdditions: ({ context }) => {
-              // Remove first item from queue even on error, so we can process next
-              const pending = context._pendingModelAdditions || []
-              return pending.length > 1 ? pending.slice(1) : undefined
-            },
-          }),
-        },
-      },
-      on: {
-        // Queue additional requests while processing
-        addModels: {
-          actions: assign({
-            _pendingModelAdditions: ({ context, event }) => {
-              const existing = context._pendingModelAdditions || []
-              return [
-                ...existing,
-                {
-                  models: (event as any).models,
-                  timestamp: Date.now(),
-                },
-              ]
-            },
-          }),
-        },
-      },
-      always: [
-        {
-          // If there are pending additions after processing, process next one
-          guard: ({ context }) => {
-            const pending = context._pendingModelAdditions || []
-            return pending.length > 0
-          },
-          target: 'addingModels',
-        },
-        {
-          // No more pending, return to idle
-          target: 'idle',
-        },
-      ],
+      // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
+      // (updateContext) or on request (validateSchema). Re-entering while errors exist would loop
+      // forever on a schema that is still invalid.
     },
     validating: {
       on: {
+        // These state-level handlers take precedence over the root ones, so they must store the result
+        // themselves.
         validationSuccess: {
           target: 'idle',
+          actions: assign(({ context }) => ({
+            ...context,
+            _validationErrors: [],
+          })),
         },
         validationError: {
           target: 'idle',
+          actions: assign(({ context, event }) => ({
+            ...context,
+            _validationErrors: event.errors,
+          })),
         },
       },
       invoke: {

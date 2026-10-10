@@ -1,6 +1,6 @@
 /* eslint-disable */
 import * as types from './graphql';
-import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
+import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
 
 /**
  * Map of all GraphQL operations in the project.
@@ -14,11 +14,12 @@ import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/
  * Learn more about it here: https://the-guild.dev/graphql/codegen/plugins/presets/preset-client#reducing-bundle-size
  */
 type Documents = {
-    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": typeof types.AttestationFieldsFragmentDoc,
+    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": typeof types.AttestationFieldsFragmentDoc,
     "\n  fragment schemaFields on Schema {\n    id\n    resolver\n    revocable\n    schema\n    index\n    schemaNames {\n      name\n    }\n    time\n    txid\n    creator\n  }\n": typeof types.SchemaFieldsFragmentDoc,
     "\n  query GetSchemas($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": typeof types.GetSchemasDocument,
     "\n  query GetSchemaByName($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": typeof types.GetSchemaByNameDocument,
     "\n  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n": typeof types.GetSeedsDocument,
+    "\n  query GetSeedsLean($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n": typeof types.GetSeedsLeanDocument,
     "\n  query GetSeedIds($where: AttestationWhereInput!) {\n    itemSeedIds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {\n      id\n    }\n  }\n": typeof types.GetSeedIdsDocument,
     "\n  query GetStorageTransactionId($where: AttestationWhereInput!) {\n    storageTransactionId: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      id\n      decodedDataJson\n    }\n  }\n": typeof types.GetStorageTransactionIdDocument,
     "\n  query GetVersions($where: AttestationWhereInput!) {\n    itemVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": typeof types.GetVersionsDocument,
@@ -27,13 +28,15 @@ type Documents = {
     "\n  query GetFilesMetadata($where: AttestationWhereInput!) {\n    filesMetadata: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": typeof types.GetFilesMetadataDocument,
     "\n  query GetImageSeeds($where: AttestationWhereInput!) {\n    imageSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      schemaId\n      txid\n      timeCreated\n      time\n      isOffchain\n    }\n  }\n": typeof types.GetImageSeedsDocument,
     "\n  query GetImageVersions($where: AttestationWhereInput!) {\n    imageVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": typeof types.GetImageVersionsDocument,
+    "\n  query GetAttestationChanges($where: AttestationWhereInput!) {\n    changes: attestations(where: $where) {\n      id\n      refUID\n      timeCreated\n      revocationTime\n    }\n  }\n": typeof types.GetAttestationChangesDocument,
 };
 const documents: Documents = {
-    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": types.AttestationFieldsFragmentDoc,
+    "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n": types.AttestationFieldsFragmentDoc,
     "\n  fragment schemaFields on Schema {\n    id\n    resolver\n    revocable\n    schema\n    index\n    schemaNames {\n      name\n    }\n    time\n    txid\n    creator\n  }\n": types.SchemaFieldsFragmentDoc,
     "\n  query GetSchemas($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": types.GetSchemasDocument,
     "\n  query GetSchemaByName($where: SchemaWhereInput!) {\n    schemas: schemata(where: $where) {\n      id\n      schema\n      schemaNames {\n        name\n      }\n    }\n  }\n": types.GetSchemaByNameDocument,
     "\n  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n": types.GetSeedsDocument,
+    "\n  query GetSeedsLean($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n": types.GetSeedsLeanDocument,
     "\n  query GetSeedIds($where: AttestationWhereInput!) {\n    itemSeedIds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {\n      id\n    }\n  }\n": types.GetSeedIdsDocument,
     "\n  query GetStorageTransactionId($where: AttestationWhereInput!) {\n    storageTransactionId: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      id\n      decodedDataJson\n    }\n  }\n": types.GetStorageTransactionIdDocument,
     "\n  query GetVersions($where: AttestationWhereInput!) {\n    itemVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": types.GetVersionsDocument,
@@ -42,6 +45,7 @@ const documents: Documents = {
     "\n  query GetFilesMetadata($where: AttestationWhereInput!) {\n    filesMetadata: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": types.GetFilesMetadataDocument,
     "\n  query GetImageSeeds($where: AttestationWhereInput!) {\n    imageSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      schemaId\n      txid\n      timeCreated\n      time\n      isOffchain\n    }\n  }\n": types.GetImageSeedsDocument,
     "\n  query GetImageVersions($where: AttestationWhereInput!) {\n    imageVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n": types.GetImageVersionsDocument,
+    "\n  query GetAttestationChanges($where: AttestationWhereInput!) {\n    changes: attestations(where: $where) {\n      id\n      refUID\n      timeCreated\n      revocationTime\n    }\n  }\n": types.GetAttestationChangesDocument,
 };
 
 /**
@@ -61,7 +65,7 @@ export function graphql(source: string): unknown;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"): (typeof documents)["\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    schema {\n      schemaNames {\n        name\n      }\n    }\n    refUID\n    revoked\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"];
+export function graphql(source: "\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"): (typeof documents)["\n  fragment attestationFields on Attestation {\n    id\n    decodedDataJson\n    attester\n    refUID\n    revoked\n    revocationTime\n    schemaId\n    txid\n    timeCreated\n    time\n    isOffchain\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -78,6 +82,10 @@ export function graphql(source: "\n  query GetSchemaByName($where: SchemaWhereIn
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n"): (typeof documents)["\n  query GetSeeds($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      schema {\n        schemaNames {\n          name\n        }\n      }\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetSeedsLean($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n"): (typeof documents)["\n  query GetSeedsLean($where: AttestationWhereInput!, $take: Int, $skip: Int) {\n    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {\n      id\n      decodedDataJson\n      attester\n      refUID\n      revoked\n      revocationTime\n      schemaId\n      timeCreated\n      isOffchain\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -110,6 +118,10 @@ export function graphql(source: "\n  query GetImageSeeds($where: AttestationWher
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query GetImageVersions($where: AttestationWhereInput!) {\n    imageVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n"): (typeof documents)["\n  query GetImageVersions($where: AttestationWhereInput!) {\n    imageVersions: attestations(\n      where: $where\n      orderBy: [{ timeCreated: desc }]\n    ) {\n      ...attestationFields\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query GetAttestationChanges($where: AttestationWhereInput!) {\n    changes: attestations(where: $where) {\n      id\n      refUID\n      timeCreated\n      revocationTime\n    }\n  }\n"): (typeof documents)["\n  query GetAttestationChanges($where: AttestationWhereInput!) {\n    changes: attestations(where: $where) {\n      id\n      refUID\n      timeCreated\n      revocationTime\n    }\n  }\n"];
 
 export function graphql(source: string) {
   return (documents as any)[source] ?? {};

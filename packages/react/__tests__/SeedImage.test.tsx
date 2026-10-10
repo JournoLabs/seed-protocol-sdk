@@ -5,17 +5,6 @@ import { SeedImage, SeedProvider, createSeedQueryClient } from '@seedprotocol/re
 import type { QueryClient } from '@tanstack/react-query'
 import {
   client,
-  BaseDb,
-  schemas,
-  metadata,
-  seeds,
-  versions,
-  propertyUids,
-  modelUids,
-  models as modelsTable,
-  modelSchemas,
-  properties,
-  publishProcesses,
   importJsonSchema,
   Schema,
   Model,
@@ -25,8 +14,11 @@ import {
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq, inArray } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
+import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { waitForItemPersisted } from './test-utils/persistence'
+import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 const testSchemaWithImage: SchemaFileFormat = {
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -56,141 +48,7 @@ const testSchemaWithImage: SchemaFileFormat = {
   migrations: [],
 }
 
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-async function waitForItemPropertyIdle(
-  property: ItemProperty<any>,
-  timeout: number = 5000
-): Promise<void> {
-  const service = property.getService()
-  try {
-    await xstateWaitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
-
 const TEST_SCHEMA_SEED_IMAGE_NAME = 'Test Schema Seed Image'
-
-/** Remove test schema + rows in FK order (delete from schemas alone fails with SQLITE_CONSTRAINT_FOREIGNKEY). */
-async function deleteTestSchemaSeedImageRows(): Promise<void> {
-  const db = BaseDb.getAppDb()
-  if (!db) return
-
-  const schemaRow = await db
-    .select()
-    .from(schemas)
-    .where(eq(schemas.name, TEST_SCHEMA_SEED_IMAGE_NAME))
-    .limit(1)
-  if (!schemaRow.length || schemaRow[0].id == null) return
-
-  const schemaId = schemaRow[0].id
-
-  const links = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(eq(modelSchemas.schemaId, schemaId))
-
-  const mids = links.map((l) => l.modelId).filter((id): id is number => id != null)
-  if (mids.length === 0) {
-    await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-    await db.delete(schemas).where(eq(schemas.id, schemaId))
-    return
-  }
-
-  const modelRows = await db
-    .select({ name: modelsTable.name })
-    .from(modelsTable)
-    .where(inArray(modelsTable.id, mids))
-  const modelNames = modelRows.map((m) => m.name).filter(Boolean) as string[]
-
-  const seedRows = await db
-    .select({ localId: seeds.localId })
-    .from(seeds)
-    .where(inArray(seeds.type, modelNames))
-  const seedLocalIds = seedRows.map((s) => s.localId).filter(Boolean) as string[]
-
-  if (seedLocalIds.length) {
-    await db.delete(publishProcesses).where(inArray(publishProcesses.seedLocalId, seedLocalIds))
-    await db.delete(metadata).where(inArray(metadata.seedLocalId, seedLocalIds))
-    await db.delete(versions).where(inArray(versions.seedLocalId, seedLocalIds))
-    await db.delete(seeds).where(inArray(seeds.localId, seedLocalIds))
-  }
-
-  const propRows = await db
-    .select({ id: properties.id })
-    .from(properties)
-    .where(inArray(properties.modelId, mids))
-  const pids = propRows.map((p) => p.id).filter((id): id is number => id != null)
-
-  if (pids.length) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, pids))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, pids))
-  }
-
-  await db.delete(modelUids).where(inArray(modelUids.modelId, mids))
-  await db.update(properties).set({ refModelId: null }).where(inArray(properties.modelId, mids))
-  await db.delete(properties).where(inArray(properties.modelId, mids))
-  await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaId))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, mids))
-  await db.delete(schemas).where(eq(schemas.id, schemaId))
-}
-
-async function deleteSchemaFileIfExists(
-  schemaName: string,
-  version: number,
-  schemaFileId: string
-): Promise<void> {
-  try {
-    const path = BaseFileManager.getPathModule()
-    const workingDir = BaseFileManager.getWorkingDir()
-    const sanitizedName = schemaName
-      .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-      .replace(/\s+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .replace(/_+/g, '_')
-    const filename = `${schemaFileId}_${sanitizedName}_v${version}.json`
-    const filePath = path.join(workingDir, filename)
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (exists) {
-      const fs = await BaseFileManager.getFs()
-      await fs.promises.unlink(filePath)
-    }
-  } catch {
-    // Ignore
-  }
-}
 
 const queryClientRef: React.MutableRefObject<QueryClient | null> = { current: null }
 const SeedProviderWrapper = ({ children }: { children: React.ReactNode }) => {
@@ -222,17 +80,12 @@ describe('SeedImage integration tests', () => {
 
     await waitFor(
       () => client.isInitialized(),
-      { timeout: 30000 }
+      { timeout: SETUP_HOOK_TIMEOUT_MS }
     )
-  }, 30000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
-    await deleteTestSchemaSeedImageRows()
-    await deleteSchemaFileIfExists(
-      TEST_SCHEMA_SEED_IMAGE_NAME,
-      testSchemaWithImage.version,
-      testSchemaWithImage.id
-    )
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
   })
 
@@ -242,15 +95,7 @@ describe('SeedImage integration tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    await deleteTestSchemaSeedImageRows()
-
-    if (testSchemaWithImage.id) {
-      await deleteSchemaFileIfExists(
-        TEST_SCHEMA_SEED_IMAGE_NAME,
-        testSchemaWithImage.version,
-        testSchemaWithImage.id
-      )
-    }
+    await cleanupTestSchemaData({ items: true })
 
     try {
       await importJsonSchema(
@@ -264,14 +109,17 @@ describe('SeedImage integration tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some((s) => s.schema.metadata?.name === TEST_SCHEMA_SEED_IMAGE_NAME)
+        expect(allSchemas.some((s) => s.schema.metadata?.name === TEST_SCHEMA_SEED_IMAGE_NAME)).toBe(true)
       },
       { timeout: 15000 }
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, { waitForReady: false })
+    // Pass the schema's modelFileId so this resolves the imported Post instead of creating a
+    // runtime "Post 1", "Post 2", ... on every test.
+    const model = Model.create('Post', TEST_SCHEMA_SEED_IMAGE_NAME, {
+      modelFileId: testSchemaWithImage.models.Post.id,
+      waitForReady: false,
+    })
     await xstateWaitFor(
       model.getService(),
       (snapshot) => snapshot.value === 'idle',
@@ -280,11 +128,12 @@ describe('SeedImage integration tests', () => {
 
     testItem = await Item.create({
       modelName: 'Post',
+      schemaName: TEST_SCHEMA_SEED_IMAGE_NAME,
       title: 'Test Post with Image',
     })
     await waitForItemIdle(testItem)
 
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await waitForItemPersisted(testItem!, { title: 'Test Post with Image' })
   })
 
   afterEach(async () => {
@@ -360,7 +209,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return prop?.refResolvedValue === TEST_IMAGE_FILENAME
+        expect(prop?.refResolvedValue).toBe(TEST_IMAGE_FILENAME)
       },
       { timeout: 20000 }
     )
@@ -381,7 +230,7 @@ describe('SeedImage integration tests', () => {
     await waitFor(
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
-        return img !== null && (img as HTMLImageElement).src?.length > 0
+        expect(img !== null && (img as HTMLImageElement).src?.length > 0).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -417,7 +266,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return !!prop?.refResolvedValue
+        expect(prop?.refResolvedValue).toBeTruthy()
       },
       { timeout: 20000 }
     )
@@ -450,7 +299,7 @@ describe('SeedImage integration tests', () => {
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
         const src = (img as HTMLImageElement)?.src
-        return img !== null && src?.length > 0 && src.startsWith('blob:')
+        expect(img !== null && src?.length > 0 && src.startsWith('blob:')).toBe(true)
       },
       { timeout: 15000 }
     )
@@ -486,7 +335,7 @@ describe('SeedImage integration tests', () => {
         const prop = testItem!.properties.find(
           (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
         ) as ItemProperty<any> | undefined
-        return !!prop?.refResolvedValue
+        expect(prop?.refResolvedValue).toBeTruthy()
       },
       { timeout: 20000 }
     )
@@ -520,7 +369,7 @@ describe('SeedImage integration tests', () => {
       () => {
         const img = scoped.queryByRole('img', { name: /feature image/i })
         const src = (img as HTMLImageElement)?.src
-        return img !== null && src?.length > 0 && src.startsWith('blob:')
+        expect(img !== null && src?.length > 0 && src.startsWith('blob:')).toBe(true)
       },
       { timeout: 15000 }
     )

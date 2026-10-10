@@ -1,5 +1,5 @@
 import { graphql } from './graphql/gql/index.js'
-import { TypedDocumentNode } from '@graphql-typed-document-node/core'
+import type { TypedDocumentNode } from '@graphql-typed-document-node/core'
 import type { Attestation, Schema as EASSchema } from './graphql/gql/graphql.js'
 
 export const GET_SCHEMAS = graphql(/* GraphQL */ `
@@ -37,6 +37,27 @@ export const GET_SEEDS = graphql(/* GraphQL */ `
           name
         }
       }
+      refUID
+      revoked
+      revocationTime
+      schemaId
+      timeCreated
+      isOffchain
+    }
+  }
+`) as TypedDocumentNode<{ itemSeeds: Attestation[] }>
+
+/**
+ * GET_SEEDS without `schema { schemaNames }`, which makes the request several times slower on
+ * easscan. Callers that need seed schema names attach them from `schemaId`
+ * (see getSchemaNamesBySchemaUids).
+ */
+export const GET_SEEDS_LEAN = graphql(/* GraphQL */ `
+  query GetSeedsLean($where: AttestationWhereInput!, $take: Int, $skip: Int) {
+    itemSeeds: attestations(where: $where, orderBy: [{ timeCreated: desc }], take: $take, skip: $skip) {
+      id
+      decodedDataJson
+      attester
       refUID
       revoked
       revocationTime
@@ -143,3 +164,17 @@ export const GET_IMAGE_VERSIONS = graphql(/* GraphQL */ `
     }
   }
 `) as TypedDocumentNode<{ imageVersions: Attestation[] }>
+
+/** Just enough of each attestation to tell what changed: see getAttestationChangesSince. */
+export const GET_ATTESTATION_CHANGES = graphql(/* GraphQL */ `
+  query GetAttestationChanges($where: AttestationWhereInput!) {
+    changes: attestations(where: $where) {
+      id
+      refUID
+      timeCreated
+      revocationTime
+    }
+  }
+`) as TypedDocumentNode<{
+  changes: Array<Pick<Attestation, 'id' | 'refUID' | 'timeCreated' | 'revocationTime'>>
+}>

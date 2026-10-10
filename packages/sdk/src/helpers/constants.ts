@@ -158,3 +158,13 @@ export function isInternalSchema(schemaName: string, schemaId?: string): boolean
   return schemaName === SEED_PROTOCOL_SCHEMA_NAME || 
          (schemaId !== undefined && INTERNAL_SCHEMA_IDS.includes(schemaId as any))
 }
+
+/**
+ * Model ids (schemaFileId) of the internal Seed Protocol storage models. Storage seeds are always
+ * these models, even if a user schema also defines a model named Image/File/Html.
+ */
+export const INTERNAL_STORAGE_MODEL_FILE_IDS = {
+  image: 'SEEDPROTOCOL_IMAGE',
+  file: 'SEEDPROTOCOL_FILE',
+  html: 'SEEDPROTOCOL_HTML',
+} as const

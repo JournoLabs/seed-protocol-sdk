@@ -173,6 +173,96 @@ describe('OPFSFilesManager', () => {
     expect(container.querySelector('.seed-fm-toasts')).toBeNull()
   })
 
+  describe('deleting a folder', () => {
+    const dirExists = async (path: string) => {
+      try {
+        let dir = await navigator.storage.getDirectory()
+        for (const part of path.split('/')) dir = await dir.getDirectoryHandle(part)
+        return true
+      } catch {
+        return false
+      }
+    }
+    const imagesFiles = () => [
+      `${root}/files/images/ridge.png`,
+      `${root}/files/images/480/ridge.webp`,
+      `${root}/files/images/1024/ridge.webp`,
+      `${root}/files/images/${TX}`,
+    ]
+
+    it('confirms, then removes the folder, its subfolders and resized copies', async () => {
+      const onAfterDelete = vi.fn()
+      render(<OPFSFilesManager rootPath={root} onAfterDelete={onAfterDelete} />)
+      await openFolder('files')
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete folder images' }))
+
+      const dialog = await screen.findByRole('dialog', { name: 'Delete the “images” folder?' })
+      expect(dialog.textContent).toContain('can’t be undone')
+      expect(dialog.textContent).toContain('including 2 resized copies')
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete folder (4 files)' }))
+
+      expect(await screen.findByText('Deleted the images folder (4 files)')).toBeTruthy()
+      expect([...onAfterDelete.mock.calls[0][0]].sort()).toEqual(imagesFiles().sort())
+      expect(await dirExists(`${root}/files/images`)).toBe(false)
+      expect(await existsOPFS(`${root}/files/json/abc.json`)).toBe(true)
+      expect(screen.queryByRole('button', { name: /^images\b/ })).toBeNull()
+    })
+
+    it('saves the folder as a .zip without closing the dialog', async () => {
+      const onDownload = vi.fn()
+      render(<OPFSFilesManager rootPath={root} onDownload={onDownload} />)
+      await openFolder('files')
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete folder images' }))
+      const dialog = await screen.findByRole('dialog')
+      fireEvent.click(within(dialog).getByRole('button', { name: /Download \.zip/ }))
+
+      await waitFor(() => expect(onDownload).toHaveBeenCalledTimes(1))
+      const [file, blob] = onDownload.mock.calls[0] as [{ name: string; type: string }, Blob]
+      expect(file.name).toMatch(/^images-\d{4}-\d{2}-\d{2}\.zip$/)
+      expect(file.type).toBe('application/zip')
+      // Zip headers store names uncompressed; paths start at the folder.
+      const text = new TextDecoder().decode(await blob.arrayBuffer())
+      expect(text).toContain('images/480/ridge.webp')
+      expect(text).not.toContain('files/images')
+
+      expect(await within(dialog).findByRole('button', { name: /Download again/ })).toBeTruthy()
+      expect(await dirExists(`${root}/files/images`)).toBe(true)
+    })
+
+    it('keeps the folder when onBeforeDelete keeps a file', async () => {
+      const onNotify = vi.fn()
+      const keep = `${root}/files/images/${TX}`
+      render(<OPFSFilesManager rootPath={root} onNotify={onNotify} onBeforeDelete={(f) => f.path !== keep} />)
+      await openFolder('files')
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete folder images' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete folder (4 files)' }))
+
+      await waitFor(() => expect(onNotify).toHaveBeenCalledTimes(1))
+      expect(onNotify.mock.calls[0][2]).toMatchObject({
+        kind: 'delete',
+        skipped: [keep],
+        folder: `${root}/files/images`,
+        folderRemoved: false,
+      })
+      expect(await existsOPFS(keep)).toBe(true)
+      expect(await dirExists(`${root}/files/images/480`)).toBe(false)
+    })
+
+    it('passes every file in the folder to confirmDelete', async () => {
+      const confirmDelete = vi.fn(async () => false)
+      render(<OPFSFilesManager rootPath={root} confirmDelete={confirmDelete} />)
+      await openFolder('files')
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete folder images' }))
+      await waitFor(() => expect(confirmDelete).toHaveBeenCalledTimes(1))
+      expect((confirmDelete.mock.calls[0] as unknown as [{ path: string }[]])[0].map((f) => f.path).sort()).toEqual(
+        imagesFiles().sort(),
+      )
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(await dirExists(`${root}/files/images`)).toBe(true)
+    })
+  })
+
   it('relabels delete with deleteAction and drops the danger styling', async () => {
     const deleteAction = vi.fn((files: { path: string }[]) => ({
       label: `Remove ${files.length} ${files.length === 1 ? 'file' : 'files'} from this device`,

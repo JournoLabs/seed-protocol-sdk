@@ -47,13 +47,16 @@ export * from './property/index'
 export const getPropertySchema = async (
   modelName: string,
   propertyName: string,
+  /** Which model is meant when several schemas define one named modelName (Model.id and/or schema). */
+  scope: { modelFileId?: string | null; schemaName?: string | null } = {},
 ): Promise<(Static<typeof TProperty> & { _propertyFileId?: string }) | undefined> => {
   // Dynamic import to break circular dependency
   const modelMod = await import('../Model/Model')
   const { Model } = modelMod
   const schemaMod = await import('../Schema/Schema')
   const { Schema } = schemaMod
-  const model = await Model.getByNameAsync(modelName)
+  const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+  const model = await Model.resolveAsync(modelName, scope)
 
   if (!model) {
     return undefined
@@ -80,7 +83,8 @@ export const getPropertySchema = async (
   }
   
   // Fallback to modelPropertiesToObject if Schema context doesn't have the data
-  if (Object.keys(schema).length === 0) {
+  const usingModelProperties = Object.keys(schema).length === 0
+  if (usingModelProperties) {
     const properties = model.properties || []
     if (properties.length === 0) {
       return undefined
@@ -118,7 +122,19 @@ export const getPropertySchema = async (
     return undefined
   }
   
-  const resolvedPropertyName = resolvePropertyName(propertyName)
+  let resolvedPropertyName = resolvePropertyName(propertyName)
+  if (!resolvedPropertyName && !usingModelProperties) {
+    // A property added at runtime (ModelProperty.create) to a schema-file model isn't in the
+    // Schema context. The schema file's definitions still win.
+    const runtimeProperties = model.properties || []
+    if (runtimeProperties.length > 0) {
+      schema = { ...modelPropertiesToObject(runtimeProperties), ...schema }
+      resolvedPropertyName = resolvePropertyName(propertyName)
+    }
+    // model.properties can lag behind the properties table (in Node it never follows rows added
+    // after the model found its own), so also look for a row with this exact name below.
+    if (!resolvedPropertyName) resolvedPropertyName = propertyName
+  }
   if (!resolvedPropertyName) {
     return undefined
   }
@@ -127,12 +143,13 @@ export const getPropertySchema = async (
   try {
     const db = BaseDb.getAppDb()
     if (db) {
-      // Find the model in the database
-      const modelRecords = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.name, modelName))
-        .limit(1)
+      // Find the model in the database (the same row as `model`, not just any model with this name)
+      const resolvedModelRecord = await resolveModelRecord(
+        modelName,
+        { modelFileId: model.id ?? scope.modelFileId, schemaName: model.schemaName ?? scope.schemaName },
+        db,
+      )
+      const modelRecords = resolvedModelRecord ? [resolvedModelRecord] : []
       
       if (modelRecords.length > 0) {
         const modelRecord = modelRecords[0]
@@ -177,14 +194,14 @@ export const getPropertySchema = async (
               
               // If it's a relation, try to match by refModelId
               if (schemaPropertyDef.ref) {
-                const refModelRecords = await db
-                  .select()
-                  .from(modelsTable)
-                  .where(eq(modelsTable.name, schemaPropertyDef.ref))
-                  .limit(1)
+                const refModelRecord = await resolveModelRecord(
+                  schemaPropertyDef.ref,
+                  { schemaName: model.schemaName },
+                  db,
+                )
                 
-                if (refModelRecords.length > 0) {
-                  const expectedRefModelId = refModelRecords[0].id
+                if (refModelRecord) {
+                  const expectedRefModelId = refModelRecord.id
                   const matchingByRef = orphanedProperties.find((p: PropertyType) => p.refModelId === expectedRefModelId)
                   if (matchingByRef) {
                     matchedProperty = matchingByRef
@@ -223,6 +240,9 @@ export const getPropertySchema = async (
             refModelId: propertyRecord.refModelId || undefined,
             refValueType: (propertyRecord.refValueType as any) || undefined,
             required: (propertyRecord as { required?: boolean }).required ?? undefined,
+            storageType: (propertyRecord.storageType as any) ?? schemaFromFile?.storageType,
+            localStorageDir: propertyRecord.localStorageDir ?? schemaFromFile?.localStorageDir,
+            filenameSuffix: propertyRecord.filenameSuffix ?? schemaFromFile?.filenameSuffix,
             // Include schemaFileId from database as _propertyFileId for ModelProperty.create()
             _propertyFileId: propertyRecord.schemaFileId || undefined,
           }
@@ -247,14 +267,14 @@ export const getPropertySchema = async (
             
             // Try to resolve refModelId from the database using the model name
             try {
-              const refModelRecords = await db
-                .select()
-                .from(modelsTable)
-                .where(eq(modelsTable.name, schemaFromFile.ref))
-                .limit(1)
+              const refModelRecord = await resolveModelRecord(
+                schemaFromFile.ref,
+                { schemaName: model.schemaName },
+                db,
+              )
               
-              if (refModelRecords.length > 0 && refModelRecords[0].id) {
-                propertySchema.refModelId = refModelRecords[0].id
+              if (refModelRecord?.id) {
+                propertySchema.refModelId = refModelRecord.id
               }
             } catch (error) {
               // Ignore errors - model might not exist yet
@@ -285,14 +305,14 @@ export const getPropertySchema = async (
       try {
         const db = BaseDb.getAppDb()
         if (db) {
-          const refModelRecords = await db
-            .select()
-            .from(modelsTable)
-            .where(eq(modelsTable.name, schemaFromFile.ref))
-            .limit(1)
+          const refModelRecord = await resolveModelRecord(
+            schemaFromFile.ref,
+            { schemaName: model.schemaName },
+            db,
+          )
           
-          if (refModelRecords.length > 0 && refModelRecords[0].id) {
-            propertySchema.refModelId = refModelRecords[0].id
+          if (refModelRecord?.id) {
+            propertySchema.refModelId = refModelRecord.id
             propertySchema.refModelName = schemaFromFile.ref
           }
         }

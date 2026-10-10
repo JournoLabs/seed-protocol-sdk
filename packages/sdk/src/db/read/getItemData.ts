@@ -1,7 +1,7 @@
 import { GetItemData, ItemData } from "@/types"
 import debug from "debug"
 import { BaseDb } from "../Db/BaseDb"
-import { and, eq, getTableColumns, SQL } from "drizzle-orm"
+import { and, desc, eq, getTableColumns, SQL } from "drizzle-orm"
 import { toSnakeCase } from "drizzle-orm/casing"
 import { startCase } from "lodash-es"
 import { getItemProperties } from "./getItemProperties"
@@ -11,6 +11,7 @@ import { modelSchemas } from "@/seedSchema/ModelSchemaSchema"
 import { schemas as schemasTable } from "@/seedSchema/SchemaSchema"
 import { getSeedData } from "./getSeedData"
 import { getLatestPublishedVersionRow } from "./getLatestPublishedVersionRow"
+import { isVersionRevoked } from "./subqueries/liveVersion"
 import { toSchemaPropertyName } from "@/helpers/metadataPropertyNames"
 
 const logger = debug('seedSdk:db:read:getItemData')
@@ -83,14 +84,20 @@ export const getItemData: GetItemData = async ({
   // Fix 5: Derive schemaName for multi-schema Model resolution (models -> model_schemas -> schemas)
   let schemaName: string | undefined
   const normalizedModelName = modelName ? startCase(modelName) : (seedRow.type ? startCase(seedRow.type) : undefined)
-  if (appDb && normalizedModelName) {
+  if (appDb && (seedRow.modelFileId || normalizedModelName)) {
     try {
+      // Prefer the seed's own model row; model names are only unique within a schema.
       const schemaRows = await appDb
         .select({ schemaName: schemasTable.name })
         .from(models)
         .innerJoin(modelSchemas, eq(models.id, modelSchemas.modelId))
         .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-        .where(eq(models.name, normalizedModelName))
+        .where(
+          seedRow.modelFileId
+            ? eq(models.schemaFileId, seedRow.modelFileId)
+            : eq(models.name, normalizedModelName!),
+        )
+        .orderBy(desc(models.id))
         .limit(1)
       if (schemaRows.length > 0 && schemaRows[0].schemaName) {
         schemaName = schemaRows[0].schemaName
@@ -126,20 +133,26 @@ export const getItemData: GetItemData = async ({
         uid: versions.uid,
         createdAt: versions.createdAt,
         attestationCreatedAt: versions.attestationCreatedAt,
+        revokedAt: versions.revokedAt,
       })
       .from(versions)
       .where(eq(versions.seedLocalId, resolvedSeedLocalId))
 
     if (allVersions.length > 0) {
-      const sorted = [...allVersions].sort((a, b) => {
+      // Revoked versions are never the latest one and don't count as published (same as the
+      // getVersionData subquery); versionsCount / lastLocalUpdateAt still cover every row.
+      const liveVersions = allVersions.filter(
+        (v: { revokedAt: number | null }) => !isVersionRevoked(v.revokedAt),
+      )
+      const sorted = [...liveVersions].sort((a, b) => {
         const ca = a.createdAt ?? 0
         const cb = b.createdAt ?? 0
         if (cb !== ca) return cb - ca
         return String(b.localId ?? '').localeCompare(String(a.localId ?? ''))
       })
-      const latest = sorted[0]!
+      const latest = sorted[0]
       let lastPub: number | null = null
-      for (const v of allVersions) {
+      for (const v of liveVersions) {
         const t = v.attestationCreatedAt
         if (t != null && (lastPub == null || t > lastPub)) lastPub = t
       }
@@ -152,8 +165,8 @@ export const getItemData: GetItemData = async ({
       versionRow = {
         versionsCount: allVersions.length,
         lastVersionPublishedAt: lastPub,
-        latestVersionUid: latest.uid ?? null,
-        latestVersionLocalId: latest.localId ?? null,
+        latestVersionUid: latest?.uid ?? null,
+        latestVersionLocalId: latest?.localId ?? null,
         publishedVersionUid: published?.uid ?? null,
         publishedVersionLocalId: published?.localId ?? null,
         lastLocalUpdateAt: lastLocal || null,

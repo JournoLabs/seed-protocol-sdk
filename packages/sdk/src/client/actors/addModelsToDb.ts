@@ -7,8 +7,46 @@ import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
 import { GET_SCHEMAS } from '@seedprotocol/eas'
+import { withSeedDbLock } from '@/helpers/tabLocks'
 
 const logger = debug('seedSdk:client:actors:addModelsToDb')
+
+type ModelRow = { id: number; name: string; schemaFileId: string | null }
+
+/**
+ * Returns every `models` row named in `modelNames`, inserting a null-schemaFileId stub for each name
+ * with no row yet (the schema import adopts stubs via findOrCreateModelRecord). Check-then-insert:
+ * another tab initializing at the same time would insert the same stubs, so tabs take turns
+ * (docs/MULTI_TAB.md).
+ */
+export async function ensureModelStubs(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  modelNames: string[],
+  filesDir: string | undefined,
+): Promise<ModelRow[]> {
+  return withSeedDbLock('init', filesDir, async () => {
+    // One query for all names. Model names are only unique per schema, so callers match each
+    // Model by its id (schemaFileId) first.
+    const rows = (await appDb
+      .select({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })
+      .from(modelsTable)
+      .where(inArray(modelsTable.name, modelNames))) as ModelRow[]
+
+    const modelsToInsert = modelNames.filter((name) => !rows.some((m) => m.name === name))
+    if (modelsToInsert.length > 0) {
+      const newlyInserted = (await appDb
+        .insert(modelsTable)
+        .values(modelsToInsert.map((name) => ({ name })))
+        .returning({ id: modelsTable.id, name: modelsTable.name, schemaFileId: modelsTable.schemaFileId })) as ModelRow[]
+
+      rows.push(...newlyInserted)
+      for (const name of modelsToInsert) {
+        logger('[client/actors] [addModelsToDb] inserted model:', name)
+      }
+    }
+    return rows
+  })
+}
 
 export const addModelsToDb = fromCallback<
   EventObject,
@@ -39,52 +77,34 @@ export const addModelsToDb = fromCallback<
     const schemaDefsByModelName = new Map<
       string,
       {
-        dbId: number
+        dbIds: number[]
         schemaDef: string
       }
     >()
 
-    // Batch fetch all existing models in one query (avoids N sequential queries)
-    type ModelRow = { id: number; name: string }
-    const existingModels = await appDb
-      .select({ id: modelsTable.id, name: modelsTable.name })
-      .from(modelsTable)
-      .where(inArray(modelsTable.name, modelNames))
+    // Model names are only unique per schema, so match each Model by its id (schemaFileId) first.
+    const existingModels = await ensureModelStubs(appDb, modelNames, context.filesDir)
 
-    const existingByName = new Map<string, ModelRow>(
-      (existingModels as ModelRow[]).map((m) => [m.name, m])
-    )
-    const modelsToInsert = modelNames.filter((name) => !existingByName.has(name))
-
-    // Batch insert missing models
-    if (modelsToInsert.length > 0) {
-      await appDb
-        .insert(modelsTable)
-        .values(modelsToInsert.map((name) => ({ name })))
-
-      const newlyInserted = await appDb
-        .select({ id: modelsTable.id, name: modelsTable.name })
-        .from(modelsTable)
-        .where(inArray(modelsTable.name, modelsToInsert))
-
-      for (const m of newlyInserted) {
-        existingByName.set(m.name, m)
-      }
-      for (const name of modelsToInsert) {
-        logger('[client/actors] [addModelsToDb] inserted model:', name)
-      }
+    const rowFor = (modelName: string): ModelRow | undefined => {
+      const modelFileId = (allModels[modelName] as { id?: string } | undefined)?.id
+      const sameName = existingModels.filter((m) => m.name === modelName)
+      return (
+        (modelFileId ? sameName.find((m) => m.schemaFileId === modelFileId) : undefined) ??
+        (sameName.length === 1 ? sameName[0] : undefined) ??
+        sameName.find((m) => !m.schemaFileId)
+      )
     }
-
     let hasModelsInDb = true
     for (const modelName of modelNames) {
-      const foundModel = existingByName.get(modelName)
+      const foundModel = rowFor(modelName)
       if (!foundModel) {
         logger('[client/actors] [addModelsToDb] Warning: Could not find or create model:', modelName)
         hasModelsInDb = false
         continue
       }
+      // The EAS schema string depends only on the model name, so every same-name row shares its uid.
       schemaDefsByModelName.set(modelName, {
-        dbId: foundModel.id,
+        dbIds: existingModels.filter((m) => m.name === modelName).map((m) => m.id),
         schemaDef: `bytes32 ${toSnakeCase(modelName)}`,
       })
     }
@@ -108,7 +128,7 @@ export const addModelsToDb = fromCallback<
         const easClient = BaseEasClient.getEasClient()
 
         const queryPromise = queryClient.fetchQuery({
-          queryKey: [`getSchemasVersion`],
+          queryKey: [`getSchemasVersion`, [...schemaDefs].sort()],
           queryFn: async () =>
             easClient.request(GET_SCHEMAS, {
               where: {
@@ -129,11 +149,12 @@ export const addModelsToDb = fromCallback<
           const db = BaseDb.getAppDb()
           if (db) {
             for (const schema of schemas) {
-              const modelId = Array.from(schemaDefsByModelName.values()).find(
-                ({ schemaDef }) => schemaDef === schema.schema,
-              )?.dbId
+              const modelIds =
+                Array.from(schemaDefsByModelName.values()).find(
+                  ({ schemaDef }) => schemaDef === schema.schema,
+                )?.dbIds ?? []
 
-              if (modelId) {
+              for (const modelId of modelIds) {
                 await db
                   .insert(modelUids)
                   .values({

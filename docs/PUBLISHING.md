@@ -21,6 +21,17 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
 
 2. **getPublishPayload** builds the attestation payload for the item and any related seeds.
 
+   **Related drafts.** A publish carries along every draft item (no seed uid yet) reachable from the
+   item through relation and list properties, at any depth, each with its full property set (its own
+   relations, lists, files and Html-embedded images included). Already-published targets are
+   attested by their current seed uid and not published again; a revoked target anywhere in the graph
+   stops the publish with `RelatedItemUnpublishedError`. Uploads (`getPublishUploads`, the publish
+   package's `getPublishUploadData`), `summarizePublishWork` and `getUnpublishedRelatedItems` walk the
+   same graph (`getPublishDraftGraph`). In a cycle (A ↔ B, or a draft pointing back at the draft
+   being published), an item can only attest the uid of a seed created before it, so the reference
+   back to the item still being walked is left out of this publish; it keeps no attestation uid, and
+   the next publish of its item attests it with the target's uid.
+
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
 
 You do not need to run schema setup yourself when using this flow.
@@ -101,6 +112,33 @@ Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **a
 **Direct SDK:** call **`item.getPublishUploads({ arweaveUploadTags: [...] })`** or import **`getPublishUploads`** with the same options object. The legacy **`runPublish`** path does not read publish config; it still calls **`getPublishUploads`** without extra tags unless you extend that flow.
 
 Very large tag sets can exceed Arweave limits and fail at transaction or DataItem creation.
+
+## Html: embedded images and property references
+
+Publish uploads an item's Html in two phases when the Html points at files published with it:
+phase 1 uploads everything else, the Html files are rewritten on disk with the resulting Arweave
+gateway URLs, then phase 2 uploads the Html.
+
+- **`data:image/...;base64,...` in `<img src>`** (policy `materialize`, the default): each image
+  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Policy
+  `preserve` leaves data URIs in place.
+- **`seed:property/<name>`** as the whole value of a `src`, `href` or `poster` attribute: the URL of
+  the same item's `<name>` property, which must be an Image, File or Json property (or a relation
+  to one) with a value. It becomes the URL of that property's phase-1 upload, or, when the property's
+  file is not uploaded in this publish, of the transaction it was published with. This lets Html show
+  a file published alongside it without embedding it a second time:
+
+  ```html
+  <img class="u-featured" src="seed:property/featureImage">
+  ```
+
+  A placeholder naming a missing, non-storage or empty property fails the publish before anything
+  is uploaded (`HtmlSeedPropertyRefError`). Placeholders are resolved under either data URI policy.
+
+The rewrite changes only those attribute values: the rest of the Html is kept byte for byte (it is
+not re-serialized), so the sealed Html is what the app wrote. The rewritten file replaces the local
+Html, so a placeholder is gone after the first publish; an app that wants to keep it should rebuild
+the Html before each publish.
 
 ## Custom publish flows
 

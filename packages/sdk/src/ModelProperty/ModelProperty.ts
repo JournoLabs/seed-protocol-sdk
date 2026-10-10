@@ -20,6 +20,8 @@ import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
+import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
 import debug from 'debug'
 
@@ -49,7 +51,17 @@ export class ModelProperty {
     string,
     { instance: ModelProperty; refCount: number }
   > = new Map()
-  
+
+  /**
+   * propertyFileId -> where the instance with that id is cached, so getById doesn't scan the cache
+   * (a model's properties are looked up one by one, which made loading one model O(n²)).
+   * Every cached instance's current id has an entry: it's added when the instance is cached and
+   * again whenever its context id changes (a property is often created with a generated id and
+   * then gets its real one). Entries aren't removed when an instance leaves the cache or changes
+   * id; getById checks an entry before using it.
+   */
+  private static idIndex = new Map<string, { cacheKey: string; instance: ModelProperty }>()
+
   // Pending writes tracking
   private static pendingWrites = new Map<string, {
     propertyFileId: string
@@ -71,6 +83,9 @@ export class ModelProperty {
   storageType?: StorageType
   localStorageDir?: string
   filenameSuffix?: string
+
+  /** currentEvictionEpoch() at construction: lookups started for this instance don't outlive an eviction. */
+  private readonly _evictionEpoch = currentEvictionEpoch()
 
   constructor(property: Static<typeof TProperty>) {
     // id is now the schemaFileId (string), _dbId is the database integer ID
@@ -98,6 +113,15 @@ export class ModelProperty {
   }
 
   /**
+   * Send from fire-and-forget async work (DB lookups started in the constructor), which can finish
+   * after the instance was unloaded or evicted with its schema.
+   */
+  private _sendIfRunning(event: Parameters<ModelPropertyService['send']>[0]): void {
+    if (isActorStopped(this._service)) return
+    this._service.send(event)
+  }
+
+  /**
    * Initialize original values and schema name for tracking changes
    * This is called asynchronously after construction
    * If the property was loaded from the database and differs from the schema file,
@@ -108,10 +132,10 @@ export class ModelProperty {
     const refModelName = property.refModelName || property.ref
     if (refModelName && !property.refModelId) {
       // Resolve refModelId asynchronously and update context
-      this._resolveRefModelId(refModelName).then((refModelId) => {
+      this._resolveRefModelId(refModelName, property).then((refModelId) => {
         if (refModelId) {
           // Update the context with the resolved refModelId
-          this._service.send({
+          this._sendIfRunning({
             type: 'updateContext',
             refModelId,
           })
@@ -180,7 +204,7 @@ export class ModelProperty {
       // Initialize with original values, including isEdited flag
       // Load isEdited from database if property exists in DB (async, fire-and-forget)
       this._loadIsEditedFromDb(property, isEdited).then((isEditedFromDb: boolean) => {
-        this._service.send({
+        this._sendIfRunning({
           type: 'initializeOriginalValues',
           originalValues,
           schemaName: undefined, // Will be set later if needed
@@ -188,7 +212,7 @@ export class ModelProperty {
         })
       }).catch(() => {
         // If we can't load from DB, use computed isEdited value
-        this._service.send({
+        this._sendIfRunning({
           type: 'initializeOriginalValues',
           originalValues,
           schemaName: undefined, // Will be set later if needed
@@ -204,7 +228,7 @@ export class ModelProperty {
         }
       })
 
-      this._service.send({
+      this._sendIfRunning({
         type: 'initializeOriginalValues',
         originalValues,
         schemaName: undefined,
@@ -213,7 +237,7 @@ export class ModelProperty {
 
     // Get schema name from model asynchronously (fire-and-forget)
     if (property.modelName) {
-      this._setSchemaName(property.modelName).catch(() => {
+      this._setSchemaName(property).catch(() => {
         // If we can't get schema name, that's okay - it will be set later if needed
       })
     }
@@ -239,12 +263,10 @@ export class ModelProperty {
         return fallbackIsEdited
       }
 
-      // Find model by name
-      const modelRecords = await db
-        .select({ id: modelsTable.id })
-        .from(modelsTable)
-        .where(eq(modelsTable.name, property.modelName))
-        .limit(1)
+      // Find this property's model (by modelId when known; model names are only unique per schema)
+      const { resolveModelRecord } = await import('@/db/read/resolveModelRecord')
+      const modelRecord = await resolveModelRecord(property.modelName, this._ownerModelScope(property), db)
+      const modelRecords = modelRecord ? [modelRecord] : []
       
       if (modelRecords.length === 0) {
         return fallbackIsEdited
@@ -277,7 +299,10 @@ export class ModelProperty {
    * @param refModelName - The name of the referenced model
    * @returns The database ID of the referenced model, or undefined if not found
    */
-  private async _resolveRefModelId(refModelName: string): Promise<number | undefined> {
+  private async _resolveRefModelId(
+    refModelName: string,
+    property?: Static<typeof TProperty>,
+  ): Promise<number | undefined> {
     if (!refModelName) {
       return undefined
     }
@@ -288,14 +313,16 @@ export class ModelProperty {
         return undefined
       }
 
-      const refModelRecords = await db
-        .select()
-        .from(modelsTable)
-        .where(eq(modelsTable.name, refModelName))
-        .limit(1)
+      // Resolve the ref within the owning model's schema
+      const { resolveRefModelRecord } = await import('@/db/read/resolveModelRecord')
+      const refModelRecord = await resolveRefModelRecord(
+        refModelName,
+        property ? this._ownerModelScope(property) : { schemaName: this._getSnapshotContext()._schemaName },
+        db,
+      )
       
-      if (refModelRecords.length > 0 && refModelRecords[0].id) {
-        return refModelRecords[0].id
+      if (refModelRecord?.id) {
+        return refModelRecord.id
       }
     } catch (error) {
       // Ignore errors - model might not exist yet or database not available
@@ -303,6 +330,16 @@ export class ModelProperty {
     }
 
     return undefined
+  }
+
+  /** Which model this property belongs to: its models row id and/or schema. */
+  private _ownerModelScope(property: Static<typeof TProperty>): { modelId?: number; schemaName?: string } {
+    const context = this._getSnapshotContext() as { modelId?: number; _schemaName?: string }
+    const modelId = (property as { modelId?: number }).modelId ?? context.modelId
+    return {
+      modelId: typeof modelId === 'number' ? modelId : undefined,
+      schemaName: context._schemaName,
+    }
   }
 
   /**
@@ -317,7 +354,37 @@ export class ModelProperty {
     }
 
     try {
-      const model = await Model.getByNameAsync(property.modelName)
+      const { modelId, schemaName } = this._ownerModelScope(property)
+      // Synchronous cache hits first: callers compare against these values right after construction,
+      // so an extra await here lets every property look "edited" (a draft save each). Only then the
+      // DB (by modelId), and never instantiate a Model while its own properties are initializing.
+      let model = schemaName ? Model.getByName(property.modelName, schemaName) : undefined
+      if (!model) {
+        try {
+          model = Model.getByName(property.modelName)
+        } catch {
+          model = undefined // ambiguous name; resolve by modelId below
+        }
+      }
+      if (!model && modelId) {
+        const { resolveModelRecord } = await import('@/db/read/resolveModelRecord')
+        const modelFileId = (await resolveModelRecord(property.modelName, { modelId }))?.schemaFileId
+        model = modelFileId ? Model.getById(modelFileId) : undefined
+      }
+      // Evicted (with its schema) or unloaded while the lookups above ran: don't instantiate its model
+      // again from rows that are being deleted.
+      if (!model && isActorStopped(this._service)) return undefined
+      if (!model) {
+        try {
+          // The epoch from when this instance was built: an eviction of the model's schema since
+          // then (this instance may already be stopped) must not re-create the model.
+          model = await Model.getByNameAsync(property.modelName, undefined, {
+            evictionEpoch: this._evictionEpoch,
+          })
+        } catch {
+          model = undefined
+        }
+      }
       
       if (!model || !model.properties || model.properties.length === 0) {
         return undefined
@@ -345,7 +412,7 @@ export class ModelProperty {
         originalValues.ref = schemaFileValue.ref
         originalValues.refModelName = schemaFileValue.ref
         // Try to get refModelId from database
-        const refModelId = await this._resolveRefModelId(schemaFileValue.ref)
+        const refModelId = await this._resolveRefModelId(schemaFileValue.ref, property)
         if (refModelId) {
           originalValues.refModelId = refModelId
         }
@@ -365,12 +432,20 @@ export class ModelProperty {
    * Set the schema name for this property by looking it up from the model
    * Tries database first (more reliable), then falls back to schema files
    */
-  private async _setSchemaName(modelName: string): Promise<void> {
+  private async _setSchemaName(property: Static<typeof TProperty>): Promise<void> {
     try {
+      // create() sets the schema name right after construction when its caller knows it. Don't look it
+      // up then: the file fallback below reads and parses every schema file, per property.
+      await Promise.resolve()
+      if (this._getSnapshotContext()._schemaName) return
+
       let schemaName: string | undefined
+      // From the property data: the instance's own modelId field is never assigned (the reactive proxy
+      // serves values from the machine context), so reading this.modelId skipped the DB lookup.
+      const { modelId } = this._ownerModelScope(property)
 
       // Try to get schema name from database first (more reliable)
-      if (this.modelId) {
+      if (modelId) {
         try {
           const db = BaseDb.getAppDb()
           if (db) {
@@ -381,7 +456,7 @@ export class ModelProperty {
               .from(modelSchemas)
               .innerJoin(schemas, eq(modelSchemas.schemaId, schemas.id))
               .innerJoin(modelsTable, eq(modelSchemas.modelId, modelsTable.id))
-              .where(eq(modelsTable.id, this.modelId))
+              .where(eq(modelsTable.id, modelId))
               .limit(1)
 
             if (modelSchemaRecords.length > 0) {
@@ -395,12 +470,12 @@ export class ModelProperty {
 
       // Fall back to schema file lookup if database didn't work
       if (!schemaName) {
-        schemaName = await getSchemaNameFromModel(modelName)
+        schemaName = await getSchemaNameFromModel(property.modelName!)
       }
 
       if (schemaName) {
         // Update the context with the schema name using dedicated event
-        this._service.send({
+        this._sendIfRunning({
           type: 'setSchemaName',
           schemaName,
         })
@@ -518,11 +593,33 @@ export class ModelProperty {
     }
 
     // Create cache key from modelName and name, or use id
-    const cacheKey = propertyWithId.modelName && propertyWithId.name
+    let cacheKey = propertyWithId.modelName && propertyWithId.name
       ? `${propertyWithId.modelName}:${propertyWithId.name}`
       : propertyWithId.id
       ? `id:${propertyWithId.id}`
       : propertyWithId.name || 'unnamed'
+
+    // Model names are only unique per schema: a cached "Post:title" may be another schema's
+    // property. If the ids say it's a different property, key this one by its own id instead.
+    // (Not by file id: the same property is often created first with a generated id, then its real one.)
+    const isOtherProperty = (cachedContext: ModelPropertyMachineContext): boolean =>
+      (typeof propertyWithId.modelId === 'number' &&
+        typeof cachedContext.modelId === 'number' &&
+        cachedContext.modelId !== propertyWithId.modelId) ||
+      (!!schemaName && !!cachedContext._schemaName && cachedContext._schemaName !== schemaName)
+    const cachedByName = this.instanceCache.get(cacheKey)
+    if (cachedByName && propertyWithId.id && isOtherProperty(cachedByName.instance._getSnapshotContext())) {
+      // Reuse this property's own id-keyed entry if it already has one.
+      cacheKey = `id:${propertyWithId.id}`
+      for (const [key, { instance }] of this.instanceCache.entries()) {
+        if (!key.startsWith('id:')) continue
+        const ctx = instance._getSnapshotContext()
+        if (ctx.modelName === propertyWithId.modelName && ctx.name === propertyWithId.name && !isOtherProperty(ctx)) {
+          cacheKey = key
+          break
+        }
+      }
+    }
 
     // Check if instance exists in cache
     if (this.instanceCache.has(cacheKey)) {
@@ -592,13 +689,17 @@ export class ModelProperty {
       instance: proxiedInstance,
       refCount: 1,
     })
-    
+    this.indexCachedInstance(cacheKey, proxiedInstance)
+
     // Trigger write process if property has modelId (or modelName) and id (schemaFileId)
     // Wait for service to be ready (idle state) and have writeProcess spawned
     const propertyFileId = propertyWithId.id // id is now the schemaFileId (string)
     const hasModelId = propertyWithId.modelId || propertyWithId.modelName
-    
-    if (hasModelId && propertyFileId) {
+    // A _dbId means the data was loaded from an existing row (createById, getPropertySchema), so
+    // there's nothing to write. Writing it back anyway raced deletes of that row's model (FK error).
+    const isPersisted = typeof (propertyWithId as { _dbId?: unknown })._dbId === 'number'
+
+    if (hasModelId && propertyFileId && !isPersisted) {
       // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
       // Retry a few times if writeProcess isn't available yet
       let retries = 0
@@ -606,6 +707,8 @@ export class ModelProperty {
       const checkAndSend = async () => {
         const service = proxiedInstance.getService()
         const snapshot = service.getSnapshot()
+        // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
+        if (isActorStopped(service)) return
         
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
           const writeProcess = snapshot.context.writeProcess
@@ -647,6 +750,9 @@ export class ModelProperty {
             // Don't clear pending write here - it might resolve later
             return
           }
+
+          // Resolving the modelId awaited the DB; the instance may have been stopped meanwhile
+          if (isActorStopped(service)) return
           
           // Track pending write now that we have the resolved modelId
           this.trackPendingWrite(propertyFileId, resolvedModelId)
@@ -657,16 +763,15 @@ export class ModelProperty {
           const currentWriteState = writeProcess.getSnapshot()
           
           if (currentWriteState.value === 'success') {
-            // Write already succeeded, clear pending write immediately
-            this.clearPendingWrite(propertyFileId, 'success')
+            // Write already succeeded
+            void this.completePendingWrite(propertyFileId, resolvedModelId)
           } else {
             // Set up subscription to catch future state changes
             const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
               if (writeSnapshot.value === 'success') {
                 writeSubscription.unsubscribe()
                 logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
-                // Clear pending write on success
-                this.clearPendingWrite(propertyFileId, 'success')
+                void this.completePendingWrite(propertyFileId, resolvedModelId)
               } else if (writeSnapshot.value === 'error') {
                 writeSubscription.unsubscribe()
                 const errorContext = writeSnapshot.context
@@ -684,6 +789,7 @@ export class ModelProperty {
             dataType: property.dataType!,
             refModelId: property.refModelId,
             refValueType: property.refValueType,
+            required: property.required,
             storageType: property.storageType,
             localStorageDir: property.localStorageDir,
             filenameSuffix: property.filenameSuffix,
@@ -714,22 +820,59 @@ export class ModelProperty {
     )
   }
 
+  /** Whether an idIndex entry still points at a cached instance with that id. */
+  private static isIndexEntryCurrent(
+    propertyFileId: string,
+    entry: { cacheKey: string; instance: ModelProperty },
+  ): boolean {
+    if (this.instanceCache.get(entry.cacheKey)?.instance !== entry.instance) return false
+    try {
+      return entry.instance._getSnapshotContext().id === propertyFileId
+    } catch {
+      return false
+    }
+  }
+
+  /** Add a newly cached instance to idIndex, and keep its entry current when its id changes. */
+  private static indexCachedInstance(cacheKey: string, instance: ModelProperty): void {
+    const index = (id: string | undefined) => {
+      if (!id) return
+      const existing = this.idIndex.get(id)
+      // Keep the instance cached first, as the old scan in insertion order returned
+      if (existing && existing.instance !== instance && this.isIndexEntryCurrent(id, existing)) return
+      this.idIndex.set(id, { cacheKey, instance })
+    }
+    let indexedId = instance._getSnapshotContext().id
+    index(indexedId)
+    instance._service.subscribe((snapshot) => {
+      const id = snapshot.context.id
+      if (id === indexedId) return
+      indexedId = id
+      index(id)
+    })
+  }
+
   /**
    * Get ModelProperty instance by propertyFileId from static cache
    */
   static getById(propertyFileId: string): ModelProperty | undefined {
     if (!propertyFileId) return undefined
-    
-    // Search through cache to find by propertyFileId
+
+    const indexed = this.idIndex.get(propertyFileId)
+    if (!indexed) return undefined
+    if (this.isIndexEntryCurrent(propertyFileId, indexed)) return indexed.instance
+
+    // The indexed instance left the cache or changed id; another cached instance may still have it.
     // Cache key might be "modelName:propertyName" or "id:propertyId"
+    this.idIndex.delete(propertyFileId)
     for (const [cacheKey, { instance }] of this.instanceCache.entries()) {
-      const context = instance._getSnapshotContext()
       // id is now the schemaFileId (string)
-      if (context.id === propertyFileId) {
+      if (instance._getSnapshotContext().id === propertyFileId) {
+        this.idIndex.set(propertyFileId, { cacheKey, instance })
         return instance
       }
     }
-    
+
     return undefined
   }
 
@@ -737,7 +880,16 @@ export class ModelProperty {
    * Create or get ModelProperty instance by propertyFileId
    * Queries the database to find the property if not cached
    */
-  static async createById(propertyFileId: string): Promise<ModelProperty | undefined> {
+  static async createById(
+    propertyFileId: string,
+    options?: {
+      /**
+       * currentEvictionEpoch() from when the caller's work started. An eviction of the property's
+       * schema since then makes this return undefined instead of re-creating it. Defaults to now.
+       */
+      evictionEpoch?: number
+    },
+  ): Promise<ModelProperty | undefined> {
     if (!propertyFileId) {
       return undefined
     }
@@ -753,11 +905,7 @@ export class ModelProperty {
     if (!db) {
       return undefined
     }
-
-    const testRecords = await db
-      .select()
-      .from(propertiesTable)
-      .limit(100)
+    const evictionEpoch = options?.evictionEpoch ?? currentEvictionEpoch()
 
     const propertyRecords = await db
       .select()
@@ -796,8 +944,11 @@ export class ModelProperty {
       refModelId: propertyRecord.refModelId || undefined,
       refValueType: propertyRecord.refValueType ? (propertyRecord.refValueType as ModelPropertyDataTypes) : undefined,
       required: propertyRecord.required ?? false,
+      storageType: (propertyRecord.storageType as StorageType | null) ?? undefined,
+      localStorageDir: propertyRecord.localStorageDir ?? undefined,
+      filenameSuffix: propertyRecord.filenameSuffix ?? undefined,
     }
-    
+
     // Load isEdited from database
     const isEditedFromDb = propertyRecord.isEdited ?? false
 
@@ -812,6 +963,22 @@ export class ModelProperty {
       if (refModelRecords.length > 0) {
         propertyData.refModelName = refModelRecords[0].name
         propertyData.ref = refModelRecords[0].name
+      }
+    }
+
+    // Its model's schema was evicted while we read the rows (e.g. a model's property lookup in flight
+    // during Schema.destroy or test cleanup): don't bring the property back.
+    if (anyEvictionSince(evictionEpoch)) {
+      const schemaRows = await db
+        .select({ name: schemas.name })
+        .from(modelSchemas)
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
+        .where(eq(modelSchemas.modelId, propertyRecord.modelId))
+      if (
+        schemaRows.length === 0 ||
+        schemaRows.some((row: { name: string | null }) => schemaEvictedSince(row.name, evictionEpoch))
+      ) {
+        return undefined
       }
     }
 
@@ -909,6 +1076,20 @@ export class ModelProperty {
       status: 'pending',
       timestamp: Date.now(),
     })
+  }
+
+  /**
+   * A property write succeeded: add the property to its model's property ids, then drop the pending
+   * write. In that order, `Model.properties` (property ids + pending writes) never misses it; in Node,
+   * where the Model has no reactive liveQuery, nothing else would add it.
+   */
+  private static async completePendingWrite(propertyFileId: string, modelId: number): Promise<void> {
+    try {
+      await Model.refreshPropertiesForDbId(modelId)
+    } catch (error) {
+      logger(`Refreshing properties of model ${modelId} after writing "${propertyFileId}" failed: ${error}`)
+    }
+    this.clearPendingWrite(propertyFileId, 'success')
   }
 
   /**
@@ -1106,14 +1287,23 @@ export class ModelProperty {
    */
   async destroy(): Promise<void> {
     const context = this._getSnapshotContext()
-    const cacheKey =
-      context.modelName && context.name
-        ? `${context.modelName}:${context.name}`
-        : (context.id ?? '')
-    if (!cacheKey) return
+    // Stored under "modelName:name", or "id:<id>" when another schema's same-name property holds that key
+    const cacheKeys = [...ModelProperty.instanceCache.entries()]
+      .filter(([, entry]) => {
+        try {
+          return entry.instance._getSnapshotContext().id === context.id
+        } catch {
+          return false
+        }
+      })
+      .map(([key]) => key)
+    if (cacheKeys.length === 0 && context.modelName && context.name) {
+      cacheKeys.push(`${context.modelName}:${context.name}`)
+    }
+    if (cacheKeys.length === 0) return
 
     forceRemoveFromCaches(this, {
-      getCacheKeys: () => [cacheKey],
+      getCacheKeys: () => cacheKeys,
       caches: [ModelProperty.instanceCache as Map<string, unknown>],
     })
 

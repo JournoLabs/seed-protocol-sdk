@@ -54,16 +54,9 @@ export const useModelProperties = (
   const isClientReady = useIsClientReady()
   const queryClient = useQueryClient()
 
-  // Get _dbId (database ID) from model context
-  const dbModelId = useMemo(() => {
-    if (!model) return null
-    try {
-      const context = (model as any)._getSnapshotContext()
-      return context._dbId as number | undefined
-    } catch {
-      return null
-    }
-  }, [model])
+  // The model's database id. It can arrive after the model is first seen (the row is written later),
+  // so follow the model's snapshot: memoizing it once left the properties live query unbuilt.
+  const dbModelId = useModelDbId(model)
 
   const modelId = model?.id
   const modelPropertiesQueryKey = useMemo(
@@ -158,6 +151,29 @@ export const useModelProperties = (
   }
 }
 
+const LOOKUP_RETRY_DELAYS_MS = [400, 1200, 2500]
+
+const readModelDbId = (model: Model | undefined | null): number | undefined => {
+  if (!model) return undefined
+  try {
+    return (model as any)._getSnapshotContext()._dbId as number | undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The model's `_dbId`, updated when the model's actor sets it. */
+const useModelDbId = (model: Model | undefined | null): number | undefined => {
+  const [dbModelId, setDbModelId] = useState(() => readModelDbId(model))
+  useEffect(() => {
+    setDbModelId(readModelDbId(model))
+    if (!model) return
+    const subscription = model.getService().subscribe(() => setDbModelId(readModelDbId(model)))
+    return () => subscription.unsubscribe()
+  }, [model])
+  return dbModelId
+}
+
 /**
  * Helper function to get property schema by modelFileId and propertyName
  */
@@ -177,8 +193,8 @@ const getPropertySchemaByModelFileId = async (
     return undefined
   }
 
-  // Use existing getPropertySchema function
-  return getPropertySchema(modelName, propertyName)
+  // Use existing getPropertySchema function, pinned to this model (names are only unique per schema)
+  return getPropertySchema(modelName, propertyName, { modelFileId, schemaName: model.schemaName })
 }
 
 /**
@@ -277,7 +293,8 @@ export function useModelProperty(
     }
   }, [isClientReady, lookupMode])
 
-  const updateModelProperty = useCallback(async () => {
+  /** `quiet`: a background retry; leaves isLoading alone. */
+  const updateModelProperty = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
     if (!isClientReady) {
       setModelProperty(undefined)
       setIsLoading(false)
@@ -289,8 +306,10 @@ export function useModelProperty(
     let resolvedModelName: string | undefined
 
     try {
-      setIsLoading(true)
-      setError(null)
+      if (!quiet) {
+        setIsLoading(true)
+        setError(null)
+      }
 
       if (lookupMode.type === 'propertyFileId') {
         if (!lookupMode.propertyFileId) {
@@ -337,7 +356,9 @@ export function useModelProperty(
         }
 
         // Use existing getPropertySchema for schemaId + modelName + propertyName
-        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName)
+        // schemaId may be a schema file id or a schema name; scope the lookup to that schema
+        const schemaName = (await getSchemaNameFromId(lookupMode.schemaId)) ?? lookupMode.schemaId
+        propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName, { schemaName })
         resolvedModelName = lookupMode.modelName
       }
 
@@ -375,6 +396,22 @@ export function useModelProperty(
     }
     updateModelProperty()
   }, [shouldLoad, updateModelProperty])
+
+  // A schemaId/modelFileId lookup reads the model's properties, which can still be loading (or the
+  // property not yet written) when the hook mounts. Nothing would ask again, so retry a few times
+  // while it finds nothing, as useModelProperties does (skipped while a lookup is running, and once
+  // one found the property or failed).
+  const skipLookupRetryRef = useRef(false)
+  skipLookupRetryRef.current = isLoading || !!modelProperty || !!error
+  useEffect(() => {
+    if (!shouldLoad || lookupMode.type === 'propertyFileId') return
+    const timers = LOOKUP_RETRY_DELAYS_MS.map((ms) =>
+      setTimeout(() => {
+        if (!skipLookupRetryRef.current) updateModelProperty({ quiet: true })
+      }, ms),
+    )
+    return () => timers.forEach((t) => clearTimeout(t))
+  }, [shouldLoad, lookupMode.type, updateModelProperty])
 
   // Subscribe to service changes when modelProperty is available.
   // Skip subscription for schemaId/modelFileId lookups where we created the instance locally—
@@ -505,47 +542,34 @@ export type UseDestroyModelPropertyReturn = {
 }
 
 export const useDestroyModelProperty = (): UseDestroyModelPropertyReturn => {
-  const [currentInstance, setCurrentInstance] = useState<ModelProperty | null>(null)
-  const [destroyState, setDestroyState] = useState<{ isLoading: boolean; error: Error | null }>({
-    isLoading: false,
-    error: null,
-  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    if (!currentInstance) {
-      setDestroyState({ isLoading: false, error: null })
-      return
-    }
-    const service = currentInstance.getService()
-    const update = () => {
-      const snap = service.getSnapshot()
-      const ctx = snap.context as { _destroyInProgress?: boolean; _destroyError?: { message: string } | null }
-      setDestroyState({
-        isLoading: !!ctx._destroyInProgress,
-        error: ctx._destroyError ? new Error(ctx._destroyError.message) : null,
-      })
-    }
-    update()
-    const sub = service.subscribe(update)
-    return () => sub.unsubscribe()
-  }, [currentInstance])
-
+  // Loading state is tracked here: the model property's service doesn't record destroy progress, and
+  // destroy() stops the service, often within a few microtasks.
   const destroy = useCallback(async (modelProperty: ModelProperty) => {
     if (!modelProperty) return
-    setCurrentInstance(modelProperty)
-    await modelProperty.destroy()
+    setError(null)
+    setIsLoading(true)
+    try {
+      await modelProperty.destroy()
+      // destroy() reports DB failures via the service context instead of throwing
+      const ctx = modelProperty.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
+      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  const resetError = useCallback(() => {
-    if (currentInstance) {
-      currentInstance.getService().send({ type: 'clearDestroyError' })
-    }
-  }, [currentInstance])
+  const resetError = useCallback(() => setError(null), [])
 
   return {
     destroy,
-    isLoading: destroyState.isLoading,
-    error: destroyState.error,
+    isLoading,
+    error,
     resetError,
   }
 }

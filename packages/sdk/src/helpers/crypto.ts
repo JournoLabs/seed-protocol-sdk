@@ -23,3 +23,12 @@ export const getContentHash = async (
 export const getDeterministicId = (seed: string): string => {
   return bytesToHex(sha3_256(utf8ToBytes(seed))).slice(0, 10)
 }
+
+/**
+ * Returns a function that maps `suffix` to `getDeterministicId(prefix + suffix)`, hashing `prefix` only
+ * once. Use it when deriving many ids from one long shared prefix (e.g. a whole serialized schema).
+ */
+export const getDeterministicIdsWithPrefix = (prefix: string): ((suffix: string) => string) => {
+  const prefixHash = sha3_256.create().update(utf8ToBytes(prefix))
+  return (suffix: string) => bytesToHex(prefixHash.clone().update(utf8ToBytes(suffix)).digest()).slice(0, 10)
+}

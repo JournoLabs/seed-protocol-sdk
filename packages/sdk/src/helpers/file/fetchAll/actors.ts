@@ -14,7 +14,7 @@ import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { saveAppState } from '@/db/write/saveAppState'
+import { addExcludedTransactions } from '@/db/write/addExcludedTransactions'
 
 const logger = debug('seedSdk:file:actors:fetchAll')
 
@@ -172,10 +172,7 @@ export const fetchAllBinaryData = fromCallback<
 
           excludedTransactions.add(transactionId)
 
-          await saveAppState(
-            'excludedTransactions',
-            JSON.stringify(Array.from(excludedTransactions)),
-          )
+          await addExcludedTransactions([transactionId])
 
           logger(
             '[fetchAll/actors] [fetchAllBinaryData] updated excludedTransactions:',

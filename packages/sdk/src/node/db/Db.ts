@@ -140,6 +140,10 @@ export class NodeDb implements IDb {
     const { backfillMetadataPropertyIds } = await import('@/db/backfillMetadataPropertyIds')
     await backfillMetadataPropertyIds()
 
+    // One-time: clear item data whose model can't be determined (seeds.model_file_id, migration 0015)
+    const { resetAmbiguousLegacyItemData } = await import('@/db/resetAmbiguousLegacyItemData')
+    await resetAmbiguousLegacyItemData()
+
     return this.db
   }
 

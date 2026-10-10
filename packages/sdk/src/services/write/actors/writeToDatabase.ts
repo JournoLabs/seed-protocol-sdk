@@ -7,6 +7,24 @@ import debug from 'debug'
 
 const logger = debug('seedSdk:write:writeToDatabase')
 
+// Writes that have started. Stopping a write process's actor can't cancel one, so code that deletes rows
+// under live instances (Schema.destroy, test cleanup) waits for these after evicting the instances.
+const inFlightWrites = new Set<Promise<void>>()
+
+/**
+ * Resolves once every database write started so far has finished (or after timeoutMs). Evict/stop the
+ * instances first so no new writes start while waiting.
+ */
+export const waitForInFlightWrites = async (timeoutMs = 5000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (inFlightWrites.size > 0 && Date.now() < deadline) {
+    await Promise.race([
+      Promise.allSettled([...inFlightWrites]),
+      new Promise((resolve) => setTimeout(resolve, deadline - Date.now())),
+    ])
+  }
+}
+
 type WriteToDatabaseInput = {
   entityType: 'model' | 'modelProperty' | 'schema'
   entityId: string
@@ -79,6 +97,7 @@ export const writeToDatabase = fromCallback<
                 storageType: ctx.storageType ?? input.entityData.storageType,
                 localStorageDir: ctx.localStorageDir ?? input.entityData.localStorageDir,
                 filenameSuffix: ctx.filenameSuffix ?? input.entityData.filenameSuffix,
+                required: ctx.required ?? input.entityData.required,
               }
             }
           }
@@ -113,13 +132,15 @@ export const writeToDatabase = fromCallback<
     }
   }
 
-  _write().catch((error) => {
+  const write = _write().catch((error) => {
     logger('Error in writeToDatabase promise:', error)
     sendBack({
       type: 'writeError',
       error: error instanceof Error ? error : new Error(String(error)),
     })
   })
+  inFlightWrites.add(write)
+  write.finally(() => inFlightWrites.delete(write))
 
   return () => {
     // Cleanup function (optional)

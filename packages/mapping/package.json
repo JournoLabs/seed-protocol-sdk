@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/mapping",
-  "version": "0.6.10",
+  "version": "0.7.1",
   "description": "Source-to-model-property field mapping helpers and UI for Seed Protocol",
   "type": "module",
   "main": "./dist/index.js",
@@ -47,7 +47,7 @@
     "react-dom": "^19.0.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.11"
   },
   "peerDependencies": {
     "react": "^18 || ^19",

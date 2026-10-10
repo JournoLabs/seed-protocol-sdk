@@ -6,7 +6,10 @@ import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
 
 export type SeedPublishState = {
-  /** `onchain` when any local row carries a valid EAS attestation UID for this seed. */
+  /**
+   * `onchain` when any local row carries a valid EAS attestation UID for this seed, revoked ones
+   * included (they stay on-chain). Check `revokedAt` to tell an unpublished seed apart.
+   */
   status: 'draft' | 'onchain'
   seedAttestationUid: string | null
   versionAttestationUid: string | null
@@ -14,6 +17,8 @@ export type SeedPublishState = {
   explorerUid: string | null
   /** Best-effort max attestation time (ms) from seed, version, or metadata rows. */
   lastAttestedAtMs: number | null
+  /** Unix seconds when the seed attestation was revoked (`item.unpublish()` or EAS sync), else null. */
+  revokedAt: number | null
 }
 
 function resolveSeedIds(
@@ -39,7 +44,8 @@ function maxMs(a: number | null | undefined, b: number | null | undefined): numb
 
 /**
  * Whether the seed has **any** on-chain anchor in local SQLite: valid EAS UID on the seed row,
- * on the newest **published** version row (`getLatestPublishedVersionRow`), or on **any** metadata row.
+ * on the newest **published** version row (`getLatestPublishedVersionRow`, which skips revoked
+ * versions), or on **any** metadata row.
  * Not the same as “no unpublished edits”; see `getPublishPendingDiff` for per-property head rows.
  */
 export async function getSeedPublishState(
@@ -53,6 +59,7 @@ export async function getSeedPublishState(
     versionAttestationUid: null,
     explorerUid: null,
     lastAttestedAtMs: null,
+    revokedAt: null,
   }
   if (!appDb || (!seedLocalId && !seedUid)) {
     return empty
@@ -109,5 +116,6 @@ export async function getSeedPublishState(
     versionAttestationUid,
     explorerUid,
     lastAttestedAtMs,
+    revokedAt: seedRow?.revokedAt ? seedRow.revokedAt : null,
   }
 }

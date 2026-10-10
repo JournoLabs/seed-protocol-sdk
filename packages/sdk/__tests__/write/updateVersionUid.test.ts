@@ -7,7 +7,7 @@ import { createVersion } from '@/db/write/createVersion'
 import { createMetadata, MetadataValidationError } from '@/db/write/createMetadata'
 import { createSeed } from '@/db/write/createSeed'
 import { setGetPublisherForNewSeeds, getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -18,13 +18,17 @@ const testDescribe = typeof window === 'undefined' ? (describe.sequential || des
 const TEST_VERSION_UID = '0x' + 'd'.repeat(64)
 
 testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => {
+  // Model names are only unique per schema: scope createMetadata to this schema's Post.
+  let postModelFileId: string
+
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-    await createGetPublishPayloadTestSchema()
-  }, 90000)
+    const { models } = await createGetPublishPayloadTestSchema()
+    postModelFileId = models.Post.id!
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -63,6 +67,42 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
       .from(versions)
       .where(eq(versions.localId, versionLocalId!))
     expect(row?.publisher).toBe(originalPublisher)
+  })
+
+  it('ignores a version uid the seed already has (patch publish via the modular executor)', async () => {
+    // The executor's SeedPublished event reports the version a patch publish attached to: an
+    // existing version. A local draft version must not take that uid.
+    const { item } = await createItemWithBasicPropertiesOnly({ title: 'Existing version uid', count: 1 })
+    const seedLocalId = item.seedLocalId!
+    const db = BaseDb.getAppDb()
+    const publishedVersionUid = '0x' + '4c7e0a'.padEnd(64, '9')
+    await db
+      .update(versions)
+      .set({ uid: publishedVersionUid, attestationCreatedAt: Date.now() - 60_000 })
+      .where(eq(versions.seedLocalId, seedLocalId))
+    const draftLocalId = await createVersion({ seedLocalId, seedType: 'post' })
+    const rowsFor = () =>
+      db
+        .select({ localId: versions.localId, uid: versions.uid })
+        .from(versions)
+        .where(eq(versions.seedLocalId, seedLocalId))
+    const before = await rowsFor()
+
+    await updateVersionUid({ seedLocalId, versionUid: publishedVersionUid, publisher: '0x' + 'd'.repeat(40) })
+    // Same uid in another case (event decoding) is the same version.
+    await updateVersionUid({ seedLocalId, versionUid: publishedVersionUid.toUpperCase().replace('0X', '0x') })
+
+    const after = await rowsFor()
+    expect(after).toEqual(before)
+    expect(after.find((r: any) => r.localId === draftLocalId)?.uid ?? null).toBeNull()
+    expect(after.filter((r: any) => r.uid?.toLowerCase() === publishedVersionUid)).toHaveLength(1)
+
+    // A new version uid still goes onto the draft.
+    const newVersionUid = '0x' + '4c7e0b'.padEnd(64, '9')
+    await updateVersionUid({ seedLocalId, versionUid: newVersionUid })
+    const final = await rowsFor()
+    expect(final.find((r: any) => r.localId === draftLocalId)?.uid).toBe(newVersionUid)
+    expect(final).toHaveLength(before.length)
   })
 
   it('createVersion sets publisher when getPublisherForNewSeeds is configured', async () => {
@@ -120,7 +160,7 @@ testDescribe('updateVersionUid, createVersion, createMetadata publisher', () => 
         propertyName: 'title',
         propertyValue: 'Test metadata publisher',
         modelName: 'Post',
-      })
+      }, undefined, { modelFileId: postModelFileId })
       const db = BaseDb.getAppDb()
       const { metadata } = await import('@/seedSchema')
       const [row] = await db

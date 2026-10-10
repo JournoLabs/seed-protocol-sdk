@@ -5,7 +5,6 @@ import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -18,53 +17,9 @@ import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
-
-// Helper function to wait for item to be in idle state using xstate waitFor
-async function waitForItemIdle(item: Item<any>, timeout: number = 5000): Promise<void> {
-  const service = item.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Item failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Item failed to load') {
-      throw error
-    }
-    throw new Error(`Item loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for itemProperty to be in idle state
-async function waitForItemPropertyIdle(property: ItemProperty<any>, timeout: number = 5000): Promise<void> {
-  const service = property.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('ItemProperty failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'ItemProperty failed to load') {
-      throw error
-    }
-    throw new Error(`ItemProperty loading timeout after ${timeout}ms`)
-  }
-}
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
+import { waitForItemIdle } from '../test-utils/waitForIdle'
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -90,23 +45,13 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('Item Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Clean up - delete in order to respect foreign key constraints
@@ -127,129 +72,17 @@ testDescribe('Item Integration Tests', () => {
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
     const db = BaseDb.getAppDb()
     if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      const { eq, ne, notInArray, sql } = await import('drizzle-orm')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map(link => link.modelId)
-          .filter((id): id is number => id !== null && id !== undefined)
-        
-        // Delete metadata for non-Seed Protocol models
-        const seedProtocolSeeds = await db
-          .select({ localId: seeds.localId })
-          .from(seeds)
-          .where(
-            sql`EXISTS (
-              SELECT 1 FROM models 
-              WHERE models.id IN (${sql.join(seedProtocolModelIds.map(id => sql`${id}`), sql`, `)})
-              AND seeds.type = models.name
-            )`
-          )
-        
-        const seedProtocolSeedLocalIds = seedProtocolSeeds.map(s => s.localId).filter(Boolean)
-        
-        if (seedProtocolSeedLocalIds.length > 0) {
-          await db.delete(metadata).where(notInArray(metadata.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(versions).where(notInArray(versions.seedLocalId, seedProtocolSeedLocalIds))
-          await db.delete(seeds).where(notInArray(seeds.localId, seedProtocolSeedLocalIds))
-        } else {
-          await db.delete(metadata)
-          await db.delete(versions)
-          await db.delete(seeds)
-        }
-        
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.delete(metadata)
-        await db.delete(versions)
-        await db.delete(seeds)
-        await db.update(properties).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(properties)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
+      // Every item, Seed Protocol models' (Image, File, ...) included, so each test starts with none.
+      // (The old version meant to keep Seed Protocol items, but its seeds.type = models.name match
+      // compared snake_case types to model names and never matched, so it deleted them all anyway.)
+      await db.delete(metadata)
+      await db.delete(versions)
+      await db.delete(seeds)
     }
-
-    // Clean up model files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    // Schemas, models and properties (FK-safe; keeps the Seed Protocol schema), and schema files
+    await cleanupTestSchemaData()
   })
 
   afterEach(async () => {
@@ -298,6 +131,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
         content: 'Test Content',
       })
@@ -337,6 +171,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'My Post',
         content: 'Post Content',
         author: 'John Doe',
@@ -407,6 +242,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -524,6 +360,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item - should work even if Model instance is not passed
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Test Title',
       })
       
@@ -558,6 +395,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item first
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me',
       })
       
@@ -569,9 +407,6 @@ testDescribe('Item Integration Tests', () => {
       // (which may work if a version was created during item creation)
       expect(createdItem.seedLocalId).toBe(seedLocalId)
       expect(createdItem.modelName).toBe('TestPost')
-      
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Try to find the item (may return undefined if no version exists yet)
       const foundItem = await Item.find({
@@ -615,6 +450,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item first
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me By Uid',
       })
       
@@ -694,14 +530,12 @@ testDescribe('Item Integration Tests', () => {
       
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Find Me No Wait',
       })
       
       await waitForItemIdle(createdItem)
       const seedLocalId = createdItem.seedLocalId
-      
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Find with waitForReady: false - should return immediately
       const foundItem = await Item.find({
@@ -743,16 +577,19 @@ testDescribe('Item Integration Tests', () => {
       // Create multiple items
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 1',
       })
       
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 2',
       })
       
       const item3 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post 3',
       })
       
@@ -760,11 +597,8 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item2)
       await waitForItemIdle(item3)
       
-      // Wait a bit for database to be updated
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
       // Get all items
-      const allItems = await Item.all('TestPost')
+      const allItems = await Item.all('TestPost', undefined, { schemaName })
       
       expect(allItems).toBeDefined()
       expect(Array.isArray(allItems)).toBe(true)
@@ -820,18 +654,19 @@ testDescribe('Item Integration Tests', () => {
 
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post A',
       })
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Post B',
       })
 
       await waitForItemIdle(item1)
       await waitForItemIdle(item2)
-      await new Promise(resolve => setTimeout(resolve, 500))
 
-      const allItems = await Item.all('TestPost', undefined, { waitForReady: true })
+      const allItems = await Item.all('TestPost', undefined, { waitForReady: true, schemaName })
 
       expect(allItems).toBeDefined()
       expect(Array.isArray(allItems)).toBe(true)
@@ -866,6 +701,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'State Test',
       })
       
@@ -905,6 +741,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Load Test',
         content: 'Load Content',
       })
@@ -965,6 +802,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item1 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Cache Test',
       })
       
@@ -974,12 +812,47 @@ testDescribe('Item Integration Tests', () => {
       // Create again with same seedLocalId - should return cached instance
       const item2 = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         seedLocalId,
         title: 'Updated Title',
       })
       
       expect(item1).toBe(item2) // Same instance
       expect(item2.seedLocalId).toBe(seedLocalId)
+    })
+
+    it('peekReady returns a ready cached item and its property without taking a cache hold', async () => {
+      const schemaName = 'Test Schema Item PeekReady'
+      const testSchema = createTestSchema(schemaName, {
+        'TestPost': {
+          id: generateId(),
+          properties: {
+            title: { dataType: 'Text' },
+          },
+        },
+      })
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const item = await Item.create({ modelName: 'TestPost', schemaName, title: 'Peek' })
+      await waitForItemIdle(item)
+      const { seedLocalId } = item
+      const holds = () => (Item as any).instanceCache.get(seedLocalId)?.refCount
+      const holdsBefore = holds()
+
+      expect(Item.peekReady(seedLocalId)).toBe(Item.getById(seedLocalId))
+      expect(holds()).toBe(holdsBefore + 1) // getById's hold, not peekReady's
+      expect(Item.peekReady(undefined)).toBeUndefined()
+      expect(Item.peekReady('not-a-cached-id')).toBeUndefined()
+
+      const title = ItemProperty.peekReady({ seedLocalId, propertyName: 'title' })
+      expect(title?.value).toBe('Peek')
+      expect(ItemProperty.peekReady({ seedLocalId, propertyName: 'notAProperty' })).toBeUndefined()
+
+      // A dropped (stopped) instance is gone from the cache, so it is never handed out.
+      Item.dropCachedInstancesForSeedIds([seedLocalId])
+      expect(Item.peekReady(seedLocalId)).toBeUndefined()
     })
   })
 
@@ -1009,6 +882,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Metadata Test',
         content: 'Metadata Content',
         author: 'Metadata Author',
@@ -1073,6 +947,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Version 1',
       })
       
@@ -1088,9 +963,6 @@ testDescribe('Item Integration Tests', () => {
         titleProp.value = 'Version 2'
         await titleProp.save()
       }
-      
-      // Wait a bit for version to update
-      await new Promise(resolve => setTimeout(resolve, 1000))
       
       // Item should detect the new version via liveQuery
       // Note: This test verifies the liveQuery subscription is set up correctly
@@ -1120,6 +992,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Drift Test',
       })
       await waitForItemIdle(item)
@@ -1151,6 +1024,7 @@ testDescribe('Item Integration Tests', () => {
 
       const reloaded = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         seedLocalId,
       })
       await waitForItemIdle(reloaded)
@@ -1188,6 +1062,7 @@ testDescribe('Item Integration Tests', () => {
       // Create item without passing modelInstance
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Independence Test',
         content: 'Independence Content',
       })
@@ -1225,6 +1100,107 @@ testDescribe('Item Integration Tests', () => {
       const properties = item.properties
       expect(properties.length).toBeGreaterThanOrEqual(2)
     })
+
+    it('should build properties from the DB model when another schema\'s same-named model is cached', async () => {
+      // A schema whose rows are gone but whose Model instance is still cached (e.g. removed earlier
+      // in the session) must not supply the property set for a same-named model in another schema.
+      const staleSchemaName = 'Test Schema Item Stale Shared Name'
+      const staleModelId = generateId()
+      const staleSchema = createTestSchema(staleSchemaName, {
+        SharedPost: { id: staleModelId, properties: { title: { dataType: 'Text' }, content: { dataType: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(staleSchema) }, staleSchema.version)
+      const staleModel = Model.create('SharedPost', staleSchemaName, { modelFileId: staleModelId, waitForReady: false })
+      await waitFor(staleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const db = BaseDb.getAppDb()
+      const [staleSchemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, staleSchemaName))
+      const staleLinks = await db.select({ modelId: modelSchemas.modelId }).from(modelSchemas).where(eq(modelSchemas.schemaId, staleSchemaRow.id))
+      for (const { modelId } of staleLinks) {
+        await db.delete(properties).where(eq(properties.modelId, modelId!))
+        await db.delete(modelUids).where(eq(modelUids.modelId, modelId!))
+      }
+      await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, staleSchemaRow.id))
+      for (const { modelId } of staleLinks) {
+        await db.delete(modelsTable).where(eq(modelsTable.id, modelId!))
+      }
+      await db.delete(schemas).where(eq(schemas.id, staleSchemaRow.id))
+
+      const schemaName = 'Test Schema Item Current Shared Name'
+      const modelId = generateId()
+      const currentSchema = createTestSchema(schemaName, {
+        SharedPost: { id: modelId, properties: { title: { dataType: 'Text' }, featureImage: { dataType: 'Image' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+      const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const item = await Item.create({ modelName: 'SharedPost', title: 'Shared name' })
+      await waitForItemIdle(item)
+
+      const names = item.properties.map((p) => p.propertyName)
+      expect(names).toContain('featureImage')
+      expect(names).not.toContain('content')
+    })
+
+    it('should not take properties from another schema when its own cached model was reimported', async () => {
+      const otherSchemaName = 'Test Schema Item Other Shared Name'
+      const otherModelId = generateId()
+      const otherSchema = createTestSchema(otherSchemaName, {
+        SharedPost: { id: otherModelId, properties: { title: { dataType: 'Text' }, content: { dataType: 'Text' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(otherSchema) }, otherSchema.version)
+      const otherModel = Model.create('SharedPost', otherSchemaName, { modelFileId: otherModelId, waitForReady: false })
+      await waitFor(otherModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      const schemaName = 'Test Schema Item Reimported Shared Name'
+      const modelId = generateId()
+      const currentSchema = createTestSchema(schemaName, {
+        SharedPost: { id: modelId, properties: { title: { dataType: 'Text' }, featureImage: { dataType: 'Image' } } },
+      })
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+      const model = Model.create('SharedPost', schemaName, { modelFileId: modelId, waitForReady: false })
+      await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+
+      // Drop every SharedPost row and reimport only the current schema: its cached Model now points at
+      // a deleted DB id (no properties) while the other schema's Model is still cached.
+      // (Both schemas may link the same SharedPost models row, so unlink both before deleting models.)
+      // Let both Models' own writes finish first, or one can fail or recreate rows after the deletes.
+      for (const m of [otherModel, model]) {
+        const writeProcess = (await waitFor(m.getService(), (snapshot) => !!snapshot.context.writeProcess)).context
+          .writeProcess!
+        await waitFor(writeProcess, (snapshot) => snapshot.value === 'success' || snapshot.value === 'error', {
+          timeout: 5000,
+        })
+      }
+      const db = BaseDb.getAppDb()
+      const schemaIds: number[] = []
+      const modelIds = new Set<number>()
+      for (const name of [otherSchemaName, schemaName]) {
+        const [schemaRow] = await db.select({ id: schemas.id }).from(schemas).where(eq(schemas.name, name))
+        schemaIds.push(schemaRow.id)
+        const links = await db.select({ modelId: modelSchemas.modelId }).from(modelSchemas).where(eq(modelSchemas.schemaId, schemaRow.id))
+        for (const { modelId: id } of links) modelIds.add(id!)
+        await db.delete(modelSchemas).where(eq(modelSchemas.schemaId, schemaRow.id))
+      }
+      for (const id of modelIds) {
+        await db.delete(properties).where(eq(properties.modelId, id))
+        await db.delete(modelUids).where(eq(modelUids.modelId, id))
+        await db.delete(modelsTable).where(eq(modelsTable.id, id))
+      }
+      for (const id of schemaIds) {
+        await db.delete(schemas).where(eq(schemas.id, id))
+      }
+      Schema.clearCache()
+      await importJsonSchema({ contents: JSON.stringify(currentSchema) }, currentSchema.version)
+
+      const item = await Item.create({ modelName: 'SharedPost', title: 'Reimported' })
+      await waitForItemIdle(item)
+
+      const names = item.properties.map((p) => p.propertyName)
+      expect(names).toContain('featureImage')
+      expect(names).not.toContain('content')
+    })
   })
 
   describe('Item reactive proxy', () => {
@@ -1250,6 +1226,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Proxy Test',
       })
       
@@ -1287,6 +1264,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Properties Test',
         content: 'Properties Content',
       })
@@ -1351,6 +1329,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'GOPD Test',
       })
       await waitForItemIdle(item)
@@ -1360,6 +1339,7 @@ testDescribe('Item Integration Tests', () => {
 
       const withRevoked = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'GOPD Revoked',
         revokedAt: 1_700_000_000,
       } as any)
@@ -1393,6 +1373,7 @@ testDescribe('Item Integration Tests', () => {
 
       const createdItem = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Publisher Test',
       })
       await waitForItemIdle(createdItem)
@@ -1437,6 +1418,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'No Publisher',
       })
       await waitForItemIdle(item)
@@ -1466,6 +1448,7 @@ testDescribe('Item Integration Tests', () => {
 
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'ReadOnly Test',
       })
       await waitForItemIdle(item)
@@ -1499,6 +1482,7 @@ testDescribe('Item Integration Tests', () => {
       
       const item = await Item.create({
         modelName: 'TestPost',
+        schemaName,
         title: 'Unload Test',
       })
       

@@ -24,7 +24,7 @@ describe('executeCreateArweaveDataItemsPhase2', () => {
     vi.restoreAllMocks()
   })
 
-  it('calls getPublishUploadData with onlyHtmlStorageSeedLocalIds and skipRelationRecursion', async () => {
+  it('calls getPublishUploadData with onlyHtmlStorageSeedLocalIds, walking relations', async () => {
     const item = {
       seedLocalId: 'parent1',
       getPublishUploads: () => [],
@@ -41,9 +41,11 @@ describe('executeCreateArweaveDataItemsPhase2', () => {
       undefined,
       expect.objectContaining({
         onlyHtmlStorageSeedLocalIds: ['htmlSeedA', 'htmlSeedB'],
-        skipRelationRecursion: true,
       }),
     )
+    // A related draft published with the item can own a deferred Html (images embedded in it).
+    const options = vi.mocked(getPublishUploadDataModule.getPublishUploadData).mock.calls[0]![3]
+    expect(options?.skipRelationRecursion).toBeUndefined()
   })
 
   it('forwards arweaveUploadTags when set on context', async () => {

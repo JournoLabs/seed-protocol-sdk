@@ -6,7 +6,7 @@ import { getPublishPayload } from '@/db/read/getPublishPayload'
 import { updateSeedUid } from '@/db/write/updateSeedUid'
 import { createSeed } from '@/db/write/createSeed'
 import { setGetPublisherForNewSeeds, getGetPublisherForNewSeeds } from '@/helpers/publishConfig'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createItemWithBasicPropertiesOnly,
@@ -20,10 +20,10 @@ testDescribe('updateSeedUid and persistSeedUid', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()

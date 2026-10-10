@@ -163,5 +163,12 @@ export async function revokeAttestations(params: {
   }
 
   const revokedAt = Math.floor(Date.now() / 1000)
-  await updateSeedRevokedAt({ seedLocalId, revokedAt })
+  // Mark the revoked version and property attestations too, so local rows read as revoked before the
+  // next EAS sync confirms it (sync keeps them as the item's last values, see ADR 0006).
+  await updateSeedRevokedAt({
+    seedLocalId,
+    revokedAt,
+    metadataUids: [...metadataBySchema.values()].flat(),
+    versionUids,
+  })
 }

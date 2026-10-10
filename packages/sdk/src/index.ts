@@ -26,6 +26,12 @@ export {
 export type { PropertyAttestationApplyPair } from './db/write/applyPropertyAttestationUidsFromPublish'
 export { getVersionData } from './db/read/subqueries/versionData'
 export { getMetadataLatest } from './db/read/subqueries/metadataLatest'
+export {
+  compareMetadataRowsLatestFirst,
+  pickLatestMetadataRowPerProperty,
+  METADATA_LATEST_FIRST_ORDER_SQL,
+} from './helpers/compareMetadataRowsLatestFirst'
+export type { MetadataRecencyRow } from './helpers/compareMetadataRowsLatestFirst'
 export { loadAllSchemasFromDb } from './helpers/schema'
 export { schemaMachine } from './Schema/service/schemaMachine'
 export { propertyMachine } from './ItemProperty/service/propertyMachine'
@@ -55,6 +61,15 @@ export type { ModelValues } from './types/model'
 
 export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
+export { AmbiguousModelError } from './Model/errors'
+export { FileSystemLockedError } from './helpers/FileManager/errors'
+export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
+export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
+export { TabLockTimeoutError } from './helpers/tabLocks'
+export {
+  MODEL_AMBIGUOUS_EVENT,
+  type ModelAmbiguousEventPayload,
+} from './db/read/resolveModelForSyncedSeed'
 export { ModelProperty } from './ModelProperty/ModelProperty'
 export { Schema } from './Schema/Schema'
 // Note: SchemaAllOptions type is available from './Schema/Schema'
@@ -137,7 +152,10 @@ export {
   isValidEasAttestationUid,
   normalizeBytes32Hex,
 } from '@seedprotocol/eas'
-export type { AttestationLikeForCanonical } from '@seedprotocol/eas'
+export type {
+  AttestationLikeForCanonical,
+  PickLatestPropertyAttestationsOptions,
+} from '@seedprotocol/eas'
 export {
   isItemOwned,
   isLocalUnsealedDraft,
@@ -277,14 +295,26 @@ export {
   type PublishValidationError,
   type ValidateItemForPublishResult,
 } from './db/read/getPublishPayload'
+export {
+  RelatedItemUnpublishedError,
+  RELATED_ITEM_UNPUBLISHED_CODE,
+  type UnpublishedRelatedItem,
+} from './db/read/publishErrors'
 
 export { getRelatedItemsForPublish } from './db/read/getRelatedItemsForPublish'
+export {
+  getPublishDraftGraph,
+  type PublishDraftGraph,
+  type PublishDraftGraphNode,
+  type GetPublishDraftGraphOptions,
+} from './db/read/publishDraftGraph'
 export {
   itemHasPublishUploadCandidates,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
 export {
   summarizePublishWork,
+  getUnpublishedRelatedItems,
   shouldAttestProperty,
   estimateDataUriByteLength,
   type PublishWorkSummary,
@@ -299,6 +329,10 @@ export {
   extractDataUriImagesFromHtml,
   replaceDataUrisInParsedHtml,
   HtmlEmbeddedDataUriLimitError,
+  findSeedPropertyRefsInHtml,
+  replaceSeedPropertyRefsInHtml,
+  HtmlSeedPropertyRefError,
+  SEED_PROPERTY_REF_PREFIX,
   HTML_EMBEDDED_MAX_IMAGES_PER_DOC,
   HTML_EMBEDDED_MAX_IMAGE_BYTES,
   HTML_EMBEDDED_MAX_TOTAL_BYTES,

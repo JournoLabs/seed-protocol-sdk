@@ -4,6 +4,7 @@ import * as syncDbWithEas from '@/events/item/syncDbWithEas'
 import {
   setupTestEnvironment,
   teardownTestEnvironment,
+  SETUP_HOOK_TIMEOUT_MS,
 } from '../test-utils/client-init'
 
 const ownedAddr = '0x1234567890123456789012345678901234567890'
@@ -16,9 +17,9 @@ describe.sequential('syncFromEasOnAddressChange', () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
       configOverrides: { syncFromEasOnAddressChange: true },
-      timeout: 120000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 120000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -65,6 +66,10 @@ describe.sequential('syncFromEasOnAddressChange', () => {
 
     await client.setAddresses([ownedAddr])
     await new Promise((r) => setTimeout(r, 400))
-    expect(runSyncSpy).not.toHaveBeenCalled()
+    // Client init also requests a sync once models are added (models_init, no addresses), which can
+    // land in this window; only an address-change sync carries the addresses.
+    expect(runSyncSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ addresses: expect.arrayContaining([ownedAddr]) }),
+    )
   })
 })

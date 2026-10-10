@@ -11,12 +11,25 @@ import {
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
+import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'
+
+/** The parts of the publish's draft graph that decide which refs a publish leaves for later. */
+type DraftGraphRefs = Pick<PublishDraftGraph, 'deferredProperties' | 'backReferences'>
 import { IItem, IItemProperty } from '@/interfaces'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
 import type { UploadProperty } from '@/db/read/getPublishUploads'
 import type { PublishMode } from '@/db/read/getPublishPayload'
+import { isSeedRevoked } from '@/db/read/isSeedRevoked'
+import type { UnpublishedRelatedItem } from '@/db/read/publishErrors'
+import {
+  findRelatedSeedRow,
+  htmlPropertyNameForHtmlSeed,
+  isUnpublishedSeed,
+  relatedModelNameFromDef,
+} from '@/db/read/resolveRelatedSeedRef'
 
 export type { PublishMode }
 
@@ -32,6 +45,11 @@ export type PublishWorkSummary = {
   attestationCount: number
   uploadCount: number
   uploadBytes: number
+  /**
+   * References the publish would attest to items whose seed was unpublished. When non-empty,
+   * publishing fails with RelatedItemUnpublishedError before anything is sent.
+   */
+  unpublishedRelatedItems: UnpublishedRelatedItem[]
 }
 
 const DATA_URI = /^data:[^;]+;base64,([\s\S]*)$/i
@@ -242,21 +260,81 @@ async function relatedIfUnpublished(
   return related
 }
 
-async function unpublishedListItems(listProperty: IItemProperty<any>): Promise<IItem<any>[]> {
-  const context = propertyContext(listProperty)
+/** Seed refs held by a relation/image property (one) or a list property (each member). */
+function seedRefsOf(prop: IItemProperty<any>, isList: boolean): string[] {
+  const context = propertyContext(prop)
   if (!context) return []
   let value = context.propertyValue
-  if (!value) return []
-  if (typeof value === 'string') {
-    value = parseListPropertyValueFromStorage(value)
+  if (isList) {
+    if (typeof value === 'string') value = parseListPropertyValueFromStorage(value)
+    return (Array.isArray(value) ? value : [])
+      .map((v) => normalizeRelationPropertyValue(v))
+      .filter((v): v is string => !!v)
   }
-  const arr = Array.isArray(value) ? value : []
-  const out: IItem<any>[] = []
-  for (const seedId of arr) {
-    const related = await loadRelatedItem(seedId)
-    if (related && isZeroUid(related.seedUid)) out.push(related)
+  const ref = normalizeRelationPropertyValue(value)
+  return ref ? [ref] : []
+}
+
+/** Like getPublishPayload: attested refs to revoked seeds block the publish. */
+async function collectUnpublishedRelatedItems(
+  props: IItemProperty<any>[],
+  isList: boolean,
+  forceFullSnapshot: boolean,
+  out: UnpublishedRelatedItem[],
+  backReferences?: Map<IItemProperty<any>, Set<string>>,
+): Promise<void> {
+  for (const prop of props) {
+    if (!shouldAttestProperty(prop, forceFullSnapshot)) continue
+    for (const ref of seedRefsOf(prop, isList)) {
+      const { seedLocalId, seedUid } = resolveSeedIdsFromRefString(ref)
+      if (!seedLocalId && !seedUid) continue
+      const row = await findRelatedSeedRow({ seedLocalId, seedUid })
+      // A back reference to a seed this publish creates (e.g. a revoked root published again) is
+      // left for a later publish, not attested (publishDraftGraph.ts)
+      if (row && backReferences?.get(prop)?.has(row.seedLocalId)) continue
+      if (!isUnpublishedSeed(row)) continue
+      if (
+        out.some(
+          (r) => r.propertyName === prop.propertyName && r.seedLocalId === row.seedLocalId,
+        )
+      ) {
+        continue
+      }
+      const related = await loadRelatedItem(row.seedLocalId)
+      out.push({
+        propertyName: prop.propertyName,
+        modelName: related?.modelName ?? relatedModelNameFromDef(prop.propertyDef) ?? row.type ?? 'unknown',
+        seedLocalId: row.seedLocalId,
+        seedUid: row.seedUid,
+      })
+    }
   }
-  return out
+}
+
+/**
+ * Images embedded in Html properties (co-published) whose seed was revoked: getPublishPayload rejects
+ * them like image properties pointing at revoked seeds. Like getPublishPayload, checks the published
+ * item's co-publish rows and those of the draft items published with it.
+ */
+async function collectUnpublishedEmbeddedImages(
+  item: IItem<any>,
+  out: UnpublishedRelatedItem[],
+): Promise<void> {
+  const appDb = BaseDb.getAppDb()
+  if (!appDb || !item.seedLocalId) return
+  for (const owner of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
+    const rows = await appDb
+      .select()
+      .from(htmlEmbeddedImageCoPublish)
+      .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, owner.seedLocalId))
+    for (const row of rows) {
+      const seed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
+      if (!isUnpublishedSeed(seed)) continue
+      const propertyName = htmlPropertyNameForHtmlSeed(owner, row.htmlSeedLocalId)
+      if (out.some((r) => r.propertyName === propertyName && r.seedLocalId === seed.seedLocalId)) continue
+      out.push({ propertyName, modelName: 'Image', seedLocalId: seed.seedLocalId, seedUid: seed.seedUid })
+    }
+  }
 }
 
 async function appendCoPublishImages(
@@ -266,6 +344,7 @@ async function appendCoPublishImages(
   visited: Set<string>,
   forceFullSnapshot: boolean,
   publishMode: PublishMode,
+  graph: DraftGraphRefs,
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
@@ -280,7 +359,9 @@ async function appendCoPublishImages(
       seedLocalId: row.imageSeedLocalId,
       modelName: 'Image',
     })
-    if (!imageItem) continue
+    // Like getPublishPayload: an embedded image that already has a seed (published, or unpublished
+    // and reported by collectUnpublishedEmbeddedImages) is not co-published.
+    if (!imageItem || !isZeroUid(imageItem.seedUid)) continue
 
     const st =
       imageItem.internalProperties['storageTransactionId'] ??
@@ -293,7 +374,7 @@ async function appendCoPublishImages(
       await addUpload(acc, seen, `seed:${imageItem.seedLocalId}`, dataUriBytes)
     }
 
-    await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited)
+    await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph)
   }
 }
 
@@ -304,6 +385,7 @@ async function summarizeItem(
   acc: PublishWorkSummary,
   seenUploads: Set<string>,
   visited: Set<string>,
+  graph: DraftGraphRefs,
 ): Promise<void> {
   const seedLocalId = item.seedLocalId
   if (!seedLocalId || visited.has(seedLocalId)) return
@@ -330,20 +412,33 @@ async function summarizeItem(
     seenUploads,
   )
 
+  await collectUnpublishedRelatedItems(
+    [...itemRelationProperties, ...itemImageProperties],
+    false,
+    forceFullSnapshot,
+    acc.unpublishedRelatedItems,
+    graph.backReferences,
+  )
+  await collectUnpublishedRelatedItems(
+    itemListProperties,
+    true,
+    forceFullSnapshot,
+    acc.unpublishedRelatedItems,
+    graph.backReferences,
+  )
+
+  // Draft Image/File/Html/Json items its storage relations point at. Draft model items its relations
+  // and lists reach are summarized by summarizePublishWork from the publish's draft graph.
+  const storageProperties = new Set(itemImageProperties)
   for (const rel of itemRelationProperties) {
+    if (!storageProperties.has(rel)) continue
     const related = await relatedIfUnpublished(rel)
     if (related) {
-      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited)
+      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph)
     }
   }
 
-  for (const listProperty of itemListProperties) {
-    for (const related of await unpublishedListItems(listProperty)) {
-      await summarizeItem(related, publishMode, forceFullSnapshot, acc, seenUploads, visited)
-    }
-  }
-
-  await appendCoPublishImages(item, acc, seenUploads, visited, forceFullSnapshot, publishMode)
+  await appendCoPublishImages(item, acc, seenUploads, visited, forceFullSnapshot, publishMode, graph)
 
   const attestable: IItemProperty<any>[] = [
     ...itemBasicProperties,
@@ -357,6 +452,8 @@ async function summarizeItem(
     const key = prop.localId || `${prop.propertyName}:${prop.seedLocalId}`
     if (seenProps.has(key)) continue
     seenProps.add(key)
+    // A ref back to an item this publish creates is left for a later publish (publishDraftGraph.ts).
+    if (graph.deferredProperties.has(prop)) continue
     if (shouldAttestProperty(prop, forceFullSnapshot)) acc.attestationCount += 1
   }
 }
@@ -365,12 +462,60 @@ async function summarizeItem(
  * Local measurement of what a publish would do: seed/version/attestation counts
  * and Arweave upload byte totals. Does not hit the network or create transactions.
  */
+const publishForcesFullSnapshot = async (
+  item: IItem<any>,
+  publishMode: PublishMode,
+): Promise<{ republishRevokedSeed: boolean; forceFullSnapshot: boolean }> => {
+  // Like getPublishPayload: an item whose seed was revoked republishes as a new seed with a full
+  // snapshot.
+  const republishRevokedSeed = !isZeroUid(item.seedUid) && (await isSeedRevoked(item.seedLocalId))
+  return { republishRevokedSeed, forceFullSnapshot: publishMode === 'new_version' || republishRevokedSeed }
+}
+
+async function collectUnpublishedRelatedItemsOf(
+  item: IItem<any>,
+  forceFullSnapshot: boolean,
+  out: UnpublishedRelatedItem[],
+  backReferences: DraftGraphRefs['backReferences'],
+): Promise<void> {
+  const { itemRelationProperties, itemListProperties, itemImageProperties } =
+    await getSegmentedItemProperties(item)
+  await collectUnpublishedRelatedItems(
+    [...itemRelationProperties, ...itemImageProperties],
+    false,
+    forceFullSnapshot,
+    out,
+    backReferences,
+  )
+  await collectUnpublishedRelatedItems(itemListProperties, true, forceFullSnapshot, out, backReferences)
+}
+
+/**
+ * References a publish of `item` would attest to items whose seed was unpublished (revoked), the
+ * same ones getPublishPayload rejects with RelatedItemUnpublishedError. Local reads only: the
+ * publish package checks this before registering schemas or uploading anything.
+ */
+export const getUnpublishedRelatedItems = async (
+  item: IItem<any>,
+  options?: SummarizePublishWorkOptions,
+): Promise<UnpublishedRelatedItem[]> => {
+  const { forceFullSnapshot } = await publishForcesFullSnapshot(item, options?.publishMode ?? 'patch')
+  const out: UnpublishedRelatedItem[] = []
+  // The item and every draft its publish carries along (publishDraftGraph.ts).
+  const { drafts, backReferences } = await getPublishDraftGraph(item, { forceFullSnapshot })
+  for (const owner of [item, ...drafts.map((d) => d.item)]) {
+    await collectUnpublishedRelatedItemsOf(owner, forceFullSnapshot, out, backReferences)
+  }
+  await collectUnpublishedEmbeddedImages(item, out)
+  return out
+}
+
 export const summarizePublishWork = async (
   item: IItem<any>,
   options?: SummarizePublishWorkOptions,
 ): Promise<PublishWorkSummary> => {
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const forceFullSnapshot = publishMode === 'new_version'
+  const { republishRevokedSeed, forceFullSnapshot } = await publishForcesFullSnapshot(item, publishMode)
   const acc: PublishWorkSummary = {
     publishMode,
     seedCount: 0,
@@ -379,7 +524,17 @@ export const summarizePublishWork = async (
     attestationCount: 0,
     uploadCount: 0,
     uploadBytes: 0,
+    unpublishedRelatedItems: [],
   }
-  await summarizeItem(item, publishMode, forceFullSnapshot, acc, new Set(), new Set())
+  const graph = await getPublishDraftGraph(item, { forceFullSnapshot })
+  const { drafts } = graph
+  const seenUploads = new Set<string>()
+  const visited = new Set<string>()
+  for (const owner of [item, ...drafts.map((d) => d.item)]) {
+    await summarizeItem(owner, publishMode, forceFullSnapshot, acc, seenUploads, visited, graph)
+  }
+  await collectUnpublishedEmbeddedImages(item, acc.unpublishedRelatedItems)
+  // summarizeItem counts the root as an existing seed (it has a seedUid).
+  if (republishRevokedSeed) acc.newSeedCount += 1
   return acc
 }

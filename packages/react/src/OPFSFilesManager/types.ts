@@ -36,6 +36,10 @@ export type OPFSFilesManagerNotice =
       /** Paths that onBeforeDelete kept. */
       skipped: string[]
       failed: { path: string; error: string }[]
+      /** Set when a whole folder was deleted. */
+      folder?: string
+      /** Whether the folder itself is gone. False when it still holds kept or failed files. */
+      folderRemoved?: boolean
     }
   | {
       kind: 'download'
@@ -109,7 +113,7 @@ export interface OPFSFilesManagerProps {
   deleteWarning?: (files: OPFSFile[]) => string | null
   /**
    * Replace the built-in delete confirmation. Receives every file that will be removed,
-   * including resized copies. Resolve true to delete.
+   * including resized copies, or every file in a folder being deleted. Resolve true to delete.
    */
   confirmDelete?: (files: OPFSFile[]) => Promise<boolean>
   /**

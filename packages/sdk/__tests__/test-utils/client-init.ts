@@ -22,9 +22,9 @@
  *   beforeAll(async () => {
  *     testProjectPath = await setupTestEnvironment({
  *       testFileUrl: import.meta.url,
- *       timeout: 90000,
+ *       timeout: SETUP_HOOK_TIMEOUT_MS,
  *     })
- *   }, 90000)
+ *   }, SETUP_HOOK_TIMEOUT_MS)
  * })
  * ```
  */
@@ -34,6 +34,8 @@ import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import type { SeedConstructorOptions } from '@/types'
 import { and } from 'drizzle-orm'
+import { cleanupLeftoverOpfsSchemaFiles, cleanupTestSchemaFiles } from './cleanupTestSchemaFiles'
+import { cleanupTestSchemaData } from './cleanupTestDb'
 
 // Dynamically import client from src/client (same pattern as client.test.ts)
 type ClientType = typeof import('@/client')['client']
@@ -53,6 +55,14 @@ async function getClient(): Promise<ClientType> {
   return cachedClient
 }
 
+/**
+ * Timeout for test setup hooks (client init, DB readiness, fixtures). Healthy setup takes under 10s
+ * (slowest measured beforeAll: ~8.4s in the browser projects), so this leaves ~3x headroom while
+ * making a hung setup fail in 30s instead of 90-120s. Use it for the hook timeout and for
+ * setupTestEnvironment's `timeout` so the inner wait never outlives the hook.
+ */
+export const SETUP_HOOK_TIMEOUT_MS = 30_000
+
 export interface TestClientConfig {
   config: SeedConstructorOptions
   projectPath?: string
@@ -62,7 +72,7 @@ export interface TestClientConfig {
 /**
  * Wait for database to be ready
  */
-async function waitForDatabase(timeout: number = 30000): Promise<void> {
+async function waitForDatabase(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const startTime = Date.now()
   
   return new Promise<void>((resolve, reject) => {
@@ -98,7 +108,7 @@ async function waitForDatabase(timeout: number = 30000): Promise<void> {
 /**
  * Wait for client and database to be ready
  */
-async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
+async function waitForClientAndDbReady(timeout: number = SETUP_HOOK_TIMEOUT_MS): Promise<void> {
   const client = await getClient()
   const startTime = Date.now()
   
@@ -130,7 +140,7 @@ async function waitForClientAndDbReady(timeout: number = 60000): Promise<void> {
  * @returns Promise that resolves when client and database are ready
  */
 export async function initializeTestClient(options: TestClientConfig): Promise<void> {
-  const { config, timeout = 90000 } = options
+  const { config, timeout = SETUP_HOOK_TIMEOUT_MS } = options
 
   // Dynamically import client (same pattern as client.test.ts)
   const client = await getClient()
@@ -355,9 +365,6 @@ export async function initializeTestClient(options: TestClientConfig): Promise<v
   } catch (error: any) {
     throw new Error(`Database not ready after initialization: ${error?.message || String(error)}`)
   }
-  
-  // Small delay to ensure everything is fully settled
-  await new Promise(resolve => setTimeout(resolve, 500))
 }
 
 /**
@@ -507,6 +514,15 @@ export async function setupTestEnvironment(options: {
     await options.beforeInit()
   }
 
+  // Browser test files share one OPFS store. Remove schema files an earlier file left behind so
+  // client.init doesn't re-import them (each adds ~0.8s to init, which pushed setup past hookTimeout).
+  if (!isNodeEnv && config.config.filesDir) {
+    const removed = await cleanupLeftoverOpfsSchemaFiles(config.config.filesDir)
+    if (removed > 0) {
+      console.log(`[setupTestEnvironment] Removed ${removed} leftover test schema files from OPFS`)
+    }
+  }
+
   console.log('Initializing client...')
   
   // Initialize client
@@ -516,7 +532,24 @@ export async function setupTestEnvironment(options: {
   })
   
   console.log('Client initialized')
-  
+
+  // The OPFS database is shared too. client.init builds Model instances for every schema still in it,
+  // and a model created later by name (e.g. 'Note') can adopt another schema's same-named row and
+  // instance. Start each browser test file with only the Seed Protocol schema.
+  if (!isNodeEnv) {
+    await cleanupTestSchemaData()
+  }
+
+  // Init no longer clears stored addresses when given none (persistInitAddresses), so addresses an
+  // earlier browser file connected would make this file's unstamped drafts read-only. Start each
+  // file without them unless it passes its own.
+  if (!isNodeEnv && !options.configOverrides?.addresses) {
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    const { appState } = await import('@/seedSchema')
+    const { eq } = await import('drizzle-orm')
+    await BaseDb.getAppDb()?.delete(appState).where(eq(appState.key, 'addresses'))
+  }
+
   // Store test project path for cleanup if it's a temporary directory
   if (isNodeEnv && testProjectPath && !options.projectPath) {
     const os = await import('os')
@@ -557,7 +590,19 @@ function scheduleTempDirCleanup(dir: string, fs: typeof import('fs')): void {
  */
 export async function teardownTestEnvironment(): Promise<void> {
   const isNodeEnv = typeof window === 'undefined'
-  
+
+  // Browser files on one worker share OPFS: whatever this file leaves in the database, the next
+  // file's client.init loads (its schemas, Model/ModelProperty instances and the work they start).
+  // Remove the file's test schema rows and items too, not just the schema files.
+  if (!isNodeEnv) {
+    const { BaseDb } = await import('@/db/Db/BaseDb')
+    if (BaseDb.getAppDb()) {
+      await cleanupTestSchemaData({ items: true })
+    } else {
+      await cleanupTestSchemaFiles()
+    }
+  }
+
   if (isNodeEnv) {
     // Restore original working directory
     if (originalCwd) {

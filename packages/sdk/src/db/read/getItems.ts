@@ -11,6 +11,10 @@ import { ZERO_BYTES32 } from '@/helpers/constants'
 
 type GetItemsDataProps = {
   modelName?: string
+  /** Restrict to items of one model (seeds.model_file_id), by its Model.id ... */
+  modelFileId?: string
+  /** ... or by the schema that defines `modelName`. */
+  schemaName?: string
   deleted?: boolean
   includeEas?: boolean
   addressFilter?: 'owned' | 'watched' | 'all'
@@ -23,12 +27,15 @@ type GetItemsData = (props: GetItemsDataProps) => Promise<ItemData[]>
  *
  * - `includeEas: false` (default): drafts only — `seeds.uid` is null, empty, legacy `'NULL'`, or zero-bytes32.
  *   On-chain seeds (real EAS seed UID) require `includeEas: true`.
- * - `latestVersionUid` / `latestVersionLocalId`: head version **row** by `created_at` (may be unattested).
+ * - `latestVersionUid` / `latestVersionLocalId`: head version **row** by `created_at` (may be unattested),
+ *   skipping revoked versions; null when every version is revoked.
  * - `publishedVersionUid` / `publishedVersionLocalId`: filled in a second batched read (same rules as
- *   `getLatestPublishedVersionRow`).
+ *   `getLatestPublishedVersionRow`: attested and not revoked).
  */
 export const getItemsData: GetItemsData = async ({
   modelName,
+  modelFileId,
+  schemaName,
   deleted,
   includeEas = false,
   addressFilter,
@@ -50,6 +57,15 @@ export const getItemsData: GetItemsData = async ({
 
   if (modelName) {
     conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+  }
+
+  if (!modelFileId && schemaName && modelName) {
+    const { resolveModelRecord } = await import('./resolveModelRecord')
+    modelFileId = (await resolveModelRecord(modelName, { schemaName }))?.schemaFileId ?? undefined
+    if (!modelFileId) return [] // that schema has no such model
+  }
+  if (modelFileId) {
+    conditions.push(eq(seeds.modelFileId, modelFileId))
   }
 
   if (addressFilter === 'owned') {
@@ -95,6 +111,7 @@ export const getItemsData: GetItemsData = async ({
       seedLocalId: seeds.localId,
       seedUid: seeds.uid,
       schemaUid: seeds.schemaUid,
+      modelFileId: seeds.modelFileId,
       ...selectModelNameOrType,
       attestationCreatedAt: seeds.attestationCreatedAt,
       versionsCount: versionData.versionsCount,

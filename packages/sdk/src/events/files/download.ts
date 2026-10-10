@@ -12,7 +12,6 @@ import debug from 'debug'
 import { waitFor } from 'xstate'
 import { getMetadata } from '@/db/read/getMetadata'
 import { saveMetadata } from '@/db/write/saveMetadata'
-import { saveAppState } from '@/db/write/saveAppState'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema'
 import { BaseEasClient, BaseQueryClient, BaseArweaveClient, ensureReadGatewaySelected } from '@/helpers'
@@ -216,7 +215,6 @@ const downloadTransactionIds = async (
   const queryClient = BaseQueryClient.getQueryClient()
 
   const transactionIdsToDownload: string[] = []
-  let excludedChanged = false
 
   await ensureReadGatewaySelected()
 
@@ -257,13 +255,6 @@ const downloadTransactionIds = async (
     } catch (error) {
       logger(error)
     }
-  }
-
-  if (excludedChanged) {
-    await saveAppState(
-      'excludedTransactions',
-      JSON.stringify(Array.from(excludedTransactions)),
-    )
   }
 
   if (transactionIdsToDownload.length === 0) {

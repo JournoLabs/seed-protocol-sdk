@@ -12,6 +12,5 @@
       "@/test/*": ["packages/sdk/__tests__/*"]
     }
   },
-  "include": ["packages/sdk/src/**/*", "packages/sdk/__tests__/**/*", "scripts/**/*"],
-  "exclude": ["packages/sdk/__tests__/__fixtures__/invalid-type.ts"]
+  "include": ["packages/sdk/src/**/*", "packages/sdk/__tests__/**/*", "scripts/**/*"]
 }

@@ -5,10 +5,11 @@ import { ModelMachineContext } from '../modelMachine'
 // import { Schema } from '@/Schema/Schema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, isNull } from 'drizzle-orm'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '../../../helpers/constants'
 import debug from 'debug'
+import { isActorStopped } from '@/helpers/entity/entityCommon'
 
 const logger = debug('seedSdk:model:actors:loadOrCreateModel')
 
@@ -57,7 +58,7 @@ const createPropertyInstances = async (propertyFileIds: string[]): Promise<void>
 export const loadOrCreateModel = fromCallback<
   EventObject,
   FromCallbackInput<ModelMachineContext>
->(({ sendBack, input: { context } }) => {
+>(({ sendBack, input: { context }, self }) => {
   const _loadOrCreateModel = async (): Promise<void> => {
     const { modelName, schemaName, id, _idFromSchema } = context // id is now the schemaFileId (string)
 
@@ -96,11 +97,36 @@ export const loadOrCreateModel = fromCallback<
         // But if we have a schemaFileId and the model found by name has a different schemaFileId,
         // don't use it - we're creating a new model from a schema file with a specific ID
         if (!modelRecord) {
-          const dbModels = await db
-            .select()
+          // Model names are only unique per schema: prefer this schema's row, and otherwise only
+          // consider same-name rows that no schema claims yet (never another schema's model).
+          const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
+          const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
+          let dbModels = await db
+            .select({
+              id: modelsTable.id,
+              name: modelsTable.name,
+              schemaFileId: modelsTable.schemaFileId,
+              isEdited: modelsTable.isEdited,
+            })
             .from(modelsTable)
-            .where(eq(modelsTable.name, modelName))
+            .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+            .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
+            .where(and(eq(modelsTable.name, modelName), eq(schemasTable.name, schemaName)))
             .limit(1)
+          if (dbModels.length === 0) {
+            dbModels = await db
+              .select({
+                id: modelsTable.id,
+                name: modelsTable.name,
+                schemaFileId: modelsTable.schemaFileId,
+                isEdited: modelsTable.isEdited,
+              })
+              .from(modelsTable)
+              .leftJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+              // Stubs only: an unlinked row with a schemaFileId is a deleted schema's leftover, not ours
+              .where(and(eq(modelsTable.name, modelName), isNull(modelSchemas.id), isNull(modelsTable.schemaFileId)))
+              .limit(1)
+          }
           
           if (dbModels.length > 0) {
             const foundModel = dbModels[0]
@@ -111,7 +137,9 @@ export const loadOrCreateModel = fromCallback<
             // This handles the case where Model.create was called with a generated ID, but the model
             // already exists in the database with a different ID. By updating the current instance's
             // schemaFileId to match the database, both will point to the same cached instance.
-            if (dbSchemaFileId) {
+            // Skip for schema models (_idFromSchema): their id is authoritative, and a same-name row
+            // with a different id belongs to another schema (e.g. two schemas that each define "Post").
+            if (dbSchemaFileId && !(_idFromSchema && schemaFileId && schemaFileId !== dbSchemaFileId)) {
               try {
                 const modelMod = await import('../../../Model/Model')
                 const { Model } = modelMod
@@ -178,7 +206,8 @@ export const loadOrCreateModel = fromCallback<
             .filter((id: string | null | undefined): id is string => id !== null && id !== undefined)
 
           if (propertyFileIds.length > 0) {
-            await createPropertyInstances(propertyFileIds)
+            // Not for a model stopped meanwhile (unloaded, or evicted with its schema)
+            if (!isActorStopped(self)) await createPropertyInstances(propertyFileIds)
           }
 
           // Generate schemaFileId if not set
@@ -225,6 +254,8 @@ export const loadOrCreateModel = fromCallback<
     try {
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
+      // Stopped meanwhile (unloaded, or evicted with its schema): don't load the schema again
+      if (isActorStopped(self)) return
       const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
       const schemaSnapshot = schema.getService().getSnapshot()
       
@@ -471,8 +502,10 @@ export const loadOrCreateModel = fromCallback<
     try {
       const schemaMod = await import('../../../Schema/Schema')
       const { Schema } = schemaMod
-      const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
-      schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
+      if (!isActorStopped(self)) {
+        const schema = Schema.create(schemaName, { waitForReady: false }) as import('../../../Schema/Schema').Schema
+        schema.getService().send({ type: 'markAsDraft', propertyKey: 'schema:models' })
+      }
     } catch (err) {
       logger(`Failed to mark schema as draft after creating model: ${err}`)
     }

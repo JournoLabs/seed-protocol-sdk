@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/sdk",
-  "version": "0.6.10",
+  "version": "0.7.1",
   "description": "Official TypeScript SDK for Seed Protocol — local-first ORM with SQLite/OPFS, syncing via Ethereum Attestation Service (EAS) and Arweave.",
   "keywords": [
     "seed-protocol",
@@ -52,15 +52,13 @@
     "directory": "packages/sdk"
   },
   "optionalDependencies": {
-    "@tanstack/query-sync-storage-persister": "5.90.15",
-    "@tanstack/react-query": "^5.90.15",
-    "@tanstack/react-query-persist-client": "5.90.15",
+    "@tanstack/react-query": "^5.104.1",
     "@zenfs/core": "2.5.6",
     "@zenfs/dom": "1.2.9",
     "fsevents": "^2.3.3"
   },
   "peerDependencies": {
-    "@tanstack/react-query": "^5.90.15",
+    "@tanstack/react-query": "^5.102.0",
     "@zenfs/core": "2.5.6",
     "@zenfs/dom": "1.2.9",
     "drizzle-orm": "^0.44.3",
@@ -95,7 +93,7 @@
     "lodash-es": "^4.17.22",
     "nanoid": "^5.1.5",
     "nanoid-dictionary": "^5.0.0",
-    "parse5": "^8.0.0",
+    "parse5": "8.0.1",
     "pluralize": "^8.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

@@ -46,20 +46,26 @@ const toCamelCase = (str: string): string => {
 type AssembleContext = {
   seedUidToModelType: Map<string, string>
   relatedSeedUids: Set<string>
+  /** Related seeds each seed's properties name (what its record depends on besides itself). */
+  relatedSeedUidsBySeedUid: Map<string, Set<string>>
   versionUidToSeedUid: Map<string, string>
   assembledItems: Map<string, Record<string, unknown>>
   versionsBySeedUid: Map<string, AttestationLike[]>
   latestVersionUidsBySeedUid: Map<string, string>
+  /** Requested seeds left out because every version is revoked; not fetched again as related. */
+  droppedSeedUids: Set<string>
 }
 
 function createAssembleContext(): AssembleContext {
   return {
     seedUidToModelType: new Map(),
     relatedSeedUids: new Set(),
+    relatedSeedUidsBySeedUid: new Map(),
     versionUidToSeedUid: new Map(),
     assembledItems: new Map(),
     versionsBySeedUid: new Map(),
     latestVersionUidsBySeedUid: new Map(),
+    droppedSeedUids: new Set(),
   }
 }
 
@@ -77,6 +83,19 @@ function ensureSeedIdentity(clone: Record<string, unknown>, seedUid: string): vo
   } else if (clone.Attester && !clone.attester) {
     clone.attester = clone.Attester
   }
+}
+
+function addRelatedSeedUid(
+  ctx: AssembleContext,
+  property: AttestationLike,
+  relatedSeedUid: string,
+): void {
+  ctx.relatedSeedUids.add(relatedSeedUid)
+  const seedUid = ctx.versionUidToSeedUid.get(property.refUID)
+  if (!seedUid) return
+  const related = ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? new Set<string>()
+  related.add(relatedSeedUid)
+  ctx.relatedSeedUidsBySeedUid.set(seedUid, related)
 }
 
 async function processItemProperty(
@@ -149,10 +168,10 @@ async function processItemProperty(
         }
       }
       metadata.value.forEach((value: string) => {
-        if (!relationValuesToExclude.includes(value)) ctx.relatedSeedUids.add(value)
+        if (!relationValuesToExclude.includes(value)) addRelatedSeedUid(ctx, property, value)
       })
     } else if (!relationValuesToExclude.includes(metadata.value as string)) {
-      ctx.relatedSeedUids.add(metadata.value as string)
+      addRelatedSeedUid(ctx, property, metadata.value as string)
     }
   }
 
@@ -181,6 +200,14 @@ async function processSeeds(
   ctx: AssembleContext,
   seeds: AttestationLike[],
   dataSource: QueryDataSource,
+  opts: {
+    dropSeedsWithOnlyRevokedVersions?: boolean
+    /**
+     * Versions already fetched with `getVersionsForSeeds(…, { includeRevoked: true })` for these
+     * seeds (and possibly others, which are ignored), so the request isn't made again.
+     */
+    versions?: AttestationLike[]
+  } = {},
 ): Promise<void> {
   const seedUids: string[] = []
 
@@ -202,7 +229,26 @@ async function processSeeds(
 
   if (seedUids.length === 0) return
 
-  const itemVersions = await dataSource.getVersionsForSeeds(seedUids)
+  // Revoked versions come back too (marked), in the same request, only so a seed whose versions
+  // were all revoked can be told from one that never had a version; they are never used below.
+  const requested = new Set(seedUids)
+  const allVersions = opts.versions
+    ? opts.versions.filter((v) => requested.has(v.refUID))
+    : await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  const itemVersions = allVersions.filter((v) => v.revoked !== true)
+
+  if (opts.dropSeedsWithOnlyRevokedVersions) {
+    // Like the SDK (latest published version skips revoked ones): every version revoked means
+    // no published version, so the seed is left out. A seed with no version at all is kept.
+    const seedsWithLiveVersion = new Set(itemVersions.map((v) => v.refUID))
+    for (const version of allVersions) {
+      const seedUid = version.refUID
+      if (seedsWithLiveVersion.has(seedUid) || !requested.has(seedUid)) continue
+      ctx.assembledItems.delete(seedUid)
+      ctx.seedUidToModelType.delete(seedUid)
+      ctx.droppedSeedUids.add(seedUid)
+    }
+  }
 
   for (let i = 0; i < itemVersions.length; i++) {
     const itemVersion = itemVersions[i] as AttestationLike
@@ -423,10 +469,13 @@ function expandRelationProperties(
   }
 }
 
+/** A record still being assembled (hydration fills in its data); read-only once returned. */
+type AssembledRecord = Omit<SeedRecord, 'data'> & { data: Record<string, unknown> }
+
 function toSeedRecords(
   ctx: AssembleContext,
   schemaName: string,
-): SeedRecord[] {
+): AssembledRecord[] {
   return Array.from(ctx.assembledItems.entries())
     .filter(([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName)
     .map(([seedUid, item]) => {
@@ -455,28 +504,56 @@ function toSeedRecords(
 }
 
 /**
- * Assemble canonical SeedRecords from Seed attestations (latest Version + canonical properties).
- * Uses per-call state (safe for concurrent requests).
+ * What an assembled record was built from, so a cache can tell when it changed: an attestation
+ * created or revoked later that references one of `refUIDs` (a new or revoked Version of the seed
+ * or of a seed it relates to, a property of one of their head Versions) or is one of `ids` (the
+ * seed or a related seed, revoked).
  */
-export async function assembleSeeds(
+export type SeedDependencies = {
+  refUIDs: string[]
+  ids: string[]
+}
+
+function dependenciesOf(ctx: AssembleContext, seedUid: string): SeedDependencies {
+  const seedUids = [seedUid, ...(ctx.relatedSeedUidsBySeedUid.get(seedUid) ?? [])]
+  const headVersionUids = seedUids
+    .map((uid) => ctx.latestVersionUidsBySeedUid.get(uid))
+    .filter((uid): uid is string => !!uid)
+  return { refUIDs: [...seedUids, ...headVersionUids], ids: seedUids }
+}
+
+/**
+ * Like assembleSeeds, plus each record's dependencies by seedUid (see SeedDependencies).
+ */
+export async function assembleSeedsWithDependencies(
   schemaName: string,
   seeds: AttestationLike[],
   options?: AssembleOptions,
   dataSource: QueryDataSource = getRemoteQueryDataSource(),
-): Promise<SeedRecord[]> {
+  /** Versions of `seeds` already fetched with `includeRevoked: true` (see getSeed). */
+  prefetched?: { versions?: AttestationLike[] },
+): Promise<{ records: SeedRecord[]; dependencies: Map<string, SeedDependencies> }> {
   const expandRelations = options?.expandRelations !== false
   const hydrateStorage = options?.hydrateStorage !== false
 
   const ctx = createAssembleContext()
 
-  await processSeeds(ctx, seeds, dataSource)
+  await processSeeds(ctx, seeds, dataSource, {
+    dropSeedsWithOnlyRevokedVersions: true,
+    versions: prefetched?.versions,
+  })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
-    (uid) => !ctx.assembledItems.has(uid),
+    (uid) => !ctx.assembledItems.has(uid) && !ctx.droppedSeedUids.has(uid),
   )
   if (relatedSeedUidsArray.length > 0) {
-    const relatedSeeds = await dataSource.getSeedsByUids(relatedSeedUidsArray)
-    await processSeeds(ctx, relatedSeeds, dataSource)
+    // Their versions only need the UIDs, so they are fetched alongside the seeds. Versions of a
+    // related seed that isn't returned (revoked, or not found) are ignored by processSeeds.
+    const [relatedSeeds, relatedVersions] = await Promise.all([
+      dataSource.getSeedsByUids(relatedSeedUidsArray),
+      dataSource.getVersionsForSeeds(relatedSeedUidsArray, { includeRevoked: true }),
+    ])
+    await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
   resolveRelationPropertiesToUrls(ctx, schemaName)
@@ -493,5 +570,21 @@ export async function assembleSeeds(
     )
   }
 
-  return records
+  const dependencies = new Map(
+    records.map((record) => [record.seedUid, dependenciesOf(ctx, record.seedUid)]),
+  )
+  return { records, dependencies }
+}
+
+/**
+ * Assemble canonical SeedRecords from Seed attestations (latest Version + canonical properties).
+ * Uses per-call state (safe for concurrent requests).
+ */
+export async function assembleSeeds(
+  schemaName: string,
+  seeds: AttestationLike[],
+  options?: AssembleOptions,
+  dataSource: QueryDataSource = getRemoteQueryDataSource(),
+): Promise<SeedRecord[]> {
+  return (await assembleSeedsWithDependencies(schemaName, seeds, options, dataSource)).records
 }

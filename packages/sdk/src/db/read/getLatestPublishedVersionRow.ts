@@ -1,7 +1,8 @@
 import { BaseDb } from '@/db/Db/BaseDb'
 import { versions } from '@/seedSchema'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
+import { versionNotRevoked } from '@/db/read/subqueries/liveVersion'
 
 export type PublishedVersionRow = {
   uid: string
@@ -11,7 +12,8 @@ export type PublishedVersionRow = {
 
 /**
  * Latest version row for the seed (by createdAt) whose uid is a real EAS attestation id.
- * Skips legacy 'NULL' / ZERO_BYTES32 placeholders and non-bytes32 strings.
+ * Skips legacy 'NULL' / ZERO_BYTES32 placeholders, non-bytes32 strings, and revoked versions
+ * (`revoked_at` set): after a full unpublish the seed has no published version.
  */
 export async function getLatestPublishedVersionRow(
   seedLocalId: string,
@@ -26,8 +28,8 @@ export async function getLatestPublishedVersionRow(
       attestationCreatedAt: versions.attestationCreatedAt,
     })
     .from(versions)
-    .where(eq(versions.seedLocalId, seedLocalId))
-    .orderBy(desc(versions.createdAt))
+    .where(and(eq(versions.seedLocalId, seedLocalId), versionNotRevoked()))
+    .orderBy(desc(versions.createdAt), desc(versions.localId))
 
   for (const vr of vRows) {
     if (vr.uid && isValidEasAttestationUid(vr.uid)) {

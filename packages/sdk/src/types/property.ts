@@ -67,12 +67,13 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   propertyRecordSchema?: PropertyType
   isRelation: boolean
   modelName: string
+  /** schemaFileId of the owning item's models row; scopes property-definition lookups to that model. */
+  modelFileId?: string
   isDbReady: boolean
   renderValue?: any
   storageTransactionId?: string
   newValue?: ItemPropertyValueType
-  /** Destroy lifecycle (for destroy hooks). */
-  _destroyInProgress?: boolean
+  /** Destroy failure from the last destroy() (read by destroy hooks). */
   _destroyError?: { message: string; name?: string } | null
   /** Validation errors from last failed save (enum, pattern, etc.). Cleared on successful save. */
   _saveValidationErrors?: import('@/Schema/validation').ValidationError[]

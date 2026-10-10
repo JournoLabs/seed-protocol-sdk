@@ -27,7 +27,7 @@ export const createArweaveTransactionsPhase2 = fromPromise(
     const def = context.htmlEmbeddedDeferredHtmlSeedLocalIds
     if (def?.length) {
       publishOpts.onlyHtmlStorageSeedLocalIds = def
-      publishOpts.skipRelationRecursion = true
+      // Walks relations: a related draft's deferred Html (embedded images) is uploaded here too.
     }
 
     const publishUploads = await item.getPublishUploads(

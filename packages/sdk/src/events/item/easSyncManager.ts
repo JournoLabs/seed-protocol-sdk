@@ -8,6 +8,13 @@ import {
 import { mergeEasSyncRequestIntents } from '@/events/item/mergeEasSyncOptions'
 import type { SyncFromEasOptions } from '@/events/item/syncDbWithEas'
 import debug from 'debug'
+import {
+  isLeaderTab,
+  onTabMessage,
+  postTabMessage,
+  whenLeaderTab,
+  withDbTabLock,
+} from '@/helpers/tabCoordinator'
 
 const log = debug('seedSdk:events:easSyncManager')
 
@@ -57,7 +64,11 @@ const runEasSync = fromPromise(
     })
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
     try {
-      await runSyncFromEas(toRunSyncArg(input.options))
+      // Sync checks for rows and then inserts the rest (no unique index on uids), so syncs in
+      // different tabs take turns. A sync can run for minutes, so wait without a timeout.
+      await withDbTabLock('eas-sync', () => runSyncFromEas(toRunSyncArg(input.options)), {
+        timeoutMs: Infinity,
+      })
       await finalizeEasSyncProcessRow(rowId, {
         status: 'completed',
         persistedSnapshot: {
@@ -241,7 +252,45 @@ function newCorrelationId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/** Requests deferred in this tab until it leads, by source; each runs once on takeover. */
+const deferredUntilLeader = new Set<EasSyncRequestSource>()
+
+/**
+ * Automatic syncs run in the leader tab only (docs/MULTI_TAB.md). A tab that skips one runs it if
+ * it later becomes leader, so closing the leader doesn't lose the catch-up sync.
+ */
+function runInLeaderTab(source: EasSyncRequestSource, request: () => void): void {
+  if (isLeaderTab()) {
+    request()
+    return
+  }
+  log(`${source} sync skipped: another tab leads`)
+  if (deferredUntilLeader.has(source)) return
+  deferredUntilLeader.add(source)
+  void whenLeaderTab().then(() => {
+    deferredUntilLeader.delete(source)
+    request()
+  })
+}
+
+let listeningToOtherTabs = false
+
+/** The leader runs address-change syncs requested by other tabs. */
+export function listenForEasSyncRequestsFromOtherTabs(): void {
+  if (listeningToOtherTabs) return
+  listeningToOtherTabs = true
+  onTabMessage((message) => {
+    if (message.type === 'eas-sync-address-change' && isLeaderTab()) {
+      requestEasSyncFromAddressChange(message.addresses)
+    }
+  })
+}
+
 export function requestEasSyncFromEventBus(): void {
+  runInLeaderTab('event_bus', sendEventBusRequest)
+}
+
+function sendEventBusRequest(): void {
   startEasSyncActor()
   easSyncActor.send({
     type: 'REQUEST',
@@ -251,6 +300,11 @@ export function requestEasSyncFromEventBus(): void {
 }
 
 export function requestEasSyncFromAddressChange(addresses: string[]): void {
+  if (!isLeaderTab()) {
+    // The leader syncs these addresses; its own address list may be stale.
+    postTabMessage({ type: 'eas-sync-address-change', addresses })
+    return
+  }
   startEasSyncActor()
   easSyncActor.send({
     type: 'REQUEST',
@@ -261,6 +315,10 @@ export function requestEasSyncFromAddressChange(addresses: string[]): void {
 }
 
 export function requestEasSyncFromModelsInit(): void {
+  runInLeaderTab('models_init', sendModelsInitRequest)
+}
+
+function sendModelsInitRequest(): void {
   startEasSyncActor()
   easSyncActor.send({
     type: 'REQUEST',

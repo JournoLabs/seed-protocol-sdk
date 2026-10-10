@@ -1,9 +1,12 @@
 {
   "name": "@seedprotocol/feed-hyper",
-  "version": "0.6.10",
+  "version": "0.7.1",
   "description": "Hyperdrive / Hyperswarm distribution for Seed Protocol feeds",
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "seed-feed": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "import": {
@@ -44,7 +47,7 @@
     "rimraf": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "author": "Keith Axline <keith@journodao.xyz>",
   "license": "MIT",

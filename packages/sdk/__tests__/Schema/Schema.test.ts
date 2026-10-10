@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { client } from '@/client'
 import { Schema } from '@/Schema/Schema'
@@ -15,52 +15,28 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { ConflictError } from '@/Schema/errors'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
+import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
+import { waitForSchemaIdle, waitForModelIdle } from '../test-utils/waitForIdle'
 
 // Helper function to wait for schema to be in idle state using xstate waitFor
-async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
-  const service = schema.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Schema failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Schema failed to load') {
-      throw error
-    }
-    throw new Error(`Schema loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for model to be in idle state using xstate waitFor
-async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
-  const service = model.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Model failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Model failed to load') {
-      throw error
-    }
-    throw new Error(`Model loading timeout after ${timeout}ms`)
-  }
+// A runtime Model writes itself and its properties to the DB in the background. Wait for those rows, or a
+// write can land after the next test's beforeEach has deleted the schema it targets.
+async function waitForModelPersisted(model: Model, propertyNames: string[] = [], timeout: number = 5000): Promise<void> {
+  const snapshot = await waitFor(model.getService(), (s) => s.context._dbId != null, { timeout })
+  if (propertyNames.length === 0) return
+  const modelId = snapshot.context._dbId as number
+  await vi.waitFor(
+    async () => {
+      const rows = await BaseDb.getAppDb()!
+        .select({ name: properties.name })
+        .from(properties)
+        .where(eq(properties.modelId, modelId))
+      expect(rows.map((row: { name: string }) => row.name)).toEqual(expect.arrayContaining(propertyNames))
+    },
+    { timeout },
+  )
 }
 
 // Helper to create a test schema
@@ -101,9 +77,9 @@ testDescribe('Schema Integration Tests', () => {
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     // Clean up in same order as beforeEach to respect foreign key constraints
@@ -180,18 +156,8 @@ testDescribe('Schema Integration Tests', () => {
       }
     }
 
-    // Clean up schema files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && file.includes('Test_Schema')) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    // Clean up schema files (both environments; in the browser they persist in OPFS)
+    await cleanupTestSchemaFiles()
   })
 
   afterEach(async () => {
@@ -422,9 +388,6 @@ testDescribe('Schema Integration Tests', () => {
         schemaName: schemaFileId, // Setting schemaName to ID (the bug scenario)
       })
       
-      // Wait a bit for the update to process
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
       // The schemaName getter should still return the actual name, not the ID
       // This is the fix we implemented
       expect(schema.schemaName).toBe(schemaName)
@@ -453,9 +416,6 @@ testDescribe('Schema Integration Tests', () => {
         schemaName: schemaFileId, // Bug scenario: schemaName is set to ID
       })
       
-      // Wait for update
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
       // Create a Model using the Schema instance
       // Model.create() reads schemaInstance.schemaName, which should return the name, not ID
       const model = Model.create('TestModel', schema, {
@@ -471,6 +431,7 @@ testDescribe('Schema Integration Tests', () => {
       const modelContext = model.getService().getSnapshot().context
       expect(modelContext.schemaName).toBe(schemaName)
       expect(modelContext.schemaName).not.toBe(schemaFileId)
+      await waitForModelPersisted(model)
     })
 
     it('should handle Schema instance during loading state correctly', async () => {
@@ -498,6 +459,7 @@ testDescribe('Schema Integration Tests', () => {
       const model = Model.create('TestModel', schema, {
         waitForReady: false, waitForReady: false })
       expect(model.schemaName).toBe(schemaName)
+      await waitForModelPersisted(model)
     })
 
     it('should prevent ID from being passed to Schema.create() when Model uses Schema instance', async () => {
@@ -538,6 +500,7 @@ testDescribe('Schema Integration Tests', () => {
       const modelContext = model.getService().getSnapshot().context
       expect(modelContext.schemaName).toBe(schemaName)
       expect(modelContext.schemaName).not.toBe(schemaFileId)
+      await waitForModelPersisted(model)
     })
   })
 
@@ -789,7 +752,7 @@ testDescribe('Schema Integration Tests', () => {
         waitForReady: false,
       })
       await waitForModelIdle(articleModel, 20000)
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await waitForModelPersisted(articleModel, ['content'])
 
       // Schema.all() should return the schema, and when loaded, it should include
       // models from both the schemaData and the database
@@ -799,8 +762,6 @@ testDescribe('Schema Integration Tests', () => {
 
       if (foundSchema) {
         await waitForSchemaIdle(foundSchema)
-        // Wait a bit for models to be loaded
-        await new Promise(resolve => setTimeout(resolve, 1000))
         
         // The schema should have models (from database merge)
         const context = foundSchema.getService().getSnapshot().context
@@ -871,9 +832,8 @@ testDescribe('Schema Integration Tests', () => {
           // If timeout, wait a bit more and continue
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
+        await waitForModelPersisted(articleModel, ['content'])
         
-        // Wait a bit for draft to be saved
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Save new version
         // Note: In browser, this might behave differently
@@ -951,8 +911,8 @@ testDescribe('Schema Integration Tests', () => {
           // If timeout, wait a bit more and continue
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
+        await waitForModelPersisted(articleModel, ['content'])
         
-        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Should throw ConflictError
         await expect(schema.saveNewVersion()).rejects.toThrow(ConflictError)
@@ -993,11 +953,14 @@ testDescribe('Schema Integration Tests', () => {
             updatedSchema.version = 2
             updatedSchema.metadata.updatedAt = new Date().toISOString()
             
+            // As a draft: a published schema loads from its schema file, and only a draft row is read
+            // from schemaData, so editing a published row's schemaData isn't picked up by reload().
             await db
               .update(schemas)
               .set({
                 schemaData: JSON.stringify(updatedSchema, null, 2),
                 version: 2,
+                isDraft: true,
                 updatedAt: new Date(updatedSchema.metadata.updatedAt).getTime(),
               })
               .where(eq(schemas.id, dbSchemas[0].id!))
@@ -1024,26 +987,11 @@ testDescribe('Schema Integration Tests', () => {
         // Wait for schema to be idle after reload
         await waitForSchemaIdle(schema)
         
-        // Give it more time for the context to update from database
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Check both context and schema property
-        const context = schema.getService().getSnapshot().context
-        const schemaVersion = schema.version
-        
-        // The version should be updated to 2 after reload
-        // If context.version is still 1, check schema.version
-        if (context.version === 2) {
-          expect(context.version).toBe(2)
-        } else if (schemaVersion === 2) {
-          expect(schemaVersion).toBe(2)
-        } else {
-          // If neither is 2, this might indicate a reload issue
-          // But we'll be lenient and just log a warning
-          console.warn(`Schema reload did not update version. Context: ${context.version}, Schema: ${schemaVersion}`)
-          // For now, we'll accept that reload might not always update version immediately
-          // This could be a known limitation or timing issue
-        }
+        // Used to log a warning and pass when the reload didn't pick up version 2
+        await waitUntilOrThrow(
+          () => schema.getService().getSnapshot().context.version === 2 || schema.version === 2,
+          'the reloaded schema to report version 2',
+        )
       })
     })
 
@@ -1156,23 +1104,26 @@ testDescribe('Schema Integration Tests', () => {
       // Update name
       schema.name = newName
       
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+      await vi.waitFor(() => expect(schema.schemaName).toBe(newName), { timeout: 5000, interval: 50 })
       
       // Verify name changed
       expect(schema.name).toBe(newName)
       expect(schema.schemaName).toBe(newName)
       
-      // Verify database was updated
+      // Verify database was updated (written after the in-memory change, so poll)
       const db = BaseDb.getAppDb()
       if (db) {
-        const dbSchemas = await db
-          .select()
-          .from(schemas)
-          .where(eq(schemas.name, newName))
-          .limit(1)
-        
-        expect(dbSchemas.length).toBeGreaterThan(0)
+        await vi.waitFor(
+          async () => {
+            const dbSchemas = await db
+              .select()
+              .from(schemas)
+              .where(eq(schemas.name, newName))
+              .limit(1)
+            expect(dbSchemas.length).toBeGreaterThan(0)
+          },
+          { timeout: 5000, interval: 50 },
+        )
       }
     })
 
@@ -1195,14 +1146,12 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
-      // Wait for models to be loaded (they're created asynchronously)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
+      await waitUntilOrThrow(() => (schema.models || []).length > 0, 'the schema to load its models')
+
       // schema.models should return Model instances from cache
       const models = schema.models || []
-      expect(Array.isArray(models)).toBe(true)
-      
-      // Models may not be loaded yet, so we'll test the read-only behavior regardless
+      expect(models.length).toBeGreaterThan(0)
+
       // Store initial models
       const initialModels = [...models]
       const initialCount = models.length
@@ -1216,8 +1165,8 @@ testDescribe('Schema Integration Tests', () => {
       const modelsAfter = schema.models || []
       expect(modelsAfter.length).toBe(initialCount)
       
-      // If models exist, verify they are Model instances
-      if (models.length > 0) {
+      // They are Model instances of this schema
+      {
         for (const model of models) {
           expect(model).toBeDefined()
           expect(model.modelName).toBeDefined()
@@ -1244,8 +1193,7 @@ testDescribe('Schema Integration Tests', () => {
       // Make a change
       schema.name = 'Test Schema Draft Updated'
       
-      // Wait for draft to be saved
-      await new Promise(resolve => setTimeout(resolve, 200))
+      await vi.waitFor(() => expect(schema.getService().getSnapshot().context._isDraft).toBe(true), { timeout: 5000, interval: 50 })
       
       // Should now be a draft
       context = schema.getService().getSnapshot().context
@@ -1302,7 +1250,6 @@ testDescribe('Schema Integration Tests', () => {
       
       // Wait for validation to complete
       await validatePromise
-      await new Promise(resolve => setTimeout(resolve, 100))
       
       // After validation, should be back to 'idle'
       expect(schema.status).toBe('idle')
@@ -1311,13 +1258,13 @@ testDescribe('Schema Integration Tests', () => {
       const snapshot = schema.getService().getSnapshot()
       expect(schema.status).toBe(snapshot.value)
       
-      // Status can be one of: 'idle', 'loading', 'addingModels', 'validating', 'error'
+      // Status can be one of: 'idle', 'loading', 'validating', 'error'
       // or nested states like { loading: 'checkingExisting' }, etc.
       const finalStatus = schema.status
-      const validTopLevelStates = ['idle', 'loading', 'addingModels', 'validating', 'error']
+      const validTopLevelStates = ['idle', 'loading', 'validating', 'error']
       const isTopLevelState = typeof finalStatus === 'string' && validTopLevelStates.includes(finalStatus)
       const isNestedState = typeof finalStatus === 'object' && finalStatus !== null && 
-        (('loading' in finalStatus) || ('addingModels' in finalStatus) || ('validating' in finalStatus))
+        (('loading' in finalStatus) || ('validating' in finalStatus))
       
       // At this point, should be 'idle' (top-level state)
       expect(finalStatus).toBe('idle')
@@ -1395,9 +1342,6 @@ testDescribe('Schema Integration Tests', () => {
         await new Promise(resolve => setTimeout(resolve, 2000))
       }
       
-      // Wait a bit for registration to complete
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       // Schema.models should now include the newly created Model instance
       // Wait a bit more for the model to be registered in the schema
       let foundModel: Model | undefined
@@ -1468,23 +1412,13 @@ testDescribe('Schema Integration Tests', () => {
       const schema = Schema.create(schemaName, { waitForReady: false })
       await waitForSchemaIdle(schema)
       
-      // Wait for models to be loaded
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Get the Model instance
-      let models = schema.models || []
-      let model = models.find((m: any) => m.modelName === 'TestModel')
-      
-      if (!model) {
-        // If model not found, create one
-        const newModel = Model.create('TestModel', schema, { waitForReady: false })
-        await waitForModelIdle(newModel)
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        models = schema.models || []
-        model = models.find((m: any) => m.modelName === 'TestModel')
-      }
-      
+      // The imported model (creating one here when it was missing used to hide that failure)
+      await waitUntilOrThrow(
+        () => (schema.models || []).some((m: any) => m.modelName === 'TestModel'),
+        'the schema to load its TestModel',
+      )
+      const models = schema.models || []
+      const model = models.find((m: any) => m.modelName === 'TestModel')
       expect(model).toBeDefined()
       if (!model) return
       

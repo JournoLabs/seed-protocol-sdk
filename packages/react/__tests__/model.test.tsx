@@ -13,65 +13,17 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   client,
   BaseDb,
-  schemas,
   models as modelsTable,
-  modelSchemas,
-  properties,
-  metadata,
-  propertyUids,
-  modelUids,
   importJsonSchema,
   Schema,
   Model,
   loadAllSchemasFromDb,
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
-import { eq, inArray } from 'drizzle-orm'
-
-/** Delete a schema row and all FK-dependent rows (matches Schema.destroy ordering). */
-async function removeSchemaByName(
-  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  schemaName: string,
-): Promise<void> {
-  const schemaRows = await db
-    .select({ id: schemas.id })
-    .from(schemas)
-    .where(eq(schemas.name, schemaName))
-  const schemaIds = schemaRows.map((r) => r.id).filter((id): id is number => id != null)
-  if (schemaIds.length === 0) return
-
-  const joinRows = await db
-    .select({ modelId: modelSchemas.modelId })
-    .from(modelSchemas)
-    .where(inArray(modelSchemas.schemaId, schemaIds))
-  const modelIds = [
-    ...new Set(joinRows.map((r) => r.modelId).filter((id): id is number => id != null)),
-  ]
-
-  await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
-
-  if (modelIds.length === 0) {
-    await db.delete(schemas).where(eq(schemas.name, schemaName))
-    return
-  }
-
-  await db.update(properties).set({ refModelId: null }).where(inArray(properties.refModelId, modelIds))
-
-  const propertyRows = await db
-    .select({ id: properties.id })
-    .from(properties)
-    .where(inArray(properties.modelId, modelIds))
-  const propertyIds = propertyRows.map((r) => r.id).filter((id): id is number => id != null)
-
-  if (propertyIds.length > 0) {
-    await db.delete(metadata).where(inArray(metadata.propertyId, propertyIds))
-    await db.delete(propertyUids).where(inArray(propertyUids.propertyId, propertyIds))
-  }
-  await db.delete(properties).where(inArray(properties.modelId, modelIds))
-  await db.delete(modelUids).where(inArray(modelUids.modelId, modelIds))
-  await db.delete(modelsTable).where(inArray(modelsTable.id, modelIds))
-  await db.delete(schemas).where(eq(schemas.name, schemaName))
-}
+import { eq } from 'drizzle-orm'
+import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { waitUntilOrThrow } from './test-utils/waitUntil'
+import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
 
 // Test schema with multiple models
 const testSchemaWithModels: SchemaFileFormat = {
@@ -85,36 +37,36 @@ const testSchemaWithModels: SchemaFileFormat = {
   },
   models: {
     Post: {
-      id: 'post-model-id',
+      id: 'post-model-models-test-id',
       properties: {
         title: {
-          id: 'title-prop-id',
+          id: 'title-prop-models-test-id',
           type: 'Text',
         },
         content: {
-          id: 'content-prop-id',
+          id: 'content-prop-models-test-id',
           type: 'Text',
         },
       },
     },
     Article: {
-      id: 'article-model-id',
+      id: 'article-model-models-test-id',
       properties: {
         title: {
-          id: 'article-title-prop-id',
+          id: 'article-title-prop-models-test-id',
           type: 'Text',
         },
         author: {
-          id: 'author-prop-id',
+          id: 'author-prop-models-test-id',
           type: 'Text',
         },
       },
     },
     Comment: {
-      id: 'comment-model-id',
+      id: 'comment-model-models-test-id',
       properties: {
         text: {
-          id: 'text-prop-id',
+          id: 'text-prop-models-test-id',
           type: 'Text',
         },
       },
@@ -319,18 +271,14 @@ describe('React Model Hooks Integration Tests', () => {
     // Wait for client to be ready
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
   })
 
   afterAll(async () => {
-    // Clean up schema from database
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await removeSchemaByName(db, 'Test Schema Models')
-    }
+    await cleanupTestSchemaData({ items: true })
 
     // Clear schema cache
     Schema.clearCache()
@@ -341,11 +289,9 @@ describe('React Model Hooks Integration Tests', () => {
     container.id = 'root'
     document.body.appendChild(container)
 
-    // Clean up any existing test schema
-    const db = BaseDb.getAppDb()
-    if (db) {
-      await removeSchemaByName(db, 'Test Schema Models')
-    }
+    // Removes every test schema, its items and schema files, after waiting for writes still running
+    // from the previous test.
+    await cleanupTestSchemaData({ items: true })
     Schema.clearCache()
 
     // Import test schema
@@ -363,38 +309,23 @@ describe('React Model Hooks Integration Tests', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')).toBe(true)
       },
       { timeout: 10000 }
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
-    await new Promise<void>((resolve) => {
-      const subscription = schema.getService().subscribe((snapshot) => {
-        if (snapshot.value === 'idle') {
-          subscription.unsubscribe()
-          schemaId = schema.id ?? testSchemaWithModels.id ?? null
-          resolve()
-        }
-      })
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        subscription.unsubscribe()
-        schemaId = testSchemaWithModels.id ?? null
-        resolve()
-      }, 5000)
-    })
+    // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+    await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+    schemaId = schema.id ?? null
 
     // Wait for models to be populated (they're loaded asynchronously)
     await waitFor(
       () => {
         const models = schema.models || []
-        return models.length >= 3 // At least Post, Article, Comment
+        expect(models.length).toBeGreaterThanOrEqual(3) // At least Post, Article, Comment
       },
       { timeout: 10000 }
     )
-
-    // Give React hooks a moment to process the schema instance
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(() => {
@@ -426,14 +357,12 @@ describe('React Model Hooks Integration Tests', () => {
             () => {
               const listA = screen.getByTestId('list-a')
               const listB = screen.getByTestId('list-b')
-              const statusA = within(listA).getByTestId('models-status').textContent
-              const statusB = within(listB).getByTestId('models-status').textContent
-              if (statusA !== 'loaded' || statusB !== 'loaded') return false
+              expect(within(listA).getByTestId('models-status').textContent).toBe('loaded')
+              expect(within(listB).getByTestId('models-status').textContent).toBe('loaded')
               const countA = parseInt(within(listA).getByTestId('models-count').textContent || '0')
               const countB = parseInt(within(listB).getByTestId('models-count').textContent || '0')
               expect(countA).toBe(countB)
               expect(countA).toBeGreaterThanOrEqual(3)
-              return true
             },
             { timeout: 15000 }
           )
@@ -570,8 +499,7 @@ describe('React Model Hooks Integration Tests', () => {
 
       await waitFor(
         () => {
-          const modelName = screen.queryByTestId('model-name')
-          return modelName !== null && modelName.textContent === 'Post'
+          expect(screen.queryByTestId('model-name')?.textContent).toBe('Post')
         },
         { timeout: 10000 }
       )
@@ -631,31 +559,18 @@ describe('React Model Hooks Integration Tests', () => {
 
       // First get the model by name to get its ID
       const schema = Schema.create('Test Schema Models', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
+      // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
-      if (!postModel || !postModel.id) {
-        // Skip if we can't get the model ID
-        return
-      }
+      expect(postModel?.id).toBeTruthy()
 
       render(<UseModelWithIdTest modelId={postModel.id} />, { container })
 
       await waitFor(
         () => {
-          const modelName = screen.queryByTestId('model-name')
-          return modelName !== null
+          expect(screen.queryByTestId('model-name')).not.toBeNull()
         },
         { timeout: 15000 }
       )
@@ -696,12 +611,7 @@ describe('React Model Hooks Integration Tests', () => {
         migrations: [],
       }
 
-      // Clean up any existing schema
-      const db = BaseDb.getAppDb()
-      if (db) {
-        await removeSchemaByName(db, 'Test Schema Dynamic')
-      }
-      Schema.clearCache()
+      // beforeEach already removed every test schema
 
       // Import empty schema
       try {
@@ -717,25 +627,15 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         async () => {
           const allSchemas = await loadAllSchemasFromDb()
-          return allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')
+          expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')).toBe(true)
         },
         { timeout: 10000 }
       )
 
       // Get schema instance
       const schema = Schema.create('Test Schema Dynamic', { waitForReady: false })
-      await new Promise<void>((resolve) => {
-        const subscription = schema.getService().subscribe((snapshot) => {
-          if (snapshot.value === 'idle') {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
 
       // Render component with useModels - should start with 0 models (use wrapper with queryClientRef to wait for cache)
       render(<UseModelsTest schemaId="Test Schema Dynamic" />, {
@@ -747,7 +647,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('models-status')
-          return status.textContent === 'loaded'
+          expect(status.textContent).toBe('loaded')
         },
         { timeout: 10000 }
       )
@@ -785,7 +685,7 @@ describe('React Model Hooks Integration Tests', () => {
               validationErrors: modelSnapshot.context._validationErrors,
             })
           }
-          return isIdle
+          expect(isIdle).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -808,7 +708,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
-          return Array.isArray(data) && data.length >= 1
+          expect(Array.isArray(data) && data.length >= 1).toBe(true)
         },
         { timeout: 10000 }
       )
@@ -823,11 +723,6 @@ describe('React Model Hooks Integration Tests', () => {
       const modelNames = modelElements.map((el) => el.textContent)
       expect(modelNames).toContain('DynamicModel')
 
-      // Clean up
-      if (db) {
-        await removeSchemaByName(db, 'Test Schema Dynamic')
-      }
-      Schema.clearCache()
     })
   })
 
@@ -863,7 +758,7 @@ describe('React Model Hooks Integration Tests', () => {
       await waitFor(
         () => {
           const status = screen.getByTestId('create-model-status')
-          return status.textContent === 'created'
+          expect(status.textContent).toBe('created')
         },
         { timeout: 3000 }
       )
@@ -889,6 +784,33 @@ describe('React Model Hooks Integration Tests', () => {
       expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
     })
 
+    it('should report isLoading and the service error for a destroy the service finishes before an effect could subscribe', async () => {
+      render(<UseDestroyModelTest model={createFastDestroyStub<Model>({ destroyError: 'stub destroy failed' })} />, { container })
+
+      screen.getByTestId('destroy-model-button').click()
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
+        },
+        { timeout: 2000 }
+      )
+
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
+          expect(screen.getByTestId('destroy-model-error').textContent).toBe('stub destroy failed')
+        },
+        { timeout: 2000 }
+      )
+
+      screen.getByTestId('destroy-model-reset-error').click()
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('destroy-model-error')).toBeNull()
+      })
+    })
+
     it(
       'should destroy a model and set loading state during destroy',
       async () => {
@@ -912,27 +834,18 @@ describe('React Model Hooks Integration Tests', () => {
 
         await waitFor(
           () => {
-            const isLoading = screen.getByTestId('destroy-model-is-loading')
-            return isLoading.textContent === 'true'
+            expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('true')
           },
           { timeout: 2000 }
         )
 
-        // Let destroy() complete and React flush setStatus('destroyed') (destroy resolves in ~10ms)
-        await act(async () => {
-          await new Promise((r) => setTimeout(r, 100))
-        })
-
         await waitFor(
           () => {
-            const status = screen.getByTestId('destroy-model-status')
-            return status.textContent === 'destroyed' || status.textContent === 'error'
+            expect(screen.getByTestId('destroy-model-is-loading').textContent).toBe('false')
+            expect(['destroyed', 'error']).toContain(screen.getByTestId('destroy-model-status').textContent)
           },
           { timeout: 25000 }
         )
-
-        const status = screen.getByTestId('destroy-model-status')
-        expect(['destroyed', 'error']).toContain(status.textContent)
       },
       30000
     )

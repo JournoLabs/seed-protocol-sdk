@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     getTransactionStatus: vi.fn(async () => ({ status: 200 })),
     getTransactionTags: vi.fn(async () => []),
     getHost: vi.fn(() => 'arweave.net'),
+    getBaseUrl: vi.fn(() => 'https://arweave.net'),
     getMetadata: vi.fn(async () => null),
     saveMetadata: vi.fn(async () => undefined),
     saveAppState: vi.fn(async () => undefined),
@@ -78,6 +79,7 @@ vi.mock('@/helpers', () => ({
     getTransactionStatus: mocks.getTransactionStatus,
     getTransactionTags: mocks.getTransactionTags,
     getHost: mocks.getHost,
+    getBaseUrl: mocks.getBaseUrl,
   },
 }))
 

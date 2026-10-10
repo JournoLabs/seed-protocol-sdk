@@ -1,8 +1,10 @@
 import { assign } from 'xstate'
+import { releasePublishLock } from '../publishLocks'
 
 export const publishDone = assign(({ context, event }) => {
   const { publishProcesses, subscriptions, settledPublishes } = context
   const seedLocalId = (event as unknown as { seedLocalId: string }).seedLocalId
+  releasePublishLock(seedLocalId)
   const subscriptionProcess = subscriptions.get(seedLocalId)
   if (subscriptionProcess) {
     subscriptionProcess.send({ type: 'UNSUBSCRIBE' })

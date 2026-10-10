@@ -28,7 +28,7 @@ export async function executeCreateArweaveDataItemsPhase2(
   const def = context.htmlEmbeddedDeferredHtmlSeedLocalIds
   if (def?.length) {
     uploadDataOpts.onlyHtmlStorageSeedLocalIds = def
-    uploadDataOpts.skipRelationRecursion = true
+    // Walks relations: a related draft's deferred Html (embedded images) is uploaded here too.
   }
   const uploadDataList = await getPublishUploadData(
     item,

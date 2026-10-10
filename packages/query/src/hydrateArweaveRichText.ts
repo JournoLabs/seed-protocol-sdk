@@ -59,6 +59,61 @@ async function fetchGatewayPayloadAsUtf8(url: string): Promise<string | null> {
   }
 }
 
+/** Upper bound on cached body text, in UTF-16 code units (~2 bytes each). */
+const BODY_CACHE_MAX_CHARS = 32_000_000
+
+/**
+ * Fetched bodies by Arweave transaction id, least recently used first. A transaction's data never
+ * changes, so entries never go stale; they are only evicted for size. Failed fetches are not cached
+ * (a new transaction can 404 until gateways have it).
+ */
+const bodyCache = new Map<string, string>()
+let bodyCacheChars = 0
+const bodiesInFlight = new Map<string, Promise<string | null>>()
+
+/** Clears the Arweave body cache. For tests. */
+export function resetArweaveBodyCache(): void {
+  bodyCache.clear()
+  bodyCacheChars = 0
+  bodiesInFlight.clear()
+}
+
+function cacheBody(txId: string, text: string): void {
+  if (text.length > BODY_CACHE_MAX_CHARS) return
+  bodyCache.set(txId, text)
+  bodyCacheChars += text.length
+  for (const [oldest, oldText] of bodyCache) {
+    if (bodyCacheChars <= BODY_CACHE_MAX_CHARS) break
+    bodyCache.delete(oldest)
+    bodyCacheChars -= oldText.length
+  }
+}
+
+/** Gateway body for a transaction URL: cached by transaction id, concurrent requests shared. */
+async function fetchTransactionBody(url: string): Promise<string | null> {
+  const txId = new URL(url.trim()).pathname.replace(/^\//, '')
+  const cached = bodyCache.get(txId)
+  if (cached !== undefined) {
+    // Most recently used goes last.
+    bodyCache.delete(txId)
+    bodyCache.set(txId, cached)
+    return cached
+  }
+  const inFlight = bodiesInFlight.get(txId)
+  if (inFlight) return inFlight
+
+  const request = fetchGatewayPayloadAsUtf8(url)
+    .then((text) => {
+      if (text !== null && bodiesInFlight.get(txId) === request) cacheBody(txId, text)
+      return text
+    })
+    .finally(() => {
+      if (bodiesInFlight.get(txId) === request) bodiesInFlight.delete(txId)
+    })
+  bodiesInFlight.set(txId, request)
+  return request
+}
+
 async function resolveHydratedBody(
   propertyName: string,
   value: string,
@@ -73,30 +128,37 @@ async function resolveHydratedBody(
     }
   }
   if (!isArweaveTransactionGatewayUrl(value)) return null
-  return fetchGatewayPayloadAsUtf8(value)
+  return fetchTransactionBody(value)
 }
 
-async function hydrateStringField(
-  item: Record<string, unknown>,
-  key: string,
-  readStorageBody?: HydrateStorageOptions['readStorageBody'],
+/** Bodies resolved at once, across all items. */
+const HYDRATE_CONCURRENCY = 8
+
+async function runWithConcurrency(
+  tasks: Array<() => Promise<void>>,
+  limit: number,
 ): Promise<void> {
-  const v = item[key]
-  if (typeof v !== 'string' || v.trim() === '') return
-  const text = await resolveHydratedBody(key, v, readStorageBody)
-  if (text === null) return
-  item[key] = text
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < tasks.length) {
+      await tasks[next++]!()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
 }
 
 /**
  * After relation URL resolution, Html/File fields may be gateway URLs (or local paths).
  * Replace those with the UTF-8 body when `hydrateStorage` is enabled.
+ * Up to HYDRATE_CONCURRENCY bodies are resolved at a time, across all items.
  */
 export async function hydrateArweaveRichTextInItems(
   items: Record<string, unknown>[],
   options?: HydrateStorageOptions,
 ): Promise<void> {
   const readStorageBody = options?.readStorageBody
+  const tasks: Array<() => Promise<void>> = []
+
   for (const item of items) {
     const keysToHydrate = new Set<string>([...RICH_TEXT_KEYS])
     const fieldModels = getFieldStorageModels(item)
@@ -106,7 +168,12 @@ export async function hydrateArweaveRichTextInItems(
       }
     }
     for (const key of keysToHydrate) {
-      await hydrateStringField(item, key, readStorageBody)
+      const v = item[key]
+      if (typeof v !== 'string' || v.trim() === '') continue
+      tasks.push(async () => {
+        const text = await resolveHydratedBody(key, v, readStorageBody)
+        if (text !== null) item[key] = text
+      })
     }
 
     const listModels = getListElementStorageModels(item)
@@ -119,13 +186,16 @@ export async function hydrateArweaveRichTextInItems(
           if (!isRichBodyStorageSchema(models[i]!)) continue
           const el = arr[i]
           if (typeof el !== 'string') continue
-          const text = await resolveHydratedBody(listKey, el, readStorageBody)
-          if (text === null) continue
-          arr[i] = text
+          tasks.push(async () => {
+            const text = await resolveHydratedBody(listKey, el, readStorageBody)
+            if (text !== null) arr[i] = text
+          })
         }
       }
     }
   }
+
+  await runWithConcurrency(tasks, HYDRATE_CONCURRENCY)
 }
 
 /** @deprecated Use {@link hydrateArweaveRichTextInItems} */

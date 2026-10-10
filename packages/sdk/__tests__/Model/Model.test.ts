@@ -1,14 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { schemas } from '@/seedSchema/SchemaSchema'
-import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
+import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { modelUids } from '@/seedSchema/ModelUidSchema'
-import { propertyUids } from '@/seedSchema/PropertyUidSchema'
+import { schemas } from '@/seedSchema/SchemaSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
 import { versions } from '@/seedSchema/VersionSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
@@ -16,55 +13,13 @@ import { eq, and } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
+import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
+import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
-async function waitForModelIdle(model: Model, timeout: number = 5000): Promise<void> {
-  const service = model.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Model failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Model failed to load') {
-      throw error
-    }
-    throw new Error(`Model loading timeout after ${timeout}ms`)
-  }
-}
-
-// Helper function to wait for schema to be in idle state using xstate waitFor
-async function waitForSchemaIdle(schema: Schema, timeout: number = 5000): Promise<void> {
-  const service = schema.getService()
-  
-  try {
-    await waitFor(
-      service,
-      (snapshot) => {
-        if (snapshot.value === 'error') {
-          throw new Error('Schema failed to load')
-        }
-        return snapshot.value === 'idle'
-      },
-      { timeout }
-    )
-  } catch (error: any) {
-    if (error.message === 'Schema failed to load') {
-      throw error
-    }
-    throw new Error(`Schema loading timeout after ${timeout}ms`)
-  }
-}
-
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
@@ -82,6 +37,14 @@ function createTestSchema(name: string, models: Record<string, any> = {}): Schem
   }
 }
 
+// The model an imported schema defines. (Model.create with a name the schema already defines makes a second,
+// renamed runtime model with no properties: "X 1".) Model.find waits for it to be idle.
+async function findImportedModel(modelName: string, schemaName: string): Promise<Model> {
+  const model = await Model.find({ modelName, schemaName })
+  expect(model).toBeDefined()
+  return model!
+}
+
 // This test should run in both browser and Node.js environments
 // Use sequential execution to avoid database locking issues in Node.js
 const testDescribe = typeof window === 'undefined' 
@@ -89,144 +52,35 @@ const testDescribe = typeof window === 'undefined'
   : describe
 
 testDescribe('Model Integration Tests', () => {
-  let fsModule: any
-  let pathModule: any
-  const isNodeEnv = typeof window === 'undefined'
-
   beforeAll(async () => {
-    // Set up Node.js-specific modules if needed
-    if (isNodeEnv) {
-      fsModule = await import('fs')
-      pathModule = await import('path')
-    }
-
     // Use shared test environment setup
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 90000) // Increased timeout to allow for full initialization
+  }, SETUP_HOOK_TIMEOUT_MS) // Increased timeout to allow for full initialization
 
   afterAll(async () => {
-    // Clean up - delete in order to respect foreign key constraints
-    const db = BaseDb.getAppDb()
-    if (db) {
-      // First, nullify refModelId in properties to break self-referential foreign keys
-      await db.update(properties).set({ refModelId: null })
-      // Delete in order: propertyUids -> modelUids -> properties -> model_schemas -> models -> schemas
-      await db.delete(propertyUids)
-      await db.delete(modelUids)
-      await db.delete(properties)
-      await db.delete(modelSchemas)
-      await db.delete(modelsTable)
-      await db.delete(schemas)
-    }
+    await cleanupTestSchemaData()
   })
 
   beforeEach(async () => {
-    // Clean up database before each test - delete in order to respect foreign key constraints
-    // IMPORTANT: Preserve Seed Protocol schema as it's required for client initialization
-    const db = BaseDb.getAppDb()
-    if (db) {
-      const { SEED_PROTOCOL_SCHEMA_NAME } = await import('@/helpers/constants')
-      const { eq, ne, notInArray, sql } = await import('drizzle-orm')
-      
-      // Get Seed Protocol schema to exclude from cleanup
-      const seedProtocolSchema = await db
-        .select()
-        .from(schemas)
-        .where(eq(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-        .limit(1)
-      
-      if (seedProtocolSchema.length > 0 && seedProtocolSchema[0].id) {
-        const seedProtocolSchemaId = seedProtocolSchema[0].id
-        
-        // Get Seed Protocol model IDs to exclude from cleanup
-        const seedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(eq(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const seedProtocolModelIds: number[] = seedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        // First, nullify refModelId in properties to break self-referential foreign keys
-        // Exclude Seed Protocol properties
-        if (seedProtocolModelIds.length > 0) {
-          await db.update(properties)
-            .set({ refModelId: null })
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.update(properties).set({ refModelId: null })
-        }
-        
-        // Delete propertyUids and modelUids (these don't have schema references, delete all)
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        
-        // Delete properties for non-Seed Protocol models
-        if (seedProtocolModelIds.length > 0) {
-          await db.delete(properties)
-            .where(notInArray(properties.modelId, seedProtocolModelIds))
-        } else {
-          await db.delete(properties)
-        }
-        
-        // Delete model_schemas join entries for non-Seed Protocol schemas
-        await db.delete(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        // Delete models for non-Seed Protocol schemas
-        // Get all non-Seed Protocol model IDs from model_schemas
-        const nonSeedProtocolModelLinks = await db
-          .select({ modelId: modelSchemas.modelId })
-          .from(modelSchemas)
-          .where(ne(modelSchemas.schemaId, seedProtocolSchemaId))
-        
-        const nonSeedProtocolModelIds: number[] = nonSeedProtocolModelLinks
-          .map((link: { modelId: number | null }) => link.modelId)
-          .filter((id: number | null): id is number => id !== null)
-        
-        if (nonSeedProtocolModelIds.length > 0) {
-          await db.delete(modelsTable)
-            .where(notInArray(modelsTable.id, nonSeedProtocolModelIds))
-        }
-        
-        // Delete schemas except Seed Protocol
-        await db.delete(schemas)
-          .where(ne(schemas.name, SEED_PROTOCOL_SCHEMA_NAME))
-      } else {
-        // Seed Protocol schema not found - delete everything (shouldn't happen but handle gracefully)
-        await db.update(properties).set({ refModelId: null })
-        await db.delete(propertyUids)
-        await db.delete(modelUids)
-        await db.delete(properties)
-        await db.delete(modelSchemas)
-        await db.delete(modelsTable)
-        await db.delete(schemas)
-      }
-    }
-
-    // Clean up model files (Node.js only)
-    if (isNodeEnv && fsModule) {
-      const workingDir = BaseFileManager.getWorkingDir()
-      if (fsModule.existsSync && fsModule.existsSync(workingDir)) {
-        const files = fsModule.readdirSync(workingDir)
-        for (const file of files) {
-          if (file.endsWith('.json') && (file.includes('Test_Model') || file.includes('Test_Schema'))) {
-            fsModule.unlinkSync(pathModule.join(workingDir, file))
-          }
-        }
-      }
-    }
+    // FK-safe; keeps the Seed Protocol schema, which client initialization needs. Also deletes the
+    // test schema files.
+    await cleanupTestSchemaData()
   })
 
   afterEach(async () => {
     // Clean up Model instances by unloading them
     const db = BaseDb.getAppDb()
     if (db) {
-      const dbModels = await db.select().from(modelsTable)
+      // models has no schema column; read it from model_schemas so the lookup is scoped (a bare name
+      // throws AmbiguousModelError once two schemas define it, and the catch below would hide that).
+      const dbModels = await db
+        .select({ name: modelsTable.name, schemaName: schemas.name })
+        .from(modelsTable)
+        .innerJoin(modelSchemas, eq(modelSchemas.modelId, modelsTable.id))
+        .innerJoin(schemas, eq(schemas.id, modelSchemas.schemaId))
       for (const dbModel of dbModels) {
         try {
           const model = Model.getByName(dbModel.name, dbModel.schemaName)
@@ -268,7 +122,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
+      await waitForSchemaIdle(schema)
       
       const model = Model.create('TestModel Schema Instance', schema, {
         waitForReady: false,
@@ -337,6 +191,9 @@ testDescribe('Model Integration Tests', () => {
         }, 5000)
       })
       
+      // model.properties only returns ModelProperty instances already in the cache, which can lag the
+      // liveQuery ids above, so poll for the instances
+      await vi.waitFor(() => expect((model.properties || []).length).toBe(2), { timeout: 5000, interval: 50 })
       expect(model.properties).toBeDefined()
       const modelProperties = model.properties || []
       expect(Array.isArray(modelProperties)).toBe(true)
@@ -446,8 +303,14 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait for the imported model to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // The imported model is written asynchronously; the rename check below needs it in the database
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()!.select().from(modelsTable).where(eq(modelsTable.name, 'Existing Model')).limit(1)
+          expect(rows.length).toBe(1)
+        },
+        { timeout: 15000, interval: 100 },
+      )
       
       // Clear the cache to force database lookup
       // Note: We can't easily clear the cache, but we can create a model with a different name first
@@ -582,16 +445,13 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait a bit for the schema import to complete and model to be written to database
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Get the model that was imported (may be renamed if duplicate exists)
-      // Try getByNameAsync first, but if that fails, try Model.create which will handle renaming
-      let TestModel = await Model.getByNameAsync(modelName, schemaName)
-      if (!TestModel) {
-        // If not found, try creating it (will use the imported model from database or create new)
-        TestModel = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      }
+      // The imported model (creating one here when it was missing used to hide that failure)
+      await waitUntilOrThrow(
+        async () => !!(await Model.getByNameAsync(modelName, schemaName)),
+        `the imported model "${modelName}"`,
+        5000,
+      )
+      const TestModel = (await Model.getByNameAsync(modelName, schemaName))!
       
       await waitForModelIdle(TestModel)
       
@@ -640,9 +500,6 @@ testDescribe('Model Integration Tests', () => {
         content: 'Test Content',
         count: 42,
       } as any)
-
-      // Wait a bit for database writes to complete
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify item has required IDs
       expect(testModelItem.seedLocalId).toBeDefined()
@@ -736,14 +593,11 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       const item = await model.create({
         name: 'Test Item',
       } as any)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify item has required IDs
       expect(item.seedLocalId).toBeDefined()
@@ -782,6 +636,7 @@ testDescribe('Model Integration Tests', () => {
       expect(versionRecord.seedType).toBe(seedRecord.type)
 
       // All metadata records should reference the same seed and version
+      expect(metadataRecords.map((meta: { propertyName: string }) => meta.propertyName)).toContain('name')
       for (const meta of metadataRecords) {
         expect(meta.seedLocalId).toBe(seedRecord.localId)
         expect(meta.versionLocalId).toBe(versionRecord.localId)
@@ -801,12 +656,9 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       const item = await model.create({} as any)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify item has required IDs
       expect(item.seedLocalId).toBeDefined()
@@ -866,14 +718,11 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       // Create multiple items
       const item1 = await model.create({ value: 'Item 1' } as any)
       const item2 = await model.create({ value: 'Item 2' } as any)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Verify items have required IDs
       expect(item1.seedLocalId).toBeDefined()
@@ -903,6 +752,9 @@ testDescribe('Model Integration Tests', () => {
       // Verify metadata records have unique localIds
       const allMetadata = await db.select().from(metadata)
       const metadataLocalIds = allMetadata.map((m: any) => m.localId).filter(Boolean)
+      expect(
+        allMetadata.filter((m: any) => m.propertyName === 'value' && [item1.seedLocalId, item2.seedLocalId].includes(m.seedLocalId)),
+      ).toHaveLength(2)
       expect(new Set(metadataLocalIds).size).toBe(metadataLocalIds.length)
     })
   })
@@ -955,9 +807,6 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      
-      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
 
       // Find the model by name
       const foundModel = await Model.find({
@@ -994,9 +843,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create('TestPost', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
-      const modelFileId = model.id
+      const modelFileId = testSchema.models.TestPost.id
 
       // Find with waitForReady: false - should return immediately
       const foundModel = await Model.find({
@@ -1071,8 +918,7 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      const model = Model.create('TestModelAll', schemaName, { waitForReady: false })
-      await waitForModelIdle(model)
+      await findImportedModel('TestModelAll', schemaName)
 
       const allModels = await Model.all()
       expect(allModels).toBeDefined()
@@ -1094,10 +940,8 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema1) }, testSchema1.version)
       await importJsonSchema({ contents: JSON.stringify(testSchema2) }, testSchema2.version)
-      const model1 = Model.create('ModelA', schemaName1, { waitForReady: false })
-      const model2 = Model.create('ModelB', schemaName2, { waitForReady: false })
-      await waitForModelIdle(model1)
-      await waitForModelIdle(model2)
+      await findImportedModel('ModelA', schemaName1)
+      await findImportedModel('ModelB', schemaName2)
 
       const forSchema1 = await Model.all(schemaName1)
       expect(forSchema1.length).toBeGreaterThanOrEqual(1)
@@ -1117,8 +961,7 @@ testDescribe('Model Integration Tests', () => {
       })
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-      const model = Model.create('TestModelWait', schemaName, { waitForReady: false })
-      await waitForModelIdle(model)
+      await findImportedModel('TestModelWait', schemaName)
 
       const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: 15000 })
       expect(allModels.length).toBeGreaterThanOrEqual(1)
@@ -1171,9 +1014,8 @@ testDescribe('Model Integration Tests', () => {
       const newName = 'UpdatedModel'
       
       model.modelName = newName
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       
       expect(model.modelName).toBe(newName)
       expect(model.name).toBe(newName)
@@ -1272,8 +1114,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      const model = Model.create(modelName, schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel(modelName, schemaName)
       
       // Update database directly
       const db = BaseDb.getAppDb()
@@ -1344,9 +1185,8 @@ testDescribe('Model Integration Tests', () => {
       const newName = 'UpdatedModel'
       
       model.modelName = newName
-      
-      // Wait for update to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       
       // Model should still be accessible by new name
       const modelByName = Model.getByName(newName, schemaName)
@@ -1378,32 +1218,13 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
-      // Wait a bit for the model to be loaded into cache from the schema import
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      // Get the existing model from the schema import (don't create a new one)
-      // Use getByNameAsync to ensure we get the model even if it's not in cache yet
-      let model = await Model.getByNameAsync(modelName, schemaName)
-      
-      // If model isn't found yet, wait a bit more and try again
-      if (!model) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-        model = await Model.getByNameAsync(modelName, schemaName)
-      }
-      
-      // If still not found, the model might not have been loaded yet, so we'll need to get it via the schema
-      if (!model) {
-        const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-        await waitForSchemaIdle(schema)
-        // Wait for models to be loaded
-        await new Promise(resolve => setTimeout(resolve, 500))
-        model = await Model.getByNameAsync(modelName, schemaName)
-      }
-      
-      // If model still doesn't exist, something went wrong
-      if (!model) {
-        throw new Error(`Model "${modelName}" not found after schema import`)
-      }
+      // The existing model from the schema import (don't create a new one)
+      await waitUntilOrThrow(
+        async () => !!(await Model.getByNameAsync(modelName, schemaName)),
+        `the imported model "${modelName}"`,
+        5000,
+      )
+      const model = (await Model.getByNameAsync(modelName, schemaName))!
       
       await waitForModelIdle(model)
       
@@ -1412,9 +1233,6 @@ testDescribe('Model Integration Tests', () => {
       
       expect(oldName).toBeDefined()
       expect(oldName).toBe(modelName)
-      
-      // Wait a bit for model to be written to database if it wasn't already
-      await new Promise(resolve => setTimeout(resolve, 300))
       
       // Verify model exists in database with old name first (if it was written)
       const db = BaseDb.getAppDb()
@@ -1432,24 +1250,26 @@ testDescribe('Model Integration Tests', () => {
       // Update name
       model.modelName = newName
       
-      // Wait for update to complete (including database save)
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
       // Verify name changed in memory
-      expect(model.modelName).toBe(newName)
+      await vi.waitFor(() => expect(model.modelName).toBe(newName), { timeout: 5000, interval: 50 })
       expect(model.name).toBe(newName)
-      
-      // Verify database was updated with new name
+
+      // Verify database was updated with new name (the save is asynchronous, so poll)
       if (db) {
-        const dbModels = await db
-          .select()
-          .from(modelsTable)
-          .where(eq(modelsTable.name, newName))
-          .limit(1)
-        
-        expect(dbModels.length).toBeGreaterThan(0)
+        const dbModels = await vi.waitFor(
+          async () => {
+            const rows = await db
+              .select()
+              .from(modelsTable)
+              .where(eq(modelsTable.name, newName))
+              .limit(1)
+            expect(rows.length).toBeGreaterThan(0)
+            return rows
+          },
+          { timeout: 5000, interval: 50 },
+        )
         expect(dbModels[0].name).toBe(newName)
-        
+
         // Verify old name no longer exists in database (if it existed before)
         if (oldName) {
           const oldDbModels = await db
@@ -1496,7 +1316,6 @@ testDescribe('Model Integration Tests', () => {
       
       // Note: description is not supported - JSON files can have it but we ignore it at runtime
       // Edit the model (using a supported property if needed)
-      await new Promise(resolve => setTimeout(resolve, 200))
       
       // Save the model (this persists to database)
       // Note: The exact save mechanism depends on implementation
@@ -1644,7 +1463,7 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       
       const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
-      await new Promise(resolve => setTimeout(resolve, 500)) // Wait for schema to initialize
+      await waitForSchemaIdle(schema)
       
       const newModel = Model.create('New model', schema, {
         properties: {
@@ -1823,8 +1642,7 @@ testDescribe('Model Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('DestroyTarget', schemaName, { waitForReady: false }) as Model
-      await waitForModelIdle(model)
+      const model = await findImportedModel('DestroyTarget', schemaName)
 
       const modelFileId = model.id
       expect(modelFileId).toBeDefined()

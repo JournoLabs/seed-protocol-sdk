@@ -72,12 +72,21 @@ a custom `onDownload`, the handler is called once with the zip blob and a synthe
 - `onBeforeDelete` runs per file **after** confirmation. Files it vetoes are reported
   in the result toast.
 - There's no Undo, because OPFS deletes are permanent.
+- Folders have their own delete button. The folder dialog says outright that the delete
+  can't be undone and offers **Download .zip** first. The zip's paths start at the
+  folder's name, and the dialog stays open after saving. The folder's files are deleted
+  one by one, the same way as a file delete, so `onBeforeDelete`, `confirmDelete`,
+  `deleteWarning` and `deleteAction` all still apply. Then any folders left empty are
+  removed. Files that a hook keeps or that `filter` hides stay where they are, and so does
+  their folder. The `delete` notice adds `folder` and `folderRemoved`. Resized copies under
+  the folder are always included, because the folder is going away.
 
 **Feedback.** Toasts replace `alert()` for results and errors. Errors name the cause,
 for example a `NotFoundError` for a missing `rootPath`, or OPFS being unsupported.
 Hosts with their own toaster pass `onNotify(message, tone, notice)`, and the built-in
 toasts aren't rendered. `notice` says what happened (`delete` with deleted, skipped and
-failed paths, `download`, or `copy-path`) so hosts can write their own wording.
+failed paths plus the folder, if one was deleted; `download`; or `copy-path`) so hosts
+can write their own wording.
 
 **Structure.** The component lives in `src/OPFSFilesManager/`, split into views,
 dialog, panel, hooks, and pure helpers (`fileModel.ts`, `format.ts`, `zip.ts`). OPFS

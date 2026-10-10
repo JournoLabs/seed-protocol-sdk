@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getPublishPayload, PublishValidationFailedError } from '@/db/read/getPublishPayload'
 import { VERSION_SCHEMA_UID } from '@/helpers/constants'
 import { Item } from '@/Item/Item'
-import { setupTestEnvironment, teardownTestEnvironment } from '../../../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../../test-utils/client-init'
 import {
   createGetPublishPayloadTestSchema,
   createGetPublishPayloadTestSchemaWithEnum,
@@ -13,6 +13,7 @@ import {
   createItemWithAllPropertyTypes,
   createItemWithImageAndUploadedTx,
   createImageItemWithMissingStorageTxMetadata,
+  createPublishedTestAuthor,
   waitForPropertyInstances,
 } from '../../../test-utils/getPublishPayloadIntegrationHelpers'
 
@@ -20,11 +21,11 @@ describe('getPublishPayload integration (browser)', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await createGetPublishPayloadTestSchema()
     await createGetPublishPayloadTestSchemaWithEnum()
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -135,9 +136,12 @@ describe('getPublishPayload integration (browser)', () => {
     const { imageSeedLocalId } = await createImageItemWithMissingStorageTxMetadata()
     const imageItem = await Item.find({ seedLocalId: imageSeedLocalId })
     if (!imageItem) throw new Error('Image item not found')
+    const author = await createPublishedTestAuthor()
     const postItem = await Item.create({
       modelName: 'Post',
+      schemaName: 'Test Schema getPublishPayload',
       title: 'Post with image placeholder',
+      author: author.seedLocalId,
       coverImage: imageSeedLocalId,
     })
     await waitForPropertyInstances(postItem)

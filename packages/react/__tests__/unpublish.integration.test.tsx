@@ -13,7 +13,6 @@ import {
 } from '@seedprotocol/sdk'
 import type { SeedConstructorOptions } from '@seedprotocol/sdk'
 import { eq, inArray } from 'drizzle-orm'
-import { waitFor as xstateWaitFor } from 'xstate'
 import {
   createGetPublishPayloadTestSchema,
   createPublishedItemForUnpublish,
@@ -21,18 +20,8 @@ import {
 } from '../../sdk/__tests__/test-utils/getPublishPayloadIntegrationHelpers'
 import { createTestRevokeExecutor } from '../../sdk/__tests__/test-utils/testRevokeExecutor'
 import type { Item as ItemClass } from '@seedprotocol/sdk'
-
-async function waitForItemIdle(item: ItemClass<any>, timeout = 5000): Promise<void> {
-  const service = item.getService()
-  await xstateWaitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
+import { waitForItemIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 
 function UnpublishTest({ item }: { item: ItemClass<any> | null }) {
   const [revoked, setRevoked] = useState(false)
@@ -92,10 +81,10 @@ describe('Unpublish React Integration Tests', () => {
       await client.setAddresses([UNPUBLISH_TEST_PUBLISHER])
     }
 
-    await waitFor(() => client.isInitialized(), { timeout: 30000 })
+    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: SETUP_HOOK_TIMEOUT_MS })
     await createGetPublishPayloadTestSchema()
     setRevokeExecutor(createTestRevokeExecutor())
-  }, 60000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     setRevokeExecutor(null)

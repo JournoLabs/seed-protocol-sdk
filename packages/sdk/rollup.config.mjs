@@ -219,7 +219,6 @@ const config = [
         'better-sqlite3',
         'react',
         'react-dom',
-        'typia',
         'fsevents',
         'hardhat',
         'mocha',

@@ -7,6 +7,8 @@ import type {
 } from '@/helpers/FileManager/IFileManager'
 import { FileDownloader }      from '../workers/FileDownloader'
 import { ImageResizer }        from '../workers/ImageResizer'
+import { FileSystemLockedError } from '@/helpers/FileManager/errors'
+import { isSkippableOpfsEntryError } from './opfsErrors'
 import debug from 'debug'
 
 const logger = debug('seedSdk:browser:helpers:FileManager')
@@ -98,14 +100,20 @@ const pathCompat = {
   },
 }
 
-/** Chromium OPFS: a directory/file handle is stale (reload, other tab, leftover sync access handle). */
-function isStaleOpfsHandleError(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === 'InvalidStateError') {
+/**
+ * Chromium OPFS: the mount walk hit an entry another context is using (reload, other tab,
+ * leftover sync access handle, a SQLite journal removed mid-walk).
+ */
+function isBusyOpfsMountError(error: unknown): boolean {
+  if (isSkippableOpfsEntryError(error)) {
     return true
   }
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('state cached in an interface object')
 }
+
+/** Waits between mount attempts; about 2 s in total. */
+const MOUNT_RETRY_DELAYS_MS = [50, 150, 300, 600, 1000]
 
 /** OPFS / ZenFS can throw NotReadableError while a file is still settling after write. */
 function isTransientOpfsReadError(error: unknown): boolean {
@@ -153,28 +161,34 @@ export class BrowserFileManager implements IFileManager {
   async initializeFileSystem(_workingDir?: string): Promise<void> {
 
     const zenfs = await this.getFs()
-    const zenfsDomMod = await import('@zenfs/dom')
-    const { WebAccess } = zenfsDomMod
+    const { TolerantWebAccess } = await import('./tolerantWebAccess')
     const {configureSingle} = zenfs
 
     const configureRoot = async () => {
       const handle = await navigator.storage.getDirectory()
       await configureSingle({
-        backend: WebAccess,
+        backend: TolerantWebAccess,
         handle,
       })
     }
 
-    try {
-      await configureRoot()
-    } catch (error) {
-      if (!isStaleOpfsHandleError(error)) {
-        throw error
+    // TolerantWebAccess skips busy entries, so what reaches here is the walk failing above them
+    // (e.g. a stale root handle). Retry without deleting OPFS data; BaseFileManager resets its
+    // flags if every attempt fails.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await configureRoot()
+        return
+      } catch (error) {
+        if (!isBusyOpfsMountError(error)) {
+          throw error
+        }
+        if (attempt === MOUNT_RETRY_DELAYS_MS.length) {
+          throw new FileSystemLockedError(error)
+        }
+        logger(`OPFS mount attempt ${attempt + 1} failed (${(error as Error)?.name}); retrying`)
+        await sleep(MOUNT_RETRY_DELAYS_MS[attempt])
       }
-      // Leftover sync-access handles can make the first walk throw. Retry once
-      // without deleting OPFS data; BaseFileManager resets flags if this still fails.
-      await sleep(50)
-      await configureRoot()
     }
   }
 
@@ -211,6 +225,21 @@ export class BrowserFileManager implements IFileManager {
     const zenfs = await this.getFs()
     const entries = await zenfs.promises.readdir(targetDir, { withFileTypes: true })
     return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
+  }
+
+  async invalidateCachedPaths(filePaths: string[]): Promise<void> {
+    const { mounts } = await this.getFs()
+    const { TolerantWebAccessFS } = await import('./tolerantWebAccess')
+    const mounted = mounts.get('/')
+    if (!(mounted instanceof TolerantWebAccessFS)) return
+    for (const filePath of filePaths) {
+      const absolute = filePath.startsWith('/') ? filePath : `/${filePath}`
+      try {
+        await mounted.invalidate(absolute)
+      } catch (error) {
+        logger(`could not refresh cached ${absolute}`, error)
+      }
+    }
   }
 
   async pathExists(filePath: string): Promise<boolean> {
@@ -360,6 +389,14 @@ export class BrowserFileManager implements IFileManager {
   async waitForFileWithContent(filePath: string, interval: number = 100, timeout: number = 5000): Promise<boolean> {
     // First wait for file to exist
     await this.waitForFile(filePath, interval, timeout)
+
+    // Usually readable at once: polling first cost every saveFile 100ms. Any read error falls
+    // through to the polling below, which decides whether it is transient.
+    try {
+      if ((await this.readFile(filePath)).size > 0) return true
+    } catch {
+      // handled by polling
+    }
 
     // Now wait for file to have content
     return new Promise((resolve, reject) => {

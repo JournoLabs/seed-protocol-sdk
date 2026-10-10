@@ -130,6 +130,10 @@ export abstract class BaseFileManager {
     return BaseFileManager.requireImpl().pathExists(filePath)
   }
 
+  static invalidateCachedPaths(filePaths: string[]): Promise<void> {
+    return BaseFileManager.requireImpl().invalidateCachedPaths(filePaths)
+  }
+
   /** File size in bytes, or null if the path does not exist / cannot be stated. */
   static getFileSize(filePath: string): Promise<number | null> {
     return BaseFileManager.requireImpl().getFileSize(filePath)

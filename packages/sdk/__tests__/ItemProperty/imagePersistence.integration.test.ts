@@ -17,7 +17,8 @@ import { eq } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitForIdle, type HasService } from '../test-utils/waitForIdle'
 
 const MINIMAL_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -36,44 +37,58 @@ function createPngFile(name: string): File {
   return new File([blob], name, { type: 'image/png' })
 }
 
-async function waitForItemIdle(item: Item<any>, timeout = 10000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+const waitForItemIdle = (item: HasService, timeout = 10000) =>
+  waitForIdle(item, 'Item', timeout)
 
-async function waitForItemPropertyIdle(
-  property: ItemProperty<any>,
-  timeout = 15000
-): Promise<void> {
-  const service = property.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('ItemProperty failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout }
-  )
-}
+const waitForItemPropertyIdle = (property: HasService, timeout = 15000) =>
+  waitForIdle(property, 'ItemProperty', timeout)
 
+/**
+ * Wait until saveImage has finished: it replaces propertyValue with the image seed id and sets
+ * refResolvedValue to the saved filename. Blob/File values get an optimistic refResolvedValue
+ * ('image' or the File name) before the save runs, so refResolvedValue alone is not a completion signal.
+ */
 async function waitForRefResolvedValue(
   property: ItemProperty<any>,
-  timeout = 30000
+  timeout = 15000
 ): Promise<string | undefined> {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    const val = property.refResolvedValue
-    if (val) return val
-    await new Promise((r) => setTimeout(r, 200))
+  const snapshot = await waitFor(
+    property.getService(),
+    (s) => {
+      const ctx = s.context as Record<string, any>
+      if (ctx._saveError || ctx._saveValidationErrors?.length) return true
+      return (
+        !!ctx.refResolvedValue &&
+        ctx.refSeedType === 'image' &&
+        typeof ctx.propertyValue === 'string' &&
+        !/^(blob|data):/.test(ctx.propertyValue)
+      )
+    },
+    { timeout }
+  )
+  const ctx = snapshot.context as Record<string, any>
+  expect(ctx._saveError ?? null).toBeNull()
+  expect(ctx._saveValidationErrors ?? []).toEqual([])
+  return ctx.refResolvedValue
+}
+
+/**
+ * Browser: Image values render as blob: URLs. Node has no display blob URLs for saved files
+ * (NodeFileManager.getContentUrlFromPath returns file://, d0159c8), so ItemProperty.value
+ * falls back to the saved filename.
+ */
+async function expectImageDisplayValue(
+  property: ItemProperty<any>,
+  savedFileName: string | undefined
+): Promise<void> {
+  const renderValue = property.value
+  expect(renderValue).toBeTruthy()
+  if (typeof window !== 'undefined') {
+    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    return
   }
-  return undefined
+  expect(renderValue).toBe(savedFileName)
+  expect(await BaseFileManager.pathExists(BaseFileManager.getFilesPath('images', renderValue))).toBe(true)
 }
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
@@ -111,10 +126,10 @@ testDescribe('Image property persistence integration tests', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 90000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
     await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
-  }, 90000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterAll(async () => {
     await teardownTestEnvironment()
@@ -133,7 +148,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with Blob image' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with Blob image' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -165,7 +180,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with blob URL image' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with blob URL image' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -199,7 +214,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post for reload test' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for reload test' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -228,16 +243,14 @@ testDescribe('Image property persistence integration tests', () => {
 
     await waitForItemPropertyIdle(reloadedProp)
 
-    const renderValue = reloadedProp.value
-    expect(renderValue).toBeTruthy()
-    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    await expectImageDisplayValue(reloadedProp, refResolvedValue)
   })
 
   it('Image displays after reload when saved from blob URL', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post for blob URL reload test' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post for blob URL reload test' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -270,16 +283,14 @@ testDescribe('Image property persistence integration tests', () => {
 
     await waitForItemPropertyIdle(reloadedProp)
 
-    const renderValue = reloadedProp.value
-    expect(renderValue).toBeTruthy()
-    expect(typeof renderValue === 'string' && renderValue.startsWith('blob:')).toBe(true)
+    await expectImageDisplayValue(reloadedProp, refResolvedValue)
   })
 
   it('data URL still works and persists', async () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with data URL' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with data URL' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(
@@ -316,7 +327,7 @@ testDescribe('Image property persistence integration tests', () => {
     const model = Model.create('Post', schemaName, { waitForReady: false })
     await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: 5000 })
 
-    const item = await Item.create({ modelName: 'Post', title: 'Post with File' })
+    const item = await Item.create({ modelName: 'Post', schemaName, title: 'Post with File' })
     await waitForItemIdle(item)
 
     const featureImageProperty = item.properties.find(

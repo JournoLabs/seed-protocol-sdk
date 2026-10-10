@@ -1,4 +1,5 @@
-import { parseFragment, serialize } from 'parse5'
+import { INTERNAL_STORAGE_MODEL_FILE_IDS } from '@/helpers/constants'
+import { parseFragment } from 'parse5'
 import type { DefaultTreeAdapterTypes } from 'parse5'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -10,6 +11,7 @@ import type { IItem } from '@/interfaces'
 import { Item } from '@/Item/Item'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
+import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@/helpers/relationSeedRef'
 
 export const HTML_EMBEDDED_MAX_IMAGES_PER_DOC = 50
 export const HTML_EMBEDDED_MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -61,13 +63,6 @@ export function resolveEffectiveHtmlEmbeddedDataUriPolicy(
 function getAttr(node: DefaultTreeAdapterTypes.Element, name: string): string | undefined {
   const a = node.attrs?.find((x) => x.name === name)
   return a?.value
-}
-
-function setAttr(node: DefaultTreeAdapterTypes.Element, name: string, value: string): void {
-  if (!node.attrs) node.attrs = []
-  const i = node.attrs.findIndex((x) => x.name === name)
-  if (i >= 0) node.attrs[i]!.value = value
-  else node.attrs.push({ name, value })
 }
 
 /**
@@ -135,22 +130,40 @@ export async function extractDataUriImagesFromHtml(html: string): Promise<HtmlEm
   return found
 }
 
+function escapeAttributeValue(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
 /**
- * Replace `data:image/...` src values with Arweave URLs using upload results keyed by image seed local id.
+ * Rewrite attribute values of `html` by splicing each new value into the original string: every
+ * byte other than the rewritten attributes stays as written. Re-serializing the parsed tree would
+ * not round-trip (parse5 drops the newline the parser eats after `<pre>`/`<textarea>`/`<listing>`,
+ * a fragment parse drops doctype/html/head/body, and quoting, case and line endings are normalized),
+ * and sealed Html must not change with the serializer.
+ *
+ * `rewrite` gets each attribute's (entity-decoded) value and returns its new value, or undefined to
+ * leave it. A rewritten attribute is written as `name="value"`.
  */
-export function replaceDataUrisInParsedHtml(
+function rewriteHtmlAttributes(
   html: string,
-  replacements: Map<string, string>,
+  rewrite: (element: DefaultTreeAdapterTypes.Element, attrName: string, value: string) => string | undefined,
 ): string {
-  if (replacements.size === 0) return html
-  const fragment = parseFragment(html)
+  const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
+  const edits: { start: number; end: number; text: string }[] = []
   const walk = (node: DefaultTreeAdapterTypes.ChildNode): void => {
     if (node.nodeName === '#text' || node.nodeName === '#comment') return
     const el = node as DefaultTreeAdapterTypes.Element
-    if (el.tagName === 'img') {
-      const src = getAttr(el, 'src')?.trim()
-      if (src && replacements.has(src)) {
-        setAttr(el, 'src', replacements.get(src)!)
+    if (el.attrs?.length) {
+      for (const attr of el.attrs) {
+        if (attr.prefix) continue
+        const next = rewrite(el, attr.name, attr.value)
+        const location = el.sourceCodeLocation?.attrs?.[attr.name]
+        if (next === undefined || !location) continue
+        edits.push({
+          start: location.startOffset,
+          end: location.endOffset,
+          text: `${attr.name}="${escapeAttributeValue(next)}"`,
+        })
       }
     }
     const parent = el as DefaultTreeAdapterTypes.ParentNode
@@ -159,7 +172,143 @@ export function replaceDataUrisInParsedHtml(
     }
   }
   for (const c of fragment.childNodes) walk(c as DefaultTreeAdapterTypes.ChildNode)
-  return serialize(fragment)
+
+  let out = html
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
+  }
+  return out
+}
+
+/**
+ * Replace `data:image/...` `<img src>` values with Arweave URLs (keyed by data URI). Only those
+ * `src` attributes change; the rest of the Html is kept byte for byte.
+ */
+export function replaceDataUrisInParsedHtml(
+  html: string,
+  replacements: Map<string, string>,
+): string {
+  if (replacements.size === 0) return html
+  return rewriteHtmlAttributes(html, (el, attrName, value) => {
+    if (el.tagName !== 'img' || attrName !== 'src') return undefined
+    return replacements.get(value.trim())
+  })
+}
+
+/**
+ * `seed:property/<propertyName>` in Html stands for the Arweave URL of the same item's
+ * `<propertyName>` storage property (Image, File or Json). Publish uploads that property first,
+ * then rewrites the placeholder to its gateway URL before the Html is uploaded, so Html can show a
+ * file published alongside it without embedding it (e.g. `<img class="u-featured"
+ * src="seed:property/featureImage">`).
+ */
+export const SEED_PROPERTY_REF_PREFIX = 'seed:property/'
+const SEED_PROPERTY_REF = /^seed:property\/([A-Za-z_$][A-Za-z0-9_$]*)$/
+/** Attributes whose whole (trimmed) value may be a `seed:property/` placeholder. */
+const SEED_PROPERTY_REF_ATTRIBUTES = new Set(['src', 'href', 'poster'])
+
+const seedPropertyRefName = (attrName: string, value: string): string | undefined =>
+  SEED_PROPERTY_REF_ATTRIBUTES.has(attrName) ? SEED_PROPERTY_REF.exec(value.trim())?.[1] : undefined
+
+/** A `seed:property/` placeholder that names no usable property, or whose upload is unknown. */
+export class HtmlSeedPropertyRefError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'HtmlSeedPropertyRefError'
+  }
+}
+
+/** Property names referenced by `seed:property/<name>` placeholders in `html`, each once. */
+export function findSeedPropertyRefsInHtml(html: string): string[] {
+  if (!html.includes(SEED_PROPERTY_REF_PREFIX)) return []
+  const names = new Set<string>()
+  rewriteHtmlAttributes(html, (_el, attrName, value) => {
+    const name = seedPropertyRefName(attrName, value)
+    if (name) names.add(name)
+    return undefined
+  })
+  return [...names]
+}
+
+/** Replace `seed:property/<name>` placeholders with `urlByPropertyName.get(name)`; other bytes are kept. */
+export function replaceSeedPropertyRefsInHtml(html: string, urlByPropertyName: Map<string, string>): string {
+  if (urlByPropertyName.size === 0) return html
+  return rewriteHtmlAttributes(html, (_el, attrName, value) => {
+    const name = seedPropertyRefName(attrName, value)
+    return name ? urlByPropertyName.get(name) : undefined
+  })
+}
+
+const SEED_PROPERTY_REF_DATA_TYPES = [
+  ModelPropertyDataTypes.Image,
+  ModelPropertyDataTypes.File,
+  ModelPropertyDataTypes.Json,
+] as string[]
+
+/**
+ * The storage property of `item` a `seed:property/<name>` placeholder names, and the seed it holds.
+ * Html properties are refused: an Html seed may itself be deferred to after the rewrite.
+ */
+function resolveSeedPropertyRefTarget(
+  item: IItem<any>,
+  propertyName: string,
+): { seedLocalId?: string; seedUid?: string } {
+  const property = item.properties.find(
+    (p) => p.propertyName === propertyName || p.propertyName === `${propertyName}Id`,
+  )
+  const def = property?.propertyDef
+  if (!property || !def) {
+    throw new HtmlSeedPropertyRefError(
+      `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${item.modelName} has no property ${propertyName}`,
+    )
+  }
+  const dataType = normalizeDataTypeLocal(def.dataType)
+  const storageType =
+    dataType === ModelPropertyDataTypes.Relation ? normalizeDataTypeLocal(def.refValueType) : dataType
+  if (!SEED_PROPERTY_REF_DATA_TYPES.includes(storageType)) {
+    throw new HtmlSeedPropertyRefError(
+      `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} is ${def.dataType}; ` +
+        `only Image, File and Json properties can be referenced`,
+    )
+  }
+  const snap = property.getService().getSnapshot()
+  const ctx = 'context' in snap ? snap.context : null
+  const ids = resolveSeedIdsFromRefString(normalizeRelationPropertyValue((ctx as any)?.propertyValue) ?? '')
+  if (!ids.seedLocalId && !ids.seedUid) {
+    throw new HtmlSeedPropertyRefError(
+      `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} has no value`,
+    )
+  }
+  return ids
+}
+
+const ARWEAVE_TX_ID = /^[a-z0-9_-]{43}$/i
+
+/**
+ * The Arweave tx of the storage seed a placeholder names: uploaded in this publish's phase 1, or,
+ * when not uploaded now, the transaction it was published with (its storageTransactionId).
+ */
+async function resolveSeedPropertyRefTxId(
+  item: IItem<any>,
+  propertyName: string,
+  txBySeedLocalId: Map<string, string>,
+): Promise<string> {
+  const { seedLocalId, seedUid } = resolveSeedPropertyRefTarget(item, propertyName)
+  const uploaded = seedLocalId ? txBySeedLocalId.get(seedLocalId) : undefined
+  if (uploaded) return uploaded
+
+  const storageItem = await Item.find({ seedLocalId, seedUid })
+  const st =
+    storageItem?.internalProperties['storageTransactionId'] ??
+    storageItem?.allProperties['storageTransactionId']
+  const stSnap = st?.getService().getSnapshot()
+  const stValue = stSnap && 'context' in stSnap ? (stSnap.context as any).propertyValue : undefined
+  if (typeof stValue === 'string' && ARWEAVE_TX_ID.test(stValue.trim())) return stValue.trim()
+
+  throw new HtmlSeedPropertyRefError(
+    `Html references ${SEED_PROPERTY_REF_PREFIX}${propertyName}, but ${propertyName} was not uploaded ` +
+      `in this publish and has no published transaction`,
+  )
 }
 
 export type PrepareHtmlEmbeddedImagesResult = {
@@ -178,6 +327,7 @@ async function deleteCoPublishRowsForParent(appDb: ReturnType<typeof BaseDb.getA
 export async function createImageItemFromDataUri(dataUri: string): Promise<{ seedLocalId: string }> {
   const imageItem = await Item.create({
     modelName: 'Image',
+    modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
   })
   await waitForEntityIdle(imageItem, { timeout: 60_000 })
   const st =
@@ -205,16 +355,38 @@ export async function prepareHtmlEmbeddedImagesForPublish(
     return { deferredHtmlSeedLocalIds: [] }
   }
 
-  await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
-
   const deferred = new Set<string>()
+  // The item's own Html, and the Html of the draft items published with it: each gets its embedded
+  // images materialized and co-published (rows keyed by the item owning the Html property).
+  for (const parent of [item, ...(await getRelatedDraftsCoPublishedWith(item))]) {
+    await prepareHtmlEmbeddedImagesOfItem(appDb, parent, publishPolicy, deferred)
+  }
+
+  return { deferredHtmlSeedLocalIds: [...deferred] }
+}
+
+/**
+ * Draft items (no seed uid yet) that a publish of `item` publishes with it: every draft reachable
+ * through relation and list properties, as getPublishPayload and getPublishUploads walk them
+ * (publishDraftGraph.ts). Html-embedded images of these items are co-published with `item` like its own.
+ */
+export async function getRelatedDraftsCoPublishedWith(item: IItem<any>): Promise<IItem<any>[]> {
+  const { getPublishDraftGraph } = await import('@/db/read/publishDraftGraph')
+  const { drafts } = await getPublishDraftGraph(item)
+  return drafts.map((d) => d.item)
+}
+
+async function prepareHtmlEmbeddedImagesOfItem(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  item: IItem<any>,
+  publishPolicy: HtmlEmbeddedDataUriPolicy | undefined,
+  deferred: Set<string>,
+): Promise<void> {
+  await deleteCoPublishRowsForParent(appDb, item.seedLocalId)
 
   for (const p of item.properties) {
     const def = p.propertyDef
     if (!def || normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
-
-    const policy = resolveEffectiveHtmlEmbeddedDataUriPolicy(def, publishPolicy)
-    if (policy !== 'materialize') continue
 
     const snap = p.getService().getSnapshot()
     const ctx = 'context' in snap ? snap.context : null
@@ -245,13 +417,16 @@ export async function prepareHtmlEmbeddedImagesForPublish(
       }
     }
 
-    let extracted: HtmlEmbeddedExtractEntry[]
-    try {
-      extracted = await extractDataUriImagesFromHtml(html)
-    } catch (e) {
-      if (e instanceof HtmlEmbeddedDataUriLimitError) throw e
-      throw e
-    }
+    // seed:property/ placeholders are filled in after phase 1 whatever the data URI policy. A
+    // placeholder naming no usable property fails here, before anything is uploaded.
+    const refs = findSeedPropertyRefsInHtml(html)
+    for (const name of refs) resolveSeedPropertyRefTarget(item, name)
+    if (refs.length > 0) deferred.add(htmlSeedLocalId.trim())
+
+    const policy = resolveEffectiveHtmlEmbeddedDataUriPolicy(def, publishPolicy)
+    if (policy !== 'materialize') continue
+
+    const extracted = await extractDataUriImagesFromHtml(html)
     if (extracted.length === 0) continue
 
     deferred.add(htmlSeedLocalId.trim())
@@ -268,8 +443,6 @@ export async function prepareHtmlEmbeddedImagesForPublish(
       }).onConflictDoNothing()
     }
   }
-
-  return { deferredHtmlSeedLocalIds: [...deferred] }
 }
 
 function normalizeDataTypeLocal(dt: string | undefined): string {
@@ -280,67 +453,84 @@ function normalizeDataTypeLocal(dt: string | undefined): string {
 export type UploadedTx = { txId: string; seedLocalId?: string; versionLocalId?: string }
 
 /**
- * After phase-1 uploads, rewrite Html files on disk: data URI → Arweave gateway URL.
+ * After phase-1 uploads, rewrite Html files on disk: data URI → Arweave gateway URL, and
+ * `seed:property/<name>` → the gateway URL of that property's upload.
+ *
+ * `deferredHtmlSeedLocalIds` (from {@link prepareHtmlEmbeddedImagesForPublish}) limits the rewrite to
+ * the Html held back from phase 1; without it, every Html of the item and its co-published drafts is
+ * considered.
  */
 export async function rewriteHtmlEmbeddedImagesOnDisk(
   parentSeedLocalId: string,
   uploadedTransactions: UploadedTx[],
+  deferredHtmlSeedLocalIds?: string[],
 ): Promise<void> {
   const appDb = BaseDb.getAppDb()
   if (!appDb) return
 
+  const parentItem = await Item.find({ seedLocalId: parentSeedLocalId })
+  if (!parentItem) return
+
+  const txBySeedLocalId = new Map<string, string>()
+  for (const u of uploadedTransactions) {
+    if (u.seedLocalId && u.txId) {
+      txBySeedLocalId.set(u.seedLocalId.trim(), u.txId.trim())
+    }
+  }
+  const deferred = deferredHtmlSeedLocalIds
+    ? new Set(deferredHtmlSeedLocalIds.map((id) => id.trim()))
+    : undefined
+
+  // The parent's Html and that of the draft items published with it (see prepareHtmlEmbeddedImagesForPublish).
+  for (const item of [parentItem, ...(await getRelatedDraftsCoPublishedWith(parentItem))]) {
+    await rewriteHtmlEmbeddedImagesOfItem(appDb, item, txBySeedLocalId, deferred)
+  }
+}
+
+async function rewriteHtmlEmbeddedImagesOfItem(
+  appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  parentItem: IItem<any>,
+  txBySeedLocalId: Map<string, string>,
+  deferred: Set<string> | undefined,
+): Promise<void> {
   const rows = await appDb
     .select()
     .from(htmlEmbeddedImageCoPublish)
-    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentSeedLocalId))
+    .where(eq(htmlEmbeddedImageCoPublish.parentSeedLocalId, parentItem.seedLocalId))
 
-  if (rows.length === 0) return
+  for (const p of parentItem.properties) {
+    const def = p.propertyDef
+    if (!def || normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
+    const snap = p.getService().getSnapshot()
+    const ctx = 'context' in snap ? snap.context : null
+    const htmlSeedLocalId = typeof (ctx as any)?.propertyValue === 'string' ? (ctx as any).propertyValue.trim() : ''
+    const refResolved = (ctx as any)?.refResolvedValue as string | undefined
+    if (!htmlSeedLocalId || !refResolved) continue
+    if (deferred && !deferred.has(htmlSeedLocalId)) continue
 
-  const txByImageSeed = new Map<string, string>()
-  for (const u of uploadedTransactions) {
-    if (u.seedLocalId && u.txId) {
-      txByImageSeed.set(u.seedLocalId.trim(), u.txId.trim())
-    }
-  }
-
-  const htmlSeedIds = new Set(
-    rows.map((r: (typeof rows)[number]) => String(r.htmlSeedLocalId).trim()),
-  )
-  const parentItem = await Item.find({ seedLocalId: parentSeedLocalId })
-
-  const refByHtmlSeed = new Map<string, string>()
-  if (parentItem) {
-    for (const p of parentItem.properties) {
-      const def = p.propertyDef
-      if (!def || normalizeDataTypeLocal(def.dataType) !== ModelPropertyDataTypes.Html) continue
-      const snap = p.getService().getSnapshot()
-      const ctx = 'context' in snap ? snap.context : null
-      const pv = typeof (ctx as any)?.propertyValue === 'string' ? (ctx as any).propertyValue.trim() : ''
-      const refResolved = (ctx as any)?.refResolvedValue as string | undefined
-      if (pv && refResolved) refByHtmlSeed.set(pv, refResolved)
-    }
-  }
-
-  for (const htmlSeedLocalId of htmlSeedIds) {
-    const refResolved = refByHtmlSeed.get(String(htmlSeedLocalId))
-    if (!refResolved) continue
+    const htmlRows = rows.filter((r: (typeof rows)[number]) => String(r.htmlSeedLocalId).trim() === htmlSeedLocalId)
     const filePath = `${BaseFileManager.getFilesPath('html')}/${refResolved}`
     if (!(await BaseFileManager.pathExists(filePath))) continue
 
     const html = await BaseFileManager.readFileAsString(filePath)
 
     const replacements = new Map<string, string>()
-    for (const r of rows) {
-      if (String(r.htmlSeedLocalId).trim() !== htmlSeedLocalId) continue
-      const txId = txByImageSeed.get(r.imageSeedLocalId.trim())
+    for (const r of htmlRows) {
+      const txId = txBySeedLocalId.get(r.imageSeedLocalId.trim())
       if (!txId) continue
       const dataUri = await findDataUriForStableKey(html, r.stableKey)
       if (dataUri) replacements.set(dataUri, getArweaveUrlForTransaction(txId))
     }
 
-    if (replacements.size === 0) continue
+    const urlByPropertyName = new Map<string, string>()
+    for (const name of findSeedPropertyRefsInHtml(html)) {
+      const txId = await resolveSeedPropertyRefTxId(parentItem, name, txBySeedLocalId)
+      urlByPropertyName.set(name, getArweaveUrlForTransaction(txId))
+    }
 
-    const newHtml = replaceDataUrisInParsedHtml(html, replacements)
+    const newHtml = replaceSeedPropertyRefsInHtml(replaceDataUrisInParsedHtml(html, replacements), urlByPropertyName)
+    if (newHtml === html) continue
+
     try {
       await BaseFileManager.saveFile(filePath, newHtml)
     } catch {
@@ -348,19 +538,10 @@ export async function rewriteHtmlEmbeddedImagesOnDisk(
       fs.writeFileSync(filePath, newHtml)
     }
 
-    if (parentItem) {
-      for (const p of parentItem.properties) {
-        const snap = p.getService().getSnapshot()
-        const ctx = 'context' in snap ? snap.context : null
-        const pv = typeof (ctx as any)?.propertyValue === 'string' ? (ctx as any).propertyValue.trim() : ''
-        if (pv === htmlSeedLocalId) {
-          p.getService().send({
-            type: 'updateContext',
-            renderValue: newHtml,
-          })
-        }
-      }
-    }
+    p.getService().send({
+      type: 'updateContext',
+      renderValue: newHtml,
+    })
   }
 }
 

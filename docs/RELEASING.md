@@ -3,7 +3,7 @@
 All 11 public packages (`eas`, `arweave`, `vite`, `query`, `sdk`, `feed`,
 `feed-hyper`, `gateway-hyper`, `react`, `publish`, `mapping`) publish from CI at one
 shared version, with npm provenance, through npm trusted publishing. There is no npm
-token. The decision is recorded in [ADR 0006](adr/0006-ci-publishing-and-branch-prereleases.md).
+token. The decision is recorded in [ADR 0007](adr/0007-ci-publishing-and-branch-prereleases.md).
 
 ## Channels
 

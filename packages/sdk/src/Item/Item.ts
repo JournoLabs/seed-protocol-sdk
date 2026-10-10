@@ -38,6 +38,7 @@ import pluralize from 'pluralize'
 import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
+import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
@@ -135,6 +136,15 @@ const itemInstanceState = new WeakMap<Item<any>, {
   definedPropertyNames: Set<string>
 }>()
 
+/**
+ * Seed uids an item has moved away from (a republish gives the item a new seed uid) whose seed row
+ * may still hold them: the new uid is set on the item before its DB write lands, and until then the
+ * seeds liveQuery can deliver the old row. Rows carrying one of these uids are ignored; the set is
+ * cleared once the row carries the item's current uid. Lower-cased. Keyed by the item's actor,
+ * which the instance and its reactive proxy share.
+ */
+const supersededSeedUids = new WeakMap<object, Set<string>>()
+
 export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   protected static instanceCache: Map<string, { instance: Item<any>; refCount: number }> = new Map();
@@ -154,6 +164,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelInstance,
       publisher,
     } = initialValues
+    const modelFileId =
+      ((initialValues as Record<string, unknown>).modelFileId as string | undefined) ?? modelInstance?.id
 
     // Store modelInstance if provided (for backward compatibility)
     // But Item no longer depends on Model being loaded - it loads properties from database directly
@@ -167,6 +179,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         seedUid,
         schemaUid,
         modelName,
+        modelFileId,
+        schemaName: ((initialValues as Record<string, unknown>).schemaName as string | undefined) ?? modelInstance?.schemaName,
         latestVersionLocalId,
         latestVersionUid,
         publisher,
@@ -265,10 +279,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       versionLocalId: latestVersionLocalId,
       versionUid: latestVersionUid,
       modelName,
+      modelFileId,
     }
 
     const metadataKeys = [
       'modelName',
+      'modelFileId',
       'schemaName',
       'modelInstance',
       'seedLocalId',
@@ -289,7 +305,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     let model: import('@/Model/Model').Model | undefined
     try {
       const M = getModel()
-      model = M != null ? M.getByName(modelName, schemaNameForModel) : undefined
+      model = M != null ? M.resolve(modelName, { modelFileId, schemaName: schemaNameForModel }) : undefined
     } catch {
       model = undefined
     }
@@ -378,6 +394,40 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     }
   }
 
+  /**
+   * Sets a tracked context property from the proxy. Setting `seedUid` to a different uid means a
+   * new seed attestation (publishing again after unpublish): the revocation belonged to the old
+   * one, so `revokedAt` is cleared, and the instance cache's uid alias moves to the new uid.
+   */
+  private static sendTrackedPropertyUpdate(target: Item<any>, prop: string, value: unknown): void {
+    const previousSeedUid =
+      prop === 'seedUid' ? (target._getSnapshotContext() as { seedUid?: string }).seedUid : undefined
+    const replacesSeedUid =
+      typeof value === 'string' &&
+      value.length > 0 &&
+      typeof previousSeedUid === 'string' &&
+      previousSeedUid.length > 0 &&
+      previousSeedUid !== value
+    target._service.send({
+      type: 'updateContext',
+      [prop]: value,
+      ...(replacesSeedUid && { revokedAt: undefined }),
+    } as any)
+    if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
+      const superseded = supersededSeedUids.get(target._service) ?? new Set<string>()
+      superseded.delete(value.toLowerCase())
+      if (replacesSeedUid) superseded.add(previousSeedUid!.toLowerCase())
+      supersededSeedUids.set(target._service, superseded)
+    }
+    if (replacesSeedUid) {
+      const entry = this.instanceCache.get(previousSeedUid!)
+      if (entry) {
+        this.instanceCache.delete(previousSeedUid!)
+        this.instanceCache.set(value as string, entry)
+      }
+    }
+  }
+
   private static releaseItemInstanceCacheHold(instance: Item<any>): void {
     const keys = this.collectInstanceCacheKeysForInstance(instance)
     if (keys.length === 0) return
@@ -388,6 +438,37 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         this.instanceCache.delete(k)
       }
     }
+  }
+
+  /**
+   * Idle, and not the shell the item machine can be in when it reaches `idle` before
+   * `propertyInstances` is merged (an item with a version but no property instances yet).
+   */
+  private static isItemSnapshotReadyForRead(snap: any): boolean {
+    if (!snap || !('value' in snap) || snap.value !== 'idle') {
+      return false
+    }
+    const ctx = snap.context || {}
+    const versionsCount = ctx.versionsCount ?? 0
+    const hasHeadVersion = !!ctx.latestVersionLocalId
+    if (versionsCount === 0 && !hasHeadVersion) {
+      return true
+    }
+    return (ctx.propertyInstances?.size ?? 0) > 0
+  }
+
+  /**
+   * The cached Item for a seedLocalId or seedUid when it can be read right now: idle and hydrated,
+   * so at least what `Item.find()` would wait for. Otherwise undefined. Unlike `getById`, it takes
+   * no cache hold, so React hooks can call it during render.
+   */
+  static peekReady(id: string | undefined): Item<any> | undefined {
+    if (!id) return undefined
+    const instance = this.findItemInstanceCacheEntryById(id)?.instance
+    if (!instance) return undefined
+    const snap = instance.getService().getSnapshot()
+    if ((snap as { status?: string }).status !== 'active') return undefined
+    return this.isItemSnapshotReadyForRead(snap) ? instance : undefined
   }
 
   /**
@@ -407,16 +488,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           if ('value' in snap && snap.value === 'error') {
             throw new Error('Entity failed to load')
           }
-          if (!('value' in snap) || snap.value !== 'idle') {
-            return false
-          }
-          const ctx = snap.context || {}
-          const versionsCount = ctx.versionsCount ?? 0
-          const hasHeadVersion = !!ctx.latestVersionLocalId
-          if (versionsCount === 0 && !hasHeadVersion) {
-            return true
-          }
-          return (ctx.propertyInstances?.size ?? 0) > 0
+          return Item.isItemSnapshotReadyForRead(snap)
         },
         { timeout: readyTimeout },
       )
@@ -580,10 +652,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             // Handle tracked properties
             if (typeof prop === 'string' && TRACKED_PROPERTIES.includes(prop as any)) {
               // Standard property update
-              target._service.send({
-                type: 'updateContext',
-                [prop]: value,
-              })
+              Item.sendTrackedPropertyUpdate(target, prop, value)
               // Auto-persist seedUid to DB when assigned so future loads and getPublishPayload see it
               if (prop === 'seedUid' && typeof value === 'string' && value.length > 0) {
                 const seedLocalId = target._getSnapshotContext().seedLocalId
@@ -652,43 +721,39 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       throw new Error('Model name is required to create an item')
     }
     // Filter out ItemData metadata properties - only pass model schema properties
-    // Use schemaName from props if available (passed from Model.create() instance method)
-    const schemaName = (props as any).schemaName
+    // Use schemaName / modelInstance from props if available (passed from Model.create() instance method)
+    const schemaName = (props as any).schemaName as string | undefined
+    const modelInstance = (props as any).modelInstance as { id?: string; schemaName?: string } | undefined
     
     // Get property names directly from database to make Item independent from Model
     let propertyNames: string[] = []
     const dataTypeByPropertyName = new Map<string, string>()
     const db = BaseDb.getAppDb()
     if (db && props.modelName) {
-      // Query properties table directly by model name
-      // First get the model record by name, optionally filtered by schema
-      let modelRecords
-      
-      // If we have a schema name, join with modelSchemas to filter by schema
-      if (schemaName) {
-        const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
-        const { modelSchemas } = modelSchemaSchemaMod
-        const schemaSchemaMod = await import('../seedSchema/SchemaSchema')
-        const { schemas: schemasTable } = schemaSchemaMod
-        
-        modelRecords = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .innerJoin(modelSchemas, eq(modelsTable.id, modelSchemas.modelId))
+      // Model names are only unique per schema: resolve the exact models row from the most specific scope.
+      const { resolveModelRecord } = await import('../db/read/resolveModelRecord')
+      const modelRecord = await resolveModelRecord(props.modelName, {
+        modelFileId: (props as any).modelFileId ?? modelInstance?.id,
+        schemaName: schemaName ?? modelInstance?.schemaName,
+      })
+      const modelRecords = modelRecord ? [modelRecord] : []
+      if (modelRecord?.schemaFileId) {
+        ;(props as any).modelFileId = modelRecord.schemaFileId
+      }
+      // Scope the constructor's Model lookup to this model's schema (as getItemData does on reload),
+      // so a same-named model cached from another schema can't supply the property set.
+      if (modelRecord && !(props as any).schemaName) {
+        const { modelSchemas } = await import('../seedSchema/ModelSchemaSchema')
+        const { schemas: schemasTable } = await import('../seedSchema/SchemaSchema')
+        const schemaRows = await db
+          .select({ schemaName: schemasTable.name })
+          .from(modelSchemas)
           .innerJoin(schemasTable, eq(modelSchemas.schemaId, schemasTable.id))
-          .where(
-            and(
-              eq(modelsTable.name, props.modelName),
-              eq(schemasTable.name, schemaName)
-            )
-          )
+          .where(eq(modelSchemas.modelId, modelRecord.id))
           .limit(1)
-      } else {
-        modelRecords = await db
-          .select({ id: modelsTable.id })
-          .from(modelsTable)
-          .where(eq(modelsTable.name, props.modelName))
-          .limit(1)
+        if (schemaRows[0]?.schemaName) {
+          ;(props as any).schemaName = schemaRows[0].schemaName
+        }
       }
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
@@ -704,7 +769,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       }
     }
     
-    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string } = { modelName: props.modelName }
+    const modelPropertyData: Partial<ModelValues<ModelSchema>> & { modelName: string; modelFileId?: string } = {
+      modelName: props.modelName,
+      modelFileId: (props as any).modelFileId,
+    }
     // File/Image/Html values that are raw content (html string, data URI, URL, File) must go through
     // the property's save pipeline to become storage seeds; createNewItem would store them verbatim.
     const pipelineValues: Array<[string, unknown]> = []
@@ -713,7 +781,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Exclude modelInstance, modelName, and schemaName as they're metadata, not item properties
     for (const [key, value] of Object.entries(props)) {
       // Skip metadata properties that aren't part of the item's data
-      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance') {
+      if (key === 'modelName' || key === 'schemaName' || key === 'modelInstance' || key === 'modelFileId') {
         continue
       }
       if (propertyNames.length === 0 || propertyNames.includes(key)) {
@@ -810,10 +878,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               throw new Error('Cannot set item.properties directly. Properties are computed from ItemProperty instances.')
             } else {
               // Standard property update
-              target._service.send({
-                type: 'updateContext',
-                [prop]: value,
-              })
+              Item.sendTrackedPropertyUpdate(target, prop, value)
             }
             return true
           }
@@ -1064,6 +1129,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       readyTimeout?: number
       includeEas?: boolean
       addressFilter?: 'owned' | 'watched' | 'all'
+      /** Only items of one model, when several schemas define `modelName`: its Model.id ... */
+      modelFileId?: string
+      /** ... or the schema that defines it. */
+      schemaName?: string
     },
   ): Promise<Item<any>[]> {
     const {
@@ -1071,8 +1140,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       readyTimeout = 5000,
       includeEas = false,
       addressFilter,
+      modelFileId,
+      schemaName,
     } = options ?? {}
-    const itemsData = await getItemsData({ modelName, deleted, includeEas, addressFilter })
+    const itemsData = await getItemsData({ modelName, modelFileId, schemaName, deleted, includeEas, addressFilter })
     const itemInstances: Item<any>[] = []
     for (const itemData of itemsData) {
       itemInstances.push(
@@ -1145,9 +1216,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           try {
             const M = getModel()
             const model =
-              schemaNameForModel !== undefined
-                ? M?.getByName(itemModelName, schemaNameForModel)
-                : M?.getByName(itemModelName)
+              M?.resolve(itemModelName, {
+                  modelFileId: ctx.modelFileId as string | undefined,
+                  schemaName: schemaNameForModel,
+                })
             if (model?.properties?.length) {
               propertySchemas = modelPropertiesToObject(model.properties)
             }
@@ -1329,7 +1401,16 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       seedSchemaUid,
     })
     const revokedAt = Math.floor(Date.now() / 1000)
-    this._service.send({ type: 'updateContext', revokedAt })
+    // The executor stamps the revoked version rows; the latest version is now the newest one left
+    // (a local draft) or none, never a revoked one.
+    const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
+    const head = await getLatestVersionRow(this.seedLocalId)
+    this._service.send({
+      type: 'updateContext',
+      revokedAt,
+      latestVersionLocalId: head?.localId ?? undefined,
+      latestVersionUid: head?.uid ?? undefined,
+    })
   }
 
   publish = async (): Promise<void> => {
@@ -1395,6 +1476,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         publisher,
         ...(attestationCreatedAtMs != null && { attestationCreatedAt: attestationCreatedAtMs }),
       })
+      // Publish has recorded the version it attested (updateVersionUid): reflect it here too, as
+      // the versions liveQuery does in the browser. After a republish this is the new version.
+      const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
+      const head = await getLatestVersionRow(seedLocalId)
+      if (head?.localId) {
+        this._service.send({
+          type: 'updateContext',
+          latestVersionLocalId: head.localId,
+          latestVersionUid: head.uid ?? undefined,
+        })
+      }
     }
   }
 
@@ -1464,7 +1556,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       if (!modelName) {
         return []
       }
-      const model = Model.getByName(modelName, schemaName)
+      const model = Model.resolve(modelName, {
+        modelFileId: this.serviceContext.modelFileId,
+        schemaName: schemaName ?? this.serviceContext.schemaName,
+      })
       if (!model) {
         return []
       }
@@ -1518,7 +1613,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         return []
       }
       
-      const model = Model.getByName(modelName)
+      const model = Model.resolve(modelName, {
+        modelFileId: serviceContext.modelFileId,
+        schemaName: serviceContext.schemaName,
+      })
       if (!model) {
         return []
       }
@@ -1750,6 +1848,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             schemaUid: seeds.schemaUid,
             latestVersionUid: versionData.latestVersionUid,
             latestVersionLocalId: versionData.latestVersionLocalId,
+            versionsCount: versionData.versionsCount,
           })
           .from(seeds)
           .leftJoin(versionData, eq(seeds.localId, versionData.seedLocalId))
@@ -1764,102 +1863,98 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         }
 
         const seedRecord = seedRecords[0]
+        // Set up from a uid alone, the item's local id comes from its seed row.
+        const watchedSeedLocalId = seedRecord.seedLocalId || seedLocalId
         const currentVersionLocalId = seedRecord.latestVersionLocalId
 
-        if (!currentVersionLocalId) {
+        // A seed whose versions are all revoked (unpublished) has no latest version, but its versions
+        // are still watched below so a new version (republish, new draft) is picked up.
+        if (!currentVersionLocalId && !seedRecord.versionsCount) {
           logger(`[Item._setupLiveQuerySubscription] No version found for seedLocalId: ${seedLocalId}`)
           return
         }
 
-        // Query initial metadata records for the latest version
-        const initialMetadata = await db
-          .select()
-          .from(metadata)
-          .where(
-            and(
-              eq(metadata.seedLocalId, seedLocalId),
-              eq(metadata.versionLocalId, currentVersionLocalId)
+        if (currentVersionLocalId) {
+          // Query initial metadata records for the latest version
+          const initialMetadata = await db
+            .select()
+            .from(metadata)
+            .where(
+              and(
+                eq(metadata.seedLocalId, watchedSeedLocalId),
+                eq(metadata.versionLocalId, currentVersionLocalId)
+              )
             )
-          )
 
-        const initialMetadataIds = initialMetadata
-          .map((row: any) => row.localId || row.uid)
-          .filter((id: string | null | undefined): id is string => Boolean(id))
+          const initialMetadataIds = initialMetadata
+            .map((row: any) => row.localId || row.uid)
+            .filter((id: string | null | undefined): id is string => Boolean(id))
 
-        logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
+          logger(`[Item._setupLiveQuerySubscription] Initial query returned ${initialMetadataIds.length} metadata records`)
 
-        // CRITICAL: Create ItemProperty instances BEFORE updating context
-        if (initialMetadataIds.length > 0) {
-          try {
-            const itemPropertyMod = await import('../ItemProperty/ItemProperty')
-            const { ItemProperty } = itemPropertyMod
-            const itemModelName = this._service.getSnapshot().context.modelName
-            const createPromises = initialMetadata.map(async (metaRow: any) => {
-              try {
-                const property = await ItemProperty.find({
-                  propertyName: metaRow.propertyName,
-                  seedLocalId,
-                  seedUid,
-                  modelName: itemModelName,
-                })
-                if (property) {
-                  logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+          // CRITICAL: Create ItemProperty instances BEFORE updating context
+          if (initialMetadataIds.length > 0) {
+            try {
+              const itemPropertyMod = await import('../ItemProperty/ItemProperty')
+              const { ItemProperty } = itemPropertyMod
+              const itemModelName = this._service.getSnapshot().context.modelName
+              const createPromises = initialMetadata.map(async (metaRow: any) => {
+                try {
+                  const property = await ItemProperty.find({
+                    propertyName: metaRow.propertyName,
+                    seedLocalId: watchedSeedLocalId,
+                    seedUid: this._getSnapshotContext().seedUid ?? seedUid,
+                    modelName: itemModelName,
+                  })
+                  if (property) {
+                    logger(`[Item._setupLiveQuerySubscription] Created/cached ItemProperty instance for propertyName "${metaRow.propertyName}"`)
+                  }
+                } catch (error) {
+                  logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
                 }
-              } catch (error) {
-                logger(`[Item._setupLiveQuerySubscription] Error creating ItemProperty instance: ${error}`)
-              }
-            })
-            await Promise.all(createPromises)
-          } catch (error) {
-            logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
+              })
+              await Promise.all(createPromises)
+            } catch (error) {
+              logger(`[Item._setupLiveQuerySubscription] Error importing ItemProperty or creating instances: ${error}`)
+            }
           }
-        }
 
-        // Update context with latest version info
-        sendToItemMachine({
-          type: 'updateContext',
-          latestVersionLocalId: currentVersionLocalId,
-          latestVersionUid: seedRecord.latestVersionUid,
-        })
+          // Update context with latest version info
+          sendToItemMachine({
+            type: 'updateContext',
+            latestVersionLocalId: currentVersionLocalId,
+            latestVersionUid: seedRecord.latestVersionUid,
+          })
+        }
 
         // Only set up liveQuery subscription in browser environment
         if (isBrowser) {
-          // Set up liveQuery to watch seeds table
-          // Use proper SQL parameter binding - ensure values are strings, not objects
-          const resolvedSeedUid = seedUid || null
-          const resolvedSeedLocalId = seedLocalId || null
-          
-          const seeds$ = BaseDb.liveQuery<{ localId: string; uid: string | null; schemaUid: string | null }>(
-            (sql: any) => {
-              if (resolvedSeedUid) {
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE uid = ${resolvedSeedUid}
-                `
-              } else if (resolvedSeedLocalId) {
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE local_id = ${resolvedSeedLocalId}
-                `
-              } else {
-                // Fallback - should not happen, but handle gracefully
-                return sql`
-                  SELECT local_id as localId, uid, schema_uid as schemaUid
-                  FROM seeds
-                  WHERE 1 = 0
-                `
-              }
-            }
+          // Watch the seed row by local id: its uid changes when an unpublished item is published
+          // again (a new seed attestation), and a watch on the uid would stop seeing the row.
+          const seeds$ = BaseDb.liveQuery<{
+            localId: string
+            uid: string | null
+            schemaUid: string | null
+            revokedAt: number | null
+          }>(
+            (sql: any) => sql`
+              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt
+              FROM seeds
+              WHERE local_id = ${watchedSeedLocalId}
+            `
           )
 
           // Set up liveQuery to watch versions table for this seed
-          const versions$ = BaseDb.liveQuery<{ localId: string; uid: string | null; seedLocalId: string }>(
+          const versions$ = BaseDb.liveQuery<{
+            localId: string
+            uid: string | null
+            seedLocalId: string
+            revokedAt: number | null
+          }>(
             (sql: any) => sql`
-              SELECT local_id as localId, uid, seed_local_id as seedLocalId
+              SELECT local_id as localId, uid, seed_local_id as seedLocalId, revoked_at as revokedAt
               FROM versions
-              WHERE seed_local_id = ${seedLocalId}
+              WHERE seed_local_id = ${watchedSeedLocalId}
               ORDER BY COALESCE(attestation_created_at, created_at) DESC
             `
           )
@@ -1879,11 +1974,31 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
               logger(`[Item._setupLiveQuerySubscription] Seed updated in database`)
               
               // Update context with seed data
+              const status = itemActor.getSnapshot().status
+              if (status === 'stopped' || status === 'done') return
+              // The row still has a uid this item moved away from (a republish set the new seed uid
+              // on the item; its DB write has not landed): stale, so neither its uid nor its
+              // revocation applies. Once the row has the item's uid, the DB has caught up.
+              const rowUid = seedRow.uid?.toLowerCase()
+              const superseded = supersededSeedUids.get(this._service)
+              if (rowUid && superseded?.has(rowUid)) {
+                logger('[Item._setupLiveQuerySubscription] Ignoring seed row with a superseded uid')
+                return
+              }
+              if (rowUid && rowUid === this._getSnapshotContext().seedUid?.toLowerCase()) {
+                superseded?.clear()
+              }
+              // A new uid written elsewhere (sync, another tab's republish) goes through the tracked
+              // setter so the instance cache's uid alias follows it. A row without a uid (not yet
+              // persisted) never clears the item's uid.
+              if (seedRow.uid && seedRow.uid !== this._getSnapshotContext().seedUid) {
+                Item.sendTrackedPropertyUpdate(this, 'seedUid', seedRow.uid)
+              }
               sendToItemMachine({
                 type: 'updateContext',
                 seedLocalId: seedRow.localId,
-                seedUid: seedRow.uid || undefined,
                 schemaUid: seedRow.schemaUid || undefined,
+                revokedAt: seedRow.revokedAt ?? undefined,
               })
             },
             error: (error) => {
@@ -1895,9 +2010,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           const versionsSubscription = versions$.subscribe({
             next: async (versionRows) => {
               if (versionRows.length === 0) return
-              
-              // Get the most recent version
-              const latestVersion = versionRows[0]
+
+              // Get the most recent version that isn't revoked. When every version is revoked (the
+              // item was unpublished) there is no latest version any more.
+              const latestVersion = versionRows.find((v) => !isVersionRevoked(v.revokedAt))
+              if (!latestVersion) {
+                sendToItemMachine({
+                  type: 'updateContext',
+                  latestVersionLocalId: undefined,
+                  latestVersionUid: undefined,
+                })
+                return
+              }
               const latestVersionLocalId = latestVersion.localId
               
               logger(`[Item._setupLiveQuerySubscription] Versions updated, latest version: ${latestVersionLocalId}`)
@@ -1908,7 +2032,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 .from(metadata)
                 .where(
                   and(
-                    eq(metadata.seedLocalId, seedLocalId),
+                    eq(metadata.seedLocalId, watchedSeedLocalId),
                     eq(metadata.versionLocalId, latestVersionLocalId)
                   )
                 )
@@ -1925,9 +2049,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                     if (itemModelName) {
                       const M = getModel()
                       const model =
-                        schemaNameForModel !== undefined
-                          ? M?.getByName(itemModelName, schemaNameForModel)
-                          : M?.getByName(itemModelName)
+                        M?.resolve(itemModelName, {
+                            modelFileId: this._service.getSnapshot().context.modelFileId,
+                            schemaName: schemaNameForModel,
+                          })
                       if (model?.properties?.length) {
                         propertySchemas = modelPropertiesToObject(model.properties)
                       }
@@ -1954,8 +2079,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                       }
                       const property = await ItemProperty.find({
                         propertyName,
-                        seedLocalId,
-                        seedUid,
+                        seedLocalId: watchedSeedLocalId,
+                        seedUid: this._getSnapshotContext().seedUid ?? seedUid,
                         modelName: itemModelName,
                       })
                       if (property) {

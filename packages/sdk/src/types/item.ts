@@ -1,4 +1,3 @@
-import { tags } from 'typia';
 import { ModelSchema } from '@/types'
 import { PropertyType as PropertySchemaType } from '@/types/property'
 import type { Attestation } from '@seedprotocol/eas'
@@ -26,6 +25,8 @@ export type ItemMachineContext<T> = {
   modelNamePlural?: string
   modelName?: string
   schemaName?: string
+  /** schemaFileId of the item's models row (seeds.model_file_id); disambiguates same-name models across schemas. */
+  modelFileId?: string
   existingItem?: Record<string, unknown>
   propertiesUpdatedAt?: number
   hasRemoteBackup?: boolean
@@ -41,14 +42,15 @@ export type ItemMachineContext<T> = {
   revokedAt?: number
   /** Last publish failure; cleared on success or reset. Serializable for XState (use message string). */
   _publishError?: { message: string } | null
-  /** Destroy lifecycle (for destroy hooks). */
-  _destroyInProgress?: boolean
+  /** Destroy failure from the last destroy() (read by destroy hooks). */
   _destroyError?: { message: string; name?: string } | null
 }
 
 export type NewItemProps<T> = Partial<ItemData> &
   Partial<T> & {
     modelName: string
+    /** Which model, when several schemas define `modelName`: the Model.id, or pass `schemaName`. */
+    modelFileId?: string
     modelInstance?: Model
     schemaUidsByModelName?: Map<string, string>
     mostRecentPropertiesBySeedUid?: Map<string, Attestation[]>
@@ -60,21 +62,23 @@ export interface ItemData {
   seedUid?: string;
   modelName?: string;
   schemaName?: string;
+  /** schemaFileId of the item's models row (seeds.model_file_id). */
+  modelFileId?: string;
   schemaUid?: string;
-  attestationCreatedAt?: number & tags.Type<"int64">;
+  attestationCreatedAt?: number;
   latestVersionUid?: string;
   latestVersionLocalId?: string;
-  /** Newest version row whose `uid` is a valid EAS attestation id (see getLatestPublishedVersionRow). */
+  /** Newest non-revoked version row whose `uid` is a valid EAS attestation id (see getLatestPublishedVersionRow). */
   publishedVersionUid?: string;
   publishedVersionLocalId?: string;
-  versionsCount?: number & tags.Type<"int32">;
-  lastVersionPublishedAt?: number & tags.Type<"int64">;
-  lastLocalUpdateAt?: number & tags.Type<"int64">;
+  versionsCount?: number;
+  lastVersionPublishedAt?: number;
+  lastLocalUpdateAt?: number;
   type?: string;
-  createdAt?: number & tags.Type<"int64">;
-  updatedAt?: number & tags.Type<"int64">;
+  createdAt?: number;
+  updatedAt?: number;
   publisher?: string;
-  revokedAt?: number & tags.Type<"int64">;
+  revokedAt?: number;
 }
 
 export type ItemFindProps = {
@@ -90,6 +94,10 @@ export type CreatePropertyInstanceProps = {
   versionLocalId?: string
   versionUid?: string
   modelName: string
+  /** schemaFileId of the owning item's models row. */
+  modelFileId?: string
+  /** metadata.property_id (properties.id) when created from a metadata row. */
+  propertyId?: number
   storageTransactionId?: string
   propertyValue: any
   schemaUid?: string

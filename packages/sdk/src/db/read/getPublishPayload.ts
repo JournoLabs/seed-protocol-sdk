@@ -1,3 +1,4 @@
+import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
 // Dynamic import to break circular dependency with getItem -> BaseItem
 // import { getItem } from '@/db/read/getItem'
 import {
@@ -20,6 +21,7 @@ import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
+import { isSeedRevoked } from '@/db/read/isSeedRevoked'
 import {
   isStorageSeedRef,
   isPublishedSeedRef,
@@ -28,6 +30,7 @@ import {
 } from '@/helpers/relationSeedRef'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
+import { draftWalkProperties } from '@/db/read/publishDraftGraph'
 import { getPropertySchema } from '@/helpers/property'
 import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
 import { modelPropertiesToObject } from '@/helpers/model'
@@ -41,7 +44,6 @@ import { IItem } from '@/interfaces'
 import debug from 'debug'
 import { encodeBytes32String } from '@/helpers/ethereumUtils'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/Schema'
-import type { ValidationError } from '@/Schema/validation'
 const logger = debug('seedSdk:db:getPublishPayload')
 
 /** Case-insensitive dataType match (schema JSON may use "text" vs "Text"). */
@@ -50,11 +52,97 @@ const matchesDataType = (
   expected: ModelPropertyDataTypes | string,
 ): boolean => normalizeDataType(actual) === expected
 
-/** Validation error collected during publish payload building. */
-export type PublishValidationError = Pick<ValidationError, 'field' | 'message'> & { code?: string }
+import {
+  PublishValidationFailedError,
+  RelatedItemUnpublishedError,
+  type PublishValidationError,
+  type UnpublishedRelatedItem,
+} from '@/db/read/publishErrors'
+import {
+  findRelatedSeedRow,
+  htmlPropertyNameForHtmlSeed,
+  isLivePublishedSeed,
+  isUnpublishedSeed,
+  relatedModelNameFromDef,
+  type RelatedSeedRow,
+} from '@/db/read/resolveRelatedSeedRef'
+
+export { PublishValidationFailedError, type PublishValidationError }
 
 /** Context for collecting validation errors instead of throwing on first error. */
-export type PublishValidationContext = { errors: PublishValidationError[] }
+export type PublishValidationContext = {
+  errors: PublishValidationError[]
+  /** Refs to seeds whose attestation was revoked; publish stops with RelatedItemUnpublishedError. */
+  unpublishedRelatedItems?: UnpublishedRelatedItem[]
+  /**
+   * Relation/list/image refs (local id, or a republished seed's old uid) to seeds that are
+   * published and live, mapped to their current uid: the parent attests that uid.
+   */
+  relatedRefUids?: Map<string, string>
+  /**
+   * Items getting a new seed in this publish whose payload is still being built (the root when it
+   * gets a new seed, and the related drafts being walked). A ref to one of them is a cycle back
+   * edge: see publishDraftGraph.ts.
+   */
+  newSeedsInProgress?: Set<string>
+  /** Properties left out of this publish because they point back at an item in progress. */
+  deferredProperties?: Set<IItemProperty<any>>
+}
+
+/** True (and the property is deferred) when `targetSeedLocalId` is an item still in progress. */
+function deferIfBackEdge(
+  ctx: PublishValidationContext,
+  property: IItemProperty<any>,
+  targetSeedLocalIds: (string | undefined)[],
+): boolean {
+  if (!targetSeedLocalIds.some((id) => !!id && ctx.newSeedsInProgress?.has(id))) return false
+  ctx.deferredProperties ??= new Set()
+  ctx.deferredProperties.add(property)
+  return true
+}
+
+/**
+ * Checks the seed a relation/list/image ref points at. A revoked (unpublished) seed is recorded in
+ * `ctx.unpublishedRelatedItems`; a live published one maps the ref to its current uid. Returns
+ * true when the caller must not walk into the related item (it is published, live or revoked).
+ */
+function noteRelatedSeed(
+  ctx: PublishValidationContext,
+  ref: string,
+  row: RelatedSeedRow | null,
+  propertyName: string,
+  modelName: string | undefined,
+): boolean {
+  if (isUnpublishedSeed(row)) {
+    ctx.unpublishedRelatedItems ??= []
+    if (
+      !ctx.unpublishedRelatedItems.some(
+        (r) => r.propertyName === propertyName && r.seedLocalId === row.seedLocalId,
+      )
+    ) {
+      ctx.unpublishedRelatedItems.push({
+        propertyName,
+        modelName: modelName ?? row.type ?? 'unknown',
+        seedLocalId: row.seedLocalId,
+        seedUid: row.seedUid,
+      })
+    }
+    return true
+  }
+  if (isLivePublishedSeed(row)) {
+    if (ref !== row.seedUid) {
+      ctx.relatedRefUids ??= new Map()
+      ctx.relatedRefUids.set(ref, row.seedUid)
+    }
+    return true
+  }
+  return false
+}
+
+/** Current uid for a ref noted by noteRelatedSeed, else the ref itself. */
+function currentRelatedRef(ctx: PublishValidationContext, ref: string): string {
+  return ctx.relatedRefUids?.get(ref.trim()) ?? ref
+}
 
 /** `patch` (default): new property attestations on the current Version. `new_version`: new Version attestation + attest all properties. */
 export type PublishMode = 'patch' | 'new_version'
@@ -268,15 +356,17 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
           p.propertyDef?.required === undefined)),
   )
   let schema: any
+  // Model names are only unique per schema: resolve definitions from this item's own model.
+  const targetScope = await getItemModelScope(targetItem as any)
   for (const itemProperty of targetItem.properties) {
     if (!itemProperty.propertyDef && targetItem.modelName) {
-      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName)
+      schema = await getPropertySchema(targetItem.modelName, itemProperty.propertyName, targetScope)
       if (!schema) {
         try {
           const { Model } = await import('@/Model/Model')
           const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-          let model = Model.getByName(normalizedModelName)
-          if (!model?.properties?.length) {
+          let model = Model.resolve(normalizedModelName, targetScope)
+          if (!model?.properties?.length && !targetScope.modelFileId) {
             model = Model.findByModelType(toSnakeCaseDb(targetItem.modelName))
           }
           const modelFound = !!model
@@ -296,11 +386,8 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
         if (db) {
           try {
             const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
-            const modelRecords = await db
-              .select({ id: models.id })
-              .from(models)
-              .where(eq(models.name, normalizedModelName))
-              .limit(1)
+            const modelRecord = await resolveModelRecord(normalizedModelName, targetScope, db)
+            const modelRecords = modelRecord ? [modelRecord] : []
             if (modelRecords.length > 0 && modelRecords[0].id) {
               const propertyRecords = await db
                 .select()
@@ -361,6 +448,9 @@ const processBasicProperties = async (
   for (const basicProperty of itemBasicProperties) {
     // Skip SDK-internal properties (e.g. publisher) - never attest to EAS
     if (INTERNAL_PROPERTY_NAMES.includes(basicProperty.propertyName)) {
+      continue
+    }
+    if (ctx.deferredProperties?.has(basicProperty)) {
       continue
     }
     const snapshot = basicProperty.getService().getSnapshot()
@@ -456,6 +546,11 @@ const processBasicProperties = async (
         .filter(Boolean)
     }
 
+    // A ref to a published related item attests that item's current uid.
+    if (typeof value === 'string' && (isRelation || isFileImageHtml || isJsonStorage)) {
+      value = currentRelatedRef(ctx, value)
+    }
+
     if (schemaDef.startsWith('bytes32[]') && !Array.isArray(value)) {
       addValidationError(
         ctx,
@@ -514,7 +609,7 @@ const processBasicProperties = async (
                 )
               : ''
         if (!idStr) continue
-        const trimmed = idStr.trim()
+        const trimmed = currentRelatedRef(ctx, idStr.trim())
         if (!trimmed) continue
         rawIds.push(trimmed)
         if (trimmed.length !== 66 && !trimmed.startsWith('0x')) {
@@ -682,17 +777,16 @@ const processRelationOrImageProperty = async (
   let isRequired = propertyDef?.required === true
   // Resolve required from schema/DB when propertyDef lacks it
   if (!isRequired && relationOrImageProperty.modelName) {
+    const propertyScope = await getItemModelScope(relationOrImageProperty as any)
     let schema = await getPropertySchema(
       relationOrImageProperty.modelName,
       relationOrImageProperty.propertyName,
+      propertyScope,
     )
     if (!schema && BaseDb.getAppDb()) {
       const normalizedModelName = upperFirst(camelCase(relationOrImageProperty.modelName))
-      const modelRecords = await BaseDb.getAppDb()!
-        .select({ id: models.id })
-        .from(models)
-        .where(eq(models.name, normalizedModelName))
-        .limit(1)
+      const modelRecord = await resolveModelRecord(normalizedModelName, propertyScope)
+      const modelRecords = modelRecord ? [modelRecord] : []
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await BaseDb.getAppDb()!
           .select()
@@ -767,13 +861,31 @@ const processRelationOrImageProperty = async (
     return multiPublishPayload
   }
 
+  // The local seed, also when the ref is the old uid of a seed published again since.
+  const relatedSeed = await findRelatedSeedRow({ seedLocalId, seedUid })
+
+  if (!isStorageSeed && deferIfBackEdge(ctx, relationOrImageProperty, [relatedSeed?.seedLocalId ?? seedLocalId])) {
+    return multiPublishPayload
+  }
+
   // Use dynamic import to break circular dependency
   const getItemMod = await import('../../db/read/getItem')
   const { getItem } = getItemMod
-  const relatedItem = await getItem({
-    seedLocalId,
-    seedUid,
-  })
+  const relatedItem = await getItem(
+    relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
+  )
+
+  if (
+    noteRelatedSeed(
+      ctx,
+      normalizedRef!,
+      relatedSeed,
+      relationOrImageProperty.propertyName,
+      relatedItem?.modelName ?? relatedModelNameFromDef(relationOrImageProperty.propertyDef),
+    )
+  ) {
+    return multiPublishPayload
+  }
 
   // When related item not found (e.g. different DB, not yet created)
   if (!relatedItem) {
@@ -794,8 +906,6 @@ const processRelationOrImageProperty = async (
   if (relatedItem.seedUid && relatedItem.seedUid !== ZERO_BYTES32) {
     return multiPublishPayload
   }
-
-  const versionUid = getVersionUid(relatedItem)
 
   let modelName: string | undefined
 
@@ -825,25 +935,67 @@ const processRelationOrImageProperty = async (
     return multiPublishPayload
   }
 
+  return processRelatedDraftItem({
+    relatedItem,
+    modelName,
+    // A storage seed (Image/File/Html/Json item) attests its own basic properties; a related model
+    // item is published with its full property set and the draft items it reaches in turn.
+    fullDraft: !isStorageSeed,
+    link: { publishLocalId: originalSeedLocalId, propertySchemaUid: relationOrImageSchemaUid },
+    reportPropertyName: relationOrImageProperty.propertyName,
+    multiPublishPayload,
+    uploadedTransactions,
+    ctx,
+    buildOpts,
+  })
+}
+
+/**
+ * The payload of a draft item (no seed uid) a published item refers to, published with it. Its
+ * request fills the referring property (`link`) through propertiesToUpdate. With `fullDraft`, the
+ * item's whole property set is attested: its storage seeds and Html-embedded images, and its own
+ * relation and list properties, whose draft targets are published with it in turn (depth first,
+ * see publishDraftGraph.ts). A draft already in the batch only gains the link.
+ */
+async function processRelatedDraftItem({
+  relatedItem,
+  modelName,
+  fullDraft,
+  link,
+  reportPropertyName,
+  multiPublishPayload,
+  uploadedTransactions,
+  ctx,
+  buildOpts,
+}: {
+  relatedItem: IItem<any>
+  modelName: string
+  fullDraft: boolean
+  /** The referring property, filled with this item's new seed uid; null when nothing refers to it in this publish. */
+  link: { publishLocalId: string; propertySchemaUid: string } | null
+  reportPropertyName: string
+  multiPublishPayload: MultiPublishPayload
+  uploadedTransactions: UploadedTransaction[]
+  ctx: PublishValidationContext
+  buildOpts?: PublishBuildOpts
+}): Promise<MultiPublishPayload> {
+  const forceFullSnapshot = buildOpts?.forceFullSnapshot === true
   const seedSchemaUid = await getEasSchemaUidForModel(modelName)
-  
+
   if (!seedSchemaUid) {
-    addValidationError(
-      ctx,
-      `Schema UID not found for model: ${modelName}`,
-      relationOrImageProperty.propertyName,
-    )
+    addValidationError(ctx, `Schema UID not found for model: ${modelName}`, reportPropertyName)
     return multiPublishPayload
   }
 
-  if (
-    mergeChildPublishPayloadIfDuplicateInBatch(
-      multiPublishPayload,
-      relatedItem.seedLocalId,
-      originalSeedLocalId,
-      relationOrImageSchemaUid,
-    )
-  ) {
+  if (multiPublishPayload.some((p) => p.localId === relatedItem.seedLocalId)) {
+    if (link) {
+      mergeChildPublishPayloadIfDuplicateInBatch(
+        multiPublishPayload,
+        relatedItem.seedLocalId,
+        link.publishLocalId,
+        link.propertySchemaUid,
+      )
+    }
     return multiPublishPayload
   }
 
@@ -851,65 +1003,139 @@ const processRelationOrImageProperty = async (
     localId: relatedItem.seedLocalId,
     seedIsRevocable: true,
     versionSchemaUid: VERSION_SCHEMA_UID,
-    seedUid: seedUid || ZERO_BYTES32,
+    seedUid: ZERO_BYTES32,
     seedSchemaUid,
-    versionUid,
+    versionUid: getVersionUid(relatedItem),
     listOfAttestations: [],
-    propertiesToUpdate: [
-      {
-        publishLocalId: originalSeedLocalId,
-        propertySchemaUid: relationOrImageSchemaUid,
-      },
-    ],
+    propertiesToUpdate: link ? [{ ...link }] : [],
   }
 
-  await ensurePropertyDefs(relatedItem)
-  const { itemBasicProperties, itemUploadProperties } =
-    await getSegmentedItemProperties(relatedItem)
+  ctx.newSeedsInProgress ??= new Set()
+  ctx.newSeedsInProgress.add(relatedItem.seedLocalId)
+  try {
+    await ensurePropertyDefs(relatedItem)
+    const segmented = await getSegmentedItemProperties(relatedItem)
+    const { itemBasicProperties, itemUploadProperties, itemImageProperties: relatedStorageSeedProperties } =
+      segmented
 
-  const relatedStorageUpload = resolveStorageTransactionUploadSlot(
-    relatedItem,
-    itemUploadProperties,
-  )
-  if (relatedStorageUpload) {
-    const transactionData = findUploadedTxForSeedLocalId(
-      uploadedTransactions,
-      relatedItem.seedLocalId,
-    )
-    if (transactionData) {
-      const itemProperty = relatedStorageUpload.itemProperty
-      // Publish encoding reads context.propertyValue; do not await ItemProperty.save() here — it
-      // uses xstate waitFor(10s) for idle and can time out while the machine is busy or still loading.
-      itemProperty.getService().send({
-        type: 'updateContext',
-        propertyValue: transactionData.txId,
-        renderValue: transactionData.txId,
-      })
-      replaceStorageTransactionInBasicProperties(itemBasicProperties, itemProperty)
-    }
-  }
-
-  for (const p of itemBasicProperties) {
-    if (
-      isStorageTransactionPropertyName(p.propertyName) &&
-      !p.propertyDef &&
-      relatedItem.modelName
-    ) {
-      const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId')
-      if (schema) {
-        p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
+    if (fullDraft) {
+      // Its own Image/File/Html/Json properties and the images embedded in its Html (as for the item itself).
+      multiPublishPayload = await processRelatedDraftStorageSeeds(
+        relatedItem,
+        relatedStorageSeedProperties,
+        itemBasicProperties,
+        multiPublishPayload,
+        uploadedTransactions,
+        ctx,
+        buildOpts,
+      )
+      // Its relations and lists: their draft targets are published too (same walk as publishDraftGraph).
+      const { relationProperties, listProperties } = draftWalkProperties(segmented)
+      for (const relationProperty of relationProperties) {
+        multiPublishPayload = await processRelationOrImageProperty(
+          relationProperty,
+          multiPublishPayload,
+          uploadedTransactions,
+          relatedItem.seedLocalId,
+          ctx,
+          buildOpts,
+        )
+        itemBasicProperties.push(relationProperty)
+      }
+      for (const listProperty of listProperties) {
+        multiPublishPayload = await processListProperty(
+          listProperty,
+          multiPublishPayload,
+          uploadedTransactions,
+          relatedItem.seedLocalId,
+          ctx,
+          buildOpts,
+        )
+        itemBasicProperties.push(listProperty)
       }
     }
-  }
 
-  dedupeOneStorageTransactionPropertyInList(itemBasicProperties)
-  publishPayload = await processBasicProperties(itemBasicProperties, publishPayload, ctx, {
-    forceFullSnapshot,
-  })
+    const relatedStorageUpload = resolveStorageTransactionUploadSlot(
+      relatedItem,
+      itemUploadProperties,
+    )
+    if (relatedStorageUpload) {
+      const transactionData = findUploadedTxForSeedLocalId(
+        uploadedTransactions,
+        relatedItem.seedLocalId,
+      )
+      if (transactionData) {
+        const itemProperty = relatedStorageUpload.itemProperty
+        // Publish encoding reads context.propertyValue; do not await ItemProperty.save() here — it
+        // uses xstate waitFor(10s) for idle and can time out while the machine is busy or still loading.
+        itemProperty.getService().send({
+          type: 'updateContext',
+          propertyValue: transactionData.txId,
+          renderValue: transactionData.txId,
+        })
+        replaceStorageTransactionInBasicProperties(itemBasicProperties, itemProperty)
+      }
+    }
+
+    for (const p of itemBasicProperties) {
+      if (
+        isStorageTransactionPropertyName(p.propertyName) &&
+        !p.propertyDef &&
+        relatedItem.modelName
+      ) {
+        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId', await getItemModelScope(relatedItem as any))
+        if (schema) {
+          p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
+        }
+      }
+    }
+
+    dedupeOneStorageTransactionPropertyInList(itemBasicProperties)
+    publishPayload = await processBasicProperties(itemBasicProperties, publishPayload, ctx, {
+      forceFullSnapshot,
+    })
+  } finally {
+    ctx.newSeedsInProgress.delete(relatedItem.seedLocalId)
+  }
 
   multiPublishPayload.push(publishPayload)
 
   return multiPublishPayload
+}
+
+/**
+ * Storage-seed properties (Image/File/Html/Json) of a draft item related to the published one, and
+ * the images embedded in its Html (htmlEmbeddedImageCoPublish rows it owns): payloads for their seeds,
+ * and the properties added to `itemBasicProperties` so the related item attests them. Same handling
+ * as the published item's own (see getPublishPayload).
+ */
+async function processRelatedDraftStorageSeeds(
+  relatedItem: IItem<any>,
+  storageSeedProperties: IItemProperty<any>[],
+  itemBasicProperties: IItemProperty<any>[],
+  multiPublishPayload: MultiPublishPayload,
+  uploadedTransactions: UploadedTransaction[],
+  ctx: PublishValidationContext,
+  buildOpts?: PublishBuildOpts,
+): Promise<MultiPublishPayload> {
+  for (const storageSeedProperty of storageSeedProperties) {
+    multiPublishPayload = await processRelationOrImageProperty(
+      storageSeedProperty,
+      multiPublishPayload,
+      uploadedTransactions,
+      relatedItem.seedLocalId,
+      ctx,
+      buildOpts,
+    )
+    itemBasicProperties.push(storageSeedProperty)
+  }
+  return processHtmlEmbeddedCoPublishImagePayloads(
+    relatedItem,
+    multiPublishPayload,
+    uploadedTransactions,
+    ctx,
+    buildOpts,
+  )
 }
 
 async function resolveHtmlPropertySchemaUidByHtmlSeed(
@@ -944,7 +1170,6 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
   item: IItem<any>,
   multiPublishPayload: MultiPublishPayload,
   uploadedTransactions: UploadedTransaction[],
-  originalSeedLocalId: string,
   ctx: PublishValidationContext,
   buildOpts?: PublishBuildOpts,
 ): Promise<MultiPublishPayload> {
@@ -967,6 +1192,22 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
     if (doneImages.has(row.imageSeedLocalId)) continue
     doneImages.add(row.imageSeedLocalId)
 
+    // An embedded image that is already published is not co-published; one whose seed was revoked
+    // (unpublished) blocks the publish like an image property pointing at it would.
+    const imageSeed = await findRelatedSeedRow({ seedLocalId: row.imageSeedLocalId })
+    if (
+      noteRelatedSeed(
+        ctx,
+        row.imageSeedLocalId,
+        imageSeed,
+        htmlPropertyNameForHtmlSeed(item, row.htmlSeedLocalId),
+        'Image',
+      )
+    ) {
+      continue
+    }
+
+    // The row's Html seed must still be the value of one of the item's Html properties.
     const htmlSchemaUid = await resolveHtmlPropertySchemaUidByHtmlSeed(item, row.htmlSeedLocalId, ctx)
     if (!htmlSchemaUid) continue
 
@@ -990,19 +1231,18 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
       continue
     }
 
-    if (
-      mergeChildPublishPayloadIfDuplicateInBatch(
-        multiPublishPayload,
-        relatedItem.seedLocalId,
-        originalSeedLocalId,
-        htmlSchemaUid,
-      )
-    ) {
+    // Already in the batch (e.g. also the value of an Image property): its payload is there.
+    if (multiPublishPayload.some((p) => p.localId === relatedItem.seedLocalId)) {
       continue
     }
 
     const versionUid = getVersionUid(relatedItem)
 
+    // No propertiesToUpdate: the Html refers to the image by its Arweave URL (the data URI is
+    // rewritten to it before the Html is uploaded), not by seed uid. The Html property holds the Html
+    // storage seed's uid, which the Html seed's own request writes into it; the contract writes each
+    // updater's seed uid into the same data[0] (SeedPublishLib.setSeedReference), so an image
+    // targeting the Html property too would overwrite that reference with the image's seed uid.
     let publishPayload: PublishPayload = {
       localId: relatedItem.seedLocalId,
       seedIsRevocable: true,
@@ -1011,12 +1251,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
       seedSchemaUid,
       versionUid,
       listOfAttestations: [],
-      propertiesToUpdate: [
-        {
-          publishLocalId: originalSeedLocalId,
-          propertySchemaUid: htmlSchemaUid,
-        },
-      ],
+      propertiesToUpdate: [],
     }
 
     await ensurePropertyDefs(relatedItem)
@@ -1049,7 +1284,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
         !p.propertyDef &&
         relatedItem.modelName
       ) {
-        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId')
+        const schema = await getPropertySchema(relatedItem.modelName, 'storageTransactionId', await getItemModelScope(relatedItem as any))
         if (schema) {
           p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
         }
@@ -1070,6 +1305,7 @@ async function processHtmlEmbeddedCoPublishImagePayloads(
 const processListProperty = async (
   listProperty: IItemProperty<any>,
   multiPublishPayload: MultiPublishPayload,
+  uploadedTransactions: UploadedTransaction[],
   originalSeedLocalId: string,
   ctx: PublishValidationContext,
   buildOpts?: PublishBuildOpts,
@@ -1114,6 +1350,7 @@ const processListProperty = async (
       ? [value]
       : []
 
+  const members: { idStr: string; seedLocalId?: string; seedUid?: string }[] = []
   for (const seedId of iterableValue) {
     const idStr =
       typeof seedId === 'string'
@@ -1124,14 +1361,44 @@ const processListProperty = async (
     if (!idStr) continue
     const { localId: seedLocalId, uid: seedUid } = getCorrectId(idStr)
     if (!seedLocalId && !seedUid) continue
+    members.push({ idStr, seedLocalId, seedUid })
+  }
+
+  // A member that is an item still in progress (a cycle back to it) can't be attested in this
+  // publish, so the list is deferred; its other draft members are still published, unlinked.
+  const memberSeeds = await Promise.all(
+    members.map((m) => findRelatedSeedRow({ seedLocalId: m.seedLocalId, seedUid: m.seedUid })),
+  )
+  const deferred = deferIfBackEdge(
+    ctx,
+    listProperty,
+    members.map((m, i) => memberSeeds[i]?.seedLocalId ?? m.seedLocalId),
+  )
+
+  for (let i = 0; i < members.length; i++) {
+    const { idStr, seedLocalId, seedUid } = members[i]!
+    const relatedSeed = memberSeeds[i] ?? null
+    const memberLocalId = relatedSeed?.seedLocalId ?? seedLocalId
+    if (memberLocalId && ctx.newSeedsInProgress?.has(memberLocalId)) continue
 
     // Use dynamic import to break circular dependency
     const getItemMod = await import('../../db/read/getItem')
     const { getItem } = getItemMod
-    const relatedItem = await getItem({
-      seedLocalId,
-      seedUid,
-    })
+    const relatedItem = await getItem(
+      relatedSeed ? { seedLocalId: relatedSeed.seedLocalId } : { seedLocalId, seedUid },
+    )
+
+    if (
+      noteRelatedSeed(
+        ctx,
+        idStr.trim(),
+        relatedSeed,
+        listProperty.propertyName,
+        relatedItem?.modelName ?? relatedModelNameFromDef(listProperty.propertyDef),
+      )
+    ) {
+      continue
+    }
 
     if (!relatedItem) {
       // An attested uid with no local copy is already published; the list attests the uid as-is.
@@ -1146,8 +1413,6 @@ const processListProperty = async (
     if (relatedItem.seedUid && relatedItem.seedUid !== ZERO_BYTES32) {
       continue
     }
-
-    const versionUid = getVersionUid(relatedItem)
 
     let modelName: string | undefined
 
@@ -1177,53 +1442,17 @@ const processListProperty = async (
       continue
     }
 
-    const seedSchemaUid = await getEasSchemaUidForModel(modelName)
-    
-    if (!seedSchemaUid) {
-      addValidationError(
-        ctx,
-        `Schema UID not found for model: ${modelName}`,
-        listProperty.propertyName,
-      )
-      continue
-    }
-
-    if (
-      mergeChildPublishPayloadIfDuplicateInBatch(
-        multiPublishPayload,
-        relatedItem.seedLocalId,
-        originalSeedLocalId,
-        listPropertySchemaUid,
-      )
-    ) {
-      continue
-    }
-
-    let publishPayload: PublishPayload = {
-      localId: relatedItem.seedLocalId,
-      seedIsRevocable: true,
-      versionSchemaUid: VERSION_SCHEMA_UID,
-      seedUid: seedUid || ZERO_BYTES32,
-      seedSchemaUid,
-      versionUid,
-      listOfAttestations: [],
-      propertiesToUpdate: [
-        {
-          publishLocalId: originalSeedLocalId,
-          propertySchemaUid: listPropertySchemaUid,
-        },
-      ],
-    }
-
-    await ensurePropertyDefs(relatedItem)
-    const { itemBasicProperties } = await getSegmentedItemProperties(relatedItem)
-
-    dedupeOneStorageTransactionPropertyInList(itemBasicProperties)
-    publishPayload = await processBasicProperties(itemBasicProperties, publishPayload, ctx, {
-      forceFullSnapshot,
+    multiPublishPayload = await processRelatedDraftItem({
+      relatedItem,
+      modelName,
+      fullDraft: true,
+      link: deferred ? null : { publishLocalId: originalSeedLocalId, propertySchemaUid: listPropertySchemaUid },
+      reportPropertyName: listProperty.propertyName,
+      multiPublishPayload,
+      uploadedTransactions,
+      ctx,
+      buildOpts,
     })
-
-    multiPublishPayload.push(publishPayload)
   }
 
   return multiPublishPayload
@@ -1422,17 +1651,6 @@ function findUploadedTxForSeedLocalId(
   )
 }
 
-/** Error thrown when publish validation fails. Includes all validation errors for user to fix. */
-export class PublishValidationFailedError extends Error {
-  constructor(
-    message: string,
-    public readonly validationErrors: PublishValidationError[],
-  ) {
-    super(message)
-    this.name = 'PublishValidationFailedError'
-  }
-}
-
 export const getPublishPayload = async (
   item: IItem<any>,
   uploadedTransactions: UploadedTransaction[],
@@ -1440,7 +1658,12 @@ export const getPublishPayload = async (
 ): Promise<MultiPublishPayload> => {
   const validationCtx: PublishValidationContext = { errors: [] }
   const publishMode: PublishMode = options?.publishMode ?? 'patch'
-  const forceFullSnapshot = publishMode === 'new_version'
+  // A revoked seed can't be published under again: republishing creates a new seed attestation
+  // (new seedUid) and a new version carrying every property (see docs/ATTESTATION_REVOCATION.md).
+  const hasSeedUid = !!item.seedUid && item.seedUid !== ZERO_BYTES32
+  const republishRevokedSeed = hasSeedUid && (await isSeedRevoked(item.seedLocalId))
+  const rootSeedUid = republishRevokedSeed ? ZERO_BYTES32 : item.seedUid || ZERO_BYTES32
+  const forceFullSnapshot = publishMode === 'new_version' || republishRevokedSeed
 
   if (publishMode === 'new_version' && (!item.seedUid || item.seedUid === ZERO_BYTES32)) {
     addValidationError(
@@ -1452,6 +1675,12 @@ export const getPublishPayload = async (
   }
 
   let multiPublishPayload: MultiPublishPayload = []
+
+  // The root gets a new seed (draft, or revoked seed published again): related drafts referring
+  // back to it can't attest its uid in this publish (see publishDraftGraph.ts).
+  if (rootSeedUid === ZERO_BYTES32) {
+    validationCtx.newSeedsInProgress = new Set([item.seedLocalId])
+  }
 
   // Each PublishPayload is generated from a Seed that needs publishing
 
@@ -1472,16 +1701,16 @@ export const getPublishPayload = async (
   }
 
   let versionUid = getVersionUid(item)
-  if (versionUid === ZERO_BYTES32 && item.seedUid && item.seedUid !== ZERO_BYTES32) {
-    versionUid = await resolveVersionUid(item.seedLocalId, item.seedUid)
+  if (versionUid === ZERO_BYTES32 && rootSeedUid !== ZERO_BYTES32) {
+    versionUid = await resolveVersionUid(item.seedLocalId, rootSeedUid)
   }
-  if (forceFullSnapshot && item.seedUid && item.seedUid !== ZERO_BYTES32) {
+  if (forceFullSnapshot && hasSeedUid) {
     versionUid = ZERO_BYTES32
   }
 
   let itemPublishData: PublishPayload = {
     localId: item.seedLocalId,
-    seedUid: item.seedUid || ZERO_BYTES32,
+    seedUid: rootSeedUid,
     seedIsRevocable: true,
     seedSchemaUid: itemSchemaUid,
     versionSchemaUid: VERSION_SCHEMA_UID,
@@ -1512,11 +1741,8 @@ export const getPublishPayload = async (
     let isRequired = relProp.propertyDef?.required === true
     if (!isRequired && BaseDb.getAppDb() && item.modelName) {
       const normalizedModelName = upperFirst(camelCase(item.modelName))
-      const modelRows = await BaseDb.getAppDb()!
-        .select({ id: models.id })
-        .from(models)
-        .where(eq(models.name, normalizedModelName))
-        .limit(1)
+      const modelRecord = await resolveModelRecord(normalizedModelName, await getItemModelScope(item as any))
+      const modelRows = modelRecord ? [modelRecord] : []
       if (modelRows.length > 0) {
         const propRows = await BaseDb.getAppDb()!
           .select({ required: properties.required, refModelId: properties.refModelId })
@@ -1575,7 +1801,6 @@ export const getPublishPayload = async (
     item,
     multiPublishPayload,
     uploadedTransactions,
-    item.seedLocalId,
     validationCtx,
     { forceFullSnapshot },
   )
@@ -1584,6 +1809,7 @@ export const getPublishPayload = async (
     multiPublishPayload = await processListProperty(
       listProperty,
       multiPublishPayload,
+      uploadedTransactions,
       item.seedLocalId,
       validationCtx,
       { forceFullSnapshot },
@@ -1593,7 +1819,7 @@ export const getPublishPayload = async (
 
   for (const p of itemBasicProperties) {
     if (isStorageTransactionPropertyName(p.propertyName) && !p.propertyDef && item.modelName) {
-      const schema = await getPropertySchema(item.modelName, 'storageTransactionId')
+      const schema = await getPropertySchema(item.modelName, 'storageTransactionId', await getItemModelScope(item as any))
       if (schema) {
         p.getService().send({ type: 'updateContext', propertyRecordSchema: schema })
       }
@@ -1633,6 +1859,11 @@ export const getPublishPayload = async (
         'publish_new_version_empty_snapshot',
       )
     }
+  }
+
+  // Stop before anything is uploaded or attested: the payload would attest revoked seed uids.
+  if (validationCtx.unpublishedRelatedItems?.length) {
+    throw new RelatedItemUnpublishedError(validationCtx.unpublishedRelatedItems, validationCtx.errors)
   }
 
   if (validationCtx.errors.length > 0) {

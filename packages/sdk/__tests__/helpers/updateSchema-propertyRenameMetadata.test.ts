@@ -10,19 +10,8 @@ import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
 import { renameModelProperty } from '@/helpers/updateSchema'
 import { generateId } from '@/helpers'
-import { setupTestEnvironment, teardownTestEnvironment } from '../test-utils/client-init'
-
-async function waitForItemIdle(item: Item<any>, timeout = 5000): Promise<void> {
-  const service = item.getService()
-  await waitFor(
-    service,
-    (snapshot) => {
-      if (snapshot.value === 'error') throw new Error('Item failed to load')
-      return snapshot.value === 'idle'
-    },
-    { timeout },
-  )
-}
+import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { waitForItemIdle } from '../test-utils/waitForIdle'
 
 function createTestSchema(name: string, models: Record<string, any>): SchemaFileFormat {
   return {
@@ -49,9 +38,9 @@ testDescribe('Property Rename Metadata Migration', () => {
   beforeAll(async () => {
     await setupTestEnvironment({
       testFileUrl: import.meta.url,
-      timeout: 60000,
+      timeout: SETUP_HOOK_TIMEOUT_MS,
     })
-  }, 60000)
+  }, SETUP_HOOK_TIMEOUT_MS)
 
   afterEach(async () => {
     const db = BaseDb.getAppDb()
@@ -101,6 +90,7 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     const item = await Item.create({
       modelName: 'Post',
+      schemaName,
       featureImage: 'test-value',
     })
     await waitForItemIdle(item)

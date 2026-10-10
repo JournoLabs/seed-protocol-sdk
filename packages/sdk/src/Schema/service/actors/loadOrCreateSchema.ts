@@ -12,6 +12,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { eq, and, desc } from 'drizzle-orm'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 import { isInternalSchema, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 
@@ -56,7 +57,7 @@ const getModelIdsForSchema = async (schemaId: number): Promise<string[]> => {
  * This ensures that Model.getById() in Schema.getContext() will find the instances
  * @param modelIds - Array of model file IDs to create instances for
  */
-const createModelInstances = async (modelIds: string[]): Promise<void> => {
+const createModelInstances = async (modelIds: string[], evictionEpoch: number): Promise<void> => {
   if (modelIds.length === 0) {
     return
   }
@@ -69,7 +70,8 @@ const createModelInstances = async (modelIds: string[]): Promise<void> => {
     // Model.createById() will check cache first, then query DB and create if needed
     const createPromises = modelIds.map(async (modelFileId) => {
       try {
-        const model = await Model.createById(modelFileId)
+        // Not if the schema was evicted (Schema.destroy, test cleanup) since this load started
+        const model = await Model.createById(modelFileId, { evictionEpoch })
         if (model) {
           logger(`Created/cached Model instance for modelFileId "${modelFileId}"`)
         } else {
@@ -183,6 +185,7 @@ export const loadOrCreateSchema = fromCallback<
   EventObject,
   FromCallbackInput<SchemaMachineContext>
 >(({ sendBack, input: { context } }) => {
+  const evictionEpoch = currentEvictionEpoch()
   const _loadOrCreateSchema = async (): Promise<void> => {
     const { schemaName } = context
     
@@ -552,7 +555,7 @@ export const loadOrCreateSchema = fromCallback<
           if (schemaRecord && schemaRecord.id) {
             modelIds = await getModelIdsForSchema(schemaRecord.id)
             // Create Model instances so they're cached before getContext runs
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
           
           sendBack({
@@ -829,7 +832,7 @@ export const loadOrCreateSchema = fromCallback<
           if (dbSchema.id) {
             modelIds = await getModelIdsForSchema(dbSchema.id)
             // Create Model instances so they're cached before getContext runs
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
           
           // Track conflict detection metadata
@@ -938,7 +941,7 @@ export const loadOrCreateSchema = fromCallback<
             if (draftsByFileId[0].id) {
               modelIds = await getModelIdsForSchema(draftsByFileId[0].id)
               // Create Model instances so they're cached before getContext runs
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             // Track conflict detection metadata
@@ -1086,7 +1089,7 @@ export const loadOrCreateSchema = fromCallback<
           if (dbSchema.id) {
             modelIds = await getModelIdsForSchema(dbSchema.id)
             // Create Model instances so they're cached before getContext runs
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
           
           // Track conflict detection metadata from DB record
@@ -1184,7 +1187,7 @@ export const loadOrCreateSchema = fromCallback<
             if (dbSchema.id) {
               modelIds = await getModelIdsForSchema(dbSchema.id)
               // Create Model instances so they're cached before getContext runs
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             // Track conflict detection metadata
@@ -1233,7 +1236,7 @@ export const loadOrCreateSchema = fromCallback<
             if (dbSchema.id) {
               modelIds = await getModelIdsForSchema(dbSchema.id)
               // Create Model instances so they're cached before getContext runs
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             sendBack({
@@ -1302,7 +1305,7 @@ export const loadOrCreateSchema = fromCallback<
           if (matchingDraft.id) {
             modelIds = await getModelIdsForSchema(matchingDraft.id)
             // Create Model instances so they're cached before getContext runs
-            await createModelInstances(modelIds)
+            await createModelInstances(modelIds, evictionEpoch)
           }
           
           // Track conflict detection metadata
@@ -1365,7 +1368,7 @@ export const loadOrCreateSchema = fromCallback<
               if (schemaRecords.length > 0 && schemaRecords[0].id) {
                 modelIds = await getModelIdsForSchema(schemaRecords[0].id)
                 // Create Model instances so they're cached before getContext runs
-                await createModelInstances(modelIds)
+                await createModelInstances(modelIds, evictionEpoch)
               }
             }
           } catch (error) {
@@ -1426,7 +1429,7 @@ export const loadOrCreateSchema = fromCallback<
             if (foundSchema.id) {
               modelIds = await getModelIdsForSchema(foundSchema.id)
               // Create Model instances so they're cached before getContext runs
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             // Track conflict detection metadata
@@ -1464,7 +1467,7 @@ export const loadOrCreateSchema = fromCallback<
             if (foundSchema.id) {
               modelIds = await getModelIdsForSchema(foundSchema.id)
               // Create Model instances so they're cached before getContext runs
-              await createModelInstances(modelIds)
+              await createModelInstances(modelIds, evictionEpoch)
             }
             
             // Track conflict detection metadata
@@ -1546,7 +1549,7 @@ export const loadOrCreateSchema = fromCallback<
         if (schemaRecords.length > 0 && schemaRecords[0].id) {
           modelIds = await getModelIdsForSchema(schemaRecords[0].id)
           // Create Model instances so they're cached before getContext runs
-          await createModelInstances(modelIds)
+          await createModelInstances(modelIds, evictionEpoch)
         }
       }
     } catch (error) {

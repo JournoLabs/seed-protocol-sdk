@@ -329,11 +329,13 @@ export class SchemaValidationService {
         })
       }
 
-      // File/Image: accept File objects from OS picker (TypeBox schema only allows string|null)
+      // File/Image: accept File objects from OS picker, and Blobs for Image (saveImage persists both).
+      // The TypeBox schema only allows string|null.
+      const isFileObject = typeof File !== 'undefined' && value instanceof File
+      const isBlobObject = typeof Blob !== 'undefined' && value instanceof Blob
       if (
-        (dataType === ModelPropertyDataTypes.File || dataType === ModelPropertyDataTypes.Image) &&
-        typeof File !== 'undefined' &&
-        value instanceof File
+        (dataType === ModelPropertyDataTypes.File && isFileObject) ||
+        (dataType === ModelPropertyDataTypes.Image && isBlobObject)
       ) {
         if (validationRules) {
           const customErrors = this.validateCustomRules(value, validationRules)

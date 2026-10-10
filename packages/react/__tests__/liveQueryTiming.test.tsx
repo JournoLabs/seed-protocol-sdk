@@ -19,6 +19,8 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { eq, and, isNotNull } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { Observable } from 'rxjs'
+import { waitForItemPersisted } from './test-utils/persistence'
+import { waitUntil, waitUntilOrThrow } from './test-utils/waitUntil'
 
 // Test schema
 const testSchema: SchemaFileFormat = {
@@ -68,7 +70,7 @@ describe('LiveQuery Timing Investigation', () => {
 
     await waitFor(
       () => {
-        return client.isInitialized()
+        expect(client.isInitialized()).toBe(true)
       },
       { timeout: 30000 }
     )
@@ -112,12 +114,11 @@ describe('LiveQuery Timing Investigation', () => {
     await waitFor(
       async () => {
         const allSchemas = await loadAllSchemasFromDb()
-        return allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Timing Test Schema')
+        expect(allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Timing Test Schema')).toBe(true)
       },
       { timeout: 15000 }
     )
 
-    await new Promise(resolve => setTimeout(resolve, 100))
   })
 
   afterEach(async () => {
@@ -152,8 +153,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      // Wait for properties to be saved
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Test Item', value: 'Test Value' })
 
       // Measure time: Direct query
       const directQueryStart = performance.now()
@@ -237,13 +237,9 @@ describe('LiveQuery Timing Investigation', () => {
       expect(directQueryResults.length).toBeGreaterThan(0)
       expect(directQueryTime).toBeLessThan(1000) // Direct query should be fast
 
-      if (reactiveQueryFirstEmission !== null) {
-        console.log(`[Timing Test] Time difference: ${(reactiveQueryFirstEmission - directQueryTime).toFixed(2)}ms`)
-        expect(reactiveQueryFirstEmission).toBeLessThan(5000) // Should emit within 5 seconds
-      } else {
-        console.log('[Timing Test] WARNING: Reactive query did not emit within 5 seconds!')
-        // This is the issue we're investigating
-      }
+      // Used to log a warning and pass when the reactive query never emitted
+      expect(reactiveQueryFirstEmission).not.toBeNull()
+      expect(reactiveQueryFirstEmission!).toBeLessThan(5000) // Should emit within 5 seconds
 
       item.unload()
       model.unload()
@@ -277,8 +273,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      // Wait for properties to be saved
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Existing Item', value: 'Existing Value' })
 
       // Verify data exists with direct query
       const directResults = await db
@@ -395,12 +390,13 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Transaction Test Item', value: 'Initial Value' })
 
       // Set up reactive query BEFORE updating
       let emissionCount = 0
       let initialEmission: any[] | null = null
       let updateEmission: any[] | null = null
+      let latestEmission: any[] | null = null
 
       const query = db
         .select({
@@ -421,6 +417,7 @@ describe('LiveQuery Timing Investigation', () => {
       const subscription = observable.subscribe({
         next: (results) => {
           emissionCount++
+          latestEmission = results
           if (emissionCount === 1) {
             initialEmission = results
             console.log(`[Transaction Test] Initial emission: ${results.length} records`)
@@ -434,8 +431,9 @@ describe('LiveQuery Timing Investigation', () => {
         },
       })
 
-      // Wait for initial emission
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Wait for initial emission. It takes ~10ms; the long timeout only covers a stalled DB worker
+      // under heavy load (finding 21), where the shorter one failed once.
+      await waitUntilOrThrow(() => emissionCount >= 1, 'the reactive query to emit', 10000)
 
       console.log(`[Transaction Test] Initial emission count: ${emissionCount}`)
       console.log(`[Transaction Test] Initial emission records: ${initialEmission?.length || 0}`)
@@ -446,6 +444,7 @@ describe('LiveQuery Timing Investigation', () => {
         seedLocalId: item.seedLocalId,
       })
 
+      expect(nameProperty).toBeDefined()
       if (nameProperty) {
         const updateStart = performance.now()
         nameProperty.value = 'Updated Name'
@@ -459,8 +458,27 @@ describe('LiveQuery Timing Investigation', () => {
 
         console.log(`[Transaction Test] Property update took ${updateTime.toFixed(2)}ms`)
 
+        // A missing update emission is only a reactive-query failure once the row is committed, so
+        // check the database first: a timeout here means the write was slow, not the live query.
+        await waitUntilOrThrow(
+          async () =>
+            (await query).some((r: any) => r.propertyName === 'name' && r.propertyValue === 'Updated Name'),
+          'the updated name to reach the database',
+          10000,
+        )
+
         // Wait for reactive query to detect change
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        // Used to tolerate the update never arriving (it only logged a warning)
+        const emittedUpdate = await waitUntil(
+          () => !!latestEmission?.some((r: any) => r.propertyName === 'name' && r.propertyValue === 'Updated Name'),
+          5000,
+        )
+        if (!emittedUpdate) {
+          throw new Error(
+            `Timed out after 5000ms waiting for the reactive query to emit the committed updated name ` +
+              `(${emissionCount} emissions, latest: ${JSON.stringify(latestEmission)})`,
+          )
+        }
 
         console.log(`[Transaction Test] Total emissions: ${emissionCount}`)
         console.log(`[Transaction Test] Update emission records: ${updateEmission?.length || 0}`)
@@ -474,13 +492,8 @@ describe('LiveQuery Timing Investigation', () => {
       subscription.unsubscribe()
 
       // Assertions
-      expect(emissionCount).toBeGreaterThanOrEqual(1) // At least initial emission
-      if (emissionCount >= 2) {
-        expect(updateEmission).not.toBeNull()
-        expect(updateEmission!.length).toBeGreaterThan(0)
-      } else {
-        console.log('[Transaction Test] WARNING: Reactive query did not detect update!')
-      }
+      expect(emissionCount).toBeGreaterThanOrEqual(2) // initial + update
+      expect(updateEmission).not.toBeNull()
 
       item.unload()
       model.unload()
@@ -514,7 +527,7 @@ describe('LiveQuery Timing Investigation', () => {
         { timeout: 5000 }
       )
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await waitForItemPersisted(item, { name: 'Drizzle Test Item', value: 'Drizzle Test Value' })
 
       // Test 1: Create Drizzle query builder
       const queryBuilderStart = performance.now()

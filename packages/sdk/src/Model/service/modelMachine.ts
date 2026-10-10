@@ -5,6 +5,7 @@ import { createModelProperties } from './actors/createModelProperties'
 import { ValidationError } from '@/Schema/validation'
 import { writeProcessMachine } from '@/services/write/writeProcessMachine'
 import debug from 'debug'
+import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:model:modelMachine')
 
@@ -29,8 +30,7 @@ export type ModelMachineContext = {
   _dbVersion?: number // DB version at load time
   _dbUpdatedAt?: number // DB updatedAt timestamp at load time (milliseconds)
   _idFromSchema?: boolean // True when Model.create was called with modelFileId (schema model); skip duplicate-name rename
-  // Destroy lifecycle (for destroy hooks)
-  _destroyInProgress?: boolean
+  // Destroy failure from the last destroy() (read by destroy hooks)
   _destroyError?: { message: string; name?: string } | null
 }
 
@@ -56,9 +56,7 @@ export const modelMachine = setup({
       | { type: 'createModelPropertiesError'; error: Error }
       | { type: 'refreshProperties' }
       | { type: 'destroyStarted' }
-      | { type: 'destroyDone' }
-      | { type: 'destroyError'; error: unknown }
-      | { type: 'clearDestroyError' },
+      | { type: 'destroyError'; error: unknown },
   },
   actors: {
     loadOrCreateModel,
@@ -69,9 +67,6 @@ export const modelMachine = setup({
   guards: {
     isModelValid: ({ context }) => {
       return !context._validationErrors || context._validationErrors.length === 0
-    },
-    hasValidationErrors: ({ context }) => {
-      return !!context._validationErrors && context._validationErrors.length > 0
     },
   },
   actions: {
@@ -152,17 +147,22 @@ export const modelMachine = setup({
         ({ context, event, self }) => {
           if ((event as any)._liveQueryPropertyIds !== undefined) {
             const newPropertyIds = (event as any)._liveQueryPropertyIds as string[]
+            // The model can be evicted with its schema (Schema.destroy, test cleanup) before the
+            // timer and import below run: then create nothing, and drop lookups an eviction overtakes.
+            const evictionEpoch = currentEvictionEpoch()
             // Use setTimeout to check after assign has been applied
             setTimeout(() => {
               const snapshot = self.getSnapshot()
+              if (snapshot.status === 'stopped') return
               
               // Create ModelProperty instances for any new property IDs
               if (Array.isArray(newPropertyIds) && newPropertyIds.length > 0) {
                 // Import and create instances asynchronously (fire-and-forget)
                 import('@/ModelProperty/ModelProperty').then(({ ModelProperty }) => {
+                  if (self.getSnapshot().status === 'stopped') return
                   const createPromises = newPropertyIds.map(async (propertyFileId) => {
                     try {
-                      const property = await ModelProperty.createById(propertyFileId)
+                      const property = await ModelProperty.createById(propertyFileId, { evictionEpoch })
                       if (property) {
                         logger(`[modelMachine] Created/cached ModelProperty instance for propertyFileId "${propertyFileId}" after _liveQueryPropertyIds update`)
                       }
@@ -235,22 +235,15 @@ export const modelMachine = setup({
       })),
     },
     destroyStarted: {
-      actions: assign({ _destroyInProgress: true, _destroyError: null }),
-    },
-    destroyDone: {
-      actions: assign({ _destroyInProgress: false }),
+      actions: assign({ _destroyError: null }),
     },
     destroyError: {
       actions: assign(({ event }) => ({
-        _destroyInProgress: false,
         _destroyError:
           event.error instanceof Error
             ? { message: event.error.message, name: event.error.name }
             : { message: String(event.error) },
       })),
-    },
-    clearDestroyError: {
-      actions: assign({ _destroyError: null }),
     },
   },
   states: {
@@ -385,10 +378,9 @@ export const modelMachine = setup({
           },
         ],
       },
-      always: {
-        guard: 'hasValidationErrors',
-        target: 'validating',
-      },
+      // No `always: hasValidationErrors -> validating` here: validation is re-run when the context changes
+      // (updateContext) or on request (validateModel). Re-entering while errors exist would loop forever on a
+      // model that is still invalid.
     },
     validating: {
       on: {
@@ -438,6 +430,7 @@ export const modelMachine = setup({
               // Trigger property refresh after properties are created
               // This ensures _liveQueryPropertyIds is updated in Node.js where liveQuery isn't available
               setTimeout(() => {
+                if (self.getSnapshot().status === 'stopped') return
                 self.send({ type: 'refreshProperties' })
               }, 100) // Small delay to ensure properties are written to DB
             },
