@@ -139,6 +139,7 @@ Behavior:
 - **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by remote `getSeed` and write-through from collection/month queries; a `getSeed` hit is checked for changes first.
 - **ETags** — from content, so they change with any edit (not only a new `versionUid`).
 - **Arweave bodies** — cached in memory by transaction id (their content never changes), whether or not the query cache is enabled.
+- **Read-only results** — records from a cached read are the cache's own objects, shared with every later caller, so `SeedRecord` is typed read-only (`data: SeedData`, `changelog: readonly ChangelogEntry[]`). Outside `NODE_ENV=production`, records are also deep-frozen as they enter the memory cache (stored, or loaded from disk), so a write throws a `TypeError` instead of silently changing what later callers see and leaving the ETag stale. Production skips the freeze. Copy before changing anything, nested values included (copy-on-write, as feed's `applyFeedDefaultsDeep` does). `queryBySchema`'s `items` array is the caller's own. Set `freezeRecords` on the cache config to override.
 - **`cache: false`** — skip all cache reads/writes for that call.
 - **`skip > 0`** — no collection cache; still write-through items when cache is enabled.
 - **Local source** — no query CacheManager (SQLite is authoritative).

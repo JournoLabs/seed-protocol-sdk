@@ -189,7 +189,8 @@ async function refreshCollection(
     lastUpdated: cached?.lastUpdated ?? startedAt,
   })
   await writeThroughAssembled(fresh, optionsKey, startedAt, seenChangeKeys)
-  return { items, limit, skip: 0, etag: stored?.etag }
+  // The cached records (frozen outside production), so a fresh result behaves like a cache hit.
+  return { items: stored ? [...stored.items] : items, limit, skip: 0, etag: stored?.etag }
 }
 
 /** Hex digits a uid prefix needs, so a stray short value can't list most of a schema. */
@@ -389,7 +390,7 @@ export async function getSeed(
     shouldUseCache(options, allowCache) &&
     dataSource.kind === 'remote'
   ) {
-    await getQueryCacheManager().setItem({
+    const stored = await getQueryCacheManager().setItem({
       record: result,
       optionsKey,
       dependencies,
@@ -397,6 +398,8 @@ export async function getSeed(
       seenChangeKeys: [],
       lastUpdated: startedAt,
     })
+    // The cached record (frozen outside production), so a fresh result behaves like a cache hit.
+    if (stored) result = stored.record
   }
 
   return result

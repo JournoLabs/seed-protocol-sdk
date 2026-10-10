@@ -7,6 +7,7 @@ import type {
   QueryCacheConfig,
   QueryCacheStats,
 } from './types.js'
+import type { GetSeedResult } from '../types.js'
 
 type PersistentCacheFactory = (config: QueryCacheConfig) => PersistentCache | null
 
@@ -179,8 +180,11 @@ export class CacheManager {
     if (!this.config.enabled) return null
 
     try {
-      const record = { ...data.record, data: { ...data.record.data } }
-      if (data.record.changelog) record.changelog = [...data.record.changelog]
+      const record: GetSeedResult = {
+        ...data.record,
+        data: { ...data.record.data },
+        ...(data.record.changelog && { changelog: [...data.record.changelog] }),
+      }
       const cached: CachedItemData = {
         ...data,
         record,

@@ -467,6 +467,60 @@ describe('queryBySchema / getSeed caching', () => {
     expect(await getQueryCacheManager().getItem('0xseed1', optionsKey)).toBeNull()
   })
 
+  describe('cached records are frozen', () => {
+    const seedRow = {
+      id: '0xseed1',
+      decodedDataJson: '',
+      refUID: '0x0',
+      schemaId: '0xschema',
+      timeCreated: 100,
+      schema: { schemaNames: [{ name: 'post' }] },
+    }
+    const writeTitle = (record: { data: object }) => () => {
+      ;(record.data as Record<string, unknown>).title = 'mutated'
+    }
+
+    it('queryBySchema results throw on mutation, fresh or cached, and the cache keeps its content', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      const first = await queryBySchema('post', uncachedOpts)
+      expect(writeTitle(first.items[0]!)).toThrow(TypeError)
+
+      const second = await queryBySchema('post', uncachedOpts)
+      expect(writeTitle(second.items[0]!)).toThrow(TypeError)
+      expect(second.items[0]!.data.title).toBe('Original')
+      expect(second.etag).toBe(first.etag)
+      // The items array is the caller's own.
+      second.items.pop()
+      expect((await queryBySchema('post', uncachedOpts)).items).toHaveLength(1)
+    })
+
+    it('getSeed results throw on mutation, fresh or cached', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
+      const opts = { expandRelations: false, hydrateStorage: false }
+
+      const fresh = await getSeed('0xseed1', opts)
+      expect(writeTitle(fresh!)).toThrow(TypeError)
+
+      mockRequest.mockClear()
+      const hit = await getSeed('0xseed1', opts)
+      expect(mockRequest).not.toHaveBeenCalled()
+      expect(writeTitle(hit!)).toThrow(TypeError)
+      expect(hit!.data.title).toBe('Original')
+    })
+
+    it('a cached changelog is frozen too', async () => {
+      mockAssembledPost('0xseed1', '0xver1', 'Original', 100)
+      mockRequest.mockResolvedValue({ itemSeeds: [seedRow] })
+      const result = await getSeed('0xseed1', {
+        include: 'data+changelog',
+        expandRelations: false,
+        hydrateStorage: false,
+      })
+      expect(() => (result!.changelog as unknown[]).push({})).toThrow(TypeError)
+    })
+  })
+
   describe('uidPrefix', () => {
     const SEED = '0xfd8c50ca' + '0'.repeat(56)
 

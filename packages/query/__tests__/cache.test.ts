@@ -216,3 +216,77 @@ describe('CacheManager collection + item', () => {
     expect(await memoryOnly.getCollection('post', KEY)).not.toBeNull()
   })
 })
+
+describe('cached records are frozen outside production', () => {
+  let cacheDir: string
+  const KEY = buildAssembleOptionsKey()
+
+  beforeEach(() => {
+    cacheDir = mkdtempSync(join(tmpdir(), 'query-cache-freeze-'))
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(cacheDir, { recursive: true, force: true })
+  })
+
+  const fileConfig = () => ({
+    enabled: true,
+    ttl: 3600,
+    cacheDir,
+    backgroundRefresh: false,
+    refreshInterval: 300,
+  })
+
+  const item = (record: SeedRecord) => ({
+    record,
+    optionsKey: KEY,
+    dependencies: deps(record.seedUid),
+    checkedAt: 0,
+    seenChangeKeys: [],
+    lastUpdated: Math.floor(Date.now() / 1000),
+  })
+
+  const nested = () =>
+    makeRecord('0xa', 1, { data: { title: 'T', author: { name: 'A' }, tags: ['x'] } })
+
+  it('deep-freezes items and collections as they are stored', async () => {
+    const cache = createQueryCacheManager({ enabled: true, ttl: 3600, cacheDir }, null)
+    const record = (await cache.setItem(item(nested())))!.record
+    expect(() => {
+      ;(record.data as Record<string, unknown>).title = 'changed'
+    }).toThrow(TypeError)
+    expect(() => {
+      ;(record.data.author as { name: string }).name = 'changed'
+    }).toThrow(TypeError)
+    expect(() => (record.data.tags as string[]).push('y')).toThrow(TypeError)
+
+    await cache.setCollection('post', KEY, {
+      items: [nested()],
+      meta: {},
+      checkedAt: 0,
+      seenChangeKeys: [],
+      lastUpdated: Math.floor(Date.now() / 1000),
+    })
+    const got = (await cache.getCollection('post', KEY))!.items[0]!
+    expect(Object.isFrozen(got)).toBe(true)
+    expect(Object.isFrozen(got.data.author)).toBe(true)
+  })
+
+  it('freezes records loaded from the persistent layer', async () => {
+    const writer = createQueryCacheManager(fileConfig(), new FileCache(fileConfig()))
+    await writer.setItem(item(nested()))
+    const reader = createQueryCacheManager(fileConfig(), new FileCache(fileConfig()))
+    const record = (await reader.getItem('0xa', KEY))!.record
+    expect(Object.isFrozen(record.data.author)).toBe(true)
+  })
+
+  it('skips freezing in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const cache = createQueryCacheManager({ enabled: true, ttl: 3600, cacheDir }, null)
+    expect(cache.getConfig().freezeRecords).toBe(false)
+    const record = (await cache.setItem(item(nested())))!.record
+    expect(Object.isFrozen(record)).toBe(false)
+    expect(Object.isFrozen(record.data.author)).toBe(false)
+  })
+})

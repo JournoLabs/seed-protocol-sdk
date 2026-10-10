@@ -1,10 +1,18 @@
+/**
+ * A seed's assembled properties. Read-only: records returned by `getSeed` / `queryBySchema` /
+ * `queryBySchemaForMonth` may be the query cache's own objects, shared with every later caller
+ * (and deep-frozen outside production). Copy before changing anything, including nested values.
+ * Still assignable to a `Record<string, unknown>` parameter.
+ */
+export type SeedData = { readonly [key: string]: unknown }
+
 export type SeedRecord = {
-  seedUid: string
-  schemaName: string
-  attester?: string
-  timeCreated: number
-  versionUid: string
-  data: Record<string, unknown>
+  readonly seedUid: string
+  readonly schemaName: string
+  readonly attester?: string
+  readonly timeCreated: number
+  readonly versionUid: string
+  readonly data: SeedData
 }
 
 /** Where to load Seed/Version/property attestations from. Default `'remote'`. */
@@ -70,7 +78,7 @@ export type GetSeedOptions = AssembleOptions & {
 
 export type GetSeedResult = SeedRecord & {
   /** Present when include is `data+changelog` or `changelog`. */
-  changelog?: ChangelogEntry[]
+  readonly changelog?: readonly ChangelogEntry[]
 }
 
 export type QueryBySchemaOptions = AssembleOptions & {

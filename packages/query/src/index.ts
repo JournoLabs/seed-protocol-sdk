@@ -32,6 +32,7 @@ export {
 } from './changelog.js'
 
 export type {
+  SeedData,
   SeedRecord,
   AssembleOptions,
   QuerySourceMode,
