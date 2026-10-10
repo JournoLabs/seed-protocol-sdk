@@ -43,7 +43,12 @@ const { items, limit, skip, etag } = await queryBySchema('post', {
   limit: 20,
   skip: 0,
 })
+
+// Seeds whose UID starts with a prefix (e.g. the 8-hex-digit trunc in a URL), newest first
+const { items: matches } = await queryBySchema('post', { uidPrefix: 'fd8c50ca', limit: 16 })
 ```
+
+`uidPrefix` takes at least 4 hex digits, with or without `0x`, in any case (it is lowercased: EAS matches UIDs case-sensitively); anything else returns no items. It filters like a schema listing (schema name, not revoked, seeds whose versions were all revoked left out) in one EAS request, or a `LIKE` on the local source. It never reads or writes the collection cache; matched items are written through to the item cache. `normalizeUidPrefix` is exported for callers that want the same validation.
 
 `SeedRecord` shape:
 
@@ -124,17 +129,20 @@ Controlled by the same env vars as feed content cache (ops compatibility):
 | Variable | Default | Notes |
 |----------|---------|--------|
 | `CACHE_ENABLED` | on in prod; **off** when `NODE_ENV=development` | Set `true`/`false` to force |
-| `CACHE_TTL` | `3600` | Seconds for collection + item entries |
-| `CACHE_DIR` | `./cache` | Collections: `{schema}.json`; items: `items/{seedUid}-{opts}.json` |
+| `CACHE_TTL` | `3600` | Seconds from an entry's last full assembly until it is rebuilt from scratch |
+| `CACHE_DIR` | `./cache` | Collections: `collections/{schema}.{opts}.json`; items: `items/{seedUid}-{opts}.json` |
 
 Behavior:
 
-- **Collection cache** — only for **remote** `queryBySchema` with `skip === 0` (working set). Warm hits still fetch the page to detect newer `timeCreated`, then merge/dedupe.
-- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by remote `getSeed` and write-through from collection/month queries.
+- **Change checks** — every cache hit asks EAS, in one request, for attestations created or revoked since the entry was last checked that touch what it was built from: the seed, its head Version, and the seeds it relates to (and their head Versions). New Versions, property edits on the same Version (the default `patch` publish), and revocations are all seen. Only changed seeds are assembled again; a cached seed that was revoked drops out. The TTL is a backstop for anything a check can't see (e.g. relations of related seeds).
+- **Collection cache** — only for **remote** `queryBySchema` with `skip === 0`, per schema and options fingerprint. Each hit fetches the seed list (cheap; shows new and revoked seeds), checks cached seeds for changes, and assembles only new or changed ones.
+- **Item cache** — keyed by `seedUid` + options fingerprint (`expandRelations` / `hydrateStorage` / `include` / changelog filters). Default latest-only key remains `e1-h1`. Filled by remote `getSeed` and write-through from collection/month queries; a `getSeed` hit is checked for changes first.
+- **ETags** — from content, so they change with any edit (not only a new `versionUid`).
+- **Arweave bodies** — cached in memory by transaction id (their content never changes), whether or not the query cache is enabled.
 - **`cache: false`** — skip all cache reads/writes for that call.
 - **`skip > 0`** — no collection cache; still write-through items when cache is enabled.
 - **Local source** — no query CacheManager (SQLite is authoritative).
-- Refresh lock — concurrent remote `queryBySchema` for the same schema share one in-flight refresh.
+- Refresh lock — concurrent remote `queryBySchema` calls for the same schema, options and `limit` share one in-flight refresh.
 
 Feed still owns serialized RSS/Atom/JSON bodies, HTTP `ETag` / 304, and image-metadata probing.
 

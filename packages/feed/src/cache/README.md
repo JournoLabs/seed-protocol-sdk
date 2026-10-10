@@ -32,7 +32,7 @@ Image metadata:
 - **Memory** — active content + image metadata
 - **Files** — `{schema}-{format}.json`, page/archive variants, `image-metadata/{txId}.json`
 
-Do not confuse with query’s `{schema}.json` collection files in the same `CACHE_DIR`.
+Do not confuse with query’s `collections/` and `items/` subdirectories in the same `CACHE_DIR`.
 
 ## HTTP Conditional Requests
 
