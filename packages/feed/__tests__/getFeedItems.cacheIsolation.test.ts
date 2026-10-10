@@ -7,6 +7,7 @@ const mockGetSeedsBySchemaName = vi.fn()
 const mockGetItemVersionsFromEas = vi.fn()
 const mockGetItemPropertiesFromEas = vi.fn()
 const mockRequest = vi.fn()
+const mockGetAttestationChangesSince = vi.fn()
 
 vi.mock('@seedprotocol/eas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@seedprotocol/eas')>()
@@ -15,6 +16,7 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
     getSeedsBySchemaName: (...args: unknown[]) => mockGetSeedsBySchemaName(...args),
     getItemVersionsFromEas: (...args: unknown[]) => mockGetItemVersionsFromEas(...args),
     getItemPropertiesFromEas: (...args: unknown[]) => mockGetItemPropertiesFromEas(...args),
+    getAttestationChangesSince: (...args: unknown[]) => mockGetAttestationChangesSince(...args),
     EasClient: {
       getEasClient: () => ({ request: mockRequest }),
     },
@@ -31,6 +33,7 @@ vi.mock('../src/bootstrap', () => ({
 }))
 
 import {
+  buildAssembleOptionsKey,
   getQueryCacheManager,
   queryBySchema,
   resetQueryCacheManager,
@@ -82,8 +85,8 @@ describe('getFeedItemsBySchemaName and the query collection cache', () => {
     process.env.CACHE_DIR = cacheDir
     process.env.CACHE_TTL = '3600'
 
-    // Every refresh sees the same seed, so nothing is newer than the cached working set
-    // and queryBySchema returns the cached SeedRecord objects.
+    // Every refresh lists the same seed and finds no attestation changes since the last check,
+    // so queryBySchema returns the cached SeedRecord objects.
     mockRequest.mockResolvedValue({ itemSeeds: [] })
     mockGetSeedsBySchemaName.mockResolvedValue([
       {
@@ -97,6 +100,7 @@ describe('getFeedItemsBySchemaName and the query collection cache', () => {
     ])
     mockGetItemVersionsFromEas.mockResolvedValue([])
     mockGetItemPropertiesFromEas.mockResolvedValue([])
+    mockGetAttestationChangesSince.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -108,7 +112,17 @@ describe('getFeedItemsBySchemaName and the query collection cache', () => {
   })
 
   it('feed defaults do not leak into cached SeedRecords', async () => {
-    await getQueryCacheManager().setCollection('post', [cachedPost()])
+    const options = { expandRelations: true, hydrateStorage: true }
+    const now = Math.floor(Date.now() / 1000)
+    await getQueryCacheManager().setCollection('post', buildAssembleOptionsKey(options), {
+      items: [cachedPost()],
+      meta: {
+        [SEED_UID]: { dependencies: { refUIDs: [SEED_UID], ids: [SEED_UID] }, builtAt: now },
+      },
+      lastUpdated: now,
+      checkedAt: now,
+      seenChangeKeys: [],
+    })
 
     const feedItems = await getFeedItemsBySchemaName('post')
     expect(feedItems).toHaveLength(1)
@@ -123,7 +137,6 @@ describe('getFeedItemsBySchemaName and the query collection cache', () => {
     // Second feed pass hits the cache again and must see pristine data.
     await getFeedItemsBySchemaName('post')
 
-    const options = { expandRelations: true, hydrateStorage: true }
     const first = await queryBySchema('post', options)
     const second = await queryBySchema('post', options)
     expect(first.items).toEqual([cachedPost()])
