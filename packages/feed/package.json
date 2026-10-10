@@ -48,6 +48,10 @@
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/feed"
   },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/feed#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

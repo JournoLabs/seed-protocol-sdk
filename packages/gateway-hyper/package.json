@@ -51,6 +51,10 @@
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/gateway-hyper"
   },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/gateway-hyper#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

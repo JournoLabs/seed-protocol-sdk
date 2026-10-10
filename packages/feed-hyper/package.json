@@ -56,6 +56,10 @@
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/feed-hyper"
   },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/feed-hyper#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }

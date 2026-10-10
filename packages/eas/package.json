@@ -57,6 +57,10 @@
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/eas"
   },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/eas#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
+  },
   "publishConfig": {
     "access": "public"
   }
