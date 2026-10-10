@@ -18,8 +18,10 @@ self.onmessage = (event) => {
   }
   if (type === 'listen') {
     const bc = new BroadcastChannel(channel)
-    bc.onmessage = (e) => self.postMessage({ type: 'heard', message: e.data })
-    self.postMessage({ type: 'listening' })
+    bc.onmessage = (e) => {
+      if (e.data && e.data.__otherTabProbe) self.postMessage({ type: 'probe-heard' })
+      else self.postMessage({ type: 'heard', message: e.data })
+    }
   }
   if (type === 'post') {
     new BroadcastChannel(channel).postMessage(message)
@@ -45,7 +47,28 @@ export function otherTab() {
   worker.addEventListener('message', (event) => {
     if (event.data.type === 'heard') heard.push(event.data.message)
   })
-  return { worker, send, heard }
+
+  /**
+   * Subscribes the other tab to `channel` and resolves once it receives messages on it. A new
+   * BroadcastChannel registers asynchronously in Chromium, so a message posted right after it's
+   * constructed can be dropped (CI run 38092037319 lost the first of two). Posts probes until one
+   * arrives; probes don't show up in `heard`.
+   */
+  const listen = async (channel: string) => {
+    const heardProbe = send({ type: 'listen', channel }, 'probe-heard')
+    const probe = new BroadcastChannel(channel)
+    let waiting = true
+    void heardProbe.then(() => (waiting = false))
+    try {
+      while (waiting) {
+        probe.postMessage({ __otherTabProbe: true })
+        await Promise.race([heardProbe, new Promise((resolve) => setTimeout(resolve, 20))])
+      }
+    } finally {
+      probe.close()
+    }
+  }
+  return { worker, send, listen, heard }
 }
 
 export type OtherTab = ReturnType<typeof otherTab>

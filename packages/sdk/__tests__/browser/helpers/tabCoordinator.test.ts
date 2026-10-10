@@ -40,16 +40,18 @@ describe('tab coordination', () => {
     const sent = vi.spyOn(easSyncActor, 'send').mockImplementation(() => {})
     tab = otherTab()
     await tab.send({ type: 'lead', name: `seed:leader:${dbKey}` }, 'leading')
-    await tab.send({ type: 'listen', channel: `seed:tabs:${dbKey}` }, 'listening')
+    await tab.listen(`seed:tabs:${dbKey}`)
     startTabCoordination({ filesDir })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     requestEasSyncFromModelsInit()
     requestEasSyncFromModelsInit()
     requestEasSyncFromAddressChange(['0xabc'])
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(
+      () => expect(tab!.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'] }]),
+      { timeout: WAIT_TIMEOUT_MS },
+    )
     expect(sent).not.toHaveBeenCalled()
-    expect(tab.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'] }])
 
     const tookOver = whenLeaderTab()
     await tab.send({ type: 'step-down' }, 'stepped-down')
