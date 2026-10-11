@@ -306,7 +306,7 @@ describe('Browser Db Integration Tests', () => {
       // Should have at least initial emission and the update emission
       // distinctUntilChanged should prevent duplicate emissions for same data
       expect(emissions.length).toBeGreaterThanOrEqual(1)
-    }, 10000)
+    })
   })
 
   describe('Error Handling', () => {

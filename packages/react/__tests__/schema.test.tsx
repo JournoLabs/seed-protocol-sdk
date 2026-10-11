@@ -651,7 +651,7 @@ describe(
                   .where(eq(modelSchemas.schemaId, schemaId))
                 expect(updatedRecords.length).toBeGreaterThan(0)
               },
-              { timeout: 10000 }
+              { timeout: WAIT_TIMEOUT_MS }
             )
           }
         }
@@ -664,7 +664,7 @@ describe(
           const status = screen.getByTestId('schema-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const schemaName = screen.getByTestId('schema-name')
@@ -701,7 +701,7 @@ describe(
           const status = screen.getByTestId('schema-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const schemaName = screen.getByTestId('schema-name')
@@ -716,7 +716,7 @@ describe(
           const status = screen.getByTestId('schema-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       rerender(<UseSchemaTest schemaIdentifier="Test Schema 2" />)
@@ -726,7 +726,7 @@ describe(
           const schemaName = screen.getByTestId('schema-name')
           expect(schemaName.textContent).toBe('Test Schema 2')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -745,7 +745,7 @@ describe(
           expect(status.textContent).toBe('loaded')
           expect(isLoading.textContent).toBe('false')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -788,7 +788,7 @@ describe(
             }
           }
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -809,7 +809,7 @@ describe(
           expect(scoped.getByTestId('is-loading').textContent).toBe('false')
           expect(scoped.queryByTestId('error-message')).toBeNull()
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -832,7 +832,7 @@ describe(
           expect(scoped.getByTestId('schema-status').textContent).toBe('loaded')
           expect(scoped.getByTestId('is-loading').textContent).toBe('false')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
   })
@@ -892,7 +892,7 @@ describe(
           const status = screen.getByTestId('schemas-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for at least 2 schemas to appear (our test schemas)
@@ -921,7 +921,7 @@ describe(
           const status = screen.getByTestId('schemas-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('schemas-count')
@@ -939,7 +939,7 @@ describe(
           const status = screen.getByTestId('schemas-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for schemas to be populated
@@ -979,7 +979,7 @@ describe(
           const status = screen.getByTestId('schemas-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('schemas-count')
@@ -1292,7 +1292,7 @@ describe(
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Render component with empty schema
@@ -1304,7 +1304,7 @@ describe(
           const status = screen.getByTestId('schema-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Verify schema name
@@ -1327,7 +1327,7 @@ describe(
         () => {
           expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Create the model
@@ -1338,7 +1338,7 @@ describe(
         () => {
           expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for model registration to complete and verify it's in the schema

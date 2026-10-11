@@ -8,6 +8,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable } from '@/seedSchema/ModelSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe
 
@@ -48,9 +49,9 @@ testDescribe('Schema.destroy with a model write in flight', () => {
       })
       const modelFileId = model.id!
       const writeProcess = (
-        await waitFor(model.getService(), (snapshot) => !!snapshot.context.writeProcess, { timeout: 10000 })
+        await waitFor(model.getService(), (snapshot) => !!snapshot.context.writeProcess, { timeout: WAIT_TIMEOUT_MS })
       ).context.writeProcess!
-      await waitFor(writeProcess, (snapshot) => snapshot.value === 'writing', { timeout: 10000 })
+      await waitFor(writeProcess, (snapshot) => snapshot.value === 'writing', { timeout: WAIT_TIMEOUT_MS })
 
       await schema.destroy()
 

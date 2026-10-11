@@ -312,7 +312,7 @@ describe('React Model Hooks Integration Tests', () => {
         const allSchemas = await loadAllSchemasFromDb()
         expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Models')).toBe(true)
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
     const schema = Schema.create('Test Schema Models', { waitForReady: false })
     // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
@@ -325,7 +325,7 @@ describe('React Model Hooks Integration Tests', () => {
         const models = schema.models || []
         expect(models.length).toBeGreaterThanOrEqual(3) // At least Post, Article, Comment
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
   })
 
@@ -407,7 +407,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('models-count')
@@ -432,7 +432,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const initialCount = screen.getByTestId('models-count')
@@ -481,7 +481,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const modelName = screen.getByTestId('model-name')
@@ -502,7 +502,7 @@ describe('React Model Hooks Integration Tests', () => {
         () => {
           expect(screen.queryByTestId('model-name')?.textContent).toBe('Post')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Change model name
@@ -513,7 +513,7 @@ describe('React Model Hooks Integration Tests', () => {
           const modelName = screen.getByTestId('model-name')
           expect(modelName.textContent).toBe('Article')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -529,7 +529,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('model-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const modelName = screen.queryByTestId('model-name')
@@ -630,7 +630,7 @@ describe('React Model Hooks Integration Tests', () => {
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'Test Schema Dynamic')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Get schema instance
@@ -650,7 +650,7 @@ describe('React Model Hooks Integration Tests', () => {
           const status = screen.getByTestId('models-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Verify initial state is empty
@@ -688,7 +688,7 @@ describe('React Model Hooks Integration Tests', () => {
           }
           expect(isIdle).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Check if model was written to DB
@@ -711,7 +711,7 @@ describe('React Model Hooks Integration Tests', () => {
           const data = modelsQueryClientRef.current?.getQueryData<Model[]>(queryKey)
           expect(Array.isArray(data) && data.length >= 1).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0))

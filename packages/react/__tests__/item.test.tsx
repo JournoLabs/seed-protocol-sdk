@@ -362,7 +362,7 @@ describe('React Item Hooks Integration Tests', () => {
         const allSchemas = await loadAllSchemasFromDb()
         expect(allSchemas.some(s => s.schema.metadata?.name === TEST_SCHEMA_ITEMS_HOOKS_NAME)).toBe(true)
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
   })
 
@@ -520,7 +520,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const itemSeedLocalId = screen.getByTestId('item-seed-local-id')
@@ -541,7 +541,7 @@ describe('React Item Hooks Integration Tests', () => {
               const status = screen.getByTestId('item-status')
               expect(status.textContent).toBe('loaded')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
@@ -562,7 +562,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // Change to different item
@@ -575,7 +575,7 @@ describe('React Item Hooks Integration Tests', () => {
               const itemDataTitle = screen.getByTestId('item-data-title')
               expect(itemDataTitle.textContent).toBe('Test Post Title 2')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
 
@@ -593,7 +593,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // Wait for loading to complete
@@ -601,7 +601,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // isLoading should be false after item loads
@@ -631,14 +631,14 @@ describe('React Item Hooks Integration Tests', () => {
               const status = withinContainer.queryByTestId('item-status')
               expect(status?.textContent).toBe('loaded')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           await waitFor(
             () => {
               expect(withinContainer.queryByTestId('item-model-name')?.textContent).toBe('Article')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const itemModelName = withinContainer.getByTestId('item-model-name')
@@ -649,7 +649,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(withinContainer.queryByTestId('item-data-headline')?.textContent).toBe('Test Article Headline')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const itemDataHeadline = withinContainer.getByTestId('item-data-headline')
@@ -659,7 +659,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(withinContainer.queryByTestId('item-data-body')?.textContent).toBe('Test Article Body')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const itemDataBody = withinContainer.getByTestId('item-data-body')
@@ -720,7 +720,7 @@ describe('React Item Hooks Integration Tests', () => {
               expect(query).toBeDefined()
               expect(query!.options.staleTime).toBe(0)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
 
@@ -748,7 +748,7 @@ describe('React Item Hooks Integration Tests', () => {
               const status = screen.getByTestId('items-status')
               expect(status.textContent).toBe('loaded')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const count = screen.getByTestId('items-count')
@@ -778,7 +778,7 @@ describe('React Item Hooks Integration Tests', () => {
               const status = screen.getByTestId('items-status')
               expect(status.textContent).toBe('loaded')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const count = screen.getByTestId('items-count')
@@ -798,7 +798,7 @@ describe('React Item Hooks Integration Tests', () => {
               expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
               expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
 
@@ -813,7 +813,7 @@ describe('React Item Hooks Integration Tests', () => {
               const n = parseInt(count.textContent || '0')
               expect(n).toBe(3)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // Change to Article model
@@ -826,7 +826,7 @@ describe('React Item Hooks Integration Tests', () => {
               expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBe(1)
               expect(screen.queryByTestId('item-0-model-name')?.textContent).toBe('Article')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
 
@@ -838,7 +838,7 @@ describe('React Item Hooks Integration Tests', () => {
               const status = screen.getByTestId('items-status')
               expect(status.textContent).toBe('loaded')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const isLoading = screen.getByTestId('items-is-loading')
@@ -856,7 +856,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // Test with deleted=true (should return only deleted items, which should be 0 in our test)
@@ -867,7 +867,7 @@ describe('React Item Hooks Integration Tests', () => {
               expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
               expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(0)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
       })
@@ -952,7 +952,7 @@ describe('React Item Hooks Integration Tests', () => {
               expect(screen.queryByTestId('combined-item-seed-local-id')?.textContent).toBe(item1.seedLocalId)
               expect(screen.queryByTestId('combined-item-title')?.textContent).toBe('Test Post Title 1')
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
         })
       })
@@ -983,7 +983,7 @@ describe('React Item Hooks Integration Tests', () => {
 
           await waitFor(
             () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
-            { timeout: 10000 },
+            { timeout: WAIT_TIMEOUT_MS },
           )
         })
 
@@ -1014,7 +1014,7 @@ describe('React Item Hooks Integration Tests', () => {
               const count = screen.getByTestId('items-count')
               expect(parseInt(count.textContent || '0')).toBe(3)
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           const initialCount = screen.getByTestId('items-count')
@@ -1079,7 +1079,7 @@ describe('React Item Hooks Integration Tests', () => {
             () => {
               expect(screen.queryByTestId('edit-done')).not.toBeNull()
             },
-            { timeout: 10000 }
+            { timeout: WAIT_TIMEOUT_MS }
           )
 
           // 4. Verify the new value is persisted to the database

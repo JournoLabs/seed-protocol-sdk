@@ -606,7 +606,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
 
       await waitFor(
         () => expect(screen.getByTestId('render-log-value').textContent).toBe('Changed After Mount'),
-        { timeout: 10000 },
+        { timeout: WAIT_TIMEOUT_MS },
       )
     })
   })
@@ -647,7 +647,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Content')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const propertyName = scoped.getByTestId('property-name')
@@ -674,7 +674,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(scoped.queryByTestId('property-value')?.textContent).toBe('Test Post Title')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const propertyName = scoped.getByTestId('property-name')
@@ -800,7 +800,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           // Should be either 'not-loaded' or 'loaded' (property not found is not an error)
           expect(['not-loaded', 'loaded']).toContain(status.textContent)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -853,7 +853,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       await xstateWaitFor(
         titleProperty.getService(),
         (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(testItem, { title: testValue })
@@ -1058,7 +1058,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .where(eq(metadataLatest.rowNum, 1))
             expect(records.length).toBeGreaterThanOrEqual(3)
           },
-          { timeout: 10000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
       }
 
@@ -1121,7 +1121,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               expect(titleProp).toBeTruthy()
               expect(String((titleProp as IItemProperty).value ?? '')).toBe('Updated Title')
             },
-            { timeout: 10000, interval: 150 }
+            { timeout: WAIT_TIMEOUT_MS, interval: 150 }
           )
           await waitFor(
             () => {
@@ -1155,7 +1155,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Items')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Get the schema instance
@@ -1166,7 +1166,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Create the model with properties
@@ -1183,7 +1183,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Create an item
@@ -1210,7 +1210,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
               .where(eq(metadataLatest.rowNum, 1))
             expect(records.length).toBeGreaterThan(0)
           },
-          { timeout: 10000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
       }
 
@@ -1285,7 +1285,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('create-item-property-status')
           expect(status.textContent === 'created' || status.textContent === 'error').toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const status = screen.getByTestId('create-item-property-status')
@@ -1442,7 +1442,7 @@ describe('React ItemProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('item-property-loading').textContent).toBe('false')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(

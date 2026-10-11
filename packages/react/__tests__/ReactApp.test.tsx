@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import App from './react-app/src/App'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 describe('React App - Component Rendering', () => {
   let container: HTMLElement
@@ -21,7 +22,7 @@ describe('React App - Component Rendering', () => {
     await waitFor(() => {
       const title = screen.getByRole('heading', { level: 1 })
       expect(title).toBeTruthy()
-    }, { timeout: 10000 })
+    }, { timeout: WAIT_TIMEOUT_MS })
 
     const title = screen.getByRole('heading', { level: 1 })
     expect(title.textContent).toContain('Seed Protocol SDK')
@@ -33,7 +34,7 @@ describe('React App - Component Rendering', () => {
     await waitFor(() => {
       const statusElement = screen.getByTestId('client-status')
       expect(statusElement.textContent).not.toBe('Checking...')
-    }, { timeout: 10000 })
+    }, { timeout: WAIT_TIMEOUT_MS })
 
     const statusElement = screen.getByTestId('client-status')
     expect(statusElement).toBeTruthy()

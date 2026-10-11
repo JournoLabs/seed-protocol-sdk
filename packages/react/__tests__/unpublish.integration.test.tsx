@@ -22,6 +22,7 @@ import { createTestRevokeExecutor } from '../../sdk/__tests__/test-utils/testRev
 import type { Item as ItemClass } from '@seedprotocol/sdk'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { waitForItemIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 function UnpublishTest({ item }: { item: ItemClass<any> | null }) {
   const [revoked, setRevoked] = useState(false)
@@ -134,9 +135,9 @@ describe('Unpublish React Integration Tests', () => {
         expect(screen.getByTestId('item-revoked').textContent).toBe('revoked')
         expect(screen.getByTestId('revoked-state').textContent).toBe('revoked')
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
-  }, 15000)
+  })
 
   it('unpublish button is disabled when item is not published', async () => {
     const { createItemWithBasicPropertiesOnly } = await import(
@@ -148,5 +149,5 @@ describe('Unpublish React Integration Tests', () => {
     render(<UnpublishTest item={item} />, { container, wrapper: SeedProviderWrapper })
 
     expect(screen.getByTestId('unpublish-button')).toBeDisabled()
-  }, 15000)
+  })
 })
