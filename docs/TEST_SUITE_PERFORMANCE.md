@@ -75,8 +75,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   React tests import it from `../../sdk/__tests__/test-utils/timeouts`). It's the default for
   `waitForIdle` and `waitUntilOrThrow`; pass it to xstate `waitFor`, `vi.waitFor` (whose default is
   only 1s) and Testing Library's `waitFor`. The Release workflow's GitHub runner takes ~2× as long
-  as a dev machine for the suite, and 1–5s waits sized locally failed there. A wait that never
-  succeeds still fails before the 30s `testTimeout`, with its own message.
+  as a dev machine for the suite, and 1–5s waits sized locally failed there (later 10s ones too,
+  under heavy local load). A wait that never succeeds still fails before the 30s `testTimeout`,
+  with its own message. Don't give a test its own timeout below that default: it only makes the
+  test fail sooner on a slow machine.
 - **Don't wait for a transient state.** The write process's `success` state returns to `idle` after
   2s, so a test that waits for `success` after doing other work hangs on a slow run: the write
   already finished. Wait on something that stays put (`context.writeStatus`), or start waiting
@@ -311,6 +313,10 @@ their number so references to them stay valid.
     each CI run (131–136s in a local full run), the longest in the suite. The 20 tests that only read
     the items now share one set created in `beforeAll`; the 5 that edit, create, delete or uncache
     items get fresh ones per test, and 4 need none. The file now takes ~19s in a local full run.
+    A loaded local full run (load average ~100) then failed `unpublish.integration.test.tsx`: its
+    fixed 10s wait for the revoke ran out inside a 15s test timeout, though `unpublish()` takes
+    20–40ms even under load (the page was starved for seconds). The remaining 10s waits now use
+    `WAIT_TIMEOUT_MS`, and the 28 tests with their own timeout below 30s use the default.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
