@@ -22,7 +22,6 @@ import {
   PUBLISH_ORDER,
   STAGING_TAG_PREFIX,
   compareStable,
-  getDistTags,
   listRemoteBranches,
   npm,
   npmWrite,
@@ -37,15 +36,21 @@ function requireEnv(name) {
 }
 
 /**
- * Registry reads can lag just behind a publish; retry before giving up.
+ * Dist-tags for a package, read together with `version` so the snapshot is at
+ * least as new as its publish (and so includes the staging tag it was published
+ * under). A bare `npm view <pkg> dist-tags` right after publishing can come from a
+ * stale registry edge that has neither, even after the version itself is visible.
+ * Retries while the version isn't there yet.
  * @param {string} packageName
  * @param {string} version
+ * @returns {Promise<Record<string, string>>}
  */
-async function waitForVersion(packageName, version) {
+async function readTagsWithVersion(packageName, version) {
   for (let attempt = 1; attempt <= 6; attempt++) {
     try {
-      npm(['view', `${packageName}@${version}`, 'version', '--prefer-online'], { capture: true })
-      return
+      return JSON.parse(
+        npm(['view', `${packageName}@${version}`, 'dist-tags', '--json', '--prefer-online'], { capture: true }),
+      )
     } catch {
       if (attempt === 6) break
       await new Promise((resolve) => setTimeout(resolve, 10_000))
@@ -83,11 +88,10 @@ async function main() {
     throw new Error('Refusing to point latest at a preview build')
   }
 
+  const tagsByPackage = new Map()
   for (const packageName of PACKAGES) {
-    await waitForVersion(packageName, version)
+    tagsByPackage.set(packageName, await readTagsWithVersion(packageName, version))
   }
-
-  const tagsByPackage = new Map(PACKAGES.map((name) => [name, getDistTags(name)]))
 
   const previewDecision = channel === 'preview' ? decidePreview(requireEnv('RELEASE_BRANCH'), sha) : null
   const results = []
@@ -112,8 +116,13 @@ async function main() {
     const tags = tagsByPackage.get(packageName)
     for (const [tag, tagged] of Object.entries(tags)) {
       if (tag.startsWith(STAGING_TAG_PREFIX) && tagged === version) {
-        npmWrite(['dist-tag', 'rm', packageName, tag])
-        console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
+        // A leftover staging tag is untidy, not broken; don't fail after the real tag moved.
+        try {
+          npmWrite(['dist-tag', 'rm', packageName, tag])
+          console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
+        } catch (error) {
+          console.warn(`[promote] ${packageName}: could not remove staging tag ${tag}: ${error.message}`)
+        }
       }
     }
   }
