@@ -111,6 +111,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   per test (items only): evicting and re-importing per test makes the next import ~2s and each
   `Item.create` ~0.4s slower, because the models are rebuilt cold. Old helpers that skipped eviction
   looked faster only because they reused Model instances bound to rows they had just deleted.
+- **Create items once for tests that only read them.** Group read-only tests under a `beforeAll`
+  that creates the items, and give only the tests that edit, create, delete or uncache items their
+  own per test (react `item.test.tsx` does this, finding 24). Each `Item.create` costs ~0.4–0.8s
+  locally and several times that on the CI runner.
 - **React tests are unmounted for you.** `packages/react/__tests__/setup.browser.ts` calls Testing
   Library's `cleanup()` after each test. Vitest runs without `globals`, so Testing Library doesn't
   register it itself; before that was added, every tree a test rendered stayed mounted for the rest
@@ -301,6 +305,12 @@ their number so references to them stay valid.
     lost its resolution hint). It now recognizes a uid by its full shape (0x + 64 chars), and
     `generateId` never starts an id with "0x". Tests: `browser/db/read/getPublishPayload.hexLocalId.test.ts`
     (mocks `generateId` to produce such ids), `helpers/generateId.test.ts`.
+24. **Fixed** (2026-10-11). React `item.test.tsx`'s `beforeEach` passed the 30s hook timeout in CI
+    run 38100553317 ("useItems > should handle deleted flag"). Every one of its 29 tests created
+    three Posts and an Article first: ~2.3s per test alone locally, and the file took 430–450s in
+    each CI run (131–136s in a local full run), the longest in the suite. The 20 tests that only read
+    the items now share one set created in `beforeAll`; the 5 that edit, create, delete or uncache
+    items get fresh ones per test, and 4 need none. The file now takes ~19s in a local full run.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
