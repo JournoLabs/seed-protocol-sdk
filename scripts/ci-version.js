@@ -4,8 +4,11 @@
  *
  * Reads GITHUB_REF, GITHUB_SHA and MAIN_BRANCH (default "main") from the
  * environment and the committed version from packages/sdk/package.json.
- * Writes version, dist_tag, staging_tag, channel and branch to GITHUB_OUTPUT
+ * Writes version, dist_tag, staging_tag, channel, branch and skip to GITHUB_OUTPUT
  * when set, and always prints them.
+ *
+ * skip is "true" for a branch push whose commit is already tagged v{committed
+ * version}: the tag's own run publishes it, so the branch run has nothing to do.
  *
  * Fails when:
  * - a release tag doesn't match the committed version
@@ -19,7 +22,7 @@
 import { appendFileSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { findCollidingBranches, git, listRemoteBranches, resolveRelease } from './release-channel.js'
+import { findCollidingBranches, git, listRemoteBranches, remoteTagCommit, resolveRelease } from './release-channel.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
@@ -37,6 +40,12 @@ function main() {
 
   let commitCount
   if (ref.startsWith('refs/heads/')) {
+    const releaseTag = `v${baseVersion}`
+    if (remoteTagCommit(releaseTag) === sha) {
+      console.log(`${sha.slice(0, 7)} is tagged ${releaseTag}; the tag's run publishes it.`)
+      writeOutputs({ skip: 'true' })
+      return
+    }
     if (git(['rev-parse', '--is-shallow-repository']) === 'true') {
       throw new Error('Shallow clone: the commit count would be wrong. Check out with fetch-depth: 0.')
     }
@@ -55,13 +64,20 @@ function main() {
     }
   }
 
-  const outputs = {
+  writeOutputs({
     version: release.version,
     dist_tag: release.distTag,
     staging_tag: release.stagingTag,
     channel: release.channel,
     branch: release.branch ?? '',
-  }
+    skip: 'false',
+  })
+}
+
+/**
+ * @param {Record<string, string>} outputs
+ */
+function writeOutputs(outputs) {
   for (const [key, value] of Object.entries(outputs)) {
     console.log(`${key}=${value}`)
   }
