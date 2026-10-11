@@ -1,5 +1,9 @@
 import { afterAll, afterEach, beforeAll } from 'vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
+
+// findBy*/waitFor give up after 1s by default. Under CI load, a component's first OPFS scan or
+// query can take longer than that, and the test fails while the UI is still loading.
+configure({ asyncUtilTimeout: 5000 })
 
 /**
  * Check if OPFS (Origin Private File System) is available in the browser
