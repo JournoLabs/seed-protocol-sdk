@@ -166,5 +166,9 @@ Done by a maintainer with publish rights and 2FA.
   (`feat/x` and `feat-x`). Rename one.
 - **A run failed partway:** re-run it. Already-published packages are skipped, and
   the tag only moves once every package is published.
+- **"… is not on the registry; not moving any tags":** npm's reads lag its publishes,
+  sometimes by minutes. The promote step waits up to 10 minutes for every package
+  (`RELEASE_REGISTRY_WAIT_MS`). If it still gives up, re-run the job: everything is
+  already published, so it goes straight to promoting.
 - **Tag "was not moved" in the summary:** a newer commit is on the branch. Its run
   moves the tag.

@@ -247,13 +247,15 @@ export function remoteTagCommit(tag, remote = 'origin') {
 
 /**
  * Run npm. Returns stdout when `capture` is set, otherwise streams output.
+ * `quiet` drops stderr, for expected failures the caller retries.
  * @param {string[]} args
- * @param {{ capture?: boolean }} [options]
+ * @param {{ capture?: boolean, quiet?: boolean }} [options]
  */
-export function npm(args, { capture = false } = {}) {
+export function npm(args, { capture = false, quiet = false } = {}) {
+  const stderr = quiet ? 'ignore' : 'inherit'
   const output = execFileSync('npm', args, {
     encoding: 'utf-8',
-    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+    stdio: capture ? ['ignore', 'pipe', stderr] : ['inherit', 'inherit', stderr],
   })
   return capture ? output.trim() : ''
 }

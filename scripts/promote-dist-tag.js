@@ -29,6 +29,10 @@ import {
 
 const PACKAGES = PUBLISH_ORDER.map((name) => `@seedprotocol/${name}`)
 
+const RETRY_INTERVAL_MS = 15_000
+// Shared by all packages: once the slowest one is visible, the rest usually are too.
+const REGISTRY_WAIT_MS = Number(process.env.RELEASE_REGISTRY_WAIT_MS ?? 10 * 60_000)
+
 function requireEnv(name) {
   const value = process.env[name]
   if (!value) throw new Error(`${name} must be set`)
@@ -40,20 +44,26 @@ function requireEnv(name) {
  * least as new as its publish (and so includes the staging tag it was published
  * under). A bare `npm view <pkg> dist-tags` right after publishing can come from a
  * stale registry edge that has neither, even after the version itself is visible.
- * Retries while the version isn't there yet.
+ * Retries while the version isn't there yet: reads can lag publishes by several
+ * minutes (v0.7.2 packages still 404'd 3 minutes after publishing).
  * @param {string} packageName
  * @param {string} version
+ * @param {number} deadline - epoch ms after which to give up
  * @returns {Promise<Record<string, string>>}
  */
-async function readTagsWithVersion(packageName, version) {
-  for (let attempt = 1; attempt <= 6; attempt++) {
+async function readTagsWithVersion(packageName, version, deadline) {
+  for (let attempt = 1; ; attempt++) {
     try {
       return JSON.parse(
-        npm(['view', `${packageName}@${version}`, 'dist-tags', '--json', '--prefer-online'], { capture: true }),
+        npm(['view', `${packageName}@${version}`, 'dist-tags', '--json', '--prefer-online'], {
+          capture: true,
+          quiet: true,
+        }),
       )
     } catch {
-      if (attempt === 6) break
-      await new Promise((resolve) => setTimeout(resolve, 10_000))
+      if (Date.now() + RETRY_INTERVAL_MS > deadline) break
+      console.log(`[promote] ${packageName}@${version} not visible on the registry yet (attempt ${attempt}); retrying`)
+      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS))
     }
   }
   throw new Error(`${packageName}@${version} is not on the registry; not moving any tags`)
@@ -88,9 +98,10 @@ async function main() {
     throw new Error('Refusing to point latest at a preview build')
   }
 
+  const deadline = Date.now() + REGISTRY_WAIT_MS
   const tagsByPackage = new Map()
   for (const packageName of PACKAGES) {
-    tagsByPackage.set(packageName, await readTagsWithVersion(packageName, version))
+    tagsByPackage.set(packageName, await readTagsWithVersion(packageName, version, deadline))
   }
 
   const previewDecision = channel === 'preview' ? decidePreview(requireEnv('RELEASE_BRANCH'), sha) : null
