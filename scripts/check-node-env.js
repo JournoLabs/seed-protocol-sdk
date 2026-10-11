@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
  * Fails fast when the Node running the tests can't pass them, instead of letting a wrong Node
- * surface as a dozen unrelated-looking failures:
- * - Node < 24.5 has no `navigator.locks`, so withTabLock runs sections unlocked and the
- *   concurrency tests (tabLocks, addExcludedTransactions, ensureModelStubs) race.
- * - better-sqlite3 is a native addon built for the Node that ran `bun install`; switching Node
- *   afterwards fails database.test.ts with a NODE_MODULE_VERSION mismatch.
- * A major version other than .nvmrc's only warns.
+ * surface as unrelated-looking failures: better-sqlite3 is a native addon built for the Node that
+ * ran `bun install`, and switching Node afterwards fails database.test.ts with a
+ * NODE_MODULE_VERSION mismatch.
+ * Only warns for a major version other than .nvmrc's, and for Node < 24.5, which has no
+ * `navigator.locks`: withTabLock then uses its in-process fallback rather than the Web Locks CI runs.
  */
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
@@ -30,8 +29,8 @@ export function checkNodeEnv({ version, hasLocks, nvmrc, loadSqlite }) {
   const [major] = parseVersion(version)
 
   if (!hasLocks) {
-    errors.push(
-      `Node ${version} has no navigator.locks (added in ${WEB_LOCKS_MIN.join('.')}), so tab locks are no-ops and concurrency tests fail.`,
+    warnings.push(
+      `Node ${version} has no navigator.locks (added in ${WEB_LOCKS_MIN.join('.')}); tab locks use the in-process fallback, not the Web Locks CI runs.`,
     )
   }
 

@@ -62,7 +62,8 @@ Ranked by damage:
 - **Cross-tab events:** BroadcastChannel `seed:events:<dbPath>` forwarding selected event-bus events.
 - **Off switch:** `multiTab?: 'coordinate' | 'off'` on `SeedConstructorOptions`, default
   `'coordinate'`. With `'off'`, or without Web Locks, every tab acts as leader (today's behavior).
-  Node always acts as leader.
+  Node always acts as leader. Without Web Locks (Node < 24.5), `withTabLock` sections still run one
+  at a time within the process (`withProcessLock` in `helpers/tabLocks.ts`).
 
 ### Phase A: make a second tab safe
 
