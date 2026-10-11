@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * Fail if browser-reachable Seed entries statically import Node builtins,
+ * import @seedprotocol/eas/node or @seedprotocol/arweave/node (statically or dynamically),
  * drizzle-orm/migrator, or js-sha3.
  *
  * Walks source entries (and published dist when present).
@@ -24,6 +25,11 @@ const FORBIDDEN = [
   { name: 'node:crypto', re: /(?:from|import)\s+['"]node:crypto['"]/ },
   { name: 'drizzle-orm/migrator', re: /(?:from|import)\s+['"]drizzle-orm\/migrator['"]/ },
   { name: 'js-sha3', re: /(?:from|import)\s+['"]js-sha3['"]/ },
+  // Loading these registers Node clients over the page's own (SDK) clients.
+  {
+    name: '@seedprotocol/*/node',
+    re: /(?:from|import)\s*\(?\s*['"]@seedprotocol\/(?:eas|arweave)\/node['"]/,
+  },
 ]
 
 const ENTRIES = [

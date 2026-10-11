@@ -26,6 +26,7 @@ vi.mock('@seedprotocol/eas', async (importOriginal) => {
 
 vi.mock('../../query/src/bootstrap.js', () => ({
   initializeQueryPlatform: vi.fn().mockResolvedValue(undefined),
+  configureQueryArweavePlatform: vi.fn(),
 }))
 
 vi.mock('../src/bootstrap', () => ({

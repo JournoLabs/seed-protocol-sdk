@@ -10,6 +10,7 @@ export default defineConfig({
     alias: [
       { find: /^@seedprotocol\/eas$/, replacement: src('eas/src/index.ts') },
       { find: /^@seedprotocol\/arweave$/, replacement: src('arweave/src/index.ts') },
+      { find: /^@seedprotocol\/arweave\/node$/, replacement: src('arweave/src/node/index.ts') },
       // @seedprotocol/eas's codegen imports these types as values (see packages/eas/vitest.config.ts)
       { find: '@graphql-typed-document-node/core', replacement: src('eas/src/shims/typed-document-node.js') },
     ],
