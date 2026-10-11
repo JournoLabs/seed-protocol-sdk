@@ -87,7 +87,7 @@ describe('events across tabs', () => {
   it('tells other tabs about events and saves from this tab', async () => {
     startTabCoordination({ filesDir })
     tab = otherTab()
-    await tab.send({ type: 'listen', channel }, 'listening')
+    await tab.listen(channel)
     const fileSaved = vi.fn()
     eventEmitter.on('file-saved', fileSaved)
 

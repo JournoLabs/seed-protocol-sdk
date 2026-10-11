@@ -282,13 +282,25 @@ their number so references to them stay valid.
     - `browser/helpers/tabEvents.test.ts` "tells other tabs about events and saves from this tab"
       saw nothing from the other tab in one local full run. Its `vi.waitFor` used the 1s default.
       A lost BroadcastChannel subscription (the worker's channel not registered yet when this tab
-      posts) didn't happen in 400 tries, with or without the CPU saturated, so the timeout was
-      the likely cause. All test waits that should succeed now use `WAIT_TIMEOUT_MS` (see "Writing
-      tests that stay fast").
-    After the fix: 4 full runs with `CI=true` passed (274–398s, load average 30–80), and
+      posts) didn't happen in 400 tries locally, so the 1s timeout was taken for the cause and all
+      test waits that should succeed now use `WAIT_TIMEOUT_MS` (see "Writing tests that stay
+      fast"). That was only part of it: in CI run 38092037319 the other tab received the second of
+      the two messages but not the first, even with 15s. A new BroadcastChannel registers
+      asynchronously in Chromium, so `otherTab`'s "listening" reply could arrive before it really
+      was. `otherTab().listen(channel)` now posts probes on the channel until one arrives.
+      `tabCoordinator.test.ts` also asserted the other tab's messages after a fixed 20ms; it now
+      waits for them.
+    After the first fixes: 4 full runs with `CI=true` passed (274–398s, load average 30–80), and
     `validation-timeout.test.ts` passed in all of them.
     `packages/query`'s tests also couldn't import `@seedprotocol/eas` / `arweave` in CI, which builds
     only the vite plugin. They now load those packages from source.
+23. **Fixed** (2026-10-10, SDK bug). `getPublishPayload.test.ts` "all property types" failed in CI
+    run 38092037319 with `invalid BytesLike value (… value="0xYVM3w1mf")`. Local ids are 10 random
+    alphanumerics, so about 1 in 3,844 starts with "0x", and `getPublishPayload` took any
+    0x-prefixed list member for an EAS uid and encoded it as-is (a relation to such an item also
+    lost its resolution hint). It now recognizes a uid by its full shape (0x + 64 chars), and
+    `generateId` never starts an id with "0x". Tests: `browser/db/read/getPublishPayload.hexLocalId.test.ts`
+    (mocks `generateId` to produce such ids), `helpers/generateId.test.ts`.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".

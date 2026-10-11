@@ -144,6 +144,14 @@ function currentRelatedRef(ctx: PublishValidationContext, ref: string): string {
   return ctx.relatedRefUids?.get(ref.trim()) ?? ref
 }
 
+/**
+ * An EAS uid (0x + 64 hex), as opposed to a local id. A "0x" prefix alone doesn't tell them apart:
+ * local ids are random alphanumerics, and about 1 in 3,844 starts with "0x".
+ */
+function isUidRef(ref: string): boolean {
+  return ref.length === 66 && ref.startsWith('0x')
+}
+
 /** `patch` (default): new property attestations on the current Version. `new_version`: new Version attestation + attest all properties. */
 export type PublishMode = 'patch' | 'new_version'
 
@@ -612,7 +620,7 @@ const processBasicProperties = async (
         const trimmed = currentRelatedRef(ctx, idStr.trim())
         if (!trimmed) continue
         rawIds.push(trimmed)
-        if (trimmed.length !== 66 && !trimmed.startsWith('0x')) {
+        if (!isUidRef(trimmed)) {
           newValues.push(encodeBytes32String(trimmed))
         } else {
           newValues.push(trimmed)
@@ -620,7 +628,7 @@ const processBasicProperties = async (
       }
       value = newValues
       const needsUidResolve = rawIds.some(
-        (id) => id.length !== 66 || !id.startsWith('0x'),
+        (id) => !isUidRef(id),
       )
       if (needsUidResolve && rawIds.length > 0) {
         rawListIdsForResolve = rawIds
@@ -685,8 +693,7 @@ const processBasicProperties = async (
     // For relation/image properties with seedLocalId, store resolution hints for resolvePublishPayloadValues
     const looksLikeLocalSeedRef =
       typeof value === 'string' &&
-      !value.startsWith('0x') &&
-      value.length !== 66 &&
+      !isUidRef(value) &&
       /^[a-zA-Z0-9_-]{10,21}$/.test(value.trim())
     if (
       looksLikeLocalSeedRef &&
@@ -2106,7 +2113,7 @@ export const resolvePublishPayloadValues = async (
         let allSlotsResolved = true
         for (const id of rawList) {
           const trimmed = id.trim()
-          if (trimmed.length === 66 && trimmed.startsWith('0x')) {
+          if (isUidRef(trimmed)) {
             resolvedValues.push(padUidForBytes32Schema(trimmed))
             continue
           }
