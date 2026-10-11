@@ -314,9 +314,16 @@ their number so references to them stay valid.
     the items now share one set created in `beforeAll`; the 5 that edit, create, delete or uncache
     items get fresh ones per test, and 4 need none. The file now takes ~19s in a local full run.
     A loaded local full run (load average ~100) then failed `unpublish.integration.test.tsx`: its
-    fixed 10s wait for the revoke ran out inside a 15s test timeout, though `unpublish()` takes
-    20–40ms even under load (the page was starved for seconds). The remaining 10s waits now use
-    `WAIT_TIMEOUT_MS`, and the 28 tests with their own timeout below 30s use the default.
+    fixed 10s wait for the revoke ran out inside a 15s test timeout. The remaining 10s waits now
+    use `WAIT_TIMEOUT_MS`, and the 28 tests with their own timeout below 30s use the default. That
+    wasn't the cause, though: it failed again with 15s. Logging each step of `Item.unpublish`
+    showed the DB work taking ~20ms and `await import('@/db/read/getLatestVersionRow')` taking
+    0.3–9s, and longer when it failed. In browser tests a module that nothing has loaded yet is
+    transformed by the Vite dev server when first imported, and under load those requests queue
+    for seconds. `Item` already imported everything that module needs, so it now imports it
+    statically. Other lazy `await import('@/…')` calls in SDK code can stall the same way the
+    first time a test reaches them; prefer static imports unless the split breaks a cycle or
+    keeps a heavy dependency out of a bundle.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".
