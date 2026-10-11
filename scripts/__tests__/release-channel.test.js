@@ -9,6 +9,7 @@ import {
   nextPatch,
   resolveRelease,
   stagingTag,
+  tagCommitFromLsRemote,
 } from '../release-channel.js'
 
 const SHA = '8b65a15e0c3d2f1a9b8c7d6e5f4a3b2c1d0e9f8a'
@@ -155,5 +156,23 @@ describe('resolveRelease', () => {
 describe('stagingTag', () => {
   it('uses the short SHA with a g prefix', () => {
     assert.equal(stagingTag(SHA), 'ci-g8b65a15')
+  })
+})
+
+describe('tagCommitFromLsRemote', () => {
+  const OTHER = '1111111111111111111111111111111111111111'
+
+  it('returns the commit of a lightweight tag', () => {
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.2\n`, 'v0.7.2'), SHA)
+  })
+
+  it('peels an annotated tag to its commit', () => {
+    const output = `${OTHER}\trefs/tags/v0.7.2\n${SHA}\trefs/tags/v0.7.2^{}\n`
+    assert.equal(tagCommitFromLsRemote(output, 'v0.7.2'), SHA)
+  })
+
+  it('returns null when the tag is missing', () => {
+    assert.equal(tagCommitFromLsRemote('', 'v0.7.2'), null)
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.20\n`, 'v0.7.2'), null)
   })
 })
