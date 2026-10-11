@@ -77,10 +77,30 @@ npm.
 ## Cutting a release
 
 ```bash
-bun run new-version            # or: bun run new-version -- 0.7.0
-git commit -am "chore: release 0.6.11"
-git tag v0.6.11
-git push origin main v0.6.11
+bun run release                 # next patch, e.g. 0.7.2 → 0.7.3
+bun run release -- 0.8.0        # explicit version
+bun run release -- --dry-run    # checks and plan only
+```
+
+[`release.js`](../scripts/release.js) checks that you're on `main` with a clean
+tree and not behind `origin/main`. It also checks that the version is plain
+`X.Y.Z`, newer than both the committed version and npm `latest`, and not already
+published, and that the tag doesn't exist yet. It fails if the Release run for
+the current commit failed; pass `--skip-ci-check` to override, or if `gh` isn't
+available it only warns. It then prints the plan and the commits since the last
+release, and asks you to type the version to confirm.
+
+On confirmation it bumps every package, commits `chore: release X.Y.Z`, creates an
+annotated tag `vX.Y.Z`, and pushes `main` and the tag in one atomic push. If the
+push fails, it removes the local commit and tag again.
+
+By hand, the same thing is:
+
+```bash
+bun run new-version -- 0.7.3
+git commit -am "chore: release 0.7.3"
+git tag v0.7.3
+git push --atomic origin main v0.7.3
 ```
 
 The tag must point at a commit whose committed version matches it, or the run fails

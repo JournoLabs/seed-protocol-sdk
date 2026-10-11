@@ -126,6 +126,29 @@ export function compareStable(a, b) {
 }
 
 /**
+ * Why `target` can't be released, given the committed version and what npm has
+ * on `latest`. Empty when it can.
+ * @param {{ target: string, committed: string, npmLatest?: string | null, published?: boolean }} input
+ * @returns {string[]}
+ */
+export function releaseVersionProblems({ target, committed, npmLatest = null, published = false }) {
+  if (!STABLE_RE.test(target)) {
+    return [`Release versions must be plain X.Y.Z; got "${target}".`]
+  }
+  const problems = []
+  if (STABLE_RE.test(committed) && compareStable(target, committed) <= 0) {
+    problems.push(`${target} is not newer than the committed version ${committed}.`)
+  }
+  if (npmLatest && STABLE_RE.test(npmLatest) && compareStable(target, npmLatest) <= 0) {
+    problems.push(`${target} is not newer than ${npmLatest} on npm \`latest\`.`)
+  }
+  if (published) {
+    problems.push(`${target} is already on npm.`)
+  }
+  return problems
+}
+
+/**
  * @param {string} sha - full commit SHA
  */
 export function stagingTag(sha) {
