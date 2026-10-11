@@ -75,8 +75,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   React tests import it from `../../sdk/__tests__/test-utils/timeouts`). It's the default for
   `waitForIdle` and `waitUntilOrThrow`; pass it to xstate `waitFor`, `vi.waitFor` (whose default is
   only 1s) and Testing Library's `waitFor`. The Release workflow's GitHub runner takes ~2× as long
-  as a dev machine for the suite, and 1–5s waits sized locally failed there. A wait that never
-  succeeds still fails before the 30s `testTimeout`, with its own message.
+  as a dev machine for the suite, and 1–5s waits sized locally failed there (later 10s ones too,
+  under heavy local load). A wait that never succeeds still fails before the 30s `testTimeout`,
+  with its own message. Don't give a test its own timeout below that default: it only makes the
+  test fail sooner on a slow machine.
 - **Don't wait for a transient state.** The write process's `success` state returns to `idle` after
   2s, so a test that waits for `success` after doing other work hangs on a slow run: the write
   already finished. Wait on something that stays put (`context.writeStatus`), or start waiting
@@ -111,6 +113,10 @@ Earlier runs that reported 45–50 minutes were on a broken tree: hung setup hoo
   per test (items only): evicting and re-importing per test makes the next import ~2s and each
   `Item.create` ~0.4s slower, because the models are rebuilt cold. Old helpers that skipped eviction
   looked faster only because they reused Model instances bound to rows they had just deleted.
+- **Create items once for tests that only read them.** Group read-only tests under a `beforeAll`
+  that creates the items, and give only the tests that edit, create, delete or uncache items their
+  own per test (react `item.test.tsx` does this, finding 24). Each `Item.create` costs ~0.4–0.8s
+  locally and several times that on the CI runner.
 - **React tests are unmounted for you.** `packages/react/__tests__/setup.browser.ts` calls Testing
   Library's `cleanup()` after each test. Vitest runs without `globals`, so Testing Library doesn't
   register it itself; before that was added, every tree a test rendered stayed mounted for the rest
@@ -301,6 +307,23 @@ their number so references to them stay valid.
     lost its resolution hint). It now recognizes a uid by its full shape (0x + 64 chars), and
     `generateId` never starts an id with "0x". Tests: `browser/db/read/getPublishPayload.hexLocalId.test.ts`
     (mocks `generateId` to produce such ids), `helpers/generateId.test.ts`.
+24. **Fixed** (2026-10-11). React `item.test.tsx`'s `beforeEach` passed the 30s hook timeout in CI
+    run 38100553317 ("useItems > should handle deleted flag"). Every one of its 29 tests created
+    three Posts and an Article first: ~2.3s per test alone locally, and the file took 430–450s in
+    each CI run (131–136s in a local full run), the longest in the suite. The 20 tests that only read
+    the items now share one set created in `beforeAll`; the 5 that edit, create, delete or uncache
+    items get fresh ones per test, and 4 need none. The file now takes ~19s in a local full run.
+    A loaded local full run (load average ~100) then failed `unpublish.integration.test.tsx`: its
+    fixed 10s wait for the revoke ran out inside a 15s test timeout. The remaining 10s waits now
+    use `WAIT_TIMEOUT_MS`, and the 28 tests with their own timeout below 30s use the default. That
+    wasn't the cause, though: it failed again with 15s. Logging each step of `Item.unpublish`
+    showed the DB work taking ~20ms and `await import('@/db/read/getLatestVersionRow')` taking
+    0.3–9s, and longer when it failed. In browser tests a module that nothing has loaded yet is
+    transformed by the Vite dev server when first imported, and under load those requests queue
+    for seconds. `Item` already imported everything that module needs, so it now imports it
+    statically. Other lazy `await import('@/…')` calls in SDK code can stall the same way the
+    first time a test reaches them; prefer static imports unless the split breaks a cycle or
+    keeps a heavy dependency out of a bundle.
 9. **Fixed** by `35d322b` (it now uses `vi.mock` instead of `vi.spyOn` on module namespaces).
 10. **Fixed** by `35d322b` (removed the test's `@/node/db/Db` import).
 11. **Fixed.** The tests ran a stale `packages/react/dist`; see "Workspace packages load from source".

@@ -82,7 +82,7 @@ describe('LiveQuery (Node polling implementation)', () => {
     } finally {
       subscription.unsubscribe()
     }
-  }, 10000)
+  })
 
   it('should not re-emit when the rows are unchanged', async () => {
     const db = BaseDb.getAppDb()
@@ -102,7 +102,7 @@ describe('LiveQuery (Node polling implementation)', () => {
     } finally {
       subscription.unsubscribe()
     }
-  }, 10000)
+  })
 
   it('should reject SQL tag function queries (not supported by the Node stub)', () => {
     expect(() =>

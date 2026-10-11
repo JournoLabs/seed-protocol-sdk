@@ -39,6 +39,7 @@ import { orderBy, startCase } from 'lodash-es'
 import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
+import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
 import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
@@ -1403,7 +1404,6 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     const revokedAt = Math.floor(Date.now() / 1000)
     // The executor stamps the revoked version rows; the latest version is now the newest one left
     // (a local draft) or none, never a revoked one.
-    const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
     const head = await getLatestVersionRow(this.seedLocalId)
     this._service.send({
       type: 'updateContext',
@@ -1478,8 +1478,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       })
       // Publish has recorded the version it attested (updateVersionUid): reflect it here too, as
       // the versions liveQuery does in the browser. After a republish this is the new version.
-      const { getLatestVersionRow } = await import('@/db/read/getLatestVersionRow')
-      const head = await getLatestVersionRow(seedLocalId)
+        const head = await getLatestVersionRow(seedLocalId)
       if (head?.localId) {
         this._service.send({
           type: 'updateContext',

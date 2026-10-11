@@ -16,6 +16,7 @@ import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk
 import { and, eq } from 'drizzle-orm'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { createFastDestroyStub } from './test-utils/fastDestroyStub'
+import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitForItemIdle, waitForItemPropertyIdle } from '../../sdk/__tests__/test-utils/waitForIdle'
 import { cleanupTestItems, cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
@@ -361,7 +362,7 @@ describe('React Item Hooks Integration Tests', () => {
         const allSchemas = await loadAllSchemasFromDb()
         expect(allSchemas.some(s => s.schema.metadata?.name === TEST_SCHEMA_ITEMS_HOOKS_NAME)).toBe(true)
       },
-      { timeout: 10000 }
+      { timeout: WAIT_TIMEOUT_MS }
     )
   })
 
@@ -370,914 +371,906 @@ describe('React Item Hooks Integration Tests', () => {
     Schema.clearCache()
   })
 
-  beforeEach(async () => {
+  beforeEach(() => {
     container = document.createElement('div')
     container.id = 'root'
     document.body.appendChild(container)
+  })
 
-    await cleanupTestItems()
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
 
-    // Create test items
+  async function createTestPost(n: number): Promise<Item<any>> {
+    const values = { title: `Test Post Title ${n}`, content: `Test Post Content ${n}`, author: `Test Author ${n}` }
+    const item = await Item.create({ modelName: 'Post', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME, ...values } as any)
+    await waitForItemIdle(item)
+    await waitForItemPersisted(item, values)
+    return item
+  }
+
+  /** Three Posts and an Article. */
+  async function createTestItems(): Promise<void> {
     const postModel = Model.create('Post', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
-    await xstateWaitFor(
-      postModel.getService(),
-      (snapshot) => snapshot.value === 'idle',
-      { timeout: WAIT_TIMEOUT_MS }
-    )
-
-    testItem1 = await Item.create({
-      modelName: 'Post',
-      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
-      title: 'Test Post Title 1',
-      content: 'Test Post Content 1',
-      author: 'Test Author 1',
-    } as any)
-    await waitForItemIdle(testItem1)
-    await waitForItemPersisted(testItem1!, { title: 'Test Post Title 1', content: 'Test Post Content 1', author: 'Test Author 1' })
-
-    testItem2 = await Item.create({
-      modelName: 'Post',
-      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
-      title: 'Test Post Title 2',
-      content: 'Test Post Content 2',
-      author: 'Test Author 2',
-    } as any)
-    await waitForItemIdle(testItem2)
-    await waitForItemPersisted(testItem2!, { title: 'Test Post Title 2', content: 'Test Post Content 2', author: 'Test Author 2' })
-
-    testItem3 = await Item.create({
-      modelName: 'Post',
-      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
-      title: 'Test Post Title 3',
-      content: 'Test Post Content 3',
-      author: 'Test Author 3',
-    } as any)
-    await waitForItemIdle(testItem3)
-    await waitForItemPersisted(testItem3!, { title: 'Test Post Title 3', content: 'Test Post Content 3', author: 'Test Author 3' })
+    await xstateWaitFor(postModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    testItem1 = await createTestPost(1)
+    testItem2 = await createTestPost(2)
+    testItem3 = await createTestPost(3)
 
     const articleModel = Model.create('Article', TEST_SCHEMA_ITEMS_HOOKS_NAME, { waitForReady: false })
-    await xstateWaitFor(
-      articleModel.getService(),
-      (snapshot) => snapshot.value === 'idle',
-      { timeout: WAIT_TIMEOUT_MS }
-    )
-
-    testArticleItem = await Item.create({
-      modelName: 'Article',
-      schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
-      headline: 'Test Article Headline',
-      body: 'Test Article Body',
-    } as any)
+    await xstateWaitFor(articleModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+    const article = { headline: 'Test Article Headline', body: 'Test Article Body' }
+    testArticleItem = await Item.create({ modelName: 'Article', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME, ...article } as any)
     await waitForItemIdle(testArticleItem)
-    await waitForItemPersisted(testArticleItem!, { headline: 'Test Article Headline', body: 'Test Article Body' })
-  })
+    await waitForItemPersisted(testArticleItem, article)
+  }
 
-  afterEach(async () => {
-    document.body.innerHTML = ''
+  function unloadTestItems(): void {
+    for (const item of [testItem1, testItem2, testItem3, testArticleItem]) item?.unload()
+    testItem1 = testItem2 = testItem3 = testArticleItem = null
+  }
 
-    // Clean up item instances
-    if (testItem1) {
-      testItem1.unload()
-      testItem1 = null
-    }
-    if (testItem2) {
-      testItem2.unload()
-      testItem2 = null
-    }
-    if (testItem3) {
-      testItem3.unload()
-      testItem3 = null
-    }
-    if (testArticleItem) {
-      testArticleItem.unload()
-      testArticleItem = null
-    }
-  })
+  // Most tests only read the items, so they share one set: creating them took ~2.3s per test locally
+  // and ~10s on the CI runner, where one test's setup went past the 30s hook timeout.
+  describe('with shared items', () => {
+    beforeAll(async () => {
+      await cleanupTestItems()
+      await createTestItems()
+    }, SETUP_HOOK_TIMEOUT_MS)
 
-  describe('useItem', () => {
-    it('should return undefined when no identifiers are provided', async () => {
-      render(<UseItemTest modelName="Post" />, { container })
-
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('item-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-
-      const nullIndicator = screen.queryByTestId('item-null')
-      expect(nullIndicator).toBeTruthy()
+    afterAll(() => {
+      unloadTestItems()
     })
 
-    it('should return item when seedLocalId is provided', async () => {
-      if (!testItem1) {
-        return
-      }
-      const item1 = testItem1
+      describe('useItem', () => {
+        it('should return undefined when no identifiers are provided', async () => {
+          render(<UseItemTest modelName="Post" />, { container })
 
-      // Verify item exists in database before test
-      const db = BaseDb.getAppDb()
-      if (db) {
-        await waitFor(
-          async () => {
-            const { seeds } = await import('@seedprotocol/sdk')
-            const seedRows = await db
-              .select()
-              .from(seeds)
-              .where(eq(seeds.localId, item1.seedLocalId))
-              .limit(1)
-            expect(seedRows.length).toBeGreaterThan(0)
-          },
-          { timeout: WAIT_TIMEOUT_MS }
-        )
-      }
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('item-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      render(
-        <UseItemTest modelName="Post" seedLocalId={item1.seedLocalId} />,
-        { container }
-      )
+          const nullIndicator = screen.queryByTestId('item-null')
+          expect(nullIndicator).toBeTruthy()
+        })
 
-      // Wait for loading to complete first (this ensures state updates have propagated)
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
-        },
-        { timeout: 15000 }
-      )
+        it('should return item when seedLocalId is provided', async () => {
+          if (!testItem1) {
+            return
+          }
+          const item1 = testItem1
 
-      // Wait for item to be found
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
-        },
-        { timeout: 15000 }
-      )
+          // Verify item exists in database before test
+          const db = BaseDb.getAppDb()
+          if (db) {
+            await waitFor(
+              async () => {
+                const { seeds } = await import('@seedprotocol/sdk')
+                const seedRows = await db
+                  .select()
+                  .from(seeds)
+                  .where(eq(seeds.localId, item1.seedLocalId))
+                  .limit(1)
+                expect(seedRows.length).toBeGreaterThan(0)
+              },
+              { timeout: WAIT_TIMEOUT_MS }
+            )
+          }
 
-      const itemSeedLocalId = screen.getByTestId('item-seed-local-id')
-      expect(itemSeedLocalId.textContent).toBe(testItem1.seedLocalId)
+          render(
+            <UseItemTest modelName="Post" seedLocalId={item1.seedLocalId} />,
+            { container }
+          )
 
-      const itemModelName = screen.getByTestId('item-model-name')
-      expect(itemModelName.textContent).toBe('Post')
+          // Wait for loading to complete first (this ensures state updates have propagated)
+          await waitFor(
+            () => {
+              expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
+            },
+            { timeout: 15000 }
+          )
 
-      // Wait for item properties to be loaded
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
-        },
-        { timeout: 15000 }
-      )
+          // Wait for item to be found
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
+            },
+            { timeout: 15000 }
+          )
 
-      const itemDataTitle = screen.getByTestId('item-data-title')
-      expect(itemDataTitle.textContent).toBe('Test Post Title 1')
+          const itemSeedLocalId = screen.getByTestId('item-seed-local-id')
+          expect(itemSeedLocalId.textContent).toBe(testItem1.seedLocalId)
 
-      const itemDataContent = screen.getByTestId('item-data-content')
-      expect(itemDataContent.textContent).toBe('Test Post Content 1')
+          const itemModelName = screen.getByTestId('item-model-name')
+          expect(itemModelName.textContent).toBe('Post')
 
-      const itemDataAuthor = screen.getByTestId('item-data-author')
-      expect(itemDataAuthor.textContent).toBe('Test Author 1')
-    })
+          // Wait for item properties to be loaded
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
+            },
+            { timeout: 15000 }
+          )
 
-    it('should return item when seedUid is provided', async () => {
-      if (!testItem1 || !testItem1.seedUid) {
-        return
-      }
-
-      render(
-        <UseItemTest modelName="Post" seedUid={testItem1.seedUid} />,
-        { container }
-      )
-
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
-        },
-        { timeout: 10000 }
-      )
-
-      const itemSeedLocalId = screen.getByTestId('item-seed-local-id')
-      expect(itemSeedLocalId.textContent).toBe(testItem1.seedLocalId)
-
-      const itemModelName = screen.getByTestId('item-model-name')
-      expect(itemModelName.textContent).toBe('Post')
-    })
-
-    it('should return undefined for non-existent item', async () => {
-      render(
-        <UseItemTest modelName="Post" seedLocalId="non-existent-id" />,
-        { container }
-      )
-
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('item-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: 10000 }
-      )
-
-      const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
-      expect(itemSeedLocalId).toBeNull()
-    })
-
-    it('should update when seedLocalId changes', async () => {
-      if (!testItem1 || !testItem2) {
-        return
-      }
-
-      const { rerender } = render(
-        <UseItemTest modelName="Post" seedLocalId={testItem1.seedLocalId} />,
-        { container }
-      )
-
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
-        },
-        { timeout: 10000 }
-      )
-
-      // Change to different item
-      rerender(
-        <UseItemTest modelName="Post" seedLocalId={testItem2.seedLocalId} />
-      )
-
-      await waitFor(
-        () => {
           const itemDataTitle = screen.getByTestId('item-data-title')
-          expect(itemDataTitle.textContent).toBe('Test Post Title 2')
-        },
-        { timeout: 10000 }
-      )
-    })
+          expect(itemDataTitle.textContent).toBe('Test Post Title 1')
 
-    it('should return isLoading and error states', async () => {
-      if (!testItem1) {
-        return
-      }
+          const itemDataContent = screen.getByTestId('item-data-content')
+          expect(itemDataContent.textContent).toBe('Test Post Content 1')
 
-      render(
-        <UseItemTest modelName="Post" seedLocalId={testItem1.seedLocalId} />,
-        { container }
-      )
+          const itemDataAuthor = screen.getByTestId('item-data-author')
+          expect(itemDataAuthor.textContent).toBe('Test Author 1')
+        })
 
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
-        },
-        { timeout: 10000 }
-      )
+        it('should return item when seedUid is provided', async () => {
+          if (!testItem1 || !testItem1.seedUid) {
+            return
+          }
 
-      // Wait for loading to complete
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
-        },
-        { timeout: 10000 }
-      )
+          render(
+            <UseItemTest modelName="Post" seedUid={testItem1.seedUid} />,
+            { container }
+          )
 
-      // isLoading should be false after item loads
-      const isLoading = screen.getByTestId('item-is-loading')
-      expect(isLoading.textContent).toBe('false')
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      // No error should be present
-      const error = screen.queryByTestId('item-error')
-      expect(error).toBeNull()
-    })
+          const itemSeedLocalId = screen.getByTestId('item-seed-local-id')
+          expect(itemSeedLocalId.textContent).toBe(testItem1.seedLocalId)
 
-    it('should handle different model types', async () => {
-      if (!testArticleItem) {
-        return
-      }
+          const itemModelName = screen.getByTestId('item-model-name')
+          expect(itemModelName.textContent).toBe('Post')
+        })
 
-      render(
-        <UseItemTest modelName="Article" seedLocalId={testArticleItem.seedLocalId} />,
-        { container }
-      )
+        it('should return undefined for non-existent item', async () => {
+          render(
+            <UseItemTest modelName="Post" seedLocalId="non-existent-id" />,
+            { container }
+          )
 
-      const withinContainer = within(container)
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('item-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      // Wait for hook to finish loading and set item (status becomes 'loaded')
-      await waitFor(
-        () => {
-          const status = withinContainer.queryByTestId('item-status')
-          expect(status?.textContent).toBe('loaded')
-        },
-        { timeout: 10000 }
-      )
+          const itemSeedLocalId = screen.queryByTestId('item-seed-local-id')
+          expect(itemSeedLocalId).toBeNull()
+        })
 
-      await waitFor(
-        () => {
-          expect(withinContainer.queryByTestId('item-model-name')?.textContent).toBe('Article')
-        },
-        { timeout: 10000 }
-      )
+        it('should update when seedLocalId changes', async () => {
+          if (!testItem1 || !testItem2) {
+            return
+          }
 
-      const itemModelName = withinContainer.getByTestId('item-model-name')
-      expect(itemModelName.textContent).toBe('Article')
+          const { rerender } = render(
+            <UseItemTest modelName="Post" seedLocalId={testItem1.seedLocalId} />,
+            { container }
+          )
 
-      // Wait for properties to be rendered
-      await waitFor(
-        () => {
-          expect(withinContainer.queryByTestId('item-data-headline')?.textContent).toBe('Test Article Headline')
-        },
-        { timeout: 10000 }
-      )
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-data-title')?.textContent).toBe('Test Post Title 1')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      const itemDataHeadline = withinContainer.getByTestId('item-data-headline')
-      expect(itemDataHeadline.textContent).toBe('Test Article Headline')
+          // Change to different item
+          rerender(
+            <UseItemTest modelName="Post" seedLocalId={testItem2.seedLocalId} />
+          )
 
-      await waitFor(
-        () => {
-          expect(withinContainer.queryByTestId('item-data-body')?.textContent).toBe('Test Article Body')
-        },
-        { timeout: 10000 }
-      )
+          await waitFor(
+            () => {
+              const itemDataTitle = screen.getByTestId('item-data-title')
+              expect(itemDataTitle.textContent).toBe('Test Post Title 2')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
 
-      const itemDataBody = withinContainer.getByTestId('item-data-body')
-      expect(itemDataBody.textContent).toBe('Test Article Body')
-    })
-  })
+        it('should return isLoading and error states', async () => {
+          if (!testItem1) {
+            return
+          }
 
-  describe('useItem with the item instance cache', () => {
-    it('returns a cached, ready item on the first render', async () => {
-      const id = testItem1!.seedLocalId
-      expect(Item.peekReady(id)).toBeDefined()
-      const log: ItemRender[] = []
+          render(
+            <UseItemTest modelName="Post" seedLocalId={testItem1.seedLocalId} />,
+            { container }
+          )
 
-      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-seed-local-id')).not.toBeNull()
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
-    })
+          // Wait for loading to complete
+          await waitFor(
+            () => {
+              expect(screen.getByTestId('item-is-loading').textContent).toBe('false')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-    it('returns a cached, ready item on the first render under SeedProvider', async () => {
-      const id = testItem1!.seedLocalId
-      const log: ItemRender[] = []
+          // isLoading should be false after item loads
+          const isLoading = screen.getByTestId('item-is-loading')
+          expect(isLoading.textContent).toBe('false')
 
-      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+          // No error should be present
+          const error = screen.queryByTestId('item-error')
+          expect(error).toBeNull()
+        })
 
-      expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
-    })
+        it('should handle different model types', async () => {
+          if (!testArticleItem) {
+            return
+          }
 
-    it('still updates after mounting when the item changes', async () => {
-      const id = testItem1!.seedLocalId
-      const log: ItemRender[] = []
-      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
-      expect(log[0].title).toBe('Test Post Title 1')
+          render(
+            <UseItemTest modelName="Article" seedLocalId={testArticleItem.seedLocalId} />,
+            { container }
+          )
 
-      // A property value changes without the item's own machine changing.
-      const titleProp = testItem1!.properties.find((p) => p.propertyName === 'title')!
-      titleProp.value = 'Changed After Mount'
-      await titleProp.save()
+          const withinContainer = within(container)
 
-      await waitFor(
-        () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
-        { timeout: 10000 },
-      )
-    })
+          // Wait for hook to finish loading and set item (status becomes 'loaded')
+          await waitFor(
+            () => {
+              const status = withinContainer.queryByTestId('item-status')
+              expect(status?.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-    it('never returns the previous item after the id changes', async () => {
-      const id1 = testItem1!.seedLocalId
-      const id2 = testItem2!.seedLocalId
-      const log: ItemRender[] = []
-      const { rerender } = render(<UseItemRenderLog seedLocalId={id1} log={log} />, { container })
+          await waitFor(
+            () => {
+              expect(withinContainer.queryByTestId('item-model-name')?.textContent).toBe('Article')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      rerender(<UseItemRenderLog seedLocalId={id2} log={log} />)
+          const itemModelName = withinContainer.getByTestId('item-model-name')
+          expect(itemModelName.textContent).toBe('Article')
 
-      const afterSwitch = log.filter((r) => r.requestedId === id2)
-      expect(afterSwitch.length).toBeGreaterThan(0)
-      // id2 is cached and ready too, so every render for it has it, with no loading state between.
-      for (const r of afterSwitch) {
-        expect(r).toEqual({ requestedId: id2, itemId: id2, title: 'Test Post Title 2', isLoading: false })
-      }
-    })
+          // Wait for properties to be rendered
+          await waitFor(
+            () => {
+              expect(withinContainer.queryByTestId('item-data-headline')?.textContent).toBe('Test Article Headline')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-    it('loads an item that is not in the cache, as before', async () => {
-      const id = testItem3!.seedLocalId
-      Item.dropCachedInstancesForSeedIds([id])
-      testItem3 = null // dropped instances are already stopped; afterEach must not unload it
-      expect(Item.peekReady(id)).toBeUndefined()
-      const log: ItemRender[] = []
+          const itemDataHeadline = withinContainer.getByTestId('item-data-headline')
+          expect(itemDataHeadline.textContent).toBe('Test Article Headline')
 
-      render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+          await waitFor(
+            () => {
+              expect(withinContainer.queryByTestId('item-data-body')?.textContent).toBe('Test Article Body')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      expect(log[0]).toEqual({ requestedId: id, itemId: undefined, title: undefined, isLoading: true })
-      await waitFor(
-        () => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 3'),
-        { timeout: 15000 },
-      )
-      expect(log[log.length - 1]).toMatchObject({ itemId: id, isLoading: false })
-    })
-  })
+          const itemDataBody = withinContainer.getByTestId('item-data-body')
+          expect(itemDataBody.textContent).toBe('Test Article Body')
+        })
+      })
 
-  describe('useItems', () => {
-    it('registers useItems query with staleTime 0', async () => {
-      const queryClientRef = React.createRef<QueryClient>()
-      function SeedWithQueryRef({ children }: { children: React.ReactNode }) {
-        return <SeedProvider queryClientRef={queryClientRef}>{children}</SeedProvider>
-      }
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedWithQueryRef })
+      describe('useItem with the item instance cache', () => {
+        it('returns a cached, ready item on the first render', async () => {
+          const id = testItem1!.seedLocalId
+          expect(Item.peekReady(id)).toBeDefined()
+          const log: ItemRender[] = []
 
-      await waitFor(
-        () => {
-          const query = queryClientRef.current?.getQueryCache().find({
-            queryKey: ['seed', 'items', 'Post', false, false, null, 0, { modelFileId: null, schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME }],
-          })
-          expect(query).toBeDefined()
-          expect(query!.options.staleTime).toBe(0)
-        },
-        { timeout: 10000 }
-      )
-    })
+          render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
 
-    it('should return every local item when modelName is not provided', async () => {
-      render(<UseItemsTest />, { container, wrapper: SeedProviderWrapper })
+          expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
+        })
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('items-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
+        it('returns a cached, ready item on the first render under SeedProvider', async () => {
+          const id = testItem1!.seedLocalId
+          const log: ItemRender[] = []
 
-      const count = screen.getByTestId('items-count')
-      // No model filter: the three Posts and the Article from beforeEach
-      expect(parseInt(count.textContent || '0')).toBe(4)
-    })
+          render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
 
-    it('should return all items for a model', async () => {
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          expect(log[0]).toEqual({ requestedId: id, itemId: id, title: 'Test Post Title 1', isLoading: false })
+        })
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('items-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: 10000 }
-      )
+        it('never returns the previous item after the id changes', async () => {
+          const id1 = testItem1!.seedLocalId
+          const id2 = testItem2!.seedLocalId
+          const log: ItemRender[] = []
+          const { rerender } = render(<UseItemRenderLog seedLocalId={id1} log={log} />, { container })
 
-      const count = screen.getByTestId('items-count')
-      const itemCount = parseInt(count.textContent || '0')
-      expect(itemCount).toBe(3) // testItem1, testItem2, testItem3
+          rerender(<UseItemRenderLog seedLocalId={id2} log={log} />)
 
-      // Verify specific items exist
-      const itemElements = screen.getAllByTestId(/^item-\d+-seed-local-id$/)
-      const seedLocalIds = itemElements.map((el) => el.textContent)
+          const afterSwitch = log.filter((r) => r.requestedId === id2)
+          expect(afterSwitch.length).toBeGreaterThan(0)
+          // id2 is cached and ready too, so every render for it has it, with no loading state between.
+          for (const r of afterSwitch) {
+            expect(r).toEqual({ requestedId: id2, itemId: id2, title: 'Test Post Title 2', isLoading: false })
+          }
+        })
+      })
 
-      if (testItem1) {
-        expect(seedLocalIds).toContain(testItem1.seedLocalId)
-      }
-      if (testItem2) {
-        expect(seedLocalIds).toContain(testItem2.seedLocalId)
-      }
-      if (testItem3) {
-        expect(seedLocalIds).toContain(testItem3.seedLocalId)
-      }
-    })
+      describe('useItems', () => {
+        it('registers useItems query with staleTime 0', async () => {
+          const queryClientRef = React.createRef<QueryClient>()
+          function SeedWithQueryRef({ children }: { children: React.ReactNode }) {
+            return <SeedProvider queryClientRef={queryClientRef}>{children}</SeedProvider>
+          }
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedWithQueryRef })
 
-    it('should return items that are all idle when loading completes', async () => {
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          await waitFor(
+            () => {
+              const query = queryClientRef.current?.getQueryCache().find({
+                queryKey: ['seed', 'items', 'Post', false, false, null, 0, { modelFileId: null, schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME }],
+              })
+              expect(query).toBeDefined()
+              expect(query!.options.staleTime).toBe(0)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('items-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: 10000 }
-      )
+        it('should return every local item when modelName is not provided', async () => {
+          render(<UseItemsTest />, { container, wrapper: SeedProviderWrapper })
 
-      const count = screen.getByTestId('items-count')
-      expect(parseInt(count.textContent || '0')).toBe(3)
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('items-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      const allIdle = screen.getByTestId('items-all-idle')
-      expect(allIdle.textContent).toBe('true')
-    })
-
-    it('should return items ordered by creation date (descending)', async () => {
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
-      const scoped = within(container)
-
-      // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
-      await waitFor(
-        () => {
-          expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
-          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
-        },
-        { timeout: 10000 }
-      )
-    })
-
-    it('should update when modelName changes', async () => {
-      const { rerender } = render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
-
-      // Assert inside waitFor so we don't depend on DOM state after resolve (avoids race where
-      // setItems(3) commits then a subsequent effect/update can briefly show 0 before stable)
-      await waitFor(
-        () => {
           const count = screen.getByTestId('items-count')
-          const n = parseInt(count.textContent || '0')
-          expect(n).toBe(3)
-        },
-        { timeout: 10000 }
-      )
+          // No model filter: the three Posts and the Article from createTestItems
+          expect(parseInt(count.textContent || '0')).toBe(4)
+        })
 
-      // Change to Article model
-      rerender(<UseItemsTest modelName="Article" />)
+        it('should return all items for a model', async () => {
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
-      // Wait until we have Article items (count >= 1 and first item is Article). Assert inside
-      // waitFor so we don't depend on DOM state after resolve and avoid races with clearing/refetch.
-      await waitFor(
-        () => {
-          expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBe(1)
-          expect(screen.queryByTestId('item-0-model-name')?.textContent).toBe('Article')
-        },
-        { timeout: 10000 }
-      )
-    })
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('items-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-    it('should return isLoading status', async () => {
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          const count = screen.getByTestId('items-count')
+          const itemCount = parseInt(count.textContent || '0')
+          expect(itemCount).toBe(3) // testItem1, testItem2, testItem3
 
-      await waitFor(
-        () => {
-          const status = screen.getByTestId('items-status')
-          expect(status.textContent).toBe('loaded')
-        },
-        { timeout: 10000 }
-      )
+          // Verify specific items exist
+          const itemElements = screen.getAllByTestId(/^item-\d+-seed-local-id$/)
+          const seedLocalIds = itemElements.map((el) => el.textContent)
 
-      const isLoading = screen.getByTestId('items-is-loading')
-      // isLoading should be false after items are loaded
-      expect(isLoading.textContent).toBe('false')
-    })
+          if (testItem1) {
+            expect(seedLocalIds).toContain(testItem1.seedLocalId)
+          }
+          if (testItem2) {
+            expect(seedLocalIds).toContain(testItem2.seedLocalId)
+          }
+          if (testItem3) {
+            expect(seedLocalIds).toContain(testItem3.seedLocalId)
+          }
+        })
 
-    it('should handle deleted flag', async () => {
-      // First, test with deleted=false (default)
-      const { rerender } = render(<UseItemsTest modelName="Post" deleted={false} />, { container, wrapper: SeedProviderWrapper })
-      const scoped = within(container)
+        it('should return items that are all idle when loading completes', async () => {
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
-      // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
-      await waitFor(
-        () => {
-          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
-        },
-        { timeout: 10000 }
-      )
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('items-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
 
-      // Test with deleted=true (should return only deleted items, which should be 0 in our test)
-      rerender(<UseItemsTest modelName="Post" deleted={true} />)
-
-      await waitFor(
-        () => {
-          expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
-          expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(0)
-        },
-        { timeout: 10000 }
-      )
-    })
-
-    it('should update when new items are created', async () => {
-      render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
-
-      await waitFor(
-        () => {
           const count = screen.getByTestId('items-count')
           expect(parseInt(count.textContent || '0')).toBe(3)
-        },
-        { timeout: 10000 }
-      )
 
-      const initialCount = screen.getByTestId('items-count')
-      const initialItemCount = parseInt(initialCount.textContent || '0')
+          const allIdle = screen.getByTestId('items-all-idle')
+          expect(allIdle.textContent).toBe('true')
+        })
 
-      // Create a new item
-      const newItem = await Item.create({
-        modelName: 'Post',
-        schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
-        title: 'New Test Post',
-        content: 'New Test Content',
-        author: 'New Test Author',
-      } as any)
-      await waitForItemIdle(newItem)
-      await waitForItemPersisted(newItem, { title: 'New Test Post', content: 'New Test Content', author: 'New Test Author' })
+        it('should return items ordered by creation date (descending)', async () => {
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+          const scoped = within(container)
 
-      // useItems uses useLiveQuery which should automatically detect database changes
-      // Wait for the new item to appear (reactive query should pick it up)
-      await waitFor(
-        () => {
-          const count = screen.getByTestId('items-count')
-          expect(parseInt(count.textContent || '0')).toBe(initialItemCount + 1)
-        },
-        { timeout: 15000 }
-      )
-
-      const finalCount = screen.getByTestId('items-count')
-      expect(parseInt(finalCount.textContent || '0')).toBe(initialItemCount + 1)
-
-      // Clean up
-      newItem.unload()
-    })
-  })
-
-  describe('useItems React Query cache sharing (SeedProvider)', () => {
-    it('should share cached list when multiple components call useItems with same params', async () => {
-      const itemAllSpy = vi.spyOn(Item, 'all')
-      try {
-        function TwoLists() {
-          return (
-            <div data-testid="two-lists">
-              <div data-testid="list-a">
-                <UseItemsTest modelName="Post" />
-              </div>
-              <div data-testid="list-b">
-                <UseItemsTest modelName="Post" />
-              </div>
-            </div>
+          // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
+          await waitFor(
+            () => {
+              expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
+              expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
           )
-        }
-        render(<TwoLists />, { container, wrapper: SeedProviderWrapper })
+        })
 
-        await waitFor(
-          () => {
+        it('should update when modelName changes', async () => {
+          const { rerender } = render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+
+          // Assert inside waitFor so we don't depend on DOM state after resolve (avoids race where
+          // setItems(3) commits then a subsequent effect/update can briefly show 0 before stable)
+          await waitFor(
+            () => {
+              const count = screen.getByTestId('items-count')
+              const n = parseInt(count.textContent || '0')
+              expect(n).toBe(3)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          // Change to Article model
+          rerender(<UseItemsTest modelName="Article" />)
+
+          // Wait until we have Article items (count >= 1 and first item is Article). Assert inside
+          // waitFor so we don't depend on DOM state after resolve and avoid races with clearing/refetch.
+          await waitFor(
+            () => {
+              expect(parseInt(screen.getByTestId('items-count').textContent || '0')).toBe(1)
+              expect(screen.queryByTestId('item-0-model-name')?.textContent).toBe('Article')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
+
+        it('should return isLoading status', async () => {
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+
+          await waitFor(
+            () => {
+              const status = screen.getByTestId('items-status')
+              expect(status.textContent).toBe('loaded')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          const isLoading = screen.getByTestId('items-is-loading')
+          // isLoading should be false after items are loaded
+          expect(isLoading.textContent).toBe('false')
+        })
+
+        it('should handle deleted flag', async () => {
+          // First, test with deleted=false (default)
+          const { rerender } = render(<UseItemsTest modelName="Post" deleted={false} />, { container, wrapper: SeedProviderWrapper })
+          const scoped = within(container)
+
+          // Assert inside waitFor so we don't depend on DOM after resolve (browser env can revert state)
+          await waitFor(
+            () => {
+              expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          // Test with deleted=true (should return only deleted items, which should be 0 in our test)
+          rerender(<UseItemsTest modelName="Post" deleted={true} />)
+
+          await waitFor(
+            () => {
+              expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
+              expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(0)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
+      })
+
+      describe('useItems React Query cache sharing (SeedProvider)', () => {
+        it('should share cached list when multiple components call useItems with same params', async () => {
+          const itemAllSpy = vi.spyOn(Item, 'all')
+          try {
+            function TwoLists() {
+              return (
+                <div data-testid="two-lists">
+                  <div data-testid="list-a">
+                    <UseItemsTest modelName="Post" />
+                  </div>
+                  <div data-testid="list-b">
+                    <UseItemsTest modelName="Post" />
+                  </div>
+                </div>
+              )
+            }
+            render(<TwoLists />, { container, wrapper: SeedProviderWrapper })
+
+            await waitFor(
+              () => {
+                const listA = screen.getByTestId('list-a')
+                const listB = screen.getByTestId('list-b')
+                expect(within(listA).getByTestId('items-status').textContent).toBe('loaded')
+                expect(within(listB).getByTestId('items-status').textContent).toBe('loaded')
+                const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
+                const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
+                expect(countA).toBe(countB)
+                expect(countA).toBe(3)
+              },
+              { timeout: 15000 }
+            )
+
             const listA = screen.getByTestId('list-a')
             const listB = screen.getByTestId('list-b')
-            expect(within(listA).getByTestId('items-status').textContent).toBe('loaded')
-            expect(within(listB).getByTestId('items-status').textContent).toBe('loaded')
             const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
             const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
             expect(countA).toBe(countB)
-            expect(countA).toBe(3)
-          },
-          { timeout: 15000 }
-        )
 
-        const listA = screen.getByTestId('list-a')
-        const listB = screen.getByTestId('list-b')
-        const countA = parseInt(within(listA).getByTestId('items-count').textContent || '0')
-        const countB = parseInt(within(listB).getByTestId('items-count').textContent || '0')
-        expect(countA).toBe(countB)
-
-        const postCalls = itemAllSpy.mock.calls.filter(
-          (call) => call[0] === 'Post' && call[1] === false
-        )
-        expect(postCalls.length).toBeLessThanOrEqual(2)
-        expect(postCalls.length).toBeGreaterThanOrEqual(1)
-      } finally {
-        itemAllSpy.mockRestore()
-      }
-    })
-  })
-
-  describe('ItemProperty edit persistence and reload', () => {
-    it('persists ItemProperty edit to db and displays new value after reload', async () => {
-      if (!testItem1) return
-
-      const editedTitle = 'Edited Title After React Edit'
-      const seedLocalId = testItem1.seedLocalId
-
-      // 1. Render component and wait for item to load
-      const { unmount } = render(
-        <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
-        { container, wrapper: SeedProviderWrapper }
-      )
-
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-title')?.textContent).toBe('Test Post Title 1')
-        },
-        { timeout: 15000 }
-      )
-
-      // 2. Edit the ItemProperty via the React component (simulates user editing)
-      // Use findByTestId to avoid race where item unmounts between waitFor and getByTestId
-      const editButton = await screen.findByTestId('edit-title-button', {}, { timeout: WAIT_TIMEOUT_MS })
-      editButton.click()
-
-      // 3. Wait for edit/save to complete
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('edit-done')).not.toBeNull()
-        },
-        { timeout: 10000 }
-      )
-
-      // 4. Verify the new value is persisted to the database
-      const db = BaseDb.getAppDb()
-      expect(db).toBeTruthy()
-      if (db) {
-        await waitFor(
-          async () => {
-            const rows = await db
-              .select()
-              .from(metadata)
-              .where(
-                and(
-                  eq(metadata.seedLocalId, seedLocalId),
-                  eq(metadata.propertyName, 'title'),
-                  eq(metadata.propertyValue, editedTitle)
-                )
+            const postCalls = itemAllSpy.mock.calls.filter(
+              (call) => call[0] === 'Post' && call[1] === false
             )
-            expect(rows.length).toBeGreaterThan(0)
-          },
-          { timeout: WAIT_TIMEOUT_MS }
-        )
-      }
-
-      // 5. Simulate page reload: unload item to clear cache, unmount, then remount
-      testItem1.unload()
-
-      unmount()
-
-      // 6. Remount (simulates fresh page load - component loads item from db)
-      // Use a fresh container to avoid "Cannot update an unmounted root"
-      const remountContainer = document.createElement('div')
-      remountContainer.id = 'root-remount'
-      document.body.appendChild(remountContainer)
-      render(
-        <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
-        { container: remountContainer, wrapper: SeedProviderWrapper }
-      )
-
-      // 7. Verify the new value is displayed as the current value after reload
-      await waitFor(
-        () => {
-          expect(screen.queryByTestId('item-title')?.textContent).toBe(editedTitle)
-        },
-        { timeout: 15000 }
-      )
-    })
-  })
-
-  describe('useItem and useItems integration', () => {
-    it('should work together - useItems shows list, useItem shows detail', async () => {
-      if (!testItem1) {
-        return
-      }
-      const item1 = testItem1
-
-      // Render both hooks
-      function CombinedTest() {
-        const { items } = useItems({ modelName: 'Post', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME })
-        const { item } = useItem({ modelName: 'Post', seedLocalId: item1.seedLocalId })
-
-        return (
-          <div>
-            <div data-testid="combined-items-count">{items.length}</div>
-            {item && <div data-testid="combined-item-seed-local-id">{item.seedLocalId}</div>}
-            {item && item.properties.find(p => p.propertyName === 'title')?.value && (
-              <div data-testid="combined-item-title">{item.properties.find(p => p.propertyName === 'title')?.value as string}</div>
-            )}
-          </div>
-        )
-      }
-
-      render(<CombinedTest />, { container, wrapper: SeedProviderWrapper })
-
-      await waitFor(
-        () => {
-          expect(parseInt(screen.queryByTestId('combined-items-count')?.textContent || '0')).toBe(3)
-          expect(screen.queryByTestId('combined-item-seed-local-id')?.textContent).toBe(item1.seedLocalId)
-          expect(screen.queryByTestId('combined-item-title')?.textContent).toBe('Test Post Title 1')
-        },
-        { timeout: 10000 }
-      )
-    })
-  })
-
-  describe('useCreateItem', () => {
-    it('should expose createItem, isLoading, error, and resetError', async () => {
-      render(<UseCreateItemTest />, { container })
-
-      await waitFor(
-        () => {
-          const btn = screen.getByTestId('create-item-button')
-          expect(btn).toBeTruthy()
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-
-      expect(screen.getByTestId('create-item-is-loading').textContent).toBe('false')
-      expect(screen.queryByTestId('create-item-error')).toBeNull()
-    })
-
-    it('should create an item and set loading state during creation', async () => {
-      container.innerHTML = ''
-      let resolveCreation: (result: 'created' | 'done' | 'error') => void
-      const creationDone = new Promise<'created' | 'done' | 'error'>((r) => {
-        resolveCreation = r
+            expect(postCalls.length).toBeLessThanOrEqual(2)
+            expect(postCalls.length).toBeGreaterThanOrEqual(1)
+          } finally {
+            itemAllSpy.mockRestore()
+          }
+        })
       })
-      render(
-        <UseCreateItemTest onCreationComplete={(result) => resolveCreation(result)} />,
-        { container }
-      )
 
-      await waitFor(
-        () => {
-          const btn = screen.getByTestId('create-item-button')
-          expect(btn).toBeTruthy()
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
+      describe('useItem and useItems integration', () => {
+        it('should work together - useItems shows list, useItem shows detail', async () => {
+          if (!testItem1) {
+            return
+          }
+          const item1 = testItem1
 
-      screen.getByTestId('create-item-button').click()
+          // Render both hooks
+          function CombinedTest() {
+            const { items } = useItems({ modelName: 'Post', schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME })
+            const { item } = useItem({ modelName: 'Post', seedLocalId: item1.seedLocalId })
 
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('create-item-is-loading').textContent).toBe('true')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
+            return (
+              <div>
+                <div data-testid="combined-items-count">{items.length}</div>
+                {item && <div data-testid="combined-item-seed-local-id">{item.seedLocalId}</div>}
+                {item && item.properties.find(p => p.propertyName === 'title')?.value && (
+                  <div data-testid="combined-item-title">{item.properties.find(p => p.propertyName === 'title')?.value as string}</div>
+                )}
+              </div>
+            )
+          }
 
-      const result = await Promise.race([
-        creationDone,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Creation did not complete within 15s')), 15000)
-        ),
-      ])
-      expect(['created', 'done', 'error']).toContain(result)
-    })
+          render(<CombinedTest />, { container, wrapper: SeedProviderWrapper })
+
+          await waitFor(
+            () => {
+              expect(parseInt(screen.queryByTestId('combined-items-count')?.textContent || '0')).toBe(3)
+              expect(screen.queryByTestId('combined-item-seed-local-id')?.textContent).toBe(item1.seedLocalId)
+              expect(screen.queryByTestId('combined-item-title')?.textContent).toBe('Test Post Title 1')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
+      })
   })
 
-  describe('useDeleteItem', () => {
-    it('should expose deleteItem, isLoading, error, and resetError', async () => {
-      render(<UseDeleteItemTest item={null} />, { container })
-
-      await waitFor(
-        () => {
-          const btn = screen.getByTestId('delete-item-button')
-          expect(btn).toBeTruthy()
-          expect(btn.hasAttribute('disabled')).toBe(true)
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-
-      expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
+  // These edit, create, delete or uncache items, so each gets its own.
+  describe('with fresh items per test', () => {
+    beforeEach(async () => {
+      await cleanupTestItems()
+      await createTestItems()
     })
 
-    it('should report isLoading and the service error for a delete the service finishes before an effect could subscribe', async () => {
-      render(<UseDeleteItemTest item={createFastDestroyStub<Item<any>>({ destroyError: 'stub delete failed' })} />, { container })
+    afterEach(() => {
+      unloadTestItems()
+    })
 
-      screen.getByTestId('delete-item-button').click()
+      describe('useItem with the item instance cache', () => {
+        it('still updates after mounting when the item changes', async () => {
+          const id = testItem1!.seedLocalId
+          const log: ItemRender[] = []
+          render(<UseItemRenderLog seedLocalId={id} log={log} />, { container })
+          expect(log[0].title).toBe('Test Post Title 1')
 
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('true')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
+          // A property value changes without the item's own machine changing.
+          const titleProp = testItem1!.properties.find((p) => p.propertyName === 'title')!
+          titleProp.value = 'Changed After Mount'
+          await titleProp.save()
 
-      await waitFor(
-        () => {
+          await waitFor(
+            () => expect(screen.getByTestId('render-log-title').textContent).toBe('Changed After Mount'),
+            { timeout: WAIT_TIMEOUT_MS },
+          )
+        })
+
+        it('loads an item that is not in the cache, as before', async () => {
+          const id = testItem3!.seedLocalId
+          Item.dropCachedInstancesForSeedIds([id])
+          testItem3 = null // dropped instances are already stopped; afterEach must not unload it
+          expect(Item.peekReady(id)).toBeUndefined()
+          const log: ItemRender[] = []
+
+          render(<UseItemRenderLog seedLocalId={id} log={log} />, { container, wrapper: SeedProviderWrapper })
+
+          expect(log[0]).toEqual({ requestedId: id, itemId: undefined, title: undefined, isLoading: true })
+          await waitFor(
+            () => expect(screen.getByTestId('render-log-title').textContent).toBe('Test Post Title 3'),
+            { timeout: 15000 },
+          )
+          expect(log[log.length - 1]).toMatchObject({ itemId: id, isLoading: false })
+        })
+      })
+
+      describe('useItems', () => {
+        it('should update when new items are created', async () => {
+          render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
+
+          await waitFor(
+            () => {
+              const count = screen.getByTestId('items-count')
+              expect(parseInt(count.textContent || '0')).toBe(3)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          const initialCount = screen.getByTestId('items-count')
+          const initialItemCount = parseInt(initialCount.textContent || '0')
+
+          // Create a new item
+          const newItem = await Item.create({
+            modelName: 'Post',
+            schemaName: TEST_SCHEMA_ITEMS_HOOKS_NAME,
+            title: 'New Test Post',
+            content: 'New Test Content',
+            author: 'New Test Author',
+          } as any)
+          await waitForItemIdle(newItem)
+          await waitForItemPersisted(newItem, { title: 'New Test Post', content: 'New Test Content', author: 'New Test Author' })
+
+          // useItems uses useLiveQuery which should automatically detect database changes
+          // Wait for the new item to appear (reactive query should pick it up)
+          await waitFor(
+            () => {
+              const count = screen.getByTestId('items-count')
+              expect(parseInt(count.textContent || '0')).toBe(initialItemCount + 1)
+            },
+            { timeout: 15000 }
+          )
+
+          const finalCount = screen.getByTestId('items-count')
+          expect(parseInt(finalCount.textContent || '0')).toBe(initialItemCount + 1)
+
+          // Clean up
+          newItem.unload()
+        })
+      })
+
+      describe('ItemProperty edit persistence and reload', () => {
+        it('persists ItemProperty edit to db and displays new value after reload', async () => {
+          if (!testItem1) return
+
+          const editedTitle = 'Edited Title After React Edit'
+          const seedLocalId = testItem1.seedLocalId
+
+          // 1. Render component and wait for item to load
+          const { unmount } = render(
+            <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
+            { container, wrapper: SeedProviderWrapper }
+          )
+
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-title')?.textContent).toBe('Test Post Title 1')
+            },
+            { timeout: 15000 }
+          )
+
+          // 2. Edit the ItemProperty via the React component (simulates user editing)
+          // Use findByTestId to avoid race where item unmounts between waitFor and getByTestId
+          const editButton = await screen.findByTestId('edit-title-button', {}, { timeout: WAIT_TIMEOUT_MS })
+          editButton.click()
+
+          // 3. Wait for edit/save to complete
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('edit-done')).not.toBeNull()
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          // 4. Verify the new value is persisted to the database
+          const db = BaseDb.getAppDb()
+          expect(db).toBeTruthy()
+          if (db) {
+            await waitFor(
+              async () => {
+                const rows = await db
+                  .select()
+                  .from(metadata)
+                  .where(
+                    and(
+                      eq(metadata.seedLocalId, seedLocalId),
+                      eq(metadata.propertyName, 'title'),
+                      eq(metadata.propertyValue, editedTitle)
+                    )
+                )
+                expect(rows.length).toBeGreaterThan(0)
+              },
+              { timeout: WAIT_TIMEOUT_MS }
+            )
+          }
+
+          // 5. Simulate page reload: unload item to clear cache, unmount, then remount
+          testItem1.unload()
+
+          unmount()
+
+          // 6. Remount (simulates fresh page load - component loads item from db)
+          // Use a fresh container to avoid "Cannot update an unmounted root"
+          const remountContainer = document.createElement('div')
+          remountContainer.id = 'root-remount'
+          document.body.appendChild(remountContainer)
+          render(
+            <EditableItemTest seedLocalId={seedLocalId} newTitle={editedTitle} />,
+            { container: remountContainer, wrapper: SeedProviderWrapper }
+          )
+
+          // 7. Verify the new value is displayed as the current value after reload
+          await waitFor(
+            () => {
+              expect(screen.queryByTestId('item-title')?.textContent).toBe(editedTitle)
+            },
+            { timeout: 15000 }
+          )
+        })
+      })
+
+      describe('useDeleteItem', () => {
+        it('should delete an item and set loading state during delete', async () => {
+          if (!testItem2) return
+
+          render(<UseDeleteItemTest item={testItem2} />, { container })
+          const scope = within(container)
+
+          await waitFor(
+            () => {
+              const btn = scope.getByTestId('delete-item-button')
+              expect(btn).toBeTruthy()
+              expect(btn.hasAttribute('disabled')).toBe(false)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          scope.getByTestId('delete-item-button').click()
+
+          await waitFor(
+            () => {
+              expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('true')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          // Wait for final status (deleted or error) to appear
+          const statusEl = await Promise.race([
+            scope.findByText('deleted', { timeout: 20000 }),
+            scope.findByText('error', { timeout: 20000 }),
+          ])
+          expect(['deleted', 'error']).toContain(statusEl.textContent)
+          await waitFor(
+            () => {
+              expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('false')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+        })
+      })
+  })
+
+  describe('without test items', () => {
+    beforeAll(async () => {
+      await cleanupTestItems()
+    })
+
+      describe('useCreateItem', () => {
+        it('should expose createItem, isLoading, error, and resetError', async () => {
+          render(<UseCreateItemTest />, { container })
+
+          await waitFor(
+            () => {
+              const btn = screen.getByTestId('create-item-button')
+              expect(btn).toBeTruthy()
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          expect(screen.getByTestId('create-item-is-loading').textContent).toBe('false')
+          expect(screen.queryByTestId('create-item-error')).toBeNull()
+        })
+
+        it('should create an item and set loading state during creation', async () => {
+          container.innerHTML = ''
+          let resolveCreation: (result: 'created' | 'done' | 'error') => void
+          const creationDone = new Promise<'created' | 'done' | 'error'>((r) => {
+            resolveCreation = r
+          })
+          render(
+            <UseCreateItemTest onCreationComplete={(result) => resolveCreation(result)} />,
+            { container }
+          )
+
+          await waitFor(
+            () => {
+              const btn = screen.getByTestId('create-item-button')
+              expect(btn).toBeTruthy()
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          screen.getByTestId('create-item-button').click()
+
+          await waitFor(
+            () => {
+              expect(screen.getByTestId('create-item-is-loading').textContent).toBe('true')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          const result = await Promise.race([
+            creationDone,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Creation did not complete within 15s')), 15000)
+            ),
+          ])
+          expect(['created', 'done', 'error']).toContain(result)
+        })
+      })
+
+      describe('useDeleteItem', () => {
+        it('should expose deleteItem, isLoading, error, and resetError', async () => {
+          render(<UseDeleteItemTest item={null} />, { container })
+
+          await waitFor(
+            () => {
+              const btn = screen.getByTestId('delete-item-button')
+              expect(btn).toBeTruthy()
+              expect(btn.hasAttribute('disabled')).toBe(true)
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
           expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
-          expect(screen.getByTestId('delete-item-error').textContent).toBe('stub delete failed')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
+        })
 
-      screen.getByTestId('delete-item-reset-error').click()
+        it('should report isLoading and the service error for a delete the service finishes before an effect could subscribe', async () => {
+          render(<UseDeleteItemTest item={createFastDestroyStub<Item<any>>({ destroyError: 'stub delete failed' })} />, { container })
 
-      await waitFor(() => {
-        expect(screen.queryByTestId('delete-item-error')).toBeNull()
+          screen.getByTestId('delete-item-button').click()
+
+          await waitFor(
+            () => {
+              expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('true')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          await waitFor(
+            () => {
+              expect(screen.getByTestId('delete-item-is-loading').textContent).toBe('false')
+              expect(screen.getByTestId('delete-item-error').textContent).toBe('stub delete failed')
+            },
+            { timeout: WAIT_TIMEOUT_MS }
+          )
+
+          screen.getByTestId('delete-item-reset-error').click()
+
+          await waitFor(() => {
+            expect(screen.queryByTestId('delete-item-error')).toBeNull()
+          })
+        })
       })
-    })
-
-    it('should delete an item and set loading state during delete', async () => {
-      if (!testItem2) return
-
-      render(<UseDeleteItemTest item={testItem2} />, { container })
-      const scope = within(container)
-
-      await waitFor(
-        () => {
-          const btn = scope.getByTestId('delete-item-button')
-          expect(btn).toBeTruthy()
-          expect(btn.hasAttribute('disabled')).toBe(false)
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-
-      scope.getByTestId('delete-item-button').click()
-
-      await waitFor(
-        () => {
-          expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('true')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-
-      // Wait for final status (deleted or error) to appear
-      const statusEl = await Promise.race([
-        scope.findByText('deleted', { timeout: 20000 }),
-        scope.findByText('error', { timeout: 20000 }),
-      ])
-      expect(['deleted', 'error']).toContain(statusEl.textContent)
-      await waitFor(
-        () => {
-          expect(scope.getByTestId('delete-item-is-loading').textContent).toBe('false')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
-    })
   })
 })

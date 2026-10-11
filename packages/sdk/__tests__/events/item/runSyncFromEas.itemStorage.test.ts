@@ -6,6 +6,7 @@ import {
   teardownTestEnvironment,
   SETUP_HOOK_TIMEOUT_MS,
 } from '../../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 /**
  * Rows sync derives for ItemStorage properties from a `storage_transaction_id` attestation (uid
@@ -261,7 +262,7 @@ describe.sequential(
           if (!events.some((e) => e.type.startsWith('saveItemStorage')))
             throw new Error('save not done')
         },
-        { timeout: 10_000 },
+        { timeout: WAIT_TIMEOUT_MS },
       )
       actor.stop()
       return events

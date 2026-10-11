@@ -200,7 +200,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
 
       expect(updatedResult.length).toBe(initialCount + 1)
       expect(updatedResult.some((s) => s.name === 'TestLiveQuerySchema')).toBe(true)
-    }, 10000)
+    })
 
     it('should update React state when schemas row is inserted', async () => {
       const db = BaseDb.getAppDb()
@@ -246,7 +246,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: WAIT_TIMEOUT_MS }
       )
-    }, 10000)
+    })
 
     it('should detect UPDATE on schemas table', async () => {
       const db = BaseDb.getAppDb()
@@ -287,7 +287,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult[0].name).toBe('UpdatedTestSchema')
-    }, 10000)
+    })
 
     it('should update React state when schemas row is updated', async () => {
       const db = BaseDb.getAppDb()
@@ -343,9 +343,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           expect(updatedData.length).toBeGreaterThan(0)
           expect(updatedData[0].name).toBe('UpdatedTestSchema')
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
 
     it('should detect DELETE on schemas table', async () => {
       const db = BaseDb.getAppDb()
@@ -383,7 +383,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult.length).toBe(0)
-    }, 10000)
+    })
 
     it('should update React state when schemas row is deleted', async () => {
       const db = BaseDb.getAppDb()
@@ -428,9 +428,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           const updatedData = JSON.parse(dataElement?.textContent || '[]')
           expect(updatedData.length).toBe(0)
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
   })
 
   describe('LiveQuery Table Change Detection - models', () => {
@@ -461,7 +461,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
 
       expect(updatedResult.length).toBe(initialCount + 1)
       expect(updatedResult.some((m) => m.name === 'TestLiveQueryModel')).toBe(true)
-    }, 10000)
+    })
 
     it('should update React state when models row is inserted', async () => {
       const db = BaseDb.getAppDb()
@@ -501,7 +501,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: WAIT_TIMEOUT_MS }
       )
-    }, 10000)
+    })
 
     it('should detect UPDATE on models table', async () => {
       const db = BaseDb.getAppDb()
@@ -532,7 +532,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult[0].name).toBe('UpdatedTestModel')
-    }, 10000)
+    })
 
     it('should update React state when models row is updated', async () => {
       const db = BaseDb.getAppDb()
@@ -572,9 +572,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           expect(updatedData.length).toBeGreaterThan(0)
           expect(updatedData[0].name).toBe('UpdatedTestModel')
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
 
     it('should detect DELETE on models table', async () => {
       const db = BaseDb.getAppDb()
@@ -605,7 +605,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult.length).toBe(0)
-    }, 10000)
+    })
 
     it('should update React state when models row is deleted', async () => {
       const db = BaseDb.getAppDb()
@@ -643,9 +643,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           const updatedData = JSON.parse(dataElement?.textContent || '[]')
           expect(updatedData.length).toBe(0)
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
   })
 
   describe('LiveQuery Table Change Detection - properties', () => {
@@ -683,7 +683,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
 
       expect(updatedResult.length).toBe(initialCount + 1)
       expect(updatedResult.some((p) => p.name === 'TestProperty')).toBe(true)
-    }, 10000)
+    })
 
     it('should update React state when properties row is inserted', async () => {
       const db = BaseDb.getAppDb()
@@ -730,7 +730,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: WAIT_TIMEOUT_MS }
       )
-    }, 10000)
+    })
 
     it('should detect UPDATE on properties table', async () => {
       const db = BaseDb.getAppDb()
@@ -774,7 +774,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult[0].name).toBe('UpdatedProperty')
-    }, 10000)
+    })
 
     it('should update React state when properties row is updated', async () => {
       const db = BaseDb.getAppDb()
@@ -827,9 +827,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           expect(updatedData.length).toBeGreaterThan(0)
           expect(updatedData[0].name).toBe('UpdatedProperty')
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
 
     it('should detect DELETE on properties table', async () => {
       const db = BaseDb.getAppDb()
@@ -870,7 +870,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult.length).toBe(0)
-    }, 10000)
+    })
 
     it('should update React state when properties row is deleted', async () => {
       const db = BaseDb.getAppDb()
@@ -918,9 +918,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           const updatedData = JSON.parse(dataElement?.textContent || '[]')
           expect(updatedData.length).toBe(0)
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
   })
 
   describe('LiveQuery Table Change Detection - model_schemas', () => {
@@ -971,7 +971,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       expect(updatedResult.some((ms) => ms.modelId === model.id && ms.schemaId === schema.id)).toBe(
         true
       )
-    }, 10000)
+    })
 
     it('should update React state when model_schemas row is inserted', async () => {
       const db = BaseDb.getAppDb()
@@ -1026,7 +1026,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
         },
         { timeout: WAIT_TIMEOUT_MS }
       )
-    }, 10000)
+    })
 
     it('should detect DELETE on model_schemas table', async () => {
       const db = BaseDb.getAppDb()
@@ -1075,7 +1075,7 @@ describe('useLiveQuery React Hook Integration Tests', () => {
       )
 
       expect(updatedResult.length).toBe(0)
-    }, 10000)
+    })
 
     it('should update React state when model_schemas row is deleted', async () => {
       const db = BaseDb.getAppDb()
@@ -1131,9 +1131,9 @@ describe('useLiveQuery React Hook Integration Tests', () => {
           const updatedData = JSON.parse(dataElement?.textContent || '[]')
           expect(updatedData.length).toBe(0)
         },
-        { timeout: 10000, interval: 100 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 }
       )
-    }, 20000)
+    })
   })
 
   describe('Integration Tests with Multiple Tables', () => {
@@ -1188,6 +1188,6 @@ describe('useLiveQuery React Hook Integration Tests', () => {
 
       expect(updatedResult.length).toBe(initialCount + 1)
       expect(updatedResult.some((r) => r.model.name === 'RelatedModel')).toBe(true)
-    }, 10000)
+    })
   })
 })

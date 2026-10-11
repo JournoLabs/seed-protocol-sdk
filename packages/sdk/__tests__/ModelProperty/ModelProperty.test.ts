@@ -653,7 +653,7 @@ testDescribe('ModelProperty Integration Tests', () => {
           waitForReady: false,
         })
         const modelSnapshot = await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle' && snapshot.context._dbId != null, {
-          timeout: 10000,
+          timeout: WAIT_TIMEOUT_MS,
         })
         const modelId = modelSnapshot.context._dbId as number
 

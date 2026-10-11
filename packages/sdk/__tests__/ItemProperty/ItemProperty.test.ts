@@ -1465,7 +1465,7 @@ testDescribe('ItemProperty Integration Tests', () => {
         await waitFor(
           titleProperty.getService(),
           (snapshot) => !snapshot.context.isSaving && snapshot.value === 'idle',
-          { timeout: 10000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         
         // Verify value was saved in the property

@@ -66,7 +66,7 @@ describe('writeProcessMachine', () => {
       const finalSnapshot = await waitFor(
         actor,
         (snapshot) => snapshot.value === 'writing' || snapshot.value === 'error' || snapshot.value === 'success',
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(['writing', 'error', 'success']).toContain(finalSnapshot.value)
@@ -91,7 +91,7 @@ describe('writeProcessMachine', () => {
       const snapshot = await waitFor(
         actor,
         (snapshot) => snapshot.value === 'error' || snapshot.value === 'idle',
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(snapshot.value).toBe('error')
@@ -137,7 +137,7 @@ describe('writeProcessMachine', () => {
       const finalSnapshot = await waitFor(
         actor,
         (snapshot) => snapshot.value === 'writing' || snapshot.value === 'error',
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
       expect(finalSnapshot.value).toBe('writing')
       expect(finalSnapshot.context.validationErrors).toEqual([])
