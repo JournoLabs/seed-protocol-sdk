@@ -7,6 +7,7 @@ import {
   findCollidingBranches,
   isValidSemver,
   nextPatch,
+  releaseVersionProblems,
   resolveRelease,
   stagingTag,
 } from '../release-channel.js'
@@ -155,5 +156,26 @@ describe('resolveRelease', () => {
 describe('stagingTag', () => {
   it('uses the short SHA with a g prefix', () => {
     assert.equal(stagingTag(SHA), 'ci-g8b65a15')
+  })
+})
+
+describe('releaseVersionProblems', () => {
+  it('accepts a version newer than the committed one and npm latest', () => {
+    assert.deepEqual(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', npmLatest: '0.7.2' }), [])
+    assert.deepEqual(releaseVersionProblems({ target: '0.8.0', committed: '0.7.2', npmLatest: null }), [])
+  })
+
+  it('rejects prerelease and malformed versions', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.3-beta.1', committed: '0.7.2' })[0], /plain X\.Y\.Z/)
+    assert.match(releaseVersionProblems({ target: 'v0.7.3', committed: '0.7.2' })[0], /plain X\.Y\.Z/)
+  })
+
+  it('rejects versions that are not newer', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.2', committed: '0.7.2' })[0], /committed version/)
+    assert.match(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', npmLatest: '0.7.3' })[0], /npm `latest`/)
+  })
+
+  it('rejects versions already on npm', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', published: true })[0], /already on npm/)
   })
 })

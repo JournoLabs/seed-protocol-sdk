@@ -122,6 +122,7 @@
     "watch": "bun run watch:eas & bun run watch:arweave",
     "sync-versions": "node scripts/sync-versions.js",
     "new-version": "node scripts/new-version.js",
+    "release": "node scripts/release.js",
     "version": "node scripts/sync-versions.js",
     "drizzle:update": "bun scripts/update-drizzle.ts",
     "check:dist:fragile": "node scripts/check-dist-fragile-dynamic-imports.js",
