@@ -14,10 +14,11 @@ describe('checkNodeEnv', () => {
     assert.deepEqual(result.warnings, [])
   })
 
-  it('fails without navigator.locks', () => {
-    const { errors } = checkNodeEnv({ version: 'v24.3.0', hasLocks: false, nvmrc: '24', loadSqlite: ok })
-    assert.equal(errors.length, 1)
-    assert.match(errors[0], /navigator\.locks/)
+  it('only warns without navigator.locks', () => {
+    const { errors, warnings } = checkNodeEnv({ version: 'v24.3.0', hasLocks: false, nvmrc: '24', loadSqlite: ok })
+    assert.deepEqual(errors, [])
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /navigator\.locks/)
   })
 
   it('fails on a native module ABI mismatch', () => {
