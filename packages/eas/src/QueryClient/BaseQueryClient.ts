@@ -13,6 +13,11 @@ export abstract class BaseQueryClient {
     BaseQueryClient._impl = impl
   }
 
+  /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */
+  static isConfigured(): boolean {
+    return BaseQueryClient._impl != null
+  }
+
   private static requireImpl(): IQueryClientFactory {
     if (!BaseQueryClient._impl) {
       throw new Error(

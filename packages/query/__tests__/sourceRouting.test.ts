@@ -190,6 +190,25 @@ describe('query source local / remote / auto', () => {
     expect(mockGetSeedsBySchemaName).not.toHaveBeenCalled()
   })
 
+  it('source remote never reads a registered local source', async () => {
+    // A page running the SDK registers a local source; Preview-style callers still want EAS only.
+    registerLocalQuerySource(
+      makeLocalFixture({
+        seedUid: '0xlocalonly',
+        versionUid: '0xlocalonlyver',
+        title: 'Local Only',
+        timeCreated: 100,
+      }),
+    )
+
+    const { items } = await queryBySchema('post', { source: 'remote', limit: 10 })
+    expect(items).toHaveLength(0)
+    expect(mockGetSeedsBySchemaName).toHaveBeenCalled()
+
+    expect(await getSeed('0xlocalonly', { source: 'remote' })).toBeNull()
+    expect(mockRequest).toHaveBeenCalled()
+  })
+
   it('source auto uses local when present', async () => {
     registerLocalQuerySource(
       makeLocalFixture({

@@ -14,6 +14,11 @@ export abstract class BaseEasClient {
     BaseEasClient._impl = impl
   }
 
+  /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */
+  static isConfigured(): boolean {
+    return BaseEasClient._impl != null
+  }
+
   private static requireImpl(): IEasClient {
     if (!BaseEasClient._impl) {
       throw new Error(

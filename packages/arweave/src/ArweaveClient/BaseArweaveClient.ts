@@ -40,6 +40,11 @@ export abstract class BaseArweaveClient {
     BaseArweaveClient._impl = impl
   }
 
+  /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */
+  static isConfigured(): boolean {
+    return BaseArweaveClient._impl != null
+  }
+
   private static requireImpl(): IArweaveClient {
     if (!BaseArweaveClient._impl) {
       throw new Error(
