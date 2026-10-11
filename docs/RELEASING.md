@@ -23,7 +23,9 @@ token. The decision is recorded in [ADR 0007](adr/0007-ci-publishing-and-branch-
   prefix. The same id goes in the version and the tag.
 - Prerelease versions are stamped in CI and **never committed**.
 
-Pushes that only change `docs/**` or `*.md` don't publish. `dependabot/**` branches
+Pushes that only change `docs/**` or `*.md` don't publish. A branch push whose commit
+is already tagged `v{committed version}` doesn't publish either: the tag's run tests and
+publishes that commit, so the branch run stops after **version**. `dependabot/**` branches
 don't publish.
 
 Rules live in [`scripts/release-channel.js`](../scripts/release-channel.js), tested by
@@ -103,6 +105,10 @@ git push --atomic origin main v0.7.3
 
 The tag must point at a commit whose committed version matches it, or the run fails
 before anything publishes.
+
+Push `main` and the tag together, as above. The `main` run then sees the tag and skips,
+so only the tag run tests and publishes. If `main` goes up first, its run publishes a
+`-next` prerelease of the release commit as usual.
 
 Publishing from a laptop (`bun run publish:all`) still works for emergencies if you
 have a token. Those versions have no provenance, so downstream deploy gates that

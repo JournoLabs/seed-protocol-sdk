@@ -43,6 +43,7 @@ jobs:
       staging_tag: ${{ steps.resolve.outputs.staging_tag }}
       channel: ${{ steps.resolve.outputs.channel }}
       branch: ${{ steps.resolve.outputs.branch }}
+      skip: ${{ steps.resolve.outputs.skip }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,6 +60,9 @@ jobs:
 
   test:
     name: Lint and test
+    needs: version
+    # A release commit pushed with its tag: the tag's run tests and publishes it.
+    if: needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

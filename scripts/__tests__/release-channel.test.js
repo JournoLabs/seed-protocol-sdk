@@ -10,6 +10,7 @@ import {
   releaseVersionProblems,
   resolveRelease,
   stagingTag,
+  tagCommitFromLsRemote,
 } from '../release-channel.js'
 
 const SHA = '8b65a15e0c3d2f1a9b8c7d6e5f4a3b2c1d0e9f8a'
@@ -177,5 +178,23 @@ describe('releaseVersionProblems', () => {
 
   it('rejects versions already on npm', () => {
     assert.match(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', published: true })[0], /already on npm/)
+  })
+})
+
+describe('tagCommitFromLsRemote', () => {
+  const OTHER = '1111111111111111111111111111111111111111'
+
+  it('returns the commit of a lightweight tag', () => {
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.2\n`, 'v0.7.2'), SHA)
+  })
+
+  it('peels an annotated tag to its commit', () => {
+    const output = `${OTHER}\trefs/tags/v0.7.2\n${SHA}\trefs/tags/v0.7.2^{}\n`
+    assert.equal(tagCommitFromLsRemote(output, 'v0.7.2'), SHA)
+  })
+
+  it('returns null when the tag is missing', () => {
+    assert.equal(tagCommitFromLsRemote('', 'v0.7.2'), null)
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.20\n`, 'v0.7.2'), null)
   })
 })

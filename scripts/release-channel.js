@@ -219,6 +219,33 @@ export function listRemoteBranches(remote = 'origin') {
 }
 
 /**
+ * The commit a tag points at, from `git ls-remote --tags` output. Annotated tags
+ * are peeled (`^{}`) to their commit.
+ * @param {string} lsRemoteOutput
+ * @param {string} tag - e.g. v0.7.2
+ * @returns {string | null}
+ */
+export function tagCommitFromLsRemote(lsRemoteOutput, tag) {
+  let direct = null
+  for (const line of lsRemoteOutput.split('\n')) {
+    if (!line) continue
+    const [sha, ref] = line.split('\t')
+    if (ref === `refs/tags/${tag}^{}`) return sha
+    if (ref === `refs/tags/${tag}`) direct = sha
+  }
+  return direct
+}
+
+/**
+ * The commit a tag on the remote points at right now, or null if there is no such tag.
+ * @param {string} tag
+ * @param {string} [remote]
+ */
+export function remoteTagCommit(tag, remote = 'origin') {
+  return tagCommitFromLsRemote(git(['ls-remote', '--tags', remote, `refs/tags/${tag}`, `refs/tags/${tag}^{}`]), tag)
+}
+
+/**
  * Run npm. Returns stdout when `capture` is set, otherwise streams output.
  * @param {string[]} args
  * @param {{ capture?: boolean }} [options]
