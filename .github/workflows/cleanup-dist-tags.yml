@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: '24'
+  # Node comes from .nvmrc (setup-node node-version-file), shared with local runs.
   NPM_VERSION: '12.2.0'
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm install -g "npm@$NPM_VERSION"
