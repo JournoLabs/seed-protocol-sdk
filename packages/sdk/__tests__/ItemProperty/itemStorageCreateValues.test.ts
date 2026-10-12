@@ -77,7 +77,7 @@ const createLegacyItem = async (html: string) => {
   const before = await metadataRow(seedLocalId, 'html')
   await BaseDb.getAppDb()
     .update(metadata)
-    .set({ propertyValue: html, refResolvedValue: null, localStorageDir: null })
+    .set({ propertyValue: html, refResolvedValue: null, localStorageDir: null, refValueType: null })
     .where(eq(metadata.localId, before.localId!))
   const filePath = BaseFileManager.getFilesPath('html', `${seedLocalId}.html`)
   expect(await BaseFileManager.pathExists(filePath)).toBe(false)
@@ -181,6 +181,7 @@ testDescribe('ItemStorage values given at creation', () => {
     const after = await metadataRow(seedLocalId, 'html')
     expect(after.refResolvedValue).toBe(`${seedLocalId}.html`)
     expect(after.localStorageDir).toBe('/html')
+    expect(after.refValueType).toBe('file')
     expect(after.propertyValue ?? null).toBeNull()
     // Reads the same, on this instance and on a fresh load.
     expect(legacy.allProperties['html']?.value).toBe(html)
@@ -202,6 +203,7 @@ testDescribe('ItemStorage values given at creation', () => {
     const row = await metadataRow(seedLocalId, 'html')
     expect(row.refResolvedValue).toBe(`${seedLocalId}.html`)
     expect(row.localStorageDir).toBe('/html')
+    expect(row.refValueType).toBe('file')
     expect(row.propertyValue ?? null).toBeNull()
 
     // A fresh load never shows the old text, not even before the file is read.
