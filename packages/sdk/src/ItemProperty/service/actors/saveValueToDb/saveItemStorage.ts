@@ -166,7 +166,8 @@ export const saveItemStorage = fromCallback<
       .set({
         refResolvedValue: fileName,
         localStorageDir,
-        ...(clearsVerbatimValue && { propertyValue: null }),
+        // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
+        ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
       })
       .where(eq(metadata.localId, propertyData.localId!))
 

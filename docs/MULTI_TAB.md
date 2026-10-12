@@ -156,6 +156,10 @@ Ranked by damage:
     `seed:opfs-write:<path>` around each write, which covers bulk and lazy downloads in every tab.
     `addExcludedTransactions` replaces the two whole-list overwrites.
   - Bulk download and resize follow EAS sync, so automatic ones now run in the leader only.
+  - The one-time legacy ItemStorage migration (`db/migrateLegacyItemStorageRows.ts`, writes
+    content stored verbatim in `metadata.property_value` to its file) starts after client init in
+    the leader only, under `seed:item-storage-migration:<db>`; a tab that takes over runs it, and
+    an appState marker (`legacyItemStorageFiles:v1`) stops later runs.
 - **Phase C: done.**
   - `packages/sdk/src/helpers/tabEvents.ts`. `emitAcrossTabs` sends EAS sync finished, addresses
     persisted and local copies removed to other tabs, which first reload
