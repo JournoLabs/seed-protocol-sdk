@@ -19,8 +19,12 @@ import { eq } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
+import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
 
 const logger = debug('seedSdk:item:getPublishUploads')
+
+/** L1 transactions {@link getPublishUploads} creates at once (each asks the gateway for price and anchor). */
+export const CREATE_TRANSACTION_CONCURRENCY = 4
 
 /** Optional tags merged into each Arweave tx after Content-SHA-256 / Content-Type. */
 export type GetPublishUploadsOptions = {
@@ -661,17 +665,16 @@ export const getPublishUploads = async (
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUpload[]> => {
   const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
-  for (const upload of uploadData) {
-    const tx = await BaseArweaveClient.createTransaction(upload.data, {
+  // Each createTransaction fetches the price / anchor from the gateway: run a few at once.
+  const created = await mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
+    itemPropertyName: upload.itemPropertyName,
+    itemPropertyLocalId: upload.itemPropertyLocalId,
+    seedLocalId: upload.seedLocalId,
+    versionLocalId: upload.versionLocalId,
+    transactionToSign: await BaseArweaveClient.createTransaction(upload.data, {
       tags: upload.tags.length ? upload.tags : undefined,
-    })
-    uploads.push({
-      itemPropertyName: upload.itemPropertyName,
-      itemPropertyLocalId: upload.itemPropertyLocalId,
-      seedLocalId: upload.seedLocalId,
-      versionLocalId: upload.versionLocalId,
-      transactionToSign: tx,
-    })
-  }
+    }),
+  }))
+  uploads.push(...created)
   return uploads
 }
