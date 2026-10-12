@@ -1,5 +1,6 @@
 import type {
   DownloadAllFilesParams,
+  DownloadAllFilesResult,
   DownloadSingleFileParams,
   IFileManager,
   ResizeAllImagesParams,
@@ -90,18 +91,8 @@ export abstract class BaseFileManager {
     return BaseFileManager.requireImpl().getContentUrlFromPath(path)
   }
 
-  static downloadAllFiles({
-    transactionIds,
-    arweaveHost,
-    arweaveBaseUrls,
-    excludedTransactions,
-  }: DownloadAllFilesParams): Promise<void> {
-    return BaseFileManager.requireImpl().downloadAllFiles({
-      transactionIds,
-      arweaveHost,
-      arweaveBaseUrls,
-      excludedTransactions,
-    })
+  static downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult | void> {
+    return BaseFileManager.requireImpl().downloadAllFiles(params)
   }
 
   static downloadFileByTransactionId({
@@ -109,12 +100,14 @@ export abstract class BaseFileManager {
     arweaveHost,
     arweaveBaseUrls,
     excludedTransactions,
-  }: DownloadSingleFileParams): Promise<void> {
+    expectedContentHash,
+  }: DownloadSingleFileParams): Promise<DownloadAllFilesResult | void> {
     return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds: [transactionId],
       arweaveHost,
       arweaveBaseUrls,
       excludedTransactions,
+      expectedContentHashes: expectedContentHash ? { [transactionId]: expectedContentHash } : undefined,
     })
   }
 

@@ -4,6 +4,21 @@ export type DownloadAllFilesParams = {
   /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
   arweaveBaseUrls?: string[]
   excludedTransactions: Set<string>
+  /**
+   * Content-SHA-256 tag values by transaction id. A download with one is saved only when its bytes
+   * match (SHA-256, or SHA3-256 for uploads from SDK 0.7.2 and earlier); see `contentSha256TagMatches`.
+   */
+  expectedContentHashes?: Record<string, string>
+}
+
+/** What a browser download run did, by transaction id. */
+export type DownloadAllFilesResult = {
+  /** Bytes matched the expected Content-SHA-256 and were saved. */
+  verifiedTransactionIds: string[]
+  /** No gateway served bytes matching the expected Content-SHA-256; nothing was saved. */
+  hashMismatchTransactionIds: string[]
+  /** Saving failed (e.g. an OPFS write error). */
+  failedTransactionIds: string[]
 }
 
 export type DownloadSingleFileParams = {
@@ -12,6 +27,8 @@ export type DownloadSingleFileParams = {
   /** Ordered read gateways (scheme + host + path) tried before `arweaveHost`; see `getArweaveReadBaseUrls`. */
   arweaveBaseUrls?: string[]
   excludedTransactions: Set<string>
+  /** Content-SHA-256 tag value to verify the download against; see {@link DownloadAllFilesParams}. */
+  expectedContentHash?: string
 }
 
 export type ResizeAllImagesParams = {
@@ -28,7 +45,7 @@ export type ResizeImageParams = {
 export interface IFileManager {
   initializeFileSystem(workingDir?: string): Promise<void>
   getContentUrlFromPath(path: string): Promise<string | undefined>
-  downloadAllFiles(params: DownloadAllFilesParams): Promise<void>
+  downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult | void>
   resizeImage(params: ResizeImageParams): Promise<void>
   resizeAllImages(params: ResizeAllImagesParams): Promise<void>
   pathExists(filePath: string): Promise<boolean>

@@ -180,17 +180,67 @@ const toBaseUrl = (hostOrUrl: string): string => {
   return `${protocol}://${h}`
 }
 
+const toHex = (buffer: ArrayBuffer): string => {
+  const view = new Uint8Array(buffer)
+  let hex = ''
+  for (let i = 0; i < view.length; i++) hex += view[i].toString(16).padStart(2, '0')
+  return hex
+}
+
+/** Verification requests waiting for the page's answer, by request id. */
+const pendingVerifications = new Map<number, (ok: boolean) => void>()
+let lastVerificationId = 0
+
+/**
+ * Ask the page whether `bytes` match a Content-SHA-256 tag. The page runs `contentSha256TagMatches`,
+ * which also accepts the SHA3-256 digests older SDKs wrote under that tag (no SHA3 in WebCrypto, and
+ * this worker cannot import a hash library). The bytes are copied, not transferred.
+ */
+const verifyOnPage = (transactionId: string, bytes: ArrayBuffer, expected: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    const requestId = ++lastVerificationId
+    pendingVerifications.set(requestId, resolve)
+    globalThis.postMessage({ message: 'verifyContent', requestId, transactionId, expected, bytes })
+  })
+
+/**
+ * True when the downloaded bytes match the upload's Content-SHA-256 tag. SHA-256 is checked here
+ * with WebCrypto when available (secure contexts); anything else goes to the page.
+ */
+const contentMatchesTag = async (transactionId: string, bytes: ArrayBuffer, expected: string): Promise<boolean> => {
+  const want = expected.trim().toLowerCase()
+  try {
+    const subtle = globalThis.crypto && globalThis.crypto.subtle
+    if (subtle && toHex(await subtle.digest('SHA-256', bytes)) === want) return true
+  } catch (error) {
+    /* fall back to the page */
+  }
+  return verifyOnPage(transactionId, bytes, want)
+}
+
 /**
  * GET /raw/{id} from each gateway in order. `networkFailedEverywhere` is true only when no gateway
  * answered at all; a non-2xx (e.g. not yet propagated) is not a reason to exclude the transaction.
  * `contentType` is the response's Content-Type (gateways serve the upload's Content-Type tag).
+ * With `expectedHash` (the upload's Content-SHA-256 tag), a body that does not match it is skipped
+ * and the next gateway tried; `hashMismatch` says that happened and no gateway served matching bytes.
  */
 const fetchRaw = async (
   baseUrls: string[],
   transactionId: string,
-): Promise<{ arrayBuffer?: ArrayBuffer; contentType?: string; networkFailedEverywhere: boolean }> => {
+  expectedHash?: string,
+): Promise<{
+  arrayBuffer?: ArrayBuffer
+  contentType?: string
+  networkFailedEverywhere: boolean
+  verified?: boolean
+  hashMismatch?: boolean
+}> => {
   let answered = false
+  let hashMismatch = false
   for (const base of baseUrls) {
+    let arrayBuffer: ArrayBuffer | undefined
+    let contentType = ''
     // A hung gateway must not stall the batch: abort the request (body included) after a while.
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
     const timer = controller ? setTimeout(() => controller.abort(), RAW_FETCH_TIMEOUT_MS) : undefined
@@ -198,21 +248,29 @@ const fetchRaw = async (
       const response = await fetch(`${base}/raw/${transactionId}`, controller ? { signal: controller.signal } : undefined)
       answered = true
       if (!response.ok) continue
-      const arrayBuffer = await response.arrayBuffer()
-      if (arrayBuffer.byteLength > 0) {
-        const contentType = (response.headers?.get('content-type') || '')
-          .split(';')[0]
-          .trim()
-          .toLowerCase()
-        return { arrayBuffer, contentType, networkFailedEverywhere: false }
-      }
+      arrayBuffer = await response.arrayBuffer()
+      contentType = (response.headers?.get('content-type') || '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase()
     } catch (error) {
       /* next gateway */
+      continue
     } finally {
       if (timer) clearTimeout(timer)
     }
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) continue
+    if (expectedHash) {
+      if (!(await contentMatchesTag(transactionId, arrayBuffer, expectedHash))) {
+        // E.g. a gateway's error page served with 200: don't trust it, try the next gateway.
+        hashMismatch = true
+        continue
+      }
+      return { arrayBuffer, contentType, networkFailedEverywhere: false, verified: true }
+    }
+    return { arrayBuffer, contentType, networkFailedEverywhere: false }
   }
-  return { networkFailedEverywhere: !answered }
+  return { networkFailedEverywhere: !answered, hashMismatch }
 }
 
 /**
@@ -324,11 +382,14 @@ const downloadFiles = async ({
   arweaveHost,
   arweaveBaseUrls,
   filesRoot = '/files',
+  expectedContentHashes,
 }: {
   transactionIds: string[],
   arweaveHost: string,
   arweaveBaseUrls?: string[],
   filesRoot?: string,
+  /** Content-SHA-256 tag values by transaction id; downloads with one are verified before saving. */
+  expectedContentHashes?: Record<string, string>,
 }) => {
 
   // Preferred / resolved gateways first, then the configured host; deduped.
@@ -343,7 +404,7 @@ const downloadFiles = async ({
   for (const transactionId of transactionIds) {
     // One bad file (failed OPFS write, quota, malformed content) must not stall or abort the batch.
     try {
-      await downloadFile(transactionId, baseUrls, filesRoot)
+      await downloadFile(transactionId, baseUrls, filesRoot, expectedContentHashes?.[transactionId])
     } catch (error) {
       globalThis.postMessage({ message: 'fileError', transactionId, error: errorInfo(error) })
     }
@@ -352,12 +413,24 @@ const downloadFiles = async ({
   }
 }
 
-const downloadFile = async (transactionId: string, baseUrls: string[], filesRoot: string) => {
+const downloadFile = async (
+  transactionId: string,
+  baseUrls: string[],
+  filesRoot: string,
+  expectedHash: string | undefined,
+) => {
   const encoder = new TextEncoder()
-  const fetched = await fetchRaw(baseUrls, transactionId)
+  const fetched = await fetchRaw(baseUrls, transactionId, expectedHash)
+
+  if (fetched.verified) {
+    globalThis.postMessage({ message: 'contentVerified', transactionId })
+  }
 
   if (!fetched.arrayBuffer) {
-    if (fetched.networkFailedEverywhere) {
+    if (fetched.hashMismatch) {
+      // Nothing saved: the bytes are not what was uploaded. Not excluded, a later run may get them.
+      globalThis.postMessage({ message: 'contentHashMismatch', transactionId })
+    } else if (fetched.networkFailedEverywhere) {
       globalThis.postMessage({
         message: 'excludeTransaction',
         transactionId,
@@ -521,6 +594,12 @@ const downloadFile = async (transactionId: string, baseUrls: string[], filesRoot
 
 onmessage = async (e) => {
   const data = (e && e.data) || {}
+  if (data.message === 'verifyContentResult') {
+    const resolve = pendingVerifications.get(data.requestId)
+    pendingVerifications.delete(data.requestId)
+    if (resolve) resolve(!!data.ok)
+    return
+  }
   const { debug, filesRoot } = data
   if (!debug) {
     console.log = () => {}

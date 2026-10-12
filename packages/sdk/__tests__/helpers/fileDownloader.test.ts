@@ -16,6 +16,9 @@ vi.mock('@/helpers/FileManager/BaseFileManager', () => ({
 }))
 
 import { FileDownloader, FileDownloadWorkerError } from '@/browser/workers/FileDownloader'
+import { getContentSha256 } from '@/helpers/arweaveContentTags'
+import { sha3_256 } from '@noble/hashes/sha3'
+import { bytesToHex } from '@noble/hashes/utils'
 
 /** Stand-in for a dedicated Worker: the test drives its handlers directly. */
 class FakeWorker {
@@ -73,7 +76,11 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
     worker.emit({ message: 'fileSaved', filePath: '/files/images/tx-1' })
     worker.emit({ message: 'excludeTransaction', transactionId: 'tx-2' })
     worker.emit({ message: 'filesDownload onmessage done', done: true })
-    await expect(p).resolves.toBeUndefined()
+    await expect(p).resolves.toEqual({
+      verifiedTransactionIds: [],
+      hashMismatchTransactionIds: [],
+      failedTransactionIds: [],
+    })
 
     expect(mocks.addExcludedTransactions).toHaveBeenCalledWith(new Set(['tx-2']))
     expect(mocks.notifyFilesWrittenOutsideCache).toHaveBeenCalledWith(['/files/images/tx-1'])
@@ -114,7 +121,7 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
     worker.emit({ message: 'fileError', transactionId: 'tx-1', error: { name: 'QuotaExceededError', message: 'disk full' } })
     expect(worker.terminated).toBe(false)
     worker.emit({ message: 'filesDownload onmessage done', done: true })
-    await expect(p).resolves.toBeUndefined()
+    await expect(p).resolves.toMatchObject({ failedTransactionIds: ['tx-1'] })
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('tx-1'))
   })
 
@@ -138,6 +145,31 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
     await expect(first).rejects.toThrow(/Superseded/)
     expect(firstWorker.terminated).toBe(true)
     lastWorker().emit({ done: true })
-    await expect(second).resolves.toBeUndefined()
+    await expect(second).resolves.toBeDefined()
+  })
+
+  it('passes expected hashes to the worker, answers its verification requests and reports the outcome', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const bytes = new TextEncoder().encode('legacy content')
+    const legacy = bytesToHex(sha3_256(bytes))
+    const p = new FileDownloader().downloadAll({ ...params, expectedContentHashes: { 'tx-1': legacy } })
+    const worker = lastWorker()
+    expect(worker.posted[0]).toMatchObject({ expectedContentHashes: { 'tx-1': legacy } })
+
+    worker.emit({ message: 'verifyContent', requestId: 7, transactionId: 'tx-1', expected: legacy, bytes: bytes.buffer })
+    worker.emit({ message: 'verifyContent', requestId: 8, transactionId: 'tx-2', expected: getContentSha256(new Uint8Array([1])), bytes: bytes.buffer })
+    expect(worker.posted.slice(1)).toEqual([
+      { message: 'verifyContentResult', requestId: 7, ok: true },
+      { message: 'verifyContentResult', requestId: 8, ok: false },
+    ])
+
+    worker.emit({ message: 'contentVerified', transactionId: 'tx-1' })
+    worker.emit({ message: 'contentHashMismatch', transactionId: 'tx-2' })
+    worker.emit({ done: true })
+    await expect(p).resolves.toEqual({
+      verifiedTransactionIds: ['tx-1'],
+      hashMismatchTransactionIds: ['tx-2'],
+      failedTransactionIds: [],
+    })
   })
 })

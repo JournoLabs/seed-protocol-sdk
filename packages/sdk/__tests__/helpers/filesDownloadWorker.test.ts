@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import filesDownload from '@/browser/workers/filesDownload'
 import { encodeCompositeUpload } from '@/helpers/compositeUpload'
+import { contentSha256TagMatches, getContentSha256 } from '@/helpers/arweaveContentTags'
+import { sha3_256 } from '@noble/hashes/sha3'
+import { bytesToHex } from '@noble/hashes/utils'
 
 const TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 const PREFERRED = 'https://app.example.com/api/seed-gateway'
@@ -62,7 +65,16 @@ async function runWorker(
   }
 
   vi.stubGlobal('navigator', { storage: { getDirectory: async () => dir } })
-  vi.stubGlobal('postMessage', (m: Posted) => posted.push(m))
+  vi.stubGlobal('postMessage', (m: Posted & { requestId?: number; bytes?: ArrayBuffer; expected?: string }) => {
+    posted.push(m)
+    // Play the page's part of content verification (FileDownloader runs contentSha256TagMatches).
+    if (m.message === 'verifyContent') {
+      const ok = contentSha256TagMatches(new Uint8Array(m.bytes!), m.expected!)
+      queueMicrotask(() =>
+        (globalThis as any).onmessage({ data: { message: 'verifyContentResult', requestId: m.requestId, ok } }),
+      )
+    }
+  })
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -321,6 +333,67 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
       const body = new TextEncoder().encode(`===FILE_SEPARATOR===html===FILE_SEPARATOR===${cjk}`)
       const { saved } = await runComposite(body)
       expect(saved.get(`${TX}.html`)).toBe(cjk)
+    })
+  })
+
+  describe('Content-SHA-256 verification', () => {
+    const BODY = '{"verified":true}'
+    const BYTES = new TextEncoder().encode(BODY)
+    const sha256 = getContentSha256(BYTES)
+    const messages = (posted: Posted[], message: string) =>
+      posted.filter((m) => m.message === message).map((m) => m.transactionId)
+
+    it('saves bytes matching the SHA-256 tag (checked in the worker, no round trip)', async () => {
+      const { saved, posted } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, expectedContentHashes: { [TX]: sha256.toUpperCase() } },
+        async () => new Response(BODY, { status: 200 }),
+      )
+      expect(saved.get(`${TX}.json`)).toBe(BODY)
+      expect(messages(posted, 'contentVerified')).toEqual([TX])
+      expect(messages(posted, 'verifyContent')).toEqual([])
+    })
+
+    it('accepts a legacy SHA3-256 tag through the page', async () => {
+      const { saved, posted } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, expectedContentHashes: { [TX]: bytesToHex(sha3_256(BYTES)) } },
+        async () => new Response(BODY, { status: 200 }),
+      )
+      expect(saved.get(`${TX}.json`)).toBe(BODY)
+      expect(messages(posted, 'verifyContent')).toEqual([TX])
+      expect(messages(posted, 'contentVerified')).toEqual([TX])
+    })
+
+    it('skips a gateway serving the wrong bytes and takes the next one', async () => {
+      const { saved, fetched } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, arweaveBaseUrls: [PREFERRED], expectedContentHashes: { [TX]: sha256 } },
+        async (url) =>
+          new Response(url.startsWith(PREFERRED) ? '<html>gateway error page</html>' : BODY, { status: 200 }),
+      )
+      expect(fetched).toEqual([`${PREFERRED}/raw/${TX}`, `${HOST}/raw/${TX}`])
+      expect(saved.get(`${TX}.json`)).toBe(BODY)
+      expect(saved.has(`${TX}.html`)).toBe(false)
+    })
+
+    it('saves nothing when no gateway serves matching bytes, and does not exclude the transaction', async () => {
+      const { saved, posted } = await runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, expectedContentHashes: { [TX]: 'ab'.repeat(32) } },
+        async () => new Response(BODY, { status: 200 }),
+      )
+      expect(saved.size).toBe(0)
+      expect(messages(posted, 'contentHashMismatch')).toEqual([TX])
+      expect(messages(posted, 'excludeTransaction')).toEqual([])
+      expect(posted.at(-1)).toMatchObject({ done: true })
+    })
+
+    it('a transaction without a tag is saved unverified', async () => {
+      const TX2 = 'B'.repeat(43)
+      const { saved, posted } = await runWorker(
+        { transactionIds: [TX, TX2], arweaveHost: HOST, expectedContentHashes: { [TX]: sha256 } },
+        async () => new Response(BODY, { status: 200 }),
+      )
+      expect(saved.get(`${TX}.json`)).toBe(BODY)
+      expect(saved.get(`${TX2}.json`)).toBe(BODY)
+      expect(messages(posted, 'contentVerified')).toEqual([TX])
     })
   })
 

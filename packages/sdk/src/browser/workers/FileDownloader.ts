@@ -2,6 +2,7 @@ import { addExcludedTransactions } from '@/db/write/addExcludedTransactions';
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager';
 import filesDownload from './filesDownload'
 import { notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
+import { contentSha256TagMatches } from '@/helpers/arweaveContentTags'
 import debug from 'debug'
 
 const logger = debug('seedSdk:browser:workers:FileDownloader')
@@ -42,7 +43,13 @@ export class FileDownloader {
     this.cores = Math.min(navigator.hardwareConcurrency || 4, 4);
   }
 
-  public downloadAll = async ({transactionIds, arweaveHost, arweaveBaseUrls, excludedTransactions}: DownloadAllFilesParams): Promise<void> => {
+  public downloadAll = async ({
+    transactionIds,
+    arweaveHost,
+    arweaveBaseUrls,
+    excludedTransactions,
+    expectedContentHashes,
+  }: DownloadAllFilesParams): Promise<DownloadAllFilesResult> => {
     // One download per instance at a time: a newer call replaces the older one, which rejects
     // instead of waiting forever on a terminated worker.
     this.abortCurrent?.(new FileDownloadWorkerError('Superseded by a newer download'))
@@ -61,9 +68,12 @@ export class FileDownloader {
 
     const localExcludedTransactions = new Set(excludedTransactions)
     const savedPaths: string[] = []
+    const verified = new Set<string>()
+    const hashMismatch = new Set<string>()
+    const failed = new Set<string>()
     const inactivityTimeoutMs = this.options.inactivityTimeoutMs ?? FILE_DOWNLOAD_INACTIVITY_TIMEOUT_MS
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<DownloadAllFilesResult>((resolve, reject) => {
       let settled = false
       let watchdog: ReturnType<typeof setTimeout> | undefined
 
@@ -97,7 +107,13 @@ export class FileDownloader {
         addExcludedTransactions(localExcludedTransactions)
           // The worker wrote to OPFS directly; refresh caches here and in other tabs.
           .then(() => notifyFilesWrittenOutsideCache(savedPaths))
-          .then(() => resolve())
+          .then(() =>
+            resolve({
+              verifiedTransactionIds: [...verified].filter((id) => !failed.has(id)),
+              hashMismatchTransactionIds: [...hashMismatch],
+              failedTransactionIds: [...failed],
+            }),
+          )
           .catch(reject)
       }
 
@@ -126,7 +142,31 @@ export class FileDownloader {
           savedPaths.push(data.filePath)
         }
 
+        if (data.message === 'verifyContent') {
+          // The worker could not confirm the bytes itself (legacy SHA3-256 tag, or no WebCrypto).
+          let ok = false
+          try {
+            ok = contentSha256TagMatches(new Uint8Array(data.bytes), String(data.expected ?? ''))
+          } catch (error) {
+            logger('content verification failed', error)
+          }
+          worker.postMessage({ message: 'verifyContentResult', requestId: data.requestId, ok })
+          return
+        }
+
+        if (data.message === 'contentVerified') {
+          verified.add(data.transactionId)
+        }
+
+        if (data.message === 'contentHashMismatch') {
+          hashMismatch.add(data.transactionId)
+          console.warn(
+            `[FileDownloader] ${data.transactionId}: no gateway served bytes matching its Content-SHA-256 tag; not saved`,
+          )
+        }
+
         if (data.message === 'fileError') {
+          failed.add(data.transactionId)
           // One file failed (e.g. OPFS write); the worker carries on with the rest.
           console.warn(
             `[FileDownloader] failed to save ${data.transactionId}: ${data.error?.name ?? 'Error'}: ${data.error?.message ?? ''}`,
@@ -164,6 +204,7 @@ export class FileDownloader {
           transactionIds,
           arweaveHost,
           arweaveBaseUrls,
+          expectedContentHashes,
           debug: logger.enabled,
           filesRoot: BaseFileManager.getWorkingDir(),
         });
