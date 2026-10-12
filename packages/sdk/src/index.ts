@@ -310,8 +310,17 @@ export {
 } from './db/read/publishDraftGraph'
 export {
   itemHasPublishUploadCandidates,
+  getPublishUploadData,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
+export type { PublishUploadData } from './types/publish'
+export {
+  CONTENT_SHA256_TAG,
+  CONTENT_TYPE_TAG,
+  getContentSha256,
+  contentSha256TagMatches,
+  buildArweaveContentTags,
+} from './helpers/arweaveContentTags'
 export {
   summarizePublishWork,
   getUnpublishedRelatedItems,

@@ -100,6 +100,8 @@ The publish package’s verification step checks that each **expected schema** i
 
 Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **after** `Content-SHA-256` and `Content-Type`.
 
+Both publish paths (L1 transactions via `getPublishUploads`, bundler DataItems via `getPublishUploadData`) build uploads with the SDK's `getPublishUploadData`, so they upload the same bytes with the same tags. **`Content-SHA-256`** is the lowercase hex **SHA-256** of the uploaded bytes (`getContentSha256`). SDK 0.7.2 and earlier wrote a SHA3-256 digest under that tag on the L1 transaction path; to check a tag value read from Arweave against bytes, use `contentSha256TagMatches`, which accepts both. The SDK itself only copies the tag into `metadata.content_hash` during files download and does not verify it.
+
 ### With `@seedprotocol/publish`
 
 - Set **`arweaveUploadTags`** on **`initPublish` / `PublishProvider` config** for app-wide defaults.
