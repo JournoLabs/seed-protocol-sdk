@@ -17,6 +17,11 @@ export * from './QueryClient/BaseQueryClient.js'
 export type { IQueryClientFactory } from './QueryClient/IQueryClientFactory.js'
 export type { IQueryClient, FetchQueryOptions } from './QueryClient/IQueryClient.js'
 export { DefaultEasClient, DefaultQueryClient, ensureEasPlatform } from './default/index.js'
+export {
+  assertSingleEasModule,
+  DuplicateEasModuleError,
+  resetEasClientOwnerForTests,
+} from './moduleOwner.js'
 export * from './stores/schemaUidCache.js'
 export type {
   Attestation,
