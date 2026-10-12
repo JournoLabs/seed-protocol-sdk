@@ -27,7 +27,10 @@ import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
 import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
-import { writeItemStorageFile } from '@/helpers/itemStorageFile'
+import {
+  convertVerbatimItemStorageRow,
+  isVerbatimItemStorageDraftRow,
+} from '@/db/write/convertVerbatimItemStorageRow'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -290,28 +293,22 @@ const migrateVerbatimItemStorageRow = async (
   childProperty: IItemProperty<any>,
   row: MetadataType,
 ): Promise<string | undefined> => {
-  const appDb = BaseDb.getAppDb()
   const seedId = row.seedUid || childProperty.seedUid || row.seedLocalId || childProperty.seedLocalId
-  if (!appDb || !seedId || !row.localId) return undefined
+  if (!seedId || !row.localId) return undefined
   const propertyDef = childProperty.propertyDef
-  const { fileName, filePath, localStorageDir } = await writeItemStorageFile(
-    {
-      seedId,
-      localStorageDir: propertyDef?.localStorageDir || row.localStorageDir,
-      filenameSuffix: propertyDef?.filenameSuffix,
-    },
-    row.propertyValue as string,
-  )
-  await appDb
-    .update(metadata)
-    .set({ refResolvedValue: fileName, localStorageDir, propertyValue: null })
-    .where(eq(metadata.localId, row.localId))
+  const converted = await convertVerbatimItemStorageRow(row.localId, {
+    seedId,
+    localStorageDir: propertyDef?.localStorageDir || row.localStorageDir,
+    filenameSuffix: propertyDef?.filenameSuffix,
+  })
+  if (!converted) return undefined
+  const { fileName, filePath, localStorageDir, content } = converted
   // The content is still the value: keep it as renderValue (the property may show it from propertyValue).
   childProperty.getService().send({
     type: 'updateContext',
     refResolvedValue: fileName,
     localStorageDir,
-    renderValue: row.propertyValue,
+    renderValue: content,
   })
   logger(`resolveItemStorageChildFile: wrote verbatim ${childProperty.propertyName} content to ${filePath}`)
   return filePath
@@ -362,7 +359,7 @@ export const resolveItemStorageChildFile = async (
   // A local draft holding the content itself (no file reference): what Item.create / createNewItem
   // stored for ItemStorage values before they went through the save pipeline. Write it to the file a
   // save would have, point the row and the property at it, and upload that.
-  if (isLocalDraft && !row.refResolvedValue && typeof row.propertyValue === 'string' && row.propertyValue !== '') {
+  if (row && isVerbatimItemStorageDraftRow(row)) {
     const migrated = await migrateVerbatimItemStorageRow(childProperty, row).catch((error) => {
       logger('resolveItemStorageChildFile: writing verbatim ItemStorage content failed', error)
       return undefined
