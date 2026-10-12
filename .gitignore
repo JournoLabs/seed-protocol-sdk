@@ -160,3 +160,7 @@ docs/private/
 
 # Vitest browser-mode failure screenshots
 .vitest-attachments/
+
+# Local deep-research output
+/research_notes/
+/reports/
