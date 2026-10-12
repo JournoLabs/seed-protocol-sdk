@@ -1,4 +1,8 @@
-import { BaseArweaveClient, isKnownArweaveGatewayHostname } from '@seedprotocol/arweave'
+import {
+  BaseArweaveClient,
+  isKnownArweaveGatewayHostname,
+  readArweaveContentResponse,
+} from '@seedprotocol/arweave'
 import {
   getFieldStorageModels,
   getListElementStorageModels,
@@ -40,7 +44,8 @@ export function isArweaveTransactionGatewayUrl(raw: string): boolean {
   }
 }
 
-async function fetchGatewayPayloadAsUtf8(url: string): Promise<string | null> {
+/** Body goes through `transformArweaveContent` (`@seedprotocol/arweave`, `content/arweaveContent.ts`). */
+async function fetchGatewayPayloadAsUtf8(url: string, transactionId: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: { Accept: 'text/html, text/plain, text/markdown, application/json, */*' },
@@ -49,9 +54,9 @@ async function fetchGatewayPayloadAsUtf8(url: string): Promise<string | null> {
     if (!res.ok) return null
     const ct = res.headers.get('content-type') ?? ''
     if (/^(image|video|audio)\//i.test(ct)) return null
-    const buf = await res.arrayBuffer()
-    if (buf.byteLength > MAX_BODY_BYTES) return null
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(buf)
+    const { bytes } = await readArweaveContentResponse(res, { transactionId })
+    if (bytes.byteLength > MAX_BODY_BYTES) return null
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     if (text.length === 0 || text.includes('\0')) return null
     return text
   } catch {
@@ -102,7 +107,7 @@ async function fetchTransactionBody(url: string): Promise<string | null> {
   const inFlight = bodiesInFlight.get(txId)
   if (inFlight) return inFlight
 
-  const request = fetchGatewayPayloadAsUtf8(url)
+  const request = fetchGatewayPayloadAsUtf8(url, txId)
     .then((text) => {
       if (text !== null && bodiesInFlight.get(txId) === request) cacheBody(txId, text)
       return text

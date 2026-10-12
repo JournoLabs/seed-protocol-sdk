@@ -250,6 +250,10 @@ export {
   getResolvedArweaveReadBaseUrls,
   fetchArweaveRawFromBaseUrl,
   fetchArweaveRawTextAcrossGateways,
+  setArweaveContentReadTransform,
+  hasArweaveContentReadTransform,
+  transformArweaveContent,
+  readArweaveContentResponse,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
@@ -263,6 +267,9 @@ export type {
   ArweaveUploadStatusResponse,
   ArweaveGatewayTransactionQueryResult,
   ArweaveReadBaseUrlOptions,
+  ArweaveContent,
+  ArweaveContentReadContext,
+  ArweaveContentReadTransform,
 } from '@seedprotocol/arweave'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
