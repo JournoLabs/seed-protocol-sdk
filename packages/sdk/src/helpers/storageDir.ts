@@ -22,3 +22,20 @@ export const getStorageSubdirForDataType = (
 /** Absolute directory for a storage seed's file (`images/`, `files/`, `html/` or `json/` under the files root). */
 export const getStorageDirForDataType = (dataType: string | null | undefined): string =>
   BaseFileManager.getFilesPath(getStorageSubdirForDataType(dataType))
+
+/**
+ * Subdirectory (relative to the files root, no leading slash) for an ItemStorage property's file:
+ * its model's `storage.path` (`localStorageDir`), else `files`.
+ */
+export const getItemStorageSubdir = (localStorageDir: string | null | undefined): string =>
+  (localStorageDir ?? '').replace(/^\/+/, '').replace(/\/+$/, '') || 'files'
+
+/**
+ * File name a local save gives an ItemStorage property: `<seedUid or seedLocalId><extension>`
+ * (see saveItemStorage). Downloaded content is named after its transaction instead
+ * (`<txId><extension>`, see syncDbWithEas), which is what the metadata row's refResolvedValue says.
+ */
+export const getItemStorageLocalFileName = (
+  seedId: string,
+  filenameSuffix: string | null | undefined,
+): string => `${seedId}${filenameSuffix ?? ''}`

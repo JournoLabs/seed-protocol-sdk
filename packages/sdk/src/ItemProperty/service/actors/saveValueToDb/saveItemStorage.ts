@@ -153,6 +153,10 @@ export const saveItemStorage = fromCallback<
     sendBack({
       type: 'updateContext',
       renderValue: newValue,
+      // Where the file is, right away: localStoragePath (and so publish uploads) must not wait for
+      // the browser's metadata live query, which Node does not have at all.
+      refResolvedValue: fileName,
+      localStorageDir,
       // Point the property at the draft row when the edit moved off a published row.
       ...(propertyData.localId !== localId && { localId: propertyData.localId }),
     })
