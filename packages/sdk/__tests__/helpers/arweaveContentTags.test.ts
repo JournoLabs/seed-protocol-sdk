@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { createHash } from 'node:crypto'
 import { sha3_256 } from '@noble/hashes/sha3'
 import { bytesToHex } from '@noble/hashes/utils'
 import {
@@ -11,8 +10,9 @@ import {
 const bytes = new TextEncoder().encode('<p>hello</p>')
 
 describe('arweaveContentTags', () => {
-  it('Content-SHA-256 is SHA-256 (same digest as node:crypto / WebCrypto)', () => {
-    expect(getContentSha256(bytes)).toBe(createHash('sha256').update(bytes).digest('hex'))
+  it('Content-SHA-256 is SHA-256 (same digest as WebCrypto)', async () => {
+    const webCrypto = bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+    expect(getContentSha256(bytes)).toBe(webCrypto)
   })
 
   it('accepts SHA-256 and legacy SHA3-256 tag values, nothing else', () => {
