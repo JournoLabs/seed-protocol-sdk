@@ -1,4 +1,5 @@
 import { BaseFileManager } from '@/helpers'
+import { getStorageDirForDataType } from '@/helpers/storageDir'
 import {
   isPublishedSeedRef,
   normalizeRelationPropertyValue,
@@ -15,7 +16,7 @@ import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
-import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 
@@ -97,20 +98,6 @@ const buildPublishUploadData = (
 }
 
 
-const getStorageDirForDataType = (dataType: string): string => {
-  switch (normalizeDataType(dataType)) {
-    case 'Image':
-      return BaseFileManager.getFilesPath('images')
-    case 'File':
-      return BaseFileManager.getFilesPath('files')
-    case 'Html':
-      return BaseFileManager.getFilesPath('html')
-    case 'Json':
-      return BaseFileManager.getFilesPath('json')
-    default:
-      return BaseFileManager.getFilesPath('images')
-  }
-}
 
 const DATA_URI_IMAGE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/i
 
