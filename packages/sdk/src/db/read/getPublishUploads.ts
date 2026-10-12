@@ -1,5 +1,9 @@
 import { BaseFileManager } from '@/helpers'
-import { getStorageDirForDataType } from '@/helpers/storageDir'
+import {
+  getStorageDirForDataType,
+  getItemStorageLocalFileName,
+  getItemStorageSubdir,
+} from '@/helpers/storageDir'
 import {
   isPublishedSeedRef,
   normalizeRelationPropertyValue,
@@ -15,7 +19,9 @@ import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
 import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
+import { metadata, type MetadataType } from '@/seedSchema'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
@@ -256,6 +262,79 @@ type ChildUploadData = {
   localStoragePath: string
 }
 
+const isUsablePath = (filePath: string | void | null | undefined): filePath is string =>
+  !!filePath && !filePath.endsWith('undefined') && !filePath.endsWith('null')
+
+/** The newest metadata row of an ItemStorage property, read from the DB (not the live query). */
+const getLatestItemStorageRow = async (
+  childProperty: IItemProperty<any>,
+): Promise<MetadataType | undefined> => {
+  const appDb = BaseDb.getAppDb()
+  const seedLocalId = childProperty.seedLocalId
+  const propertyName = childProperty.storagePropertyName || childProperty.propertyName
+  if (!appDb || !seedLocalId || !propertyName) return undefined
+  const where = [eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, propertyName)]
+  if (childProperty.versionLocalId) where.push(eq(metadata.versionLocalId, childProperty.versionLocalId))
+  const rows: MetadataType[] = await appDb.select().from(metadata).where(and(...where))
+  return [...rows].sort(compareMetadataRowsLatestFirst)[0]
+}
+
+/**
+ * Local file of one ItemStorage child of a composite upload. Tries, in order: the property's
+ * localStoragePath (context set by save / hydration / the live query), its newest metadata row's
+ * refResolvedValue + localStorageDir, then (for a local draft, or no row) the name
+ * saveItemStorage gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage
+ * directory). A published or derived row is never swapped for a local file of another name: that
+ * file would be older content.
+ *
+ * `missingLocalEdit` lists the paths tried when nothing exists although the newest row is a saved
+ * local edit (no attestation uid, not derived from one, refResolvedValue set by saveItemStorage):
+ * that edit's file should be there. A published or derived row without a file (e.g. content not
+ * downloaded, or a property the composite never had) is skipped as before.
+ */
+export const resolveItemStorageChildFile = async (
+  childProperty: IItemProperty<any>,
+): Promise<{ filePath?: string; missingLocalEdit?: string[] }> => {
+  const tried: string[] = []
+  const tryPath = async (filePath: string | void | null | undefined): Promise<string | undefined> => {
+    if (!isUsablePath(filePath) || tried.includes(filePath)) return undefined
+    tried.push(filePath)
+    return (await BaseFileManager.pathExists(filePath)) ? filePath : undefined
+  }
+
+  const fromContext = await tryPath(childProperty.localStoragePath)
+  if (fromContext) return { filePath: fromContext }
+
+  const row = await getLatestItemStorageRow(childProperty).catch((error) => {
+    logger('resolveItemStorageChildFile: metadata lookup failed', error)
+    return undefined
+  })
+  const propertyDef = childProperty.propertyDef
+  const dir = getItemStorageSubdir(propertyDef?.localStorageDir || row?.localStorageDir)
+
+  if (row?.refResolvedValue) {
+    const fromRow = await tryPath(BaseFileManager.getFilesPath(dir, row.refResolvedValue))
+    if (fromRow) return { filePath: fromRow }
+  }
+
+  const isLocalDraft = !!row && !row.uid && row.derivedFromUid == null
+  const suffix = propertyDef?.filenameSuffix
+  const seedIds = !row || isLocalDraft
+    ? [row?.seedUid, childProperty.seedUid, row?.seedLocalId, childProperty.seedLocalId]
+    : []
+  for (const seedId of seedIds) {
+    if (!seedId) continue
+    const derived = await tryPath(
+      BaseFileManager.getFilesPath(dir, getItemStorageLocalFileName(seedId, suffix)),
+    )
+    if (derived) return { filePath: derived }
+  }
+
+  // saveItemStorage sets refResolvedValue on the draft row once the file is written. A draft row
+  // without one is the empty row createNewItem makes for every model property: nothing to upload.
+  return isLocalDraft && !!row?.refResolvedValue ? { missingLocalEdit: tried } : {}
+}
+
 /**
  * True if publish would include at least one Arweave upload (local file / storage seed present).
  * Does not create Arweave transactions or hit the network — use for routing (e.g. skip EAS-only)
@@ -302,28 +381,14 @@ async function uploadPropertyWouldUpload(
   uploadProperty: UploadProperty,
   relatedItemProperty?: IItemProperty<any>,
 ): Promise<boolean> {
-  const childUploads: ChildUploadData[] = []
 
   for (const childProperty of uploadProperty.childProperties) {
-    const filePath = childProperty.localStoragePath
-
-    if (!filePath || filePath.endsWith('undefined')) {
-      continue
+    // Not strict: a local edit whose file is missing still means "would upload", so the publish
+    // goes ahead and fails loudly in processUploadPropertyData instead of skipping the upload.
+    const resolved = await resolveItemStorageChildFile(childProperty)
+    if (resolved.filePath || resolved.missingLocalEdit) {
+      return true
     }
-
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) {
-      continue
-    }
-
-    childUploads.push({
-      propertyName: childProperty.propertyName,
-      localStoragePath: filePath,
-    })
-  }
-
-  if (childUploads.length > 0) {
-    return true
   }
 
   if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -426,14 +491,16 @@ const processUploadPropertyData = async (
   const childUploads: ChildUploadData[] = []
 
   for (const childProperty of uploadProperty.childProperties) {
-    const filePath = childProperty.localStoragePath
+    const { filePath, missingLocalEdit } = await resolveItemStorageChildFile(childProperty)
 
-    if (!filePath || filePath.endsWith('undefined')) {
-      continue
-    }
-
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) {
+    if (!filePath) {
+      if (missingLocalEdit) {
+        // Uploading without it would publish a composite that silently lacks this edit.
+        throw new Error(
+          `Cannot publish ${itemProperty.seedLocalId}: the local file for ${childProperty.propertyName} ` +
+            `was not found (looked in ${missingLocalEdit.join(', ')})`,
+        )
+      }
       continue
     }
 

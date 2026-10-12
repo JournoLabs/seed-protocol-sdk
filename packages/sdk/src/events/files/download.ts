@@ -21,6 +21,7 @@ import { Endpoints } from '@/types'
 import type { TransactionTag } from '@/types/arweave'
 import { getTransactionTagsByIds } from '@seedprotocol/arweave'
 import { CONTENT_SHA256_TAG } from '@/helpers/arweaveContentTags'
+import { getCompositeChildPaths } from '@/db/read/getCompositeChildPaths'
 import { throttle } from 'lodash-es'
 
 
@@ -289,6 +290,12 @@ const downloadTransactionIds = async (
   // Preferred gateways first: a just-published item is only on the gateway it was uploaded through.
   const arweaveBaseUrls = getArweaveReadBaseUrls()
 
+  // Where each ItemStorage child of a composite goes (the worker cannot read the DB or the schema).
+  const compositeChildPaths = await getCompositeChildPaths(transactionIdsToDownload).catch((error) => {
+    logger('[download] composite child paths lookup failed', error)
+    return {} as Record<string, Record<string, string>>
+  })
+
   let result: DownloadAllFilesResult | void
   if (transactionIdsToDownload.length === 1) {
     const transactionId = transactionIdsToDownload[0]
@@ -298,6 +305,7 @@ const downloadTransactionIds = async (
       arweaveBaseUrls,
       excludedTransactions,
       expectedContentHash: expectedContentHashes[transactionId],
+      compositeChildPaths: compositeChildPaths[transactionId],
     })
   } else {
     result = await BaseFileManager.downloadAllFiles({
@@ -306,6 +314,7 @@ const downloadTransactionIds = async (
       arweaveBaseUrls,
       excludedTransactions,
       expectedContentHashes,
+      compositeChildPaths,
     })
   }
 

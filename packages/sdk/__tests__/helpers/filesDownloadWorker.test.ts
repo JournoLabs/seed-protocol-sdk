@@ -328,6 +328,59 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
       ])
     })
 
+    describe('children routed by the model\'s ItemStorage settings', () => {
+      const cover = new Uint8Array(64).map((_, i) => 255 - i) // binary: base64-framed
+      const body = () =>
+        encodeCompositeUpload([
+          { name: 'html', bytes: new TextEncoder().encode('<p>post</p>') },
+          { name: 'cover', bytes: cover },
+          { name: 'notes', bytes: new TextEncoder().encode('# notes') },
+        ])
+      const run = (compositeChildPaths?: Record<string, Record<string, string>>) =>
+        runWorker({ transactionIds: [TX], arweaveHost: HOST, compositeChildPaths }, async () =>
+          new Response(body(), { status: 200, headers: { 'content-type': 'application/octet-stream' } }),
+        )
+      const savedTo = (posted: Posted[]) =>
+        posted.filter((m) => m.message === 'fileSaved').map((m) => m.filePath)
+
+      it('saves every child where the SDK reads that property (storage dir + txId + extension)', async () => {
+        const { raw, posted } = await run({
+          [TX]: { html: `html/${TX}.html`, cover: `covers/${TX}.bin`, notes: `notes/${TX}.md` },
+        })
+        expect(savedTo(posted)).toEqual([
+          `/files/html/${TX}.html`,
+          `/files/covers/${TX}.bin`,
+          `/files/notes/${TX}.md`,
+        ])
+        expect(Array.from(raw.get(`${TX}.bin`)!)).toEqual(Array.from(cover))
+        expect(new TextDecoder().decode(raw.get(`${TX}.md`))).toBe('# notes')
+        expect(posted.some((m) => m.message === 'compositeChildUnrouted')).toBe(false)
+      })
+
+      it('without paths: html / json as before, other children reported instead of guessed at', async () => {
+        const { posted } = await run()
+        expect(savedTo(posted)).toEqual([`/files/html/${TX}.html`])
+        expect(
+          posted.filter((m) => m.message === 'compositeChildUnrouted').map((m) => (m as any).name),
+        ).toEqual(['cover', 'notes'])
+      })
+
+      it('paths for another transaction do not apply', async () => {
+        const { posted } = await run({ ['x'.repeat(43)]: { cover: 'files/other.bin' } })
+        expect(savedTo(posted)).toEqual([`/files/html/${TX}.html`])
+      })
+
+      it('ignores a path that is absolute or climbs out of the files root', async () => {
+        const { posted } = await run({
+          [TX]: { cover: '../outside.bin', notes: '/etc/notes.md', html: `html/${TX}.html` },
+        })
+        expect(savedTo(posted)).toEqual([`/files/html/${TX}.html`])
+        expect(
+          posted.filter((m) => m.message === 'compositeChildUnrouted').map((m) => (m as any).name),
+        ).toEqual(['cover', 'notes'])
+      })
+    })
+
     it('a composite of mostly non-ASCII text is still recognised', async () => {
       const cjk = '<p>' + '你好世界'.repeat(200) + '</p>'
       const body = new TextEncoder().encode(`===FILE_SEPARATOR===html===FILE_SEPARATOR===${cjk}`)

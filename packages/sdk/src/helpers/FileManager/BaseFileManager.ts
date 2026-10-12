@@ -101,6 +101,7 @@ export abstract class BaseFileManager {
     arweaveBaseUrls,
     excludedTransactions,
     expectedContentHash,
+    compositeChildPaths,
   }: DownloadSingleFileParams): Promise<DownloadAllFilesResult | void> {
     return BaseFileManager.requireImpl().downloadAllFiles({
       transactionIds: [transactionId],
@@ -108,6 +109,7 @@ export abstract class BaseFileManager {
       arweaveBaseUrls,
       excludedTransactions,
       expectedContentHashes: expectedContentHash ? { [transactionId]: expectedContentHash } : undefined,
+      compositeChildPaths: compositeChildPaths ? { [transactionId]: compositeChildPaths } : undefined,
     })
   }
 
