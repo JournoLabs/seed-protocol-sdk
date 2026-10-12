@@ -17,6 +17,7 @@ import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPubl
 import { eq } from 'drizzle-orm'
 import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
+import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -35,29 +36,22 @@ export type GetPublishUploadsOptions = {
   skipRelationRecursion?: boolean
 }
 
-const EXTENSION_TO_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  html: 'text/html',
-  htm: 'text/html',
-  json: 'application/json',
-  txt: 'text/plain',
-}
-
-const getMimeTypeFromPath = (filePathOrName: string): string | undefined => {
-  const ext = filePathOrName.split('.').pop()?.toLowerCase()
-  return ext ? EXTENSION_TO_MIME[ext] : undefined
-}
-
 const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
     return new Uint8Array(await data.arrayBuffer())
   }
   return new Uint8Array(data as Buffer)
+}
+
+/** A local file's bytes plus its MIME type: the Blob's own type, else the name's extension, else a sniff of the bytes. */
+const readUploadFile = async (
+  filePath: string,
+  fileName: string = filePath,
+): Promise<{ bytes: Uint8Array; contentType: string | undefined }> => {
+  const data = await BaseFileManager.readFileAsBuffer(filePath)
+  const bytes = await toUint8Array(data)
+  const sourceType = typeof Blob !== 'undefined' && data instanceof Blob ? data.type : undefined
+  return { bytes, contentType: resolveUploadMimeType({ sourceType, fileName, bytes }) }
 }
 
 export const prepareArweaveTransaction = async (
@@ -186,13 +180,12 @@ const getStorageSeedUploadData = async (
       continue
     }
 
-    const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-    const fileContents = await toUint8Array(fileBuffer)
+    const { bytes: fileContents, contentType } = await readUploadFile(filePath, refResolvedValue)
 
     uploads.push(
       buildPublishUploadData(
         fileContents,
-        getMimeTypeFromPath(refResolvedValue),
+        contentType,
         {
           itemPropertyName: itemProperty.propertyName,
           itemPropertyLocalId: itemProperty.localId,
@@ -459,6 +452,7 @@ const processUploadPropertyData = async (
   }
 
   let fileContents
+  let fileContentType: string | undefined
 
   if (!childUploads || childUploads.length === 0) {
     if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -474,11 +468,13 @@ const processUploadPropertyData = async (
       }
 
       try {
-        const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-        fileContents = await toUint8Array(fileBuffer)
+        const read = await readUploadFile(filePath)
+        fileContents = read.bytes
+        fileContentType = read.contentType
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fileContents = await toUint8Array(fs.readFileSync(filePath))
+        fileContentType = resolveUploadMimeType({ fileName: filePath, bytes: fileContents })
       }
     }
     if (!fileContents) {
@@ -522,7 +518,7 @@ const processUploadPropertyData = async (
 
   let contentType: string | undefined
   if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
-    contentType = getMimeTypeFromPath(relatedItemProperty.localStoragePath)
+    contentType = fileContentType
   } else if (childUploads.length > 0) {
     contentType = 'application/octet-stream'
   }

@@ -231,6 +231,10 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     it('declared non-image Content-Type goes to files/, never images/', async () => {
       expect(await savedPaths(BINARY, { 'content-type': 'application/pdf' })).toEqual([`/files/files/${TX}.pdf`])
       expect(await savedPaths(BINARY, { 'content-type': 'video/x-unknown' })).toEqual([`/files/files/${TX}`])
+      // Extensions come from the map shared with the upload side (helpers/mimeTypes.ts).
+      expect(await savedPaths(BINARY, { 'content-type': 'video/quicktime' })).toEqual([`/files/files/${TX}.mov`])
+      expect(await savedPaths(BINARY, { 'content-type': 'audio/x-wav' })).toEqual([`/files/files/${TX}.wav`])
+      expect(await savedPaths(BINARY, { 'content-type': 'audio/mpeg' })).toEqual([`/files/files/${TX}.mp3`])
       expect(await savedPaths('# Title\n\n- item', { 'content-type': 'text/markdown; charset=utf-8' })).toEqual([
         `/files/files/${TX}.md`,
       ])

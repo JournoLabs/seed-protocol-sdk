@@ -1,4 +1,14 @@
-export default `(
+import { MIME_TO_EXTENSION } from '@/helpers/mimeTypes'
+
+/**
+ * Injected at the top of the worker source below (the worker runs from a string and cannot import):
+ * the same MIME -> extension map the upload side uses, see `helpers/mimeTypes.ts`. A free global,
+ * so bundlers never rename references to it.
+ */
+declare const SEED_MIME_TO_EXTENSION: Record<string, string>
+
+export default `const SEED_MIME_TO_EXTENSION = ${JSON.stringify(MIME_TO_EXTENSION)};
+(
   ${
     function () {
 
@@ -251,18 +261,8 @@ const directoryForContentType = (contentType: string): 'images' | 'html' | 'json
   return 'files'
 }
 
-const FILE_EXTENSIONS: Record<string, string> = {
-  'application/pdf': 'pdf',
-  'text/markdown': 'md',
-  'text/csv': 'csv',
-  'text/plain': 'txt',
-  'application/zip': 'zip',
-  'audio/mpeg': 'mp3',
-  'audio/wav': 'wav',
-  'audio/ogg': 'ogg',
-  'video/mp4': 'mp4',
-  'video/webm': 'webm',
-}
+/** Shared with the upload side (`helpers/mimeTypes.ts`), injected into this worker's source. */
+const FILE_EXTENSIONS: Record<string, string> = SEED_MIME_TO_EXTENSION
 
 /** `files/{txId}` plus an extension when the Content-Type has a well-known one. */
 const fileNameForFiles = (transactionId: string, contentType: string): string => {
