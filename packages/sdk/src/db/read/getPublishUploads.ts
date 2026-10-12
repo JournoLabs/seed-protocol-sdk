@@ -1,4 +1,5 @@
 import { BaseFileManager } from '@/helpers'
+import { getStorageDirForDataType } from '@/helpers/storageDir'
 import {
   isPublishedSeedRef,
   normalizeRelationPropertyValue,
@@ -15,10 +16,16 @@ import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
-import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
+import { resolveUploadMimeType } from '@/helpers/mimeTypes'
+import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
+import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
 
 const logger = debug('seedSdk:item:getPublishUploads')
+
+/** L1 transactions {@link getPublishUploads} creates at once (each asks the gateway for price and anchor). */
+export const CREATE_TRANSACTION_CONCURRENCY = 4
 
 /** Optional tags merged into each Arweave tx after Content-SHA-256 / Content-Type. */
 export type GetPublishUploadsOptions = {
@@ -35,29 +42,22 @@ export type GetPublishUploadsOptions = {
   skipRelationRecursion?: boolean
 }
 
-const EXTENSION_TO_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  html: 'text/html',
-  htm: 'text/html',
-  json: 'application/json',
-  txt: 'text/plain',
-}
-
-const getMimeTypeFromPath = (filePathOrName: string): string | undefined => {
-  const ext = filePathOrName.split('.').pop()?.toLowerCase()
-  return ext ? EXTENSION_TO_MIME[ext] : undefined
-}
-
 const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
     return new Uint8Array(await data.arrayBuffer())
   }
   return new Uint8Array(data as Buffer)
+}
+
+/** A local file's bytes plus its MIME type: the Blob's own type, else the name's extension, else a sniff of the bytes. */
+const readUploadFile = async (
+  filePath: string,
+  fileName: string = filePath,
+): Promise<{ bytes: Uint8Array; contentType: string | undefined }> => {
+  const data = await BaseFileManager.readFileAsBuffer(filePath)
+  const bytes = await toUint8Array(data)
+  const sourceType = typeof Blob !== 'undefined' && data instanceof Blob ? data.type : undefined
+  return { bytes, contentType: resolveUploadMimeType({ sourceType, fileName, bytes }) }
 }
 
 export const prepareArweaveTransaction = async (
@@ -103,20 +103,6 @@ const buildPublishUploadData = (
 }
 
 
-const getStorageDirForDataType = (dataType: string): string => {
-  switch (normalizeDataType(dataType)) {
-    case 'Image':
-      return BaseFileManager.getFilesPath('images')
-    case 'File':
-      return BaseFileManager.getFilesPath('files')
-    case 'Html':
-      return BaseFileManager.getFilesPath('html')
-    case 'Json':
-      return BaseFileManager.getFilesPath('json')
-    default:
-      return BaseFileManager.getFilesPath('images')
-  }
-}
 
 const DATA_URI_IMAGE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/i
 
@@ -186,13 +172,12 @@ const getStorageSeedUploadData = async (
       continue
     }
 
-    const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-    const fileContents = await toUint8Array(fileBuffer)
+    const { bytes: fileContents, contentType } = await readUploadFile(filePath, refResolvedValue)
 
     uploads.push(
       buildPublishUploadData(
         fileContents,
-        getMimeTypeFromPath(refResolvedValue),
+        contentType,
         {
           itemPropertyName: itemProperty.propertyName,
           itemPropertyLocalId: itemProperty.localId,
@@ -459,6 +444,7 @@ const processUploadPropertyData = async (
   }
 
   let fileContents
+  let fileContentType: string | undefined
 
   if (!childUploads || childUploads.length === 0) {
     if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -474,11 +460,13 @@ const processUploadPropertyData = async (
       }
 
       try {
-        const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-        fileContents = await toUint8Array(fileBuffer)
+        const read = await readUploadFile(filePath)
+        fileContents = read.bytes
+        fileContentType = read.contentType
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fileContents = await toUint8Array(fs.readFileSync(filePath))
+        fileContentType = resolveUploadMimeType({ fileName: filePath, bytes: fileContents })
       }
     }
     if (!fileContents) {
@@ -487,31 +475,26 @@ const processUploadPropertyData = async (
   }
 
   if (childUploads.length > 0) {
-    const separator = '===FILE_SEPARATOR==='
-    // let compositeFileContents = `${itemProperty.propertyName}${separator}${mainFileContents}`
-    let compositeFileContents = ''
-
+    // Composite of the item's ItemStorage files; see helpers/compositeUpload.ts for the format.
+    // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
+    const children: CompositeChild[] = []
+    const fs = await BaseFileManager.getFs()
     for (const childUpload of childUploads) {
-      let childUploadContents
-
-      const fs = await BaseFileManager.getFs()
-
+      let childUploadContents: Uint8Array | string
       try {
-        childUploadContents = await fs.promises.readFile(
-          childUpload.localStoragePath,
-        )
+        childUploadContents = await fs.promises.readFile(childUpload.localStoragePath)
       } catch (e) {
         childUploadContents = fs.readFileSync(childUpload.localStoragePath)
       }
-
-      compositeFileContents += `${separator}${childUpload.propertyName}${separator}${childUploadContents}`
+      children.push({
+        name: childUpload.propertyName,
+        bytes:
+          typeof childUploadContents === 'string'
+            ? new TextEncoder().encode(childUploadContents)
+            : new Uint8Array(childUploadContents),
+      })
     }
-
-    if (typeof document !== 'undefined') {
-      fileContents = new TextEncoder().encode(compositeFileContents)
-    } else {
-      fileContents = Buffer.from(compositeFileContents)
-    }
+    fileContents = encodeCompositeUpload(children)
   }
 
   if (!fileContents) {
@@ -522,7 +505,7 @@ const processUploadPropertyData = async (
 
   let contentType: string | undefined
   if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
-    contentType = getMimeTypeFromPath(relatedItemProperty.localStoragePath)
+    contentType = fileContentType
   } else if (childUploads.length > 0) {
     contentType = 'application/octet-stream'
   }
@@ -678,17 +661,16 @@ export const getPublishUploads = async (
   options?: GetPublishUploadsOptions,
 ): Promise<PublishUpload[]> => {
   const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
-  for (const upload of uploadData) {
-    const tx = await BaseArweaveClient.createTransaction(upload.data, {
+  // Each createTransaction fetches the price / anchor from the gateway: run a few at once.
+  const created = await mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
+    itemPropertyName: upload.itemPropertyName,
+    itemPropertyLocalId: upload.itemPropertyLocalId,
+    seedLocalId: upload.seedLocalId,
+    versionLocalId: upload.versionLocalId,
+    transactionToSign: await BaseArweaveClient.createTransaction(upload.data, {
       tags: upload.tags.length ? upload.tags : undefined,
-    })
-    uploads.push({
-      itemPropertyName: upload.itemPropertyName,
-      itemPropertyLocalId: upload.itemPropertyLocalId,
-      seedLocalId: upload.seedLocalId,
-      versionLocalId: upload.versionLocalId,
-      transactionToSign: tx,
-    })
-  }
+    }),
+  }))
+  uploads.push(...created)
   return uploads
 }

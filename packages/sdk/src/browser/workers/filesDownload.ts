@@ -1,4 +1,14 @@
-export default `(
+import { MIME_TO_EXTENSION } from '@/helpers/mimeTypes'
+
+/**
+ * Injected at the top of the worker source below (the worker runs from a string and cannot import):
+ * the same MIME -> extension map the upload side uses, see `helpers/mimeTypes.ts`. A free global,
+ * so bundlers never rename references to it.
+ */
+declare const SEED_MIME_TO_EXTENSION: Record<string, string>
+
+export default `const SEED_MIME_TO_EXTENSION = ${JSON.stringify(MIME_TO_EXTENSION)};
+(
   ${
     function () {
 
@@ -148,6 +158,17 @@ const getFilesPath = (filesRoot: string, ...parts: string[]) => {
   return [root, ...parts].filter(Boolean).join('/').replace(/\/+/g, '/')
 }
 
+/** Per-gateway limit for one `/raw/{id}` request, body included. */
+const RAW_FETCH_TIMEOUT_MS = 60_000
+
+const errorInfo = (error: unknown): { name: string; message: string } => {
+  const e = (error ?? {}) as { name?: unknown; message?: unknown }
+  return {
+    name: typeof e.name === 'string' && e.name ? e.name : 'Error',
+    message: typeof e.message === 'string' ? e.message : String(error),
+  }
+}
+
 const toBaseUrl = (hostOrUrl: string): string => {
   const h = (hostOrUrl || '').trim().replace(/\/$/, '')
   if (!h) return ''
@@ -159,34 +180,97 @@ const toBaseUrl = (hostOrUrl: string): string => {
   return `${protocol}://${h}`
 }
 
+const toHex = (buffer: ArrayBuffer): string => {
+  const view = new Uint8Array(buffer)
+  let hex = ''
+  for (let i = 0; i < view.length; i++) hex += view[i].toString(16).padStart(2, '0')
+  return hex
+}
+
+/** Verification requests waiting for the page's answer, by request id. */
+const pendingVerifications = new Map<number, (ok: boolean) => void>()
+let lastVerificationId = 0
+
+/**
+ * Ask the page whether `bytes` match a Content-SHA-256 tag. The page runs `contentSha256TagMatches`,
+ * which also accepts the SHA3-256 digests older SDKs wrote under that tag (no SHA3 in WebCrypto, and
+ * this worker cannot import a hash library). The bytes are copied, not transferred.
+ */
+const verifyOnPage = (transactionId: string, bytes: ArrayBuffer, expected: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    const requestId = ++lastVerificationId
+    pendingVerifications.set(requestId, resolve)
+    globalThis.postMessage({ message: 'verifyContent', requestId, transactionId, expected, bytes })
+  })
+
+/**
+ * True when the downloaded bytes match the upload's Content-SHA-256 tag. SHA-256 is checked here
+ * with WebCrypto when available (secure contexts); anything else goes to the page.
+ */
+const contentMatchesTag = async (transactionId: string, bytes: ArrayBuffer, expected: string): Promise<boolean> => {
+  const want = expected.trim().toLowerCase()
+  try {
+    const subtle = globalThis.crypto && globalThis.crypto.subtle
+    if (subtle && toHex(await subtle.digest('SHA-256', bytes)) === want) return true
+  } catch (error) {
+    /* fall back to the page */
+  }
+  return verifyOnPage(transactionId, bytes, want)
+}
+
 /**
  * GET /raw/{id} from each gateway in order. `networkFailedEverywhere` is true only when no gateway
  * answered at all; a non-2xx (e.g. not yet propagated) is not a reason to exclude the transaction.
  * `contentType` is the response's Content-Type (gateways serve the upload's Content-Type tag).
+ * With `expectedHash` (the upload's Content-SHA-256 tag), a body that does not match it is skipped
+ * and the next gateway tried; `hashMismatch` says that happened and no gateway served matching bytes.
  */
 const fetchRaw = async (
   baseUrls: string[],
   transactionId: string,
-): Promise<{ arrayBuffer?: ArrayBuffer; contentType?: string; networkFailedEverywhere: boolean }> => {
+  expectedHash?: string,
+): Promise<{
+  arrayBuffer?: ArrayBuffer
+  contentType?: string
+  networkFailedEverywhere: boolean
+  verified?: boolean
+  hashMismatch?: boolean
+}> => {
   let answered = false
+  let hashMismatch = false
   for (const base of baseUrls) {
+    let arrayBuffer: ArrayBuffer | undefined
+    let contentType = ''
+    // A hung gateway must not stall the batch: abort the request (body included) after a while.
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
+    const timer = controller ? setTimeout(() => controller.abort(), RAW_FETCH_TIMEOUT_MS) : undefined
     try {
-      const response = await fetch(`${base}/raw/${transactionId}`)
+      const response = await fetch(`${base}/raw/${transactionId}`, controller ? { signal: controller.signal } : undefined)
       answered = true
       if (!response.ok) continue
-      const arrayBuffer = await response.arrayBuffer()
-      if (arrayBuffer.byteLength > 0) {
-        const contentType = (response.headers?.get('content-type') || '')
-          .split(';')[0]
-          .trim()
-          .toLowerCase()
-        return { arrayBuffer, contentType, networkFailedEverywhere: false }
-      }
+      arrayBuffer = await response.arrayBuffer()
+      contentType = (response.headers?.get('content-type') || '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase()
     } catch (error) {
       /* next gateway */
+      continue
+    } finally {
+      if (timer) clearTimeout(timer)
     }
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) continue
+    if (expectedHash) {
+      if (!(await contentMatchesTag(transactionId, arrayBuffer, expectedHash))) {
+        // E.g. a gateway's error page served with 200: don't trust it, try the next gateway.
+        hashMismatch = true
+        continue
+      }
+      return { arrayBuffer, contentType, networkFailedEverywhere: false, verified: true }
+    }
+    return { arrayBuffer, contentType, networkFailedEverywhere: false }
   }
-  return { networkFailedEverywhere: !answered }
+  return { networkFailedEverywhere: !answered, hashMismatch }
 }
 
 /**
@@ -235,18 +319,8 @@ const directoryForContentType = (contentType: string): 'images' | 'html' | 'json
   return 'files'
 }
 
-const FILE_EXTENSIONS: Record<string, string> = {
-  'application/pdf': 'pdf',
-  'text/markdown': 'md',
-  'text/csv': 'csv',
-  'text/plain': 'txt',
-  'application/zip': 'zip',
-  'audio/mpeg': 'mp3',
-  'audio/wav': 'wav',
-  'audio/ogg': 'ogg',
-  'video/mp4': 'mp4',
-  'video/webm': 'webm',
-}
+/** Shared with the upload side (`helpers/mimeTypes.ts`), injected into this worker's source. */
+const FILE_EXTENSIONS: Record<string, string> = SEED_MIME_TO_EXTENSION
 
 /** `files/{txId}` plus an extension when the Content-Type has a well-known one. */
 const fileNameForFiles = (transactionId: string, contentType: string): string => {
@@ -267,16 +341,55 @@ const decodeBase64 = (base64: string): Uint8Array | undefined => {
   }
 }
 
+/**
+ * Composite format: a copy of `helpers/compositeUpload.ts` (this worker cannot import; a test
+ * decodes the SDK encoder's output through this worker). Children are
+ * `===FILE_SEPARATOR===<name>===FILE_SEPARATOR===<text>`; a binary child's name ends in `;base64`
+ * and its content is base64.
+ */
+const COMPOSITE_SEPARATOR = '===FILE_SEPARATOR==='
+const COMPOSITE_BASE64_SUFFIX = ';base64'
+
+const startsWithCompositeSeparator = (bytes: Uint8Array): boolean => {
+  if (bytes.length < COMPOSITE_SEPARATOR.length) return false
+  for (let i = 0; i < COMPOSITE_SEPARATOR.length; i++) {
+    if (bytes[i] !== COMPOSITE_SEPARATOR.charCodeAt(i)) return false
+  }
+  return true
+}
+
+const decodeComposite = (bytes: Uint8Array): { name: string; bytes: Uint8Array }[] | undefined => {
+  const parts = new TextDecoder('utf-8').decode(bytes).split(COMPOSITE_SEPARATOR).slice(1)
+  if (parts.length % 2 !== 0) return undefined
+  const encoder = new TextEncoder()
+  const children: { name: string; bytes: Uint8Array }[] = []
+  for (let i = 0; i < parts.length; i += 2) {
+    const rawName = parts[i]
+    const content = parts[i + 1]
+    if (rawName.endsWith(COMPOSITE_BASE64_SUFFIX)) {
+      const decoded = decodeBase64(content.replace(/\s/g, ''))
+      if (!decoded) return undefined
+      children.push({ name: rawName.slice(0, -COMPOSITE_BASE64_SUFFIX.length), bytes: decoded })
+    } else {
+      children.push({ name: rawName, bytes: encoder.encode(content) })
+    }
+  }
+  return children
+}
+
 const downloadFiles = async ({
   transactionIds,
   arweaveHost,
   arweaveBaseUrls,
   filesRoot = '/files',
+  expectedContentHashes,
 }: {
   transactionIds: string[],
   arweaveHost: string,
   arweaveBaseUrls?: string[],
   filesRoot?: string,
+  /** Content-SHA-256 tag values by transaction id; downloads with one are verified before saving. */
+  expectedContentHashes?: Record<string, string>,
 }) => {
 
   // Preferred / resolved gateways first, then the configured host; deduped.
@@ -288,193 +401,220 @@ const downloadFiles = async ({
     }
   }
 
-  const encoder = new TextEncoder()
-
   for (const transactionId of transactionIds) {
-    const fetched = await fetchRaw(baseUrls, transactionId)
+    // One bad file (failed OPFS write, quota, malformed content) must not stall or abort the batch.
+    try {
+      await downloadFile(transactionId, baseUrls, filesRoot, expectedContentHashes?.[transactionId])
+    } catch (error) {
+      globalThis.postMessage({ message: 'fileError', transactionId, error: errorInfo(error) })
+    }
+    // Liveness signal for the page's inactivity watchdog.
+    globalThis.postMessage({ message: 'fileProcessed', transactionId })
+  }
+}
 
-    if (!fetched.arrayBuffer) {
-      if (fetched.networkFailedEverywhere) {
-        globalThis.postMessage({
-          message: 'excludeTransaction',
-          transactionId,
-        })
+const downloadFile = async (
+  transactionId: string,
+  baseUrls: string[],
+  filesRoot: string,
+  expectedHash: string | undefined,
+) => {
+  const encoder = new TextEncoder()
+  const fetched = await fetchRaw(baseUrls, transactionId, expectedHash)
+
+  if (fetched.verified) {
+    globalThis.postMessage({ message: 'contentVerified', transactionId })
+  }
+
+  if (!fetched.arrayBuffer) {
+    if (fetched.hashMismatch) {
+      // Nothing saved: the bytes are not what was uploaded. Not excluded, a later run may get them.
+      globalThis.postMessage({ message: 'contentHashMismatch', transactionId })
+    } else if (fetched.networkFailedEverywhere) {
+      globalThis.postMessage({
+        message: 'excludeTransaction',
+        transactionId,
+      })
+    }
+    return
+  }
+
+  const contentType = fetched.contentType || ''
+  const bytes = await transformDownloadedContent(new Uint8Array(fetched.arrayBuffer), {
+    transactionId,
+    contentType,
+  })
+
+  const saveToFiles = (data: Uint8Array) =>
+    saveBufferToOPFS(
+      getFilesPath(filesRoot, 'files', fileNameForFiles(transactionId, contentType)),
+      data,
+    )
+
+  // Composite upload (several ItemStorage files in one transaction, uploaded as
+  // application/octet-stream). Detected on the bytes: a composite of mostly non-ASCII text (e.g.
+  // CJK html) would fail the isBinary heuristic below.
+  if (startsWithCompositeSeparator(bytes)) {
+    const children = decodeComposite(bytes)
+    if (!children) {
+      // Not a composite after all: keep the bytes rather than fail the whole download.
+      await saveToFiles(bytes)
+      return
+    }
+    for (const child of children) {
+      // Children are routed by property name; only the html / json ItemStorage layout is known here.
+      if (child.name === 'html') {
+        await saveBufferToOPFS(getFilesPath(filesRoot, 'html', `${transactionId}.html`), child.bytes)
       }
-      continue
+      if (child.name === 'json') {
+        await saveBufferToOPFS(getFilesPath(filesRoot, 'json', `${transactionId}.json`), child.bytes)
+      }
+    }
+    return
+  }
+
+  let dataString: string | undefined
+  if (!isBinary(bytes)) {
+    dataString = new TextDecoder('utf-8').decode(bytes)
+  }
+
+  // The upload said what it is (Content-Type tag, served as the response header).
+  const declaredDir = directoryForContentType(contentType)
+  const isLegacyDataUri = !!dataString && dataString.startsWith('data:')
+  if (declaredDir && !isLegacyDataUri) {
+    if (declaredDir === 'images') {
+      await saveBufferToOPFS(getFilesPath(filesRoot, 'images', transactionId), bytes)
+    } else if (declaredDir === 'html') {
+      await saveBufferToOPFS(getFilesPath(filesRoot, 'html', `${transactionId}.html`), bytes)
+    } else if (declaredDir === 'json') {
+      await saveBufferToOPFS(getFilesPath(filesRoot, 'json', `${transactionId}.json`), bytes)
+    } else {
+      await saveToFiles(bytes)
+    }
+    return
+  }
+
+  // No useful Content-Type: sniff. Binary is an image only when it has an image signature.
+  if (!dataString) {
+    if (hasImageSignature(bytes)) {
+      await saveBufferToOPFS(getFilesPath(filesRoot, 'images', transactionId), bytes)
+    } else {
+      await saveToFiles(bytes)
+    }
+    return
+  }
+
+  let textType = identifyString(dataString)
+
+  if (
+    textType !== 'json' &&
+    textType !== 'base64' &&
+    textType !== 'html'
+  ) {
+    const possibleImageType = getDataTypeFromString(dataString)
+    if (!possibleImageType) {
+      // Plain text / markdown / anything else textual.
+      await saveToFiles(bytes)
+      return
     }
 
-    const contentType = fetched.contentType || ''
-    const bytes = await transformDownloadedContent(new Uint8Array(fetched.arrayBuffer), {
-      transactionId,
-      contentType,
-    })
+    textType = possibleImageType
+  }
 
-    const saveToFiles = (data: Uint8Array) =>
-      saveBufferToOPFS(
-        getFilesPath(filesRoot, 'files', fileNameForFiles(transactionId, contentType)),
-        data,
-      )
+  if (textType === 'url') {
+    const url = dataString as string
 
-    let dataString: string | undefined
-    if (!isBinary(bytes)) {
-      dataString = new TextDecoder('utf-8').decode(bytes)
+    // Legacy: an upload whose content is the URL of an image.
+    if (!/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(url)) {
+      await saveToFiles(bytes)
+      return
     }
 
-    // Composite upload (several child files in one transaction); uploaded as application/octet-stream.
-    if (dataString && dataString.startsWith('===FILE_SEPARATOR===')) {
-      const dataStringParts = dataString
-        .split('===FILE_SEPARATOR===')
-        .slice(1)
+    let buffer: ArrayBuffer | undefined
 
-      if (dataStringParts.length % 2 !== 0) {
-        // Not a composite after all: keep the bytes rather than fail the whole download.
-        await saveToFiles(bytes)
-        continue
+    try {
+      const response = await fetch(url)
+      if (!response.ok) {
+        return
       }
 
-      for (let i = 0; i < dataStringParts.length; i += 2) {
-        const partType = dataStringParts[i]
-        const content = dataStringParts[i + 1]
-        if (partType === 'html') {
-          const fileName = `${transactionId}.html`
-          await saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), encoder.encode(content))
-        }
-        if (partType === 'json') {
-          const fileName = `${transactionId}.json`
-          await saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), encoder.encode(content))
-        }
-      }
+      buffer = await response.arrayBuffer()
 
-      continue
+    } catch(error) {
+      globalThis.postMessage({
+        message: 'excludeTransaction',
+        transactionId,
+      })
+      return
     }
 
-    // The upload said what it is (Content-Type tag, served as the response header).
-    const declaredDir = directoryForContentType(contentType)
-    const isLegacyDataUri = !!dataString && dataString.startsWith('data:')
-    if (declaredDir && !isLegacyDataUri) {
-      if (declaredDir === 'images') {
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'images', transactionId), bytes)
-      } else if (declaredDir === 'html') {
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'html', `${transactionId}.html`), bytes)
-      } else if (declaredDir === 'json') {
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'json', `${transactionId}.json`), bytes)
-      } else {
-        await saveToFiles(bytes)
-      }
-      continue
+    await saveBufferToOPFS(
+      getFilesPath(filesRoot, 'images', transactionId),
+      new Uint8Array(buffer),
+    )
+
+    return
+  }
+
+  let fileName = transactionId
+
+  if (textType === 'base64') {
+    const mimeType = getMimeType(dataString as string)
+    const isDataUri = dataString.startsWith('data:')
+    // Remove the Base64 header if it exists (e.g., "data:image/png;base64,")
+    const binaryData = decodeBase64(dataString.split(',').pop() || '')
+
+    // A data:image URI, or bare base64 that decodes to an image. Anything else is kept as text.
+    const isImage =
+      !!binaryData &&
+      ((isDataUri && !!mimeType && mimeType.startsWith('image/')) || hasImageSignature(binaryData))
+    if (!binaryData || !isImage) {
+      await saveToFiles(bytes)
+      return
     }
 
-    // No useful Content-Type: sniff. Binary is an image only when it has an image signature.
-    if (!dataString) {
-      if (hasImageSignature(bytes)) {
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'images', transactionId), bytes)
-      } else {
-        await saveToFiles(bytes)
-      }
-      continue
+    const fileExtension = mimeType && mimeType.startsWith('image/') ? mimeType.replace('image/', '') : mimeType
+    if (fileExtension) {
+      fileName += `.${fileExtension}`
     }
 
-    let textType = identifyString(dataString)
+    await saveBufferToOPFS(getFilesPath(filesRoot, 'images', fileName), binaryData)
+  }
 
-    if (
-      textType !== 'json' &&
-      textType !== 'base64' &&
-      textType !== 'html'
-    ) {
-      const possibleImageType = getDataTypeFromString(dataString)
-      if (!possibleImageType) {
-        // Plain text / markdown / anything else textual.
-        await saveToFiles(bytes)
-        continue
-      }
+  if (textType === 'html') {
+    fileName += '.html'
+    await saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), encoder.encode(dataString))
+  }
 
-      textType = possibleImageType
-    }
-
-    if (textType === 'url') {
-      const url = dataString as string
-
-      // Legacy: an upload whose content is the URL of an image.
-      if (!/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(url)) {
-        await saveToFiles(bytes)
-        continue
-      }
-
-      let buffer: ArrayBuffer | undefined
-
-      try {
-        const response = await fetch(url)
-        if (!response.ok) {
-          continue
-        }
-
-        buffer = await response.arrayBuffer()
-
-      } catch(error) {
-        globalThis.postMessage({
-          message: 'excludeTransaction',
-          transactionId,
-        })
-        continue
-      }
-
-      await saveBufferToOPFS(
-        getFilesPath(filesRoot, 'images', transactionId),
-        new Uint8Array(buffer),
-      )
-
-      continue
-    }
-
-    let fileName = transactionId
-
-    if (textType === 'base64') {
-      const mimeType = getMimeType(dataString as string)
-      const isDataUri = dataString.startsWith('data:')
-      // Remove the Base64 header if it exists (e.g., "data:image/png;base64,")
-      const binaryData = decodeBase64(dataString.split(',').pop() || '')
-
-      // A data:image URI, or bare base64 that decodes to an image. Anything else is kept as text.
-      const isImage =
-        !!binaryData &&
-        ((isDataUri && !!mimeType && mimeType.startsWith('image/')) || hasImageSignature(binaryData))
-      if (!binaryData || !isImage) {
-        await saveToFiles(bytes)
-        continue
-      }
-
-      const fileExtension = mimeType && mimeType.startsWith('image/') ? mimeType.replace('image/', '') : mimeType
-      if (fileExtension) {
-        fileName += `.${fileExtension}`
-      }
-
-      await saveBufferToOPFS(getFilesPath(filesRoot, 'images', fileName), binaryData)
-    }
-
-    if (textType === 'html') {
-      fileName += '.html'
-      await saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), encoder.encode(dataString))
-    }
-
-    if (textType === 'json') {
-      fileName += '.json'
-      await saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), encoder.encode(dataString))
-    }
-
+  if (textType === 'json') {
+    fileName += '.json'
+    await saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), encoder.encode(dataString))
   }
 }
 
 onmessage = async (e) => {
-  const { debug, filesRoot } = e.data
+  const data = (e && e.data) || {}
+  if (data.message === 'verifyContentResult') {
+    const resolve = pendingVerifications.get(data.requestId)
+    pendingVerifications.delete(data.requestId)
+    if (resolve) resolve(!!data.ok)
+    return
+  }
+  const { debug, filesRoot } = data
   if (!debug) {
     console.log = () => {}
   }
-  await downloadFiles({ ...e.data, filesRoot });
+  try {
+    await downloadFiles({ ...data, filesRoot })
+  } catch (error) {
+    // Anything not caught per file: tell the page instead of leaving it waiting for `done`.
+    globalThis.postMessage({ message: 'filesDownload failed', error: errorInfo(error) })
+    return
+  }
   globalThis.postMessage({
     message: 'filesDownload onmessage done',
     done: true,
   })
-  
 }
 }.toString()
 }

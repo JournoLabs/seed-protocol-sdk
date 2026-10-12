@@ -81,7 +81,7 @@ const SeedImageInner = ({
   // Resolved filename: explicit override, or from property
   const resolvedFilename = filenameOverride ?? (property?.refResolvedValue ?? property?.value) as string | undefined
 
-  const { status: ensureStatus, gatewayHref } = useEnsureLocalImage({
+  const { status: ensureStatus, gatewayHref, onGatewayError } = useEnsureLocalImage({
     imageProperty: property ?? imageProperty,
     filename: filenameOverride,
     width,
@@ -224,8 +224,15 @@ const SeedImageInner = ({
     (ensure && !hasContentUrl ? gatewayHref : undefined) ||
     'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
+  // A gateway that 404s (e.g. the image hasn't propagated there yet) moves on to the next one.
+  const { onError: onErrorProp, ...imgProps } = props
+  const handleError: React.ReactEventHandler<HTMLImageElement> = (event) => {
+    if (gatewayHref && imgSrc === gatewayHref) onGatewayError()
+    onErrorProp?.(event)
+  }
+
   return (
-    <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...props} />
+    <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...imgProps} onError={handleError} />
   )
 }
 

@@ -192,14 +192,9 @@ export class BrowserFileManager implements IFileManager {
     }
   }
 
-  async downloadAllFiles( {
-                                   transactionIds,
-                                   arweaveHost,
-                                   arweaveBaseUrls,
-                                   excludedTransactions,
-                                 }: DownloadAllFilesParams ): Promise<void> {
+  async downloadAllFiles(params: DownloadAllFilesParams): Promise<DownloadAllFilesResult> {
     const fileDownloader = new FileDownloader()
-    await fileDownloader.downloadAll({ transactionIds, arweaveHost, arweaveBaseUrls, excludedTransactions })
+    return fileDownloader.downloadAll(params)
   }
 
   async resizeImage( { filePath, width, height }: ResizeImageParams ): Promise<void> {

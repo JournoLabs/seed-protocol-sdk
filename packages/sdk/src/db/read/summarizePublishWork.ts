@@ -3,6 +3,7 @@
  * without building transactions or requiring a valid payload.
  */
 import { BaseFileManager } from '@/helpers'
+import { getStorageDirForDataType } from '@/helpers/storageDir'
 import { INTERNAL_PROPERTY_NAMES, ZERO_BYTES32 } from '@/helpers/constants'
 import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFromStorage'
 import { ModelPropertyDataTypes, normalizeDataType } from '@/helpers/property'
@@ -133,20 +134,6 @@ export function shouldAttestProperty(
   return true
 }
 
-function getStorageDirForDataType(dataType: string): string {
-  switch (normalizeDataType(dataType)) {
-    case 'Image':
-      return BaseFileManager.getFilesPath('images')
-    case 'File':
-      return BaseFileManager.getFilesPath('files')
-    case 'Html':
-      return BaseFileManager.getFilesPath('html')
-    case 'Json':
-      return BaseFileManager.getFilesPath('json')
-    default:
-      return BaseFileManager.getFilesPath('images')
-  }
-}
 
 async function addUpload(
   acc: PublishWorkSummary,
