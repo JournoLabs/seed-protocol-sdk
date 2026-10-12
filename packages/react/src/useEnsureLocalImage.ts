@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BaseArweaveClient,
+  getArweaveReadBaseUrls,
   ensureImageLocal,
   normalizeArweaveTxIdForEnsure,
   type EnsureImageLocalResult,
@@ -17,7 +18,15 @@ export type UseEnsureLocalImageParams = {
 
 export type UseEnsureLocalImageReturn = {
   status: 'idle' | 'loading' | EnsureImageLocalResult['status']
+  /** Current gateway URL for progressive display; advances through {@link gatewayHrefs} on {@link onGatewayError}. */
   gatewayHref: string | undefined
+  /**
+   * `/raw/{id}` on every read gateway, preferred ones first (`getArweaveReadBaseUrls`): a
+   * just-published image is only on the gateway it was uploaded through until it propagates.
+   */
+  gatewayHrefs: string[]
+  /** Call when `gatewayHref` failed to load (e.g. an `<img>` onError) to move to the next gateway. */
+  onGatewayError: () => void
   result: EnsureImageLocalResult | null
 }
 
@@ -65,14 +74,34 @@ export function useEnsureLocalImage(
     return candidate?.trim() || undefined
   }, [filename, refResolvedValue, stringValue])
 
-  const gatewayHref = useMemo(() => {
-    if (!transactionId) return undefined
+  const gatewayHrefs = useMemo(() => {
+    if (!transactionId) return []
+    const hrefs: string[] = []
     try {
-      return BaseArweaveClient.getRawUrl(transactionId)
+      for (const base of getArweaveReadBaseUrls()) {
+        const href = `${base.replace(/\/$/, '')}/raw/${transactionId}`
+        if (!hrefs.includes(href)) hrefs.push(href)
+      }
     } catch {
-      return undefined
+      /* gateway state not ready: fall back to the configured host below */
     }
+    try {
+      const configured = BaseArweaveClient.getRawUrl(transactionId)
+      if (configured && !hrefs.includes(configured)) hrefs.push(configured)
+    } catch {
+      /* no configured host */
+    }
+    return hrefs
   }, [transactionId])
+
+  const [gatewayIndex, setGatewayIndex] = useState(0)
+  useEffect(() => {
+    setGatewayIndex(0)
+  }, [gatewayHrefs])
+  const gatewayHref = gatewayHrefs[gatewayIndex]
+  const onGatewayError = useCallback(() => {
+    setGatewayIndex((i) => (i < gatewayHrefs.length ? i + 1 : i))
+  }, [gatewayHrefs])
 
   useEffect(() => {
     let cancelled = false
@@ -115,5 +144,5 @@ export function useEnsureLocalImage(
     }
   }, [enabled, transactionId, fileName, width])
 
-  return { status, gatewayHref, result }
+  return { status, gatewayHref, gatewayHrefs, onGatewayError, result }
 }

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 
 const VALID_TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     createdWidths: [480],
   })),
   getRawUrl: vi.fn((tx: string) => `https://arweave.net/raw/${tx}`),
+  // Default: no preferred gateways resolved, only the configured host.
+  getArweaveReadBaseUrls: vi.fn((): string[] => ['https://arweave.net']),
   pathExists: vi.fn(async () => false),
   getContentUrlFromPath: vi.fn(async () => undefined),
   getFilesPath: vi.fn((...parts: string[]) => parts.join('/')),
@@ -34,6 +36,7 @@ vi.mock('@seedprotocol/sdk', async () => {
     ...actual,
     ensureImageLocal: mocks.ensureImageLocal,
     normalizeArweaveTxIdForEnsure: mocks.normalizeArweaveTxIdForEnsure,
+    getArweaveReadBaseUrls: mocks.getArweaveReadBaseUrls,
     BaseArweaveClient: {
       ...((actual.BaseArweaveClient as object) ?? {}),
       getRawUrl: mocks.getRawUrl,
@@ -111,7 +114,29 @@ describe('SeedImage ensure / progressive gateway', () => {
       expect(img.getAttribute('src')).toBe(GATEWAY_URL)
     })
     expect(mocks.ensureImageLocal).toHaveBeenCalled()
-    expect(mocks.getRawUrl).toHaveBeenCalledWith(VALID_TX)
+  })
+
+  it('uses the preferred read gateway first and falls back to the next on error', async () => {
+    const PREFERRED = 'https://app.example.com/api/seed-gateway'
+    mocks.getArweaveReadBaseUrls.mockReturnValue([PREFERRED, 'https://ar-io.net', 'https://arweave.net'])
+    mocks.ensureImageLocal.mockImplementation(() => new Promise(() => {})) // stays ensuring
+    try {
+      render(
+        <SeedImage imageProperty={makeImageProperty()} filename={VALID_TX} width={480} ensure data-testid="seed-img" />,
+      )
+      const img = await screen.findByTestId('seed-img')
+      await waitFor(() => expect(img.getAttribute('src')).toBe(`${PREFERRED}/raw/${VALID_TX}`))
+
+      fireEvent.error(img)
+      await waitFor(() => expect(img.getAttribute('src')).toBe(`https://ar-io.net/raw/${VALID_TX}`))
+      fireEvent.error(img)
+      await waitFor(() => expect(img.getAttribute('src')).toBe(GATEWAY_URL))
+      // Every gateway failed: the placeholder, not a broken image.
+      fireEvent.error(img)
+      await waitFor(() => expect(img.getAttribute('src')).toMatch(/^data:image\/gif/))
+    } finally {
+      mocks.getArweaveReadBaseUrls.mockReturnValue(['https://arweave.net'])
+    }
   })
 
   it('does not call ensureImageLocal when ensure={false}', async () => {
