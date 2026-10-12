@@ -282,14 +282,15 @@ const getLatestItemStorageRow = async (
 /**
  * Local file of one ItemStorage child of a composite upload. Tries, in order: the property's
  * localStoragePath (context set by save / hydration / the live query), its newest metadata row's
- * refResolvedValue + localStorageDir, then the name saveItemStorage gives a new file
- * (`<seedUid or seedLocalId><extension>` in the model's storage directory).
+ * refResolvedValue + localStorageDir, then (for a local draft, or no row) the name
+ * saveItemStorage gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage
+ * directory). A published or derived row is never swapped for a local file of another name: that
+ * file would be older content.
  *
  * `missingLocalEdit` lists the paths tried when nothing exists although the newest row is a saved
  * local edit (no attestation uid, not derived from one, refResolvedValue set by saveItemStorage):
- * that edit's file should be there. A published or
- * derived row without a file (e.g. content not downloaded, or a property the composite never had)
- * is skipped as before.
+ * that edit's file should be there. A published or derived row without a file (e.g. content not
+ * downloaded, or a property the composite never had) is skipped as before.
  */
 export const resolveItemStorageChildFile = async (
   childProperty: IItemProperty<any>,
@@ -316,8 +317,11 @@ export const resolveItemStorageChildFile = async (
     if (fromRow) return { filePath: fromRow }
   }
 
+  const isLocalDraft = !!row && !row.uid && row.derivedFromUid == null
   const suffix = propertyDef?.filenameSuffix
-  const seedIds = [row?.seedUid, childProperty.seedUid, row?.seedLocalId, childProperty.seedLocalId]
+  const seedIds = !row || isLocalDraft
+    ? [row?.seedUid, childProperty.seedUid, row?.seedLocalId, childProperty.seedLocalId]
+    : []
   for (const seedId of seedIds) {
     if (!seedId) continue
     const derived = await tryPath(
@@ -328,8 +332,7 @@ export const resolveItemStorageChildFile = async (
 
   // saveItemStorage sets refResolvedValue on the draft row once the file is written. A draft row
   // without one is the empty row createNewItem makes for every model property: nothing to upload.
-  const isSavedLocalEdit = !!row && !row.uid && row.derivedFromUid == null && !!row.refResolvedValue
-  return isSavedLocalEdit ? { missingLocalEdit: tried } : {}
+  return isLocalDraft && !!row?.refResolvedValue ? { missingLocalEdit: tried } : {}
 }
 
 /**
