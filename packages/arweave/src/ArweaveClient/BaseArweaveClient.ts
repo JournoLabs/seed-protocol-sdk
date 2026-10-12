@@ -9,6 +9,7 @@ import type {
 } from '../types/arweave.js'
 import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '../constants.js'
 import type { IArweaveClient } from './IArweaveClient.js'
+import { hasArweaveContentReadTransform, transformArweaveContent } from '../content/arweaveContent.js'
 
 function parseGateway(input: string): { protocol: 'http' | 'https'; host: string } {
   const t = input.trim()
@@ -214,11 +215,25 @@ export abstract class BaseArweaveClient {
     return BaseArweaveClient.requireImpl().getTransactionStatus(transactionId)
   }
 
-  static getTransactionData(
+  /**
+   * Transaction data from the platform client. Decoded data goes through `transformArweaveContent`
+   * when a read transform is registered (see `content/arweaveContent.ts`); `decode: false` returns
+   * the encoded data as is.
+   */
+  static async getTransactionData(
     transactionId: string,
     options?: GetDataOptions
   ): Promise<Uint8Array | string> {
-    return BaseArweaveClient.requireImpl().getTransactionData(transactionId, options)
+    const data = await BaseArweaveClient.requireImpl().getTransactionData(transactionId, options)
+    if (options?.decode === false || !hasArweaveContentReadTransform()) {
+      return data
+    }
+    const isString = typeof data === 'string'
+    const { bytes } = await transformArweaveContent(
+      { bytes: isString ? new TextEncoder().encode(data) : data },
+      { transactionId },
+    )
+    return isString ? new TextDecoder().decode(bytes) : bytes
   }
 
   static getTransactionTags(transactionId: string): Promise<TransactionTag[]> {

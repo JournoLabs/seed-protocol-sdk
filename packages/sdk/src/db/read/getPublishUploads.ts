@@ -8,10 +8,10 @@ import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
-import { getContentHash } from '@/helpers/crypto'
+import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
 import { Item } from '@/Item/Item'
 import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
-import { PublishUpload } from '@/types/publish'
+import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
 import { eq } from 'drizzle-orm'
@@ -66,24 +66,40 @@ export const prepareArweaveTransaction = async (
   contentType?: string,
   additionalTags?: TransactionTag[],
 ): Promise<ArweaveTransaction> => {
-  const tags: TransactionTag[] = []
-  if (contentHash) {
-    tags.push({ name: 'Content-SHA-256', value: contentHash })
-    logger('contentHash', contentHash)
-    logger('adding content hash tag')
-  }
-  if (contentType) {
-    tags.push({ name: 'Content-Type', value: contentType })
-  }
-  if (additionalTags?.length) {
-    tags.push(...additionalTags)
-  }
+  const tags = buildArweaveContentTags(contentHash, contentType, additionalTags)
 
   const tx = await BaseArweaveClient.createTransaction(data, {
     tags: tags.length ? tags : undefined,
   })
 
   return tx
+}
+
+type UploadTarget = Pick<
+  PublishUploadData,
+  'itemPropertyName' | 'itemPropertyLocalId' | 'seedLocalId' | 'versionLocalId'
+>
+
+/**
+ * The one place an upload's bytes become a {@link PublishUploadData}: everything after this
+ * (Content-SHA-256, tags, the L1 transaction or the bundler DataItem, signing) works from what it
+ * returns. A future private-publish option that encrypts content belongs here, before the hash and
+ * tags are computed, so both publish paths pick it up.
+ */
+const buildPublishUploadData = (
+  data: Uint8Array,
+  contentType: string | undefined,
+  target: UploadTarget,
+  options: GetPublishUploadsOptions | undefined,
+): PublishUploadData => {
+  const contentHash = getContentSha256(data)
+  return {
+    data,
+    contentHash,
+    contentType,
+    tags: buildArweaveContentTags(contentHash, contentType, options?.arweaveUploadTags),
+    ...target,
+  }
 }
 
 
@@ -117,12 +133,11 @@ function decodeDataUriImage(dataUri: string): { mimeType: string; bytes: Uint8Ar
   }
 }
 
-const getStorageSeedUploads = async (
+const getStorageSeedUploadData = async (
   itemStorageSeedProperties: IItemProperty<any>[],
   options?: GetPublishUploadsOptions,
-) => {
-  const uploads: PublishUpload[] = []
-  const extra = options?.arweaveUploadTags
+): Promise<PublishUploadData[]> => {
+  const uploads: PublishUploadData[] = []
 
   for (const itemProperty of itemStorageSeedProperties) {
     const snapshot = itemProperty.getService().getSnapshot()
@@ -174,33 +189,29 @@ const getStorageSeedUploads = async (
     const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
     const fileContents = await toUint8Array(fileBuffer)
 
-    const contentHash = await getContentHash(fileContents)
-    const contentType = getMimeTypeFromPath(refResolvedValue)
-
-    const transaction = await prepareArweaveTransaction(
-      fileContents,
-      contentHash,
-      contentType,
-      extra,
+    uploads.push(
+      buildPublishUploadData(
+        fileContents,
+        getMimeTypeFromPath(refResolvedValue),
+        {
+          itemPropertyName: itemProperty.propertyName,
+          itemPropertyLocalId: itemProperty.localId,
+          seedLocalId,
+          versionLocalId: itemProperty.versionLocalId!,
+        },
+        options,
+      ),
     )
-
-    uploads.push({
-      itemPropertyName: itemProperty.propertyName,
-      itemPropertyLocalId: itemProperty.localId,
-      seedLocalId,
-      versionLocalId: itemProperty.versionLocalId!,
-      transactionToSign: transaction,
-    })
   }
 
   return uploads
 }
 
-async function appendCoPublishedImageUploads(
+async function appendCoPublishedImageUploadData(
   item: IItem<any>,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   options?: GetPublishUploadsOptions,
-): Promise<PublishUpload[]> {
+): Promise<PublishUploadData[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb || options?.onlyHtmlStorageSeedLocalIds?.length) return uploads
 
@@ -225,22 +236,21 @@ async function appendCoPublishedImageUploads(
       : ''
     const decoded = decodeDataUriImage(stValue)
 
-    const more: PublishUpload[] = []
+    const more: PublishUploadData[] = []
     if (decoded && st && st.localId && st.versionLocalId) {
-      const contentHash = await getContentHash(decoded.bytes)
-      const transaction = await prepareArweaveTransaction(
-        decoded.bytes,
-        contentHash,
-        decoded.mimeType,
-        options?.arweaveUploadTags,
+      more.push(
+        buildPublishUploadData(
+          decoded.bytes,
+          decoded.mimeType,
+          {
+            itemPropertyName: st.propertyName,
+            itemPropertyLocalId: st.localId,
+            seedLocalId: imageItem.seedLocalId,
+            versionLocalId: st.versionLocalId,
+          },
+          options,
+        ),
       )
-      more.push({
-        itemPropertyName: st.propertyName,
-        itemPropertyLocalId: st.localId,
-        seedLocalId: imageItem.seedLocalId,
-        versionLocalId: st.versionLocalId,
-        transactionToSign: transaction,
-      })
     }
     for (const u of more) {
       if (!seen.has(u.seedLocalId)) {
@@ -420,13 +430,12 @@ export async function itemHasPublishUploadCandidates(
   return false
 }
 
-const processUploadProperty = async (
+const processUploadPropertyData = async (
   uploadProperty: UploadProperty,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
-): Promise<PublishUpload[]> => {
-  const extra = options?.arweaveUploadTags
+): Promise<PublishUploadData[]> => {
   const itemProperty = uploadProperty.itemProperty
 
   const childUploads: ChildUploadData[] = []
@@ -450,7 +459,6 @@ const processUploadProperty = async (
   }
 
   let fileContents
-  let transaction: ArweaveTransaction
 
   if (!childUploads || childUploads.length === 0) {
     if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -512,21 +520,12 @@ const processUploadProperty = async (
 
   const uint8Array = new Uint8Array(fileContents)
 
-  const contentHash = await getContentHash(uint8Array)
-
   let contentType: string | undefined
   if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
     contentType = getMimeTypeFromPath(relatedItemProperty.localStoragePath)
   } else if (childUploads.length > 0) {
     contentType = 'application/octet-stream'
   }
-
-  transaction = await prepareArweaveTransaction(
-    uint8Array,
-    contentHash,
-    contentType,
-    extra,
-  )
 
   let itemPropertyLocalId = relatedItemProperty
     ? relatedItemProperty.localId
@@ -535,13 +534,19 @@ const processUploadProperty = async (
     ? relatedItemProperty.propertyName
     : itemProperty.propertyName
 
-  uploads.push({
-    itemPropertyName,
-    itemPropertyLocalId,
-    seedLocalId: itemProperty.seedLocalId!,
-    versionLocalId: itemProperty.versionLocalId!,
-    transactionToSign: transaction,
-  })
+  uploads.push(
+    buildPublishUploadData(
+      uint8Array,
+      contentType,
+      {
+        itemPropertyName,
+        itemPropertyLocalId,
+        seedLocalId: itemProperty.seedLocalId!,
+        versionLocalId: itemProperty.versionLocalId!,
+      },
+      options,
+    ),
+  )
 
   return uploads
 }
@@ -551,12 +556,12 @@ const isDraftItem = (item: IItem<any>): boolean =>
   !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
 
 /** One item's own uploads: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
-const getItemOwnPublishUploads = async (
+const getItemOwnPublishUploadData = async (
   item: IItem<any>,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   relatedItemProperty: IItemProperty<any> | undefined,
   options: GetPublishUploadsOptions | undefined,
-) => {
+): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
 
@@ -564,11 +569,11 @@ const getItemOwnPublishUploads = async (
   // the related items published with it (whose Html can embed images too).
   const onlyDeferredHtml = !!options?.onlyHtmlStorageSeedLocalIds?.length
   if (onlyDeferredHtml) {
-    const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
     uploads.push(...storageSeedUploads)
   } else {
     for (const uploadProperty of itemUploadProperties) {
-      uploads = await processUploadProperty(
+      uploads = await processUploadPropertyData(
         uploadProperty,
         uploads,
         relatedItemProperty,
@@ -576,12 +581,12 @@ const getItemOwnPublishUploads = async (
       )
     }
 
-    const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
     uploads.push(...storageSeedUploads)
 
     // Images embedded in this item's Html: the published item's, and a related draft's published with it.
     if (!relatedItemProperty || isDraftItem(item)) {
-      uploads = await appendCoPublishedImageUploads(item, uploads, options)
+      uploads = await appendCoPublishedImageUploadData(item, uploads, options)
     }
   }
 
@@ -626,7 +631,7 @@ const getItemOwnPublishUploads = async (
       )
     }
 
-    uploads = await getItemOwnPublishUploads(relatedItem, uploads, relationProperty, {
+    uploads = await getItemOwnPublishUploadData(relatedItem, uploads, relationProperty, {
       ...options,
       skipRelationRecursion: true,
     })
@@ -636,16 +641,19 @@ const getItemOwnPublishUploads = async (
 }
 
 /**
- * Arweave uploads for a publish of `item`: its own, and those of every draft item the publish
- * carries along (reachable through relation and list properties, see publishDraftGraph.ts).
+ * Upload data for a publish of `item`: its own, and that of every draft item the publish carries
+ * along (reachable through relation and list properties, see publishDraftGraph.ts). Raw bytes plus
+ * Content-SHA-256 / Content-Type / configured tags; no Arweave transaction is created, so this
+ * does not touch the network. The bundler path in `@seedprotocol/publish` signs these as
+ * DataItems; {@link getPublishUploads} turns them into L1 transactions.
  */
-export const getPublishUploads = async (
+export const getPublishUploadData = async (
   item: IItem<any>,
-  uploads: PublishUpload[] = [],
+  uploads: PublishUploadData[] = [],
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
-) => {
-  uploads = await getItemOwnPublishUploads(item, uploads, relatedItemProperty, options)
+): Promise<PublishUploadData[]> => {
+  uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options)
 
   if (options?.skipRelationRecursion) {
     return uploads
@@ -653,8 +661,34 @@ export const getPublishUploads = async (
 
   const { drafts } = await getPublishDraftGraph(item, { strict: true })
   for (const { item: draft, via, viaList } of drafts) {
-    uploads = await getItemOwnPublishUploads(draft, uploads, viaList ? undefined : via, options)
+    uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options)
   }
 
+  return uploads
+}
+
+/**
+ * Arweave L1 transactions for a publish of `item`: {@link getPublishUploadData}, each made into an
+ * unsigned transaction carrying the same tags.
+ */
+export const getPublishUploads = async (
+  item: IItem<any>,
+  uploads: PublishUpload[] = [],
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadsOptions,
+): Promise<PublishUpload[]> => {
+  const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
+  for (const upload of uploadData) {
+    const tx = await BaseArweaveClient.createTransaction(upload.data, {
+      tags: upload.tags.length ? upload.tags : undefined,
+    })
+    uploads.push({
+      itemPropertyName: upload.itemPropertyName,
+      itemPropertyLocalId: upload.itemPropertyLocalId,
+      seedLocalId: upload.seedLocalId,
+      versionLocalId: upload.versionLocalId,
+      transactionToSign: tx,
+    })
+  }
   return uploads
 }

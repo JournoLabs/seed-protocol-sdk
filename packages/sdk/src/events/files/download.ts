@@ -395,6 +395,7 @@ export const downloadAllFilesBinaryRequestHandler = async (
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('html'))
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('json'))
   await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
+  await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('files'))
 
   const excludedTransactions = await getExcludedTransactions()
   const fromEas = parseTransactionIdsFromMetadata(filesMetadata ?? [], excludedTransactions)

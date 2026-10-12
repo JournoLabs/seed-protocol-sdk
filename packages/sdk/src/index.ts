@@ -250,6 +250,10 @@ export {
   getResolvedArweaveReadBaseUrls,
   fetchArweaveRawFromBaseUrl,
   fetchArweaveRawTextAcrossGateways,
+  setArweaveContentReadTransform,
+  hasArweaveContentReadTransform,
+  transformArweaveContent,
+  readArweaveContentResponse,
 } from '@seedprotocol/arweave'
 export type {
   SeedGatewayTransportMode,
@@ -263,6 +267,9 @@ export type {
   ArweaveUploadStatusResponse,
   ArweaveGatewayTransactionQueryResult,
   ArweaveReadBaseUrlOptions,
+  ArweaveContent,
+  ArweaveContentReadContext,
+  ArweaveContentReadTransform,
 } from '@seedprotocol/arweave'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
@@ -310,8 +317,17 @@ export {
 } from './db/read/publishDraftGraph'
 export {
   itemHasPublishUploadCandidates,
+  getPublishUploadData,
   type GetPublishUploadsOptions,
 } from './db/read/getPublishUploads'
+export type { PublishUploadData } from './types/publish'
+export {
+  CONTENT_SHA256_TAG,
+  CONTENT_TYPE_TAG,
+  getContentSha256,
+  contentSha256TagMatches,
+  buildArweaveContentTags,
+} from './helpers/arweaveContentTags'
 export {
   summarizePublishWork,
   getUnpublishedRelatedItems,
