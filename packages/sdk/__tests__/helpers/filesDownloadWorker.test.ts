@@ -5,7 +5,13 @@ const TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 const PREFERRED = 'https://app.example.com/api/seed-gateway'
 const HOST = 'https://arweave.net'
 
-type Posted = { message?: string; transactionId?: string; filePath?: string; done?: boolean }
+type Posted = {
+  message?: string
+  transactionId?: string
+  filePath?: string
+  done?: boolean
+  error?: { name: string; message: string }
+}
 
 /**
  * Runs the worker source in this realm with a fake OPFS, then sends it one message.
@@ -13,8 +19,8 @@ type Posted = { message?: string; transactionId?: string; filePath?: string; don
  */
 async function runWorker(
   data: Record<string, unknown>,
-  fetchImpl: (url: string) => Promise<Response>,
-  opfs: { existing?: Record<string, string>; failWrite?: boolean } = {},
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+  opfs: { existing?: Record<string, string>; failWrite?: boolean | ((name: string) => boolean) } = {},
 ): Promise<{ saved: Map<string, string>; posted: Posted[]; fetched: string[]; closed: string[] }> {
   const encoder = new TextEncoder()
   const bytes = new Map<string, Uint8Array>(
@@ -32,7 +38,9 @@ async function runWorker(
       createSyncAccessHandle: async () => ({
         truncate: (size: number) => bytes.set(name, (bytes.get(name) ?? new Uint8Array()).slice(0, size)),
         write: (buf: Uint8Array, { at = 0 }: { at?: number } = {}) => {
-          if (opfs.failWrite) throw new DOMException('disk full', 'QuotaExceededError')
+          if (typeof opfs.failWrite === 'function' ? opfs.failWrite(name) : opfs.failWrite) {
+            throw new DOMException('disk full', 'QuotaExceededError')
+          }
           const current = bytes.get(name) ?? new Uint8Array()
           const next = new Uint8Array(Math.max(current.length, at + buf.length))
           next.set(current)
@@ -50,9 +58,9 @@ async function runWorker(
   vi.stubGlobal('postMessage', (m: Posted) => posted.push(m))
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string | URL) => {
+    vi.fn(async (url: string | URL, init?: RequestInit) => {
       fetched.push(String(url))
-      return fetchImpl(String(url))
+      return fetchImpl(String(url), init)
     }),
   )
 
@@ -141,16 +149,65 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     expect(saved.get(`${TX}.json`)).toBe('{"a":1}')
   })
 
-  it('closes the sync access handle when the write fails', async () => {
-    await expect(
-      runWorker(
-        { transactionIds: [TX], arweaveHost: HOST },
-        async () => new Response('{"a":1}', { status: 200 }),
-        { failWrite: true },
-      ),
-    ).rejects.toMatchObject({ name: 'QuotaExceededError' })
+  it('closes the sync access handle when the write fails, reports the file and still finishes', async () => {
+    const { posted } = await runWorker(
+      { transactionIds: [TX], arweaveHost: HOST },
+      async () => new Response('{"a":1}', { status: 200 }),
+      { failWrite: true },
+    )
 
     expect(lastClosed).toEqual([`${TX}.json`])
+    expect(posted).toContainEqual({
+      message: 'fileError',
+      transactionId: TX,
+      error: { name: 'QuotaExceededError', message: 'disk full' },
+    })
+    expect(posted.at(-1)).toMatchObject({ done: true })
+  })
+
+  it('one failing file does not stop the rest of the batch', async () => {
+    const TX2 = 'A'.repeat(43)
+    const { saved, posted } = await runWorker(
+      { transactionIds: [TX, TX2], arweaveHost: HOST },
+      async (url) => new Response(url.includes(TX2) ? '{"b":2}' : '{"a":1}', { status: 200 }),
+      { failWrite: (name) => name.startsWith(TX) },
+    )
+
+    expect(saved.get(`${TX2}.json`)).toBe('{"b":2}')
+    expect(posted.filter((m) => m.message === 'fileError').map((m) => m.transactionId)).toEqual([TX])
+    expect(posted.filter((m) => m.message === 'fileProcessed').map((m) => m.transactionId)).toEqual([TX, TX2])
+    expect(posted.at(-1)).toMatchObject({ done: true })
+  })
+
+  it('gives up on a gateway that never answers and tries the next one', async () => {
+    vi.useFakeTimers()
+    try {
+      const run = runWorker(
+        { transactionIds: [TX], arweaveHost: HOST, arweaveBaseUrls: [PREFERRED] },
+        (url, init) =>
+          url.startsWith(PREFERRED)
+            ? new Promise<Response>((_, reject) => {
+                init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+              })
+            : Promise.resolve(new Response('{"a":1}', { status: 200 })),
+      )
+      await vi.advanceTimersByTimeAsync(60_000)
+      const { saved, posted } = await run
+      expect(saved.get(`${TX}.json`)).toBe('{"a":1}')
+      expect(posted.at(-1)).toMatchObject({ done: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('posts an error instead of done when the batch itself throws', async () => {
+    // A malformed job (no transaction list) fails outside the per-file handling.
+    const { posted } = await runWorker({ transactionIds: undefined, arweaveHost: HOST }, async () =>
+      new Response('', { status: 404 }),
+    )
+
+    expect(posted.some((m) => m.done)).toBe(false)
+    expect(posted.at(-1)).toMatchObject({ message: 'filesDownload failed', error: { name: 'TypeError' } })
   })
 
   describe('where content lands', () => {
