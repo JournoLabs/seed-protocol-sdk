@@ -49,6 +49,7 @@ export class FileDownloader {
     arweaveBaseUrls,
     excludedTransactions,
     expectedContentHashes,
+    compositeChildPaths,
   }: DownloadAllFilesParams): Promise<DownloadAllFilesResult> => {
     // One download per instance at a time: a newer call replaces the older one, which rejects
     // instead of waiting forever on a terminated worker.
@@ -154,6 +155,11 @@ export class FileDownloader {
           return
         }
 
+        if (data.message === 'compositeChildUnrouted') {
+          // No local ItemStorage property for this child (e.g. its item is not synced yet).
+          logger(`composite ${data.transactionId}: no local path for child "${data.name}"; not saved`)
+        }
+
         if (data.message === 'contentVerified') {
           verified.add(data.transactionId)
         }
@@ -205,6 +211,7 @@ export class FileDownloader {
           arweaveHost,
           arweaveBaseUrls,
           expectedContentHashes,
+          compositeChildPaths,
           debug: logger.enabled,
           filesRoot: BaseFileManager.getWorkingDir(),
         });

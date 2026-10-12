@@ -172,4 +172,18 @@ describe.skipIf(typeof window !== 'undefined')('FileDownloader', () => {
       failedTransactionIds: [],
     })
   })
+
+  it('passes composite child paths to the worker and tolerates an unrouted child', async () => {
+    const compositeChildPaths = { 'tx-1': { cover: 'files/tx-1.bin' } }
+    const p = new FileDownloader().downloadAll({ ...params, compositeChildPaths })
+    const worker = lastWorker()
+    expect(worker.posted[0]).toMatchObject({ compositeChildPaths })
+    worker.emit({ message: 'compositeChildUnrouted', transactionId: 'tx-2', name: 'notes' })
+    worker.emit({ done: true })
+    await expect(p).resolves.toEqual({
+      verifiedTransactionIds: [],
+      hashMismatchTransactionIds: [],
+      failedTransactionIds: [],
+    })
+  })
 })

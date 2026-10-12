@@ -377,12 +377,26 @@ const decodeComposite = (bytes: Uint8Array): { name: string; bytes: Uint8Array }
   return children
 }
 
+/**
+ * A composite child's path from the page, relative to the files root. Only plain relative paths
+ * are taken: nothing absolute, no `.` / `..` segments, no backslashes.
+ */
+const safeRelativePath = (path: unknown): string | undefined => {
+  if (typeof path !== 'string' || !path || path.startsWith('/') || path.indexOf('\\') !== -1) return undefined
+  const segments = path.split('/')
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..') return undefined
+  }
+  return path
+}
+
 const downloadFiles = async ({
   transactionIds,
   arweaveHost,
   arweaveBaseUrls,
   filesRoot = '/files',
   expectedContentHashes,
+  compositeChildPaths,
 }: {
   transactionIds: string[],
   arweaveHost: string,
@@ -390,6 +404,12 @@ const downloadFiles = async ({
   filesRoot?: string,
   /** Content-SHA-256 tag values by transaction id; downloads with one are verified before saving. */
   expectedContentHashes?: Record<string, string>,
+  /**
+   * Where each child of a composite goes, by transaction id then child (property) name: a path
+   * relative to the files root, the one the SDK reads that ItemStorage property from
+   * (`<storage dir>/<txId><extension>`). Children without one fall back to the html / json layout.
+   */
+  compositeChildPaths?: Record<string, Record<string, string>>,
 }) => {
 
   // Preferred / resolved gateways first, then the configured host; deduped.
@@ -404,7 +424,13 @@ const downloadFiles = async ({
   for (const transactionId of transactionIds) {
     // One bad file (failed OPFS write, quota, malformed content) must not stall or abort the batch.
     try {
-      await downloadFile(transactionId, baseUrls, filesRoot, expectedContentHashes?.[transactionId])
+      await downloadFile(
+        transactionId,
+        baseUrls,
+        filesRoot,
+        expectedContentHashes?.[transactionId],
+        compositeChildPaths?.[transactionId],
+      )
     } catch (error) {
       globalThis.postMessage({ message: 'fileError', transactionId, error: errorInfo(error) })
     }
@@ -418,6 +444,7 @@ const downloadFile = async (
   baseUrls: string[],
   filesRoot: string,
   expectedHash: string | undefined,
+  childPaths: Record<string, string> | undefined,
 ) => {
   const encoder = new TextEncoder()
   const fetched = await fetchRaw(baseUrls, transactionId, expectedHash)
@@ -462,12 +489,20 @@ const downloadFile = async (
       return
     }
     for (const child of children) {
-      // Children are routed by property name; only the html / json ItemStorage layout is known here.
-      if (child.name === 'html') {
+      // Children are routed by property name: to the path the page gave for it (the model's
+      // ItemStorage directory and extension), else the html / json layout older SDKs assumed.
+      const routed = childPaths && Object.prototype.hasOwnProperty.call(childPaths, child.name)
+        ? safeRelativePath(childPaths[child.name])
+        : undefined
+      if (routed) {
+        await saveBufferToOPFS(getFilesPath(filesRoot, routed), child.bytes)
+      } else if (child.name === 'html') {
         await saveBufferToOPFS(getFilesPath(filesRoot, 'html', `${transactionId}.html`), child.bytes)
-      }
-      if (child.name === 'json') {
+      } else if (child.name === 'json') {
         await saveBufferToOPFS(getFilesPath(filesRoot, 'json', `${transactionId}.json`), child.bytes)
+      } else {
+        // No local item knows this child's property yet; a later download (after sync) places it.
+        globalThis.postMessage({ message: 'compositeChildUnrouted', transactionId, name: child.name })
       }
     }
     return
