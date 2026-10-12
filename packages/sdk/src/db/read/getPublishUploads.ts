@@ -20,6 +20,7 @@ import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
 import { resolveUploadMimeType } from '@/helpers/mimeTypes'
 import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
+import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
 
 const logger = debug('seedSdk:item:getPublishUploads')
 
@@ -474,31 +475,26 @@ const processUploadPropertyData = async (
   }
 
   if (childUploads.length > 0) {
-    const separator = '===FILE_SEPARATOR==='
-    // let compositeFileContents = `${itemProperty.propertyName}${separator}${mainFileContents}`
-    let compositeFileContents = ''
-
+    // Composite of the item's ItemStorage files; see helpers/compositeUpload.ts for the format.
+    // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
+    const children: CompositeChild[] = []
+    const fs = await BaseFileManager.getFs()
     for (const childUpload of childUploads) {
-      let childUploadContents
-
-      const fs = await BaseFileManager.getFs()
-
+      let childUploadContents: Uint8Array | string
       try {
-        childUploadContents = await fs.promises.readFile(
-          childUpload.localStoragePath,
-        )
+        childUploadContents = await fs.promises.readFile(childUpload.localStoragePath)
       } catch (e) {
         childUploadContents = fs.readFileSync(childUpload.localStoragePath)
       }
-
-      compositeFileContents += `${separator}${childUpload.propertyName}${separator}${childUploadContents}`
+      children.push({
+        name: childUpload.propertyName,
+        bytes:
+          typeof childUploadContents === 'string'
+            ? new TextEncoder().encode(childUploadContents)
+            : new Uint8Array(childUploadContents),
+      })
     }
-
-    if (typeof document !== 'undefined') {
-      fileContents = new TextEncoder().encode(compositeFileContents)
-    } else {
-      fileContents = Buffer.from(compositeFileContents)
-    }
+    fileContents = encodeCompositeUpload(children)
   }
 
   if (!fileContents) {

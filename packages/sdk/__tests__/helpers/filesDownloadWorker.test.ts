@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import filesDownload from '@/browser/workers/filesDownload'
+import { encodeCompositeUpload } from '@/helpers/compositeUpload'
 
 const TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 const PREFERRED = 'https://app.example.com/api/seed-gateway'
@@ -21,7 +22,13 @@ async function runWorker(
   data: Record<string, unknown>,
   fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
   opfs: { existing?: Record<string, string>; failWrite?: boolean | ((name: string) => boolean) } = {},
-): Promise<{ saved: Map<string, string>; posted: Posted[]; fetched: string[]; closed: string[] }> {
+): Promise<{
+  saved: Map<string, string>
+  raw: Map<string, Uint8Array>
+  posted: Posted[]
+  fetched: string[]
+  closed: string[]
+}> {
   const encoder = new TextEncoder()
   const bytes = new Map<string, Uint8Array>(
     Object.entries(opfs.existing ?? {}).map(([name, text]) => [name, encoder.encode(text)]),
@@ -76,7 +83,7 @@ async function runWorker(
 
   const decoder = new TextDecoder()
   const saved = new Map([...bytes].map(([name, buf]) => [name, decoder.decode(buf)] as [string, string]))
-  return { saved, posted, fetched, closed }
+  return { saved, raw: bytes, posted, fetched, closed }
 }
 
 let lastClosed: string[] = []
@@ -270,6 +277,50 @@ describe.skipIf(typeof window !== 'undefined')('filesDownload worker', () => {
     it('a data:image URI is still decoded into images/', async () => {
       const b64 = btoa(String.fromCharCode(...PNG))
       expect(await savedPaths(`data:image/png;base64,${b64}`)).toEqual([`/files/images/${TX}.png`])
+    })
+  })
+
+  describe('composite uploads', () => {
+    const runComposite = async (body: Uint8Array) =>
+      runWorker({ transactionIds: [TX], arweaveHost: HOST }, async () =>
+        new Response(body, { status: 200, headers: { 'content-type': 'application/octet-stream' } }),
+      )
+
+    it('decodes what the SDK encoder writes, binary children included', async () => {
+      const html = '<p>héllo</p>'
+      const json = new Uint8Array([0x7b, 0x7d, 0x00, 0xff]) // not valid text: base64-framed
+      const body = encodeCompositeUpload([
+        { name: 'html', bytes: new TextEncoder().encode(html) },
+        { name: 'json', bytes: json },
+      ])
+      const { raw, posted } = await runWorker({ transactionIds: [TX], arweaveHost: HOST }, async () =>
+        new Response(body, { status: 200, headers: { 'content-type': 'application/octet-stream' } }),
+      )
+      expect(posted.filter((m) => m.message === 'fileSaved').map((m) => m.filePath)).toEqual([
+        `/files/html/${TX}.html`,
+        `/files/json/${TX}.json`,
+      ])
+      expect(new TextDecoder().decode(raw.get(`${TX}.html`))).toBe(html)
+      expect(Array.from(raw.get(`${TX}.json`)!)).toEqual(Array.from(json))
+    })
+
+    it('still reads a legacy text composite', async () => {
+      const legacy = new TextEncoder().encode(
+        '===FILE_SEPARATOR===html===FILE_SEPARATOR===<h1>t</h1>===FILE_SEPARATOR===json===FILE_SEPARATOR===' +
+          '{"b":2}',
+      )
+      const { posted } = await runComposite(legacy)
+      expect(posted.filter((m) => m.message === 'fileSaved').map((m) => m.filePath)).toEqual([
+        `/files/html/${TX}.html`,
+        `/files/json/${TX}.json`,
+      ])
+    })
+
+    it('a composite of mostly non-ASCII text is still recognised', async () => {
+      const cjk = '<p>' + '你好世界'.repeat(200) + '</p>'
+      const body = new TextEncoder().encode(`===FILE_SEPARATOR===html===FILE_SEPARATOR===${cjk}`)
+      const { saved } = await runComposite(body)
+      expect(saved.get(`${TX}.html`)).toBe(cjk)
     })
   })
 

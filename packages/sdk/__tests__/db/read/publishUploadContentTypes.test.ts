@@ -12,6 +12,8 @@ import {
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForIdle } from '../../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
+import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { decodeCompositeUpload } from '@/helpers/compositeUpload'
 
 /**
  * Uploads carry a Content-Type for every file type the SDK knows, not just images / html / json:
@@ -34,6 +36,15 @@ const schemaFile = () => ({
         report: { id: generateId(), type: 'File' },
         audio: { id: generateId(), type: 'File' },
         untitled: { id: generateId(), type: 'File' },
+      },
+    },
+    UploadTypesPost: {
+      id: generateId(),
+      properties: {
+        title: { id: generateId(), type: 'Text' },
+        storageTransactionId: { id: generateId(), type: 'Text' },
+        html: { id: generateId(), type: 'Text', storage: { type: 'ItemStorage', path: '/html', extension: '.html' } },
+        cover: { id: generateId(), type: 'Text', storage: { type: 'ItemStorage', path: '/files', extension: '.bin' } },
       },
     },
   },
@@ -64,7 +75,7 @@ testDescribe('publish upload Content-Type', () => {
     await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
     const schema = schemaFile()
     await importJsonSchema({ contents: JSON.stringify(schema) }, schema.version)
-    await ensureModelUidsForGetPublishPayloadTest(['UploadTypesDoc', 'File'], SCHEMA_NAME)
+    await ensureModelUidsForGetPublishPayloadTest(['UploadTypesDoc', 'UploadTypesPost', 'File'], SCHEMA_NAME)
     await ensurePropertySchemaUidsForGetPublishPayloadTest(schema as any)
     vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(
       async (_data: unknown, options?: { tags?: { name: string; value: string }[] }) =>
@@ -99,5 +110,38 @@ testDescribe('publish upload Content-Type', () => {
     const txs = await getPublishUploads(item as any)
     expect(txs.map((t) => t.itemPropertyLocalId)).toEqual(uploads.map((u) => u.itemPropertyLocalId))
     expect(txs.map((t) => (t.transactionToSign as any).tags)).toEqual(uploads.map((u) => u.tags))
+  }, 90000)
+
+  it('a composite of ItemStorage files keeps a binary child intact', async () => {
+    const post = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'UploadTypesPost', title: 'composite' } as any)
+    await waitForIdle(post, 'Item', 15000)
+    await waitForPropertyInstances(post)
+
+    const html = '<p>héllo 你好</p>'
+    const cover = new Uint8Array(256).map((_, i) => 255 - i) // invalid UTF-8, NUL included
+    // Put the ItemStorage files on disk and point the properties at them (what saveItemStorage plus
+    // the browser's metadata live query do). Text validation keeps binary out of the property API,
+    // so a binary child only happens when the file itself is binary, e.g. one written by other code.
+    const fs = await BaseFileManager.getFs()
+    const place = async (propertyName: string, dir: string, fileName: string, bytes: Uint8Array) => {
+      await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(dir))
+      await fs.promises.writeFile(BaseFileManager.getFilesPath(dir, fileName), bytes)
+      post.allProperties[propertyName]!.getService().send({
+        type: 'updateContext',
+        refResolvedValue: fileName,
+        localStorageDir: `/${dir}`,
+      })
+    }
+    await place('html', 'html', `${post.seedLocalId}.html`, new TextEncoder().encode(html))
+    await place('cover', 'files', `${post.seedLocalId}.bin`, cover)
+    expect(post.allProperties.cover!.localStoragePath).toBeTruthy()
+
+    const uploads = await getPublishUploadData(post as any)
+    const composite = uploads.find((u) => u.itemPropertyName === 'storageTransactionId')
+    expect(composite?.contentType).toBe('application/octet-stream')
+    const children = decodeCompositeUpload(composite!.data)!
+    const byName = Object.fromEntries(children.map((c) => [c.name, c.bytes]))
+    expect(new TextDecoder().decode(byName.html)).toBe(html)
+    expect(Array.from(byName.cover!)).toEqual(Array.from(cover))
   }, 90000)
 })

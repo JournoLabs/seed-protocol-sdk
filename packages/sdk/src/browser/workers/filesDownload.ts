@@ -283,6 +283,42 @@ const decodeBase64 = (base64: string): Uint8Array | undefined => {
   }
 }
 
+/**
+ * Composite format: a copy of `helpers/compositeUpload.ts` (this worker cannot import; a test
+ * decodes the SDK encoder's output through this worker). Children are
+ * `===FILE_SEPARATOR===<name>===FILE_SEPARATOR===<text>`; a binary child's name ends in `;base64`
+ * and its content is base64.
+ */
+const COMPOSITE_SEPARATOR = '===FILE_SEPARATOR==='
+const COMPOSITE_BASE64_SUFFIX = ';base64'
+
+const startsWithCompositeSeparator = (bytes: Uint8Array): boolean => {
+  if (bytes.length < COMPOSITE_SEPARATOR.length) return false
+  for (let i = 0; i < COMPOSITE_SEPARATOR.length; i++) {
+    if (bytes[i] !== COMPOSITE_SEPARATOR.charCodeAt(i)) return false
+  }
+  return true
+}
+
+const decodeComposite = (bytes: Uint8Array): { name: string; bytes: Uint8Array }[] | undefined => {
+  const parts = new TextDecoder('utf-8').decode(bytes).split(COMPOSITE_SEPARATOR).slice(1)
+  if (parts.length % 2 !== 0) return undefined
+  const encoder = new TextEncoder()
+  const children: { name: string; bytes: Uint8Array }[] = []
+  for (let i = 0; i < parts.length; i += 2) {
+    const rawName = parts[i]
+    const content = parts[i + 1]
+    if (rawName.endsWith(COMPOSITE_BASE64_SUFFIX)) {
+      const decoded = decodeBase64(content.replace(/\s/g, ''))
+      if (!decoded) return undefined
+      children.push({ name: rawName.slice(0, -COMPOSITE_BASE64_SUFFIX.length), bytes: decoded })
+    } else {
+      children.push({ name: rawName, bytes: encoder.encode(content) })
+    }
+  }
+  return children
+}
+
 const downloadFiles = async ({
   transactionIds,
   arweaveHost,
@@ -342,37 +378,31 @@ const downloadFile = async (transactionId: string, baseUrls: string[], filesRoot
       data,
     )
 
-  let dataString: string | undefined
-  if (!isBinary(bytes)) {
-    dataString = new TextDecoder('utf-8').decode(bytes)
-  }
-
-  // Composite upload (several child files in one transaction); uploaded as application/octet-stream.
-  if (dataString && dataString.startsWith('===FILE_SEPARATOR===')) {
-    const dataStringParts = dataString
-      .split('===FILE_SEPARATOR===')
-      .slice(1)
-
-    if (dataStringParts.length % 2 !== 0) {
+  // Composite upload (several ItemStorage files in one transaction, uploaded as
+  // application/octet-stream). Detected on the bytes: a composite of mostly non-ASCII text (e.g.
+  // CJK html) would fail the isBinary heuristic below.
+  if (startsWithCompositeSeparator(bytes)) {
+    const children = decodeComposite(bytes)
+    if (!children) {
       // Not a composite after all: keep the bytes rather than fail the whole download.
       await saveToFiles(bytes)
       return
     }
-
-    for (let i = 0; i < dataStringParts.length; i += 2) {
-      const partType = dataStringParts[i]
-      const content = dataStringParts[i + 1]
-      if (partType === 'html') {
-        const fileName = `${transactionId}.html`
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'html', fileName), encoder.encode(content))
+    for (const child of children) {
+      // Children are routed by property name; only the html / json ItemStorage layout is known here.
+      if (child.name === 'html') {
+        await saveBufferToOPFS(getFilesPath(filesRoot, 'html', `${transactionId}.html`), child.bytes)
       }
-      if (partType === 'json') {
-        const fileName = `${transactionId}.json`
-        await saveBufferToOPFS(getFilesPath(filesRoot, 'json', fileName), encoder.encode(content))
+      if (child.name === 'json') {
+        await saveBufferToOPFS(getFilesPath(filesRoot, 'json', `${transactionId}.json`), child.bytes)
       }
     }
-
     return
+  }
+
+  let dataString: string | undefined
+  if (!isBinary(bytes)) {
+    dataString = new TextDecoder('utf-8').decode(bytes)
   }
 
   // The upload said what it is (Content-Type tag, served as the response header).
