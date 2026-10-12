@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { Item } from '@/Item/Item'
+import { ItemProperty } from '@/ItemProperty/ItemProperty'
 import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
@@ -55,6 +56,32 @@ const metadataRow = async (seedLocalId: string, propertyName: string) => {
     .where(and(eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, propertyName)))
   expect(rows).toHaveLength(1)
   return rows[0]!
+}
+
+/** Cold load: a fresh Item and fresh property instances built from the DB, not cached ones. */
+const coldLoad = async (seedLocalId: string, previous?: Item<any>) => {
+  previous?.unload()
+  ItemProperty.clearInstanceCacheForItem(seedLocalId)
+  const item = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'CreatePost', seedLocalId } as any)
+  await waitForIdle(item, 'Item', 15000)
+  await waitForPropertyInstances(item)
+  return item
+}
+
+/**
+ * An item whose html row is what Item.create / createNewItem stored before the fix: the content in
+ * property_value, no file reference, no file. No instance is loaded, as for data from an earlier session.
+ */
+const createLegacyItem = async (html: string) => {
+  const { seedLocalId } = await createNewItem({ modelName: 'CreatePost', title: 'legacy' } as any)
+  const before = await metadataRow(seedLocalId, 'html')
+  await BaseDb.getAppDb()
+    .update(metadata)
+    .set({ propertyValue: html, refResolvedValue: null, localStorageDir: null })
+    .where(eq(metadata.localId, before.localId!))
+  const filePath = BaseFileManager.getFilesPath('html', `${seedLocalId}.html`)
+  expect(await BaseFileManager.pathExists(filePath)).toBe(false)
+  return { seedLocalId, filePath }
 }
 
 testDescribe('ItemStorage values given at creation', () => {
@@ -115,14 +142,9 @@ testDescribe('ItemStorage values given at creation', () => {
   it('reading the value back from a fresh load returns the content', async () => {
     const html = '<p>read me back</p>'
     const post = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'CreatePost', title: 'reload', html } as any)
-    const seedLocalId = post.seedLocalId
-    post.unload()
-
-    const reloaded = await Item.find({ seedLocalId, modelName: 'CreatePost' })
-    expect(reloaded).toBeTruthy()
-    await waitForIdle(reloaded as any, 'Item', 15000)
-    await waitForPropertyInstances(reloaded as any)
-    await vi.waitFor(() => expect(reloaded!.allProperties['html']?.value).toBe(html), { timeout: 15000 })
+    const reloaded = await coldLoad(post.seedLocalId, post)
+    expect(reloaded).not.toBe(post)
+    await vi.waitFor(() => expect(reloaded.allProperties['html']?.value).toBe(html), { timeout: 15000 })
   }, 90000)
 
   it('createNewItem writes ItemStorage values to their files instead of the metadata row', async () => {
@@ -145,31 +167,56 @@ testDescribe('ItemStorage values given at creation', () => {
 
   it('a legacy row with the content stored verbatim (no file) is written out and uploaded on publish', async () => {
     const html = '<p>legacy verbatim</p>'
-    // No instance loaded yet, as for data from an earlier session.
-    const { seedLocalId } = await createNewItem({ modelName: 'CreatePost', title: 'legacy' } as any)
-    // What Item.create / createNewItem stored before the fix: the content in property_value, no file.
-    const before = await metadataRow(seedLocalId, 'html')
-    await BaseDb.getAppDb()
-      .update(metadata)
-      .set({ propertyValue: html, refResolvedValue: null, localStorageDir: null })
-      .where(eq(metadata.localId, before.localId!))
-    const filePath = BaseFileManager.getFilesPath('html', `${seedLocalId}.html`)
-    expect(await BaseFileManager.pathExists(filePath)).toBe(false)
+    const { seedLocalId, filePath } = await createLegacyItem(html)
 
-    const legacy = await Item.find({ seedLocalId, modelName: 'CreatePost' })
-    await waitForIdle(legacy as any, 'Item', 15000)
-    await waitForPropertyInstances(legacy as any)
-    await vi.waitFor(() => expect(legacy!.allProperties['html']?.value).toBe(html), { timeout: 15000 })
+    const legacy = await coldLoad(seedLocalId)
+    await vi.waitFor(() => expect(legacy.allProperties['html']?.value).toBe(html), { timeout: 15000 })
 
-    const byName = await compositeChildren(legacy as any)
+    const byName = await compositeChildren(legacy)
     expect(byName.html).toBe(html)
     expect(Object.keys(byName)).toEqual(['html'])
 
-    // Migrated in place: the file exists and the row points at it; the value still reads the same.
+    // Migrated in place: the file holds the content, the row points at it instead of holding it.
     expect(await BaseFileManager.readFileAsString(filePath)).toBe(html)
     const after = await metadataRow(seedLocalId, 'html')
     expect(after.refResolvedValue).toBe(`${seedLocalId}.html`)
     expect(after.localStorageDir).toBe('/html')
-    expect(legacy!.allProperties['html']?.value).toBe(html)
+    expect(after.propertyValue ?? null).toBeNull()
+    // Reads the same, on this instance and on a fresh load.
+    expect(legacy.allProperties['html']?.value).toBe(html)
+    const reloaded = await coldLoad(seedLocalId, legacy)
+    await vi.waitFor(() => expect(reloaded.allProperties['html']?.value).toBe(html), { timeout: 15000 })
+  }, 90000)
+
+  it('saving over a legacy verbatim row clears the old text from the row', async () => {
+    const { seedLocalId, filePath } = await createLegacyItem('<p>old text</p>')
+    const legacy = await coldLoad(seedLocalId)
+    await vi.waitFor(() => expect(legacy.allProperties['html']?.value).toBe('<p>old text</p>'), { timeout: 15000 })
+
+    const htmlProp = legacy.allProperties['html']!
+    htmlProp.value = '<p>new text</p>'
+    await htmlProp.save()
+    expect(htmlProp.value).toBe('<p>new text</p>')
+    expect(await BaseFileManager.readFileAsString(filePath)).toBe('<p>new text</p>')
+
+    const row = await metadataRow(seedLocalId, 'html')
+    expect(row.refResolvedValue).toBe(`${seedLocalId}.html`)
+    expect(row.localStorageDir).toBe('/html')
+    expect(row.propertyValue ?? null).toBeNull()
+
+    // A fresh load never shows the old text, not even before the file is read.
+    const seen: unknown[] = []
+    legacy.unload()
+    ItemProperty.clearInstanceCacheForItem(seedLocalId)
+    const reloaded = await Item.create({ schemaName: SCHEMA_NAME, modelName: 'CreatePost', seedLocalId } as any)
+    const watch = setInterval(() => seen.push(reloaded.allProperties['html']?.value), 5)
+    try {
+      await waitForIdle(reloaded, 'Item', 15000)
+      await waitForPropertyInstances(reloaded)
+      await vi.waitFor(() => expect(reloaded.allProperties['html']?.value).toBe('<p>new text</p>'), { timeout: 15000 })
+    } finally {
+      clearInterval(watch)
+    }
+    expect(seen).not.toContain('<p>old text</p>')
   }, 90000)
 })

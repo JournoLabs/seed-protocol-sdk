@@ -283,7 +283,8 @@ const getLatestItemStorageRow = async (
 /**
  * Write a legacy ItemStorage draft row's verbatim content to `<seedUid or seedLocalId><extension>`
  * and record it on the row (refResolvedValue, localStorageDir) and in the property context. The
- * row's propertyValue is left as it was, so the value reads the same even if the file goes away.
+ * row's propertyValue is cleared once the file is written, so the row has the same shape as one a
+ * save makes and a later edit of the file never leaves stale text behind it.
  */
 const migrateVerbatimItemStorageRow = async (
   childProperty: IItemProperty<any>,
@@ -303,9 +304,15 @@ const migrateVerbatimItemStorageRow = async (
   )
   await appDb
     .update(metadata)
-    .set({ refResolvedValue: fileName, localStorageDir })
+    .set({ refResolvedValue: fileName, localStorageDir, propertyValue: null })
     .where(eq(metadata.localId, row.localId))
-  childProperty.getService().send({ type: 'updateContext', refResolvedValue: fileName, localStorageDir })
+  // The content is still the value: keep it as renderValue (the property may show it from propertyValue).
+  childProperty.getService().send({
+    type: 'updateContext',
+    refResolvedValue: fileName,
+    localStorageDir,
+    renderValue: row.propertyValue,
+  })
   logger(`resolveItemStorageChildFile: wrote verbatim ${childProperty.propertyName} content to ${filePath}`)
   return filePath
 }

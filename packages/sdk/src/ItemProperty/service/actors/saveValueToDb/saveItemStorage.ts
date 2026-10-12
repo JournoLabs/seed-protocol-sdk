@@ -150,6 +150,15 @@ export const saveItemStorage = fromCallback<
       )
     }
 
+    // A legacy row (made before Item.create saved ItemStorage values) holds the old content itself
+    // in propertyValue. The file is the content now: drop it, or a fresh load shows the old text
+    // until the file is read. A row whose propertyValue is the file name keeps it.
+    const clearsVerbatimValue =
+      !propertyData.refResolvedValue &&
+      propertyData.propertyValue != null &&
+      propertyData.propertyValue !== '' &&
+      propertyData.propertyValue !== fileName
+
     // The row says where the file is (read back by hydration, the browser's metadata live query
     // and publish); without localStorageDir the live query would clear it from the context.
     await appDb
@@ -157,6 +166,7 @@ export const saveItemStorage = fromCallback<
       .set({
         refResolvedValue: fileName,
         localStorageDir,
+        ...(clearsVerbatimValue && { propertyValue: null }),
       })
       .where(eq(metadata.localId, propertyData.localId!))
 
