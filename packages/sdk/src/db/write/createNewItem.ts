@@ -6,6 +6,7 @@ import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { modelPropertiesToObject } from '@/helpers/model'
+import { writeItemStorageFile } from '@/helpers/itemStorageFile'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -55,12 +56,36 @@ export const createNewItem = async ({
     const propertyValue = propertyData[propertyName]
     const propertyRecordSchema = propertySchemas?.[propertyName]
 
+    // ItemStorage content lives in the property's file (`<seedLocalId><extension>`), as a save puts
+    // it; the row records where. Stored verbatim in the row, publish would never upload it.
+    const isItemStorageValue =
+      propertyRecordSchema?.storageType === 'ItemStorage' &&
+      propertyValue != null &&
+      propertyValue !== ''
+    let storageFields: { refResolvedValue: string; localStorageDir: string; refValueType: string } | undefined
+    if (isItemStorageValue) {
+      const written = await writeItemStorageFile(
+        {
+          seedId: newSeedId,
+          localStorageDir: propertyRecordSchema.localStorageDir,
+          filenameSuffix: propertyRecordSchema.filenameSuffix,
+        },
+        propertyValue as string | Blob | ArrayBuffer,
+      )
+      storageFields = {
+        refResolvedValue: written.fileName,
+        localStorageDir: written.localStorageDir,
+        refValueType: 'file',
+      }
+    }
+
     await createMetadata(
       {
         seedLocalId: newSeedId,
         versionLocalId: newVersionId,
         propertyName,
-        propertyValue,
+        propertyValue: storageFields ? undefined : propertyValue,
+        ...storageFields,
         modelName,
       } as Parameters<typeof createMetadata>[0],
       propertyRecordSchema,
