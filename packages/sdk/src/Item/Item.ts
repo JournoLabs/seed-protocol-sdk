@@ -109,9 +109,18 @@ const getModel = (): typeof import('@/Model/Model').Model => {
 
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
-/** Raw File/Image/Html content (not already a storage seed reference) needs ItemProperty.save(). */
-function needsStorageSavePipeline(dataType: string | undefined, value: unknown): boolean {
+/**
+ * Initial values that need ItemProperty.save() rather than a verbatim metadata row: raw File/Image/Html
+ * content (not already a storage seed reference) becomes a storage seed, and an ItemStorage property's
+ * content goes into its file (`<seedLocalId><extension>`), where publish and reads look for it.
+ */
+function needsStorageSavePipeline(
+  dataType: string | undefined,
+  value: unknown,
+  storageType?: string | null,
+): boolean {
   if (value == null || value === '') return false
+  if (storageType === 'ItemStorage') return true
   const isStorageType =
     isDataType(dataType, ModelPropertyDataTypes.File) ||
     isDataType(dataType, ModelPropertyDataTypes.Image) ||
@@ -729,6 +738,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     // Get property names directly from database to make Item independent from Model
     let propertyNames: string[] = []
     const dataTypeByPropertyName = new Map<string, string>()
+    const storageTypeByPropertyName = new Map<string, string>()
     const db = BaseDb.getAppDb()
     if (db && props.modelName) {
       // Model names are only unique per schema: resolve the exact models row from the most specific scope.
@@ -759,13 +769,18 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       
       if (modelRecords.length > 0 && modelRecords[0].id) {
         const propertyRecords = await db
-          .select({ name: propertiesTable.name, dataType: propertiesTable.dataType })
+          .select({
+            name: propertiesTable.name,
+            dataType: propertiesTable.dataType,
+            storageType: propertiesTable.storageType,
+          })
           .from(propertiesTable)
           .where(eq(propertiesTable.modelId, modelRecords[0].id))
         
         propertyNames = propertyRecords.map((r: { name: string | null }) => r.name).filter((name: string | null): name is string => Boolean(name))
         for (const r of propertyRecords) {
           if (r.name && r.dataType) dataTypeByPropertyName.set(r.name, r.dataType)
+          if (r.name && r.storageType) storageTypeByPropertyName.set(r.name, r.storageType)
         }
       }
     }
@@ -775,7 +790,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       modelFileId: (props as any).modelFileId,
     }
     // File/Image/Html values that are raw content (html string, data URI, URL, File) must go through
-    // the property's save pipeline to become storage seeds; createNewItem would store them verbatim.
+    // the property's save pipeline to become storage seeds, and ItemStorage values to be written to
+    // their file with the property context pointing at it (as `prop.value = v; await prop.save()`).
     const pipelineValues: Array<[string, unknown]> = []
     
     // Only include properties that are in the model schema
@@ -786,7 +802,13 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         continue
       }
       if (propertyNames.length === 0 || propertyNames.includes(key)) {
-        if (needsStorageSavePipeline(dataTypeByPropertyName.get(key), value)) {
+        if (
+          needsStorageSavePipeline(
+            dataTypeByPropertyName.get(key),
+            value,
+            storageTypeByPropertyName.get(key),
+          )
+        ) {
           pipelineValues.push([key, value])
           continue
         }
@@ -932,7 +954,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /**
-   * Run each File/Image/Html initial value through its ItemProperty save pipeline (sequentially, to
+   * Run each File/Image/Html/ItemStorage initial value through its ItemProperty save pipeline (sequentially, to
    * avoid SQLite write contention). Rejects on the first failure; the item itself has been created.
    */
   private static async savePipelineValues(

@@ -13,6 +13,8 @@ import { metadata, type MetadataType } from '@/seedSchema'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { createMetadata } from '@/db/write/createMetadata'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { writeItemStorageFile } from '@/helpers/itemStorageFile'
+import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 
 /** A local edit: no attestation uid of its own and not derived from one. */
 const isLocalDraft = (row: Pick<MetadataType, 'uid' | 'derivedFromUid'>): boolean =>
@@ -92,11 +94,14 @@ export const saveItemStorage = fromCallback<
       propertyData = latest && isLocalDraft(latest) ? latest : undefined
 
       if (!propertyData && newValue) {
-        const filename = `${draftSeedUid || draftSeedLocalId}${propertyRecordSchema.filenameSuffix}`
-        const dir = propertyRecordSchema.localStorageDir?.replace(/^\//, '') || 'files'
-        await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(dir))
-        const writeToPath = BaseFileManager.getFilesPath(dir, filename)
-        await BaseFileManager.saveFile(writeToPath, newValue as string | Blob | ArrayBuffer)
+        const { fileName: filename } = await writeItemStorageFile(
+          {
+            seedId: draftSeedUid || draftSeedLocalId,
+            localStorageDir: propertyRecordSchema.localStorageDir,
+            filenameSuffix: propertyRecordSchema.filenameSuffix,
+          },
+          newValue as string | Blob | ArrayBuffer,
+        )
 
         propertyData = await createMetadata(
           {
@@ -121,32 +126,47 @@ export const saveItemStorage = fromCallback<
       throw new Error(`No metadata row to save ${propertyName} to`)
     }
 
+    // No storage.path: the `files` directory, as resolveItemStorageChildFile and download assume.
     const localStorageDir =
-      propertyRecordSchema.localStorageDir || propertyData.localStorageDir
+      propertyRecordSchema.localStorageDir || propertyData.localStorageDir || '/files'
+    const seedId = propertyData.seedUid || propertyData.seedLocalId
+    if (!propertyData.refResolvedValue && !seedId) {
+      throw new Error(`Missing a seed id to name the ${propertyName} file after`)
+    }
+
     const fileName =
       propertyData.refResolvedValue ||
-      `${propertyData.seedUid || propertyData.seedLocalId}${propertyRecordSchema.filenameSuffix}`
-
-    if (!localStorageDir || !fileName) {
-      throw new Error(
-        `Missing localStorageDir: ${localStorageDir} or fileName: ${fileName}`,
+      getItemStorageLocalFileName(seedId ?? '', propertyRecordSchema.filenameSuffix)
+    try {
+      await writeItemStorageFile(
+        { seedId: seedId ?? '', localStorageDir, fileName },
+        newValue as string | Blob | ArrayBuffer,
+      )
+    } catch (error) {
+      const fs = await BaseFileManager.getFs()
+      fs.writeFileSync(
+        BaseFileManager.getFilesPath(getItemStorageSubdir(localStorageDir), fileName),
+        newValue,
       )
     }
 
-    const dir = localStorageDir.replace(/^\//, '')
-    await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath(dir))
-    const filePath = BaseFileManager.getFilesPath(dir, fileName)
-    try {
-      await BaseFileManager.saveFile(filePath, newValue as string | Blob | ArrayBuffer)
-    } catch (error) {
-      const fs = await BaseFileManager.getFs()
-      fs.writeFileSync(filePath, newValue)
-    }
+    // A legacy row (made before Item.create saved ItemStorage values) holds the old content itself
+    // in propertyValue. The file is the content now: drop it, or a fresh load shows the old text
+    // until the file is read. A row whose propertyValue is the file name keeps it.
+    const clearsVerbatimValue =
+      !propertyData.refResolvedValue &&
+      propertyData.propertyValue != null &&
+      propertyData.propertyValue !== '' &&
+      propertyData.propertyValue !== fileName
 
+    // The row says where the file is (read back by hydration, the browser's metadata live query
+    // and publish); without localStorageDir the live query would clear it from the context.
     await appDb
       .update(metadata)
       .set({
         refResolvedValue: fileName,
+        localStorageDir,
+        ...(clearsVerbatimValue && { propertyValue: null }),
       })
       .where(eq(metadata.localId, propertyData.localId!))
 
