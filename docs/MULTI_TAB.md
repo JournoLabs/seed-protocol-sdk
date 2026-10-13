@@ -160,6 +160,16 @@ Ranked by damage:
     content stored verbatim in `metadata.property_value` to its file) starts after client init in
     the leader only, under `seed:item-storage-migration:<db>`; a tab that takes over runs it, and
     an appState marker (`legacyItemStorageFiles:v1`) stops later runs.
+  - ItemStorage files: every writer of a local draft's file (`saveItemStorage`, the legacy-row
+    conversion used by that migration and by publish, `createNewItem`) holds
+    `seed:item-storage:<absolute file path>` (`withItemStorageFileLock` in
+    `helpers/itemStorageFile.ts`) across reading the row, writing the file and updating the row; the
+    conversion re-reads the row under the lock and skips one a save already converted. Without it a
+    save landing between the conversion's read and its file write had its file overwritten with the
+    legacy content. The file lock is always innermost: it may be taken under
+    `seed:item-storage-migration:<db>` or `seed:publish:<seedLocalId>`, never the reverse, and no
+    other lock is requested while it is held. Downloads write `<txId><ext>` files, never a draft's
+    `<seedUid or seedLocalId><ext>`, and keep their own `seed:opfs-write:<path>` lock.
 - **Phase C: done.**
   - `packages/sdk/src/helpers/tabEvents.ts`. `emitAcrossTabs` sends EAS sync finished, addresses
     persisted and local copies removed to other tabs, which first reload
