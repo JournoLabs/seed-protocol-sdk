@@ -142,8 +142,9 @@ export const saveItemStorage = fromCallback<
       const seedId = row.seedUid || row.seedLocalId
       return seedId ? getItemStorageLocalFileName(seedId, propertyRecordSchema.filenameSuffix) : undefined
     }
-    const missingSeedId = () => new Error(`Missing a seed id to name the ${propertyName} file after`)
-    if (!fileNameOf(propertyData)) throw missingSeedId()
+    if (!fileNameOf(propertyData)) {
+      throw new Error(`Missing a seed id to name the ${propertyName} file after`)
+    }
 
     // Read the row, write the file and update the row under the file's lock, so a conversion of a
     // legacy row (migration, publish) or another save of this file, in this tab or another, can't
@@ -191,7 +192,8 @@ export const saveItemStorage = fromCallback<
         return { fileName, localStorageDir }
       },
     )
-    if (!saved) throw missingSeedId()
+    // The row went away (or lost its seed ids) before the lock was granted.
+    if (!saved) throw new Error(`No metadata row to save ${propertyName} to`)
     const { fileName, localStorageDir } = saved
 
     sendBack({
