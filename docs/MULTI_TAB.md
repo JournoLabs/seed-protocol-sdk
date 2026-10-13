@@ -185,6 +185,11 @@ Ranked by damage:
     path's index entry, handle and in-memory copy and reads it again. Without it, a file rewritten
     elsewhere read back at its old size ("version two" → "ve"). The in-memory copy is refreshed only
     when its directory is already cached; async reads work either way.
+  - Without an invalidation, `TolerantWebAccessFS.stat()` re-reads a file's size from OPFS (one
+    `getFile()`) and refreshes the index and in-memory copy when OPFS changed since the mount last
+    looked, so async opens, appends and reads see files other tabs or workers grew. Writes only
+    shrink an OPFS file for a truncate made through that mount (open `'w'`, `truncate()`), never
+    because the cached size is smaller. Sync-API writes still use the in-memory copy's position.
   - `FILES_CHANGED_EVENT` (exported) tells `useFiles` / `useImageFiles` to refetch.
   - Two-tab end-to-end test: `browser/multiTab.e2e.test.ts` opens real Playwright pages
     (`__tests__/e2e/multiTab/tab.html`) through browser commands in `vite.config.js`. It checks

@@ -1,5 +1,5 @@
-import { constants, Inode } from '@zenfs/core'
-import type { InodeLike } from '@zenfs/core'
+import { constants, Inode, vfs } from '@zenfs/core'
+import type { CreationOptions, InodeLike } from '@zenfs/core'
 import { join } from '@zenfs/core/path'
 import { WebAccess, WebAccessFS } from '@zenfs/dom'
 import type { WebAccessOptions } from '@zenfs/dom'
@@ -8,90 +8,260 @@ import { isSkippableOpfsEntryError } from './opfsErrors'
 
 const logger = debug('seedSdk:browser:helpers:tolerantWebAccess')
 
+/** A truncate made through this mount that OPFS doesn't have yet. Compared by identity. */
+type PendingTruncate = { readonly length: number }
+
+/** An OPFS file as this mount last saw it. */
+type OpfsVersion = { size: number; lastModified: number }
+
 /**
  * WebAccessFS mounts by walking all of OPFS and reading every file's size, and one unreadable
  * entry fails the whole mount. This variant skips such entries instead. A skipped file is still
  * listed by readdir, and WebAccessFS.stat() indexes it lazily on first use, once it is readable.
  *
- * It also makes overwrites with shorter content shrink the file (see `write` and `touch`).
+ * It also makes overwrites with shorter content shrink the file (see `write` and `touch`), without
+ * cutting off bytes another context (a tab, a worker writing through a SyncAccessHandle) added to a
+ * file this mount had indexed at a smaller size: OPFS only shrinks for a truncate made through this
+ * mount, and stat() re-reads a file's size when OPFS changed since this mount last looked.
  *
  * Overrides @zenfs/dom 1.2.9 / @zenfs/core 2.5.6 internals (`_loadHandles`, `_loadMetadata`,
- * `crossCopy`, `write`, `touch`, `get`, `_handles`, `_sync`, `index`); both packages are pinned to
- * exact versions, and tolerantWebAccess.test.ts / opfsOverwrite.test.ts cover the coupling.
+ * `crossCopy`, `stat`, `write`, `touch`, `remove`, `get`, `_handles`, `_sync`, `_isInitialized`,
+ * `index`, and `vfs.Handle#truncate`/`truncateSync`, see `trackTruncates`); both packages are pinned
+ * to exact versions, and tolerantWebAccess.test.ts / opfsOverwrite.test.ts cover the coupling.
  */
 export class TolerantWebAccessFS extends WebAccessFS {
+  /**
+   * Truncates made through this mount that OPFS doesn't have yet, by path. ZenFS truncates by
+   * lowering the inode's size and syncing it later, so only these may shrink the OPFS file: an
+   * inode that is merely smaller than the file is a stale view of a file someone else grew.
+   */
+  private readonly _truncates = new Map<string, PendingTruncate>()
+
+  /** Each OPFS file as this mount last saw it, to notice writes made elsewhere. */
+  private readonly _seen = new Map<string, OpfsVersion>()
+
   constructor(root: FileSystemDirectoryHandle, disableHandleCache?: boolean) {
     super(root, disableHandleCache)
-    // Reads would otherwise mark the file dirty (atime) and end in touch(), which shrinks the OPFS
-    // file to the size it is given: with a stale size (a file another context grew) that would cut
-    // data off. Without atime, touch() only follows writes, truncates, chmod and utimes.
+    // Reads would otherwise mark the file dirty (atime) and end in touch() for every read. Without
+    // atime, touch() only follows writes, truncates, chmod and utimes.
     this.attributes.set('no_atime')
   }
 
   /**
+   * Called by vfs.Handle#truncate(Sync) for files on this mount (see `trackTruncates`). Returns an
+   * undo for a truncate the handle then rejects.
+   */
+  _noteTruncate(path: string, length: number): () => void {
+    const previous = this._truncates.get(path)
+    // Truncated twice before a write: the bytes past the shorter length are gone either way.
+    this._truncates.set(path, { length: Math.min(length, previous?.length ?? length) })
+    return () => {
+      if (previous) this._truncates.set(path, previous)
+      else this._truncates.delete(path)
+    }
+  }
+
+  /**
+   * The sync API's in-memory copy (a StoreFS) truncates by setting the size alone and keeps the old
+   * bytes, which a later write past that size then exposes in place of zeros. Cut them off there
+   * too. Called by vfs.Handle#truncate(Sync) once the truncate went through.
+   */
+  _truncateCache(path: string, length: number): void {
+    try {
+      const cached = this._sync.statSync(path)
+      if ((cached.mode & constants.S_IFMT) != constants.S_IFREG) return
+      // Even when the size already matches: a sync handle's truncate() has synced it by now.
+      const data = new Uint8Array(length) // Past the old size (truncate to extend): zeros.
+      const kept = Math.min(length, cached.size)
+      if (kept) this._sync.readSync(path, data.subarray(0, kept), 0, kept)
+      this._sync.unlinkSync(path)
+      this._sync.createFileSync(path, cached as unknown as CreationOptions)
+      if (length) this._sync.writeSync(path, data, 0)
+      cached.size = length
+      this._sync.touchSync(path, cached)
+    } catch (error) {
+      logger(`could not truncate the cached copy of ${path}: ${(error as Error).name}`)
+    }
+  }
+
+  private _takeTruncate(path: string, pending: PendingTruncate | undefined): void {
+    // A truncate recorded while this write or sync was under way is left for the next one.
+    if (pending && this._truncates.get(path) === pending) this._truncates.delete(path)
+  }
+
+  private _remember(path: string, file: File): void {
+    this._seen.set(path, { size: file.size, lastModified: file.lastModified })
+  }
+
+  /** Another context changed the file: the next stat() refreshes the sync API's in-memory copy. */
+  private _markChangedElsewhere(path: string): void {
+    this._seen.set(path, { size: -1, lastModified: -1 })
+  }
+
+  /**
+   * The index holds each file's size from when this mount last looked, and another context may
+   * have written the file since. Re-read it from OPFS, so opening a file (an append goes to its
+   * size) and reading it see the true file, and refresh the in-memory copy behind the sync API when
+   * the file changed. Costs one getFile() per stat of a regular file; contents are only read when
+   * the file changed.
+   */
+  async stat(path: string): Promise<Inode> {
+    const inode = (await super.stat(path)) as Inode
+    if ((inode.mode & constants.S_IFMT) != constants.S_IFREG) return inode
+    // While mounting, sizes were just read and crossCopy stats every file.
+    if (!(this as unknown as AsyncState)._isInitialized) return inode
+    // This mount truncated the file and OPFS doesn't have it yet: the inode's size is the truth.
+    if (this._truncates.has(path)) return inode
+
+    let file: File
+    try {
+      file = await ((await this.get('file', path)) as FileSystemFileHandle).getFile()
+    } catch {
+      return inode // Gone or busy: keep what the index knows.
+    }
+    const seen = this._seen.get(path)
+    if (seen && seen.size == file.size && seen.lastModified == file.lastModified) return inode
+    this._remember(path, file)
+    // First look at a file this mount just indexed (WebAccessFS.stat, invalidate): nothing to fix.
+    if (!seen && inode.size == file.size) return inode
+    logger(`${path} changed outside this mount (${inode.size} -> ${file.size} bytes)`)
+    inode.update({ size: file.size, mtimeMs: file.lastModified })
+    this.index.set(path, inode)
+    await this._recache(path, inode, file)
+    return inode
+  }
+
+  /** Replaces the sync API's in-memory copy of `path` with `file`, if it holds one. */
+  private async _recache(path: string, inode: Inode, file: File): Promise<void> {
+    try {
+      this._sync.statSync(path)
+    } catch {
+      return // Not cached: async reads go to OPFS, and invalidate() handles the rest.
+    }
+    try {
+      const data = new Uint8Array(await file.arrayBuffer())
+      try {
+        this._sync.unlinkSync(path)
+      } catch {
+        // Already gone.
+      }
+      this._sync.createFileSync(path, inode as unknown as CreationOptions)
+      this._sync.writeSync(path, data, 0)
+      this._sync.touchSync(path, inode)
+    } catch (error) {
+      logger(`not caching ${path}: ${(error as Error).name}`)
+      try {
+        this._sync.unlinkSync(path)
+      } catch {
+        // Nothing was copied.
+      }
+    }
+  }
+
+  /**
    * WebAccessFS.write opens the file with `keepExistingData` and never truncates, so a whole-file
-   * overwrite with shorter content (open 'w' sets the inode size to 0, then writes at 0) kept the old
-   * tail on disk, and recorded the old size in the index. Here the file ends at ZenFS's logical size:
-   * the larger of the inode's size (after any truncate) and the end of this write. Appends and writes
-   * at an offset keep the rest of the file.
+   * overwrite with shorter content (open 'w', then a write at 0) kept the old tail on disk. Here a
+   * truncate this mount made since the file was last written (open 'w', ftruncate) is applied in
+   * the same writable as the data: the file is cut to that length first (a write past it leaves
+   * zeros in the gap, as POSIX does). Without one, the data goes over the file OPFS has, whatever
+   * size this mount last saw: appends and writes at an offset never cut off bytes another context
+   * wrote.
    */
   async write(path: string, buffer: Uint8Array, offset: number): Promise<void> {
+    const pending = this._truncates.get(path)
     const inode = this.index.get(path)
-    let handle: FileSystemHandle | undefined
+    let handle: FileSystemFileHandle | undefined
     if (inode && (inode.mode & constants.S_IFMT) == constants.S_IFREG) {
       try {
-        handle = await this.get('file', path)
+        handle = (await this.get('file', path)) as FileSystemFileHandle
       } catch {
         // Not in OPFS yet: WebAccessFS.write creates it, and a new file has no old tail.
       }
     }
-    if (!inode || !handle) return super.write(path, buffer, offset)
+    if (!inode || !handle) {
+      await super.write(path, buffer, offset)
+      this._takeTruncate(path, pending)
+      if (inode) this._seen.set(path, { size: inode.size, lastModified: inode.mtimeMs })
+      return
+    }
 
     const data = copyIfShared(buffer)
-    const size = Math.max(inode.size, offset + data.byteLength)
-    // Replacing every byte: start from an empty file instead of copying the old one.
-    const wholeFile = offset == 0 && data.byteLength >= size
-    const writable = await (handle as FileSystemFileHandle).createWritable({ keepExistingData: !wholeFile })
+    const end = offset + data.byteLength
+    // Truncated to no more than this write covers: start from an empty file instead of a copy.
+    const wholeFile = pending !== undefined && offset == 0 && pending.length <= data.byteLength
+    const writable = await handle.createWritable({ keepExistingData: !wholeFile })
     try {
-      if (!wholeFile) await writable.truncate(size)
+      if (pending && !wholeFile) await writable.truncate(pending.length)
       await writable.write({ type: 'write', position: offset, data })
       await writable.close()
     } catch (error) {
       await writable.abort().catch(() => {})
       throw error
     }
-    const { size: written, lastModified } = await (handle as FileSystemFileHandle).getFile()
-    inode.update({ size: written, mtimeMs: lastModified })
+    this._takeTruncate(path, pending)
+
+    const file = await handle.getFile()
+    const seen = this._seen.get(path)
+    inode.update({ size: file.size, mtimeMs: file.lastModified })
     this.index.set(path, inode)
+    this._remember(path, file)
+    // Larger than this mount's writes explain: another context grew it. The sync API's copy is
+    // refreshed by the next stat(), not here, where queued sync writes may not have landed yet.
+    const expected = pending ? Math.max(pending.length, end) : Math.max(seen?.size ?? 0, end)
+    if (seen && seen.size >= 0 && file.size != expected) this._markChangedElsewhere(path)
   }
 
   /**
-   * ZenFS truncates by setting the inode's size and syncing it with touch() (FileHandle.truncate,
-   * open 'w' through the sync API, whose data write reaches here before the new size does). Make
-   * OPFS follow when that size is smaller than the file.
+   * ZenFS truncates by setting the inode's size and syncing it with touch() (FileHandle.truncate
+   * with no write after it). Make OPFS follow when this mount truncated the file. Any other touch
+   * (chmod, utimes, the size after writes) leaves the OPFS file alone: a smaller size there is a
+   * stale view, and the index takes the file's real size back.
    */
   async touch(path: string, metadata: InodeLike): Promise<void> {
+    const pending = this._truncates.get(path)
     await super.touch(path, metadata)
-    const size = metadata.size
     const inode = this.index.get(path)
-    if (typeof size != 'number' || !inode || (inode.mode & constants.S_IFMT) != constants.S_IFREG) return
+    if (!inode || (inode.mode & constants.S_IFMT) != constants.S_IFREG) return
     let handle: FileSystemFileHandle
     try {
       handle = (await this.get('file', path)) as FileSystemFileHandle
     } catch {
-      return // Not in OPFS (yet): nothing to shrink.
+      return // Not in OPFS (yet): nothing to shrink, and a queued write creates it.
     }
-    if ((await handle.getFile()).size <= size) return
-    const writable = await handle.createWritable({ keepExistingData: true })
-    try {
-      await writable.truncate(size)
-      await writable.close()
-    } catch (error) {
-      await writable.abort().catch(() => {})
-      throw error
+
+    if (pending) {
+      const size = typeof metadata.size == 'number' ? metadata.size : pending.length
+      const writable = await handle.createWritable({ keepExistingData: true })
+      try {
+        await writable.truncate(Math.min(pending.length, size))
+        // Truncated, then extended: the new bytes are zeros.
+        if (size > pending.length) await writable.truncate(size)
+        await writable.close()
+      } catch (error) {
+        await writable.abort().catch(() => {})
+        throw error
+      }
+      this._takeTruncate(path, pending)
+      const file = await handle.getFile()
+      inode.update({ size: file.size, mtimeMs: file.lastModified })
+      this._remember(path, file)
+      return
     }
-    const { size: truncated, lastModified } = await handle.getFile()
-    inode.update({ size: truncated, mtimeMs: lastModified })
+
+    const file = await handle.getFile()
+    if (inode.size == file.size) return
+    const seen = this._seen.get(path)
+    inode.update({ size: file.size })
+    if (!seen || seen.size != file.size || seen.lastModified != file.lastModified) {
+      this._markChangedElsewhere(path)
+    }
+  }
+
+  async remove(path: string): Promise<void> {
+    for (const map of [this._truncates, this._seen]) {
+      for (const p of [...map.keys()]) if (p == path || p.startsWith(path + '/')) map.delete(p)
+    }
+    return super.remove(path)
   }
 
   async _loadHandles(path: string, handle: FileSystemDirectoryHandle): Promise<void> {
@@ -126,6 +296,7 @@ export class TolerantWebAccessFS extends WebAccessFS {
       try {
         const { lastModified, size } = await (handle as FileSystemFileHandle).getFile()
         this.index.set(path, new Inode({ mode: 0o644 | constants.S_IFREG, size, mtimeMs: lastModified }))
+        this._seen.set(path, { size, lastModified })
       } catch (error) {
         if (!isSkippableOpfsEntryError(error)) throw error
         logger(`skipping file ${path}: ${(error as DOMException).name}`)
@@ -145,6 +316,8 @@ export class TolerantWebAccessFS extends WebAccessFS {
     if (path == '/') return
     this.index.delete(path)
     this._handles.delete(path)
+    this._seen.delete(path)
+    this._truncates.delete(path)
     try {
       this._sync.unlinkSync(path)
     } catch {
@@ -187,6 +360,51 @@ function copyIfShared(buffer: Uint8Array): Uint8Array<ArrayBuffer> {
 }
 
 type AsyncCrossCopy = { crossCopy(this: TolerantWebAccessFS, path: string): Promise<void> }
+
+/** Set by the Async mixin once ready() has copied OPFS into the in-memory cache. */
+type AsyncState = { _isInitialized: boolean }
+
+const TRACKED = Symbol.for('seedSdk.tolerantWebAccess.trackTruncates')
+
+/**
+ * ZenFS file handles truncate by lowering their inode's size, and only tell the file system the new
+ * size later (touch), the same way they report a size that's merely stale. So handles on a
+ * TolerantWebAccessFS report each truncate when it's made (open with 'w', ftruncate, truncate).
+ * Patches the shared vfs.Handle prototype once; handles on other file systems are unaffected.
+ */
+function trackTruncates(): void {
+  const proto = vfs.Handle.prototype as typeof vfs.Handle.prototype & { [TRACKED]?: true }
+  if (proto[TRACKED]) return
+  proto[TRACKED] = true
+  const fsOf = (handle: vfs.Handle) => (handle.fs instanceof TolerantWebAccessFS ? handle.fs : undefined)
+
+  const truncate = proto.truncate
+  proto.truncate = async function (this: vfs.Handle, length: number) {
+    const fs = fsOf(this)
+    // Noted first: on a sync handle, truncate() syncs (touch) before it returns.
+    const undo = fs?._noteTruncate(this.internalPath, length)
+    try {
+      await truncate.call(this, length)
+    } catch (error) {
+      undo?.()
+      throw error
+    }
+    fs?._truncateCache(this.internalPath, length)
+  }
+  const truncateSync = proto.truncateSync
+  proto.truncateSync = function (this: vfs.Handle, length: number) {
+    const fs = fsOf(this)
+    const undo = fs?._noteTruncate(this.internalPath, length)
+    try {
+      truncateSync.call(this, length)
+    } catch (error) {
+      undo?.()
+      throw error
+    }
+    fs?._truncateCache(this.internalPath, length)
+  }
+}
+trackTruncates()
 
 /**
  * ZenFS converts most DOMExceptions to errno errors: an entry removed mid-walk becomes ENOENT, and
