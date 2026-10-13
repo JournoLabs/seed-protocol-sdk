@@ -294,6 +294,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/Db.test.ts',
             // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
+            'packages/sdk/__tests__/browser/helpers/opfsOverwrite.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',

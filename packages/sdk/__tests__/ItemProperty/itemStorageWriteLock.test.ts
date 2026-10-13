@@ -19,9 +19,8 @@ import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } 
  * BaseFileManager.saveFile. Runs in both the NodeJS and browser projects; each race also runs
  * without Web Locks (the in-process fallback).
  *
- * Each later write is at least as long as the one before it: in the browser, overwriting a file
- * with shorter content leaves the old tail in OPFS (@zenfs/dom WebAccessFS.write never truncates),
- * a separate bug these tests don't cover.
+ * Later writes are shorter than earlier ones, so a write that left the old tail in place (as
+ * @zenfs/dom's WebAccessFS.write did in the browser) would show in the file's content.
  */
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
@@ -174,12 +173,12 @@ testDescribe('ItemStorage file write lock', () => {
   for (const mode of modes) {
     describe(mode, () => {
       it('a save that arrives while a conversion writes the legacy content wins in file and row', async () => {
-        const item = await legacyItem('<p>legacy</p>')
+        const item = await legacyItem('<p>legacy content, longer than the save</p>')
         const { writes, gate } = instrumentWrites()
         useMode(mode)
 
         // The conversion has read the row and is about to write the legacy content.
-        const legacyWrite = gate('<p>legacy</p>')
+        const legacyWrite = gate('<p>legacy content, longer than the save</p>')
         const converting = convertVerbatimItemStorageRow(item.localId, { localStorageDir: '/html', filenameSuffix: '.html' })
         await legacyWrite.reached
         if (mode === 'web locks') {
@@ -187,16 +186,16 @@ testDescribe('ItemStorage file write lock', () => {
         }
 
         // A save now waits for the conversion instead of writing first and being overwritten.
-        const saving = save(item, '<p>saved text</p>')
+        const saving = save(item, '<p>saved</p>')
         await settle()
         expect(writes).toEqual([])
 
         legacyWrite.release()
-        expect(await converting).toMatchObject({ fileName: `${item.seedLocalId}.html`, content: '<p>legacy</p>' })
+        expect(await converting).toMatchObject({ fileName: `${item.seedLocalId}.html`, content: '<p>legacy content, longer than the save</p>' })
         await saving
 
-        expect(writes).toEqual(['<p>legacy</p>', '<p>saved text</p>'])
-        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved text</p>')
+        expect(writes).toEqual(['<p>legacy content, longer than the save</p>', '<p>saved</p>'])
+        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>saved</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
           localStorageDir: '/html',
@@ -238,19 +237,19 @@ testDescribe('ItemStorage file write lock', () => {
         const { writes, gate } = instrumentWrites()
         useMode(mode)
 
-        const firstWrite = gate('<p>first</p>')
-        const first = save(item, '<p>first</p>')
+        const firstWrite = gate('<p>first save, the longer one</p>')
+        const first = save(item, '<p>first save, the longer one</p>')
         await firstWrite.reached
 
-        const second = save(item, '<p>second</p>')
+        const second = save(item, '<p>2nd</p>')
         await settle()
         expect(writes).toEqual([])
 
         firstWrite.release()
         await Promise.all([first, second])
 
-        expect(writes).toEqual(['<p>first</p>', '<p>second</p>'])
-        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>second</p>')
+        expect(writes).toEqual(['<p>first save, the longer one</p>', '<p>2nd</p>'])
+        expect(await BaseFileManager.readFileAsString(item.filePath)).toBe('<p>2nd</p>')
         expect(await rowByLocalId(item.localId)).toMatchObject({
           refResolvedValue: `${item.seedLocalId}.html`,
           propertyValue: null,
