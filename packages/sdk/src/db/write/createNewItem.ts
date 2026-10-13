@@ -6,7 +6,11 @@ import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { writeItemStorageFile } from '@/helpers/itemStorageFile'
+import {
+  getItemStorageFilePath,
+  withItemStorageFileLock,
+  writeItemStorageFile,
+} from '@/helpers/itemStorageFile'
 
 type CreateNewItemProps = Partial<ModelValues<any>> & {
   modelName: string
@@ -62,35 +66,42 @@ export const createNewItem = async ({
       propertyRecordSchema?.storageType === 'ItemStorage' &&
       propertyValue != null &&
       propertyValue !== ''
-    let storageFields: { refResolvedValue: string; localStorageDir: string; refValueType: string } | undefined
-    if (isItemStorageValue) {
-      const written = await writeItemStorageFile(
+    const insertRow = (
+      storageFields?: { refResolvedValue: string; localStorageDir: string; refValueType: string },
+    ) =>
+      createMetadata(
         {
-          seedId: newSeedId,
-          localStorageDir: propertyRecordSchema.localStorageDir,
-          filenameSuffix: propertyRecordSchema.filenameSuffix,
-        },
-        propertyValue as string | Blob | ArrayBuffer,
+          seedLocalId: newSeedId,
+          versionLocalId: newVersionId,
+          propertyName,
+          propertyValue: storageFields ? undefined : propertyValue,
+          ...storageFields,
+          modelName,
+        } as Parameters<typeof createMetadata>[0],
+        propertyRecordSchema,
+        { skipValidation: true, modelFileId },
       )
-      storageFields = {
+
+    if (!isItemStorageValue) {
+      await insertRow()
+      continue
+    }
+
+    // File and row under the file's lock, like every writer of a local draft's file (see
+    // withItemStorageFileLock). The seed is new, so nothing else should be writing it yet.
+    const target = {
+      seedId: newSeedId,
+      localStorageDir: propertyRecordSchema.localStorageDir,
+      filenameSuffix: propertyRecordSchema.filenameSuffix,
+    }
+    await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
+      const written = await writeItemStorageFile(target, propertyValue as string | Blob | ArrayBuffer)
+      await insertRow({
         refResolvedValue: written.fileName,
         localStorageDir: written.localStorageDir,
         refValueType: 'file',
-      }
-    }
-
-    await createMetadata(
-      {
-        seedLocalId: newSeedId,
-        versionLocalId: newVersionId,
-        propertyName,
-        propertyValue: storageFields ? undefined : propertyValue,
-        ...storageFields,
-        modelName,
-      } as Parameters<typeof createMetadata>[0],
-      propertyRecordSchema,
-      { skipValidation: true, modelFileId },
-    )
+      })
+    })
   }
 
   return {
