@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import {
   getAddressesForItemsFilter,
+  ownedSeedsSql,
+  placeholderUidSql,
   publisherInAddressListSql,
   Item,
   eventEmitter,
@@ -313,13 +315,16 @@ export const useItems: UseItems = ({
       if (addressesForFilter === null) return null
     }
     const conditions: any[] = []
+    // Same predicates as getItemsData, so the live query and the fetched list agree.
     if (!includeEas) {
-      conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as any)
+      conditions.push(placeholderUidSql(seeds.uid) as any)
     }
     if (modelName) {
       conditions.push(eq(seeds.type, toSnakeCase(modelName)))
     }
-    if (addressFilter === 'owned' || addressFilter === 'watched') {
+    if (addressFilter === 'owned') {
+      conditions.push(ownedSeedsSql(addressesForFilter ?? []) as any)
+    } else if (addressFilter === 'watched') {
       conditions.push(
         publisherInAddressListSql(seeds.publisher, addressesForFilter ?? []) as any,
       )
