@@ -461,8 +461,9 @@ export class BrowserFileManager implements IFileManager {
       throw new Error('Unsupported content type')
     }
     
-    await zenfs.writeFile(filePath, writeContent)
-    await this.waitForFileWithContent(filePath, 100, 5000)
+    // The promise API: zenfs.writeFile is the Node callback API, which returns before the write
+    // lands, so a read right after saveFile could see the previous content.
+    await zenfs.promises.writeFile(filePath, writeContent)
     // try {
     //   // Get a handle to the OPFS root directory
     //   const root = await navigator.storage.getDirectory();
