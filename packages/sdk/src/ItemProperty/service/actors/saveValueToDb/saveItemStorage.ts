@@ -13,7 +13,12 @@ import { metadata, type MetadataType } from '@/seedSchema'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { createMetadata } from '@/db/write/createMetadata'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { writeItemStorageFile } from '@/helpers/itemStorageFile'
+import {
+  getItemStorageFilePath,
+  withItemStorageFileLock,
+  withLockedItemStorageRow,
+  writeItemStorageFile,
+} from '@/helpers/itemStorageFile'
 import { getItemStorageLocalFileName, getItemStorageSubdir } from '@/helpers/storageDir'
 
 /** A local edit: no attestation uid of its own and not derived from one. */
@@ -94,29 +99,32 @@ export const saveItemStorage = fromCallback<
       propertyData = latest && isLocalDraft(latest) ? latest : undefined
 
       if (!propertyData && newValue) {
-        const { fileName: filename } = await writeItemStorageFile(
-          {
-            seedId: draftSeedUid || draftSeedLocalId,
-            localStorageDir: propertyRecordSchema.localStorageDir,
-            filenameSuffix: propertyRecordSchema.filenameSuffix,
-          },
-          newValue as string | Blob | ArrayBuffer,
-        )
+        const target = {
+          seedId: draftSeedUid || draftSeedLocalId,
+          localStorageDir: propertyRecordSchema.localStorageDir,
+          filenameSuffix: propertyRecordSchema.filenameSuffix,
+        }
+        propertyData = await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
+          const { fileName: filename } = await writeItemStorageFile(
+            target,
+            newValue as string | Blob | ArrayBuffer,
+          )
 
-        propertyData = await createMetadata(
-          {
-            propertyName,
-            propertyValue: filename,
-            modelType: (modelName ?? knownRow?.modelType ?? '').toLowerCase() || undefined,
-            seedLocalId: draftSeedLocalId,
-            seedUid: draftSeedUid,
-            versionLocalId,
-            versionUid,
-            localStorageDir: propertyRecordSchema.localStorageDir,
-            refValueType: 'file',
-          },
-          propertyRecordSchema,
-        )
+          return createMetadata(
+            {
+              propertyName,
+              propertyValue: filename,
+              modelType: (modelName ?? knownRow?.modelType ?? '').toLowerCase() || undefined,
+              seedLocalId: draftSeedLocalId,
+              seedUid: draftSeedUid,
+              versionLocalId,
+              versionUid,
+              localStorageDir: propertyRecordSchema.localStorageDir,
+              refValueType: 'file',
+            },
+            propertyRecordSchema,
+          )
+        })
       }
     } else if (propertyData && !isLocalDraft(propertyData)) {
       propertyData = undefined
@@ -127,49 +135,64 @@ export const saveItemStorage = fromCallback<
     }
 
     // No storage.path: the `files` directory, as resolveItemStorageChildFile and download assume.
-    const localStorageDir =
-      propertyRecordSchema.localStorageDir || propertyData.localStorageDir || '/files'
-    const seedId = propertyData.seedUid || propertyData.seedLocalId
-    if (!propertyData.refResolvedValue && !seedId) {
-      throw new Error(`Missing a seed id to name the ${propertyName} file after`)
+    const localStorageDirOf = (row: MetadataType) =>
+      propertyRecordSchema.localStorageDir || row.localStorageDir || '/files'
+    const fileNameOf = (row: MetadataType): string | undefined => {
+      if (row.refResolvedValue) return row.refResolvedValue
+      const seedId = row.seedUid || row.seedLocalId
+      return seedId ? getItemStorageLocalFileName(seedId, propertyRecordSchema.filenameSuffix) : undefined
     }
+    const missingSeedId = () => new Error(`Missing a seed id to name the ${propertyName} file after`)
+    if (!fileNameOf(propertyData)) throw missingSeedId()
 
-    const fileName =
-      propertyData.refResolvedValue ||
-      getItemStorageLocalFileName(seedId ?? '', propertyRecordSchema.filenameSuffix)
-    try {
-      await writeItemStorageFile(
-        { seedId: seedId ?? '', localStorageDir, fileName },
-        newValue as string | Blob | ArrayBuffer,
-      )
-    } catch (error) {
-      const fs = await BaseFileManager.getFs()
-      fs.writeFileSync(
-        BaseFileManager.getFilesPath(getItemStorageSubdir(localStorageDir), fileName),
-        newValue,
-      )
-    }
+    // Read the row, write the file and update the row under the file's lock, so a conversion of a
+    // legacy row (migration, publish) or another save of this file, in this tab or another, can't
+    // land in between and leave the file with older content than the row says.
+    const saved = await withLockedItemStorageRow(
+      propertyData.localId!,
+      (row) => {
+        const fileName = fileNameOf(row)
+        return fileName && BaseFileManager.getFilesPath(getItemStorageSubdir(localStorageDirOf(row)), fileName)
+      },
+      async (row, filePath) => {
+        const localStorageDir = localStorageDirOf(row)
+        const fileName = fileNameOf(row)!
+        try {
+          await writeItemStorageFile(
+            { seedId: row.seedUid || row.seedLocalId || '', localStorageDir, fileName },
+            newValue as string | Blob | ArrayBuffer,
+          )
+        } catch (error) {
+          const fs = await BaseFileManager.getFs()
+          fs.writeFileSync(filePath, newValue)
+        }
 
-    // A legacy row (made before Item.create saved ItemStorage values) holds the old content itself
-    // in propertyValue. The file is the content now: drop it, or a fresh load shows the old text
-    // until the file is read. A row whose propertyValue is the file name keeps it.
-    const clearsVerbatimValue =
-      !propertyData.refResolvedValue &&
-      propertyData.propertyValue != null &&
-      propertyData.propertyValue !== '' &&
-      propertyData.propertyValue !== fileName
+        // A legacy row (made before Item.create saved ItemStorage values) holds the old content itself
+        // in propertyValue. The file is the content now: drop it, or a fresh load shows the old text
+        // until the file is read. A row whose propertyValue is the file name keeps it.
+        const clearsVerbatimValue =
+          !row.refResolvedValue &&
+          row.propertyValue != null &&
+          row.propertyValue !== '' &&
+          row.propertyValue !== fileName
 
-    // The row says where the file is (read back by hydration, the browser's metadata live query
-    // and publish); without localStorageDir the live query would clear it from the context.
-    await appDb
-      .update(metadata)
-      .set({
-        refResolvedValue: fileName,
-        localStorageDir,
-        // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
-        ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
-      })
-      .where(eq(metadata.localId, propertyData.localId!))
+        // The row says where the file is (read back by hydration, the browser's metadata live query
+        // and publish); without localStorageDir the live query would clear it from the context.
+        await appDb
+          .update(metadata)
+          .set({
+            refResolvedValue: fileName,
+            localStorageDir,
+            // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
+            ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
+          })
+          .where(eq(metadata.localId, row.localId!))
+
+        return { fileName, localStorageDir }
+      },
+    )
+    if (!saved) throw missingSeedId()
+    const { fileName, localStorageDir } = saved
 
     sendBack({
       type: 'updateContext',

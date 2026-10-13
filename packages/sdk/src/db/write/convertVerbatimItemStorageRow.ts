@@ -1,7 +1,11 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, type MetadataType } from '@/seedSchema'
-import { writeItemStorageFile } from '@/helpers/itemStorageFile'
+import {
+  getItemStorageFilePath,
+  withLockedItemStorageRow,
+  writeItemStorageFile,
+} from '@/helpers/itemStorageFile'
 
 type VerbatimRowFields = Pick<
   MetadataType,
@@ -44,9 +48,16 @@ export type ConvertedItemStorageRow = {
  * `refResolvedValue`, `localStorageDir` and `refValueType: 'file'` with property_value cleared.
  * Used by publish (resolveItemStorageChildFile) and the one-time migration (migrateLegacyItemStorageRows).
  *
- * The row is read again first, and the update only applies while it is still the same legacy row,
- * so a row converted or saved in the meantime is left alone. Returns undefined when there was
- * nothing to convert. Throws when the file can't be written; the row is then unchanged.
+ * Reading the row, writing the file and updating the row happen under the file's lock
+ * ({@link withItemStorageFileLock}), which saveItemStorage holds too: a save in this or another tab
+ * either finishes before (the row, read again once the lock is held, is no longer legacy and is
+ * left alone) or starts after (and overwrites the file and row with its content). Without the lock
+ * a save landing between the read and the file write would have its file overwritten with the old
+ * content. The row update also stays conditional on the row being unchanged, for writers that
+ * don't take the lock (a tab still running an older SDK).
+ *
+ * Returns undefined when there was nothing to convert. Throws when the file can't be written; the
+ * row is then unchanged.
  */
 export const convertVerbatimItemStorageRow = async (
   localId: string,
@@ -55,45 +66,47 @@ export const convertVerbatimItemStorageRow = async (
   const appDb = BaseDb.getAppDb()
   if (!appDb || !localId) return undefined
 
-  const rows: MetadataType[] = await appDb
-    .select()
-    .from(metadata)
-    .where(eq(metadata.localId, localId))
-    .limit(1)
-  const row = rows[0]
-  if (!row || !isVerbatimItemStorageDraftRow(row)) return undefined
-
-  const seedId = storage.seedId || row.seedUid || row.seedLocalId
-  if (!seedId) return undefined
-
-  const content = row.propertyValue as string
-  const { fileName, filePath, localStorageDir } = await writeItemStorageFile(
-    {
+  const targetOf = (row: MetadataType) => {
+    if (!isVerbatimItemStorageDraftRow(row)) return undefined
+    const seedId = storage.seedId || row.seedUid || row.seedLocalId
+    if (!seedId) return undefined
+    return {
       seedId,
       localStorageDir: storage.localStorageDir || row.localStorageDir,
       filenameSuffix: storage.filenameSuffix,
+    }
+  }
+
+  return withLockedItemStorageRow(
+    localId,
+    (row) => {
+      const target = targetOf(row)
+      return target && getItemStorageFilePath(target)
     },
-    content,
+    async (row) => {
+      const content = row.propertyValue as string
+      const { fileName, filePath, localStorageDir } = await writeItemStorageFile(targetOf(row)!, content)
+
+      await appDb
+        .update(metadata)
+        .set({ refResolvedValue: fileName, localStorageDir, refValueType: 'file', propertyValue: null })
+        .where(
+          and(
+            eq(metadata.localId, localId),
+            isNull(metadata.refResolvedValue),
+            eq(metadata.propertyValue, content),
+          ),
+        )
+
+      // Changed between the read and the update by a writer outside the lock: that change stands.
+      const after: Pick<MetadataType, 'refResolvedValue' | 'propertyValue'>[] = await appDb
+        .select({ refResolvedValue: metadata.refResolvedValue, propertyValue: metadata.propertyValue })
+        .from(metadata)
+        .where(eq(metadata.localId, localId))
+        .limit(1)
+      if (after[0]?.refResolvedValue !== fileName || after[0]?.propertyValue != null) return undefined
+
+      return { fileName, filePath, localStorageDir, content }
+    },
   )
-
-  await appDb
-    .update(metadata)
-    .set({ refResolvedValue: fileName, localStorageDir, refValueType: 'file', propertyValue: null })
-    .where(
-      and(
-        eq(metadata.localId, localId),
-        isNull(metadata.refResolvedValue),
-        eq(metadata.propertyValue, content),
-      ),
-    )
-
-  // Changed between the read and the update (e.g. a save in another tab): that change stands.
-  const after: Pick<MetadataType, 'refResolvedValue' | 'propertyValue'>[] = await appDb
-    .select({ refResolvedValue: metadata.refResolvedValue, propertyValue: metadata.propertyValue })
-    .from(metadata)
-    .where(eq(metadata.localId, localId))
-    .limit(1)
-  if (after[0]?.refResolvedValue !== fileName || after[0]?.propertyValue != null) return undefined
-
-  return { fileName, filePath, localStorageDir, content }
 }
