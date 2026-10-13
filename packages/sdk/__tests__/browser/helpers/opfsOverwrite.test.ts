@@ -187,3 +187,138 @@ describe('overwriting OPFS files through ZenFS', () => {
     expect(new TextDecoder().decode(await readRaw(path))).toBe('a longer version written past ZenFS')
   })
 })
+
+/**
+ * Another context (a tab, a worker with a SyncAccessHandle) can grow a file without this page's
+ * ZenFS hearing about it. Partial writes and syncs from this page must still end up with what POSIX
+ * gives on the true file, not cut the file to the size ZenFS last saw.
+ */
+describe('partial writes to a file another context grew', () => {
+  const dec = new TextDecoder()
+
+  beforeAll(async () => {
+    fileManager = new BrowserFileManager()
+    await fileManager.initializeFileSystem()
+    fs = await fileManager.getFs()
+    await fs.promises.mkdir(`/${testDir}`, { recursive: true })
+  })
+
+  afterAll(async () => {
+    const root = await navigator.storage.getDirectory()
+    await root.removeEntry(testDir, { recursive: true }).catch(() => {})
+  })
+
+  /** Replaces the file's bytes through a raw OPFS handle; ZenFS's cache is not told. */
+  async function writeBehindZenFS(path: string, content: string) {
+    const segments = path.split('/').filter(Boolean)
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(segments[0]!)
+    const writable = await (await dir.getFileHandle(segments[1]!)).createWritable()
+    await writable.write(content)
+    await writable.close()
+  }
+
+  const grown = 'hello, and more bytes from another tab'
+
+  it('appendFile appends after the bytes another context wrote', async () => {
+    const path = `/${testDir}/grown-append.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    await fs.promises.appendFile(path, '!')
+    await expectContent(path, grown + '!')
+  })
+
+  it('a write at an offset keeps the bytes another context wrote after it', async () => {
+    const path = `/${testDir}/grown-offset.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    const handle = await fs.promises.open(path, 'r+')
+    await handle.write(enc.encode('HE'), 0, 2, 0)
+    await handle.close()
+    await expectContent(path, 'HE' + grown.slice(2))
+  })
+
+  it('a write at an offset whose bytes ZenFS did not see the file reach keeps the rest', async () => {
+    const path = `/${testDir}/grown-offset-past.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    const handle = await fs.promises.open(path, 'r+')
+    await handle.write(enc.encode('XY'), 0, 2, 10)
+    await handle.close()
+    await expectContent(path, grown.slice(0, 10) + 'XY' + grown.slice(12))
+  })
+
+  it('syncing metadata (utimes, chmod) does not cut the file to the stale size', async () => {
+    const path = `/${testDir}/grown-touch.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+
+    fs.chmodSync(path, 0o600)
+    fs.utimesSync(path, new Date(), new Date())
+    await flush()
+    expect(dec.decode(await readRaw(path))).toBe(grown)
+
+    await fs.promises.utimes(path, new Date(), new Date())
+    await fs.promises.chmod(path, 0o644)
+    expect(dec.decode(await readRaw(path))).toBe(grown)
+    await expectContent(path, grown)
+  })
+
+  it('sync-API writes at an offset do not cut the file either', async () => {
+    const path = `/${testDir}/grown-sync-offset.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    const fd = fs.openSync(path, 'r+')
+    fs.writeSync(fd, enc.encode('HE'), 0, 2, 0)
+    fs.closeSync(fd)
+    await flush()
+    expect(dec.decode(await readRaw(path))).toBe('HE' + grown.slice(2))
+    await expectContent(path, 'HE' + grown.slice(2))
+  })
+
+  it('reads see the bytes another context wrote', async () => {
+    const path = `/${testDir}/grown-read.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    expect(await fs.promises.readFile(path, 'utf8')).toBe(grown)
+    expect((await fs.promises.stat(path)).size).toBe(grown.length)
+    // The in-memory copy behind the sync API follows once ZenFS has looked at the file again.
+    expect(fs.readFileSync(path, 'utf8')).toBe(grown)
+  })
+
+  it('an explicit truncate from this page, then a partial write, still shrinks the file', async () => {
+    const path = `/${testDir}/grown-truncate.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    const handle = await fs.promises.open(path, 'r+')
+    await handle.truncate(5)
+    await handle.write(enc.encode('XY'), 0, 2, 8)
+    await handle.close()
+    // POSIX: cut at 5, the gap up to 8 reads as zeros, then XY.
+    await expectContent(path, new Uint8Array([...enc.encode('hello'), 0, 0, 0, ...enc.encode('XY')]))
+
+    await fs.promises.truncate(path, 3)
+    await expectContent(path, 'hel')
+
+    fs.truncateSync(path, 2)
+    await flush()
+    await expectContent(path, 'he')
+  })
+
+  it("open 'w' then chunked writes ends with exactly the chunks", async () => {
+    const path = `/${testDir}/grown-w.txt`
+    await fs.promises.writeFile(path, 'hello')
+    await writeBehindZenFS(path, grown)
+    const writer = await fs.promises.open(path, 'w')
+    // Looking at the file between the truncate and the first write keeps the truncate.
+    await fs.promises.stat(path)
+    await writer.write(enc.encode('ab'))
+    await writer.write(enc.encode('cd'))
+    await writer.close()
+    await expectContent(path, 'abcd')
+
+    await writeBehindZenFS(path, grown)
+    fs.writeFileSync(path, 'xy')
+    await flush()
+    await expectContent(path, 'xy')
+  })
+})
