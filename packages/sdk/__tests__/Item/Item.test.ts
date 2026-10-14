@@ -19,8 +19,23 @@ import { importJsonSchema } from '@/imports/json'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
-import { waitForItemIdle } from '../test-utils/waitForIdle'
+import { waitForItemIdle, type HasService } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
+
+// Item.create resolves before the item's ItemProperty instances are attached. Fails if they never are.
+async function waitForPropertyInstances(item: HasService, minCount = 1): Promise<void> {
+  const service = item.getService()
+  try {
+    await waitFor(
+      service,
+      (snapshot) => ((snapshot.context.propertyInstances as Map<string, unknown> | undefined)?.size ?? 0) >= minCount,
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+  } catch (error) {
+    const size = (service.getSnapshot().context.propertyInstances as Map<string, unknown> | undefined)?.size ?? 0
+    throw new Error(`Item had ${size} property instances, expected at least ${minCount}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
 
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
@@ -180,31 +195,7 @@ testDescribe('Item Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 3) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        // Check immediately
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 3) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 3)
       
       expect(item.properties).toBeDefined()
       const properties = item.properties || []
@@ -413,6 +404,7 @@ testDescribe('Item Integration Tests', () => {
       const foundItem = await Item.find({
         modelName: 'TestPost',
         seedLocalId,
+        readyTimeout: WAIT_TIMEOUT_MS,
       })
       
       // If found, verify it matches
@@ -488,6 +480,7 @@ testDescribe('Item Integration Tests', () => {
         const foundItem = await Item.find({
           modelName: 'TestPost',
           seedUid,
+          readyTimeout: WAIT_TIMEOUT_MS,
         })
         
         expect(foundItem).toBeDefined()
@@ -549,8 +542,11 @@ testDescribe('Item Integration Tests', () => {
       // Item might not be idle yet since we didn't wait
       const service = foundItem!.getService()
       const state = service.getSnapshot().value
-      // State could be idle (if already loaded) or loading/waitingForDb
-      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+      // Any of itemMachineSingle's load/ready states
+      expect(['waitingForDb', 'loading', 'idle']).toContain(state)
+      // It still finishes loading on its own
+      await waitForItemIdle(foundItem!)
+      expect(foundItem!.seedLocalId).toBe(seedLocalId)
     })
   })
 
@@ -667,7 +663,7 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item1)
       await waitForItemIdle(item2)
 
-      const allItems = await Item.all('TestPost', undefined, { waitForReady: true, schemaName })
+      const allItems = await Item.all('TestPost', undefined, { waitForReady: true, readyTimeout: WAIT_TIMEOUT_MS, schemaName })
 
       expect(allItems).toBeDefined()
       expect(Array.isArray(allItems)).toBe(true)
@@ -749,29 +745,7 @@ testDescribe('Item Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 2) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 2) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 2)
       
       const context = item.getService().getSnapshot().context
       expect(context.propertyInstances).toBeDefined()
@@ -892,28 +866,7 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item)
       
       // Wait for properties to be loaded from metadata
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 3) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 3) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 3)
       
       // Verify properties are loaded
       const properties = item.properties
@@ -1075,28 +1028,7 @@ testDescribe('Item Integration Tests', () => {
       expect(item.modelName).toBe('TestPost')
       
       // Properties should be loaded from metadata table
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 2) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 2) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 2)
       
       const properties = item.properties
       expect(properties.length).toBeGreaterThanOrEqual(2)
@@ -1277,29 +1209,7 @@ testDescribe('Item Integration Tests', () => {
       
       await waitForItemIdle(item)
       
-      // Wait for properties to be loaded
-      await new Promise<void>((resolve) => {
-        const subscription = item.getService().subscribe((snapshot) => {
-          const propertyInstances = snapshot.context.propertyInstances as Map<string, any> | undefined
-          if (propertyInstances && propertyInstances.size >= 2) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        const currentSnapshot = item.getService().getSnapshot()
-        const currentPropertyInstances = currentSnapshot.context.propertyInstances as Map<string, any> | undefined
-        if (currentPropertyInstances && currentPropertyInstances.size >= 2) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        setTimeout(() => {
-          subscription.unsubscribe()
-          resolve()
-        }, 5000)
-      })
+      await waitForPropertyInstances(item, 2)
       
       // Properties getter should compute from propertyInstances
       const properties = item.properties
