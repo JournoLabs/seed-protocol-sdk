@@ -91,17 +91,19 @@ export function normalizePropertyRecordSchema<T>(def: T): T {
   return out as T
 }
 
+// String literals, not enum members: PropertyDataType must accept plain strings
+// such as `{ dataType: 'Text' }`. ModelPropertyDataTypes members still fit.
 export const TPropertyDataType = Type.Union([
-  Type.Literal(ModelPropertyDataTypes.Text),
-  Type.Literal(ModelPropertyDataTypes.Number),
-  Type.Literal(ModelPropertyDataTypes.List),
-  Type.Literal(ModelPropertyDataTypes.Relation),
-  Type.Literal(ModelPropertyDataTypes.Image),
-  Type.Literal(ModelPropertyDataTypes.Json),
-  Type.Literal(ModelPropertyDataTypes.File),
-  Type.Literal(ModelPropertyDataTypes.Boolean),
-  Type.Literal(ModelPropertyDataTypes.Date),
-  Type.Literal(ModelPropertyDataTypes.Html),
+  Type.Literal('Text'),
+  Type.Literal('Number'),
+  Type.Literal('List'),
+  Type.Literal('Relation'),
+  Type.Literal('Image'),
+  Type.Literal('Json'),
+  Type.Literal('File'),
+  Type.Literal('Boolean'),
+  Type.Literal('Date'),
+  Type.Literal('Html'),
 ])
 
 export const TStorageType = Type.Union([
