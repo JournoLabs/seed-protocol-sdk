@@ -234,7 +234,9 @@ export const hydrateFromDb = fromCallback<
         }
         if (filePath) {
           localStorageDir = `/${dir}`
-          renderValue = await BaseFileManager.readFileAsString(filePath)
+          // The same content URL saveFile sets, so the value reads the same before and after a reload.
+          refResolvedDisplayValue = await BaseFileManager.getContentUrlFromPath(filePath)
+          renderValue = refResolvedDisplayValue
         }
       } catch (e) {
         logger('[hydrateFromDb] File resolution error', e)

@@ -401,7 +401,8 @@ export const loadOrCreateProperty = fromCallback<
           filePath = await resolveMatchingFilePath(dir, metadataRecord.refResolvedValue)
         }
         if (filePath) {
-          renderValue = await BaseFileManager.readFileAsString(filePath)
+          // The content URL saveFile and hydrateFromDb set, so the value reads the same everywhere.
+          renderValue = await BaseFileManager.getContentUrlFromPath(filePath)
         }
       } catch (e) {
         logger(`Failed to resolve File for ${propertyName}: ${e}`)

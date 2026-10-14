@@ -8,7 +8,7 @@ import {
   SaveValueToDbEvent,
 } from '@/types/property'
 import { createSeed } from '@/db/write/createSeed'
-import { getDataTypeFromString, toMetadataPropertyName } from '@/helpers'
+import { toMetadataPropertyName } from '@/helpers'
 import { createVersion } from '@/db/write/createVersion'
 import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
@@ -16,6 +16,38 @@ import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 
 let fileSchemaUid: string | undefined
+
+/**
+ * What a string assigned to a File property means:
+ * - `data:` URL: its decoded bytes
+ * - `http(s):` or `blob:` URL: fetched
+ * - the name of a file already in the files folder: a reference to it
+ * - anything else: the file's text content
+ * (Bare strings used to be decoded as base64 when they looked like it, so "hello" became
+ * garbage, and names like "photo.jpg" were fetched as URLs.)
+ */
+export async function classifyFileString(
+  value: string,
+): Promise<{ kind: 'dataUrl'; bytes: ArrayBuffer } | { kind: 'url' } | { kind: 'existing' } | { kind: 'text' }> {
+  const dataUrl = /^data:([^,]*?)(;base64)?,(.*)$/s.exec(value)
+  if (dataUrl) {
+    const [, , isBase64, payload] = dataUrl
+    const bytes = isBase64
+      ? Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(payload))
+    return { kind: 'dataUrl', bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer }
+  }
+  if (/^(https?:\/\/|blob:)/i.test(value)) {
+    return { kind: 'url' }
+  }
+  if (!/[\\/]/.test(value) && value.length < 256) {
+    const existingFilePath = BaseFileManager.getFilesPath('files', value)
+    if (await BaseFileManager.pathExists(existingFilePath)) {
+      return { kind: 'existing' }
+    }
+  }
+  return { kind: 'text' }
+}
 
 export const saveFile = fromCallback<
   EventObject,
@@ -78,21 +110,20 @@ export const saveFile = fromCallback<
       fileSchemaUid = fetchedSchemaUid ?? undefined
     }
 
+    let isExistingFileReference = false
     if (typeof newValue === 'string') {
-      const newValueType = getDataTypeFromString(newValue)
-      if (newValueType === 'base64') {
-        const base64Data = (newValue as string).split(',')[1] || newValue
-        const binaryString = atob(base64Data)
-        const binaryArray = new Uint8Array(binaryString.length)
-        for (let i = 0; i < binaryString.length; i++) {
-          binaryArray[i] = binaryString.charCodeAt(i)
-        }
-        fileData = binaryArray.buffer
-      } else if (newValueType === 'url') {
-        const response = await fetch(newValue as string)
+      const source = await classifyFileString(newValue)
+      if (source.kind === 'dataUrl') {
+        fileData = source.bytes
+      } else if (source.kind === 'url') {
+        const response = await fetch(newValue)
         fileData = await response.arrayBuffer()
-        const urlPath = new URL(newValue as string)
-        fileName = urlPath.pathname.split('/').pop()
+        if (!newValue.startsWith('blob:')) {
+          fileName = new URL(newValue).pathname.split('/').pop() || undefined
+        }
+      } else if (source.kind === 'existing') {
+        isExistingFileReference = true
+        fileName = newValue
       } else {
         fileData = newValue
       }
@@ -101,21 +132,6 @@ export const saveFile = fromCallback<
     if (newValue instanceof File) {
       fileName = newValue.name
       fileData = await newValue.arrayBuffer() // Blob API: works in browsers and Node (no FileReader in Node)
-    }
-
-    // Handle existing file reference: filename from listFiles() that exists in files folder
-    let isExistingFileReference = false
-    if (
-      typeof newValue === 'string' &&
-      getDataTypeFromString(newValue) === null
-    ) {
-      const existingFilePath = BaseFileManager.getFilesPath('files', newValue)
-      const pathExistsResult = await BaseFileManager.pathExists(existingFilePath)
-      if (pathExistsResult) {
-        isExistingFileReference = true
-        fileName = newValue
-        fileData = undefined
-      }
     }
 
     if (!fileData && !isExistingFileReference) {
