@@ -2,12 +2,14 @@ import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   setAdditionalSyncAddresses,
   setGetPublisherForNewSeeds,
+  setPublishExecutor,
   setRevokeExecutor,
   whenLeaderTab,
   type TransactionTag,
 } from '@seedprotocol/sdk'
 import type { Chain } from 'viem'
 import { revokeAttestations } from './services/revoke/revokeAttestations'
+import { publishItem } from './helpers/publishItem'
 import {
   configureEasReadChain,
   expectEasReadChain,
@@ -297,7 +299,9 @@ export function getConfigRef(): PublishConfig | null {
 
 /**
  * Initialize the publish package. Call once before using PublishManager or other publish APIs.
- * Registers the config and SDK hooks (revoke executor, getPublisherForNewSeeds, etc.).
+ * Registers the config and SDK hooks: the publish executor behind `item.publish()`, the
+ * revoke executor behind `item.unpublish()`, getPublisherForNewSeeds, etc. Until this runs,
+ * `item.publish()` and `item.unpublish()` throw.
  * For React apps, you can alternatively pass config to PublishProvider.
  */
 export function initPublish(c: PublishConfig): void {
@@ -313,6 +317,7 @@ export function initPublish(c: PublishConfig): void {
     if (wallet?.signer?.address) return wallet.signer.address
     return undefined
   })
+  setPublishExecutor(publishItem)
   setRevokeExecutor(revokeAttestations)
   // Polls every 45 s; one tab is enough (docs/MULTI_TAB.md). Starts on takeover if this tab
   // isn't the leader yet.

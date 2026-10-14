@@ -155,7 +155,9 @@ export {
 export {
   ensureWalletThenPublish,
   type EnsureWalletThenPublishResult,
+  type PublishStarted,
 } from './helpers/ensureWalletThenPublish'
+export { publishItem, waitForPublishActor } from './helpers/publishItem'
 export { ensureManagedAccountEasConfigured, assertManagedAccountEasMatchesConfig } from './helpers/ensureManagedAccountEasConfigured'
 export {
   assertExecutorModuleReadyForAccount,

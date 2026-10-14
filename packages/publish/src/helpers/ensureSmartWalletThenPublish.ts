@@ -16,7 +16,7 @@ import { getPublishThirdwebChain } from './thirdwebChain'
 import { getPublishChainName } from './chainConfig'
 
 export type EnsureSmartWalletResult =
-  | { outcome: 'started' }
+  | { outcome: 'started'; started: import('./ensureWalletThenPublish').PublishStarted }
   | { outcome: 'no_address' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
@@ -78,21 +78,21 @@ export async function ensureSmartWalletThenPublish(
     }
 
     const wallet = fromThirdwebAccount(modularAccount)
-    PublishManager.createPublish(item, managedAddress, wallet, {
+    const started = PublishManager.createPublish(item, managedAddress, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
-    return { outcome: 'started' }
+    return { outcome: 'started', started }
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
     const wallet = fromThirdwebAccount(resolved.account)
-    PublishManager.createPublish(item, resolved.address, wallet, {
+    const started = PublishManager.createPublish(item, resolved.address, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
-    return { outcome: 'started' }
+    return { outcome: 'started', started }
   }
   return { outcome: 'needs_deploy' }
 }
