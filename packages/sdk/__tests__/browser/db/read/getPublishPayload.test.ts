@@ -184,13 +184,17 @@ describe('getPublishPayload integration (browser)', () => {
 
   it('rejects publish when Text property has invalid enum value', async () => {
     // Schema already created in beforeAll via createGetPublishPayloadTestSchemaWithEnum
-    // Item.create uses createNewItem with skipValidation: true, so invalid enum is persisted
-    const item = await Item.create({
-      modelName: 'Article',
-      schemaName: 'Test Schema getPublishPayload Enum',
-      title: 'Test article',
-      status: 'invalid',
-    })
+    // Item.create rejects invalid values by default; validate: false stores one, as data
+    // imported from elsewhere could hold
+    const item = await Item.create(
+      {
+        modelName: 'Article',
+        schemaName: 'Test Schema getPublishPayload Enum',
+        title: 'Test article',
+        status: 'invalid',
+      },
+      { validate: false },
+    )
     await waitForPropertyInstances(item)
     let err: unknown
     try {

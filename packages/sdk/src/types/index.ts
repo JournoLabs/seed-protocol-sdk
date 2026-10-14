@@ -133,4 +133,13 @@ export interface CreateWaitOptions {
   readyTimeout?: number
 }
 
+export interface ItemCreateOptions extends CreateWaitOptions {
+  /**
+   * Item.create rejects unknown keys and values that break their property's type or rules
+   * (ItemCreateValidationError). Pass false only to import data that is already stored or
+   * attested as-is; the values are then written unchecked.
+   */
+  validate?: boolean
+}
+
 export type ClientCallback = (event: any) => void

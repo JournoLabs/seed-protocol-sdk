@@ -265,7 +265,8 @@ testDescribe('Item Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      // The imported model. (A runtime Model.create('TestPost') would add a new, empty "TestPost 1".)
+      const model = (await Model.getByNameAsync('TestPost', schemaName))!
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -275,7 +276,7 @@ testDescribe('Item Integration Tests', () => {
       const item = await model.create()
       await waitForItemIdle(item)
 
-      expect(item.title).toBeUndefined()
+      expect(item.title ?? undefined).toBeUndefined() // unset: null or undefined
       item.title = 'A New Title'
       expect(item.title).toBe('A New Title')
 
@@ -300,7 +301,8 @@ testDescribe('Item Integration Tests', () => {
 
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
 
-      const model = Model.create('TestPost', schemaName, { waitForReady: false })
+      // The imported model. (A runtime Model.create('TestPost') would add a new, empty "TestPost 1".)
+      const model = (await Model.getByNameAsync('TestPost', schemaName))!
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
@@ -311,7 +313,7 @@ testDescribe('Item Integration Tests', () => {
       await waitForItemIdle(item)
 
       expect(item.title).toBe('Initial Title')
-      expect(item.content).toBeUndefined()
+      expect(item.content ?? undefined).toBeUndefined() // unset: null or undefined
       item.content = 'Set content after create'
       expect(item.content).toBe('Set content after create')
 

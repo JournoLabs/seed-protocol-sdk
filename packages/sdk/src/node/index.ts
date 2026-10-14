@@ -10,6 +10,7 @@ export type { IItem, IItemProperty } from '../interfaces'
 
 // Errors
 export { AmbiguousModelError } from '../Model/errors'
+export { ItemCreateValidationError, UnknownModelError, type ItemCreateProblem } from '../Item/errors'
 export { ConflictError, type ConflictResult } from '../Schema/errors'
 export { OwnershipError, assertItemOwned, isItemOwned } from '../helpers/ownership'
 
