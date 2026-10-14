@@ -26,6 +26,11 @@ describe('validatePropertyValue combines rules', () => {
     expect(check('archived-for-a-long-time', ModelPropertyDataTypes.Text, rules)).toBe(false)
   })
 
+  it('accepts ISO date strings for Date (the date-time format is registered)', () => {
+    expect(check('2025-01-15T00:00:00.000Z', ModelPropertyDataTypes.Date, {})).toBe(true)
+    expect(check('not a date', ModelPropertyDataTypes.Date, {})).toBe(false)
+  })
+
   it('applies enum on its own to non-string types', () => {
     expect(check(2, ModelPropertyDataTypes.Number, { enum: [1, 2] })).toBe(true)
     expect(check(3, ModelPropertyDataTypes.Number, { enum: [1, 2] })).toBe(false)

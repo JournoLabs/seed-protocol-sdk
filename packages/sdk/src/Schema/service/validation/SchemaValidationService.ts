@@ -5,10 +5,16 @@ import { ValidationResult, ValidationError, ValidationRules, DEFAULT_TEXT_MAX_LE
 import { SchemaMachineContext } from '../schemaMachine'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
 import { ModelMachineContext } from '@/Model/service/modelMachine'
-import { Type, TSchema, TUnion, TLiteral } from '@sinclair/typebox'
+import { FormatRegistry, Type, TSchema, TUnion, TLiteral } from '@sinclair/typebox'
 import debug from 'debug'
 
 const logger = debug('seedSdk:schema:validation')
+
+// Date properties use Type.String({ format: 'date-time' }). TypeBox only checks formats that are
+// registered, and fails every value for an unknown one, so without this no Date value was valid.
+if (!FormatRegistry.Has('date-time')) {
+  FormatRegistry.Set('date-time', (value) => !Number.isNaN(Date.parse(value)))
+}
 
 /**
  * Service for validating schemas, models, and properties using TypeBox
@@ -362,7 +368,11 @@ export class SchemaValidationService {
         const elementDataType = normalizeDataType(String(refValueType)) as ModelPropertyDataTypes
         // Apply default maxLength for Text elements in List. Html elements hold arbitrary-length content.
         const elementEffectiveRules = validationRules ? { ...validationRules } : {}
-        if (elementDataType === ModelPropertyDataTypes.Text && elementEffectiveRules.maxLength === undefined) {
+        if (
+          elementDataType === ModelPropertyDataTypes.Text &&
+          elementEffectiveRules.maxLength === undefined &&
+          !(Array.isArray(elementEffectiveRules.enum) && elementEffectiveRules.enum.length > 0)
+        ) {
           elementEffectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
         }
         for (let i = 0; i < value.length; i++) {
@@ -409,7 +419,9 @@ export class SchemaValidationService {
 
       // Apply default maxLength for Text when not explicitly set. Html holds arbitrary-length content (e.g. article body) and must not default to 255.
       const effectiveRules = validationRules ? { ...validationRules } : {}
-      if (dataType === ModelPropertyDataTypes.Text && effectiveRules.maxLength === undefined) {
+      // An enum already bounds the value, so the default limit is not added to it.
+      const hasEnum = !!(effectiveRules.enum && Array.isArray(effectiveRules.enum) && effectiveRules.enum.length > 0)
+      if (dataType === ModelPropertyDataTypes.Text && effectiveRules.maxLength === undefined && !hasEnum) {
         effectiveRules.maxLength = DEFAULT_TEXT_MAX_LENGTH
       }
 
