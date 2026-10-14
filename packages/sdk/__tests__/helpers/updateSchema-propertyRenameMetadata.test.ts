@@ -8,7 +8,8 @@ import { metadata } from '@/seedSchema/MetadataSchema'
 import { eq } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
-import { renameModelProperty } from '@/helpers/updateSchema'
+import { renameModelProperty, whenDeferredSchemaReloadsSettled } from '@/helpers/updateSchema'
+import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForItemIdle } from '../test-utils/waitForIdle'
@@ -137,5 +138,51 @@ testDescribe('Property Rename Metadata Migration', () => {
     await waitForItemIdle(loadedItem!)
 
     expect(loadedItem!.coverImage).toBe('test-value')
+  })
+
+  it('should rename the property row in place when the schema reloads after a rename', async () => {
+    // Own schema name: the first test leaves its v2 schema file on disk
+    const renameSchemaName = 'Property Rename Row Test Schema'
+    const testSchema = createTestSchema(renameSchemaName, {
+      Post: {
+        id: generateId(),
+        properties: {
+          featureImage: {
+            id: featureImageId,
+            dataType: 'Text',
+          },
+        },
+      },
+    })
+
+    await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+    const db = BaseDb.getAppDb()
+    if (!db) throw new Error('Database not available')
+
+    const [postModel] = await db
+      .select()
+      .from(modelsTable)
+      .where(eq(modelsTable.schemaFileId, testSchema.models.Post.id))
+    expect(postModel).toBeDefined()
+
+    const propertiesBefore = await db
+      .select()
+      .from(properties)
+      .where(eq(properties.modelId, postModel.id!))
+    const featureImageRow = propertiesBefore.find((p) => p.name === 'featureImage')
+    expect(featureImageRow).toBeDefined()
+
+    await renameModelProperty(renameSchemaName, 'Post', 'featureImage', 'coverImage')
+    await whenDeferredSchemaReloadsSettled()
+
+    const propertiesAfter = await db
+      .select()
+      .from(properties)
+      .where(eq(properties.modelId, postModel.id!))
+
+    expect(propertiesAfter.map((p) => p.name)).toEqual(['coverImage'])
+    expect(propertiesAfter[0].id).toBe(featureImageRow!.id)
+    expect(propertiesAfter[0].schemaFileId).toBe(featureImageId)
   })
 })

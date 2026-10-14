@@ -1115,6 +1115,7 @@ export const addModelsToDb = async (
     schemaFileId?: string
     modelFileIds?: Map<string, string>
     propertyFileIds?: Map<string, Map<string, string>>
+    propertyDefinitions?: Map<string, { [propertyName: string]: any }>
   },
 ) => {
   const db = BaseDb.getAppDb()
@@ -1198,8 +1199,13 @@ export const addModelsToDb = async (
     
     // If context properties are empty, try modelClass.properties (for backward compatibility)
     // but convert ModelProperty instances to object format
+    // Property definitions read from the schema file win: a cached Model keeps the properties it
+    // was created with, so after a rename its context still has the old name.
+    const filePropertyDefinitions = schemaFileData?.propertyDefinitions?.get(modelName)
     let schema: { [propertyName: string]: any } = {}
-    if (Object.keys(contextProperties).length > 0) {
+    if (filePropertyDefinitions) {
+      schema = filePropertyDefinitions
+    } else if (Object.keys(contextProperties).length > 0) {
       schema = contextProperties
     } else if (Object.keys(pendingProperties).length > 0) {
       // Use pending property definitions (from JSON import)
@@ -1223,7 +1229,8 @@ export const addModelsToDb = async (
       
       // Get property schemaFileId if available
       let propertyFileId = schemaFileData?.propertyFileIds?.get(modelName)?.get(propertyName)
-      
+      const propertyFileIdGenerated = !propertyFileId
+
       // If no propertyFileId from map, generate a random ID
       // IDs should be generated in the import process before calling addModelsToDb
       if (!propertyFileId) {
@@ -1349,6 +1356,10 @@ export const addModelsToDb = async (
         // Ensure schemaFileId is updated if we have it
         // Preserve existing isEdited value if it was true (local edits take precedence)
         const updateData = { ...propertyData }
+        // A generated id must not replace the one the row already has from its schema file
+        if (propertyFileIdGenerated && existingProperty.schemaFileId) {
+          updateData.schemaFileId = existingProperty.schemaFileId
+        }
         if (existingProperty.isEdited === true) {
           // Preserve isEdited = true if property was locally edited
           delete updateData.isEdited
