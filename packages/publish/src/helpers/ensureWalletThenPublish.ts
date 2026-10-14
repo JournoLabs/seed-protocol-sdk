@@ -8,8 +8,15 @@ import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
 import type { ManagedAccountPublishError } from '../errors'
 
+/**
+ * `started` resolves with the spawned publish actor once it exists, or `undefined` when
+ * that seed is already publishing in this tab or another. It does not wait for the
+ * publish to finish; use {@link publishItem} (or `item.publish()`) for that.
+ */
+export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undefined>
+
 export type EnsureWalletThenPublishResult =
-  | { outcome: 'started' }
+  | { outcome: 'started'; started: PublishStarted }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
   | { outcome: 'needs_deploy' }
@@ -68,9 +75,9 @@ export async function ensureWalletThenPublish(
     return { outcome: 'no_address' }
   }
 
-  PublishManager.createPublish(item, address, session, {
+  const started = PublishManager.createPublish(item, address, session, {
     ...options,
     dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? session.signer,
   })
-  return { outcome: 'started' }
+  return { outcome: 'started', started }
 }

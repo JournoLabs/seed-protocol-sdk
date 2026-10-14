@@ -4,7 +4,7 @@ Publish UI components and helpers for Seed Protocol.
 
 The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `getPublishPayload`, which registers EAS schemas and adds naming attestations so EASSCAN displays them. If you build a custom publish flow that calls `item.getPublishPayload()` directly, you must run schema setup first or use this package's flow.
 
-`initPublish()` or `PublishProvider` registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
+**`item.publish()` and `item.unpublish()` need this package.** `initPublish()` (or `<PublishProvider config>`) registers the executors behind them: `publishItem` for `item.publish()` and the revocation executor for `item.unpublish()`. Until it runs, both throw. `item.publish(options)` passes `options` through as `CreatePublishOptions`, uses the wallet registered with `useSeedWallet().connect` or `setPublishWallet`, and resolves when the publish has finished (it rejects if it fails). See [docs/ATTESTATION_REVOCATION.md](../../docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
 
 **Badges / on-chain vs pending:** use `@seedprotocol/sdk` `getSeedPublishState` for “any on-chain anchor for this seed”, `getPublishPendingDiff` for per-property heads missing attestation UIDs, and `getItemsData` (`includeEas`, `publishedVersionUid` vs `latestVersionUid`) for list rows. When a publish run finishes, observe `usePublishProcess(seedLocalId)` or the `publishProcesses` table instead of ad hoc window events.
 
@@ -56,7 +56,9 @@ function App() {
   )
 }
 
-// Later:
+// Later, once the wallet is connected:
+// await item.publish()   // resolves when uploads and attestations are done
+// or, to start without waiting:
 // await ensureWalletThenPublish(item, { dataItemSigner: /* from useSeedWallet().signer */ })
 ```
 

@@ -57,8 +57,10 @@ import { Model, Property, Item } from '@seedprotocol/sdk'
 
 // Define models in your schema; then create and publish items:
 const post = await Post.create({ title: 'Hello', summary: '...', ... })
-await post.publish()
+await post.publish() // needs @seedprotocol/publish, see below
 ```
+
+`item.publish()` needs **[@seedprotocol/publish](packages/publish)**. The SDK builds the payload, but the uploads and EAS writes are done by an executor that the publish package registers when you call its `initPublish()` (or mount `<PublishProvider config>`). Without it, `publish()` throws an error saying so. `item.unpublish()` works the same way.
 
 For full guides on schema, models, properties, items, files, and the CLI, see **[the docs](https://seedprotocol.io)**.
 

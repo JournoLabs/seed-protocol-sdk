@@ -12,7 +12,14 @@ You can publish **incremental** property updates on the **same** Version (patch 
 
 ## Publish flow (recommended)
 
-When using the publish package (`@seedprotocol/publish`) with `ConnectButton` and its publish flow:
+Publishing needs the publish package (`@seedprotocol/publish`). The SDK prepares payloads but
+does not upload or attest on its own: `item.publish(options)` hands the item to the executor
+that `initPublish()` / `<PublishProvider config>` registers (`setPublishExecutor(publishItem)`),
+and throws if none is registered. It resolves when the publish has finished and rejects if it
+failed; attestation failures that wait for `PublishManager.retryAttestations` also reject.
+`options` are the publish package's `CreatePublishOptions`.
+
+When using the publish package with `ConnectButton` and its publish flow:
 
 1. **ensureEasSchemasForItem** runs before `getPublishPayload`. It:
    - Registers EAS schemas for each item property via the SchemaRegistry contract
