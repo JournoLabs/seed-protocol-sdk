@@ -177,14 +177,44 @@ Ranked by damage:
     cached Items, then emit the same event. Events are posted only where they originate, so
     nothing is relayed twice.
   - Files: `file-saved` stays a local event (the legacy resize listener in `browser/index.ts` would
-    otherwise spawn a worker in every tab); `notifyFileSaved` sends the path to other tabs instead.
-    The download and resize workers write to OPFS directly, so even the tab that ran them had stale
-    ZenFS entries for rewritten files; they now report saved paths, and
-    `notifyFilesWrittenOutsideCache` refreshes this tab and the others.
+    otherwise spawn a worker in every tab).
+  - Every file write that goes through ZenFS is announced to other tabs from the mount itself:
+    `TolerantWebAccessFS.onOpfsChange` fires for each file it writes, truncates or removes (a rename
+    is a removal plus a write) once the change is in OPFS, and `BrowserFileManager` routes it to
+    `queueFilesChangedNotice` (`helpers/tabEvents.ts`). That covers `saveFile` / `saveFileSync`
+    (item-storage files, schema and `updateSchema` writes, `imports/json`,
+    `htmlEmbeddedDataUriPublish`, the save actors) and code using `fs.promises` / `fs.*Sync`
+    directly (`fetchAll`, the schema unlink, sync-API fallbacks) without a call per writer. The
+    save actors' `notifyFileSaved` now only emits `file-saved` locally; its message was a duplicate
+    and, for the sync-API fallbacks, went out before OPFS had the data. Sync-API writes are
+    announced when their queued OPFS write lands, not when `writeFileSync` returns.
+  - Coalescing: paths gather in a set for `FILES_CHANGED_FLUSH_MS` (25 ms, counted from the first
+    path, so a steady stream still sends once per window) and go out as one `files-changed`
+    message, split at `FILES_CHANGED_MAX_PATHS` (500). A save's several ZenFS calls (truncate,
+    write, sync) and bulk writes (migration files, schema processing, downloads) send a few
+    messages, not one per write. Queued paths are flushed on `pagehide`. Nothing is queued unless
+    the tab coordinates (Node, `multiTab: 'off'`, no Web Locks: no-op).
+  - Every tab message carries `from: TAB_ID`; the channel handler drops messages with this tab's
+    id (a BroadcastChannel never hears itself, but a second channel object in the page would).
+  - Receivers only refresh caches (`BaseFileManager.invalidateCachedPaths`, serialized per tab):
+    invalidation reads OPFS and never writes it, so it never fires `onOpfsChange` and no message is
+    sent back. A path the tab never had, or that's gone, costs one failed lookup and drops whatever
+    was cached under it.
+  - Database files: the SQLite database and its journal/WAL are written by sqlocal's worker through
+    its own OPFS VFS, not through ZenFS, so they never produce messages (SQLite does its own
+    locking, and `stat()` already tolerates their size changing under the mount). The drizzle
+    migration, journal and snapshot files `Db.prepareDb` writes through `saveFile` are ordinary
+    small files and are announced (one coalesced message per init).
+  - The download and resize workers write to OPFS directly, so even the tab that ran them had stale
+    ZenFS entries for rewritten files; they report saved paths, and `notifyFilesWrittenOutsideCache`
+    refreshes this tab and queues the same notice for the others.
+  - All of this is defense in depth: a tab that misses a message still sees the change on its next
+    async `stat()` (below). What it adds is the sync API's in-memory copy, which `stat()` only
+    refreshes when something stats the file.
   - `TolerantWebAccessFS.invalidate(path)` (via `BaseFileManager.invalidateCachedPaths`) drops a
     path's index entry, handle and in-memory copy and reads it again. Without it, a file rewritten
-    elsewhere read back at its old size ("version two" → "ve"). The in-memory copy is refreshed only
-    when its directory is already cached; async reads work either way.
+    elsewhere read back at its old size ("version two" → "ve"). Directories the in-memory copy lacks
+    (created by another tab after this one mounted) are added, so the sync API finds new files too.
   - Without an invalidation, `TolerantWebAccessFS.stat()` re-reads a file's size from OPFS (one
     `getFile()`) and refreshes the index and in-memory copy when OPFS changed since the mount last
     looked, so async opens, appends and reads see files other tabs or workers grew. Writes only
@@ -194,7 +224,8 @@ Ranked by damage:
   - Two-tab end-to-end test: `browser/multiTab.e2e.test.ts` opens real Playwright pages
     (`__tests__/e2e/multiTab/tab.html`) through browser commands in `vite.config.js`. It checks
     concurrent init, a single leader, a file rewritten behind ZenFS reading fresh in the other tab,
-    and leadership handover. Publish restore across tabs is covered by `publishLocks.node.test.ts`
+    saves (async and sync API) reaching the other tab's `readFileSync` with no stat there, bulk
+    saves coalescing into few messages, no echo, and leadership handover. Publish restore across tabs is covered by `publishLocks.node.test.ts`
     rather than this test, since a real publish needs a chain.
   - Still stale on purpose (step 11): Schema/Model metadata on existing instances, ModelProperty,
     module-level lookup maps.

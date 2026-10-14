@@ -161,7 +161,8 @@ export class BrowserFileManager implements IFileManager {
   async initializeFileSystem(_workingDir?: string): Promise<void> {
 
     const zenfs = await this.getFs()
-    const { TolerantWebAccess } = await import('./tolerantWebAccess')
+    const { TolerantWebAccess, TolerantWebAccessFS } = await import('./tolerantWebAccess')
+    const { queueFilesChangedNotice } = await import('@/helpers/tabEvents')
     const {configureSingle} = zenfs
 
     const configureRoot = async () => {
@@ -178,6 +179,12 @@ export class BrowserFileManager implements IFileManager {
     for (let attempt = 0; ; attempt++) {
       try {
         await configureRoot()
+        // Every write through ZenFS (saveFile, saveFileSync, fs.promises / fs.*Sync used directly)
+        // reaches OPFS through this mount: tell other tabs once each change lands, coalesced.
+        const mounted = zenfs.mounts.get('/')
+        if (mounted instanceof TolerantWebAccessFS) {
+          mounted.onOpfsChange = (path) => queueFilesChangedNotice([path])
+        }
         return
       } catch (error) {
         if (!isBusyOpfsMountError(error)) {
@@ -222,12 +229,21 @@ export class BrowserFileManager implements IFileManager {
     return entries.filter((entry: { isFile: () => boolean }) => entry.isFile()).map((entry: { name: string }) => entry.name)
   }
 
+  /** Invalidations run one at a time: two refreshing the same path at once could interleave. */
+  private invalidations: Promise<void> = Promise.resolve()
+
   async invalidateCachedPaths(filePaths: string[]): Promise<void> {
+    const run = this.invalidations.then(() => this.invalidateNow(filePaths))
+    this.invalidations = run.catch(() => {})
+    return run
+  }
+
+  private async invalidateNow(filePaths: string[]): Promise<void> {
     const { mounts } = await this.getFs()
     const { TolerantWebAccessFS } = await import('./tolerantWebAccess')
     const mounted = mounts.get('/')
     if (!(mounted instanceof TolerantWebAccessFS)) return
-    for (const filePath of filePaths) {
+    for (const filePath of new Set(filePaths)) {
       const absolute = filePath.startsWith('/') ? filePath : `/${filePath}`
       try {
         await mounted.invalidate(absolute)

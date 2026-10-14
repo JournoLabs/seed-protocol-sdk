@@ -4,6 +4,7 @@ import {
   onTabMessage,
   resetTabCoordinationForTests,
   startTabCoordination,
+  TAB_ID,
   whenLeaderTab,
 } from '@/helpers/tabCoordinator'
 import { easSyncActor, requestEasSyncFromAddressChange, requestEasSyncFromModelsInit } from '@/events/item/easSyncManager'
@@ -48,7 +49,7 @@ describe('tab coordination', () => {
     requestEasSyncFromModelsInit()
     requestEasSyncFromAddressChange(['0xabc'])
     await vi.waitFor(
-      () => expect(tab!.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'] }]),
+      () => expect(tab!.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'], from: TAB_ID }]),
       { timeout: WAIT_TIMEOUT_MS },
     )
     expect(sent).not.toHaveBeenCalled()
@@ -70,6 +71,24 @@ describe('tab coordination', () => {
     const message = { type: 'eas-sync-address-change', addresses: ['0xdef'] }
     await tab.send({ type: 'post', channel: `seed:tabs:${dbKey}`, message }, 'posted')
     await vi.waitFor(() => expect(received).toEqual([message]), { timeout: WAIT_TIMEOUT_MS })
+    unsubscribe()
+  })
+
+  it("ignores messages carrying this tab's id", async () => {
+    startTabCoordination({ filesDir })
+    const received: unknown[] = []
+    const unsubscribe = onTabMessage((message) => received.push(message))
+
+    tab = otherTab()
+    const channel = `seed:tabs:${dbKey}`
+    const own = { type: 'files-changed', paths: ['/own'], from: TAB_ID }
+    const other = { type: 'files-changed', paths: ['/other'], from: 'another-tab' }
+    await tab.send({ type: 'post', channel, message: own }, 'posted')
+    await tab.send({ type: 'post', channel, message: other }, 'posted')
+    await vi.waitFor(() => expect(received).toEqual([other]), { timeout: WAIT_TIMEOUT_MS })
+    // The worker posts from a fresh channel each time; give the first one time to arrive too.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(received).toEqual([other])
     unsubscribe()
   })
 

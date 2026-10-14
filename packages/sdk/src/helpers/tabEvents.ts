@@ -3,7 +3,7 @@ import { eventEmitter } from '@/eventBus'
 import { ADDRESSES_PERSISTED_EVENT, LOCAL_COPIES_REMOVED_EVENT } from '@/client/events'
 import { EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@/helpers/constants'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { onTabMessage, postTabMessage } from '@/helpers/tabCoordinator'
+import { isPostingTabMessages, onTabMessage, postTabMessage } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:helpers:tabEvents')
 
@@ -34,12 +34,11 @@ export function emitAcrossTabs(name: CrossTabEventName, payload?: unknown): void
 }
 
 /**
- * A file saved through this tab's file system: emits `file-saved` here (as before) and tells other
- * tabs, whose caches don't see it.
+ * A file saved through this tab's file system: emits `file-saved` here. Other tabs hear about it
+ * from the file system itself (see queueFilesChangedNotice), once the write has reached OPFS.
  */
 export function notifyFileSaved(filePath: string): void {
   eventEmitter.emit('file-saved', filePath)
-  postTabMessage({ type: 'files-changed', paths: [filePath] })
 }
 
 /**
@@ -50,7 +49,54 @@ export async function notifyFilesWrittenOutsideCache(paths: string[]): Promise<v
   if (paths.length === 0) return
   await BaseFileManager.invalidateCachedPaths(paths)
   eventEmitter.emit(FILES_CHANGED_EVENT, paths)
-  postTabMessage({ type: 'files-changed', paths })
+  queueFilesChangedNotice(paths)
+}
+
+/**
+ * How long changed paths gather before one `files-changed` message goes out. Counted from the
+ * first queued path, so a steady stream of writes still sends once per window, never later.
+ */
+export const FILES_CHANGED_FLUSH_MS = 25
+/** Keeps a message for a huge batch (a bulk download) from being one giant structured clone. */
+export const FILES_CHANGED_MAX_PATHS = 500
+
+let pendingChangedPaths = new Set<string>()
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+let flushOnPageHide = false
+
+/**
+ * Tells other tabs that these absolute ZenFS paths changed in OPFS, so they drop and re-read their
+ * cached copies (the sync API's in-memory copy in particular). The browser file system calls this
+ * for every file it writes, truncates or removes (`TolerantWebAccessFS.onOpfsChange`, wired in
+ * `BrowserFileManager.initializeFileSystem`), after the change reached OPFS. Paths are coalesced
+ * for FILES_CHANGED_FLUSH_MS, so bulk writes (migrations, schema processing, downloads) send a few
+ * messages rather than one per write.
+ *
+ * Defense in depth only: a tab that misses a message still sees the change on its next async
+ * stat() (see TolerantWebAccessFS.stat). A no-op unless this tab coordinates with others.
+ */
+export function queueFilesChangedNotice(paths: Iterable<string>): void {
+  if (!isPostingTabMessages()) return
+  for (const path of paths) pendingChangedPaths.add(path)
+  if (flushTimer !== undefined || pendingChangedPaths.size === 0) return
+  flushTimer = setTimeout(flushFilesChangedNotices, FILES_CHANGED_FLUSH_MS)
+  if (!flushOnPageHide && typeof addEventListener === 'function') {
+    flushOnPageHide = true
+    // A tab closing inside the window still sends what it wrote.
+    addEventListener('pagehide', flushFilesChangedNotices)
+  }
+}
+
+/** Sends the queued paths now (page hide, tests). */
+export function flushFilesChangedNotices(): void {
+  if (flushTimer !== undefined) clearTimeout(flushTimer)
+  flushTimer = undefined
+  if (pendingChangedPaths.size === 0) return
+  const paths = [...pendingChangedPaths]
+  pendingChangedPaths = new Set()
+  for (let i = 0; i < paths.length; i += FILES_CHANGED_MAX_PATHS) {
+    postTabMessage({ type: 'files-changed', paths: paths.slice(i, i + FILES_CHANGED_MAX_PATHS) })
+  }
 }
 
 /** Refreshes this tab's in-memory state for an event another tab emitted, before re-emitting it. */
@@ -92,6 +138,7 @@ export function listenForOtherTabsEvents(): void {
           }
         })
     } else if (message.type === 'files-changed') {
+      // Only refreshes caches: never writes, so never sends files-changed back.
       void BaseFileManager.invalidateCachedPaths(message.paths)
         .catch((error) => logger('refreshing changed files failed', error))
         .then(() => eventEmitter.emit(FILES_CHANGED_EVENT, message.paths))

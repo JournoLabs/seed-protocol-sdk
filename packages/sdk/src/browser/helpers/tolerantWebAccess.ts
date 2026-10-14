@@ -1,6 +1,6 @@
 import { constants, Inode, vfs } from '@zenfs/core'
 import type { CreationOptions, InodeLike } from '@zenfs/core'
-import { join } from '@zenfs/core/path'
+import { dirname, join } from '@zenfs/core/path'
 import { WebAccess, WebAccessFS } from '@zenfs/dom'
 import type { WebAccessOptions } from '@zenfs/dom'
 import debug from 'debug'
@@ -39,6 +39,14 @@ export class TolerantWebAccessFS extends WebAccessFS {
 
   /** Each OPFS file as this mount last saw it, to notice writes made elsewhere. */
   private readonly _seen = new Map<string, OpfsVersion>()
+
+  /**
+   * Called with each file path whose OPFS contents this mount changed (a write, a truncate, a
+   * removal; a rename is both), once the change is in OPFS. BrowserFileManager uses it to tell other
+   * tabs. Not called for what invalidate(), stat() or crossCopy() put in the in-memory copy: those
+   * only read OPFS.
+   */
+  onOpfsChange?: (path: string) => void
 
   constructor(root: FileSystemDirectoryHandle, disableHandleCache?: boolean) {
     super(root, disableHandleCache)
@@ -87,6 +95,14 @@ export class TolerantWebAccessFS extends WebAccessFS {
   private _takeTruncate(path: string, pending: PendingTruncate | undefined): void {
     // A truncate recorded while this write or sync was under way is left for the next one.
     if (pending && this._truncates.get(path) === pending) this._truncates.delete(path)
+  }
+
+  private _changed(path: string): void {
+    try {
+      this.onOpfsChange?.(path)
+    } catch (error) {
+      logger(`change listener failed for ${path}`, error)
+    }
   }
 
   private _remember(path: string, file: File): void {
@@ -182,6 +198,8 @@ export class TolerantWebAccessFS extends WebAccessFS {
       await super.write(path, buffer, offset)
       this._takeTruncate(path, pending)
       if (inode) this._seen.set(path, { size: inode.size, lastModified: inode.mtimeMs })
+      // WebAccessFS.write also creates directories; only files are worth telling other tabs about.
+      if (inode && (inode.mode & constants.S_IFMT) == constants.S_IFREG) this._changed(path)
       return
     }
 
@@ -209,6 +227,7 @@ export class TolerantWebAccessFS extends WebAccessFS {
     // refreshed by the next stat(), not here, where queued sync writes may not have landed yet.
     const expected = pending ? Math.max(pending.length, end) : Math.max(seen?.size ?? 0, end)
     if (seen && seen.size >= 0 && file.size != expected) this._markChangedElsewhere(path)
+    this._changed(path)
   }
 
   /**
@@ -245,6 +264,7 @@ export class TolerantWebAccessFS extends WebAccessFS {
       const file = await handle.getFile()
       inode.update({ size: file.size, mtimeMs: file.lastModified })
       this._remember(path, file)
+      this._changed(path)
       return
     }
 
@@ -261,7 +281,8 @@ export class TolerantWebAccessFS extends WebAccessFS {
     for (const map of [this._truncates, this._seen]) {
       for (const p of [...map.keys()]) if (p == path || p.startsWith(path + '/')) map.delete(p)
     }
-    return super.remove(path)
+    await super.remove(path)
+    this._changed(path)
   }
 
   async _loadHandles(path: string, handle: FileSystemDirectoryHandle): Promise<void> {
@@ -309,8 +330,11 @@ export class TolerantWebAccessFS extends WebAccessFS {
   /**
    * Forgets what the mount cached for `path` (size, handle, contents) and reads it again from OPFS.
    * For files written outside this ZenFS instance: by another tab, or by a worker writing to OPFS
-   * directly. A file that's gone stays forgotten. The in-memory copy is only refreshed when its
-   * directory is already cached; async reads re-index the file either way (WebAccessFS.stat).
+   * directly. Only reads OPFS (never writes it, so never calls onOpfsChange).
+   *
+   * An entry that's gone (removed elsewhere) is forgotten along with anything cached under it, and
+   * costs one failed lookup. A file in directories this mount hasn't cached yet (created elsewhere
+   * after it mounted) gets them added to the in-memory copy, so the sync API finds it.
    */
   async invalidate(path: string): Promise<void> {
     if (path == '/') return
@@ -318,12 +342,72 @@ export class TolerantWebAccessFS extends WebAccessFS {
     this._handles.delete(path)
     this._seen.delete(path)
     this._truncates.delete(path)
+    let inode: Inode
+    try {
+      inode = await this.stat(path) // Re-indexes from OPFS (WebAccessFS.stat).
+    } catch {
+      this._forgetCached(path) // Gone (or unreadable for now: the next stat() looks again).
+      return
+    }
     try {
       this._sync.unlinkSync(path)
     } catch {
-      // Not cached.
+      // Not cached, or a directory: crossCopy refreshes what's under it.
     }
+    if ((inode.mode & constants.S_IFMT) == constants.S_IFREG) await this._cacheParents(path)
     await this.crossCopy(path)
+  }
+
+  /** Drops `path` and everything under it from the index, handles and in-memory copy. */
+  private _forgetCached(path: string): void {
+    for (const map of [this._handles, this._seen, this._truncates] as Map<string, unknown>[]) {
+      for (const p of [...map.keys()]) if (p == path || p.startsWith(path + '/')) map.delete(p)
+    }
+    for (const [p] of [...this.index.entries()]) {
+      if (p == path || p.startsWith(path + '/')) this.index.delete(p)
+    }
+    const drop = (p: string): void => {
+      let stats: { mode: number }
+      try {
+        stats = this._sync.statSync(p)
+      } catch {
+        return // Not cached.
+      }
+      try {
+        if ((stats.mode & constants.S_IFMT) == constants.S_IFDIR) {
+          for (const name of this._sync.readdirSync(p)) drop(join(p, name))
+          this._sync.rmdirSync(p)
+        } else {
+          this._sync.unlinkSync(p)
+        }
+      } catch (error) {
+        logger(`could not drop the cached copy of ${p}: ${(error as Error).name}`)
+      }
+    }
+    drop(path)
+  }
+
+  /** Adds the directories above `path` that the in-memory copy lacks, so crossCopy can fill it. */
+  private async _cacheParents(path: string): Promise<void> {
+    const missing: string[] = []
+    for (let dir = dirname(path); dir != '/'; dir = dirname(dir)) {
+      try {
+        this._sync.statSync(dir)
+        break
+      } catch {
+        missing.unshift(dir)
+      }
+    }
+    for (const dir of missing) {
+      try {
+        const stats = await this.stat(dir)
+        this._sync.mkdirSync(dir, stats as unknown as CreationOptions)
+        this._sync.touchSync(dir, stats)
+      } catch (error) {
+        logger(`could not cache directory ${dir}: ${(error as Error).name}`)
+        return // crossCopy then skips the file (async reads still find it).
+      }
+    }
   }
 
   /**

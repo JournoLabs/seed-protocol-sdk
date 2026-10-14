@@ -7,7 +7,7 @@ import { client } from '@/client'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { eventEmitter } from '@/eventBus'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
-import { isLeaderTab } from '@/helpers/tabCoordinator'
+import { isLeaderTab, TAB_ID } from '@/helpers/tabCoordinator'
 import { FILES_CHANGED_EVENT, notifyFilesWrittenOutsideCache } from '@/helpers/tabEvents'
 
 const filesDir = new URLSearchParams(location.search).get('filesDir')
@@ -15,6 +15,14 @@ if (!filesDir) throw new Error('tab.html needs ?filesDir=')
 
 const filesChanged: string[][] = []
 eventEmitter.on(FILES_CHANGED_EVENT, (paths: string[]) => filesChanged.push(paths))
+
+/** Every files-changed message on this database's tab channel, from any tab (this one included). */
+const filesChangedMessages: Array<{ from?: string; paths: string[] }> = []
+new BroadcastChannel(`seed:tabs:${filesDir}/db/seed.db`).onmessage = (event) => {
+  if (event.data?.type === 'files-changed') {
+    filesChangedMessages.push({ from: event.data.from, paths: event.data.paths })
+  }
+}
 
 const db = () => {
   const appDb = BaseDb.getAppDb()
@@ -57,7 +65,36 @@ const seedTab = {
     return absolute
   },
   readFile: (absolutePath: string) => BaseFileManager.readFileAsString(absolutePath),
+  /** Through the SDK's file manager (async API); returns the absolute path. */
+  async saveFile(relativePath: string, text: string): Promise<string> {
+    const absolute = `${filesDir}/${relativePath}`
+    await BaseFileManager.createDirIfNotExists(absolute.slice(0, absolute.lastIndexOf('/')))
+    await BaseFileManager.saveFile(absolute, text)
+    return absolute
+  },
+  /** Many saves at once, as schema processing or a migration does; returns the absolute paths. */
+  async saveFiles(relativeDir: string, count: number, text: string): Promise<string[]> {
+    const dir = `${filesDir}/${relativeDir}`
+    await BaseFileManager.createDirIfNotExists(dir)
+    const paths = Array.from({ length: count }, (_, i) => `${dir}/f${i}.txt`)
+    await Promise.all(paths.map((path) => BaseFileManager.saveFile(path, text)))
+    return paths
+  },
+  /** Through the sync API; the OPFS write lands after this returns. */
+  saveFileSync(absolutePath: string, text: string): void {
+    BaseFileManager.saveFileSync(absolutePath, text)
+  },
+  /** The sync API's in-memory copy only: no stat(), no invalidate. null when it has no such file. */
+  readFileSync(absolutePath: string): Promise<string | null> {
+    try {
+      return BaseFileManager.readFileSync(absolutePath).text()
+    } catch {
+      return Promise.resolve(null)
+    }
+  },
+  tabId: () => TAB_ID,
   filesChanged: () => filesChanged,
+  filesChangedMessages: () => filesChangedMessages,
 }
 
 declare global {
