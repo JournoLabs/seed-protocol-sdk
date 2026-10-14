@@ -13,6 +13,7 @@ import {
   useSchema,
   useSchemas,
   useServices,
+  formatSeedJson,
 } from '@seedprotocol/react'
 import { BaseDb, client, importJsonSchema, Model, Schema, schemas } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
@@ -165,5 +166,16 @@ describe('item and query hooks', () => {
     ])
     expect(first).toBeDefined()
     expect(second).toBeUndefined()
+  })
+})
+
+describe('formatSeedJson', () => {
+  it('prints an object shared by two keys in full, and only real cycles as [Circular]', () => {
+    const shared = { a: 1 }
+    expect(JSON.parse(formatSeedJson({ x: shared, y: shared }))).toEqual({ x: { a: 1 }, y: { a: 1 } })
+
+    const cyclic: Record<string, unknown> = { name: 'loop' }
+    cyclic.self = cyclic
+    expect(JSON.parse(formatSeedJson(cyclic))).toEqual({ name: 'loop', self: '[Circular]' })
   })
 })

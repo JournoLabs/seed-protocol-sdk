@@ -4,10 +4,11 @@ export * from './services'
 export * from './db'
 export * from './schema'
 export * from './modelProperty'
-export { useDeleteItem } from './trash'
+export { useDeleteItem, type UseDeleteItemReturn } from './trash'
 export { useImageFiles } from './useImageFiles'
 export { useFiles, FILES_QUERY_KEY_PREFIX } from './useFiles'
 export { useModels, useModel, useCreateModel, useDestroyModel } from './model'
+export type { UseCreateModelOptions, UseCreateModelReturn, UseDestroyModelReturn } from './model'
 export { useLiveQuery, useLiveQueryState } from './liveQuery'
 export {
   useEasSyncProcesses,
@@ -34,6 +35,9 @@ export type {
   OPFSFilesManagerNotice,
   OPFSFilesManagerNotifyTone,
 } from './OPFSFilesManager'
+export { useStorageEstimate, type StorageEstimate } from './OPFSFilesManager/useStorageEstimate'
+export { useThumbnail, type ThumbnailStatus } from './OPFSFilesManager/useThumbnail'
+export type { FileEntry } from './OPFSFilesManager/fileModel'
 export { useOPFSFiles } from './useOPFSFiles'
 export type { OPFSFile, UseOPFSFilesOptions } from './useOPFSFiles'
 export {
