@@ -1476,7 +1476,8 @@ export class Model {
   /**
    * Get all Model instances, optionally filtered by schema.
    * When DB is available, loads from DB via getModelsData; otherwise returns from cache.
-   * Supports waitForReady to wait for each model to reach idle state before returning.
+   * With waitForReady, waits for each model to be ready (idle, with any properties from Model.create
+   * created) and leaves out models that error or time out.
    */
   static async all(
     schemaName?: string,
@@ -1570,15 +1571,20 @@ export class Model {
     }
 
     if (waitForReady && instances.length > 0) {
-      await Promise.all(
+      // Leave out models that errored or didn't get ready in time. Don't re-read their state afterwards:
+      // a ready model can already be validating again, and it still belongs in the result.
+      const ready = await Promise.all(
         instances.map((m) =>
-          waitForEntityIdle(m as Parameters<typeof waitForEntityIdle>[0], {
-            timeout: readyTimeout,
-            throwOnError: false,
-          }),
+          this.waitUntilReady(m, readyTimeout).then(
+            () => true,
+            (error) => {
+              logger(`Model.all: leaving out a model that isn't ready: ${error instanceof Error ? error.message : String(error)}`)
+              return false
+            },
+          ),
         ),
       )
-      return instances.filter((m) => (m as Model)._getSnapshot?.().value === 'idle')
+      return instances.filter((_, i) => ready[i])
     }
 
     return instances

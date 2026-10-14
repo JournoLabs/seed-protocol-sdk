@@ -8,7 +8,7 @@ import { metadata } from '@/seedSchema/MetadataSchema'
 import { eq } from 'drizzle-orm'
 import { SchemaFileFormat } from '@/types/import'
 import { importJsonSchema } from '@/imports/json'
-import { renameModelProperty } from '@/helpers/updateSchema'
+import { renameModelProperty, whenDeferredSchemaReloadsSettled } from '@/helpers/updateSchema'
 import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForItemIdle } from '../test-utils/waitForIdle'
@@ -113,7 +113,9 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     await renameModelProperty(schemaName, 'Post', 'featureImage', 'coverImage')
 
-    await new Promise((r) => setTimeout(r, 250))
+    // renameModelProperty defers its schema reload. The metadata asserted below is migrated before it
+    // returns; wait for the reload so it doesn't overlap the rest of the test or afterEach cleanup.
+    await whenDeferredSchemaReloadsSettled()
 
     const metadataAfterRename = await db
       .select()

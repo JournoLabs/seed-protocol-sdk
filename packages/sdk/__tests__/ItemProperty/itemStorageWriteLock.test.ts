@@ -11,6 +11,7 @@ import { convertVerbatimItemStorageRow } from '@/db/write/convertVerbatimItemSto
 import { saveItemStorage } from '@/ItemProperty/service/actors/saveValueToDb/saveItemStorage'
 import { itemStorageFileLockName, withItemStorageFileLock } from '@/helpers/itemStorageFile'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /**
  * Writers of one ItemStorage file (saveItemStorage, the legacy-row conversion used by the migration
@@ -137,6 +138,9 @@ const hasWebLocks = () => typeof navigator !== 'undefined' && !!navigator.locks
 const heldLockNames = async (): Promise<string[]> =>
   hasWebLocks() ? ((await navigator.locks.query()).held ?? []).map((lock) => lock.name ?? '') : []
 
+const pendingLockNames = async (): Promise<string[]> =>
+  hasWebLocks() ? ((await navigator.locks.query()).pending ?? []).map((lock) => lock.name ?? '') : []
+
 /**
  * - `web locks`: navigator.locks (Chromium; Node >= 24.5).
  * - `no web locks`: navigator.locks hidden, so withTabLock falls back to its in-process queue.
@@ -262,8 +266,13 @@ testDescribe('ItemStorage file write lock', () => {
         useMode(mode)
 
         let release!: () => void
-        const holding = withItemStorageFileLock(held.filePath, () => new Promise<void>((resolve) => (release = resolve)))
-        await settle()
+        let locked!: () => void
+        const lockTaken = new Promise<void>((resolve) => (locked = resolve))
+        const holding = withItemStorageFileLock(held.filePath, () => {
+          locked()
+          return new Promise<void>((resolve) => (release = resolve))
+        })
+        await lockTaken
 
         await save(other, '<p>other saved</p>')
         expect(await BaseFileManager.readFileAsString(other.filePath)).toBe('<p>other saved</p>')
@@ -272,6 +281,13 @@ testDescribe('ItemStorage file write lock', () => {
         // The held file's writers wait until it is released.
         let saved = false
         const saving = save(held, '<p>held saved</p>').then(() => (saved = true))
+        if (mode === 'web locks') {
+          // The save has reached the lock and is queued behind the holder.
+          await vi.waitFor(
+            async () => expect(await pendingLockNames()).toContain(itemStorageFileLockName(held.filePath)),
+            { timeout: WAIT_TIMEOUT_MS },
+          )
+        }
         await settle()
         expect(saved).toBe(false)
         release()

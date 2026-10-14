@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import React, { useEffect, useState } from 'react'
 import {
   useModel,
@@ -703,8 +703,7 @@ describe('React Model Hooks Integration Tests', () => {
       }
 
       // Wait for the model to appear in useModels - this is the critical test
-      // Wait for query cache first (broadcast triggers refetch), then flush React and assert on DOM.
-      await new Promise((r) => setTimeout(r, 200))
+      // Wait for query cache first (broadcast triggers refetch), then for React to render it.
       const queryKey = ['seed', 'models', 'Test Schema Dynamic'] as const
       await waitFor(
         () => {
@@ -713,16 +712,18 @@ describe('React Model Hooks Integration Tests', () => {
         },
         { timeout: WAIT_TIMEOUT_MS }
       )
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0))
-      })
-      const finalCount = screen.getByTestId('models-count')
-      expect(parseInt(finalCount.textContent || '0')).toBeGreaterThanOrEqual(1)
+      await waitFor(
+        () => {
+          const finalCount = screen.getByTestId('models-count')
+          expect(parseInt(finalCount.textContent || '0')).toBeGreaterThanOrEqual(1)
 
-      // Verify the specific model name appears
-      const modelElements = screen.getAllByTestId(/^model-\d+$/)
-      const modelNames = modelElements.map((el) => el.textContent)
-      expect(modelNames).toContain('DynamicModel')
+          // Verify the specific model name appears
+          const modelElements = screen.getAllByTestId(/^model-\d+$/)
+          const modelNames = modelElements.map((el) => el.textContent)
+          expect(modelNames).toContain('DynamicModel')
+        },
+        { timeout: WAIT_TIMEOUT_MS }
+      )
 
     })
   })

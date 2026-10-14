@@ -4,6 +4,7 @@ import {
   RelatedItemUnpublishedError,
   type UnpublishedRelatedItem,
 } from '../../../../../sdk/src/db/read/publishErrors'
+import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../../test-utils/waitUntil'
 
 /**
  * Publishing an item that references an unpublished (revoked) item fails in the checking step,
@@ -47,8 +48,12 @@ const runChecking = async (seedLocalId: string) => {
     on: { '*': { actions: ({ event }) => events.push(event as any) } },
   })
   const actor = createActor(machine).start()
-  for (let i = 0; i < 100 && events.length === 0; i++) await new Promise((r) => setTimeout(r, 10))
-  actor.stop()
+  try {
+    // checking sends exactly one event (its verdict) and then finishes.
+    await waitUntilOrThrow(() => events.length > 0, `the checking actor's verdict for ${seedLocalId}`)
+  } finally {
+    actor.stop()
+  }
   return events
 }
 
@@ -65,7 +70,7 @@ describe('checking: references to unpublished items', () => {
     ])
     expect(events[0]!.errors![0]!.message).toContain('authorLocal1')
     expect(ensureEasSchemasForItem).not.toHaveBeenCalled()
-  })
+  }, TEST_TIMEOUT_MS)
 
   test('goes ahead when nothing referenced is unpublished', async () => {
     harness.unpublished = []
@@ -73,5 +78,5 @@ describe('checking: references to unpublished items', () => {
     const events = await runChecking('postLocal02')
     expect(events.map((e) => e.type)).toEqual(['skipArweave'])
     expect(ensureEasSchemasForItem).toHaveBeenCalled()
-  })
+  }, TEST_TIMEOUT_MS)
 })
