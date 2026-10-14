@@ -59,6 +59,13 @@ async function resolveSchemaNameFromSource(
   return null
 }
 
+/** Error for a schema the app passed in config, so init fails with what went wrong and where. */
+function userSchemaLoadError(option: 'schema' | 'schemaFile', source: unknown, error: unknown): Error {
+  const where = typeof source === 'string' ? ` from "${source}"` : ''
+  const reason = error instanceof Error ? error.message : String(error)
+  return new Error(`Could not load config.${option}${where}: ${reason}`, { cause: error })
+}
+
 // Timeout for the entire schema processing operation (120 seconds)
 // Schema processing can be slow with syncSchemaFromSource, loadAllSchemasFromDb, and OPFS file I/O
 const PROCESS_SCHEMA_FILES_TIMEOUT_MS = 120000
@@ -153,8 +160,9 @@ export const processSchemaFiles = fromCallback<
           }
           logger(`Synced canonical schema from ${typeof context.schema === 'string' ? context.schema : 'object'}`)
         } catch (error: any) {
-          logger(`Error syncing canonical schema:`, error)
-          // Don't fail init - schema might already be in DB
+          // A schema the app passed in failed (missing file, bad JSON, DB write). Re-running an
+          // unchanged schema does not throw, so this is not the already-loaded case: fail init.
+          throw userSchemaLoadError('schema', context.schema, error)
         }
       }
     } else if (context.schemaFile) {
@@ -169,8 +177,7 @@ export const processSchemaFiles = fromCallback<
         }
         logger(`Loaded schema from ${resolvedPath}`)
       } catch (error: any) {
-        logger(`Error loading schema file ${context.schemaFile}:`, error)
-        // Don't fail init - schema might already be in DB
+        throw userSchemaLoadError('schemaFile', context.schemaFile, error)
       }
     }
 
@@ -394,14 +401,12 @@ export const processSchemaFiles = fromCallback<
     })
   }
 
-  processSchemaFilesChain = processSchemaFilesChain
+  const run = processSchemaFilesChain
     // Its schema and model inserts check for rows first, so tabs take turns (docs/MULTI_TAB.md).
     .then(() => withSeedDbLock('init', context.filesDir, _processSchemaFiles))
-    .catch((err) => {
-      logger('processSchemaFiles chain error:', err)
-      throw err
-    })
-  processSchemaFilesChain.then(reportSuccess).catch((error) => {
+  // The chain only orders runs; a failed run must not fail the next init too.
+  processSchemaFilesChain = run.catch(() => {})
+  run.then(reportSuccess).catch((error) => {
     reportError(error instanceof Error ? error : new Error(String(error)))
   })
 
