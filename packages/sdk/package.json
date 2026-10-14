@@ -20,11 +20,11 @@
     "react"
   ],
   "type": "module",
-  "main": "./dist/main.cjs",
+  "main": "./dist/main.js",
   "module": "./dist/main.js",
   "types": "./dist/src/index.d.ts",
   "engines": {
-    "node": ">= 20 <= 24"
+    "node": "^20.19.0 || >=22.12.0 <=24"
   },
   "files": [
     "dist",
@@ -108,7 +108,7 @@
       },
       "require": {
         "types": "./dist/src/index.d.ts",
-        "default": "./dist/main.cjs"
+        "default": "./dist/main.js"
       }
     },
     "./node": {
@@ -118,7 +118,7 @@
       },
       "require": {
         "types": "./dist/src/node/index.d.ts",
-        "default": "./dist/node.cjs"
+        "default": "./dist/node.js"
       }
     },
     "./platform": {
