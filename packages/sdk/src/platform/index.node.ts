@@ -16,3 +16,6 @@ export function createPlatformServices(): PlatformServices {
     queryClient: new NodeQueryClient(),
   }
 }
+
+export { configurePlatform } from './configurePlatform'
+export type { PlatformServices } from './types'

@@ -62,6 +62,8 @@ export type { ModelValues } from './types/model'
 export { Item } from './Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from './ItemProperty/ItemProperty'
 export { AmbiguousModelError } from './Model/errors'
+export { ConflictError, type ConflictResult } from './Schema/errors'
+export type { ValidationError, ValidationResult } from './Schema/validation'
 export { FileSystemLockedError } from './helpers/FileManager/errors'
 export { isLeaderTab, whenLeaderTab, type MultiTabMode } from './helpers/tabCoordinator'
 export { FILES_CHANGED_EVENT } from './helpers/tabEvents'
@@ -158,6 +160,8 @@ export type {
 } from '@seedprotocol/eas'
 export {
   isItemOwned,
+  assertItemOwned,
+  OwnershipError,
   isLocalUnsealedDraft,
   publisherIsInOwnedSet,
   isSeedRowOwned,
