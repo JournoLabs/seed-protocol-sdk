@@ -201,37 +201,3 @@ export const Property = {
   Html: htmlPropertyFactory,
   /** `Html` opts are not representable in `TPropertyConstructor`; keep runtime shape via double assert. */
 } as unknown as PropertyDefs
-
-export const PropertyMetadataKey = Symbol('property')
-
-export const PropertyConstructor = (propertyType: Static<typeof TProperty>) => {
-  return function (parentClassPrototype: any, propertyKey: string) {
-    const existingProperties =
-      Reflect.getMetadata(PropertyMetadataKey, parentClassPrototype) || []
-
-    existingProperties.push({ propertyKey, propertyType })
-    Reflect.defineMetadata(
-      PropertyMetadataKey,
-      existingProperties,
-      parentClassPrototype,
-    )
-  }
-}
-
-export const Text = (
-  storageType?: StorageType,
-  srcDir?: string,
-  filenameSuffix?: string,
-) => PropertyConstructor(Property.Text(storageType, srcDir, filenameSuffix))
-export const Number = () => PropertyConstructor(Property.Number())
-export const Json  = () => PropertyConstructor(Property.Json())
-export const File  = () => PropertyConstructor(Property.File())
-export const Image = () => PropertyConstructor(Property.Image())
-export const Relation = (ref: string, refValueType?: PropertyDataType, required?: boolean) =>
-  PropertyConstructor(Property.Relation(ref, refValueType, required)) // Adjust for actual relation type
-export const List = (refValueType: PropertyDataType, ref?: string) =>
-  PropertyConstructor(Property.List(refValueType, ref))
-export const Boolean = () => PropertyConstructor(Property.Boolean())
-export const Date = () => PropertyConstructor(Property.Date())
-export const Html = (opts?: { htmlEmbeddedDataUriPolicy?: HtmlEmbeddedDataUriPolicy }) =>
-  PropertyConstructor(htmlPropertyFactory(opts))

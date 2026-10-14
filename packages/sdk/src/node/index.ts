@@ -1,18 +1,7 @@
 import { enableMapSet } from 'immer'
 
 // Core schema exports
-export {
-  Model,
-  Property,
-  Image,
-  List,
-  Text,
-  Json,
-  Relation,
-  Boolean,
-  Number,
-  Date,
-} from '../Schema'
+export { Model, Property } from '../Schema'
 
 // Core classes
 export { Item } from '../Item/Item'
