@@ -35,7 +35,7 @@ await client.init({
 
 Three different address lists, do not mix them:
 
-- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only. An empty owned list returns no rows (it does not skip the filter).
+- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only and always agree. An empty owned list matches only local unsealed drafts (no publisher, no real uid, no `attestationRaw`), so users can write before connecting a wallet; it does not skip the filter.
 - **`publisherAddress`** — who new seeds/versions/metadata are stamped with (usually the managed account). Set via the publish wallet session, not by putting the module contract in `owned`.
 - **`getAdditionalSyncAddresses`** — extra EAS indexers (legacy executor module). Used for sync and revoke only, never for ownership.
 

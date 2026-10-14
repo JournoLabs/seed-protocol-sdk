@@ -770,6 +770,35 @@ describe('React Item Hooks Integration Tests', () => {
           }
         })
 
+        it('addressFilter owned lists local drafts while signed out, and drops them once owned is set', async () => {
+          const previous = await client.getAddresses()
+          try {
+            await client.setAddresses({ owned: [] })
+            render(<UseItemsTest modelName="Post" addressFilter="owned" />, { container, wrapper: SeedProviderWrapper })
+            const scoped = within(container)
+
+            // The shared Posts are local unsealed drafts: owned with no wallet, so listed.
+            await waitFor(
+              () => {
+                expect(scoped.getByTestId('items-status').textContent).toBe('loaded')
+                expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(3)
+              },
+              { timeout: WAIT_TIMEOUT_MS }
+            )
+
+            // Connected but unclaimed: isItemOwned says no, so the list must agree.
+            await client.setAddresses({ owned: ['0xabc0000000000000000000000000000000000001'] })
+            await waitFor(
+              () => {
+                expect(parseInt(scoped.getByTestId('items-count').textContent || '0')).toBe(0)
+              },
+              { timeout: WAIT_TIMEOUT_MS }
+            )
+          } finally {
+            await client.setAddresses(previous)
+          }
+        })
+
         it('should return items that are all idle when loading completes', async () => {
           render(<UseItemsTest modelName="Post" />, { container, wrapper: SeedProviderWrapper })
 
