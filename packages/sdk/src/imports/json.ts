@@ -1060,6 +1060,7 @@ async function applySchemaToDb(
   modelDefinitions: ModelDefinitions,
   modelFileIds: Map<string, string>,
   propertyFileIds: Map<string, Map<string, string>>,
+  propertyDefinitions?: Map<string, { [propName: string]: any }>,
 ): Promise<{ schemaRecord: Awaited<ReturnType<typeof import('../helpers/db').addSchemaToDb>> }> {
   const schemaName = schemaFile.metadata?.name
   const version = schemaFile.version
@@ -1091,6 +1092,7 @@ async function applySchemaToDb(
       schemaFileId: schemaFile.id!,
       modelFileIds,
       propertyFileIds,
+      propertyDefinitions,
     })
     await new Promise(resolve => setTimeout(resolve, 200))
   }
@@ -1261,7 +1263,22 @@ export const loadSchemaFromFile = async (
     try {
       const db = BaseDb.getAppDb()
       if (db) {
-        const { schemaRecord } = await applySchemaToDb(schemaFile, modelDefinitions, modelFileIds, propertyFileIds)
+        // A model already in the instance cache keeps its old properties (Model.create ignores the
+        // ones passed), so give addModelsToDb this file's definitions: a renamed or changed property
+        // must come from the file, not from the cached model.
+        const propertyDefinitions = new Map(
+          Object.entries(importData.models).map(([modelName, modelDef]) => [
+            modelName,
+            jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds.get(modelName)),
+          ]),
+        )
+        const { schemaRecord } = await applySchemaToDb(
+          schemaFile,
+          modelDefinitions,
+          modelFileIds,
+          propertyFileIds,
+          propertyDefinitions,
+        )
           
           // Query the database to get model IDs that were just created
           const modelSchemaSchemaMod = await import('../seedSchema/ModelSchemaSchema')
@@ -1415,23 +1432,16 @@ export const loadSchemaFromFile = async (
 }
 
 /**
- * Create a Model class from a JSON model definition
- * @param modelName - The name of the model
+ * Convert a JSON model's properties to the schema property format Model.create and addModelsToDb take
+ * @param modelName - The name of the model (for error messages)
  * @param modelDef - The JSON model definition
- * @param schemaName - The name of the schema this model belongs to
- * @returns A Model class that can be used with the SDK
+ * @param propertyFileIds - Optional map of property names to their file IDs from the JSON file
  */
-export const createModelFromJson = async (
+const jsonPropertiesToSchemaProperties = (
   modelName: string,
   modelDef: JsonImportSchema['models'][string],
-  schemaName: string,
-  modelFileId?: string, // Optional modelFileId from JSON file
-  propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
-): Promise<any> => {
-  const modelMod = await import('../Model/Model')
-  const { Model } = modelMod
-
-  // Convert JSON properties to schema format
+  propertyFileIds?: Map<string, string>,
+): { [propName: string]: any } => {
   const convertedProperties: { [propName: string]: any } = {}
   if (modelDef.properties) {
     for (const [propName, propDef] of Object.entries(modelDef.properties)) {
@@ -1499,6 +1509,28 @@ export const createModelFromJson = async (
       convertedProperties[propName] = schemaProp
     }
   }
+
+  return convertedProperties
+}
+
+/**
+ * Create a Model class from a JSON model definition
+ * @param modelName - The name of the model
+ * @param modelDef - The JSON model definition
+ * @param schemaName - The name of the schema this model belongs to
+ * @returns A Model class that can be used with the SDK
+ */
+export const createModelFromJson = async (
+  modelName: string,
+  modelDef: JsonImportSchema['models'][string],
+  schemaName: string,
+  modelFileId?: string, // Optional modelFileId from JSON file
+  propertyFileIds?: Map<string, string>, // Optional map of property names to their file IDs from the JSON file
+): Promise<any> => {
+  const modelMod = await import('../Model/Model')
+  const { Model } = modelMod
+
+  const convertedProperties = jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds)
 
   // Create Model instance with the definition
   // Pass id (schemaFileId) if provided to ensure Model instance uses correct ID
