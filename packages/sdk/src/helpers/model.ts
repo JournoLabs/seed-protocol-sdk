@@ -18,6 +18,10 @@ export function modelPropertiesToObject(properties: ModelProperty[]): { [propert
         localStorageDir: propContext.localStorageDir,
         filenameSuffix: propContext.filenameSuffix,
         required: propContext.required,
+        ...(propContext.validation ? { validation: propContext.validation } : {}),
+        ...(propContext.htmlEmbeddedDataUriPolicy
+          ? { htmlEmbeddedDataUriPolicy: propContext.htmlEmbeddedDataUriPolicy }
+          : {}),
       }
     }
   }

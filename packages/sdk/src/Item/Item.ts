@@ -23,7 +23,7 @@ import {
   NewItemProps,
   PropertyData
 } from '@/types'
-import type { CreateWaitOptions } from '@/types'
+import type { CreateWaitOptions, ItemCreateOptions } from '@/types'
 import type { ItemPublishOptions } from '@/helpers/publishConfig'
 import { normalizePublisher } from '@/helpers/addresses'
 
@@ -49,7 +49,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
-import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
+import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
 import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -553,7 +553,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
 
   static async create<T extends ModelValues<ModelSchema>>(
     props: Partial<ItemData> & { modelInstance?: import('@/Model/Model').Model },
-    options?: CreateWaitOptions,
+    options?: ItemCreateOptions,
   ): Promise<Item<any>> {
     const waitForReady = options?.waitForReady !== false
     const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
@@ -750,6 +750,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         schemaName: schemaName ?? modelInstance?.schemaName,
       })
       const modelRecords = modelRecord ? [modelRecord] : []
+      if (!modelRecord) {
+        const { UnknownModelError } = await import('./errors')
+        throw new UnknownModelError(props.modelName, schemaName ?? modelInstance?.schemaName)
+      }
       if (modelRecord?.schemaFileId) {
         ;(props as any).modelFileId = modelRecord.schemaFileId
       }
@@ -818,6 +822,12 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
         // Type assertion: we've filtered out modelInstance above, so value should be a valid property value
         modelPropertyData[key] = value as any
       }
+    }
+    // Strict by default: unknown keys and invalid values reject before anything is written.
+    // Values that go through the property save pipeline (files, Html, ItemStorage) are
+    // validated there.
+    if (propertyNames.length > 0 && options?.validate !== false) {
+      await Item.assertValidCreateValues(props, propertyNames, dataTypeByPropertyName, new Set(pipelineValues.map(([key]) => key)))
     }
     const { seedLocalId, versionLocalId, } = await createNewItem(modelPropertyData)
     props.seedLocalId = seedLocalId
@@ -1382,6 +1392,80 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /** Same as `item.publish(options)`; requires @seedprotocol/publish. */
+  /** Keys Item.create accepts besides the model's properties. */
+  private static readonly CREATE_METADATA_KEYS = new Set([
+    'modelName', 'schemaName', 'modelInstance', 'modelFileId', 'type',
+    'seedLocalId', 'seedUid', 'schemaUid', 'attestationCreatedAt',
+    'latestVersionUid', 'latestVersionLocalId', 'publishedVersionUid', 'publishedVersionLocalId',
+    'versionsCount', 'lastVersionPublishedAt', 'lastLocalUpdateAt',
+    'createdAt', 'updatedAt', 'publisher', 'revokedAt',
+  ])
+
+  /** Throws ItemCreateValidationError for unknown keys and values that break their property's rules. */
+  private static async assertValidCreateValues(
+    props: Record<string, unknown>,
+    propertyNames: string[],
+    dataTypeByPropertyName: Map<string, string>,
+    skipKeys: Set<string>,
+  ): Promise<void> {
+    const { ItemCreateValidationError } = await import('./errors')
+    const { getPropertySchema } = await import('../helpers/property')
+    const { SchemaValidationService } = await import('../Schema/service/validation/SchemaValidationService')
+    const validationService = new SchemaValidationService()
+    const modelName = props.modelName as string
+    const known = new Set(propertyNames)
+    const problems: import('./errors').ItemCreateProblem[] = []
+
+    for (const [key, value] of Object.entries(props)) {
+      if (Item.CREATE_METADATA_KEYS.has(key) || skipKeys.has(key)) continue
+      if (!known.has(key)) {
+        problems.push({
+          property: key,
+          code: 'unknown_property',
+          message: `${modelName} has no property "${key}"`,
+        })
+        continue
+      }
+      if (value === undefined || value === null) continue
+      const propertySchema = await getPropertySchema(modelName, key, {
+        modelFileId: props.modelFileId as string | undefined,
+        schemaName: props.schemaName as string | undefined,
+      })
+      const dataType = normalizeDataType(propertySchema?.dataType ?? dataTypeByPropertyName.get(key) ?? '')
+      if (!dataType) continue
+      // Lists may be passed as the JSON array string they are stored as.
+      let checked: unknown = value
+      if (dataType === ModelPropertyDataTypes.List && typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value)
+          if (Array.isArray(parsed)) checked = parsed
+        } catch {
+          // Not JSON: validated as given, and rejected as a non-array
+        }
+      }
+      const { resolvePropertyValidationRules } = await import('../helpers/propertyValidationRules')
+      const rules =
+        propertySchema?.validation ??
+        (await resolvePropertyValidationRules(modelName, key, {
+          modelFileId: props.modelFileId as string | undefined,
+          schemaName: props.schemaName as string | undefined,
+        }))
+      const result = validationService.validatePropertyValue(
+        checked,
+        dataType as ModelPropertyDataTypes,
+        rules,
+        propertySchema?.refValueType,
+      )
+      for (const error of result.errors) {
+        problems.push({ property: key, code: error.code, message: error.message })
+      }
+    }
+
+    if (problems.length > 0) {
+      throw new ItemCreateValidationError(modelName, problems)
+    }
+  }
+
   /**
    * Set `publisher` on loaded Items for these seeds (after claimUnpublishedDrafts stamped
    * their rows). Items that aren't loaded read it from the DB when they load.

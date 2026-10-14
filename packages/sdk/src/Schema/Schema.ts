@@ -3,6 +3,7 @@ import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
 import { Model } from '@/Model/Model'
+import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -106,6 +107,8 @@ export class Schema {
   protected readonly _service: SchemaService
 
   $schema?: string
+  /** The schema's name (metadata.name). Assigning it renames the schema and saves a draft. */
+  name?: string
   version?: number
   metadata?: {
     name: string
@@ -372,10 +375,7 @@ export class Schema {
             
             // Save draft to database immediately so changes persist
             saveDraftLogger(`Name change detected, calling _saveDraftToDb (oldName: "${oldName}", newName: "${newName}")`)
-            instance._saveDraftToDb(oldName, newName).catch((error) => {
-              saveDraftLogger(`ERROR: Failed to save draft after name change: ${error instanceof Error ? error.message : String(error)}`)
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(instance._service, instance._saveDraftToDb(oldName, newName), `Schema "${newName}"`)
           } else {
             logger(`Schema name unchanged: "${oldName}"`)
           }
@@ -419,9 +419,7 @@ export class Schema {
           if (TRACKED_PROPERTIES.includes(prop as any)) {
             const trackedPropContext = newInstance._getSnapshotContext()
             const schemaName = trackedPropContext.metadata?.name || trackedPropContext.schemaName
-            newInstance._saveDraftToDb(schemaName, schemaName).catch((error) => {
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(newInstance._service, newInstance._saveDraftToDb(schemaName, schemaName), `Schema "${schemaName}"`)
           }
         }
       },
@@ -904,6 +902,14 @@ export class Schema {
     return this._getSnapshotContext()._validationErrors || []
   }
 
+  /**
+   * The error from the last draft save that an assignment started (e.g. `schema.name = ...`),
+   * such as a ConflictError; undefined once a later one succeeds.
+   */
+  get lastSaveError(): Error | undefined {
+    return getDraftSaveError(this._service)
+  }
+
   get isValid() {
     const errors = this.validationErrors
     return errors.length === 0
@@ -948,43 +954,68 @@ export class Schema {
   }
 
   /**
-   * Build models object from Model instances (for persistence)
-   * Model instances are the source of truth for model data
+   * Build the file-format `models` object from this schema's Model instances: every model
+   * (those created at runtime too), each property as its file definition ({ id, type, model,
+   * ref, refValueType, required, storage, validation, ... }).
    */
-  private _buildModelsFromInstances(): { [modelName: string]: any } {
+  private async _buildModelsFromInstances(): Promise<SchemaFileFormat['models']> {
     const context = this._getSnapshotContext()
-    const models: { [modelName: string]: any } = {}
-    
-    // Get model IDs from service context (reactive state)
-    const modelIds = context._liveQueryModelIds || []
-    
-    // Iterate through Model instances from static cache
-    for (const modelFileId of modelIds) {
-      const modelInstance = Model.getById(modelFileId)
-      if (!modelInstance) continue
+    const { convertPropertyToSchemaUpdate } = await import('@/helpers/updateSchema')
+    const models: SchemaFileFormat['models'] = {}
+
+    for (const modelInstance of this.models) {
       try {
         const modelName = modelInstance.modelName
-        
-        if (!modelName) {
-          logger(`Model instance with ID ${modelFileId} has no modelName, skipping`)
-          continue
+        if (!modelName) continue
+
+        const properties: SchemaFileFormat['models'][string]['properties'] = {}
+        let propertyContexts: any[] = (modelInstance.properties ?? []).map(
+          (property: any) => property.getService().getSnapshot().context,
+        )
+        // model.properties can still be empty for a model created at runtime (the browser fills
+        // it from a live query): read the rows, preferring each row's cached instance.
+        const modelDbId = (modelInstance.getService().getSnapshot().context as { _dbId?: number })._dbId
+        const db = BaseDb.getAppDb()
+        if (propertyContexts.length === 0 && modelDbId && db) {
+          const { ModelProperty } = await import('../ModelProperty/ModelProperty')
+          const rows = await db.select().from(propertiesTable).where(eq(propertiesTable.modelId, modelDbId))
+          propertyContexts = rows.map((row: typeof propertiesTable.$inferSelect) => {
+            const cached = row.schemaFileId ? ModelProperty.getById(row.schemaFileId) : undefined
+            return cached
+              ? cached.getService().getSnapshot().context
+              : {
+                  ...row,
+                  id: row.schemaFileId ?? undefined,
+                  refModelId: row.refModelId ?? undefined,
+                  refValueType: row.refValueType ?? undefined,
+                  storageType: row.storageType ?? undefined,
+                  localStorageDir: row.localStorageDir ?? undefined,
+                  filenameSuffix: row.filenameSuffix ?? undefined,
+                }
+          })
         }
-        
-        // Build model definition from Model instance context
-        // CRITICAL: Read properties from ModelProperty instances, not from Model's properties context
-        // ModelProperty instances are the source of truth for property data
-        const propertiesFromInstances = (modelInstance as any)._buildPropertiesFromInstances?.() || modelInstance.properties || {}
-        
+        for (const ctx of propertyContexts) {
+          if (!ctx.name) continue
+          const { updates } = await convertPropertyToSchemaUpdate(ctx as any, modelName, ctx.name)
+          properties[ctx.name] = {
+            ...(ctx.id ? { id: ctx.id } : {}),
+            ...updates,
+            ...(ctx.validation ? { validation: ctx.validation } : {}),
+            ...(ctx.htmlEmbeddedDataUriPolicy ? { htmlEmbeddedDataUriPolicy: ctx.htmlEmbeddedDataUriPolicy } : {}),
+          }
+        }
+
+        // No property instances loaded for this model: keep the definitions the schema has.
+        const fromContext = context.models?.[modelName]?.properties
         models[modelName] = {
-          properties: propertiesFromInstances,
+          ...(modelInstance.id ? { id: modelInstance.id } : {}),
+          properties: Object.keys(properties).length > 0 || !fromContext ? properties : fromContext,
         }
-        
-        logger(`Built model "${modelName}" from Model instance (ID: ${modelFileId})`)
       } catch (error) {
-        logger(`Error building model from instance (ID: ${modelFileId}): ${error instanceof Error ? error.message : String(error)}`)
+        logger(`Error building model from instance: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    
+
     logger(`Built ${Object.keys(models).length} models from Model instances`)
     return models
   }
@@ -1030,7 +1061,7 @@ export class Schema {
     // Build current schema state from context
     // CRITICAL: Read models from Model instances, not from Schema context
     // Model instances are the source of truth for model data
-    const modelsFromInstances = this._buildModelsFromInstances()
+    const modelsFromInstances = await this._buildModelsFromInstances()
     
     const currentSchema: SchemaFileFormat = {
       id: context.id,
@@ -1121,6 +1152,7 @@ export class Schema {
       type: 'clearDraft',
       _dbUpdatedAt: new Date(publishedSchema.metadata.updatedAt).getTime(),
       _dbVersion: publishedSchema.version,
+      savedSchema: publishedSchema,
     } as any)
 
     // Clear edited flags on all ModelProperty instances and in database
@@ -1498,7 +1530,7 @@ export class Schema {
       
       // CRITICAL: Read models from Model instances, not from Schema context
       // Model instances are the source of truth for model data
-      const modelsFromInstances = this._buildModelsFromInstances()
+      const modelsFromInstances = await this._buildModelsFromInstances()
       
       const currentSchema: SchemaFileFormat = {
         $schema: context.$schema || 'https://seedprotocol.org/schemas/data-model/v1',

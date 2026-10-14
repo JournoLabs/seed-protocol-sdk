@@ -35,6 +35,29 @@ const withListRelationStorageName = <T extends { propertyName?: string; property
   return { ...context, propertyName: storageName, isRelation: true }
 }
 
+/**
+ * List values are stored as JSON array strings. Whichever actor or event delivers one, a List
+ * property holds the array, so `value` reads the same on a new item and after a reload.
+ */
+const withListValueParsed = <T extends { propertyValue?: unknown; renderValue?: unknown; propertyRecordSchema?: any }>(
+  context: T,
+): T => {
+  if (normalizePropertyRecordSchema(context.propertyRecordSchema ?? {})?.dataType !== 'List') return context
+  const parse = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trimStart().startsWith('[')) return value
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : value
+    } catch {
+      return value
+    }
+  }
+  const propertyValue = parse(context.propertyValue)
+  const renderValue = parse(context.renderValue)
+  if (propertyValue === context.propertyValue && renderValue === context.renderValue) return context
+  return { ...context, propertyValue, renderValue }
+}
+
 export const propertyMachine = setup({
   types: {
     context: {} as PropertyMachineContext,
@@ -104,9 +127,9 @@ export const propertyMachine = setup({
           }
           newContext[key] = (event as any)[key]
         }
-        return 'propertyRecordSchema' in (event as any)
-          ? withListRelationStorageName(newContext)
-          : newContext
+        return withListValueParsed(
+          'propertyRecordSchema' in (event as any) ? withListRelationStorageName(newContext) : newContext,
+        )
       }),
     },
     destroyStarted: {
@@ -159,7 +182,7 @@ export const propertyMachine = setup({
           target: 'idle',
           actions: assign(({ context, event }) => {
             const property = (event as any).property
-            return withListRelationStorageName({
+            return withListValueParsed(withListRelationStorageName({
               ...context,
               propertyName: property.propertyName || context.propertyName,
               propertyValue: property.propertyValue !== undefined ? property.propertyValue : context.propertyValue,
@@ -177,7 +200,7 @@ export const propertyMachine = setup({
               refResolvedValue: property.refResolvedValue !== undefined ? property.refResolvedValue : context.refResolvedValue,
               refResolvedDisplayValue: property.refResolvedDisplayValue !== undefined ? property.refResolvedDisplayValue : context.refResolvedDisplayValue,
               localStorageDir: property.localStorageDir !== undefined ? property.localStorageDir : context.localStorageDir,
-            })
+            }))
           }),
         },
         loadOrCreatePropertyError: {

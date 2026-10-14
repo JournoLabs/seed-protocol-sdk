@@ -30,6 +30,7 @@ import { getModelsData } from '@/db/read/getModelsData'
 import { toSnakeCase } from 'drizzle-orm/casing'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
+import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
 
@@ -637,9 +638,7 @@ export class Model {
             })
             
             // Save draft to database immediately so changes persist
-            target._saveDraftToDb(oldName, newName).catch((error) => {
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(target._service, target._saveDraftToDb(oldName, newName), `Model "${newName}"`)
             
             // NOTE: Schema is not notified of model name changes during edits.
             // Schema will read from Model instances when persisting/saving.
@@ -1777,6 +1776,11 @@ export class Model {
 
   get status() {
     return this._getSnapshot().value
+  }
+
+  /** The error from the last draft save a rename started, or undefined once a later one succeeds. */
+  get lastSaveError(): Error | undefined {
+    return getDraftSaveError(this._service)
   }
 
   get validationErrors() {
