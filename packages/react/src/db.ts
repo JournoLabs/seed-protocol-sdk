@@ -1,62 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Subscription } from 'xstate'
+import { useSelector } from '@xstate/react'
 import { getClient, ClientManagerState } from '@seedprotocol/sdk'
-import debug from 'debug'
 
-const logger = debug('seedSdk:react:db')
+/**
+ * Client states in which the app database is open: DB_INIT finishes with dbReady and moves to
+ * SAVE_CONFIG. DB_INIT itself (still opening, may fail) and INIT_FAILED are not ready.
+ */
+const DB_READY_STATES = new Set<string>([
+  ClientManagerState.SAVE_CONFIG,
+  ClientManagerState.PROCESS_SCHEMA_FILES,
+  ClientManagerState.ADD_MODELS_TO_STORE,
+  ClientManagerState.ADD_MODELS_TO_DB,
+  ClientManagerState.IDLE,
+])
 
+export const isDbReadyState = (state: unknown): boolean =>
+  typeof state === 'string' && DB_READY_STATES.has(state)
+
+/**
+ * Whether the app database is open. True once the client has opened it, false again if init
+ * fails or restarts.
+ */
 export const useDbsAreReady = () => {
-  const [dbsAreReady, setDbsAreReady] = useState(false)
-
-  const update = useCallback(() => {
-    if (dbsAreReady) {
-      return
-    }
-    setDbsAreReady(true)
-  }, [])
-
-  useEffect(() => {
-    let subscription: Subscription | undefined
-
-    const _waitForDbs = async (): Promise<void> => {
-      const clientManager = getClient()
-      const clientService = clientManager.getService()
-      
-      const currentState = clientService.getSnapshot().value
-      // DB is ready when ClientManager reaches DB_INIT state or later
-      if (currentState === ClientManagerState.DB_INIT || 
-          currentState === ClientManagerState.SAVE_CONFIG ||
-          currentState === ClientManagerState.PROCESS_SCHEMA_FILES ||
-          currentState === ClientManagerState.ADD_MODELS_TO_STORE ||
-          currentState === ClientManagerState.ADD_MODELS_TO_DB ||
-          currentState === ClientManagerState.IDLE) {
-        update()
-        return
-      }
-      
-      subscription = clientService.subscribe((snapshot) => {
-        const state = snapshot.value
-        if (state === ClientManagerState.DB_INIT || 
-            state === ClientManagerState.SAVE_CONFIG ||
-            state === ClientManagerState.PROCESS_SCHEMA_FILES ||
-            state === ClientManagerState.ADD_MODELS_TO_STORE ||
-            state === ClientManagerState.ADD_MODELS_TO_DB ||
-            state === ClientManagerState.IDLE) {
-          update()
-          subscription?.unsubscribe()
-        }
-      })
-    }
-
-    _waitForDbs()
-
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe()
-      }
-    }
-  }, [])
-
+  const dbsAreReady = useSelector(getClient().getService(), (snapshot) => isDbReadyState(snapshot.value))
   return {
     dbsAreReady,
   }

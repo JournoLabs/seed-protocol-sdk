@@ -280,9 +280,6 @@ export const useDestroySchema = (): UseDestroySchemaReturn => {
     setIsLoading(true)
     try {
       await schema.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = schema.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err

@@ -227,7 +227,12 @@ function UseDestroyModelTest({ model }: { model: Model | null }) {
   const handleDestroy = async () => {
     if (!model) return
     setStatus('destroying')
-    await destroy(model)
+    try {
+      await destroy(model)
+    } catch {
+      // The hook rejects and also sets `error`, which the test reads
+      return
+    }
     setStatus('destroyed')
   }
 

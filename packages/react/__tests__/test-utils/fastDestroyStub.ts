@@ -16,8 +16,11 @@ export function createFastDestroyStub<T>(options: { destroyError?: string } = {}
     }),
     destroy: async () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
-      // Like runDestroyLifecycle, report DB failures via the service context instead of throwing
-      if (options.destroyError) context._destroyError = { message: options.destroyError }
+      // Like runDestroyLifecycle: record the failure on the service context and reject
+      if (options.destroyError) {
+        context._destroyError = { message: options.destroyError }
+        throw new Error(options.destroyError)
+      }
     },
   } as unknown as T
 }

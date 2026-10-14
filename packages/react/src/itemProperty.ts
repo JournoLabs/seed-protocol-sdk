@@ -689,11 +689,6 @@ export const useDestroyItemProperty = (): UseDestroyItemPropertyReturn => {
     setIsLoading(true)
     try {
       await itemProperty.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = (itemProperty.getService().getSnapshot() as unknown as {
-        context: { _destroyError?: { message: string } | null }
-      }).context
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err

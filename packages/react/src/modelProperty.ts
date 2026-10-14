@@ -553,9 +553,6 @@ export const useDestroyModelProperty = (): UseDestroyModelPropertyReturn => {
     setIsLoading(true)
     try {
       await modelProperty.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = modelProperty.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err

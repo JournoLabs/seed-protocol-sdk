@@ -286,7 +286,12 @@ function UseDeleteItemTest({ item }: { item: Item<any> | null }) {
   const handleDelete = async () => {
     if (!item) return
     setStatus('deleting')
-    await deleteItem(item)
+    try {
+      await deleteItem(item)
+    } catch {
+      // The hook rejects and also sets `error`, which the test reads
+      return
+    }
     setStatus('deleted')
   }
 
