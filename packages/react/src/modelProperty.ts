@@ -8,8 +8,8 @@ import { Subscription } from "xstate"
 import debug from "debug"
 import { useLiveQuery } from "./liveQuery"
 import { BaseDb } from '@seedprotocol/sdk'
-import { properties as propertiesTable, models as modelsTable } from '@seedprotocol/sdk'
-import { eq } from "drizzle-orm"
+import { properties as propertiesTable, models as modelsTable, schemas as schemasTable } from '@seedprotocol/sdk'
+import { eq, or } from "drizzle-orm"
 import { Model } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getSchemaNameFromId } from '@seedprotocol/sdk'
@@ -35,6 +35,23 @@ type UseModelPropertiesResult = {
  * @param modelName - The name of the model to get properties from (required if first param is schemaId)
  * @returns Object with modelProperties array, isLoading, and error
  */
+/**
+ * A schema name for a schemaId that may be a schema name, a schema file id, or "name-version".
+ * An exact stored name or file id wins, so hyphenated names ("my-app") aren't cut.
+ */
+async function resolveSchemaName(schemaId: string): Promise<string> {
+  const db = BaseDb.getAppDb()
+  if (db) {
+    const rows = await db
+      .select({ name: schemasTable.name })
+      .from(schemasTable)
+      .where(or(eq(schemasTable.name, schemaId), eq(schemasTable.schemaFileId, schemaId)))
+      .limit(1)
+    if (rows[0]?.name) return rows[0].name
+  }
+  return getSchemaNameFromId(schemaId) ?? schemaId
+}
+
 export const useModelProperties = (
   schemaIdOrModelId: string | null | undefined,
   modelName?: string | null | undefined
@@ -357,7 +374,7 @@ export function useModelProperty(
 
         // Use existing getPropertySchema for schemaId + modelName + propertyName
         // schemaId may be a schema file id or a schema name; scope the lookup to that schema
-        const schemaName = (await getSchemaNameFromId(lookupMode.schemaId)) ?? lookupMode.schemaId
+        const schemaName = await resolveSchemaName(lookupMode.schemaId)
         propertyData = await getPropertySchema(lookupMode.modelName, lookupMode.propertyName, { schemaName })
         resolvedModelName = lookupMode.modelName
       }
