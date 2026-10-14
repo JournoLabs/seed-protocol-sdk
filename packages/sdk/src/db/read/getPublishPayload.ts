@@ -8,11 +8,11 @@ import {
   VERSION_SCHEMA_UID,
   ZERO_BYTES32,
 } from '@/helpers/constants'
-import {
+import type {
   AttestationRequest,
   AttestationRequestData,
-  SchemaEncoder,
 } from '@ethereum-attestation-service/eas-sdk'
+import { loadEasSdk } from '@/helpers/easSdk'
 
 import { toSnakeCase } from '@/helpers'
 import { toSnakeCase as toSnakeCaseDb } from 'drizzle-orm/casing'
@@ -651,7 +651,8 @@ const processBasicProperties = async (
 
     let encodedData: string
     try {
-            const dataEncoder = new SchemaEncoder(schemaDef)
+      const { SchemaEncoder } = await loadEasSdk()
+      const dataEncoder = new SchemaEncoder(schemaDef)
       encodedData = dataEncoder.encodeData(data) as string
     } catch (encodeErr) {
       addValidationError(
@@ -2087,7 +2088,8 @@ export const resolvePublishPayloadValues = async (
     return multiPayload
   }
 
-    const result: MultiPublishPayload = []
+  const { SchemaEncoder } = await loadEasSdk()
+  const result: MultiPublishPayload = []
 
   for (const payload of multiPayload) {
     const updatedAttestations: PublishPayload['listOfAttestations'] = []
