@@ -162,7 +162,7 @@ export class Schema {
     // Note: Property getters/setters are now handled by the Proxy in create()
   }
 
-  static create(schemaName: string, options?: { waitForReady?: false }): Schema
+  static create(schemaName: string, options: { waitForReady: false }): Schema
   static create(
     schemaName: string,
     options?: { waitForReady?: true; readyTimeout?: number },
