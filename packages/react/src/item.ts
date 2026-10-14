@@ -13,7 +13,7 @@ import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
-import type { IItem, IItemProperty } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
@@ -483,7 +483,11 @@ export const useCreateItem = (): UseCreateItemReturn => {
 }
 
 type UsePublishItemReturn = {
-  publishItem: (item: Item<any> | undefined) => void
+  /**
+   * Calls `item.publish(options)`, which needs @seedprotocol/publish: `initPublish()` or
+   * `<PublishProvider config>` must have run, or `error` reports that publishing is not configured.
+   */
+  publishItem: (item: Item<any> | undefined, options?: ItemPublishOptions) => void
   isLoading: boolean
   error: Error | null
   resetError: () => void
@@ -497,12 +501,14 @@ export const usePublishItem = (): UsePublishItemReturn => {
 
   const resetError = useCallback(() => setError(null), [])
 
-  const publishItem = useCallback((item: Item<any> | undefined) => {
+  const publishItem = useCallback((item: Item<any> | undefined, options?: ItemPublishOptions) => {
     if (!item) return
     setPublishingItem(item)
     setError(null)
-    item.publish().catch(() => {
-      // Error is surfaced via service state subscription; avoid unhandled rejection
+    // The promise is the one source of errors: it also rejects before the item machine
+    // starts (publishing not configured, item not owned, already publishing).
+    item.publish(options).catch((err: unknown) => {
+      setError(err instanceof Error ? err : new Error(String(err)))
     })
   }, [])
 
@@ -517,19 +523,11 @@ export const usePublishItem = (): UsePublishItemReturn => {
     subscriptionRef.current?.unsubscribe()
     const service = publishingItem.getService()
     const subscription = service.subscribe((snapshot: any) => {
-      const value = snapshot?.value
-      const ctx = snapshot?.context
-      setIsLoading(value === 'publishing')
-      const publishError = ctx?._publishError
-      setError(publishError ? new Error(publishError.message) : null)
+      setIsLoading(snapshot?.value === 'publishing')
     })
 
     subscriptionRef.current = subscription
-    const snap = service.getSnapshot()
-    setIsLoading(snap?.value === 'publishing')
-    const ctx = snap?.context
-    const publishError = ctx?._publishError
-    setError(publishError ? new Error(publishError.message) : null)
+    setIsLoading(service.getSnapshot()?.value === 'publishing')
 
     return () => {
       subscriptionRef.current?.unsubscribe()
