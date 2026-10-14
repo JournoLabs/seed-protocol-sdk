@@ -209,6 +209,15 @@ export const schemaMachine = setup({
         if ((event as any)._dbVersion !== undefined) {
           newContext._dbVersion = (event as any)._dbVersion
         }
+        // saveNewVersion passes the schema it just wrote: the instance now is that version.
+        const saved = (event as any).savedSchema as
+          | Pick<SchemaFileFormat, 'version' | 'metadata' | 'migrations'>
+          | undefined
+        if (saved) {
+          newContext.version = saved.version
+          newContext.metadata = saved.metadata
+          newContext.migrations = saved.migrations
+        }
         
         return newContext
       }),
@@ -284,6 +293,13 @@ export const schemaMachine = setup({
                 _schemaRecord: ({ event }) => event.schemaRecord,
                 id: ({ event }) => event.schema.id, // schemaFileId (string)
                 _dbId: ({ event }) => event.schemaRecord?.id, // Database integer ID
+                // A schema created in code has these only in the written record; without them
+                // validation (and so saveNewVersion) failed with "Schema metadata is required".
+                $schema: ({ context, event }) => context.$schema ?? event.schema.$schema,
+                version: ({ context, event }) => context.version ?? event.schema.version,
+                metadata: ({ context, event }) => context.metadata ?? event.schema.metadata,
+                enums: ({ context, event }) => context.enums ?? event.schema.enums,
+                migrations: ({ context, event }) => context.migrations ?? event.schema.migrations,
               }),
             },
             writeError: {
