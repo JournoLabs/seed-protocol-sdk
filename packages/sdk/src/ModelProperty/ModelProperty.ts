@@ -73,6 +73,8 @@ export class ModelProperty {
   
   protected readonly _service: ModelPropertyService
 
+  /** The property's schemaFileId (its id in schema files). */
+  id?: string
   name?: string
   dataType?: ModelPropertyDataTypes
   ref?: string

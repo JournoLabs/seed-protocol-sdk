@@ -106,6 +106,8 @@ export class Schema {
   protected readonly _service: SchemaService
 
   $schema?: string
+  /** The schema's name (metadata.name). Assigning it renames the schema and saves a draft. */
+  name?: string
   version?: number
   metadata?: {
     name: string
