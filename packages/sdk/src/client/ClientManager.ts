@@ -1,4 +1,6 @@
-import type { AddressConfiguration } from '@/types'
+import type { AddressConfiguration, SeedConstructorOptions } from '@/types'
+import { isEqual } from 'lodash-es'
+import { normalizeAddressConfig } from '@/helpers/addresses'
 import debug                      from 'debug'
 import { createActor, waitFor }   from 'xstate'
 import { clientManagerMachine }   from '@/client/clientManagerMachine'
@@ -60,11 +62,104 @@ const subscription         = clientManager.subscribe(( snapshot ) => {
 
 clientManager.start()
 
+/** Config of the init that is running or has succeeded; cleared when init fails or the client stops. */
+let activeInitConfig: SeedConstructorOptions['config'] | undefined
+
+export const INIT_CONFIG_CONFLICT_MESSAGE =
+  'client.init was already called with a different config. The SDK keeps the config it was ' +
+  'initialised with: pass the same config, or call client.stop() before initialising with a new one. ' +
+  'To change addresses, use client.setAddresses() (or call init again with the same config and new addresses).'
+
 const ensureInitialized = () => {
   if (!clientManager.getSnapshot().context.isInitialized) {
     throw new Error(CLIENT_NOT_INITIALIZED);
   }
 }
+
+const coalescedInit = createCoalescedAsync(async (options: any) => {
+  // If the actor is stopped (e.g., from a previous failed test), restart it
+  const snapshot = clientManager.getSnapshot()
+  const currentState = snapshot.value as string
+  const isStopped = snapshot.status === 'stopped'
+  
+  if (isStopped) {
+    logger('Client manager was stopped, restarting...')
+    clientManager.start()
+    // Wait for the actor to be ready
+    try {
+      await waitFor(clientManager, (snapshot) => snapshot.status !== 'stopped', { timeout: 1000 })
+    } catch (e) {
+      logger('Timeout waiting for actor to restart, continuing anyway...')
+    }
+  }
+  
+  // Clear any stale context from previous failed initializations
+  // This ensures we start with a clean slate before the new init updates it
+  if (currentState !== 'uninitialized') {
+    logger(`Client manager is in state ${currentState}, clearing stale context before re-init...`)
+    clientManager.send({ 
+      type: 'updateContext', 
+      context: {
+        isInitialized: false,
+        addressesSet: false,
+        isSaving: false,
+        syncFromEasOnAddressChange: false,
+        endpoints: undefined,
+        addresses: undefined,
+        ownedAddresses: undefined,
+        watchedAddresses: undefined,
+        models: undefined,
+        arweaveDomain: undefined,
+        filesDir: undefined,
+        dbConfig: undefined,
+        initError: undefined,
+        saveError: undefined,
+      }
+    })
+    // Wait a moment for the context update to be processed
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  
+  // Send init event - the root-level handler will transition to PLATFORM_CLASSES_INIT
+  // which will stop any running actors and start fresh with the new options
+  // The platformClassesInit actor will update the context with the correct endpoints from options
+  clientManager.send({ type: 'init', options });
+  
+  // Wait for the state machine to transition to PLATFORM_CLASSES_INIT to ensure
+  // any old actors are stopped and the new initialization flow begins
+  try {
+    await waitFor(clientManager, (snapshot) => {
+      return snapshot.value === 'platformClassesInit' || snapshot.context.isInitialized
+    }, { timeout: 1000 })
+  } catch (e) {
+    // If we can't transition, continue anyway - the waitFor below will catch any errors
+    logger('Timeout waiting for state transition, continuing...')
+  }
+  try {
+    await waitFor(clientManager, (snapshot) => {
+      return snapshot.context.isInitialized || snapshot.context.initError != null
+    }, { timeout: 120000 });
+    const initError = clientManager.getSnapshot().context.initError
+    if (initError) {
+      throw initError instanceof Error ? initError : new Error(String(initError))
+    }
+  } catch (error: any) {
+    // Ensure we never throw undefined
+    if (error === undefined || error === null) {
+      throw new Error('Initialization failed with undefined error')
+    }
+    throw error
+  }
+  // Wire `@seedprotocol/query` local source once DB is ready
+  registerSeedQueryLocalSource({ force: true })
+}, () => {
+  const snapshot = clientManager.getSnapshot()
+  return (
+    snapshot.value === ClientManagerState.IDLE &&
+    snapshot.context.isInitialized === true &&
+    !snapshot.context.initError
+  )
+})
 
 // Singleton instance - created once at module load time
 // ES modules cache exports, ensuring all imports get the same instance
@@ -76,90 +171,31 @@ const clientInstance = {
     // ensureInitialized();
     return clientManager;
   },
-  init: createCoalescedAsync(async (options: any) => {
-    // If the actor is stopped (e.g., from a previous failed test), restart it
-    const snapshot = clientManager.getSnapshot()
-    const currentState = snapshot.value as string
-    const isStopped = snapshot.status === 'stopped'
-    
-    if (isStopped) {
-      logger('Client manager was stopped, restarting...')
-      clientManager.start()
-      // Wait for the actor to be ready
-      try {
-        await waitFor(clientManager, (snapshot) => snapshot.status !== 'stopped', { timeout: 1000 })
-      } catch (e) {
-        logger('Timeout waiting for actor to restart, continuing anyway...')
-      }
+  /**
+   * Initialise the SDK. Calls made while an init is running share it. Once initialised, a
+   * call with the same config resolves at once and applies any change in `addresses`; a
+   * call with a different config throws INIT_CONFIG_CONFLICT_MESSAGE (call stop() first).
+   */
+  init: async (options: SeedConstructorOptions): Promise<void> => {
+    if (activeInitConfig !== undefined && !isEqual(activeInitConfig, options?.config)) {
+      throw new Error(INIT_CONFIG_CONFLICT_MESSAGE)
     }
-    
-    // Clear any stale context from previous failed initializations
-    // This ensures we start with a clean slate before the new init updates it
-    if (currentState !== 'uninitialized') {
-      logger(`Client manager is in state ${currentState}, clearing stale context before re-init...`)
-      clientManager.send({ 
-        type: 'updateContext', 
-        context: {
-          isInitialized: false,
-          addressesSet: false,
-          isSaving: false,
-          syncFromEasOnAddressChange: false,
-          endpoints: undefined,
-          addresses: undefined,
-          ownedAddresses: undefined,
-          watchedAddresses: undefined,
-          models: undefined,
-          arweaveDomain: undefined,
-          filesDir: undefined,
-          dbConfig: undefined,
-          initError: undefined,
-          saveError: undefined,
-        }
-      })
-      // Wait a moment for the context update to be processed
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    
-    // Send init event - the root-level handler will transition to PLATFORM_CLASSES_INIT
-    // which will stop any running actors and start fresh with the new options
-    // The platformClassesInit actor will update the context with the correct endpoints from options
-    clientManager.send({ type: 'init', options });
-    
-    // Wait for the state machine to transition to PLATFORM_CLASSES_INIT to ensure
-    // any old actors are stopped and the new initialization flow begins
+    const isRepeat = activeInitConfig !== undefined
+    activeInitConfig = options?.config
     try {
-      await waitFor(clientManager, (snapshot) => {
-        return snapshot.value === 'platformClassesInit' || snapshot.context.isInitialized
-      }, { timeout: 1000 })
-    } catch (e) {
-      // If we can't transition, continue anyway - the waitFor below will catch any errors
-      logger('Timeout waiting for state transition, continuing...')
-    }
-    try {
-      await waitFor(clientManager, (snapshot) => {
-        return snapshot.context.isInitialized || snapshot.context.initError != null
-      }, { timeout: 120000 });
-      const initError = clientManager.getSnapshot().context.initError
-      if (initError) {
-        throw initError instanceof Error ? initError : new Error(String(initError))
-      }
-    } catch (error: any) {
-      // Ensure we never throw undefined
-      if (error === undefined || error === null) {
-        throw new Error('Initialization failed with undefined error')
-      }
+      await coalescedInit(options)
+    } catch (error) {
+      activeInitConfig = undefined
       throw error
     }
-    // Wire `@seedprotocol/query` local source once DB is ready
-    registerSeedQueryLocalSource({ force: true })
-  }, () => {
-    const snapshot = clientManager.getSnapshot()
-    return (
-      snapshot.value === ClientManagerState.IDLE &&
-      snapshot.context.isInitialized === true &&
-      !snapshot.context.initError
-    )
-  }),
+    if (isRepeat && options?.addresses !== undefined) {
+      const wanted = normalizeAddressConfig(options.addresses)
+      const current = { owned: await getOwnedAddressesFromDb(), watched: await getWatchedAddressesFromDb() }
+      if (!isEqual(wanted, current)) {
+        await clientInstance.setAddresses(wanted)
+      }
+    }
+  },
   setAddresses: async (addresses: AddressConfiguration) => {
     ensureInitialized();
     logger('setAddresses', addresses);
@@ -250,21 +286,37 @@ const clientInstance = {
     // Global service removed - model registration is now handled by ClientManager
     // Models are added to DB during the ADD_MODELS_TO_DB state
   },
-  onReady: (callback: () => void) => {
+  /**
+   * Calls `callback` once the client is initialised, or on the next microtask if it already
+   * is. Returns a function that cancels the callback.
+   */
+  onReady: (callback: () => void): (() => void) => {
+    if (clientManager.getSnapshot().context.isInitialized) {
+      let cancelled = false
+      queueMicrotask(() => {
+        if (!cancelled) callback()
+      })
+      return () => {
+        cancelled = true
+      }
+    }
     const subscription = clientManager.subscribe((snapshot) => {
       if (snapshot.context.isInitialized) {
         subscription.unsubscribe()
         callback();
       }
     });
+    return () => subscription.unsubscribe()
   },
   stop: () => {
     ensureInitialized();
+    activeInitConfig = undefined
     unregisterSeedQueryLocalSource()
     clientManager.stop();
   },
   unload: () => {
     ensureInitialized();
+    activeInitConfig = undefined
     unregisterSeedQueryLocalSource()
     clientManager.stop();
     subscription.unsubscribe();

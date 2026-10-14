@@ -136,6 +136,8 @@ Ranked by damage:
     non-leader tabs. Keeping stale addresses in a lone tab made drafts created before the wallet
     reconnected read-only (unstamped drafts aren't owned while owned addresses are stored), so
     the first tab clears them as before.
+  - Init with no `addresses` option at all keeps the stored addresses in every tab, and warns once
+    when there are any. Only an explicit `addresses: []` clears them, and only in the leader tab.
   - The drizzle driver retries `SQLITE_BUSY` / `SQLITE_LOCKED` (`sqliteBusyRetry.ts`).
 - **Phase B: done.**
   - `packages/publish/src/services/publishManager/publishLocks.ts`: the tab running a publish holds
