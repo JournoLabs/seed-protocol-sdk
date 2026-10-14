@@ -71,6 +71,11 @@ const modelInstanceState = new WeakMap<Model, {
   liveQuerySubscription: Subscription | null // LiveQuery subscription for cross-instance property updates
 }>()
 
+// Settles once the properties passed to Model.create exist, or rejects when they can't be created.
+// The model reaches idle before its write, so idle alone doesn't mean they exist yet. Keyed by the
+// actor because callers hold the proxy, not the instance.
+const pendingPropertyCreation = new WeakMap<object, Promise<void>>()
+
 // Define tracked properties for the Proxy
 // These properties will be read from/written to the actor context
 const TRACKED_PROPERTIES = [
@@ -181,6 +186,34 @@ export class Model {
     })
 
     // Note: Property getters/setters are now handled by the Proxy in create()
+  }
+
+  /**
+   * Resolves once the model is idle and any properties passed to Model.create exist.
+   * Rejects if it errors, times out, or its properties can't be created.
+   */
+  private static async waitUntilReady(instance: Model, timeout: number): Promise<Model> {
+    const startedAt = Date.now()
+    await waitForEntityIdle(instance, { timeout })
+    const propertyCreation = pendingPropertyCreation.get(instance.getService())
+    if (!propertyCreation) return instance
+
+    const remaining = Math.max(0, timeout - (Date.now() - startedAt))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        propertyCreation,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const modelName = instance.getService().getSnapshot().context.modelName
+            reject(new Error(`Model "${modelName}" did not finish creating its properties within ${timeout}ms`))
+          }, remaining)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+    return instance
   }
 
   /**
@@ -358,9 +391,7 @@ export class Model {
       })
       logger(`Model.create: Found instance in ID cache for "${modelName}" (ID: ${id})`)
       if (!waitForReady) return instance
-      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-        () => instance,
-      )
+      return this.waitUntilReady(instance, readyTimeout)
     }
 
     // Step 2: Check for duplicate names and generate unique name if needed (before checking cache)
@@ -407,9 +438,7 @@ export class Model {
             this.instanceCacheByName.set(legacyKey, existingId)
           }
           if (!waitForReady) return instance
-          return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-            () => instance,
-          )
+          return this.waitUntilReady(instance, readyTimeout)
         }
       }
     }
@@ -456,9 +485,7 @@ export class Model {
       }
       
       if (!waitForReady) return instance
-      return waitForEntityIdle(instance, { timeout: readyTimeout }).then(
-        () => instance,
-      )
+      return this.waitUntilReady(instance, readyTimeout)
     }
 
     // Step 7: Create new instance with id in initial context
@@ -474,6 +501,32 @@ export class Model {
     
     if (options?.properties) {
       logger(`[Model.create] Created instance with _pendingPropertyDefinitions in initial context (${Object.keys(options.properties).length} properties) for model "${uniqueModelName}"`)
+    }
+
+    // Called by the write trigger below when the properties will never be created
+    let failPropertyCreation: (reason: string) => void = () => {}
+    if (options?.properties && Object.keys(options.properties).length > 0) {
+      const service = newInstance.getService()
+      const propertyCreation = new Promise<void>((resolve, reject) => {
+        const subscription = service.subscribe({
+          next: (snapshot) => {
+            if (snapshot.value === 'idle' && !snapshot.context._pendingPropertyDefinitions) {
+              subscription.unsubscribe()
+              resolve()
+            } else if (snapshot.value === 'error') {
+              failPropertyCreation('the model is in an error state')
+            }
+          },
+          complete: () => failPropertyCreation('the model was unloaded'),
+        })
+        failPropertyCreation = (reason) => {
+          subscription.unsubscribe()
+          reject(new Error(`Model "${service.getSnapshot().context.modelName}" could not create its properties: ${reason}`))
+        }
+      })
+      // Only waitUntilReady reports this; without waitForReady nobody awaits it
+      propertyCreation.catch(() => {})
+      pendingPropertyCreation.set(service, propertyCreation)
     }
     
     // Step 7: Set initial model data if provided
@@ -729,7 +782,10 @@ export class Model {
           })
           
           // Unloaded or evicted (e.g. Schema.destroy) while it loaded: a stopped model never writes
-          if (isActorStopped(proxiedInstance._service)) return
+          if (isActorStopped(proxiedInstance._service)) {
+            failPropertyCreation('the model was unloaded')
+            return
+          }
           // Only write if validation passed (model is in idle state, not error)
           const finalSnapshot = proxiedInstance._service.getSnapshot()
           if (finalSnapshot.value === 'idle' && (!finalSnapshot.context._validationErrors || finalSnapshot.context._validationErrors.length === 0)) {
@@ -828,6 +884,7 @@ export class Model {
                 _dbId: schemaInstance ? (schemaInstance as any)._getSnapshotContext()._dbId : 'N/A',
                 schemaName: schemaName || 'N/A',
               })
+              failPropertyCreation(`its schema "${schemaName}" was not found in the database`)
             } else if (finalSnapshot.context.id) {
               // Verify schema exists in database before proceeding (additional safety check)
               try {
@@ -865,7 +922,10 @@ export class Model {
               const maxRetries = 10
               const checkAndSend = async () => {
                 // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
-                if (isActorStopped(proxiedInstance._service)) return
+                if (isActorStopped(proxiedInstance._service)) {
+                  failPropertyCreation('the model was unloaded')
+                  return
+                }
                 const currentSnapshot = proxiedInstance._service.getSnapshot()
                 if (currentSnapshot.context.writeProcess) {
                   // Track pending write (only once it really starts: a stopped model leaves none behind)
@@ -920,6 +980,7 @@ export class Model {
                         logger(`Write process failed for model "${finalSnapshot.context.modelName}": ${errorContext.error?.message || 'Unknown error'}`)
                         logger(`Write process error details:`, errorContext.error)
                         logger(`Validation errors:`, errorContext.validationErrors)
+                        failPropertyCreation(`writing the model failed: ${errorContext.error?.message || 'Unknown error'}`)
                       }
                     })
                   }
@@ -939,6 +1000,7 @@ export class Model {
                   setTimeout(checkAndSend, 50) // Retry after 50ms
                 } else {
                   logger(`ERROR: writeProcess not available after ${maxRetries} retries for model "${finalSnapshot.context.modelName}"`)
+                  failPropertyCreation('its write process never started')
                 }
               }
               
@@ -946,20 +1008,21 @@ export class Model {
               setTimeout(checkAndSend, 0)
             } else {
               logger(`Cannot trigger write process: missing schemaId (${schemaId}) or id (${finalSnapshot.context.id})`)
+              failPropertyCreation('it has no id')
             }
           } else {
             logger(`Model validation failed or model in error state, skipping write process`)
+            failPropertyCreation('the model failed validation')
           }
         } catch (error) {
           logger(`Failed to trigger write process: ${error instanceof Error ? error.message : String(error)}`)
+          failPropertyCreation(error instanceof Error ? error.message : String(error))
         }
       })
     }
     
     if (!waitForReady) return proxiedInstance
-    return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
-      () => proxiedInstance,
-    )
+    return this.waitUntilReady(proxiedInstance, readyTimeout)
   }
 
   /**
