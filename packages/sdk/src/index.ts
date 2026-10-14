@@ -15,7 +15,7 @@ export type {
   AddressesPersistedPayload,
   LocalCopiesRemovedPayload,
 } from './client/events'
-export { getClient } from './client/ClientManager'
+export { getClient, INIT_CONFIG_CONFLICT_MESSAGE } from './client/ClientManager'
 export { ClientManagerState, MachineIds } from './client/constants'
 export { BaseDb } from './db/Db/BaseDb'
 export { createNewItem } from './db/write/createNewItem'

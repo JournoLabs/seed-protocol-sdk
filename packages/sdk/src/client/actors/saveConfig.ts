@@ -5,25 +5,57 @@ import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
 import debug                    from 'debug'
-import { normalizeAddressList } from '@/helpers/addresses'
+import { normalizeAddressConfig, normalizeAddressList } from '@/helpers/addresses'
+import { eq } from 'drizzle-orm'
 import { loadLocalDbChain } from '@/helpers/localDbChain'
 import { withSeedDbLock } from '@/helpers/tabLocks'
 import { isLeaderTab } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:client:actors:saveConfig')
 
+let warnedKeptStoredAddresses = false
+
+/** Test hook: let the "kept stored addresses" warning fire again. */
+export function resetKeptStoredAddressesWarning(): void {
+  warnedKeptStoredAddresses = false
+}
+
 /**
- * Saves the addresses passed to init. Hosts pass `addresses: []` before a wallet connects. In the
- * first (leader) tab that clears stored addresses, as it always has, so drafts made before the
- * wallet reconnects stay editable. A tab opened while another is running (`keepStoredWhenEmpty`)
- * keeps them instead: they're the other tab's connected wallet, which EAS sync, downloads and
- * publishing read. See docs/MULTI_TAB.md.
+ * Saves the addresses passed to init.
+ *
+ * - No `addresses` option (`addressesProvided: false`): stored addresses are kept, with a
+ *   one-time warning when there are any, since a forgotten option would otherwise act on
+ *   an earlier session's wallet.
+ * - `addresses: []`: hosts pass this before a wallet connects. In the first (leader) tab it
+ *   clears stored addresses, so drafts made before the wallet reconnects stay editable. A tab
+ *   opened while another is running (`keepStoredWhenEmpty`) keeps them instead: they're the
+ *   other tab's connected wallet, which EAS sync, downloads and publishing read. See
+ *   docs/MULTI_TAB.md.
  */
 export async function persistInitAddresses(
   appDb: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
-  { addresses, ownedAddresses, watchedAddresses }: Pick<ClientManagerContext, 'addresses' | 'ownedAddresses' | 'watchedAddresses'>,
+  {
+    addresses,
+    addressesProvided,
+    ownedAddresses,
+    watchedAddresses,
+  }: Pick<ClientManagerContext, 'addresses' | 'addressesProvided' | 'ownedAddresses' | 'watchedAddresses'>,
   { keepStoredWhenEmpty }: { keepStoredWhenEmpty: boolean },
 ): Promise<void> {
+  if (addressesProvided === false) {
+    if (!warnedKeptStoredAddresses) {
+      const rows = await appDb.select().from(appState).where(eq(appState.key, 'addresses')).limit(1)
+      const stored = rows[0]?.value ? normalizeAddressConfig(JSON.parse(rows[0].value)) : undefined
+      if (stored && (stored.owned.length > 0 || stored.watched.length > 0)) {
+        warnedKeptStoredAddresses = true
+        console.warn(
+          `[seed] client.init was called without \`addresses\`, so the stored addresses are kept ` +
+            `(${stored.owned.length} owned, ${stored.watched.length} watched). Pass \`addresses: []\` to clear them.`,
+        )
+      }
+    }
+    return
+  }
   const owned = normalizeAddressList(ownedAddresses ?? addresses ?? [])
   const watched = normalizeAddressList(watchedAddresses ?? [])
   if (owned.length === 0 && watched.length === 0 && keepStoredWhenEmpty) return
@@ -45,6 +77,7 @@ export const saveConfig = fromCallback<
   const {
     endpoints,
     addresses,
+    addressesProvided,
     ownedAddresses,
     watchedAddresses,
     arweaveDomain,
@@ -95,7 +128,7 @@ export const saveConfig = fromCallback<
 
       await persistInitAddresses(
         appDb,
-        { addresses, ownedAddresses, watchedAddresses },
+        { addresses, addressesProvided, ownedAddresses, watchedAddresses },
         { keepStoredWhenEmpty: !isLeaderTab() },
       )
 

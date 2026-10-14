@@ -75,8 +75,23 @@ export const propertyMachine = setup({
         isSaving: true,
         _saveError: undefined,
         _saveValidationErrors: undefined,
+        _valueBeforeSave: ({ event }) => (event as { before?: PropertyMachineContext['_valueBeforeSave'] }).before,
       }),
       target: '.saving',
+    },
+    /** analyzeInput refused (item not owned) or failed before writing: restore the shown value. */
+    saveFailed: {
+      target: '.idle',
+      actions: assign(({ context, event }) => {
+        const error = (event as { type: 'saveFailed'; error: unknown }).error
+        return {
+          isSaving: false,
+          _saveError:
+            error instanceof Error ? { message: error.message, name: error.name } : { message: String(error) },
+          ...((context._valueBeforeSave ?? {}) as Partial<PropertyMachineContext>),
+          _valueBeforeSave: undefined,
+        }
+      }),
     },
     updateContext: {
       actions: assign(({ context, event }) => {

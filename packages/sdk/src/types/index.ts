@@ -101,6 +101,13 @@ export type AddressConfiguration =
 
 export interface SeedConstructorOptions {
   config: SeedConfig
+  /**
+   * Addresses to save at init. Leave it out to keep the addresses already stored (the
+   * SDK warns once when it does). Pass `[]` (or `{ owned: [] }`) to clear them, e.g.
+   * before a wallet connects. In a second tab, `[]` keeps the first tab's addresses
+   * (docs/MULTI_TAB.md). Calling init again with only different addresses applies them
+   * like `client.setAddresses`.
+   */
   readonly addresses?: AddressConfiguration
   /**
    * When true, after `setAddresses` persists to app_state, the SDK runs `runSyncFromEas`

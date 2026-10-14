@@ -177,6 +177,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       gatewaySidecarPort: gatewayConfig.hyper?.localSidecarPort,
       gatewayProxyBaseUrl: resolvedGateway.proxyBaseUrl ?? gatewayConfig.proxyBaseUrl,
       addresses: normalizedAddresses.owned,
+      addressesProvided: addresses !== undefined,
       ownedAddresses: normalizedAddresses.owned,
       watchedAddresses: normalizedAddresses.watched,
       filesDir: normalizedFilesDir,

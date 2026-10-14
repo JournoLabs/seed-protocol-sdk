@@ -51,6 +51,8 @@ export type ClientManagerContext = {
   syncFromEasOnAddressChange?: boolean
   endpoints?: Endpoints
   addresses?: string[]
+  /** False when init was called without `addresses`: stored addresses are kept. */
+  addressesProvided?: boolean
   ownedAddresses?: string[]
   watchedAddresses?: string[]
   models?: { [key: string]: Model }

@@ -79,9 +79,15 @@ export type PropertyMachineContext = Omit<Partial<MetadataType>, 'propertyValue'
   _saveValidationErrors?: import('@/Schema/validation').ValidationError[]
   /** Error from last failed save (e.g. file save, metadata creation). Cleared on successful save. */
   _saveError?: { message: string; name?: string } | null
+  /** Set by an assignment's save: the values to restore if that save fails. */
+  _valueBeforeSave?: PropertyValueSnapshot
 }
 
 export type SaveValueToDbEvent = {
   type: 'saveValueToDb'
   newValue: ItemPropertyValueType
+  /** Values shown before an assignment; restored if the save is refused or fails. */
+  before?: PropertyValueSnapshot
 }
+
+export type PropertyValueSnapshot = { propertyValue?: unknown; renderValue?: unknown }

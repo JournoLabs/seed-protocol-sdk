@@ -1861,6 +1861,9 @@ export class Schema {
           ),
         ] as number[]
 
+        const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+        await detachModelRows(db, modelIds)
+
         await db.delete(modelSchemas).where(inArray(modelSchemas.schemaId, schemaIds))
 
         for (const modelId of modelIds) {

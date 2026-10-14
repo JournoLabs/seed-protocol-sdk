@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { appState } from '@/seedSchema'
-import { persistInitAddresses } from '@/client/actors/saveConfig'
+import { persistInitAddresses, resetKeptStoredAddressesWarning } from '@/client/actors/saveConfig'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 
 describe('persistInitAddresses', () => {
@@ -59,5 +59,27 @@ describe('persistInitAddresses', () => {
       { keepStoredWhenEmpty: true },
     )
     expect(JSON.parse((await stored())!)).toEqual({ owned: ['0xdef'], watched: ['0x123'] })
+  })
+
+  it('keeps stored addresses in the leader tab when init has no addresses option, and warns once', async () => {
+    await store(connected)
+    resetKeptStoredAddressesWarning()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const omitted = { addresses: [], ownedAddresses: [], watchedAddresses: [], addressesProvided: false }
+      await persistInitAddresses(BaseDb.getAppDb()!, omitted, { keepStoredWhenEmpty: false })
+      await persistInitAddresses(BaseDb.getAppDb()!, omitted, { keepStoredWhenEmpty: false })
+      expect(await stored()).toBe(connected)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toContain('without `addresses`')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('clears in the leader tab when addresses: [] is passed explicitly', async () => {
+    await store(connected)
+    await persistInitAddresses(BaseDb.getAppDb()!, { ...none, addressesProvided: true }, { keepStoredWhenEmpty: false })
+    expect(JSON.parse((await stored())!)).toEqual({ owned: [], watched: [] })
   })
 })
