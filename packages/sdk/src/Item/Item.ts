@@ -1443,10 +1443,17 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           // Not JSON: validated as given, and rejected as a non-array
         }
       }
+      const { resolvePropertyValidationRules } = await import('../helpers/propertyValidationRules')
+      const rules =
+        propertySchema?.validation ??
+        (await resolvePropertyValidationRules(modelName, key, {
+          modelFileId: props.modelFileId as string | undefined,
+          schemaName: props.schemaName as string | undefined,
+        }))
       const result = validationService.validatePropertyValue(
         checked,
         dataType as ModelPropertyDataTypes,
-        propertySchema?.validation,
+        rules,
         propertySchema?.refValueType,
       )
       for (const error of result.errors) {

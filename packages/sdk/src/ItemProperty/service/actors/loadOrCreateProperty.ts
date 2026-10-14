@@ -184,41 +184,13 @@ export const loadOrCreateProperty = fromCallback<
               filenameSuffix: propRecord.filenameSuffix || undefined,
               required: (propRecord as { required?: boolean }).required ?? undefined,
             }
-            // Merge with schema from file/DB to get validation rules (enum, pattern, etc.) - properties table doesn't store these
-            try {
-              const { getPropertySchema } = await import('../../../helpers/property')
-              let schemaFromFile = await getPropertySchema(normalizedModelName, propertyName, {
-                modelFileId: modelRecord?.schemaFileId ?? modelFileId,
-              })
-              if (!schemaFromFile?.validation) {
-                // Fallback: get validation from schemaData in database (Schema context may not be loaded yet)
-                const { schemas: schemasTable } = await import('../../../seedSchema/SchemaSchema')
-                const { modelSchemas } = await import('../../../seedSchema/ModelSchemaSchema')
-                const modelSchemaRows = await db
-                  .select({ schemaId: modelSchemas.schemaId })
-                  .from(modelSchemas)
-                  .where(eq(modelSchemas.modelId, modelRecords[0].id))
-                  .limit(1)
-                if (modelSchemaRows.length > 0 && modelSchemaRows[0].schemaId) {
-                  const schemaRows = await db
-                    .select({ schemaData: schemasTable.schemaData })
-                    .from(schemasTable)
-                    .where(eq(schemasTable.id, modelSchemaRows[0].schemaId))
-                    .limit(1)
-                  if (schemaRows.length > 0 && schemaRows[0].schemaData) {
-                    const parsed = JSON.parse(schemaRows[0].schemaData) as { models?: Record<string, { properties?: Record<string, { validation?: unknown }> }> }
-                    const modelDef = parsed?.models?.[normalizedModelName]
-                    const propDef = modelDef?.properties?.[propertyName]
-                    if (propDef?.validation) {
-                      propertyRecordSchema = { ...propertyRecordSchema, validation: propDef.validation }
-                    }
-                  }
-                }
-              } else {
-                propertyRecordSchema = { ...propertyRecordSchema, validation: schemaFromFile.validation }
-              }
-            } catch {
-              // Schema not loaded or lookup failed - continue with DB schema only
+            // Validation rules (enum, pattern, ...) aren't in the properties table
+            const { resolvePropertyValidationRules } = await import('../../../helpers/propertyValidationRules')
+            const validation = await resolvePropertyValidationRules(normalizedModelName, propertyName, {
+              modelFileId: modelRecord?.schemaFileId ?? modelFileId,
+            })
+            if (validation) {
+              propertyRecordSchema = { ...propertyRecordSchema, validation }
             }
           }
         }
