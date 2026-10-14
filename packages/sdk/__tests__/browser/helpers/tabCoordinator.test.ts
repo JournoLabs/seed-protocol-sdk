@@ -16,6 +16,16 @@ describe('tab coordination', () => {
   const dbKey = `${filesDir}/db/seed.db`
   let tab: ReturnType<typeof otherTab> | undefined
 
+  /** This tab's leader-lock request is queued behind the other tab's: it follows, not leads. */
+  const waitForQueuedLeaderRequest = () =>
+    vi.waitFor(
+      async () => {
+        const { pending = [] } = await navigator.locks.query()
+        expect(pending.map((lock) => lock.name)).toContain(`seed:leader:${dbKey}`)
+      },
+      { timeout: WAIT_TIMEOUT_MS },
+    )
+
   afterEach(async () => {
     vi.restoreAllMocks()
     resetTabCoordinationForTests()
@@ -28,7 +38,7 @@ describe('tab coordination', () => {
     await tab.send({ type: 'lead', name: `seed:leader:${dbKey}` }, 'leading')
 
     startTabCoordination({ filesDir })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitForQueuedLeaderRequest()
     expect(isLeaderTab()).toBe(false)
 
     const tookOver = whenLeaderTab()
@@ -43,7 +53,7 @@ describe('tab coordination', () => {
     await tab.send({ type: 'lead', name: `seed:leader:${dbKey}` }, 'leading')
     await tab.listen(`seed:tabs:${dbKey}`)
     startTabCoordination({ filesDir })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitForQueuedLeaderRequest()
 
     requestEasSyncFromModelsInit()
     requestEasSyncFromModelsInit()

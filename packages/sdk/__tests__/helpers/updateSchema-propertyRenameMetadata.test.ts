@@ -13,6 +13,7 @@ import { generateId } from '@/helpers'
 import { setupTestEnvironment, teardownTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitForItemIdle } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
+import { waitUntilOrThrow } from '../test-utils/waitUntil'
 
 function createTestSchema(name: string, models: Record<string, any>): SchemaFileFormat {
   return {
@@ -113,7 +114,14 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     await renameModelProperty(schemaName, 'Post', 'featureImage', 'coverImage')
 
-    await new Promise((r) => setTimeout(r, 250))
+    // renameModelProperty defers loadSchemaFromFile (setTimeout 100ms). The metadata asserted below is
+    // migrated before it returns; wait for the deferred load to write schema v2 so it isn't still
+    // starting while the rest of the test (and afterEach cleanup) runs.
+    const { schemas } = await import('@/seedSchema/SchemaSchema')
+    await waitUntilOrThrow(async () => {
+      const rows = await db.select({ version: schemas.version }).from(schemas).where(eq(schemas.name, schemaName))
+      return rows.some((row) => row.version === 2)
+    }, 'deferred schema reload after the rename to write version 2')
 
     const metadataAfterRename = await db
       .select()
