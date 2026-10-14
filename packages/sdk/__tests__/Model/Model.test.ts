@@ -17,7 +17,7 @@ import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/clien
 import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
+import { waitForModelIdle, waitForModelSettled, waitForSchemaIdle } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
@@ -1403,8 +1403,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
+      // Wait for model to stabilize, including its write
+      await waitForModelSettled(newModel)
       
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1465,14 +1465,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
 
-      // Wait for model to stabilize. The first idle comes before the write: writeSuccess then moves the
-      // model to creatingProperties, so wait until the property definitions have been consumed too.
-      await waitForModelIdle(newModel, 10000)
-      await waitFor(
-        newModel.getService(),
-        (s) => s.value === 'error' || (s.value === 'idle' && !s.context._pendingPropertyDefinitions),
-        { timeout: 10000 },
-      )
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
 
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1535,11 +1529,11 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
-      
-      // Wait for schema registration to complete
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
+
+      // Wait a bit more to ensure no additional callbacks
+      await new Promise(resolve => setTimeout(resolve, 1000))
       
       // Unsubscribe
       subscription.unsubscribe()
