@@ -1437,19 +1437,25 @@ testDescribe('Model Integration Tests', () => {
           )
         }
       })
-      
-      // Wait for model to stabilize
+
+      // Wait for model to stabilize. The first idle comes before the write: writeSuccess then moves the
+      // model to creatingProperties, so wait until the property definitions have been consumed too.
       await waitForModelIdle(newModel, 10000)
-      
+      await waitFor(
+        newModel.getService(),
+        (s) => s.value === 'error' || (s.value === 'idle' && !s.context._pendingPropertyDefinitions),
+        { timeout: 10000 },
+      )
+
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       // Unsubscribe
       subscription.unsubscribe()
-      
+
       // Verify we didn't get an excessive number of callbacks
       expect(callbackCount).toBeLessThanOrEqual(maxExpectedCallbacks)
-      
+
       // Verify the model eventually reached idle state
       const finalSnapshot = newModel.getService().getSnapshot()
       expect(finalSnapshot.value).toBe('idle')
