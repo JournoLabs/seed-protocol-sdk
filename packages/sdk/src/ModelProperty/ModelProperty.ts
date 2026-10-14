@@ -700,7 +700,16 @@ export class ModelProperty {
     // there's nothing to write. Writing it back anyway raced deletes of that row's model (FK error).
     const isPersisted = typeof (propertyWithId as { _dbId?: unknown })._dbId === 'number'
 
+    // Settles when the row write finishes; create() waits for it when waitForReady is on, so a
+    // failed write rejects create() instead of resolving with nothing in the DB.
+    let writeDone: Promise<void> = Promise.resolve()
     if (hasModelId && propertyFileId && !isPersisted) {
+      let resolveWrite!: () => void
+      let rejectWrite!: (error: Error) => void
+      writeDone = new Promise<void>((resolve, reject) => {
+        resolveWrite = resolve
+        rejectWrite = reject
+      })
       // Wait for writeProcess to be spawned (it's spawned in idle state entry action)
       // Retry a few times if writeProcess isn't available yet
       let retries = 0
@@ -709,7 +718,10 @@ export class ModelProperty {
         const service = proxiedInstance.getService()
         const snapshot = service.getSnapshot()
         // Unloaded or evicted (e.g. Schema.destroy) before the write started: nothing to write to
-        if (isActorStopped(service)) return
+        if (isActorStopped(service)) {
+          resolveWrite()
+          return
+        }
         
         if (snapshot.value === 'idle' && snapshot.context.writeProcess) {
           const writeProcess = snapshot.context.writeProcess
@@ -749,11 +761,19 @@ export class ModelProperty {
             logger(`ERROR: Cannot write property "${property.name}" - no modelId available`)
             console.error(`[ModelProperty.create] ERROR: Cannot write property "${property.name}" - no modelId available. modelId: ${propertyWithId.modelId}, modelName: ${propertyWithId.modelName}`)
             // Don't clear pending write here - it might resolve later
+            rejectWrite(
+              new Error(
+                `Cannot write property "${property.name}": model ${propertyWithId.modelName ?? propertyWithId.modelId} has no database row`,
+              ),
+            )
             return
           }
 
           // Resolving the modelId awaited the DB; the instance may have been stopped meanwhile
-          if (isActorStopped(service)) return
+          if (isActorStopped(service)) {
+            resolveWrite()
+            return
+          }
           
           // Track pending write now that we have the resolved modelId
           this.trackPendingWrite(propertyFileId, resolvedModelId)
@@ -766,6 +786,7 @@ export class ModelProperty {
           if (currentWriteState.value === 'success') {
             // Write already succeeded
             void this.completePendingWrite(propertyFileId, resolvedModelId)
+            resolveWrite()
           } else {
             // Set up subscription to catch future state changes
             const writeSubscription = writeProcess.subscribe((writeSnapshot) => {
@@ -773,6 +794,7 @@ export class ModelProperty {
                 writeSubscription.unsubscribe()
                 logger(`[writeProcess subscription] Write succeeded for property "${property.name}" (propertyFileId: ${propertyFileId})`)
                 void this.completePendingWrite(propertyFileId, resolvedModelId)
+                resolveWrite()
               } else if (writeSnapshot.value === 'error') {
                 writeSubscription.unsubscribe()
                 const errorContext = writeSnapshot.context
@@ -780,6 +802,11 @@ export class ModelProperty {
                 logger(`Write process error details:`, errorContext.error)
                 // Mark pending write as error
                 this.clearPendingWrite(propertyFileId, 'error')
+                rejectWrite(
+                  new Error(
+                    `Failed to write property "${property.name}": ${errorContext.error?.message || 'Unknown error'}`,
+                  ),
+                )
               }
             })
           }
@@ -808,6 +835,7 @@ export class ModelProperty {
           console.error(`[ModelProperty.create] ERROR: writeProcess not available after ${maxRetries} retries for property "${property.name}" (propertyFileId: ${propertyFileId})`)
           // Mark as error if we couldn't even start the write process
           this.clearPendingWrite(propertyFileId, 'error')
+          rejectWrite(new Error(`Failed to write property "${property.name}": its write process never started`))
         }
       }
       
@@ -815,8 +843,22 @@ export class ModelProperty {
       setTimeout(checkAndSend, 0)
     }
     
-    if (!waitForReady) return proxiedInstance
-    return waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }).then(
+    if (!waitForReady) {
+      // Nobody awaits the write; failures are already logged above.
+      writeDone.catch(() => {})
+      return proxiedInstance
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const writeWithin = Promise.race([
+      writeDone,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Property "${property.name}" was not written within ${readyTimeout}ms`)),
+          readyTimeout,
+        )
+      }),
+    ]).finally(() => clearTimeout(timer))
+    return Promise.all([waitForEntityIdle(proxiedInstance, { timeout: readyTimeout }), writeWithin]).then(
       () => proxiedInstance,
     )
   }
