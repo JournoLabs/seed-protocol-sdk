@@ -30,5 +30,12 @@ jobs:
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
 
+      # Same as release.yml: the tests import these workspace packages from their dist
+      - name: Build workspace packages the tests import
+        run: |
+          for pkg in eas arweave query vite; do
+            (cd "packages/$pkg" && bun run build)
+          done
+
       - name: Run tests
         run: bun run test

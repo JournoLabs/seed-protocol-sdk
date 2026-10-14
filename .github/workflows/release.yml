@@ -81,9 +81,14 @@ jobs:
 
       - run: bun run lint
 
-      # The root vite.config.js imports @seedprotocol/vite, which resolves to its dist.
-      - name: Build the vite plugin for the test config
-        run: cd packages/vite && bun run build
+      # Workspace packages resolve to their dist: the root vite.config.js imports @seedprotocol/vite,
+      # and the SDK type check (first step of `bun run test`) imports eas, arweave and query.
+      # Package builds only, not build:* (those run the tests first).
+      - name: Build workspace packages the tests import
+        run: |
+          for pkg in eas arweave query vite; do
+            (cd "packages/$pkg" && bun run build)
+          done
 
       - run: bun run test
 
