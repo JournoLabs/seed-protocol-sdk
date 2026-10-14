@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import React from 'react'
-import { SeedProvider, useModel, useModels, useIsDbReady, useDbsAreReady, useServices } from '@seedprotocol/react'
-import { client, importJsonSchema, Model } from '@seedprotocol/sdk'
+import { SeedProvider, useModel, useModels, useIsDbReady, useDbsAreReady, useServices, useSchema, useSchemas } from '@seedprotocol/react'
+import { BaseDb, client, importJsonSchema, Model, Schema, schemas } from '@seedprotocol/sdk'
+import { eq } from 'drizzle-orm'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 import { SETUP_HOOK_TIMEOUT_MS } from './test-utils/client-init'
 import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
@@ -24,16 +25,17 @@ function schemaFile(name: string, models: SchemaFileFormat['models']): SchemaFil
   }
 }
 
-describe('React hook correctness', () => {
-  beforeAll(async () => {
-    if (!client.isInitialized()) {
-      const config: SeedConstructorOptions = {
-        config: { endpoints: { filePaths: '/api/seed/migrations', files: '/app-files' }, filesDir: '.seed' },
-      }
-      await client.init(config)
+beforeAll(async () => {
+  if (!client.isInitialized()) {
+    const config: SeedConstructorOptions = {
+      config: { endpoints: { filePaths: '/api/seed/migrations', files: '/app-files' }, filesDir: '.seed' },
     }
-    await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: SETUP_HOOK_TIMEOUT_MS })
-  }, SETUP_HOOK_TIMEOUT_MS)
+    await client.init(config)
+  }
+  await waitFor(() => expect(client.isInitialized()).toBe(true), { timeout: SETUP_HOOK_TIMEOUT_MS })
+}, SETUP_HOOK_TIMEOUT_MS)
+
+describe('React hook correctness', () => {
 
   it('useModel keeps the same hook order when modelName switches between null and a name', async () => {
     const name = 'Hook Order Schema'
@@ -80,6 +82,35 @@ describe('React hook correctness', () => {
     await dropMe!.destroy()
 
     await waitFor(() => expect(result.current.models.map((m) => m.modelName)).toEqual(['KeepMe']), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+  })
+})
+
+describe('schema hooks', () => {
+  it('useSchema with an unknown name returns null without creating a draft', async () => {
+    const name = 'No Such Schema For useSchema'
+    const { result } = renderHook(() => useSchema(name), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: WAIT_TIMEOUT_MS })
+    expect(result.current.schema).toBeNull()
+    expect(result.current.error).toBeNull()
+    const rows = await BaseDb.getAppDb()!.select().from(schemas).where(eq(schemas.name, name))
+    expect(rows).toEqual([])
+  })
+
+  it('useSchemas drops a destroyed schema', async () => {
+    const name = 'Schemas Shrink Schema'
+    const file = schemaFile(name, {})
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useSchemas(), { wrapper })
+    await waitFor(() => expect(result.current.schemas.some((s) => s.metadata?.name === name)).toBe(true), {
+      timeout: WAIT_TIMEOUT_MS,
+    })
+
+    const schema = (await Schema.create(name)) as Schema
+    await schema.destroy()
+
+    await waitFor(() => expect(result.current.schemas.some((s) => s.metadata?.name === name)).toBe(false), {
       timeout: WAIT_TIMEOUT_MS,
     })
   })
