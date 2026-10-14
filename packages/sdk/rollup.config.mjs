@@ -181,10 +181,12 @@ const config = [
       postProcess(),
     ],
   },
-  // CommonJS build - Node.js only
+  // CommonJS build - Node.js only. Entries mirror the ESM build so each
+  // package.json "require" condition loads the same API its types describe.
   {
     input: {
-      'main.cjs': 'src/node/index.ts', // We'll create this
+      'main.cjs': 'src/index.ts',
+      'node.cjs': 'src/node/index.ts',
       'vite.cjs': 'src/vite/index.ts', // Vite plugin CommonJS build
     },
     output: [
@@ -194,8 +196,10 @@ const config = [
         sourcemap: true,
         preserveModules: false,
         entryFileNames: '[name]',
-        // CJS chunks go under dist/cjs/ so they do not overwrite ESM chunks in dist/
-        chunkFileNames: 'cjs/[name]-[hash].js',
+        // CJS chunks go under dist/cjs/ so they do not overwrite ESM chunks in dist/.
+        // They need the .cjs extension: the package is "type": "module", so Node
+        // would load .js chunks as ESM and every require()d export would be undefined.
+        chunkFileNames: 'cjs/[name]-[hash].cjs',
       },
     ],
     external: (id) => {
