@@ -1645,6 +1645,31 @@ testDescribe('Model Integration Tests', () => {
         expect(modelRecordsAfter.length).toBe(0)
       }
     })
+
+    it('does not bring the model back when a lookup by id overlaps destroy', async () => {
+      const schemaName = 'Test Schema Model Destroy Overlap'
+      const testSchema = createTestSchema(schemaName, {
+        OverlapTarget: {
+          properties: {
+            name: { dataType: 'Text' },
+          },
+        },
+      })
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      const model = await findImportedModel('OverlapTarget', schemaName)
+      const modelFileId = model.id!
+
+      // destroy() clears the caches before it deletes the rows. A lookup that starts in between (a
+      // schema loading its models, say) still reads the row, and used to cache a new instance.
+      const destroying = model.destroy()
+      const lookup = Model.createById(modelFileId)
+      await destroying
+      await lookup
+
+      expect(Model.getById(modelFileId)).toBeUndefined()
+    })
   })
 })
 
