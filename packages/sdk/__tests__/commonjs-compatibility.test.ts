@@ -2,6 +2,8 @@
  * Checks that package.json's entry points (main/module/exports) point at files the rollup build actually
  * emits, in the right module format: `require` conditions must hit a CommonJS output, `import`
  * conditions an ESM one. This caught exports drifting from `./dist/main.cjs.js` to `./dist/main.cjs`.
+ * Each `require` entry must also be built from the same source as its `import` twin, since both
+ * share one set of types. scripts/check-dist-cjs-entries.js checks the built files load.
  *
  * Runs without building: rollup.config.mjs is imported with its plugins stubbed out, so only the
  * declared inputs/outputs are read.
@@ -25,7 +27,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.j
 
 type RollupOptions = {
   input: Record<string, string>
-  output: { dir: string; format: string; entryFileNames: string }[]
+  output: { dir: string; format: string; entryFileNames: string; chunkFileNames?: string }[]
 }
 
 /** Map of emitted entry file (e.g. `./dist/main.cjs`) to its format and source module. */
@@ -52,10 +54,34 @@ function exportTargets(value: unknown, conditions: string[] = []): [string[], st
 }
 
 describe('CommonJS compatibility of package entry points', () => {
-  it('main points at the CommonJS node build and module at the ESM main build', async () => {
+  it('main and module are the CommonJS and ESM builds of src/index.ts', async () => {
     const entries = await emittedEntries()
-    expect(entries.get(packageJson.main)).toEqual({ format: 'cjs', source: 'src/node/index.ts' })
+    expect(entries.get(packageJson.main)).toEqual({ format: 'cjs', source: 'src/index.ts' })
     expect(entries.get(packageJson.module)).toEqual({ format: 'esm', source: 'src/index.ts' })
+  })
+
+  it('every require entry is built from the same source as its import twin', async () => {
+    const entries = await emittedEntries()
+    const problems: string[] = []
+    for (const [subpath, value] of Object.entries(packageJson.exports)) {
+      const conditions = value as { require?: { default?: string }; import?: { default?: string } }
+      const cjs = conditions.require?.default
+      const esm = conditions.import?.default
+      if (!cjs || !esm) continue
+      const cjsSource = entries.get(cjs)?.source
+      const esmSource = entries.get(esm)?.source
+      if (cjsSource !== esmSource) problems.push(`${subpath}: require builds ${cjsSource}, import builds ${esmSource}`)
+    }
+    expect(problems).toEqual([])
+  })
+
+  it('CommonJS chunks use the .cjs extension so Node does not load them as ESM', async () => {
+    const { default: configs } = (await import('../rollup.config.mjs')) as { default: RollupOptions[] }
+    const cjsOutputs = configs.flatMap((config) => config.output).filter((output) => output.format === 'cjs')
+    expect(cjsOutputs.length).toBeGreaterThan(0)
+    for (const output of cjsOutputs) {
+      expect(output.chunkFileNames).toMatch(/\.cjs$/)
+    }
   })
 
   it('"." resolves to CJS for require and ESM for import', () => {

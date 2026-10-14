@@ -2,7 +2,7 @@
 
 ## Current State: ✅ Already Possible
 
-**Yes, you can already call `Schema.create('new-schema-name')` and get a new Schema with no models!**
+**Yes, you can already call `await Schema.create('new-schema-name')` and get a new Schema with no models!**
 
 The system automatically creates a schema file when a Schema instance is created for a non-existent schema name.
 
@@ -11,7 +11,7 @@ The system automatically creates a schema file when a Schema instance is created
 ### 1. Schema Creation (`Schema.create()`)
 
 ```typescript
-const schema = Schema.create('my-new-schema')
+const schema = await Schema.create('my-new-schema')
 ```
 
 **What happens:**
@@ -104,7 +104,7 @@ The `loadOrCreateSchema` actor (in `src/schema/service/actors/loadOrCreateSchema
 
 ```typescript
 // File created immediately
-const schema = Schema.create('my-schema')
+const schema = await Schema.create('my-schema')
 // File exists: my-schema-v1.json with models: {}
 
 // Add models later (via other mechanisms)
@@ -173,7 +173,7 @@ await schema.persist() // Creates file
 
 ```typescript
 // This already works:
-const schema = Schema.create('new-schema-name')
+const schema = await Schema.create('new-schema-name')
 // ✅ Returns Schema instance
 // ✅ File is created immediately with empty models: {}
 // ✅ Schema is ready to use

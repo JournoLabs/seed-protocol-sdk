@@ -29,7 +29,7 @@ export type SeedClientGateProps = {
   schema?: SchemaInput
   /** Custom loading UI. Default: simple centered "Loading..." text. */
   loadingComponent?: ReactNode
-  /** @deprecated Schema is now loaded at init via config.schema; no separate import. Kept for backward compatibility. */
+  /** @deprecated Never called. Schema loads at init via config.schema, and a schema that fails to load fails init: handle it in `onInitError`. */
   onSchemaImportError?: (err: unknown) => void
   /**
    * Called when client init fails; children stay hidden behind the loading UI. A

@@ -921,7 +921,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
 
   static create(
     props: Partial<CreatePropertyInstanceProps>,
-    options?: { waitForReady?: false },
+    options: { waitForReady: false },
   ): ItemProperty<any> | undefined
   static create(
     props: Partial<CreatePropertyInstanceProps>,

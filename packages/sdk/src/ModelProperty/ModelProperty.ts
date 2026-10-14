@@ -542,7 +542,7 @@ export class ModelProperty {
 
   static create(
     property: Static<typeof TProperty>,
-    options?: { waitForReady?: false; schemaName?: string },
+    options: { waitForReady: false; schemaName?: string },
   ): ModelProperty
   static create(
     property: Static<typeof TProperty>,

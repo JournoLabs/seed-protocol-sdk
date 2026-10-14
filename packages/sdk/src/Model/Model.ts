@@ -327,12 +327,12 @@ export class Model {
   static create(
     modelName: string,
     schemaNameOrSchema: string | any, // Schema type - using any to avoid circular dependency
-    options?: {
+    options: {
       id?: string
       modelFileId?: string
       properties?: { [propertyName: string]: any }
       registerWithSchema?: boolean
-      waitForReady?: false
+      waitForReady: false
     },
   ): Model
   static create(
