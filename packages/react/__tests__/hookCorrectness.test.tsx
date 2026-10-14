@@ -1,7 +1,19 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import React from 'react'
-import { SeedProvider, useModel, useModels, useIsDbReady, useDbsAreReady, useServices, useSchema, useSchemas } from '@seedprotocol/react'
+import {
+  SeedProvider,
+  useCreateItem,
+  useDbsAreReady,
+  useEasSyncProcessById,
+  useIsDbReady,
+  useLiveQueryState,
+  useModel,
+  useModels,
+  useSchema,
+  useSchemas,
+  useServices,
+} from '@seedprotocol/react'
 import { BaseDb, client, importJsonSchema, Model, Schema, schemas } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
@@ -113,5 +125,45 @@ describe('schema hooks', () => {
     await waitFor(() => expect(result.current.schemas.some((s) => s.metadata?.name === name)).toBe(false), {
       timeout: WAIT_TIMEOUT_MS,
     })
+  })
+})
+
+describe('item and query hooks', () => {
+  it('useLiveQuery with an inline (unmemoised) builder settles instead of resubscribing forever', async () => {
+    let renders = 0
+    const { result } = renderHook(
+      () => {
+        renders += 1
+        const db = BaseDb.getAppDb()
+        return useLiveQueryState<{ id: number }>(db ? db.select().from(schemas).orderBy(schemas.name) : null)
+      },
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.data).toBeDefined(), { timeout: WAIT_TIMEOUT_MS })
+    const settled = renders
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(renders - settled).toBeLessThan(3)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('useEasSyncProcessById(undefined) is not loading', () => {
+    const { result } = renderHook(() => useEasSyncProcessById(undefined), { wrapper })
+    expect(result.current).toEqual({ record: null, isLoading: false })
+  })
+
+  it('useCreateItem runs one create when called twice before a re-render', async () => {
+    const name = 'Create Guard Schema'
+    const file = schemaFile(name, {
+      GuardNote: { id: 'guard-note-model-id', properties: { title: { id: 'guard-note-title-id', type: 'Text' } } },
+    })
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const { result } = renderHook(() => useCreateItem(), { wrapper })
+
+    const [first, second] = await Promise.all([
+      result.current.createItem('GuardNote', { schemaName: name, title: 'one' }),
+      result.current.createItem('GuardNote', { schemaName: name, title: 'two' }),
+    ])
+    expect(first).toBeDefined()
+    expect(second).toBeUndefined()
   })
 })

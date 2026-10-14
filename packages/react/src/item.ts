@@ -416,18 +416,27 @@ export const useItems: UseItems = ({
     queryClient.invalidateQueries({ queryKey })
   }, [isClientReady, seedsTableData, queryClient, queryKey])
 
+  // Same array while the data is the same, so `items` can be an effect/memo dependency.
+  const sortedItems = useMemo(
+    () =>
+      orderBy(
+        items,
+        [
+          (item) =>
+            item.lastVersionPublishedAt ||
+            item.attestationCreatedAt ||
+            item.createdAt,
+        ],
+        ['desc'],
+      ),
+    [items],
+  )
+
   return {
-    items: orderBy(
-      items,
-      [
-        (item) =>
-          item.lastVersionPublishedAt ||
-          item.attestationCreatedAt ||
-          item.createdAt,
-      ],
-      ['desc'],
-    ),
-    isLoading,
+    items: sortedItems,
+    // Before the client is ready the query is disabled, which TanStack reports as not loading:
+    // count it as loading so an empty list isn't shown as "no items" first.
+    isLoading: isLoading || !isClientReady,
     error: queryError as Error | null,
   }
 }
@@ -442,15 +451,18 @@ export type UseCreateItemReturn = {
 export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
+  const inFlightRef = useRef(false)
 
   const resetError = useCallback(() => setError(null), [])
 
   const createItem = useCallback(
     async (modelName: string, itemData?: Record<string, any>): Promise<Item<any> | undefined> => {
-      if (isLoading) {
+      if (inFlightRef.current) {
         logger('[useCreateItem] [createItem] already creating item, skipping')
         return undefined
       }
+      inFlightRef.current = true
 
       setError(null)
       // Flush loading=true synchronously so the UI (and tests) can observe it before async work runs.
@@ -466,12 +478,13 @@ export const useCreateItem = (): UseCreateItemReturn => {
         setError(err instanceof Error ? err : new Error(String(err)))
         return undefined
       } finally {
+        inFlightRef.current = false
         // Defer clearing loading so React can commit the loading=true render first.
         // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
         queueMicrotask(() => setIsLoading(false))
       }
     },
-    [isLoading],
+    [],
   )
 
   return {

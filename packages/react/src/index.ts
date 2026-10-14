@@ -8,7 +8,7 @@ export { useDeleteItem } from './trash'
 export { useImageFiles } from './useImageFiles'
 export { useFiles, FILES_QUERY_KEY_PREFIX } from './useFiles'
 export { useModels, useModel, useCreateModel, useDestroyModel } from './model'
-export { useLiveQuery } from './liveQuery'
+export { useLiveQuery, useLiveQueryState } from './liveQuery'
 export {
   useEasSyncProcesses,
   useEasSyncProcessesState,
