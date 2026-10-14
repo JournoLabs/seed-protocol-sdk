@@ -10,12 +10,15 @@ export type ClaimUnpublishedDraftsResult = {
   seeds: number
   versions: number
   metadata: number
+  /** Local ids of the claimed seeds, so loaded Items can take the new publisher. */
+  seedLocalIds: string[]
 }
 
 const emptyResult = (): ClaimUnpublishedDraftsResult => ({
   seeds: 0,
   versions: 0,
   metadata: 0,
+  seedLocalIds: [],
 })
 
 /**
@@ -35,7 +38,7 @@ export async function claimUnpublishedDrafts(
 
   const claimTable = async (
     table: typeof seeds | typeof versions | typeof metadata,
-  ): Promise<number> => {
+  ): Promise<string[]> => {
     const rows = (await appDb
       .select({
         localId: table.localId,
@@ -54,25 +57,26 @@ export async function claimUnpublishedDrafts(
       )
       .map((row: ClaimableRow & { localId: string }) => row.localId)
 
-    if (ids.length === 0) return 0
+    if (ids.length === 0) return []
 
     await appDb
       .update(table)
       .set({ publisher: normalized, updatedAt: now })
       .where(inArray(table.localId, ids))
 
-    return ids.length
+    return ids
   }
 
-  const [seedCount, versionCount, metadataCount] = await Promise.all([
+  const [seedIds, versionIds, metadataIds] = await Promise.all([
     claimTable(seeds),
     claimTable(versions),
     claimTable(metadata),
   ])
 
   return {
-    seeds: seedCount,
-    versions: versionCount,
-    metadata: metadataCount,
+    seeds: seedIds.length,
+    versions: versionIds.length,
+    metadata: metadataIds.length,
+    seedLocalIds: seedIds,
   }
 }

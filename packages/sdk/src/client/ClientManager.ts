@@ -228,7 +228,10 @@ const clientInstance = {
    */
   claimUnpublishedDrafts: async (publisher: string) => {
     ensureInitialized()
-    return claimUnpublishedDrafts(publisher)
+    const result = await claimUnpublishedDrafts(publisher)
+    // Loaded Items read publisher from their context; give the claimed ones the new value.
+    Item.setPublisherForCachedSeeds(result.seedLocalIds, publisher)
+    return result
   },
   /**
    * Hard-delete local on-chain seed copies for the given publisher addresses.

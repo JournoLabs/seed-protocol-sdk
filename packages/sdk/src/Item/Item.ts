@@ -25,6 +25,7 @@ import {
 } from '@/types'
 import type { CreateWaitOptions } from '@/types'
 import type { ItemPublishOptions } from '@/helpers/publishConfig'
+import { normalizePublisher } from '@/helpers/addresses'
 
 import { BehaviorSubject } from 'rxjs'
 import {
@@ -1381,6 +1382,22 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   }
 
   /** Same as `item.publish(options)`; requires @seedprotocol/publish. */
+  /**
+   * Set `publisher` on loaded Items for these seeds (after claimUnpublishedDrafts stamped
+   * their rows). Items that aren't loaded read it from the DB when they load.
+   */
+  static setPublisherForCachedSeeds(seedLocalIds: readonly string[], publisher: string): void {
+    const normalized = normalizePublisher(publisher)
+    if (!normalized) return
+    for (const seedLocalId of seedLocalIds) {
+      const item = Item.getById(seedLocalId)
+      if (!item) continue
+      const status = item.getService().getSnapshot().status
+      if (status === 'stopped' || status === 'done') continue
+      item.getService().send({ type: 'updateContext', publisher: normalized })
+    }
+  }
+
   static async publish(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
     await item.publish(options)
   }
@@ -1975,9 +1992,10 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
             uid: string | null
             schemaUid: string | null
             revokedAt: number | null
+            publisher: string | null
           }>(
             (sql: any) => sql`
-              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt
+              SELECT local_id as localId, uid, schema_uid as schemaUid, revoked_at as revokedAt, publisher
               FROM seeds
               WHERE local_id = ${watchedSeedLocalId}
             `
@@ -2038,6 +2056,8 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
                 seedLocalId: seedRow.localId,
                 schemaUid: seedRow.schemaUid || undefined,
                 revokedAt: seedRow.revokedAt ?? undefined,
+                // claimUnpublishedDrafts (here or in another tab) stamps drafts' publisher.
+                ...(seedRow.publisher ? { publisher: seedRow.publisher } : {}),
               })
             },
             error: (error) => {
