@@ -40,3 +40,25 @@ export const waitForItemPropertyIdle = (property: HasService, timeout?: number) 
   waitForIdle(property, 'ItemProperty', timeout)
 export const waitForModelPropertyIdle = (property: HasService, timeout?: number) =>
   waitForIdle(property, 'ModelProperty', timeout)
+
+/**
+ * Waits for a Model to finish everything Model.create started: the first idle comes before its write,
+ * after which writeSuccess moves a model created with properties to creatingProperties.
+ */
+export async function waitForModelSettled(model: HasService, timeout = WAIT_TIMEOUT_MS): Promise<void> {
+  await waitForModelIdle(model, timeout)
+  const service = model.getService()
+  try {
+    await waitFor(
+      service,
+      (s) => s.value === 'error' || (s.value === 'idle' && !s.context?._pendingPropertyDefinitions),
+      { timeout },
+    )
+  } catch (error) {
+    throw new Error(
+      `Model did not finish creating its properties within ${timeout}ms ` +
+        `(state: ${JSON.stringify(service.getSnapshot().value)}): ` +
+        (error instanceof Error ? error.message : String(error)),
+    )
+  }
+}

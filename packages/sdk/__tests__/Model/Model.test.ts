@@ -3,7 +3,7 @@ import { waitFor } from 'xstate'
 import { Schema } from '@/Schema/Schema'
 import { Model } from '@/Model/Model'
 import { BaseDb } from '@/db/Db/BaseDb'
-import { models as modelsTable } from '@/seedSchema/ModelSchema'
+import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { seeds } from '@/seedSchema/SeedSchema'
@@ -17,7 +17,7 @@ import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/clien
 import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { waitForModelIdle, waitForSchemaIdle } from '../test-utils/waitForIdle'
+import { waitForModelIdle, waitForModelSettled, waitForSchemaIdle } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Helper function to wait for model to be in idle state using xstate waitFor
@@ -208,6 +208,33 @@ testDescribe('Model Integration Tests', () => {
       expect(titleProperty?.dataType).toBe('Text')
       expect(contentProperty).toBeDefined()
       expect(contentProperty?.dataType).toBe('Text')
+    })
+
+    it('resolves waitForReady only after the properties exist', async () => {
+      const schemaName = 'Test Schema Model Create Ready Properties'
+      const testSchema = createTestSchema(schemaName)
+
+      await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
+
+      // The model is idle once before its write; ready must wait for the property pass after it
+      const model = await Model.create('TestModel Ready Properties', schemaName, {
+        properties: {
+          title: { dataType: 'Text' },
+          content: { dataType: 'Text' },
+        },
+        readyTimeout: WAIT_TIMEOUT_MS,
+      })
+
+      const snapshot = model.getService().getSnapshot()
+      expect(snapshot.value).toBe('idle')
+      expect(snapshot.context._pendingPropertyDefinitions).toBeUndefined()
+
+      const db = BaseDb.getAppDb()
+      const rows = await db
+        .select({ name: propertiesTable.name })
+        .from(propertiesTable)
+        .where(eq(propertiesTable.modelId, snapshot.context._dbId!))
+      expect(rows.map((r) => r.name).sort()).toEqual(['content', 'title'])
     })
 
     it('should throw error if model name is empty', () => {
@@ -1376,8 +1403,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
+      // Wait for model to stabilize, including its write
+      await waitForModelSettled(newModel)
       
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1438,14 +1465,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
 
-      // Wait for model to stabilize. The first idle comes before the write: writeSuccess then moves the
-      // model to creatingProperties, so wait until the property definitions have been consumed too.
-      await waitForModelIdle(newModel, 10000)
-      await waitFor(
-        newModel.getService(),
-        (s) => s.value === 'error' || (s.value === 'idle' && !s.context._pendingPropertyDefinitions),
-        { timeout: 10000 },
-      )
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
 
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1508,11 +1529,11 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
-      
-      // Wait for schema registration to complete
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
+
+      // Wait a bit more to ensure no additional callbacks
+      await new Promise(resolve => setTimeout(resolve, 1000))
       
       // Unsubscribe
       subscription.unsubscribe()
