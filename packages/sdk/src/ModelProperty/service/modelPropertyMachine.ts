@@ -34,7 +34,7 @@ export const modelPropertyMachine = setup({
       | { type: 'initializeOriginalValues'; originalValues: Partial<Static<typeof TProperty>>; schemaName?: string; isEdited?: boolean }
       | { type: 'clearEdited' }
       | { type: 'setSchemaName'; schemaName: string }
-      | { type: 'renamedInStorage'; name: string }
+      | { type: 'syncedFromStorage'; values: Partial<Static<typeof TProperty>> }
       | { type: 'saveToSchema' }
       | { type: 'saveToSchemaSuccess' }
       | { type: 'saveToSchemaError'; error: Error }
@@ -181,13 +181,13 @@ export const modelPropertyMachine = setup({
         _schemaName: event.schemaName,
       })),
     },
-    // The property's row and schema file already have this name (e.g. after renameModelProperty), so
-    // unlike updateContext it isn't an edit: no validation, draft marking or saveToSchema.
-    renamedInStorage: {
+    // The property's row and schema file already have these values (e.g. after a schema update reloaded
+    // them), so unlike updateContext it isn't an edit: no validation, draft marking or saveToSchema.
+    syncedFromStorage: {
       actions: assign(({ context, event }) => ({
-        name: event.name,
+        ...event.values,
         _originalValues: context._originalValues
-          ? { ...context._originalValues, name: event.name }
+          ? { ...context._originalValues, ...event.values }
           : context._originalValues,
       })),
     },
