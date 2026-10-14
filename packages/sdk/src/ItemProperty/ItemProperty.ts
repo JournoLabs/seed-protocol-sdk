@@ -25,7 +25,7 @@ import {
   resolveStorageNameToSchemaName,
 } from '@/helpers'
 import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -932,7 +932,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     options?: CreateWaitOptions,
   ): ItemProperty<any> | undefined | Promise<ItemProperty<any> | undefined> {
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     const { propertyName, seedLocalId, seedUid, versionLocalId, versionUid } =
       props
@@ -1146,7 +1146,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     seedUid,
     modelName: modelNameOption,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: ItemPropertyFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1221,7 +1221,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     params: { seedLocalId?: string; seedUid?: string },
     options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<ItemProperty<any>[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
     const { seedLocalId, seedUid } = params
     if (!seedLocalId && !seedUid) {
       return []
