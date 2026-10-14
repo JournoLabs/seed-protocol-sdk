@@ -639,6 +639,14 @@ export class ModelProperty {
       if (propertyWithId.refModelId && !cachedContext.refModelId) {
         needsUpdate.refModelId = propertyWithId.refModelId
       }
+      // Rules defined in code exist only on the instance: an instance cached from the DB row first
+      // (which has no column for them) must still take them.
+      if (propertyWithId.validation && !cachedContext.validation) {
+        needsUpdate.validation = propertyWithId.validation
+      }
+      if (propertyWithId.htmlEmbeddedDataUriPolicy && !cachedContext.htmlEmbeddedDataUriPolicy) {
+        needsUpdate.htmlEmbeddedDataUriPolicy = propertyWithId.htmlEmbeddedDataUriPolicy
+      }
       
       if (Object.keys(needsUpdate).length > 0) {
         instance._service.send({
