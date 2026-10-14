@@ -16,6 +16,19 @@ import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:updateSchema')
 
+// Schema reloads renameModelProperty deferred and that haven't finished yet
+const deferredSchemaReloads = new Set<Promise<void>>()
+
+/**
+ * Resolves once every schema reload deferred by renameModelProperty has finished (failures are logged,
+ * not thrown). For tests and teardown that must not overlap that reload.
+ */
+export async function whenDeferredSchemaReloadsSettled(): Promise<void> {
+  while (deferredSchemaReloads.size > 0) {
+    await Promise.all(deferredSchemaReloads)
+  }
+}
+
 /**
  * Schema property update definition
  */
@@ -780,11 +793,16 @@ export async function renameModelProperty(
   // Defer loadSchemaFromFile to avoid sync cascade: it triggers addSchemaToDb/addModelsToDb,
   // which post to BroadcastChannel and cause React invalidates. Running that synchronously
   // can interrupt the save flow and cause freezes (e.g. updateContext/refetch loops).
-  setTimeout(() => {
-    loadSchemaFromFile(newFilePath).catch((err) => {
-      logger('Deferred loadSchemaFromFile after rename failed:', err)
-    })
-  }, 100)
+  const reload: Promise<void> = new Promise<void>((resolve) => setTimeout(resolve, 100))
+    .then(() => loadSchemaFromFile(newFilePath))
+    .then(
+      () => {},
+      (err) => {
+        logger('Deferred loadSchemaFromFile after rename failed:', err)
+      },
+    )
+    .finally(() => deferredSchemaReloads.delete(reload))
+  deferredSchemaReloads.add(reload)
 
   return newFilePath
 }
