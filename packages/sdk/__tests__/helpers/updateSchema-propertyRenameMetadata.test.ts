@@ -163,7 +163,7 @@ testDescribe('Property Rename Metadata Migration', () => {
     const [postModel] = await db
       .select()
       .from(modelsTable)
-      .where(eq(modelsTable.schemaFileId, testSchema.models.Post.id))
+      .where(eq(modelsTable.schemaFileId, testSchema.models.Post.id!))
     expect(postModel).toBeDefined()
 
     const propertiesBefore = await db
