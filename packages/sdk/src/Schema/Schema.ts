@@ -1905,6 +1905,21 @@ export class Schema {
           await db.delete(modelsTable).where(eq(modelsTable.id, modelId))
         }
         await db.delete(schemasTable).where(eq(schemasTable.schemaFileId, schemaFileId))
+
+        // Delete the SDK's own copies of this schema's files (all versions) in the working dir.
+        // loadAllSchemasFromDb imports any schema file without a DB row, so leaving them brought
+        // the destroyed schema back on the next Schema.all().
+        // Files are named {schemaFileId}_{name}_v{version}.json. Match on that prefix: the id
+        // listCompleteSchemaFiles parses is wrong for names with spaces (greedy filename regex).
+        const { listCompleteSchemaFiles } = await import('@/helpers/schema')
+        const files = await listCompleteSchemaFiles().catch(() => [])
+        const fs = await BaseFileManager.getFs()
+        const path = BaseFileManager.getPathModule()
+        for (const file of files) {
+          if (path.basename(file.filePath).startsWith(`${schemaFileId}_`)) {
+            await fs.promises.unlink(file.filePath).catch(() => {})
+          }
+        }
       },
     })
   }
