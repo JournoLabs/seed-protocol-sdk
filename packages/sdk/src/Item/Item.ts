@@ -47,7 +47,7 @@ import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { properties as propertiesTable, models as modelsTable } from '@/seedSchema'
 import { modelPropertiesToObject } from '@/helpers/model'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { isStorageSeedRef } from '@/helpers/relationSeedRef'
 import { findEntity } from '@/helpers/entity/entityFind'
@@ -555,7 +555,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     options?: CreateWaitOptions,
   ): Promise<Item<any>> {
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     if (!props.modelName && props.type) {
       props.modelName = startCase(props.type)
@@ -1110,7 +1110,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     seedLocalId,
     seedUid,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: ItemFindProps & {
     waitForReady?: boolean
     readyTimeout?: number
@@ -1161,7 +1161,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
   ): Promise<Item<any>[]> {
     const {
       waitForReady = false,
-      readyTimeout = 5000,
+      readyTimeout = DEFAULT_READY_TIMEOUT_MS,
       includeEas = false,
       addressFilter,
       modelFileId,

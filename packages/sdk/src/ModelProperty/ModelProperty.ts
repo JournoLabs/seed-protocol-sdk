@@ -17,7 +17,7 @@ import { getSchemaNameFromModel } from './service/actors/saveToSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { and, eq, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
@@ -557,7 +557,7 @@ export class ModelProperty {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
     const schemaName = options?.schemaName
 
     // Handle 'type' field from JSON schema format - convert to 'dataType'
@@ -1090,7 +1090,7 @@ export class ModelProperty {
   static async find({
     propertyFileId,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: {
     propertyFileId: string
     waitForReady?: boolean
@@ -1121,7 +1121,7 @@ export class ModelProperty {
     modelFileId: string,
     options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<ModelProperty[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
     if (!modelFileId) {
       return []
     }

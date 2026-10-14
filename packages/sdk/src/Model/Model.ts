@@ -15,7 +15,7 @@ import { modelPropertiesToObject } from '@/helpers/model'
 import { models as modelsTable, properties as propertiesTable } from '@/seedSchema/ModelSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -362,7 +362,7 @@ export class Model {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 5000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     // Extract schema name and instance
     let schemaName: string
@@ -1364,7 +1364,7 @@ export class Model {
     modelName,
     schemaName,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: {
     modelFileId?: string
     modelName?: string
@@ -1483,7 +1483,7 @@ export class Model {
     schemaName?: string,
     options?: { waitForReady?: boolean; readyTimeout?: number },
   ): Promise<Model[]> {
-    const { waitForReady = false, readyTimeout = 5000 } = options ?? {}
+    const { waitForReady = false, readyTimeout = DEFAULT_READY_TIMEOUT_MS } = options ?? {}
     const appDb = BaseDb.getAppDb()
 
     if (!appDb) {

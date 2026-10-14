@@ -60,7 +60,7 @@ Schema, Model, ModelProperty, Item, and ItemProperty each run a small state mach
 
 - **Default:** `create()` returns a **Promise** that resolves when the entity is **ready** (state machine in the idle state). You should **`await`** the result before using the entity.
 - **Opt-out:** Pass **`{ waitForReady: false }`** as the last argument to get the entity **immediately** (synchronous return). Use this when you manage readiness yourself (e.g. internal loops that call `waitForEntityIdle` later) or when you only need a reference.
-- **Timeout:** When waiting, you can pass **`readyTimeout`** (milliseconds; default `5000`) in the same options object, e.g. `{ readyTimeout: 10000 }`.
+- **Timeout:** When waiting, you can pass **`readyTimeout`** (milliseconds; default `15000`) in the same options object, e.g. `{ readyTimeout: 30000 }`.
 
 So in normal app code you’ll write:
 

@@ -18,7 +18,7 @@ import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
 import { isInternalSchema } from '@/helpers/constants'
-import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
+import { DEFAULT_READY_TIMEOUT_MS, waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
@@ -176,7 +176,7 @@ export class Schema {
     }
 
     const waitForReady = options?.waitForReady !== false
-    const readyTimeout = options?.readyTimeout ?? 15000
+    const readyTimeout = options?.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS
 
     // First, check if we have an instance cached by name
     if (this.instanceCacheByName.has(schemaName)) {
@@ -575,7 +575,7 @@ export class Schema {
   static async find({
     schemaFileId,
     waitForReady = true,
-    readyTimeout = 5000,
+    readyTimeout = DEFAULT_READY_TIMEOUT_MS,
   }: {
     schemaFileId: string
     waitForReady?: boolean
@@ -617,7 +617,7 @@ export class Schema {
       includeAllVersions = false,
       includeInternal = false,
       waitForReady = false,
-      readyTimeout = 5000,
+      readyTimeout = DEFAULT_READY_TIMEOUT_MS,
     } = options
     
     try {
