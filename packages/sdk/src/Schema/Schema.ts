@@ -3,6 +3,7 @@ import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
 import { Model } from '@/Model/Model'
+import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
 import { SchemaFileFormat } from '@/types/import'
 import type { CreateWaitOptions } from '@/types'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -374,10 +375,7 @@ export class Schema {
             
             // Save draft to database immediately so changes persist
             saveDraftLogger(`Name change detected, calling _saveDraftToDb (oldName: "${oldName}", newName: "${newName}")`)
-            instance._saveDraftToDb(oldName, newName).catch((error) => {
-              saveDraftLogger(`ERROR: Failed to save draft after name change: ${error instanceof Error ? error.message : String(error)}`)
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(instance._service, instance._saveDraftToDb(oldName, newName), `Schema "${newName}"`)
           } else {
             logger(`Schema name unchanged: "${oldName}"`)
           }
@@ -421,9 +419,7 @@ export class Schema {
           if (TRACKED_PROPERTIES.includes(prop as any)) {
             const trackedPropContext = newInstance._getSnapshotContext()
             const schemaName = trackedPropContext.metadata?.name || trackedPropContext.schemaName
-            newInstance._saveDraftToDb(schemaName, schemaName).catch((error) => {
-              logger(`Failed to save draft to database: ${error instanceof Error ? error.message : String(error)}`)
-            })
+            trackDraftSave(newInstance._service, newInstance._saveDraftToDb(schemaName, schemaName), `Schema "${schemaName}"`)
           }
         }
       },
@@ -904,6 +900,14 @@ export class Schema {
 
   get validationErrors() {
     return this._getSnapshotContext()._validationErrors || []
+  }
+
+  /**
+   * The error from the last draft save that an assignment started (e.g. `schema.name = ...`),
+   * such as a ConflictError; undefined once a later one succeeds.
+   */
+  get lastSaveError(): Error | undefined {
+    return getDraftSaveError(this._service)
   }
 
   get isValid() {
