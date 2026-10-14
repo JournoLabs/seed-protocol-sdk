@@ -18,6 +18,7 @@ import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas, ModelSchemaType } from '@/seedSchema/ModelSchemaSchema'
 import { InferInsertModel } from 'drizzle-orm'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
+import { refreshCachedProperties } from './cachedPropertyRefresh'
 // Dynamic import to break circular dependency: Model -> ... -> helpers/db -> ModelProperty -> ... -> Model
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
@@ -1151,6 +1152,9 @@ export const addModelsToDb = async (
   const modelRecords = new Map<string, NewModelRecord>()
   const modelProcessingErrors: Array<{ modelName: string; error: string }> = []
   
+  // Property rows this call changed, so cached ModelProperty instances can be given the new values
+  const updatedPropertyFileIds: string[] = []
+
   for (const [modelName, modelClass] of Object.entries(models)) {
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
@@ -1383,6 +1387,8 @@ export const addModelsToDb = async (
             .update(properties)
             .set(updateData)
             .where(eq(properties.id, existingProperty.id!))
+          const updatedFileId = updateData.schemaFileId ?? existingProperty.schemaFileId
+          if (updatedFileId) updatedPropertyFileIds.push(updatedFileId)
         }
       } else {
         // Property doesn't exist, create it with schemaFileId
@@ -1461,6 +1467,9 @@ export const addModelsToDb = async (
   } else if (schemaRecord && !schemaRecord.id) {
     logger(`Warning: schemaRecord provided but has no id, cannot create join table entries`)
   }
+
+  // A cached instance is otherwise never re-read from its row (createById returns it as is)
+  await refreshCachedProperties(updatedPropertyFileIds)
 }
 
 /**

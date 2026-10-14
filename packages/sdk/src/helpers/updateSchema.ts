@@ -1,7 +1,7 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
 import { SchemaFileFormat, JsonImportSchema } from '@/types/import'
 import { getLatestSchemaVersion } from './schema'
-import { createModelsFromJson, loadSchemaFromFile } from '@/imports/json'
+import { createModelsFromJson, jsonPropertiesToSchemaProperties, loadSchemaFromFile } from '@/imports/json'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
 import { schemas, SchemaType } from '@/seedSchema/SchemaSchema'
@@ -643,11 +643,21 @@ async function loadSchemaWithRenames(
   // Add schema to database with schemaFileId
   const schemaRecord = await addSchemaToDb(schemaInput as SchemaType, schemaFile.id)
 
+  // A cached Model keeps the properties it was created with (Model.create ignores the ones passed),
+  // so addModelsToDb must take changed properties from this file, as in loadSchemaFromFile
+  const propertyDefinitions = new Map(
+    Object.entries(importData.models).map(([modelName, modelDef]) => [
+      modelName,
+      jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds.get(modelName)),
+    ]),
+  )
+
   // Add models to database with model renames handled and schemaFileIds
   await addModelsToDb(modelDefinitions, schemaRecord, modelRenames, {
     schemaFileId: schemaFile.id,
     modelFileIds,
     propertyFileIds,
+    propertyDefinitions,
   })
 
   // Models are now Model instances, no registration needed
@@ -795,11 +805,6 @@ export async function renameModelProperty(
   // can interrupt the save flow and cause freezes (e.g. updateContext/refetch loops).
   const reload: Promise<void> = new Promise<void>((resolve) => setTimeout(resolve, 100))
     .then(() => loadSchemaFromFile(newFilePath))
-    .then(async () => {
-      // The reload renamed the property's row; cached ModelProperty instances still have the old name
-      const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
-      if (oldProperty.id) await ModelProperty.refreshNameFromDb(oldProperty.id)
-    })
     .then(
       () => {},
       (err) => {

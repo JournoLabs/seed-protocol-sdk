@@ -1437,7 +1437,7 @@ export const loadSchemaFromFile = async (
  * @param modelDef - The JSON model definition
  * @param propertyFileIds - Optional map of property names to their file IDs from the JSON file
  */
-const jsonPropertiesToSchemaProperties = (
+export const jsonPropertiesToSchemaProperties = (
   modelName: string,
   modelDef: JsonImportSchema['models'][string],
   propertyFileIds?: Map<string, string>,

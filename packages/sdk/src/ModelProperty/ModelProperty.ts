@@ -15,7 +15,7 @@ import { properties as propertiesTable, models as modelsTable } from '@/seedSche
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { getSchemaNameFromModel } from './service/actors/saveToSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { findEntity } from '@/helpers/entity/entityFind'
@@ -23,6 +23,7 @@ import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
 import { anyEvictionSince, currentEvictionEpoch, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
 import { forceRemoveFromCaches, runDestroyLifecycle } from '@/helpers/entity/entityDestroy'
+import { setCachedPropertyRefresher } from '@/helpers/cachedPropertyRefresh'
 import debug from 'debug'
 
 const logger = debug('seedSdk:modelProperty:ModelProperty')
@@ -997,38 +998,84 @@ export class ModelProperty {
   }
 
   /**
-   * Give cached instances of a property the name its row now has (e.g. after renameModelProperty's
-   * schema reload renamed the row in place). Nothing else updates them: createById and the Model's
-   * property refresh return a cached instance as is. Also re-keys a "modelName:oldName" cache entry
-   * so creating the property by its new name finds this instance.
+   * Give cached instances of these properties the values their rows now have (e.g. after a schema
+   * update reloaded them: renamed, dataType or storage changed). Nothing else updates them: createById
+   * and the Model's property refresh return a cached instance as is. A renamed instance's
+   * "modelName:oldName" cache entry is re-keyed so creating the property by its new name finds it.
+   * Instances with unsaved edits are left alone, as addModelsToDb leaves edited rows alone.
    */
-  static async refreshNameFromDb(propertyFileId: string): Promise<void> {
-    if (!propertyFileId) return
+  static async refreshFromDb(propertyFileIds: string[]): Promise<void> {
+    const ids = new Set(propertyFileIds.filter(Boolean))
+    if (ids.size === 0) return
     const db = BaseDb.getAppDb()
     if (!db) return
 
-    const [row] = await db
-      .select({ name: propertiesTable.name })
+    const rows = await db
+      .select({
+        schemaFileId: propertiesTable.schemaFileId,
+        name: propertiesTable.name,
+        dataType: propertiesTable.dataType,
+        refModelId: propertiesTable.refModelId,
+        refModelName: modelsTable.name,
+        refValueType: propertiesTable.refValueType,
+        required: propertiesTable.required,
+        storageType: propertiesTable.storageType,
+        localStorageDir: propertiesTable.localStorageDir,
+        filenameSuffix: propertiesTable.filenameSuffix,
+      })
       .from(propertiesTable)
-      .where(eq(propertiesTable.schemaFileId, propertyFileId))
-      .limit(1)
-    const name = row?.name
-    if (!name) return
+      .leftJoin(modelsTable, eq(modelsTable.id, propertiesTable.refModelId))
+      .where(inArray(propertiesTable.schemaFileId, [...ids]))
 
-    for (const [cacheKey, entry] of [...this.instanceCache.entries()]) {
-      const { instance } = entry
-      if (isActorStopped(instance._service)) continue
-      const context = instance._getSnapshotContext()
-      if (context.id !== propertyFileId || context.name === name) continue
+    for (const row of rows) {
+      const propertyFileId = row.schemaFileId
+      if (!propertyFileId || !row.name) continue
+      const dataType = row.dataType as ModelPropertyDataTypes
+      const rowValues: Partial<Static<typeof TProperty>> = {
+        name: row.name,
+        dataType,
+        refValueType: (row.refValueType as ModelPropertyDataTypes | null) ?? undefined,
+        required: row.required ?? false,
+        storageType: (row.storageType as StorageType | null) ?? undefined,
+        localStorageDir: row.localStorageDir ?? undefined,
+        filenameSuffix: row.filenameSuffix ?? undefined,
+      }
+      if (row.refModelId) {
+        rowValues.refModelId = row.refModelId
+        if (row.refModelName) {
+          rowValues.ref = row.refModelName
+          rowValues.refModelName = row.refModelName
+        }
+      } else if (dataType !== ModelPropertyDataTypes.Relation && dataType !== ModelPropertyDataTypes.List) {
+        // No longer a reference. (A Relation/List row without refModelId may just not have its
+        // referenced model's row yet, so keep the instance's ref then.)
+        rowValues.refModelId = undefined
+        rowValues.ref = undefined
+        rowValues.refModelName = undefined
+      }
 
-      instance._service.send({ type: 'renamedInStorage', name })
+      for (const [cacheKey, entry] of [...this.instanceCache.entries()]) {
+        const { instance } = entry
+        if (isActorStopped(instance._service)) continue
+        const context = instance._getSnapshotContext()
+        if (context.id !== propertyFileId || context._isEdited) continue
 
-      const newCacheKey = context.modelName ? `${context.modelName}:${name}` : undefined
-      if (newCacheKey && cacheKey === `${context.modelName}:${context.name}` && !this.instanceCache.has(newCacheKey)) {
-        this.instanceCache.delete(cacheKey)
-        this.instanceCache.set(newCacheKey, entry)
-        if (this.idIndex.get(propertyFileId)?.instance === instance) {
-          this.idIndex.set(propertyFileId, { cacheKey: newCacheKey, instance })
+        const changed = Object.fromEntries(
+          Object.entries(rowValues).filter(
+            ([key, value]) => (context as Record<string, unknown>)[key] !== value,
+          ),
+        ) as Partial<Static<typeof TProperty>>
+        if (Object.keys(changed).length === 0) continue
+
+        instance._service.send({ type: 'syncedFromStorage', values: changed })
+
+        const newCacheKey = changed.name && context.modelName ? `${context.modelName}:${changed.name}` : undefined
+        if (newCacheKey && cacheKey === `${context.modelName}:${context.name}` && !this.instanceCache.has(newCacheKey)) {
+          this.instanceCache.delete(cacheKey)
+          this.instanceCache.set(newCacheKey, entry)
+          if (this.idIndex.get(propertyFileId)?.instance === instance) {
+            this.idIndex.set(propertyFileId, { cacheKey: newCacheKey, instance })
+          }
         }
       }
     }
@@ -1399,3 +1446,5 @@ export class ModelProperty {
     })
   }
 }
+
+setCachedPropertyRefresher((propertyFileIds) => ModelProperty.refreshFromDb(propertyFileIds))
