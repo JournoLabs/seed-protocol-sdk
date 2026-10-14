@@ -1,4 +1,4 @@
-import { isBrowser, isNode } from '@/helpers/environment'
+import { isNode } from '@/helpers/environment'
 
 type EasSdk = typeof import('@ethereum-attestation-service/eas-sdk')
 
@@ -19,9 +19,13 @@ let easSdkPromise: Promise<EasSdk> | undefined
 export function loadEasSdk(): Promise<EasSdk> {
   if (!easSdkPromise) {
     easSdkPromise = (async () => {
-      if (isNode() && !isBrowser() && typeof process.getBuiltinModule === 'function') {
-        const { createRequire } = process.getBuiltinModule('node:module')
-        return createRequire(import.meta.url)('@ethereum-attestation-service/eas-sdk') as EasSdk
+      if (isNode() && typeof document === 'undefined' && typeof process.getBuiltinModule === 'function') {
+        try {
+          const { createRequire } = process.getBuiltinModule('node:module')
+          return createRequire(import.meta.url)('@ethereum-attestation-service/eas-sdk') as EasSdk
+        } catch {
+          // e.g. import.meta.url is not a file: URL (bundled renderer). Fall through.
+        }
       }
       return import('@ethereum-attestation-service/eas-sdk')
     })()
