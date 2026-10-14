@@ -20,7 +20,9 @@ import { modelPropertiesToObject } from '@/helpers/model'
 import { waitForModelIdle, waitForModelSettled, waitForSchemaIdle } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
-// Helper function to wait for model to be in idle state using xstate waitFor
+// modelMachine's states once loading has finished without error (see src/Model/service/modelMachine.ts)
+const MODEL_STATES_AFTER_LOAD = ['idle', 'validating', 'creatingProperties']
+
 // Helper to create a test schema
 function createTestSchema(name: string, models: Record<string, any> = {}): SchemaFileFormat {
   return {
@@ -151,46 +153,13 @@ testDescribe('Model Integration Tests', () => {
         waitForReady: false,
       }) as Model
 
-      model.getService().subscribe((snapshot) => {
-        console.log('model snapshot.value', snapshot.value)
-        // console.log('model snapshot.context', snapshot.context)
-      })
-      
       await waitForModelIdle(model)
-      
-      // Wait for liveQuery subscription to be set up and context to be updated
-      await new Promise<void>((resolve, reject) => {
-        const subscription = model.getService().subscribe((snapshot) => {
-          console.log('Waiting for liveQueryIds', snapshot.context._liveQueryPropertyIds)
-          const liveQueryIds = snapshot.context._liveQueryPropertyIds || []
-          if (liveQueryIds.length >= 2) {
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        // Also check immediately in case it's already updated
-        const currentSnapshot = model.getService().getSnapshot()
-        const currentLiveQueryIds = currentSnapshot.context._liveQueryPropertyIds || []
-        if (currentLiveQueryIds.length >= 2) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          subscription.unsubscribe()
-          const finalSnapshot = model.getService().getSnapshot()
-          const finalLiveQueryIds = finalSnapshot.context._liveQueryPropertyIds || []
-          console.log('finalLiveQueryIds', finalLiveQueryIds)
-          if (finalLiveQueryIds.length >= 2) {
-            resolve()
-          } else {
-            reject(new Error(`Timeout waiting for liveQueryPropertyIds. Got ${finalLiveQueryIds.length} items, expected at least 2`))
-          }
-        }, 5000)
-      })
+
+      // The property ids arrive through a liveQuery after the model's write
+      await waitUntilOrThrow(
+        () => (model.getService().getSnapshot().context._liveQueryPropertyIds || []).length >= 2,
+        'the model\'s liveQuery property ids (expected at least 2)',
+      )
       
       // model.properties only returns ModelProperty instances already in the cache, which can lag the
       // liveQuery ids above, so poll for the instances
@@ -483,34 +452,10 @@ testDescribe('Model Integration Tests', () => {
       await waitForModelIdle(TestModel)
       
       // Wait for model properties to be loaded (they come from the schema import)
-      await new Promise<void>((resolve, reject) => {
-        const subscription = TestModel.getService().subscribe((snapshot) => {
-          const properties = TestModel.properties || []
-          if (properties.length >= 3) { // title, content, count
-            subscription.unsubscribe()
-            resolve()
-          }
-        })
-        
-        // Check immediately
-        const properties = TestModel.properties || []
-        if (properties.length >= 3) {
-          subscription.unsubscribe()
-          resolve()
-          return
-        }
-        
-        // Timeout after 5 seconds
-        setTimeout(() => {
-          subscription.unsubscribe()
-          const finalProperties = TestModel.properties || []
-          if (finalProperties.length >= 3) {
-            resolve()
-          } else {
-            reject(new Error(`Timeout waiting for model properties. Got ${finalProperties.length} properties, expected at least 3`))
-          }
-        }, 5000)
-      })
+      await waitUntilOrThrow(
+        () => (TestModel.properties || []).length >= 3, // title, content, count
+        'the imported model\'s 3 properties',
+      )
       
       // Get the actual model name (may be renamed if duplicate exists)
       const actualModelName = TestModel.modelName
@@ -817,8 +762,11 @@ testDescribe('Model Integration Tests', () => {
       expect(foundModel).toBeDefined()
       expect(foundModel?.modelName).toBe('TestPost')
 
-      // Verify it's in idle state (find() should have waited)
+      // find() should have waited past loading. It resolves on the first idle, and the model can leave idle
+      // again (validating, creatingProperties), so check it got past loading, then that it settles in idle.
       const service = foundModel!.getService()
+      expect(MODEL_STATES_AFTER_LOAD).toContain(service.getSnapshot().value)
+      await waitForModelSettled(foundModel!)
       expect(service.getSnapshot().value).toBe('idle')
     })
 
@@ -844,8 +792,11 @@ testDescribe('Model Integration Tests', () => {
       expect(foundModel).toBeDefined()
       expect(foundModel?.modelName).toBe('TestPost')
       
-      // Verify it's in idle state (find() should have waited)
+      // find() should have waited past loading. It resolves on the first idle, and the model can leave idle
+      // again (validating, creatingProperties), so check it got past loading, then that it settles in idle.
       const service = foundModel!.getService()
+      expect(MODEL_STATES_AFTER_LOAD).toContain(service.getSnapshot().value)
+      await waitForModelSettled(foundModel!)
       expect(service.getSnapshot().value).toBe('idle')
     })
 
@@ -882,8 +833,10 @@ testDescribe('Model Integration Tests', () => {
       // Model might not be idle yet since we didn't wait
       const service = foundModel!.getService()
       const state = service.getSnapshot().value
-      // State could be idle (if already loaded) or loading/waitingForDb
-      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+      // Any modelMachine state but error: it may still be loading, or already past it
+      expect(['loading', ...MODEL_STATES_AFTER_LOAD]).toContain(state)
+      await waitForModelSettled(foundModel!)
+      expect(service.getSnapshot().value).toBe('idle')
     })
   })
 
@@ -990,8 +943,14 @@ testDescribe('Model Integration Tests', () => {
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       await findImportedModel('TestModelWait', schemaName)
 
-      const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: 15000 })
-      expect(allModels.length).toBeGreaterThanOrEqual(1)
+      const allModels = await Model.all(schemaName, { waitForReady: true, readyTimeout: WAIT_TIMEOUT_MS })
+      expect(allModels.map((m) => m.modelName)).toContain('TestModelWait')
+      // all() resolves once each model has been idle; a model can leave idle again (validating,
+      // creatingProperties), so check each got past loading, then settles in idle
+      for (const m of allModels) {
+        expect(MODEL_STATES_AFTER_LOAD).toContain(m.getService().getSnapshot().value)
+      }
+      await Promise.all(allModels.map((m) => waitForModelSettled(m)))
       for (const m of allModels) {
         expect(m.getService().getSnapshot().value).toBe('idle')
       }
@@ -1077,7 +1036,7 @@ testDescribe('Model Integration Tests', () => {
       // Status should be 'loading' initially
       expect(['loading', 'idle']).toContain(model.status)
       
-      await waitForModelIdle(model)
+      await waitForModelSettled(model)
       
       // Status should be 'idle' after loading
       expect(model.status).toBe('idle')
@@ -1586,8 +1545,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
       
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1639,8 +1598,8 @@ testDescribe('Model Integration Tests', () => {
         }
       })
       
-      // Wait for model to stabilize
-      await waitForModelIdle(newModel, 10000)
+      // Wait for model to stabilize, including the property pass after its write
+      await waitForModelSettled(newModel)
       
       // Wait a bit more to ensure no additional callbacks
       await new Promise(resolve => setTimeout(resolve, 1000))

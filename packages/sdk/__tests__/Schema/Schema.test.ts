@@ -18,13 +18,12 @@ import { ConflictError } from '@/Schema/errors'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
 import { waitUntilOrThrow } from '../test-utils/waitUntil'
 import { cleanupTestSchemaFiles } from '../test-utils/cleanupTestSchemaFiles'
-import { waitForSchemaIdle, waitForModelIdle } from '../test-utils/waitForIdle'
+import { waitForSchemaIdle, waitForModelIdle, waitForModelSettled } from '../test-utils/waitForIdle'
 import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
-// Helper function to wait for schema to be in idle state using xstate waitFor
 // A runtime Model writes itself and its properties to the DB in the background. Wait for those rows, or a
 // write can land after the next test's beforeEach has deleted the schema it targets.
-async function waitForModelPersisted(model: Model, propertyNames: string[] = [], timeout: number = 5000): Promise<void> {
+async function waitForModelPersisted(model: Model, propertyNames: string[] = [], timeout: number = WAIT_TIMEOUT_MS): Promise<void> {
   const snapshot = await waitFor(model.getService(), (s) => s.context._dbId != null, { timeout })
   if (propertyNames.length === 0) return
   const modelId = snapshot.context._dbId as number
@@ -360,8 +359,10 @@ testDescribe('Schema Integration Tests', () => {
       // Schema might not be idle yet since we didn't wait
       const service = foundSchema!.getService()
       const state = service.getSnapshot().value
-      // State could be idle (if already loaded) or loading/waitingForDb
-      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+      // Any schemaMachine state but error (loading is a compound state, so check its top level)
+      const topLevelState = typeof state === 'string' ? state : Object.keys(state)[0]
+      expect(['loading', 'idle', 'validating']).toContain(topLevelState)
+      await waitForSchemaIdle(foundSchema!)
     })
   })
 
@@ -752,7 +753,7 @@ testDescribe('Schema Integration Tests', () => {
         },
         waitForReady: false,
       })
-      await waitForModelIdle(articleModel, 20000)
+      await waitForModelSettled(articleModel)
       await waitForModelPersisted(articleModel, ['content'])
 
       // Schema.all() should return the schema, and when loaded, it should include
@@ -827,12 +828,7 @@ testDescribe('Schema Integration Tests', () => {
           },
           waitForReady: false,
         })
-        try {
-          await waitForModelIdle(articleModel, 20000) // 20 seconds
-        } catch (error: any) {
-          // If timeout, wait a bit more and continue
-          await new Promise(resolve => setTimeout(resolve, 2000))
-        }
+        await waitForModelSettled(articleModel)
         await waitForModelPersisted(articleModel, ['content'])
         
         
@@ -906,12 +902,7 @@ testDescribe('Schema Integration Tests', () => {
           },
           waitForReady: false,
         })
-        try {
-          await waitForModelIdle(articleModel, 20000) // 20 seconds
-        } catch (error: any) {
-          // If timeout, wait a bit more and continue
-          await new Promise(resolve => setTimeout(resolve, 2000))
-        }
+        await waitForModelSettled(articleModel)
         await waitForModelPersisted(articleModel, ['content'])
         
         
@@ -1329,68 +1320,19 @@ testDescribe('Schema Integration Tests', () => {
         waitForReady: false,
       })
       
-      // Wait for model with a longer timeout, but don't fail if it takes a while
-      // The model might be created but just taking time to reach idle
-      try {
-        await waitForModelIdle(model, 20000) // 20 seconds
-      } catch (error: any) {
-        // If timeout, check if model is at least created
-        const snapshot = model.getService().getSnapshot()
-        if (snapshot.value === 'error') {
-          throw error // Re-throw if there's an actual error
-        }
-        // If it's just taking time, wait a bit more and continue
-        await new Promise(resolve => setTimeout(resolve, 2000))
-      }
-      
+      await waitForModelSettled(model)
+
       // Schema.models should now include the newly created Model instance
-      // Wait a bit more for the model to be registered in the schema
-      let foundModel: Model | undefined
-      let attempts = 0
-      const maxAttempts = 20 // Increase attempts
-      const attemptDelay = 300 // Reduce delay to 300ms
-      
-      while (attempts < maxAttempts && !foundModel) {
-        await new Promise(resolve => setTimeout(resolve, attemptDelay))
-        const updatedModels = schema.models || []
-        foundModel = updatedModels.find((m: any) => {
-          const modelName = m.modelName || m.name
-          return modelName === 'TestModel'
-        }) as Model | undefined
-        attempts++
-      }
-      
+      await waitUntilOrThrow(
+        () => (schema.models || []).some((m: any) => (m.modelName || m.name) === 'TestModel'),
+        'TestModel in schema.models',
+      )
+      const foundModel = (schema.models || []).find((m: any) => (m.modelName || m.name) === 'TestModel')
       expect(Array.isArray(schema.models)).toBe(true)
-      
-      // Verify the model was created successfully
-      expect(model).toBeDefined()
       expect(model.modelName).toBe('TestModel')
       expect(model.schemaName).toBe(schemaName)
-      
-      // The model should be registered in schema.models, but if it's not found,
-      // it might be a timing issue. Check the schema context as well.
-      if (!foundModel) {
-        // Check if model is in schema context
-        const context = schema.getService().getSnapshot().context
-        const contextModel = context.models?.['TestModel']
-        
-        if (contextModel) {
-          // Model is in context but not yet in schema.models - this is acceptable
-          // as schema.models is computed from Model instances, which may take time
-          expect(contextModel).toBeDefined()
-        } else {
-          // Model should eventually appear in schema.models
-          // For now, we'll verify the model exists and is correct
-          // The registration might happen asynchronously
-          expect(model).toBeDefined()
-        }
-      } else {
-        // Model was found in schema.models
-        expect(foundModel).toBe(model) // Should be the same instance
-        expect(foundModel.modelName).toBe('TestModel')
-        expect(foundModel.schemaName).toBe(schemaName)
-      }
-    }, 60000) // 60 second timeout for this test
+      expect(foundModel).toBe(model) // Should be the same instance
+    })
   })
 
   describe('Schema read-only relationship with Model instances', () => {
