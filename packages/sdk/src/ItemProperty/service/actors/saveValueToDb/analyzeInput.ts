@@ -55,6 +55,13 @@ export const analyzeInput = fromCallback<
   }
 
   const _analyzeInput = async (): Promise<boolean> => {
+    // Assignment writes straight to the DB, so check ownership here as save()/destroy()/publish() do.
+    const { isItemOwned, OwnershipError } = await import('@/helpers/ownership')
+    if (!(await isItemOwned({ seedLocalId: seedLocalId ?? undefined, seedUid: context.seedUid ?? undefined }))) {
+      sendBack({ type: 'saveFailed', error: new OwnershipError() })
+      return false
+    }
+
     // Use dynamic import to break circular dependency
     const schemaMod = await import('../../../../Schema')
     const { ModelPropertyDataTypes } = schemaMod
@@ -242,9 +249,14 @@ export const analyzeInput = fromCallback<
     return true
   }
 
-  _analyzeInput().then((isDone) => {
-    if (isDone) {
-      sendBack({ type: 'saveValueToDbSuccess' })
-    }
-  })
+  _analyzeInput().then(
+    (isDone) => {
+      if (isDone) {
+        sendBack({ type: 'saveValueToDbSuccess' })
+      }
+    },
+    (error: unknown) => {
+      sendBack({ type: 'saveFailed', error })
+    },
+  )
 })

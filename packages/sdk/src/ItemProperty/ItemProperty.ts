@@ -1452,6 +1452,8 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
     if (currentValue === value) {
       return
     }
+    // Restored if the save is refused (item not owned) or fails.
+    const before = { propertyValue: context.propertyValue, renderValue: context.renderValue }
     // Update context immediately so UI shows the value before save completes
     this._service.send({
       type: 'updateContext',
@@ -1471,7 +1473,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
         (schema) => {
           if (!schema) return false
           this._service.send({ type: 'updateContext', propertyRecordSchema: schema })
-          this._service.send({ type: 'save', newValue: value })
+          this._service.send({ type: 'save', newValue: value, before })
           return true
         },
         () => false,
@@ -1484,6 +1486,7 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
       this._service.send({
         type: 'save',
         newValue: value,
+        before,
       })
     }
   }
