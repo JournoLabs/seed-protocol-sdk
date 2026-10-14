@@ -181,13 +181,13 @@ const config = [
       postProcess(),
     ],
   },
-  // CommonJS build - Node.js only. Entries mirror the ESM build so each
-  // package.json "require" condition loads the same API its types describe.
+  // CommonJS build of the Vite plugin only, for CommonJS vite configs.
+  // The SDK entries have no CJS build: package.json's "require" conditions
+  // point at the ESM files, which Node 20.19+ / 22.12+ loads via require(esm).
+  // One module graph means no second copy of the SDK's singletons.
   {
     input: {
-      'main.cjs': 'src/index.ts',
-      'node.cjs': 'src/node/index.ts',
-      'vite.cjs': 'src/vite/index.ts', // Vite plugin CommonJS build
+      'vite.cjs': 'src/vite/index.ts',
     },
     output: [
       {

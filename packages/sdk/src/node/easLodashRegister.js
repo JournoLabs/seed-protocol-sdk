@@ -6,6 +6,10 @@
  * of this package) and does support named imports. The hook sends only eas-sdk's
  * `lodash` specifier to `lodash-es`.
  *
+ * `@seedprotocol/sdk` itself no longer needs this: it loads eas-sdk's CommonJS
+ * build on Node (see src/helpers/easSdk.ts). `@seedprotocol/publish` imports
+ * eas-sdk statically, so Node processes that load it still need the hook.
+ *
  *   node --import @seedprotocol/sdk/node-eas-lodash
  */
 import { register } from 'node:module'

@@ -65,7 +65,7 @@ For full guides on schema, models, properties, items, files, and the CLI, see **
 ## Module support
 
 - **ESM** (recommended): `import { Model, Property, Item } from '@seedprotocol/sdk'`
-- **CommonJS**: `const { Model, Item } = require('@seedprotocol/sdk')`. Needs Node 20.19+ or 22.12+, which can `require()` the ESM-only `@seedprotocol/*` dependencies.
+- **CommonJS**: `const { Model, Item } = require('@seedprotocol/sdk')`. The package is ESM-only; `require()` loads the same ESM build through Node's `require(esm)`, so it needs Node 20.19+ or 22.12+.
 
 ## License
 

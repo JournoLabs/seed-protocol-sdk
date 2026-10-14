@@ -9,6 +9,18 @@ import { normalizeAddressList, normalizeHexAddress } from '@/helpers/addresses'
 
 const READ_ONLY_ERROR = 'Item is read-only: you do not own this item'
 
+/**
+ * Thrown by write operations (save, destroy, publish, unpublish) on an item none
+ * of the client's addresses own. See isItemOwned for what counts as owned.
+ */
+export class OwnershipError extends Error {
+  constructor(message = READ_ONLY_ERROR) {
+    super(message)
+    this.name = 'OwnershipError'
+    Object.setPrototypeOf(this, OwnershipError.prototype)
+  }
+}
+
 type ItemLike = { seedLocalId?: string; seedUid?: string }
 
 export type SeedOwnershipRow = {
@@ -181,11 +193,12 @@ export async function isItemOwned(item: ItemLike | IItem<any>): Promise<boolean>
 }
 
 /**
- * Throws if the item is not owned. Use before write operations (publish, save, destroy).
+ * Throws OwnershipError if the item is not owned. Use before write operations
+ * (publish, save, destroy).
  */
 export async function assertItemOwned(item: ItemLike | IItem<any>): Promise<void> {
   const owned = await isItemOwned(item)
   if (!owned) {
-    throw new Error(READ_ONLY_ERROR)
+    throw new OwnershipError()
   }
 }

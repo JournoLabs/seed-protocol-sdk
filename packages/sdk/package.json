@@ -20,11 +20,11 @@
     "react"
   ],
   "type": "module",
-  "main": "./dist/main.cjs",
+  "main": "./dist/main.js",
   "module": "./dist/main.js",
   "types": "./dist/src/index.d.ts",
   "engines": {
-    "node": ">= 20 <= 24"
+    "node": "^20.19.0 || >=22.12.0 <=24"
   },
   "files": [
     "dist",
@@ -35,8 +35,8 @@
     "build": "bun run build:dev",
     "build:types": "node ../../scripts/build-with-tests.js \"tsc -p packages/sdk/tsconfig.declarations.json && node scripts/rewrite-dts-alias-to-relative.js\"",
     "build:watch": "tsc -w -p tsconfig.json",
-    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js\"",
-    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js\"",
+    "build:dev": "node ../../scripts/build-with-tests.js \"cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
+    "build:publish": "node ../../scripts/build-with-tests.js \"bun run sync-versions && cd packages/sdk && rm -rf dist && NODE_ENV=production rollup -c && node ../../scripts/check-dist-fragile-dynamic-imports.js --fail && node ../../scripts/check-dist-fragile-imports.js --fail && tsc -p tsconfig.declarations.json && node ../../scripts/rewrite-dts-alias-to-relative.js && node ../../scripts/check-dist-no-alias.js && node ../../scripts/check-dist-cjs-entries.js && node ../../scripts/check-sdk-node-consumer.js\"",
     "compile": "graphql-codegen --config codegen.ts",
     "watch": "graphql-codegen -w",
     "test": "vitest run --reporter=default",
@@ -108,7 +108,7 @@
       },
       "require": {
         "types": "./dist/src/index.d.ts",
-        "default": "./dist/main.cjs"
+        "default": "./dist/main.js"
       }
     },
     "./node": {
@@ -118,7 +118,7 @@
       },
       "require": {
         "types": "./dist/src/node/index.d.ts",
-        "default": "./dist/node.cjs"
+        "default": "./dist/node.js"
       }
     },
     "./platform": {

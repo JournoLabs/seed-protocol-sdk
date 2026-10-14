@@ -2,13 +2,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { NodePathResolver, PathResolver } from '@/node/helpers/PathResolver'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 
 /**
- * NodePathResolver decides where the SDK lives from process.cwd() and NODE_ENV. Each test builds the
+ * NodePathResolver decides where the SDK lives from process.cwd(), NODE_ENV and, in production, the
+ * installed package's location. Each test builds the
  * project layout it needs in a fresh temp dir, chdirs into it, and afterEach restores cwd and env.
  */
+
+/** Production resolves the installed @seedprotocol/sdk package, not a path under cwd. */
+const installedSdkDist = path.join(
+  path.dirname(createRequire(import.meta.url).resolve('@seedprotocol/sdk/package.json')),
+  'dist',
+)
 
 const writeJson = (file: string, data: unknown) => {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -78,7 +86,7 @@ describe('NodePathResolver', () => {
       makeDir('other', 'src', 'node')
       writeJson(path.join(tmpRoot, 'other', 'package.json'), { name: 'something-else' })
       process.chdir(path.join(tmpRoot, 'other'))
-      expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'other', 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+      expect(resolver.getSdkRootDir()).toBe(installedSdkDist)
     })
 
     it('resolves a link:@seedprotocol/sdk dependency to node_modules', () => {
@@ -97,20 +105,34 @@ describe('NodePathResolver', () => {
       expect(resolver.getSdkRootDir()).toBe(path.join(tmpRoot, 'seed-protocol-sdk'))
     })
 
-    it('defaults to node_modules/@seedprotocol/sdk/dist in production', () => {
+    it('resolves the installed package in production, whatever the cwd', () => {
       vi.stubEnv('NODE_ENV', 'production')
       const project = makeDir('app')
       writeJson(path.join(project, 'package.json'), { dependencies: { '@seedprotocol/sdk': '^1.0.0' } })
       process.chdir(project)
-      expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+      expect(resolver.getSdkRootDir()).toBe(installedSdkDist)
       expect(resolver.getNodeModulesDir()).toBe(path.join(project, 'node_modules'))
+    })
+
+    it('falls back to node_modules under cwd when the package cannot be resolved', () => {
+      vi.stubEnv('NODE_ENV', 'production')
+      const project = makeDir('app')
+      process.chdir(project)
+      const getBuiltinModule = vi.spyOn(process, 'getBuiltinModule').mockImplementation(() => {
+        throw new Error('unavailable')
+      })
+      try {
+        expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+      } finally {
+        getBuiltinModule.mockRestore()
+      }
     })
 
     it('treats a project without package.json as production', () => {
       vi.stubEnv('NODE_ENV', '')
       const project = makeDir('bare')
       process.chdir(project)
-      expect(resolver.getSdkRootDir()).toBe(path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'))
+      expect(resolver.getSdkRootDir()).toBe(installedSdkDist)
     })
   })
 
@@ -183,7 +205,7 @@ describe('NodePathResolver', () => {
       process.chdir(project)
       const dotSeed = path.join(project, '.seed')
       expect(resolver.getAppPaths(project)).toEqual({
-        sdkRootDir: path.join(project, 'node_modules', '@seedprotocol', 'sdk', 'dist'),
+        sdkRootDir: installedSdkDist,
         dotSeedDir: dotSeed,
         nodeModulesDir: path.join(project, 'node_modules'),
         appSchemaDir: path.join(dotSeed, 'schema'),

@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 /**
  * Post-build safeguard: every "require" entry in packages/sdk/package.json
- * exports must load under CommonJS and expose the same names as its "import"
+ * exports must load under require() and expose the same names as its "import"
  * twin. Its types are shared with the ESM entry, so a missing name is a lie in
  * the published typings.
  *
- * Catches the two ways the CJS build has broken before:
- * - entry built from a different source file than the types describe
- * - chunks emitted as .js in a "type": "module" package, so Node loads them as
- *   ESM and every require()d export is undefined
- *
- * Needs Node >= 20.19 / 22.12 (require of the ESM-only workspace packages).
- * The ESM side loads with the node-eas-lodash hook, as Node ESM users must.
+ * Most require entries point at the ESM file itself (Node 20.19+ / 22.12+ load
+ * it via require(esm)). That breaks if the graph gains top-level await
+ * (ERR_REQUIRE_ASYNC_MODULE) or an import Node can't resolve, so neither side
+ * loads the node-eas-lodash hook here: plain Node must manage without it.
  * Exits 0 if all entries match; exits 1 and prints each problem otherwise.
  */
 
@@ -24,7 +21,6 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const sdkDir = path.join(__dirname, '..', 'packages', 'sdk')
 const pkg = JSON.parse(readFileSync(path.join(sdkDir, 'package.json'), 'utf8'))
 const require = createRequire(path.join(sdkDir, 'package.json'))
-await import(pathToFileURL(path.join(sdkDir, 'src/node/easLodashRegister.js')).href)
 
 let hadViolation = false
 const fail = (msg) => {
@@ -64,5 +60,5 @@ for (const [subpath, conditions] of Object.entries(pkg.exports)) {
 if (hadViolation) {
   process.exit(1)
 }
-console.log('[check-dist-cjs-entries] CJS entries match their ESM twins')
+console.log('[check-dist-cjs-entries] require entries load and match their ESM twins')
 process.exit(0)

@@ -17,6 +17,12 @@ export {
 // Core classes
 export { Item } from '../Item/Item'
 export { ItemProperty, ItemPropertySaveValidationError } from '../ItemProperty/ItemProperty'
+export type { IItem, IItemProperty } from '../interfaces'
+
+// Errors
+export { AmbiguousModelError } from '../Model/errors'
+export { ConflictError, type ConflictResult } from '../Schema/errors'
+export { OwnershipError, assertItemOwned, isItemOwned } from '../helpers/ownership'
 
 // Node.js specific exports
 export { FileManager } from './helpers/FileManager'
@@ -55,6 +61,9 @@ export { client } from '../client'
 
 // All types
 export * from '../types'
+export type { MultiTabMode } from '../helpers/tabCoordinator'
+export type { SyncFromEasOptions } from '../events/item/syncDbWithEas'
+export type { HtmlEmbeddedDataUriPolicy } from '../helpers/property'
 
 // CLI exports
 export { PathResolver } from './helpers/PathResolver'
