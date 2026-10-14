@@ -137,7 +137,9 @@ jobs:
     if: needs.version.outputs.channel == 'release'
     runs-on: ubuntu-latest
     permissions:
+      # Writes the release, and deletes older tags that never published
       contents: write
+      actions: read
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -145,10 +147,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      # Older vX.Y.Z tags whose release failed before publishing and was skipped. Only warns on problems.
+      - name: Remove unreleased tags
+        id: tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/prune-unreleased-tags.js
+
       - name: Generate changelog
+        env:
+          # The last tag that reached npm, so a skipped failed tag's changes stay in the notes
+          PREVIOUS_RELEASED_TAG: ${{ steps.tags.outputs.previous_tag }}
         run: |
           TAG_NAME="v$RELEASE_VERSION"
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$TAG_NAME^" 2>/dev/null || echo "")
+          PREVIOUS_TAG="$PREVIOUS_RELEASED_TAG"
+          if [ -z "$PREVIOUS_TAG" ]; then
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$TAG_NAME^" 2>/dev/null || echo "")
+          fi
 
           if [ -z "$PREVIOUS_TAG" ]; then
             CHANGELOG=$(git log "$TAG_NAME" --pretty=format:"- %s (%h)" --no-merges)

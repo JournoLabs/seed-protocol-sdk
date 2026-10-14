@@ -80,6 +80,7 @@ npm.
 bun run release                 # next patch, e.g. 0.7.2 → 0.7.3
 bun run release -- 0.8.0        # explicit version
 bun run release -- --dry-run    # checks and plan only
+bun run release -- --retry      # re-release a version whose tag run failed before publishing
 ```
 
 [`release.js`](../scripts/release.js) checks that you're on `main` with a clean
@@ -105,6 +106,30 @@ git push --atomic origin main v0.7.3
 
 The tag must point at a commit whose committed version matches it, or the run fails
 before anything publishes.
+
+### When a release fails before publishing
+
+If the tag's run fails before any package reaches npm (a flaky test, say), the version
+is still unused: npm only makes a version permanent once it's published. Fix the
+problem on `main`, then:
+
+```bash
+bun run release -- --retry
+```
+
+It moves the committed version's tag from the failed commit to HEAD and pushes it,
+which starts a new tag run. HEAD must contain the old tag's commit, and the old run
+must have finished. Like a new release, it checks CI for HEAD, prints the plan, and
+asks you to type the version.
+
+It refuses when some packages already published that version. npm can't replace them,
+so re-run the failed run instead: it publishes the rest from the same commit.
+
+If you'd rather skip the version, cut the next one as usual. When that release
+succeeds, the GitHub Release job deletes older `vX.Y.Z` tags whose version is on npm
+for no package ([`prune-unreleased-tags.js`](../scripts/prune-unreleased-tags.js)),
+and starts the changelog at the last tag that did publish, so the skipped tag's
+changes still appear. Tags with a Release run still going are kept.
 
 Push `main` and the tag together, as above. The `main` run then sees the tag and skips,
 so only the tag run tests and publishes. If `main` goes up first, its run publishes a
@@ -166,6 +191,9 @@ Done by a maintainer with publish rights and 2FA.
   (`feat/x` and `feat-x`). Rename one.
 - **A run failed partway:** re-run it. Already-published packages are skipped, and
   the tag only moves once every package is published.
+- **A tag run failed before publishing anything:** fix it on `main`, then
+  `bun run release -- --retry`. See [When a release fails before
+  publishing](#when-a-release-fails-before-publishing).
 - **"… is not on the registry; not moving any tags":** npm's reads lag its publishes,
   sometimes by minutes. The promote step waits up to 10 minutes for every package
   (`RELEASE_REGISTRY_WAIT_MS`). If it still gives up, re-run the job: everything is
