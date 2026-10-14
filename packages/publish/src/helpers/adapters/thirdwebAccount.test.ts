@@ -7,6 +7,9 @@ const sendTransaction = mock(async () => ({ transactionHash: '0x' + '11'.repeat(
 mock.module('thirdweb', () => ({
   prepareTransaction,
   sendTransaction,
+  // Unused here, but modules that import them must still link under this mock.
+  deploySmartAccount: mock(async () => {}),
+  getContract: mock(() => ({})),
   defineChain: (chain: unknown) => chain,
   createThirdwebClient: (opts: { clientId?: string; secretKey?: string }) => ({
     clientId: opts.clientId ?? 'from-secret',
