@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { waitFor } from 'xstate'
 import { Model } from '@/Model/Model'
 import { Item } from '@/Item/Item'
+import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { eq } from 'drizzle-orm'
@@ -145,12 +146,14 @@ testDescribe('Property Rename Metadata Migration', () => {
   it('should rename the property row in place when the schema reloads after a rename', async () => {
     // Own schema name: the first test leaves its v2 schema file on disk
     const renameSchemaName = 'Property Rename Row Test Schema'
+    // Own property id too, so ModelProperty.getById can't return the first test's cached instance
+    const propertyFileId = generateId()
     const testSchema = createTestSchema(renameSchemaName, {
       Post: {
         id: generateId(),
         properties: {
           featureImage: {
-            id: featureImageId,
+            id: propertyFileId,
             dataType: 'Text',
           },
         },
@@ -185,6 +188,11 @@ testDescribe('Property Rename Metadata Migration', () => {
 
     expect(propertiesAfter.map((p) => p.name)).toEqual(['coverImage'])
     expect(propertiesAfter[0].id).toBe(featureImageRow!.id)
-    expect(propertiesAfter[0].schemaFileId).toBe(featureImageId)
+    expect(propertiesAfter[0].schemaFileId).toBe(propertyFileId)
+
+    // The cached instance follows the renamed row
+    const cachedProperty = ModelProperty.getById(propertyFileId)
+    expect(cachedProperty).toBeDefined()
+    expect(cachedProperty!.name).toBe('coverImage')
   })
 })

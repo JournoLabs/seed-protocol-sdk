@@ -997,6 +997,44 @@ export class ModelProperty {
   }
 
   /**
+   * Give cached instances of a property the name its row now has (e.g. after renameModelProperty's
+   * schema reload renamed the row in place). Nothing else updates them: createById and the Model's
+   * property refresh return a cached instance as is. Also re-keys a "modelName:oldName" cache entry
+   * so creating the property by its new name finds this instance.
+   */
+  static async refreshNameFromDb(propertyFileId: string): Promise<void> {
+    if (!propertyFileId) return
+    const db = BaseDb.getAppDb()
+    if (!db) return
+
+    const [row] = await db
+      .select({ name: propertiesTable.name })
+      .from(propertiesTable)
+      .where(eq(propertiesTable.schemaFileId, propertyFileId))
+      .limit(1)
+    const name = row?.name
+    if (!name) return
+
+    for (const [cacheKey, entry] of [...this.instanceCache.entries()]) {
+      const { instance } = entry
+      if (isActorStopped(instance._service)) continue
+      const context = instance._getSnapshotContext()
+      if (context.id !== propertyFileId || context.name === name) continue
+
+      instance._service.send({ type: 'renamedInStorage', name })
+
+      const newCacheKey = context.modelName ? `${context.modelName}:${name}` : undefined
+      if (newCacheKey && cacheKey === `${context.modelName}:${context.name}` && !this.instanceCache.has(newCacheKey)) {
+        this.instanceCache.delete(cacheKey)
+        this.instanceCache.set(newCacheKey, entry)
+        if (this.idIndex.get(propertyFileId)?.instance === instance) {
+          this.idIndex.set(propertyFileId, { cacheKey: newCacheKey, instance })
+        }
+      }
+    }
+  }
+
+  /**
    * Find ModelProperty instance by propertyFileId
    * Waits for the property to be fully loaded (idle state) by default
    * @param options - Find options including propertyFileId and wait configuration

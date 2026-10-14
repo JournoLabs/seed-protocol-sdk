@@ -795,6 +795,11 @@ export async function renameModelProperty(
   // can interrupt the save flow and cause freezes (e.g. updateContext/refetch loops).
   const reload: Promise<void> = new Promise<void>((resolve) => setTimeout(resolve, 100))
     .then(() => loadSchemaFromFile(newFilePath))
+    .then(async () => {
+      // The reload renamed the property's row; cached ModelProperty instances still have the old name
+      const { ModelProperty } = await import('@/ModelProperty/ModelProperty')
+      if (oldProperty.id) await ModelProperty.refreshNameFromDb(oldProperty.id)
+    })
     .then(
       () => {},
       (err) => {
