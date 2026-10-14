@@ -280,6 +280,9 @@ export type {
 } from '@seedprotocol/arweave'
 export { waitForEntityIdle } from './helpers/waitForEntityIdle'
 export {
+  setPublishExecutor,
+  getPublishExecutor,
+  PUBLISH_NOT_CONFIGURED_MESSAGE,
   setUploadExecutor,
   getUploadExecutor,
   setGetPublisherForNewSeeds,
@@ -289,7 +292,14 @@ export {
   setAdditionalSyncAddresses,
   getGetAdditionalSyncAddresses,
 } from './helpers/publishConfig'
-export type { GetPublisherForNewSeeds, UploadExecutor, RevokeExecutor, GetAdditionalSyncAddresses } from './helpers/publishConfig'
+export type {
+  GetPublisherForNewSeeds,
+  ItemPublishOptions,
+  PublishExecutor,
+  UploadExecutor,
+  RevokeExecutor,
+  GetAdditionalSyncAddresses,
+} from './helpers/publishConfig'
 
 export { 
   createSchema, 

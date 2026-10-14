@@ -24,6 +24,7 @@ import {
   PropertyData
 } from '@/types'
 import type { CreateWaitOptions } from '@/types'
+import type { ItemPublishOptions } from '@/helpers/publishConfig'
 
 import { BehaviorSubject } from 'rxjs'
 import {
@@ -1379,8 +1380,9 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     state.definedPropertyNames.add(propertyName)
   }
 
-  static async publish(item: IItem<any>): Promise<void> {
-    await item.publish()
+  /** Same as `item.publish(options)`; requires @seedprotocol/publish. */
+  static async publish(item: IItem<any>, options?: ItemPublishOptions): Promise<void> {
+    await item.publish(options)
   }
 
   subscribe = (callback: (itemProps: any) => void): Subscription => {
@@ -1435,28 +1437,43 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     })
   }
 
-  publish = async (): Promise<void> => {
+  /**
+   * Upload this item's files to Arweave and write its attestations to EAS.
+   *
+   * Requires @seedprotocol/publish. Its `initPublish()` (or `<PublishProvider config>`)
+   * registers the PublishExecutor this delegates to; without it, publish() throws
+   * PUBLISH_NOT_CONFIGURED_MESSAGE. `options` are passed to that package unchanged (its
+   * CreatePublishOptions: signers, Arweave tags, `publishMode`, `onPublished`, ...).
+   *
+   * Resolves when the publish has finished, and rejects with the publish package's error
+   * if it failed. Throws OwnershipError if none of the client's addresses own the item.
+   */
+  publish = async (options?: ItemPublishOptions): Promise<void> => {
     const { assertItemOwned } = await import('@/helpers/ownership')
+    const { getPublishExecutor, PUBLISH_NOT_CONFIGURED_MESSAGE } = await import('@/helpers/publishConfig')
     await assertItemOwned(this)
-    this._service.send({ type: 'startPublish' })
+    if (!getPublishExecutor()) {
+      throw new Error(PUBLISH_NOT_CONFIGURED_MESSAGE)
+    }
+    const current = this._service.getSnapshot().value as string
+    if (current !== 'idle') {
+      throw new Error(
+        current === 'publishing'
+          ? 'Item is already being published.'
+          : `Item is not ready to publish (state: ${current}).`,
+      )
+    }
     return new Promise<void>((resolve, reject) => {
+      // Subscribe before sending: subscribe() does not replay the current snapshot,
+      // so a subscription made after startPublish could miss the 'publishing' state.
       let wasPublishing = false
-      const timeoutMs = 300000 // 5 minutes, match previous handler timeout
-      const timeoutId = setTimeout(() => {
-        unsub.unsubscribe()
-        if (!wasPublishing) {
-          reject(new Error('Publish did not start (timeout)'))
-        } else {
-          reject(new Error('Publish timed out'))
-        }
-      }, timeoutMs)
       const unsub = this._service.subscribe((snapshot: SnapshotFrom<typeof itemMachineSingle>) => {
         const value = snapshot.value as string
         if (value === 'publishing') {
           wasPublishing = true
+          return
         }
         if (value === 'idle' && wasPublishing) {
-          clearTimeout(timeoutId)
           unsub.unsubscribe()
           const ctx = snapshot.context as { _publishError?: { message: string } | null }
           if (ctx._publishError) {
@@ -1466,6 +1483,7 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
           }
         }
       })
+      this._service.send({ type: 'startPublish', item: this, options })
     })
   }
 

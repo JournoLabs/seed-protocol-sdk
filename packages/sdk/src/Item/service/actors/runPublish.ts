@@ -1,16 +1,24 @@
 import { EventObject, fromCallback } from 'xstate'
-import { FromCallbackInput } from '@/types/machines'
 import { ItemMachineContext } from '@/types/item'
 import type { Item } from '@/Item/Item'
+import type { IItem } from '@/interfaces/IItem'
 import debug from 'debug'
-import { getUploadExecutor } from '@/helpers/publishConfig'
+import {
+  getPublishExecutor,
+  PUBLISH_NOT_CONFIGURED_MESSAGE,
+  type ItemPublishOptions,
+} from '@/helpers/publishConfig'
 
 const logger = debug('seedSdk:Item:runPublish')
 
+/**
+ * Runs the publish for item.publish() by handing the item to the PublishExecutor that
+ * @seedprotocol/publish registers, which uploads to Arweave and writes to EAS.
+ */
 export const runPublish = fromCallback<
   EventObject,
-  FromCallbackInput<ItemMachineContext<any>>
->(({ sendBack, input: { context } }) => {
+  { context: ItemMachineContext<any>; item?: IItem<any>; options?: ItemPublishOptions }
+>(({ sendBack, input: { context, item: itemFromEvent, options } }) => {
   const { seedLocalId } = context
 
   const _runPublish = async () => {
@@ -18,45 +26,25 @@ export const runPublish = fromCallback<
       sendBack({ type: 'publishError', error: new Error('Item has no seedLocalId') })
       return
     }
-
+    const executor = getPublishExecutor()
+    if (!executor) {
+      sendBack({ type: 'publishError', error: new Error(PUBLISH_NOT_CONFIGURED_MESSAGE) })
+      return
+    }
     try {
-      const itemMod = await import('../../../Item/Item')
-      const { Item } = itemMod
-      const item = await Item.find({ seedLocalId })
-
+      // item.publish() sends its own instance; look it up only if startPublish came without one.
+      const item =
+        itemFromEvent ??
+        ((await (await import('../../../Item/Item')).Item.find({ seedLocalId })) as Item<any> | undefined)
       if (!item) {
-        sendBack({ type: 'publishError', error: new Error(`Item not found for seedLocalId: ${seedLocalId}`) })
+        sendBack({ type: 'publishError', error: new Error(`Item not found: ${seedLocalId}`) })
         return
       }
-
-      const getPublishUploadsMod = await import('../../../db/read/getPublishUploads')
-      const { getPublishUploads } = getPublishUploadsMod
-      const getPublishPayloadMod = await import('../../../db/read/getPublishPayload')
-      const { getPublishPayload } = getPublishPayloadMod
-
-      const uploads = await getPublishUploads(item)
-
-      let uploadedTransactions: { txId: string; seedLocalId?: string; versionLocalId?: string }[] = []
-      const executor = getUploadExecutor()
-      if (executor && uploads.length > 0) {
-        for (const upload of uploads) {
-          const { txId } = await executor(upload)
-          uploadedTransactions.push({
-            txId,
-            seedLocalId: upload.seedLocalId,
-            versionLocalId: upload.versionLocalId,
-          })
-        }
-      }
-
-      await getPublishPayload(item as Item<any>, uploadedTransactions)
-
-      logger('runPublish: payload prepared (upload/EAS submit stubbed)')
+      await executor(item, options)
       sendBack({ type: 'publishSuccess' })
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err))
+    } catch (error) {
       logger('runPublish error:', error)
-      sendBack({ type: 'publishError', error })
+      sendBack({ type: 'publishError', error: error instanceof Error ? error : new Error(String(error)) })
     }
   }
 

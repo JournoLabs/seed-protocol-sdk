@@ -8,7 +8,13 @@ export interface IItem<T extends ModelValues<ModelSchema>> {
   subscribe(callback: (itemProps: any) => void): Subscription
   getService(): ActorRefFrom<any>
   getEditedProperties(): Promise<PropertyData[]>
-  publish(): Promise<void>
+  /**
+   * Upload and attest this item. Requires @seedprotocol/publish: `initPublish()` (or
+   * `<PublishProvider config>`) registers the executor this delegates to; without it
+   * this throws. Resolves when the publish has finished; rejects if it failed.
+   * `options` are passed to the publish package (its CreatePublishOptions).
+   */
+  publish(options?: import('@/helpers/publishConfig').ItemPublishOptions): Promise<void>
   unpublish(): Promise<void>
   getPublishUploads(
     options?: import('@/db/read/getPublishUploads').GetPublishUploadsOptions,
