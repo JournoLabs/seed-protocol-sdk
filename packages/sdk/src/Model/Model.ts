@@ -59,11 +59,6 @@ function getModelProperty(): any {
   return ModelPropertyClass
 }
 
-// Lazy import for Schema to avoid circular dependency
-const schemaImportPromise = import('@/Schema/Schema')
-  .then(module => module.Schema)
-  .catch(() => null)
-
 // WeakMap to store mutable state per Model instance
 // This avoids issues with read-only properties when instances are frozen by Immer
 
@@ -2070,6 +2065,8 @@ export class Model {
 
           if (modelRecords.length > 0) {
             const modelId = modelRecords[0].id
+            const { detachModelRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+            await detachModelRows(db, [typeof modelId === 'string' ? parseInt(modelId, 10) : modelId])
             await db.delete(modelSchemas).where(eq(modelSchemas.modelId, modelId))
             await db
               .delete(propertiesTable)
@@ -2079,8 +2076,8 @@ export class Model {
         }
 
         if (schemaName && modelName) {
-          const Schema = await schemaImportPromise
-          if (!Schema) throw new Error('Schema not loaded')
+          // Imported here, not at module load: Model and Schema import each other.
+          const { Schema } = await import('@/Schema/Schema')
           const schema = Schema.create(schemaName, { waitForReady: false }) as import('@/Schema/Schema').Schema
           const schemaContext = schema.getService().getSnapshot().context
           if (schemaContext.models?.[modelName]) {

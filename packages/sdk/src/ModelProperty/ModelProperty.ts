@@ -1423,6 +1423,8 @@ export class ModelProperty {
             )
             .limit(1)
           if (propertyRecords.length > 0 && propertyRecords[0].propertyId != null) {
+            const { detachPropertyRows } = await import('@/helpers/entity/detachRowsBeforeDelete')
+            await detachPropertyRows(db, [propertyRecords[0].propertyId])
             await db
               .delete(propertiesTable)
               .where(eq(propertiesTable.id, propertyRecords[0].propertyId))
