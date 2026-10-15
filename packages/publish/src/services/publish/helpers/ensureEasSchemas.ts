@@ -331,7 +331,7 @@ async function ensureEasSchemasForItemResolved(
     const schema = await getEasSchemaForItemProperty({
       // A list relation's cached schemaUid may be for its schema-key name; don't look it up.
       schemaUid: listRelationName ? undefined : property.schemaUid,
-      propertyName: nameForEas,
+      propertyName: propertyNameSnakeCase,
       easDataType: easDataTypeForLookup,
     })
 
