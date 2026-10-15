@@ -40,6 +40,13 @@ export {
   DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'
 export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
+export {
+  PublishNotAuthorizedError,
+  PUBLISH_AUTHORIZATION_HEADER,
+  type AuthorizePublish,
+  type PublishAuthorization,
+  type PublishAuthorizationRequest,
+} from './authorization'
 export type {
   PublishUploadData,
   GetPublishUploadDataOptions,

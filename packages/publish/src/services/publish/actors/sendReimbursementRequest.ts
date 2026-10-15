@@ -1,3 +1,4 @@
+import { publishAuthorizationHeaders } from '~/authorization'
 import { fromPromise } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import type { ArweaveTransactionInfo } from '../../../types'
@@ -41,7 +42,8 @@ export const sendReimbursementRequest = fromPromise(
     const { status, body, message: serverMessage } = await postUploadArweaveStart(
       url,
       formData,
-      uploadApiBaseUrl
+      uploadApiBaseUrl,
+      publishAuthorizationHeaders(context.publishAuthorization),
     )
 
     if (status >= 300 || status < 200) {

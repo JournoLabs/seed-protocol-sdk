@@ -251,6 +251,11 @@ export interface PublishConfig {
    * Per-publish {@link CreatePublishOptions.onPublished} overrides this when set.
    */
   onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /**
+   * Approves each publish before it spends anything; return `false` to refuse, or `{ token }` to
+   * send a token to the upload API with the publish's requests. See {@link AuthorizePublish}.
+   */
+  authorizePublish?: import('./authorization').AuthorizePublish
 }
 
 /** Options passed at createPublish time. Signers here override config fallbacks. */
@@ -287,6 +292,8 @@ export interface CreatePublishOptions {
    * Overrides {@link PublishConfig.onPublished} when both are set.
    */
   onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /** Overrides {@link PublishConfig.authorizePublish} for this publish. */
+  authorizePublish?: import('./authorization').AuthorizePublish
 }
 
 /** Internal: module-level config ref set by PublishProvider on mount. */

@@ -3,6 +3,7 @@ import type { PublishMachineContext } from '../../../types'
 import { getPublishConfig } from '~/config'
 import { resolvePublishPayment } from '~/payment'
 import { uploadToTurbo } from '../helpers/uploadToTurbo'
+import { publishAuthorizationHeaders } from '~/authorization'
 
 const BATCH_UPLOAD_TIMEOUT_MS = 120_000
 const importDynamic = new Function('s', 'return import(s)') as (specifier: string) => Promise<{
@@ -165,7 +166,10 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
       try {
         response = await fetch(bundlerUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            ...publishAuthorizationHeaders(context.publishAuthorization),
+          },
           body: payload,
           signal: controller.signal,
         })

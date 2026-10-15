@@ -18,6 +18,7 @@ import {
   uploadData,
   uploadViaBundler,
   checking,
+  authorizing,
   preparingHtmlEmbedded,
   rewritingHtmlEmbedded,
 } from './actors'
@@ -70,6 +71,7 @@ export const publishMachine = setup({
     createAttestations,
     createAttestationsDirectToEas,
     checking,
+    authorizing,
     preparingHtmlEmbedded,
     rewritingHtmlEmbedded,
   },
@@ -166,6 +168,10 @@ export const publishMachine = setup({
       },
       errorStep : () => 'checking',
     },),
+    assignErrorAuthorizing : assign({
+      error     : ( { event, }, ) => getErrorFromEvent(event,),
+      errorStep : () => 'authorizing',
+    },),
     assignErrorCheckingFailed : assign({
       error : ({ event }) => {
         const ev = event as { error?: unknown }
@@ -178,9 +184,24 @@ export const publishMachine = setup({
 
 },).createMachine({
   id      : 'publish',
-  initial : 'checking',
+  initial : 'authorizing',
   context : ( { input, }, ) => input as PublishMachineContext,
   states  : {
+    // Before checking: checking can already send transactions (EAS schema registration).
+    authorizing : {
+      invoke : {
+        src     : 'authorizing',
+        input   : ( { context } ) => ({ context } as { context: PublishMachineContext }),
+        onDone  : {
+          target  : 'checking',
+          actions : assign({ publishAuthorization : ( { event } ) => event.output }),
+        },
+        onError : {
+          target  : FAILURE,
+          actions : ['assignErrorAuthorizing', 'handleError'],
+        },
+      },
+    },
     checking : {
       on: {
         notOwner: {
