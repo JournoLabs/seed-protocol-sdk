@@ -14,6 +14,7 @@ import { createMetadata } from '@/db/write/createMetadata'
 import { updateItemPropertyValue } from '@/db/write/updateItemPropertyValue'
 import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
+import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
 
 let fileSchemaUid: string | undefined
 
@@ -145,6 +146,8 @@ export const saveFile = fromCallback<
 
     if (!fileName) {
       fileName = newFileSeedLocalId
+    } else if (!isExistingFileReference) {
+      fileName = storageFileNameForNewSeed(newFileSeedLocalId, fileName)
     }
 
     const filePath = BaseFileManager.getFilesPath('files', fileName)
