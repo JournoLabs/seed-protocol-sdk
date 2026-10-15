@@ -50,7 +50,7 @@ describe('combinePublishCostEstimate', () => {
     expect(estimate.arweave.bytes).toBe(1_000_000)
     expect(estimate.arweave.uploadCount).toBe(1)
     expect(estimate.arweave.path).toBe('l1')
-    expect(estimate.arweave.userPays).toBe(true)
+    expect(estimate.arweave.userPays).toBe(false)
     expect(estimate.evm.userPays).toBe(true)
     expect(estimate.totalUsd).toBe(estimate.evm.usd + estimate.arweave.usd)
     expect(estimate.arweave.usd).toBe(0.01)
