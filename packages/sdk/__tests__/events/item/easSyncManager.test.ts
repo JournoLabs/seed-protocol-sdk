@@ -68,7 +68,7 @@ describe('easSyncMachine', () => {
   })
 
   it('runs a failed automatic sync again later (offline at startup)', async () => {
-    setRetriesWhenOnlineEnabled(true)
+    const previousRetrySetting = setRetriesWhenOnlineEnabled(true)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       runSpy.mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -86,7 +86,7 @@ describe('easSyncMachine', () => {
       expect(runSpy).toHaveBeenLastCalledWith(undefined)
     } finally {
       cancelAllRetriesWhenOnline()
-      setRetriesWhenOnlineEnabled(undefined)
+      setRetriesWhenOnlineEnabled(previousRetrySetting)
       vi.useRealTimers()
     }
   })

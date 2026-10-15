@@ -7,8 +7,9 @@
  * with an unreachable indexer). Only one retry per task is pending at a time. Timers don't keep a
  * Node process alive. `client.stop()` cancels every pending retry.
  *
- * Off under `NODE_ENV=test`, where a late retry would sync in the middle of another test; tests that
- * exercise retries pass `enabled` or call {@link setRetriesWhenOnlineEnabled}.
+ * Off under `NODE_ENV=test`, where a late retry would sync in the middle of another test (browser
+ * test setups, which have no NODE_ENV, turn them off with {@link setRetriesWhenOnlineEnabled}).
+ * Tests that exercise retries pass `enabled` or call setRetriesWhenOnlineEnabled(true).
  */
 const DEFAULT_DELAYS_MS = [15_000, 30_000, 60_000, 120_000, 300_000]
 
@@ -28,9 +29,14 @@ const isTestEnv = (): boolean =>
 
 let enabledOverride: boolean | undefined
 
-/** Turns retries without an explicit `enabled` on or off; `undefined` restores the default. */
-export function setRetriesWhenOnlineEnabled(enabled: boolean | undefined): void {
+/**
+ * Turns retries without an explicit `enabled` on or off; `undefined` restores the default.
+ * Returns the previous setting, so a test can put it back.
+ */
+export function setRetriesWhenOnlineEnabled(enabled: boolean | undefined): boolean | undefined {
+  const previous = enabledOverride
   enabledOverride = enabled
+  return previous
 }
 
 const isOffline = (): boolean =>

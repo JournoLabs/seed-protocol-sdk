@@ -54,7 +54,7 @@ describe('retryWhenOnline', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
-  it('cancelAllRetriesWhenOnline cancels pending retries, and tests are off by default', () => {
+  it('cancelAllRetriesWhenOnline cancels pending retries, and test runs have retries off', () => {
     vi.useFakeTimers()
     const run = vi.fn()
     const retry = createRetryWhenOnline(run, { delaysMs: [100], enabled: true })
@@ -63,6 +63,7 @@ describe('retryWhenOnline', () => {
     vi.advanceTimersByTime(1000)
     expect(run).not.toHaveBeenCalled()
 
+    // NODE_ENV=test in Node; setup.browser.ts in the browser.
     const offInTests = createRetryWhenOnline(run, { delaysMs: [100] })
     offInTests.schedule()
     expect(offInTests.pending).toBe(false)

@@ -1,5 +1,10 @@
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { cleanup, configure } from '@testing-library/react'
+import { setRetriesWhenOnlineEnabled } from '@seedprotocol/sdk'
+
+// NODE_ENV isn't 'test' in the browser: turn off the SDK's offline retries, as Node tests have them
+// off, so a late retry can't sync in the middle of another test.
+setRetriesWhenOnlineEnabled(false)
 
 // findBy*/waitFor give up after 1s by default. Under CI load, a component's first OPFS scan or
 // query can take longer than that, and the test fails while the UI is still loading.
