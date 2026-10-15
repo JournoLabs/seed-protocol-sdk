@@ -951,7 +951,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
 
       addRendererCompatibilityAliases(aliasEntries)
-      addNodePolyfillShimAliases(aliasEntries, polyfillShimPaths)
+      // Node polyfill shim aliases come from seed-protocol:polyfill-resolve, ahead of all others.
 
       // Vite merges a returned alias list *before* the existing one, so returning ours
       // would let it shadow the user's. Append to the config in place instead (Vite's
@@ -1084,16 +1084,18 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     config(userConfig) {
       if (Object.keys(polyfillShimAliasObj).length === 0) return
 
-      const existingResolve = userConfig.resolve ?? {}
-      const mergedAlias = withPreferredPolyfillAliases(
-        normalizeAliasEntries(existingResolve.alias),
-        polyfillShimPaths,
-      )
+      // Rewrite resolve.alias in place rather than returning it: this drops entries
+      // (a returned list can only add), and Vite would concatenate a returned copy
+      // onto the existing list, duplicating every alias.
+      userConfig.resolve = {
+        ...userConfig.resolve,
+        alias: withPreferredPolyfillAliases(
+          normalizeAliasEntries(userConfig.resolve?.alias),
+          polyfillShimPaths,
+        ),
+      }
 
       return {
-        resolve: {
-          alias: mergedAlias,
-        },
         optimizeDeps: {
           rolldownOptions: optimizeDepsRolldownPatch(undefined, {
             // Later merges overwrite vite-plugin-node-polyfills' serve-time

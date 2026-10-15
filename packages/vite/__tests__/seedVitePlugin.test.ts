@@ -383,6 +383,87 @@ describe('seedVitePlugin renderer hardening', () => {
   })
 })
 
+describe('seedVitePlugin resolved resolve.alias / dedupe', () => {
+  type ResolvedAlias = { find: string | RegExp; replacement: string }
+  const findKey = (find: string | RegExp) => (typeof find === 'string' ? find : find.toString())
+
+  async function resolveResolve(
+    resolve: Record<string, unknown>,
+    includeNodePolyfills: boolean,
+  ) {
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: seedVitePlugin({ includeNodePolyfills }),
+        resolve,
+      },
+      'serve',
+    )
+    return config.resolve as unknown as { alias: ResolvedAlias[]; dedupe: string[] }
+  }
+
+  const userAliasArray = () => [
+    { find: 'arweave', replacement: '/user/arweave.js' },
+    { find: /^debug$/, replacement: '/user/debug.js' },
+    { find: 'user-lib', replacement: '/user/lib.js' },
+  ]
+  const userAliasObject = () => ({
+    arweave: '/user/arweave.js',
+    'user-lib': '/user/lib.js',
+  })
+
+  for (const includeNodePolyfills of [false, true]) {
+    for (const [form, makeAlias] of [
+      ['array', userAliasArray],
+      ['object', userAliasObject],
+    ] as const) {
+      it(`keeps ${form}-form user aliases once and ahead of the plugin's (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
+        const { alias } = await resolveResolve({ alias: makeAlias() }, includeNodePolyfills)
+
+        const keys = alias.map((entry) => findKey(entry.find))
+        const duplicates = keys.filter((key, i) => keys.indexOf(key) !== i)
+        expect(duplicates).toEqual([])
+
+        const userIndex = (replacement: string) =>
+          alias.findIndex((entry) => entry.replacement === replacement)
+        const pluginArweave = keys.indexOf('/^arweave$/')
+        expect(pluginArweave).toBeGreaterThan(-1)
+        expect(userIndex('/user/arweave.js')).toBeGreaterThan(-1)
+        expect(userIndex('/user/arweave.js')).toBeLessThan(pluginArweave)
+        expect(userIndex('/user/lib.js')).toBeGreaterThan(-1)
+
+        // Node polyfill shims match first, and the polyfills plugin's bare string
+        // aliases (which would also catch subpaths such as `buffer/`) are dropped.
+        const shimBuffer = keys.indexOf('/^buffer$/')
+        expect(shimBuffer).toBeGreaterThan(-1)
+        expect(shimBuffer).toBeLessThan(userIndex('/user/arweave.js'))
+        for (const bare of ['buffer', 'node:buffer', 'process', 'node:process', 'global']) {
+          expect(keys).not.toContain(bare)
+        }
+
+        if (form === 'array') {
+          // Same find as the plugin's debug shim: the user's entry replaces it.
+          const debugEntries = alias.filter((entry) => findKey(entry.find) === '/^debug$/')
+          expect(debugEntries.map((entry) => entry.replacement)).toEqual(['/user/debug.js'])
+        }
+      })
+    }
+
+    it(`keeps user dedupe entries once (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
+      const { dedupe } = await resolveResolve(
+        { dedupe: ['user-dep', 'react'] },
+        includeNodePolyfills,
+      )
+      expect(dedupe.filter((dep) => dep === 'user-dep')).toHaveLength(1)
+      expect(dedupe.filter((dep) => dep === 'react')).toHaveLength(1)
+      expect(dedupe).toContain('@seedprotocol/sdk')
+      expect(new Set(dedupe).size).toBe(dedupe.length)
+    })
+  }
+})
+
 describe('seedVitePlugin resolved optimizer config (node polyfills on)', () => {
   async function resolveServeConfig(userConfig: Record<string, unknown> = {}) {
     return resolveConfig(
