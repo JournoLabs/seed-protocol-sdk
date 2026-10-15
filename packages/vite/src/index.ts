@@ -284,6 +284,40 @@ const APP_OPTIONAL_OPTIMIZE_INCLUDES = [
   'isows',
 ] as const
 
+/**
+ * Seed packages whose module-level state (registered EAS / query / Arweave clients, EAS chain,
+ * Arweave gateway) must be one copy per page. With the SDK excluded from prebundling, Vite can
+ * find these one at a time; a package prebundled in a later optimizer pass can load as its own
+ * module instance, and query then throws DuplicateEasModuleError. Prebundling them together in
+ * the first pass, and deduping the ones the app resolves, keeps one copy.
+ */
+const SEED_SHARED_STATE_PACKAGES = [
+  '@seedprotocol/eas',
+  '@seedprotocol/arweave',
+  '@seedprotocol/query',
+] as const
+
+/**
+ * `include` entries: the bare name when the app resolves the package itself, else the nested
+ * form through the SDK (bun installs it under @seedprotocol/sdk). `dedupe` only gets packages
+ * the app root resolves: Vite resolves deduped packages from the root, so a nested-only one
+ * would fail to resolve.
+ */
+function seedSharedStateDeps(appRoot: string): { include: string[]; dedupe: string[] } {
+  const include: string[] = []
+  const dedupe: string[] = []
+  const sdkAtRoot = isResolvableFromRoot('@seedprotocol/sdk', appRoot)
+  for (const pkg of SEED_SHARED_STATE_PACKAGES) {
+    if (isResolvableFromRoot(pkg, appRoot)) {
+      include.push(pkg)
+      dedupe.push(pkg)
+    } else if (sdkAtRoot) {
+      include.push(`@seedprotocol/sdk > ${pkg}`)
+    }
+  }
+  return { include, dedupe }
+}
+
 /** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
 
@@ -936,6 +970,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         ...APP_OPTIONAL_OPTIMIZE_INCLUDES.filter((dep) => isResolvableFromRoot(dep, appRoot)),
       ]
 
+      const sharedStateDeps = seedSharedStateDeps(appRoot)
+
       const existingOptimize = userConfig.optimizeDeps
       const debugOptimizeAliases = debugShimOptimizeAliasObject()
       const streamOptimizeAliases = streamShimOptimizeAliasObject()
@@ -952,6 +988,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         ],
         include: [
           ...resolvableOptimizeIncludes,
+          ...sharedStateDeps.include,
           ...EAS_OPTIMIZE_INCLUDES,
           ...CJS_OPTIMIZE_INCLUDES,
         ],
@@ -991,6 +1028,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // Also dedupe XState and Seed packages: two xstate copies cause Object.assign _version errors;
           // two @seedprotocol/sdk copies leave BaseDb facade / Db.appDb on different module instances
           // ("App DB not found", undefined.$with on PostsPage).
+          // Two eas / arweave / query copies split registered clients and chain (see SEED_SHARED_STATE_PACKAGES).
           // Two @zenfs copies leave configureSingle / WebAccess on different module instances
           // and can remount OPFS against a stale handle.
           dedupe: Array.from(
@@ -1005,6 +1043,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
               '@seedprotocol/react',
               '@seedprotocol/publish',
               '@seedprotocol/feed',
+              ...sharedStateDeps.dedupe,
               '@zenfs/core',
               '@zenfs/dom',
             ])

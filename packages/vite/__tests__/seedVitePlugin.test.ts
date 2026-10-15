@@ -147,6 +147,50 @@ describe('seedVitePlugin renderer hardening', () => {
     }
   })
 
+  it('prebundles eas / arweave / query together and dedupes the ones the app resolves', () => {
+    const shared = ['@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/query']
+    const writePkg = (dir: string, name: string) => {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }))
+    }
+    const roots: string[] = []
+    const mkRoot = () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
+      roots.push(root)
+      return root
+    }
+    try {
+      const configPlugin = getConfigPlugin()
+
+      // Hoisted (npm): the app resolves each package.
+      const hoisted = mkRoot()
+      writePkg(path.join(hoisted, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+      for (const pkg of shared) writePkg(path.join(hoisted, 'node_modules', pkg), pkg)
+      const h = callConfig(configPlugin, { root: hoisted })
+      for (const pkg of shared) {
+        expect(h.optimizeDeps.include).toContain(pkg)
+        expect(h.resolve.dedupe).toContain(pkg)
+      }
+
+      // Nested under the SDK only (bun): prebundle through the SDK, never dedupe from the root.
+      const nested = mkRoot()
+      writePkg(path.join(nested, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+      const n = callConfig(configPlugin, { root: nested })
+      for (const pkg of shared) {
+        expect(n.optimizeDeps.include).toContain(`@seedprotocol/sdk > ${pkg}`)
+        expect(n.resolve.dedupe).not.toContain(pkg)
+      }
+
+      // No SDK and no packages: nothing added.
+      const bare = callConfig(configPlugin, { root: mkRoot() })
+      for (const pkg of shared) {
+        expect(bare.optimizeDeps.include.some((dep: string) => dep.endsWith(pkg))).toBe(false)
+      }
+    } finally {
+      for (const root of roots) fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('returns only its own optimizeDeps additions (Vite concatenates arrays)', () => {
     const configPlugin = getConfigPlugin()
     const result = callConfig(configPlugin, {

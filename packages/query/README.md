@@ -156,6 +156,7 @@ Init only fills in what is missing. EAS and Arweave clients that are already reg
 - **EAS:** registers the default fetch-based EAS and query clients (`ensureEasPlatform()` from `@seedprotocol/eas`) when none are registered.
 - **Arweave:** with no Arweave client registered, the Node entry registers the Node client. The browser entry only sets the read gateway, because query only needs the host. It never loads `@seedprotocol/eas/node` or `@seedprotocol/arweave/node`.
 - **`arweaveDomain`:** when passed, it always sets the gateway host.
+- **One copy of each package:** if the clients were registered on another copy of `@seedprotocol/eas` or `@seedprotocol/arweave`, for example a second install or a separate Vite pre-bundle, every query call throws `DuplicateEasModuleError` or `DuplicateArweaveModuleError`. It doesn't quietly use other clients and another chain. To fix it, install every `@seedprotocol/*` package at the same version and only once (`npm ls @seedprotocol/eas`). With Vite, `seedVitePlugin` pre-bundles eas, arweave and query together.
 
 `source: 'remote'` (the default) always reads EAS, even when a local source is registered.
 

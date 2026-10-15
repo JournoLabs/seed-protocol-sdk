@@ -1,9 +1,10 @@
 import {
+  assertSingleArweaveModule,
   BaseArweaveClient,
   DEFAULT_ARWEAVE_HOST,
   resolveArweaveHostFromEnv,
 } from '@seedprotocol/arweave'
-import { ensureEasPlatform } from '@seedprotocol/eas'
+import { assertSingleEasModule, ensureEasPlatform } from '@seedprotocol/eas'
 
 let initialized = false
 
@@ -40,10 +41,16 @@ function resolveQueryArweaveDomain(explicit?: string): string {
  * Make sure EAS and Arweave are usable for remote query. Clients already registered (by the SDK
  * or a host app) are used as they are, so query can run in a page or process where SeedClient is
  * running without replacing its clients or its Arweave gateway. Only missing pieces get defaults.
+ *
+ * Throws DuplicateEasModuleError / DuplicateArweaveModuleError when the clients were registered
+ * on another copy of those packages. Checked on every call, since the SDK may register after
+ * query's first call.
  */
 export async function initializeQueryPlatform(
   options?: InitializeQueryPlatformOptions,
 ): Promise<void> {
+  assertSingleEasModule()
+  assertSingleArweaveModule()
   if (initialized) return
   ensureEasPlatform()
   if (!BaseArweaveClient.isConfigured()) {

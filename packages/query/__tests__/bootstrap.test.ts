@@ -2,10 +2,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ARWEAVE_HOST_ENV_KEYS } from '@seedprotocol/arweave'
 
 // Each test loads fresh copies of query, eas and arweave, so the Base*Client statics start empty.
-async function load(entry: 'browser' | 'node') {
+// Copies from earlier tests stay registered in the shared "which copy owns the clients" marker,
+// so it is cleared too (`keepOwner` keeps it, to load a second copy beside a running one).
+async function load(entry: 'browser' | 'node', { keepOwner = false } = {}) {
   vi.resetModules()
   const eas = await import('@seedprotocol/eas')
   const arweave = await import('@seedprotocol/arweave')
+  if (!keepOwner) {
+    eas.resetEasClientOwnerForTests()
+    arweave.resetArweaveClientOwnerForTests()
+  }
   const query = entry === 'node' ? await import('../src/index.node') : await import('../src/index')
   return { eas, arweave, query }
 }
@@ -68,5 +74,49 @@ describe('Arweave client when none is registered', () => {
     const { arweave, query } = await load('node')
     await query.initializeQueryPlatform()
     expect(arweave.BaseArweaveClient.isConfigured()).toBe(true)
+  })
+})
+
+describe('a second copy of eas / arweave', () => {
+  it('throws when the SDK registered its clients on another copy of eas', async () => {
+    const sdkCopy = await load('browser')
+    registerHostClients(sdkCopy)
+    const queryCopy = await load('browser', { keepOwner: true })
+
+    await expect(queryCopy.query.initializeQueryPlatform()).rejects.toThrow(
+      /Two copies of @seedprotocol\/eas/,
+    )
+  })
+
+  it('throws on the next call when the SDK registers on another copy after query started', async () => {
+    const queryCopy = await load('browser')
+    await queryCopy.query.initializeQueryPlatform()
+    const sdkCopy = await load('browser', { keepOwner: true })
+    registerHostClients(sdkCopy)
+
+    await expect(queryCopy.query.initializeQueryPlatform()).rejects.toThrow(
+      /Two copies of @seedprotocol\/eas/,
+    )
+  })
+
+  it('throws when only arweave is duplicated', async () => {
+    const queryCopy = await load('node')
+    const { arweave: otherArweave } = await load('node', { keepOwner: true })
+    // Same eas copy as query; the Arweave client lands on the other arweave copy.
+    queryCopy.eas.ensureEasPlatform()
+    otherArweave.BaseArweaveClient.configure({} as never)
+
+    await expect(queryCopy.query.initializeQueryPlatform()).rejects.toThrow(
+      /Two copies of @seedprotocol\/arweave/,
+    )
+  })
+
+  it('does not throw when the SDK and query share one copy', async () => {
+    const loaded = await load('browser')
+    registerHostClients(loaded)
+    await loaded.query.initializeQueryPlatform()
+    // Re-registering on the same copy (e.g. SeedClient restart) is fine.
+    registerHostClients(loaded)
+    await expect(loaded.query.initializeQueryPlatform()).resolves.toBeUndefined()
   })
 })

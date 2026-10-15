@@ -1,5 +1,6 @@
 import type { IQueryClient } from './IQueryClient.js'
 import type { IQueryClientFactory } from './IQueryClientFactory.js'
+import { markEasClientOwner } from '../moduleOwner.js'
 
 export abstract class BaseQueryClient {
   private static _impl: IQueryClientFactory | null = null
@@ -11,6 +12,7 @@ export abstract class BaseQueryClient {
       )
     }
     BaseQueryClient._impl = impl
+    markEasClientOwner()
   }
 
   /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */

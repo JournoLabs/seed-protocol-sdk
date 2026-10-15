@@ -10,6 +10,7 @@ import type {
 import { DEFAULT_ARWEAVE_HOST, resolveArweaveHostFromEnv } from '../constants.js'
 import type { IArweaveClient } from './IArweaveClient.js'
 import { hasArweaveContentReadTransform, transformArweaveContent } from '../content/arweaveContent.js'
+import { markArweaveClientOwner } from '../moduleOwner.js'
 
 function parseGateway(input: string): { protocol: 'http' | 'https'; host: string } {
   const t = input.trim()
@@ -39,6 +40,7 @@ export abstract class BaseArweaveClient {
       )
     }
     BaseArweaveClient._impl = impl
+    markArweaveClientOwner()
   }
 
   /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */
