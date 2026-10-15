@@ -66,6 +66,11 @@ export const getItemPropertiesFromEas = async ({
   return itemProperties
 }
 
+/**
+ * Canonical properties of the given versions. It doesn't check attesters: filter `getItemPropertiesFromEas`
+ * results with `keepAttestationsFromRefAttester(properties, versions)` first when the versions may
+ * not all be trusted (see easRefAttester.ts).
+ */
 export const getCanonicalItemPropertiesFromEas = async (props: {
   versionUids: string[]
   excludeRevoked?: boolean
