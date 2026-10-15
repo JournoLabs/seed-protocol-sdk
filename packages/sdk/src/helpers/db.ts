@@ -11,7 +11,8 @@ import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
+import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
 import { and, eq, isNull, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
@@ -196,7 +197,7 @@ export async function migrateMetadataForPropertyRename(
   }
 
   // Fallback: update metadata with null propertyId (legacy rows) by propertyName + modelType
-  const modelType = toSnakeCase(modelName)
+  const modelType = easName(modelName)
   const toUpdateByFallback = await db
     .select({ localId: metadata.localId })
     .from(metadata)
@@ -234,6 +235,59 @@ export async function migrateMetadataForPropertyRename(
     )
   }
   return total
+}
+
+/**
+ * Moves a renamed property's metadata rows to its new name: rows linked by propertyId, and legacy
+ * rows without one by name and model type. Each stored form of the name moves to the same form of
+ * the new one: the key (`author` → `writer`), a single relation's `<key>Id` (`authorId` →
+ * `writerId`), a list relation's storage name (`authorIdentityIds` → `writerIdentityIds`).
+ * Returns the number of rows moved.
+ */
+export async function moveMetadataToRenamedProperty(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  {
+    propertyId,
+    modelType,
+    oldName,
+    newName,
+    propertyDef,
+  }: {
+    propertyId: number
+    modelType: string
+    oldName: string
+    newName: string
+    propertyDef?: { dataType?: string; refValueType?: string; ref?: string; refModelName?: string }
+  },
+): Promise<number> {
+  const forms = (name: string) => [
+    name,
+    toMetadataPropertyName(name, propertyDef?.dataType, propertyDef?.refValueType),
+    listRelationEasPropertyName(name, propertyDef) ?? name,
+  ]
+  const oldForms = forms(oldName)
+  const newForms = forms(newName)
+  let moved = 0
+  const seen = new Set<string>()
+  for (let i = 0; i < oldForms.length; i++) {
+    const from = oldForms[i]!
+    const to = newForms[i]!
+    if (from === to || seen.has(from)) continue
+    seen.add(from)
+    const byId = await db
+      .update(metadata)
+      .set({ propertyName: to })
+      .where(and(eq(metadata.propertyId, propertyId), eq(metadata.propertyName, from)))
+      .returning({ localId: metadata.localId })
+    const legacy = await db
+      .update(metadata)
+      .set({ propertyName: to })
+      .where(and(isNull(metadata.propertyId), eq(metadata.propertyName, from), eq(metadata.modelType, modelType)))
+      .returning({ localId: metadata.localId })
+    moved += byId.length + legacy.length
+  }
+  if (moved > 0) logger(`[moveMetadataToRenamedProperty] moved ${moved} metadata rows ${oldName} -> ${newName}`)
+  return moved
 }
 
 export const getObjectForRow = (row: any): ResultObject => {
@@ -1315,32 +1369,8 @@ export const addModelsToDb = async (
         propertyData.refValueType = null
       }
 
-      // If not found by name, try to find by position/characteristics (for renamed properties)
-      if (!existingProperty) {
-        // Look for unmatched DB properties that could be this renamed property
-        // Match by: same dataType, same refModelId (if applicable), and not matching any schema property name
-        const potentialMatches = allDbProperties.filter((p: PropertyType) => 
-          !matchedDbPropertyIds.has(p.id!) &&
-          !schemaPropertyNames.has(p.name) && // This DB property doesn't match any schema property name
-          p.dataType === propertyValues.dataType &&
-          (expectedRefModelId === null 
-            ? p.refModelId === null 
-            : p.refModelId === expectedRefModelId) &&
-          (propertyValues.refValueType 
-            ? p.refValueType === propertyValues.refValueType 
-            : p.refValueType === null)
-        )
-        
-        // If we find exactly one match, or if we're at the same position index, use it
-        // For now, use the first match (could be enhanced to use position more precisely)
-        if (potentialMatches.length > 0) {
-          const matchedProperty = potentialMatches[0]
-          existingProperty = matchedProperty
-          logger(
-            `Found renamed property: ${modelName}:${matchedProperty.name} -> ${propertyName} (matched by characteristics)`,
-          )
-        }
-      }
+      // ADR 0008: a rename needs the property's id. A name that matches no stored property by id
+      // or name is a new property, even if one of the same type was removed in the same edit.
 
       if (existingProperty) {
         // Mark this DB property as matched
@@ -1407,6 +1437,16 @@ export const addModelsToDb = async (
             .where(eq(properties.id, existingProperty.id!))
           const updatedFileId = updateData.schemaFileId ?? existingProperty.schemaFileId
           if (updatedFileId) updatedPropertyFileIds.push(updatedFileId)
+        }
+        if (existingProperty.name !== propertyName) {
+          // Renamed (matched by id): its values move to the new name.
+          await moveMetadataToRenamedProperty(db, {
+            propertyId: existingProperty.id!,
+            modelType: easName(modelName),
+            oldName: existingProperty.name,
+            newName: propertyName,
+            propertyDef: propertyValues,
+          })
         }
       } else {
         // Property doesn't exist, create it with schemaFileId
