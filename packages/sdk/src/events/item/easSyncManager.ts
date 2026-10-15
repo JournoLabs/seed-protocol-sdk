@@ -8,6 +8,7 @@ import {
 import { mergeEasSyncRequestIntents } from '@/events/item/mergeEasSyncOptions'
 import type { SyncFromEasOptions } from '@/events/item/syncDbWithEas'
 import debug from 'debug'
+import { createRetryWhenOnline } from '@/helpers/retryWhenOnline'
 import {
   isLeaderTab,
   onTabMessage,
@@ -96,6 +97,25 @@ const runEasSync = fromPromise(
   },
 )
 
+/**
+ * Automatic syncs that failed (probably offline), merged and run again once the device is back
+ * online. A failed `client_api` sync isn't retried: its caller gets the error.
+ */
+let failedSyncOptions: SyncFromEasOptions[] = []
+const syncRetry = createRetryWhenOnline(() => {
+  const options = mergeEasSyncRequestIntents(failedSyncOptions)
+  failedSyncOptions = []
+  runInLeaderTab('retry', () => {
+    startEasSyncActor()
+    easSyncActor.send({
+      type: 'REQUEST',
+      correlationId: newCorrelationId(),
+      options,
+      source: 'retry',
+    })
+  })
+})
+
 const initialContext: EasSyncMachineContext = {
   runOptions: {},
   activeCorrelationIds: [],
@@ -173,19 +193,28 @@ export const easSyncMachine = setup({
         }),
         onDone: {
           target: 'afterRun',
-          actions: assign({
-            lastFinishedCorrelationIds: ({ context }) => [
-              ...context.activeCorrelationIds,
-            ],
-            lastFinishedStatus: () => 'success',
-            lastFinishedError: () => null,
-            activeCorrelationIds: () => [],
-            runOptions: () => ({}),
-          }),
+          actions: [
+            () => syncRetry.succeeded(),
+            assign({
+              lastFinishedCorrelationIds: ({ context }) => [
+                ...context.activeCorrelationIds,
+              ],
+              lastFinishedStatus: () => 'success',
+              lastFinishedError: () => null,
+              activeCorrelationIds: () => [],
+              runOptions: () => ({}),
+            }),
+          ],
         },
         onError: {
           target: 'afterRun',
           actions: [
+            // Before the assign below clears runOptions.
+            ({ context }) => {
+              if (context.activePrimarySource === 'client_api') return
+              failedSyncOptions.push(context.runOptions)
+              syncRetry.schedule()
+            },
             assign({
               lastFinishedCorrelationIds: ({ context }) => [
                 ...context.activeCorrelationIds,

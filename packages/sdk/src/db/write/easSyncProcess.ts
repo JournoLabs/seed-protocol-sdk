@@ -13,7 +13,13 @@ function enqueueEasSyncDbWrite<T>(fn: () => Promise<T>): Promise<T> {
 const MAX_ERROR_MESSAGE_LENGTH = 500
 const MAX_ERROR_DETAILS_LENGTH = 2000
 
-export type EasSyncRequestSource = 'event_bus' | 'address_change' | 'client_api' | 'models_init'
+/** `retry`: an automatic sync that failed (probably offline), run again (see retryWhenOnline). */
+export type EasSyncRequestSource =
+  | 'event_bus'
+  | 'address_change'
+  | 'client_api'
+  | 'models_init'
+  | 'retry'
 
 export async function insertEasSyncProcessRow(params: {
   requestPayload: Record<string, unknown>
