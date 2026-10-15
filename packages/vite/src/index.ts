@@ -11,18 +11,19 @@ const _req = createRequire(import.meta.url)
 
 export interface SeedVitePluginOptions {
   /**
-   * Additional modules to alias to ZenFS equivalents.
+   * Modules to alias to ZenFS (`@zenfs/core`, or `@zenfs/core/promises` for ids
+   * containing "promises"). The list replaces the default; to add a module, pass
+   * the defaults plus yours.
    * @default ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']
    */
   fsModules?: string[]
 
   /**
-   * Whether to inject automatic ZenFS initialization script into index.html.
-   * When true, injects a &lt;script type="module"&gt; that imports from '@zenfs/core'/'@zenfs/dom'.
-   * Browsers cannot resolve those bare specifiers, so the script fails at runtime unless you use
-   * an import map or load ZenFS another way. Prefer false and initialize ZenFS in your entry:
-   * import { configure } from '@zenfs/core'; import { IndexedDB } from '@zenfs/dom';
-   * await configure({ mounts: { '/': IndexedDB } });
+   * Whether to inject a ZenFS initialization script into index.html that mounts
+   * IndexedDB at `/`. Leave this false with the SDK: `client.init()` mounts OPFS
+   * at `/` itself, so apps do not configure ZenFS, and this mount would only be
+   * replaced. The script also imports the bare specifiers '@zenfs/core' and
+   * '@zenfs/dom', which browsers cannot resolve without an import map.
    * @default false
    */
   autoInit?: boolean
@@ -816,7 +817,6 @@ function optimizeDepsRolldownPatch(
  * - Aliases path → path-browserify
  * - Ensures CommonJS in SDK dist is transformed by Vite's CommonJS plugin
  * - Allowlists linked SDK / sqlocal worker paths on server.fs.allow for Vite dev
- * - Optionally injects a simple ZenFS initialization script
  * - Optionally wires up vite-plugin-node-polyfills with safe defaults
  *
  * This plugin assumes the SDK does not bundle Node-only code in the browser entry.
@@ -825,9 +825,7 @@ function optimizeDepsRolldownPatch(
  *
  * For the renderer build:
  * - Use the SDK's ESM entry: import from '@seedprotocol/sdk' (resolves to dist/main.js).
- * - When autoInit is false (default), initialize ZenFS in your entry:
- *   import { configure } from '@zenfs/core'; import { IndexedDB } from '@zenfs/dom';
- *   await configure({ mounts: { '/': IndexedDB } });
+ * - Do not configure ZenFS yourself: `client.init()` mounts OPFS at `/`.
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const {
