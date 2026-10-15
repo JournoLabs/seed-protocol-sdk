@@ -4,7 +4,7 @@ Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. Item assembl
 
 ## P2P distribution
 
-HTTP hosting is optional. To publish the same generated feeds onto Hyperdrive / Hyperswarm (and serve them to classic RSS readers over localhost), use **`@seedprotocol/feed-hyper`** and the `seed feed` CLI. See [packages/feed-hyper/README.md](../feed-hyper/README.md) and [docs/FEED_HYPER.md](../../docs/FEED_HYPER.md).
+HTTP hosting is optional. To publish the same generated feeds onto Hyperdrive / Hyperswarm (and serve them to classic RSS readers over localhost), use **`@seedprotocol/feed-hyper`** and its `seed-feed` CLI. See [packages/feed-hyper/README.md](../feed-hyper/README.md) and [docs/FEED_HYPER.md](../../docs/FEED_HYPER.md).
 
 Channel self-links use `feedUrl` from site config (`setSiteConfig` / `createFeed` overrides). Home/channel links use `siteUrl`.
 
@@ -66,19 +66,3 @@ EAS_CHAIN_ID=8453
 # FEED_ITEM_URL_BASE=https://base.easscan.org
 FEED_ITEM_URL_PATH=attestation/view
 ```
-
----
-
-To install dependencies:
-
-```bash
-bun install
-```
-
-To run:
-
-```bash
-bun run index.ts
-```
-
-This project was created using `bun init` in bun v1.3.5. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

@@ -82,11 +82,14 @@ jobs:
       - run: bun run lint
 
       # Workspace packages resolve to their dist: the root vite.config.js imports @seedprotocol/vite,
-      # and the SDK type check (first step of `bun run test`) imports eas, arweave and query.
-      # Package builds only, not build:* (those run the tests first).
+      # the SDK type check (first step of `bun run test`) imports eas, arweave and query, the
+      # publish bun:test files import sdk and react, and feed-hyper's tests import feed. Package builds only, not build:* (those run the
+      # tests first); SKIP_TESTS stops sdk's and react's build scripts doing the same.
       - name: Build workspace packages the tests import
+        env:
+          SKIP_TESTS: '1'
         run: |
-          for pkg in eas arweave query vite; do
+          for pkg in eas arweave feed query vite sdk react; do
             (cd "packages/$pkg" && bun run build)
           done
 

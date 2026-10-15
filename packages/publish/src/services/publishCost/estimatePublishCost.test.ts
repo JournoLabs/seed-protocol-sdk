@@ -64,14 +64,56 @@ describe('estimatePublishCost', () => {
     expect(estimate.prices.ethUsd).toBe(2000)
   })
 
-  test('paymaster sets evm.userPays false', async () => {
+  test('EIP-7702 bundler with a paymaster sets evm.userPays false', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      bundlerUrl: 'https://bundler.example',
+      paymasterUrl: 'https://paymaster.example',
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(false)
+  })
+
+  test('EIP-7702 bundler without a paymaster: the user pays gas', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      bundlerUrl: 'https://bundler.example',
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(true)
+  })
+
+  test('paymasterUrl alone does not sponsor a plain EOA publish', async () => {
     initPublish({
       uploadApiBaseUrl: 'https://example.test',
       paymasterUrl: 'https://paymaster.example',
       getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(true)
+  })
+
+  test('modular executor is sponsored by default (thirdweb.sponsorGas)', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      useModularExecutor: true,
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
     expect(estimate.evm.userPays).toBe(false)
+  })
+
+  test('modular executor with sponsorGas false: the user pays gas', async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      useModularExecutor: true,
+      thirdweb: { sponsorGas: false },
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(true)
   })
 
   test('bundler path is reported when configured', async () => {

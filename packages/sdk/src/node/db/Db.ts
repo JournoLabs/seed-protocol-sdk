@@ -104,8 +104,8 @@ export class NodeDb implements IDb {
   /**
    * Copy prebuilt SQL migrations into the app db directory (overwrite to stay current).
    */
-  copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string): string {
-    const { outDir } = resolveDbPaths(filesDir)
+  copyDrizzleFiles(filesDir: string, migrationsSourceDir?: string, config?: DbConfig): string {
+    const { outDir } = resolveDbPaths(filesDir, config)
     const source = migrationsSourceDir || resolveSdkDrizzleMigrationsDir()
     logger('[Db.copyDrizzleFiles] copying from %s to %s', source, outDir)
     copyDirRecursive(source, outDir)
@@ -126,7 +126,7 @@ export class NodeDb implements IDb {
     }
 
     // Install SDK migration SQL next to the DB (same source of truth as browser)
-    this.copyDrizzleFiles(resolvedFilesDir)
+    this.copyDrizzleFiles(resolvedFilesDir, undefined, config)
 
     const dbUrl = config?.dbUrl
       ? (config.dbUrl.startsWith('file:') ? config.dbUrl : `file:${path.resolve(config.dbUrl)}`)

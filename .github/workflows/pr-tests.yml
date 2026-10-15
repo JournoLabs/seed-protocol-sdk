@@ -32,8 +32,10 @@ jobs:
 
       # Same as release.yml: the tests import these workspace packages from their dist
       - name: Build workspace packages the tests import
+        env:
+          SKIP_TESTS: '1'
         run: |
-          for pkg in eas arweave query vite; do
+          for pkg in eas arweave feed query vite sdk react; do
             (cd "packages/$pkg" && bun run build)
           done
 
