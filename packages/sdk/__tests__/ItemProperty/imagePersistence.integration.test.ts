@@ -360,4 +360,32 @@ testDescribe('Image property persistence integration tests', () => {
     await waitForItemPropertyIdle(reloadedProp)
     expect(reloadedProp.value).toBeTruthy()
   })
+
+  it('keeps two uploads with the same file name apart', async () => {
+    const model = Model.create('Post', schemaName, { waitForReady: false })
+    await waitFor(model.getService(), (s) => s.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
+
+    const upload = async (title: string, bytes: number[]) => {
+      const item = await Item.create({ modelName: 'Post', schemaName, title })
+      await waitForItemIdle(item)
+      const property = item.properties.find(
+        (p) => p.propertyName === 'featureImage' || p.propertyName === 'featureImageId'
+      ) as ItemProperty<any>
+      property.value = new File([new Uint8Array(bytes)], 'photo.png', { type: 'image/png' })
+      return waitForRefResolvedValue(property)
+    }
+
+    const first = await upload('First post', [1, 2, 3])
+    const second = await upload('Second post', [4, 5, 6, 7])
+
+    expect(first).not.toBe(second)
+    expect(first?.endsWith('photo.png')).toBe(true)
+    expect(second?.endsWith('photo.png')).toBe(true)
+    const read = async (name: string | undefined) =>
+      new Uint8Array(
+        await (await BaseFileManager.readFile(BaseFileManager.getFilesPath('images', name!))).arrayBuffer()
+      )
+    expect([...(await read(first))]).toEqual([1, 2, 3])
+    expect([...(await read(second))]).toEqual([4, 5, 6, 7])
+  })
 })

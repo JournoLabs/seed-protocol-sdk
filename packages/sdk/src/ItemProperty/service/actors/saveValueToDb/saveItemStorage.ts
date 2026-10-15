@@ -184,6 +184,9 @@ export const saveItemStorage = fromCallback<
           .set({
             refResolvedValue: fileName,
             localStorageDir,
+            // The draft is as new as its content (see updateItemPropertyValue).
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
             // Same shape as a row the migration or publish converted (convertVerbatimItemStorageRow).
             ...(clearsVerbatimValue && { propertyValue: null, refValueType: 'file' }),
           })

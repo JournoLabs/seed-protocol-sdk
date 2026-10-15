@@ -1,7 +1,7 @@
 import { resolveItemModelFileId } from '@/db/read/resolveModelRecord'
 import { resolveModelForSyncedSeed, skipSeedOnAmbiguousModel } from '@/db/read/resolveModelForSyncedSeed'
 import { camelCase } from 'lodash-es'
-import { Attestation, SchemaWhereInput } from '@seedprotocol/eas'
+import { Attestation, SchemaWhereInput, partitionByRefAttester } from '@seedprotocol/eas'
 import {
   parseEasPropertyMetadata,
   parseEasRelationPropertyName,
@@ -931,28 +931,68 @@ const syncVersionsAndPropertiesForSeeds = async ({
 }): Promise<void> => {
   if (seedUids.length === 0) return
 
-  const itemVersions = await getItemVersionsFromEas({
+  // Only the seed's attester can add versions to it, and only a version's attester can add
+  // properties to it (see partitionByRefAttester): anyone can attest with any refUID.
+  const fetchedVersions = await getItemVersionsFromEas({
     seedUids,
     excludeRevoked: false,
   })
+  const { kept: itemVersions, foreign: foreignVersions } = partitionByRefAttester(
+    fetchedVersions,
+    itemSeeds,
+  )
 
   const { versionUids } = await saveEasVersionsToDb({
     itemVersions,
     state,
   })
-  if (versionUids.length === 0) return
 
-  const fetchedProperties = await getItemPropertiesFromEas({
-    versionUids,
-    excludeRevoked: false,
-  })
+  let foreignProperties: Attestation[] = []
+  if (versionUids.length > 0) {
+    const allProperties = await getItemPropertiesFromEas({
+      versionUids,
+      excludeRevoked: false,
+    })
+    const partitioned = partitionByRefAttester(allProperties, itemVersions)
+    foreignProperties = partitioned.foreign
 
-  // The save makes the canonical pick; it also needs the other attestations to clean up after them.
-  await saveEasPropertiesToDb({
-    fetchedProperties,
-    itemSeeds,
-    state,
+    // The save makes the canonical pick; it also needs the other attestations to clean up after them.
+    await saveEasPropertiesToDb({
+      fetchedProperties: partitioned.kept,
+      itemSeeds,
+      state,
+    })
+  }
+
+  await deleteForeignAttestationRows({
+    versionUids: foreignVersions.map((version) => version.id),
+    propertyUids: foreignProperties.map((property) => property.id),
   })
+}
+
+/**
+ * Remove rows an earlier sync stored for versions and properties that another account attested:
+ * a foreign version row would count as the seed's latest version, and a foreign property row as
+ * its newest value.
+ */
+const deleteForeignAttestationRows = async ({
+  versionUids,
+  propertyUids,
+}: {
+  versionUids: string[]
+  propertyUids: string[]
+}): Promise<void> => {
+  if (versionUids.length === 0 && propertyUids.length === 0) return
+  const appDb = BaseDb.getAppDb()
+  await writeInBatches(propertyUids, (chunk) =>
+    appDb.delete(metadata).where(inArray(metadata.uid, chunk)),
+  )
+  await writeInBatches(versionUids, (chunk) =>
+    appDb.delete(metadata).where(inArray(metadata.versionUid, chunk)),
+  )
+  await writeInBatches(versionUids, (chunk) =>
+    appDb.delete(versions).where(inArray(versions.uid, chunk)),
+  )
 }
 
 /**

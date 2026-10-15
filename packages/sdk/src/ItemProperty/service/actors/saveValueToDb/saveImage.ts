@@ -16,6 +16,7 @@ import { getEasSchemaUidForModel } from '@/db/read/getSchemaUidForModel'
 import { getEasSchemaForItemProperty } from '@/helpers/getSchemaForItemProperty'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { ImageSize } from '@/helpers/constants'
+import { storageFileNameForNewSeed } from '@/helpers/storageFileName'
 
 
 /** Fetch image from URL (including blob:) and return { buffer, mimeType } for saving as binary. */
@@ -131,6 +132,8 @@ export const saveImage = fromCallback<
       if (mimeType) {
         fileName += `.${mimeType.split('/')[1]}`
       }
+    } else if (!isExistingFileReference) {
+      fileName = storageFileNameForNewSeed(newImageSeedLocalId, fileName)
     }
 
     const filePath = BaseFileManager.getFilesPath('images', fileName)

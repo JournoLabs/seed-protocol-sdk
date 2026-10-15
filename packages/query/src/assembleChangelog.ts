@@ -1,4 +1,7 @@
-import { pickLatestPropertyAttestationsByRefAndSchema } from '@seedprotocol/eas'
+import {
+  keepAttestationsFromRefAttester,
+  pickLatestPropertyAttestationsByRefAndSchema,
+} from '@seedprotocol/eas'
 import {
   applyChangelogFilters,
   buildFlatSnapshotFromProperties,
@@ -32,7 +35,13 @@ export async function assembleSeedChangelog(
   const changelogOpts: ChangelogOptions = options?.changelog ?? {}
   const granularity = changelogOpts.granularity ?? 'version'
 
-  const itemVersions = await dataSource.getVersionsForSeed(seedUid)
+  // Anyone can attest with any refUID: only the seed's attester's versions, and each version's
+  // attester's properties, count.
+  const [seed, fetchedVersions] = await Promise.all([
+    dataSource.getSeedByUid(seedUid),
+    dataSource.getVersionsForSeed(seedUid),
+  ])
+  const itemVersions = keepAttestationsFromRefAttester(fetchedVersions, seed ? [seed] : [])
 
   const sortedVersions = [...itemVersions].sort(
     (a, b) => a.timeCreated - b.timeCreated,
@@ -45,8 +54,10 @@ export async function assembleSeedChangelog(
   const latestVersionUid = sortedVersions[sortedVersions.length - 1]!.id
   const versionUids = sortedVersions.map((v) => v.id)
 
-  const rawProperties =
-    await dataSource.getPropertiesForVersionUids(versionUids)
+  const rawProperties = keepAttestationsFromRefAttester(
+    await dataSource.getPropertiesForVersionUids(versionUids),
+    sortedVersions,
+  )
 
   let changelog: ChangelogEntry[]
 
