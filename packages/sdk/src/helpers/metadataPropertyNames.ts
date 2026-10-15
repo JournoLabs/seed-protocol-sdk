@@ -1,4 +1,5 @@
 import pluralize from 'pluralize'
+import { easName } from '@seedprotocol/eas'
 import { normalizeDataType } from './property/index'
 
 /** Minimal property def shape for List-of-relation storage name resolution */
@@ -189,4 +190,30 @@ export function resolveMetadataRecord<T extends RecordWithRef>(
   return (
     records.find((r) => r.propertyName === preferredPropertyName) ?? records[0]
   )
+}
+
+/**
+ * The EAS property name publish writes for an item property (ADR 0008 §3), already in EAS form:
+ *
+ * - List of relations: its `<name><Model>Ids` storage name (`author_identity_ids`).
+ * - Single Relation, Image, File or Html: its schema key (`author`), never the local `<name>Id`
+ *   storage name. The key is `propertyDef.name` when known, else `propertyName` without its `Id`.
+ * - Anything else: the property name.
+ */
+export function easPropertyNameForPublish(
+  propertyName: string,
+  propertyDef?: (PropertySchemaEntry & { name?: string; refValueType?: string }) | null,
+): string {
+  const listRelationName = listRelationEasPropertyName(propertyName, propertyDef ?? undefined)
+  if (listRelationName) return easName(listRelationName)
+  if (
+    propertyDef &&
+    normalizeDataType(propertyDef.dataType) !== 'List' &&
+    needsMetadataIdSuffix(propertyDef.dataType, propertyDef.refValueType) &&
+    !ID_SUFFIX_EXCLUDE.has(propertyName)
+  ) {
+    const key = propertyDef.name ?? (propertyName.endsWith('Id') ? propertyName.slice(0, -2) : propertyName)
+    return easName(key)
+  }
+  return easName(propertyName)
 }

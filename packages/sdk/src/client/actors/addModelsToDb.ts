@@ -1,7 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq, inArray } from 'drizzle-orm'
-import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
+import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
@@ -110,7 +110,7 @@ export const addModelsToDb = fromCallback<
       // The EAS schema string depends only on the model name, so every same-name row shares its uid.
       schemaDefsByModelName.set(modelName, {
         dbIds: existingModels.filter((m) => m.name === modelName).map((m) => m.id),
-        schemaDef: `bytes32 ${toSnakeCase(modelName)}`,
+        schemaDef: `bytes32 ${easName(modelName)}`,
       })
     }
 

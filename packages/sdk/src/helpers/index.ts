@@ -77,9 +77,10 @@ export type {
 export { generateId } from './generateId'
 const logger = debug('seedSdk:shared:helpers')
 
-export const toSnakeCase = (str: string) => {
-  return str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
-}
+export { easName } from '@seedprotocol/eas'
+
+/** @deprecated Use easName (ADR 0008): the one function for names written to EAS. */
+export { easName as toSnakeCase } from '@seedprotocol/eas'
 
 export const identifyString = (str: string) => {
   try {

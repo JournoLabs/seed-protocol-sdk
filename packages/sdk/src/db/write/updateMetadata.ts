@@ -3,7 +3,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { eq } from 'drizzle-orm'
 import { PropertyType } from '@/types'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
 import { normalizeDataType } from '@/helpers/property'
 import { normalizePublisher } from '@/helpers/addresses'
@@ -59,7 +59,11 @@ export const updateMetadata: UpdateMetadata = async (metadataValues, propertyRec
         const easDataType = INTERNAL_DATA_TYPES[dataTypeKey]?.eas
 
         if (easDataType) {
-          const propertyNameSnakeCase = toSnakeCase(metadataValues.propertyName)
+          // The name publish registers (ADR 0008): a single relation's key, not its authorId storage name.
+          const propertyNameSnakeCase = easPropertyNameForPublish(
+            metadataValues.propertyName,
+            propertyRecordSchema as Parameters<typeof easPropertyNameForPublish>[1],
+          )
           // Cached, including misses: every item of a model looks up the same property schemas.
           const schemaUid = await getEasSchemaUidForExactDefinition(
             `${easDataType} ${propertyNameSnakeCase}`,

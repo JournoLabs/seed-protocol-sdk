@@ -18,7 +18,7 @@ import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
 import { INTERNAL_DATA_TYPES, SEED_PROTOCOL_SCHEMA_NAME } from '@/helpers/constants'
 import { normalizeDataType } from '@/helpers/property'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { getEasSchemaUidForSchemaDefinition, setSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { waitForIdle, type HasService, waitForModelIdle } from './waitForIdle'
 
@@ -168,7 +168,7 @@ export async function ensurePropertySchemaUidsForGetPublishPayloadTest(schema: S
       const listName = listRelationEasPropertyName(key, { dataType, ref: def.ref ?? def.model })
       if (listName) names.add(listName)
       for (const name of names) {
-        const text = `${eas} ${toSnakeCase(name)}`
+        const text = `${eas} ${easName(name)}`
         if (await getEasSchemaUidForSchemaDefinition({ schemaText: text })) continue
         setSchemaUidForSchemaDefinition({ text, schemaUid: SchemaRegistry.getSchemaUID(text, zeroAddress, true) })
       }

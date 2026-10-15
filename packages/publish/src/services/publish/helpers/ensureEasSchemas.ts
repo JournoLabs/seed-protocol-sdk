@@ -8,6 +8,8 @@ import {
   setSchemaUidForSchemaDefinition,
   setSchemaUidForModel,
   listRelationEasPropertyName,
+  easName,
+  easPropertyNameForPublish,
 } from '@seedprotocol/sdk'
 import type { IItem } from '@seedprotocol/sdk'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
@@ -39,9 +41,6 @@ export function resetEnsuredBaseSchemas(): void {
   chainsWithBaseSchemas.clear()
 }
 
-function toSnakeCase(str: string): string {
-  return str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
-}
 
 /**
  * Collects all model names used by the item (item's model + relation refs + list refs + Image).
@@ -200,7 +199,7 @@ async function ensureEasSchemasForItemResolved(
   const registeredModelSchemaUids = new Set<string>()
 
   for (const modelName of modelNames) {
-    const schemaDef = `bytes32 ${toSnakeCase(modelName)}`
+    const schemaDef = `bytes32 ${easName(modelName)}`
     const schemaUid = SchemaRegistry.getSchemaUID(
       schemaDef,
       RESOLVER_ADDRESS as `0x${string}`,
@@ -240,7 +239,7 @@ async function ensureEasSchemasForItemResolved(
         sender,
         prepareNameSchemaAttestation({
           schemaUid,
-          schemaName: toSnakeCase(modelName),
+          schemaName: easName(modelName),
         }),
       )
     } catch (err) {
@@ -296,16 +295,13 @@ async function ensureEasSchemasForItemResolved(
     if (!property.propertyDef) continue
 
     const easDataTypeRaw = easTypeForDataType(property.propertyDef.dataType)
-    const prop = property as { storagePropertyName?: string; propertyName: string }
-    // List of Relation: name comes from the definition (authors → authorIdentityIds), matching
-    // getPublishPayload, regardless of the name the ItemProperty was built with.
+    // ADR 0008: the same name getPublishPayload attests under (list relations: storage name;
+    // single relations: schema key).
     const listRelationName = listRelationEasPropertyName(property.propertyName, property.propertyDef)
-    const nameForEas =
-      listRelationName ??
-      (prop.storagePropertyName && prop.storagePropertyName.length > 0
-        ? prop.storagePropertyName
-        : property.propertyName)
-    const propertyNameSnakeCase = toSnakeCase(nameForEas)
+    const propertyNameSnakeCase = easPropertyNameForPublish(
+      property.propertyName,
+      property.propertyDef as Parameters<typeof easPropertyNameForPublish>[1],
+    )
     const schemaDef = `${easDataTypeRaw} ${propertyNameSnakeCase}`
     if (listRelationName && !propertyNameSnakeCase.endsWith('_ids')) {
       throw new Error(

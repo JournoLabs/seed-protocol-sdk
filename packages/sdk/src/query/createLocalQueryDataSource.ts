@@ -4,7 +4,7 @@ import type {
   AttestationLike,
   QueryDataSource,
 } from '@seedprotocol/query'
-import { isValidEasAttestationUid } from '@seedprotocol/eas'
+import { easName, isValidEasAttestationUid } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseFileManager } from '@/helpers/FileManager/BaseFileManager'
 import { seeds, versions, metadata } from '@/seedSchema'
@@ -20,12 +20,6 @@ function msToUnixSeconds(ms: number | null | undefined): number {
   return Math.floor(ms)
 }
 
-function toSnakeCaseName(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase()
-}
 
 function parsePropertyValue(raw: string | null | undefined): unknown {
   if (raw == null) return ''
@@ -200,7 +194,7 @@ function metadataRowToAttestation(row: {
   }
 
   const name = row.propertyName
-    ? toSnakeCaseName(row.propertyName)
+    ? easName(row.propertyName)
     : 'unknown'
   const value = parsePropertyValue(row.propertyValue)
   const type = row.easDataType || 'string'
