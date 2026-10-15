@@ -65,7 +65,8 @@ export function combinePublishCostEstimate(
       bytes: work.uploadBytes,
       uploadCount: work.uploadCount,
       path: arweavePath,
-      userPays: true,
+      // Both paths go through the upload API, whose operator pays for the Arweave transactions.
+      userPays: false,
     },
     prices: {
       ethUsd: rates.ethUsd,
