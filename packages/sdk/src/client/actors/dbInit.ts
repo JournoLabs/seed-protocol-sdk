@@ -12,13 +12,13 @@ FromCallbackInput<ClientManagerContext>
 >(({sendBack, input: {context}}) => {
 
   const _dbInit = async () => {
-    const { filesDir } = context
+    const { filesDir, dbConfig } = context
     if (!filesDir) {
       throw new Error('filesDir is required')
     }
     
     // Prepare databases - this handles all initialization, migration, and file setup
-    await BaseDb.prepareDb(filesDir)
+    await BaseDb.prepareDb(filesDir, dbConfig)
 
     // Verify database is ready
     const appDb = BaseDb.getAppDb()

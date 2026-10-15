@@ -37,9 +37,13 @@ export interface WebpackConfigContext {
 export type Environment = 'browser' | 'node' | 'react-native'
 
 
+/** Where the Node SQLite database lives (`config.dbConfig`). The browser keeps its database in OPFS and ignores it. */
 export interface DbConfig {
+  /** libsql URL or file path for the database. Default: `<filesDir>/db/seed.db`. */
   dbUrl?: string
+  /** @deprecated Unused — schema is the static SDK seedSchema + prebuilt SQL migrations */
   schemaDir?: string
+  /** Directory the SDK's migration SQL is copied to and run from. Default: `<filesDir>/db`. */
   outDir?: string
 }
 
