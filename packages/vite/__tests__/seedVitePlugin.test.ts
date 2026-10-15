@@ -59,9 +59,12 @@ describe('seedVitePlugin renderer hardening', () => {
 
   it('merges renderer compatibility aliases and optimizeDeps includes', () => {
     const configPlugin = getConfigPlugin()
-    const result = configPlugin.config!({ resolve: { alias: [] }, optimizeDeps: {} })
+    const userConfig: Record<string, any> = { resolve: { alias: [] }, optimizeDeps: {} }
+    const result = callConfig(configPlugin, userConfig)
 
-    const aliases = result?.resolve?.alias
+    // Aliases are appended to the config in place (see the config hook), not returned.
+    expect(result?.resolve?.alias).toBeUndefined()
+    const aliases = userConfig.resolve.alias
     expect(Array.isArray(aliases)).toBe(true)
 
     const aliasKeys = (aliases as Array<{ find: string | RegExp; replacement: string }>).map(

@@ -953,11 +953,15 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       addRendererCompatibilityAliases(aliasEntries)
       addNodePolyfillShimAliases(aliasEntries, polyfillShimPaths)
 
-      const existingResolve = userConfig.resolve ?? {}
-      const mergedAlias = mergeAliasEntries(
-        normalizeAliasEntries(existingResolve.alias),
-        aliasEntries,
-      )
+      // Vite merges a returned alias list *before* the existing one, so returning ours
+      // would let it shadow the user's. Append to the config in place instead (Vite's
+      // documented escape hatch when merging can't express the order), skipping finds
+      // the user already set, so user aliases still match first.
+      userConfig.resolve = {
+        ...userConfig.resolve,
+        alias: mergeAliasEntries(normalizeAliasEntries(userConfig.resolve?.alias), aliasEntries),
+      }
+      const userDedupe = new Set(userConfig.resolve.dedupe ?? [])
 
       const desiredOptimizeIncludes = [
         '@zenfs/core',
@@ -1020,9 +1024,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           'process.browser': 'true',
           'process.platform': '"browser"',
         },
+        // Only this plugin's dedupe entries: Vite concatenates them onto the user's.
         resolve: {
-          ...existingResolve,
-          alias: mergedAlias,
           // Prevent duplicate React/thirdweb instances when @seedprotocol/publish is workspace-linked.
           // Multiple copies break context (e.g. useActiveAccount must be used within ThirdwebProvider).
           // Also dedupe XState and Seed packages: two xstate copies cause Object.assign _version errors;
@@ -1033,7 +1036,6 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           // and can remount OPFS against a stale handle.
           dedupe: Array.from(
             new Set([
-              ...(existingResolve.dedupe ?? []),
               'react',
               'react-dom',
               'thirdweb',
@@ -1046,8 +1048,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
               ...sharedStateDeps.dedupe,
               '@zenfs/core',
               '@zenfs/dom',
-            ])
-          ),
+            ]),
+          ).filter((dep) => !userDedupe.has(dep)),
         },
         optimizeDeps,
         // Only the headers the user has not set: Vite deep-merges these into theirs.
