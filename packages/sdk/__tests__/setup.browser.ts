@@ -1,9 +1,4 @@
 import { afterAll, afterEach, beforeAll } from 'vitest'
-import { setRetriesWhenOnlineEnabled } from '@/helpers/retryWhenOnline'
-
-// NODE_ENV isn't 'test' in the browser: turn off offline retries here as Node tests have them off,
-// so a late retry can't sync in the middle of another test. Tests of retries turn them back on.
-setRetriesWhenOnlineEnabled(false)
 
 /**
  * Check if OPFS (Origin Private File System) is available in the browser

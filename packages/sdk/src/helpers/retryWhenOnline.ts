@@ -7,9 +7,9 @@
  * with an unreachable indexer). Only one retry per task is pending at a time. Timers don't keep a
  * Node process alive. `client.stop()` cancels every pending retry.
  *
- * Off under `NODE_ENV=test`, where a late retry would sync in the middle of another test (browser
- * test setups, which have no NODE_ENV, turn them off with {@link setRetriesWhenOnlineEnabled}).
- * Tests that exercise retries pass `enabled` or call setRetriesWhenOnlineEnabled(true).
+ * Off in test runs (NODE_ENV or Vite's mode is `test`), where a late retry would sync in the middle
+ * of another test. Tests that exercise retries pass `enabled` or call
+ * setRetriesWhenOnlineEnabled(true).
  */
 const DEFAULT_DELAYS_MS = [15_000, 30_000, 60_000, 120_000, 300_000]
 
@@ -24,8 +24,10 @@ export type RetryWhenOnline = {
 
 const all = new Set<RetryWhenOnline>()
 
+/** NODE_ENV in Node; in the browser, Vite (and so Vitest) sets import.meta.env.MODE. */
 const isTestEnv = (): boolean =>
-  typeof process !== 'undefined' && process.env?.NODE_ENV === 'test'
+  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
+  (import.meta as { env?: { MODE?: string } }).env?.MODE === 'test'
 
 let enabledOverride: boolean | undefined
 

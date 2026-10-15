@@ -63,7 +63,7 @@ describe('retryWhenOnline', () => {
     vi.advanceTimersByTime(1000)
     expect(run).not.toHaveBeenCalled()
 
-    // NODE_ENV=test in Node; setup.browser.ts in the browser.
+    // NODE_ENV=test in Node; Vite's mode is 'test' in the browser.
     const offInTests = createRetryWhenOnline(run, { delaysMs: [100] })
     offInTests.schedule()
     expect(offInTests.pending).toBe(false)
