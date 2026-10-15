@@ -34,7 +34,7 @@ import {
   runDestroyLifecycle,
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { localNamesInBestMatchTier } from '@seedprotocol/eas'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
@@ -1105,12 +1105,15 @@ export class Model {
   }
 
   /**
-   * Find Model by modelType (snake_case from DB/metadata).
-   * Handles model names with spaces: "new_model" -> finds "New model" (toSnakeCase("New model") === "new_model").
+   * Find Model by modelType (an EAS model name, as seeds.type stores it). Matched as ADR 0008
+   * matches EAS names: `new_model` finds "New model", and `htmlpage` (an older SDK's name) finds
+   * "HTMLPage". Only the tightest matching tier counts; matches in several schemas are ambiguous.
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
-    return this._getUniqueCachedModel(modelType, (cachedModelName) => toSnakeCase(cachedModelName) === modelType)
+    const cachedNames = [...this.instanceCacheByName.keys()].map((key) => key.slice(key.lastIndexOf(':') + 1))
+    const best = localNamesInBestMatchTier(modelType, cachedNames)
+    return this._getUniqueCachedModel(modelType, (cachedModelName) => best.has(cachedModelName))
   }
 
   /**

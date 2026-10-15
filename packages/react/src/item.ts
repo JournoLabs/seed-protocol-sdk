@@ -21,7 +21,7 @@ import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/sdk'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -320,7 +320,7 @@ export const useItems: UseItems = ({
       conditions.push(placeholderUidSql(seeds.uid) as any)
     }
     if (modelName) {
-      conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+      conditions.push(eq(seeds.type, easName(modelName)))
     }
     if (addressFilter === 'owned') {
       conditions.push(ownedSeedsSql(addressesForFilter ?? []) as any)

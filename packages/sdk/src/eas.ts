@@ -20,7 +20,7 @@ export type {
   GetPublishedByFromEasParams,
 } from '@seedprotocol/eas'
 
-import { toSnakeCase } from '@/helpers'
+import { easNameVariants } from '@seedprotocol/eas'
 import { withExcludeRevokedFilter } from '@seedprotocol/eas'
 import { BaseEasClient } from '@seedprotocol/eas'
 import { BaseQueryClient } from '@seedprotocol/eas'
@@ -46,21 +46,19 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const OR: Record<string, unknown>[] = []
   const hasImageModel = modelNames.includes('Image')
 
+  // ADR 0008: every name the model can match at the fuzzy level that an SDK may have published
+  // (its EAS name, the older simple snake_case, separators dropped, a plural or singular form).
+  // The caller matches the results to local models.
+  const schemaNames = new Set<string>()
   for (const modelName of modelNames) {
-    const snake = toSnakeCase(modelName)
-    OR.push({
-      schema: {
-        equals: `bytes32 ${snake}`,
-      },
-    })
-    const altSchema = `bytes32 ${modelName}`
-    if (altSchema !== `bytes32 ${snake}`) {
-      OR.push({
-        schema: {
-          equals: altSchema,
-        },
-      })
+    for (const variant of easNameVariants(modelName)) {
+      schemaNames.add(variant)
+      schemaNames.add(variant.endsWith('s') ? variant.slice(0, -1) : `${variant}s`)
     }
+    schemaNames.add(modelName)
+  }
+  for (const name of schemaNames) {
+    OR.push({ schema: { equals: `bytes32 ${name}` } })
   }
 
   if (hasImageModel) {

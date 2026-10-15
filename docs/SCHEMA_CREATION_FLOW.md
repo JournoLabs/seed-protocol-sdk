@@ -51,6 +51,8 @@ The `loadOrCreateSchema` actor (in `src/schema/service/actors/loadOrCreateSchema
     }],
   }
   ```
+  `migrations` is a record of changes, stored and returned as written. The SDK doesn't run it:
+  local data isn't transformed when a schema's version changes (ADR 0008).
 
 **Step 3: Save to File Immediately**
 - **File is written synchronously** at this point (line 105 in `loadOrCreateSchema.ts`)

@@ -66,6 +66,10 @@ export type SchemaFileFormat = {
   enums: {
     [enumName: string]: any
   }
+  /**
+   * A record of the schema's changes, stored and returned as written. The SDK doesn't run them:
+   * local data isn't transformed when a schema's version changes (ADR 0008).
+   */
   migrations: Array<{
     version: number
     timestamp: string

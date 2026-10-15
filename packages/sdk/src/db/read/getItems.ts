@@ -1,6 +1,6 @@
 import { ItemData } from '@/types'
 import { and, eq, gt, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
@@ -52,7 +52,7 @@ export const getItemsData: GetItemsData = async ({
   }
 
   if (modelName) {
-    conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+    conditions.push(eq(seeds.type, easName(modelName)))
   }
 
   if (!modelFileId && schemaName && modelName) {

@@ -4,7 +4,7 @@ import { ModelValues } from '@/types'
 import { createSeed } from './createSeed'
 import { createVersion } from './createVersion'
 import { createMetadata } from './createMetadata'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { modelPropertiesToObject } from '@/helpers/model'
 import {
   getItemStorageFilePath,
@@ -33,7 +33,7 @@ export const createNewItem = async ({
     throw new Error('A model name is required for createNewItem')
   }
 
-  const seedType = toSnakeCase(modelName)
+  const seedType = easName(modelName)
 
   // Dynamic import to break circular dependency
   const modelMod = await import('../../Model/Model')
@@ -44,7 +44,7 @@ export const createNewItem = async ({
 
   const newSeedId = await createSeed({ type: seedType, modelFileId })
 
-  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: toSnakeCase(modelName) })
+  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
 
   // Build set of all properties to create metadata for: union of model schema + propertyData
   // This ensures we create metadata for ALL model properties even when creating with no initial values

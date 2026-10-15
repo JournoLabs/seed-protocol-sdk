@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { SchemaRegistry } from '@ethereum-attestation-service/eas-sdk'
+import { easName } from '@seedprotocol/eas'
 import { brandSigner, brandTxSender, type PublishWallet } from '../../../helpers/seedSigner'
 
 const INTERNAL_DATA_TYPES = {
@@ -81,6 +82,13 @@ function segmented() {
   }
 }
 
+// Mirrors the SDK helper for the names used here (staff, authors).
+const mockListRelationName = (name: string, def?: { dataType?: string; ref?: string }) => {
+  if (normalizeDataType(def?.dataType) !== 'List' || !def?.ref) return undefined
+  if (name.endsWith(`${def.ref}Ids`)) return name
+  return `${name.replace(/s$/, '')}${def.ref}Ids`
+}
+
 mock.module('@seedprotocol/sdk', () => ({
   INTERNAL_DATA_TYPES,
   ModelPropertyDataTypes: { File: 'File', Html: 'Html', Image: 'Image', Text: 'Text' },
@@ -91,10 +99,18 @@ mock.module('@seedprotocol/sdk', () => ({
   setSchemaUidForSchemaDefinition: () => {},
   setSchemaUidForModel: () => {},
   // Mirrors the SDK helper for the names used here (staff, authors).
-  listRelationEasPropertyName: (name: string, def?: { dataType?: string; ref?: string }) => {
-    if (normalizeDataType(def?.dataType) !== 'List' || !def?.ref) return undefined
-    if (name.endsWith(`${def.ref}Ids`)) return name
-    return `${name.replace(/s$/, '')}${def.ref}Ids`
+  listRelationEasPropertyName: mockListRelationName,
+  easName,
+  // Mirrors the SDK helper (ADR 0008): list relations by storage name, single refs by their key.
+  easPropertyNameForPublish: (name: string, def?: { dataType?: string; ref?: string; refValueType?: string; name?: string }) => {
+    const listName = mockListRelationName(name, def)
+    if (listName) return easName(listName)
+    const refTypes = ['Relation', 'Image', 'File', 'Html']
+    const dataType = normalizeDataType(def?.dataType)
+    if (def && (refTypes.includes(dataType) || refTypes.includes(normalizeDataType(def.refValueType)))) {
+      return easName(def.name ?? name.replace(/Id$/, ''))
+    }
+    return easName(name)
   },
 }))
 

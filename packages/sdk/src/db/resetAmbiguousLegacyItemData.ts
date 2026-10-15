@@ -1,5 +1,5 @@
 import { eq, isNotNull, isNull, and } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
 import {
@@ -69,7 +69,7 @@ export const resetAmbiguousLegacyItemData = async (): Promise<boolean> => {
   }[]
   const byType = new Map<string, { modelIds: Set<number>; schemaNames: Set<string> }>()
   for (const row of linkedModels) {
-    const type = toSnakeCase(row.modelName)
+    const type = easName(row.modelName)
     const entry = byType.get(type) ?? { modelIds: new Set(), schemaNames: new Set() }
     entry.modelIds.add(row.modelId)
     entry.schemaNames.add(row.schemaName)

@@ -4,7 +4,7 @@ import { PropertyMachineContext } from '@/types/property'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, models, properties, type MetadataType } from '@/seedSchema'
 import { eq, and, or } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { camelCase, upperFirst } from 'lodash-es'
 import { getMetadataLatest } from '@/db/read/subqueries/metadataLatest'
 import {
@@ -87,7 +87,7 @@ export const loadOrCreateProperty = fromCallback<
           })
           let model = await Model.resolveAsync(normalizedModelName, { modelFileId: itemModelFileId })
           if (!model?.properties?.length && !itemModelFileId) {
-            model = Model.findByModelType(toSnakeCase(modelNameForNew))
+            model = Model.findByModelType(easName(modelNameForNew))
           }
           if (model?.properties?.length) {
             const schemas = modelPropertiesToObject(model.properties)
@@ -210,7 +210,7 @@ export const loadOrCreateProperty = fromCallback<
         // Try PascalCase first ("post" -> "Post"); then findByModelType for names with spaces ("new_model" -> "New model")
         let model = Model.resolve(normalizedModelName, { modelFileId })
         if (!model?.properties?.length && !modelFileId) {
-          model = Model.findByModelType(toSnakeCase(modelName))
+          model = Model.findByModelType(easName(modelName))
         }
         if (model?.properties?.length) {
           const schemas = modelPropertiesToObject(model.properties)

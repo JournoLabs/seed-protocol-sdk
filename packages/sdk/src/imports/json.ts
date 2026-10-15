@@ -8,6 +8,8 @@ import { ModelDefinitions, ModelClassType } from '@/types'
 // Dynamic import to break circular dependency with helpers/db -> ModelProperty -> updateSchema -> imports/json
 // import { addModelsToDb, addSchemaToDb } from '@/helpers/db'
 import { generateId } from '@/helpers'
+import { easName } from '@seedprotocol/eas'
+import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
 import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
@@ -451,6 +453,38 @@ const getSchemaFilePath = (workingDir: string, name: string, version: number, sc
  * @returns The file path where the schema was saved
  * @throws Error if import file cannot be read, parsed, or if schema already exists
  */
+/**
+ * Warns when two models, or two properties of one model, have the same EAS name (ADR 0008): they
+ * would publish to the same EAS schema (`HTMLPage` and `HtmlPage` are both `html_page`). A warning,
+ * not an error, so schema files that already load keep loading.
+ */
+export function warnOnEasNameCollisions(schemaFile: Pick<SchemaFileFormat, 'models'> & { metadata?: { name?: string } }): string[] {
+  const warnings: string[] = []
+  const collisions = (names: [string, string][]) => {
+    const byEasName = new Map<string, string[]>()
+    for (const [name, eas] of names) byEasName.set(eas, [...(byEasName.get(eas) ?? []), name])
+    return [...byEasName.entries()].filter(([, group]) => group.length > 1)
+  }
+  const models = Object.entries(schemaFile.models ?? {})
+  for (const [eas, group] of collisions(models.map(([name]) => [name, easName(name)]))) {
+    warnings.push(`models ${group.join(', ')} all publish as "bytes32 ${eas}"`)
+  }
+  for (const [modelName, model] of models) {
+    const properties = Object.entries((model as { properties?: Record<string, any> })?.properties ?? {})
+    const named = properties.map(([key, def]): [string, string] => [
+      key,
+      easPropertyNameForPublish(key, { ...def, dataType: def?.dataType ?? def?.type, name: key }),
+    ])
+    for (const [eas, group] of collisions(named)) {
+      warnings.push(`${modelName} properties ${group.join(', ')} all publish as "${eas}"`)
+    }
+  }
+  for (const warning of warnings) {
+    console.warn(`[seed] schema ${schemaFile.metadata?.name ?? ''}: ${warning}; EAS can't tell them apart.`)
+  }
+  return warnings
+}
+
 export async function importJsonSchema(
   importFilePath: string,
   version?: number,
@@ -690,6 +724,8 @@ export async function importJsonSchema(
       schemaFile = transformImportToSchemaFile(importData, version)
     }
   }
+
+  warnOnEasNameCollisions(schemaFile)
 
   // Check if this is an internal SDK schema (should not create files in app directory)
   const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
