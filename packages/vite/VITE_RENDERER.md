@@ -21,7 +21,7 @@ Recommended: **Vite 8** and **@vitejs/plugin-react 6** (aligned with this monore
 ## What the plugin configures automatically
 
 - **Node polyfills** (`vite-plugin-node-polyfills`) with browser-safe defaults (optional via `includeNodePolyfills: false`). Default `include` is `path`, `buffer`, `events`, `string_decoder`, `util` — **not** `stream` or `crypto` (those pull `stream-browserify` and break Vite SSR / React Router SPA prerender). Use `includeNodePolyfills: false` for Framework Mode / prerender. The SDK aliases injected shim imports (`…/shims/buffer`, `…/shims/global`, `…/shims/process`) plus `buffer` / `process` / `global` (and `node:` variants) to absolute paths from the SDK install.
-- **Cross-origin isolation headers** (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`) on the Vite dev and preview servers, including `writeHead` (Framework-Mode HTML handlers ignore `server.headers` alone). Opt out with `isolationHeaders: false`. Production hosts must set the same headers themselves.
+- **Cross-origin isolation headers** (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`) on the Vite dev and preview servers, including `writeHead` (Framework-Mode HTML handlers ignore `server.headers` alone). A COOP/COEP/CORP value you set in `server.headers` or `preview.headers` wins over the plugin's for that server (`preview` falls back to `server.headers`, as in Vite). Opt out with `isolationHeaders: false`. Production hosts must set the same headers themselves.
 - **FS aliases** (`fs` → `@zenfs/core`, etc.) and **ZenFS stable ESM entrypoints** (`@zenfs/core`, `@zenfs/core/path`, `@zenfs/dom`).
 - **`nanoid-dictionary`** → `dist/dictionary.esm.js` (avoids broken UMD `browser` field with namespace imports).
 - **`debug` interop shim** so `import debug from 'debug'` works in the renderer.
@@ -29,14 +29,7 @@ Recommended: **Vite 8** and **@vitejs/plugin-react 6** (aligned with this monore
 - **SDK dist CommonJS** handling and **FileManager** import-shape fix (`path-browserify` default → `import * as path from 'path'`).
 - **Inline `global` / `process` shims** in `index.html` for early CJS wrapper evaluation. `process.env.NODE_ENV` follows Vite `mode` (not hardcoded `"production"`), so React Refresh works during `vite serve`.
 
-Initialize ZenFS in your app entry (default `autoInit: false`):
-
-```ts
-import { configure } from '@zenfs/core'
-import { IndexedDB } from '@zenfs/dom'
-
-await configure({ mounts: { '/': IndexedDB } })
-```
+You do not need to configure ZenFS yourself: `client.init()` mounts OPFS at `/` before the SDK touches files. Leave `autoInit` at its default (`false`).
 
 ## Migrating from app-local fixes
 
@@ -55,9 +48,9 @@ After upgrading:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `includeNodePolyfills` | `true` | Add `vite-plugin-node-polyfills` (no `stream`/`crypto`). Set `false` for React Router Framework Mode / prerender |
-| `isolationHeaders` | `true` | Dev/preview COOP/COEP/CORP (writeHead-safe). `false` to disable, or `{ coop, coep, corp }` to override. Default COEP is `credentialless` |
-| `autoInit` | `false` | Inject ZenFS init script into `index.html` (usually prefer manual init) |
-| `fsModules` | `fs`, `fs/promises`, `node:fs`, … | Extra modules aliased to ZenFS |
+| `isolationHeaders` | `true` | Dev/preview COOP/COEP/CORP (writeHead-safe). `false` to disable, or `{ coop, coep, corp }` to override. Default COEP is `credentialless`. Values in your own `server.headers` / `preview.headers` win |
+| `autoInit` | `false` | Inject a script into `index.html` that mounts IndexedDB at `/`. Leave `false` with the SDK: `client.init()` mounts OPFS itself, and the script's bare `@zenfs/*` imports need an import map |
+| `fsModules` | `fs`, `fs/promises`, `node:fs`, `node:fs/promises` | Modules aliased to ZenFS. Your list replaces the default, so include the defaults when adding a module |
 | `debug` | `false` | Plugin diagnostic logging (not the `debug` npm package) |
 
 ## Troubleshooting
