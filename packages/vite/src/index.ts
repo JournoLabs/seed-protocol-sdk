@@ -48,6 +48,8 @@ export interface SeedVitePluginOptions {
    * Applied in configureServer and configurePreviewServer, including writeHead,
    * because Vite `server.headers` is not copied onto Framework-Mode HTML responses.
    * Set `false` to disable. Pass `{ coop, coep, corp }` to override values.
+   * A COOP/COEP/CORP value you set yourself in `server.headers` or `preview.headers`
+   * (any letter case) wins over both this option and the defaults, for that server.
    * @default true (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`)
    */
   isolationHeaders?: boolean | {
@@ -186,6 +188,39 @@ function resolveIsolationHeaders(
     'Cross-Origin-Embedder-Policy': overrides.coep ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy'],
     'Cross-Origin-Resource-Policy': overrides.corp ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Resource-Policy'],
   }
+}
+
+/**
+ * Isolation headers the user has not set in `headers` (case-insensitive), so a
+ * config() hook can add them without replacing the user's values.
+ */
+function isolationHeadersNotSetBy(
+  isolationHeaders: Record<string, string>,
+  headers: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const userKeys = new Set(Object.keys(headers ?? {}).map((key) => key.toLowerCase()))
+  return Object.fromEntries(
+    Object.entries(isolationHeaders).filter(([key]) => !userKeys.has(key.toLowerCase())),
+  )
+}
+
+/**
+ * The isolation headers the middleware sends: the user's `headers` value where
+ * they set one, else ours.
+ */
+function effectiveIsolationHeaders(
+  isolationHeaders: Record<string, string>,
+  headers: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const userValues = new Map(
+    Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+  )
+  return Object.fromEntries(
+    Object.entries(isolationHeaders).map(([key, value]) => {
+      const userValue = userValues.get(key.toLowerCase())
+      return [key, userValue == null ? value : String(userValue)]
+    }),
+  )
 }
 
 function applyIsolationHeaderMiddleware(
@@ -690,6 +725,9 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   } = options
 
   const isolationHeaders = resolveIsolationHeaders(isolationHeadersOption)
+  // Replaced in configResolved by the values the user's server/preview headers leave us.
+  let serverIsolationHeaders = isolationHeaders
+  let previewIsolationHeaders = isolationHeaders
   let htmlNodeEnv = 'production'
 
   const log = (...args: unknown[]) => {
@@ -718,6 +756,16 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     enforce: 'pre',
 
     configResolved(resolvedConfig) {
+      if (isolationHeaders) {
+        serverIsolationHeaders = effectiveIsolationHeaders(
+          isolationHeaders,
+          resolvedConfig.server.headers,
+        )
+        previewIsolationHeaders = effectiveIsolationHeaders(
+          isolationHeaders,
+          resolvedConfig.preview.headers,
+        )
+      }
       const addedAllowPaths = ensureDevServerFsAllow(resolvedConfig.server.fs.allow)
       if (addedAllowPaths.length > 0) {
         log(
@@ -851,22 +899,21 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           ),
         },
         optimizeDeps,
+        // Only the headers the user has not set: Vite deep-merges these into theirs.
+        // Preview falls back to server.headers when preview.headers is unset, so
+        // only touch preview.headers when the user set it.
         ...(isolationHeaders
           ? {
               server: {
-                ...(userConfig.server ?? {}),
-                headers: {
-                  ...(userConfig.server?.headers ?? {}),
-                  ...isolationHeaders,
-                },
+                headers: isolationHeadersNotSetBy(isolationHeaders, userConfig.server?.headers),
               },
-              preview: {
-                ...(userConfig.preview ?? {}),
-                headers: {
-                  ...(userConfig.preview?.headers ?? {}),
-                  ...isolationHeaders,
-                },
-              },
+              ...(userConfig.preview?.headers
+                ? {
+                    preview: {
+                      headers: isolationHeadersNotSetBy(isolationHeaders, userConfig.preview.headers),
+                    },
+                  }
+                : {}),
             }
           : {}),
       }
@@ -945,11 +992,11 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     enforce: 'post',
 
     configureServer(server) {
-      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+      if (serverIsolationHeaders) applyIsolationHeaderMiddleware(server, serverIsolationHeaders)
     },
 
     configurePreviewServer(server) {
-      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+      if (previewIsolationHeaders) applyIsolationHeaderMiddleware(server, previewIsolationHeaders)
     },
 
     config(userConfig) {

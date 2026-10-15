@@ -252,6 +252,75 @@ describe('seedVitePlugin renderer hardening', () => {
     expect(applied['Cross-Origin-Opener-Policy']).toBe('same-origin')
   })
 
+  it('lets user server/preview isolation headers win over the plugin values', async () => {
+    const plugins = seedVitePlugin({ includeNodePolyfills: false })
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins,
+        server: {
+          headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' },
+        },
+        preview: { headers: { 'cross-origin-opener-policy': 'same-origin-allow-popups' } },
+      },
+      'serve',
+    )
+    expect(config.server.headers).toEqual({
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'X-App': 'dev',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    })
+    // A lower-case user key is not shadowed by our capitalized one.
+    expect(config.preview.headers).toEqual({
+      'cross-origin-opener-policy': 'same-origin-allow-popups',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    })
+
+    // The writeHead middleware sends the user's values too, not ours.
+    const main = plugins.find((p) => p.name === 'seed-protocol:main')!
+    for (const [hookName, expected] of [
+      ['configureServer', { coep: 'require-corp', coop: 'same-origin' }],
+      ['configurePreviewServer', { coep: 'credentialless', coop: 'same-origin-allow-popups' }],
+    ] as const) {
+      const applied: Record<string, string> = {}
+      let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
+      const hook = (main as Record<string, any>)[hookName]
+      const fn = typeof hook === 'function' ? hook : hook.handler
+      fn({ middlewares: { use: (m: typeof middleware) => { middleware = m } } })
+      middleware!(
+        {},
+        {
+          getHeader: (key: string) => applied[key],
+          setHeader: (key: string, value: string) => { applied[key] = value },
+          writeHead: () => {},
+        },
+        () => {},
+      )
+      expect(applied['Cross-Origin-Embedder-Policy']).toBe(expected.coep)
+      expect(applied['Cross-Origin-Opener-Policy']).toBe(expected.coop)
+    }
+  })
+
+  it('leaves preview inheriting server.headers when the user sets no preview headers', async () => {
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: seedVitePlugin({ includeNodePolyfills: false }),
+        server: { headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' } },
+      },
+      'serve',
+    )
+    expect(config.preview.headers).toEqual(config.server.headers)
+    expect(config.preview.headers?.['X-App']).toBe('dev')
+    expect(config.preview.headers?.['Cross-Origin-Embedder-Policy']).toBe('require-corp')
+  })
+
   it('skips isolation headers when isolationHeaders is false', () => {
     const configPlugin = getConfigPlugin({ isolationHeaders: false })
     const result = callConfig(configPlugin, { resolve: { alias: [] }, optimizeDeps: {} })
