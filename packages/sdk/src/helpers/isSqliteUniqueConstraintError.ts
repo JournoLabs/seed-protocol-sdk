@@ -31,7 +31,8 @@ export function isSqliteUniqueConstraintError(error: unknown): boolean {
     }
 
     for (const key of ['message', 'msg', 'stack'] as const) {
-      const value = err[key]
+      const raw = err[key]
+      const value = key === 'stack' && typeof raw === 'string' ? stackWithoutFrames(raw) : raw
       if (typeof value === 'string' && matchesUniqueConstraintText(value)) {
         return true
       }
@@ -55,4 +56,15 @@ function matchesUniqueConstraintText(text: string): boolean {
     /\brc\s*=\s*2067\b/i.test(text) ||
     (text.includes('2067') && lower.includes('constraint'))
   )
+}
+
+/**
+ * A stack's message lines without its frames. Frames hold file names and line:column numbers, so
+ * a frame in a file named like this one, with a 2067 in its position or URL timestamp, would match.
+ */
+function stackWithoutFrames(stack: string): string {
+  return stack
+    .split('\n')
+    .filter((line) => !/^\s*at\s/.test(line) && !/@\S*:\d+:\d+\s*$/.test(line))
+    .join('\n')
 }
