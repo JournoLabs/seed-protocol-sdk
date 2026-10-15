@@ -15,6 +15,8 @@ import {
 import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
+import { ManagedAccountPublishError } from '../../../errors'
+import { undeployedPublisherProblem } from '../helpers/undeployedSmartAccount'
 
 const activePublishProcesses = new Set<string>()
 
@@ -24,6 +26,31 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
   if (cfg.useModularExecutor) return 'multiPublish'
   const deployed = await isContractDeployed(publisherAddress)
   return deployed ? 'multiPublish' : 'directEas'
+}
+
+/**
+ * Direct EAS is for EOAs (and `useDirectEas`). A publisher with no bytecode that is really an
+ * undeployed smart account, or that the wallet does not send as, is refused rather than attested
+ * one transaction per Seed from the wrong path.
+ */
+async function refuseUndeployedSmartAccount(
+  publisherAddress: string,
+  wallet: Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
+): Promise<Error | null> {
+  const problem = await undeployedPublisherProblem(publisherAddress, wallet)
+  if (problem === 'undeployed_smart_account') {
+    return new ManagedAccountPublishError(
+      `The publishing smart account ${publisherAddress} is not deployed on ${getPublishChainName()} yet. Deploy it first (your wallet's setup flow, or deploySmartWalletContract from @seedprotocol/publish/thirdweb), then publish again.`,
+      'MANAGED_ACCOUNT_NOT_DEPLOYED',
+      publisherAddress,
+    )
+  }
+  if (problem === 'sender_is_not_publisher') {
+    return new Error(
+      `The publish wallet sends as ${wallet?.txSender?.address}, not as the publisher ${publisherAddress}, which has no contract deployed on ${getPublishChainName()}. Attesting directly to EAS would record the wrong attester. Connect the publisher's wallet, or deploy the publisher's smart account first.`,
+    )
+  }
+  return null
 }
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
@@ -106,6 +133,18 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
             ),
           })
           return
+        }
+
+        if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
+          const refusal = await refuseUndeployedSmartAccount(
+            address.trim(),
+            (wallet ?? account) as Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
+          )
+          if (refusal) {
+            activePublishProcesses.delete(item.seedLocalId)
+            sendBack({ type: 'checkingFailed', error: refusal })
+            return
+          }
         }
 
         const needsArweave = await itemNeedsArweaveUpload(item)
