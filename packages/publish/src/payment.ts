@@ -1,0 +1,147 @@
+import type { PublishConfig } from './config'
+
+/**
+ * Who pays a publish's EVM gas: `'sponsored'` (a Thirdweb or ERC-4337 paymaster) or `'user'`
+ * (the publishing account's own ETH).
+ */
+export type PublishGasPayer = 'sponsored' | 'user'
+
+/**
+ * Who pays for Arweave storage: `'operator'` (the upload API at `uploadApiBaseUrl` funds it) or
+ * `'user'`.
+ */
+export type PublishStoragePayer = 'operator' | 'user'
+
+/**
+ * Who pays for a publish. Each field is optional: leave it out to keep what the lower-level
+ * settings (`thirdweb.sponsorGas`, `paymasterUrl`, ...) give. When set, it fills in those
+ * settings' defaults, and `initPublish` throws if a setting contradicts it.
+ */
+export interface PublishPaymentConfig {
+  gas?: PublishGasPayer
+  storage?: PublishStoragePayer
+}
+
+/**
+ * Which account sends a publish's transactions:
+ * - `'modular'`: the user's Thirdweb managed account (`useModularExecutor`)
+ * - `'eip7702'`: the permissionless EIP-7702 sender (`accountMode: 'eip7702'` with `bundlerUrl`)
+ * - `'wallet'`: the registered publish wallet as-is (EIP-1193, ethers or a Thirdweb account)
+ */
+export type PublishSenderKind = 'modular' | 'eip7702' | 'wallet'
+
+export interface ResolvedPublishPayment {
+  sender: PublishSenderKind
+  gas: {
+    payer: PublishGasPayer
+    /** Who sponsors when `payer` is `'sponsored'`. */
+    sponsor?: 'thirdweb' | 'paymaster'
+  }
+  storage: {
+    payer: PublishStoragePayer
+    path: 'l1' | 'bundler'
+  }
+}
+
+export class PublishPaymentConfigError extends Error {
+  constructor(message: string) {
+    super(`@seedprotocol/publish: ${message}`)
+    this.name = 'PublishPaymentConfigError'
+  }
+}
+
+type PaymentInputs = Pick<
+  PublishConfig,
+  'payment' | 'useModularExecutor' | 'accountMode' | 'bundlerUrl' | 'paymasterUrl' | 'thirdweb' | 'useArweaveBundler'
+>
+
+/** The sender ensureWalletThenPublish and useSeedWallet use for this config. */
+export function resolvePublishSender(config: PaymentInputs): PublishSenderKind {
+  if (config.useModularExecutor) return 'modular'
+  const accountMode = config.accountMode ?? (config.bundlerUrl ? 'eip7702' : 'eoa')
+  if (accountMode === 'eip7702' && config.bundlerUrl) return 'eip7702'
+  return 'wallet'
+}
+
+/**
+ * `thirdweb.sponsorGas` with `payment.gas` as its default. Thirdweb wallets read this, so a
+ * `payment: { gas: 'user' }` config builds unsponsored wallets without setting sponsorGas too.
+ */
+export function resolveSponsorGas(config: Pick<PublishConfig, 'payment' | 'thirdweb'>): boolean {
+  const explicit = config.thirdweb?.sponsorGas
+  if (explicit !== undefined) return explicit
+  return config.payment?.gas !== 'user'
+}
+
+/**
+ * Who pays gas and storage for this config, from the sender it selects. The publish flow and
+ * {@link estimatePublishCost} both use this, so a cost estimate reports what a publish does.
+ *
+ * - modular: Thirdweb sponsors when `thirdweb.sponsorGas` (default true)
+ * - eip7702: a paymaster sponsors (`paymasterUrl`, else the bundler), unless `payment.gas` is
+ *   `'user'`, which sends without one
+ * - wallet: the user pays
+ *
+ * Storage goes through the upload API on both paths. On the bundler path the user's key signs
+ * data items and the operator pays for them. On the L1 path the user's Arweave key pays the fee
+ * and the upload API reimburses it before the upload; the second pass for deferred Html is not
+ * reimbursed.
+ */
+export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPayment {
+  const sender = resolvePublishSender(config)
+  let gas: ResolvedPublishPayment['gas']
+  if (sender === 'modular') {
+    gas = resolveSponsorGas(config) ? { payer: 'sponsored', sponsor: 'thirdweb' } : { payer: 'user' }
+  } else if (sender === 'eip7702') {
+    gas = config.payment?.gas === 'user' ? { payer: 'user' } : { payer: 'sponsored', sponsor: 'paymaster' }
+  } else {
+    gas = { payer: 'user' }
+  }
+  return {
+    sender,
+    gas,
+    storage: {
+      payer: config.payment?.storage ?? 'operator',
+      path: config.useArweaveBundler ? 'bundler' : 'l1',
+    },
+  }
+}
+
+/**
+ * Throws {@link PublishPaymentConfigError} when `payment` asks for something the other settings
+ * can't deliver. Called by `initPublish`.
+ */
+export function assertPublishPaymentConfig(config: PaymentInputs): void {
+  const payment = config.payment
+  if (!payment) return
+  const sender = resolvePublishSender(config)
+
+  if (payment.gas === 'sponsored') {
+    if (sender === 'wallet') {
+      throw new PublishPaymentConfigError(
+        "payment.gas is 'sponsored', but publishes are sent from the connected wallet, which pays its own gas. " +
+          'Set useModularExecutor (Thirdweb sponsorship) or bundlerUrl (EIP-7702 with a paymaster).',
+      )
+    }
+    if (sender === 'modular' && config.thirdweb?.sponsorGas === false) {
+      throw new PublishPaymentConfigError("payment.gas is 'sponsored' but thirdweb.sponsorGas is false.")
+    }
+  }
+
+  if (payment.gas === 'user') {
+    if (sender === 'modular' && config.thirdweb?.sponsorGas === true) {
+      throw new PublishPaymentConfigError("payment.gas is 'user' but thirdweb.sponsorGas is true.")
+    }
+    if (sender === 'eip7702' && config.paymasterUrl) {
+      throw new PublishPaymentConfigError(
+        "payment.gas is 'user' but paymasterUrl is set; remove it so the EIP-7702 sender pays its own gas.",
+      )
+    }
+  }
+
+  if (payment.storage === 'user') {
+    throw new PublishPaymentConfigError(
+      "payment.storage 'user' is not supported yet: uploads go through the upload API, whose operator pays.",
+    )
+  }
+}

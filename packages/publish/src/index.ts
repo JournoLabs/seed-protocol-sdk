@@ -26,6 +26,16 @@ export {
   type ArweaveDataItemInfoResult,
   type PublishAccountMode,
 } from './config'
+export {
+  resolvePublishPayment,
+  resolvePublishSender,
+  PublishPaymentConfigError,
+  type PublishPaymentConfig,
+  type PublishGasPayer,
+  type PublishStoragePayer,
+  type PublishSenderKind,
+  type ResolvedPublishPayment,
+} from './payment'
 export type {
   PublishUploadData,
   GetPublishUploadDataOptions,

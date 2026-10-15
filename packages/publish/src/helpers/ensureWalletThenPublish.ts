@@ -6,6 +6,7 @@ import { getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
+import { resolvePublishPayment } from '../payment'
 import type { ManagedAccountPublishError } from '../errors'
 
 /**
@@ -41,7 +42,8 @@ export async function ensureWalletThenPublish(
   options?: CreatePublishOptions,
 ): Promise<EnsureWalletThenPublishResult> {
   const config = getPublishConfig()
-  if (config.useModularExecutor) {
+  const payment = resolvePublishPayment(config)
+  if (payment.sender === 'modular') {
     // Modular / ManagedAccount Thirdweb bootstrap is adapter-only.
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     return ensureSmartWalletThenPublish(item, null, async () => {
@@ -56,15 +58,16 @@ export async function ensureWalletThenPublish(
   }
 
   // Upgrade EOA sender to permissionless EIP-7702 when configured.
-  if (config.accountMode === 'eip7702' && config.bundlerUrl) {
-    const sponsored = await createPermissionlessTxSender({
+  if (payment.sender === 'eip7702') {
+    const txSender = await createPermissionlessTxSender({
       signer: session.signer,
-      bundlerUrl: config.bundlerUrl,
+      bundlerUrl: config.bundlerUrl!,
       paymasterUrl: config.paymasterUrl,
+      sponsored: payment.gas.payer === 'sponsored',
     })
     session = {
       ...session,
-      txSender: sponsored,
+      txSender,
       publisherAddress: session.publisherAddress ?? session.signer.address,
     }
   }

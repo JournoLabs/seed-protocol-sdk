@@ -31,8 +31,9 @@ export type PublishCostEstimate = {
     uploadCount: number
     path: 'l1' | 'bundler'
     /**
-     * Whether the user pays for storage. Always false today: both paths hand the data to the
-     * upload API (`uploadApiBaseUrl`), whose operator funds the Arweave transactions.
+     * Whether the user pays for storage (`payment.storage`). With the default `'operator'` the
+     * upload API funds it: on the bundler path directly, on the L1 path by reimbursing the user's
+     * Arweave key before the upload (the deferred-Html second pass is not reimbursed).
      */
     userPays: boolean
   }

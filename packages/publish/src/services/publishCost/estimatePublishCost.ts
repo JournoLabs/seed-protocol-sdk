@@ -1,5 +1,6 @@
 import type { IItem } from '@seedprotocol/sdk'
 import { getPublishConfig } from '~/config'
+import { resolvePublishPayment } from '~/payment'
 import { heuristicPublishGas } from './gasHeuristics'
 import { getCachedMarketRates, type MarketRates } from './marketRates'
 import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummary } from './types'
@@ -7,27 +8,17 @@ import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummar
 const WINSTON_PER_AR = 1e12
 const WEI_PER_ETH = 1e18
 
-/**
- * Whether the user's wallet pays publish gas, following the sender ensureWalletThenPublish picks:
- * the modular executor publishes from a Thirdweb managed account (sponsored per
- * `thirdweb.sponsorGas`), EIP-7702 with a bundler goes through the permissionless sender (sponsored
- * when `paymasterUrl` is set), and anything else is a plain transaction from the user's EOA.
- */
-function evmUserPaysFor(cfg: ReturnType<typeof getPublishConfig>): boolean {
-  if (cfg.useModularExecutor) return !cfg.thirdweb.sponsorGas
-  if (cfg.accountMode === 'eip7702' && cfg.bundlerUrl) return !cfg.paymasterUrl
-  return true
-}
-
-function readPublishFlags(): { evmUserPays: boolean; arweavePath: 'l1' | 'bundler' } {
+/** Who pays, from the same resolution the publish flow uses ({@link resolvePublishPayment}). */
+function readPublishFlags(): { evmUserPays: boolean; arweaveUserPays: boolean; arweavePath: 'l1' | 'bundler' } {
   try {
-    const cfg = getPublishConfig()
+    const payment = resolvePublishPayment(getPublishConfig())
     return {
-      evmUserPays: evmUserPaysFor(cfg),
-      arweavePath: cfg.useArweaveBundler ? 'bundler' : 'l1',
+      evmUserPays: payment.gas.payer === 'user',
+      arweaveUserPays: payment.storage.payer === 'user',
+      arweavePath: payment.storage.path,
     }
   } catch {
-    return { evmUserPays: true, arweavePath: 'l1' }
+    return { evmUserPays: true, arweaveUserPays: false, arweavePath: 'l1' }
   }
 }
 
@@ -38,9 +29,10 @@ function roundUsd(n: number): number {
 export function combinePublishCostEstimate(
   work: PublishWorkSummary,
   rates: MarketRates,
-  flags?: { evmUserPays?: boolean; arweavePath?: 'l1' | 'bundler' },
+  flags?: { evmUserPays?: boolean; arweaveUserPays?: boolean; arweavePath?: 'l1' | 'bundler' },
 ): PublishCostEstimate {
   const evmUserPays = flags?.evmUserPays ?? true
+  const arweaveUserPays = flags?.arweaveUserPays ?? false
   const arweavePath = flags?.arweavePath ?? 'l1'
   const gas = heuristicPublishGas(work)
   const evmWei = gas * rates.gasPriceWei
@@ -65,8 +57,7 @@ export function combinePublishCostEstimate(
       bytes: work.uploadBytes,
       uploadCount: work.uploadCount,
       path: arweavePath,
-      // Both paths go through the upload API, whose operator pays for the Arweave transactions.
-      userPays: false,
+      userPays: arweaveUserPays,
     },
     prices: {
       ethUsd: rates.ethUsd,

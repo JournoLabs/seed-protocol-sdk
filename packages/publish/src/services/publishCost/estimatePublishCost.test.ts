@@ -75,10 +75,32 @@ describe('estimatePublishCost', () => {
     expect(estimate.evm.userPays).toBe(false)
   })
 
-  test('EIP-7702 bundler without a paymaster: the user pays gas', async () => {
+  test('EIP-7702 bundler without paymasterUrl is sponsored (the bundler is the paymaster)', async () => {
     initPublish({
       uploadApiBaseUrl: 'https://example.test',
       bundlerUrl: 'https://bundler.example',
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(false)
+  })
+
+  test("EIP-7702 with payment.gas 'user': the user pays gas", async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      bundlerUrl: 'https://bundler.example',
+      payment: { gas: 'user' },
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.evm.userPays).toBe(true)
+  })
+
+  test("modular executor with payment.gas 'user': the user pays gas", async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      useModularExecutor: true,
+      payment: { gas: 'user' },
       getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })

@@ -1,3 +1,4 @@
+import { assertPublishPaymentConfig, resolveSponsorGas } from './payment'
 import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   setAdditionalSyncAddresses,
@@ -57,7 +58,7 @@ export interface ThirdwebWalletOptions {
   bundlerUrl?: string
   /**
    * Sponsor gas through Thirdweb: the managed smart account's UserOps and, in `'EIP7702'` mode,
-   * the in-app EOA's transactions. Default `true`. Set `false` where Thirdweb's paymaster is
+   * the in-app EOA's transactions. Default `true` (`false` with `payment: { gas: 'user' }`). Set `false` where Thirdweb's paymaster is
    * unavailable (local chains); the accounts then pay their own gas and must hold ETH.
    */
   sponsorGas?: boolean
@@ -116,6 +117,13 @@ export interface PublishConfig {
    */
   thirdweb?: ThirdwebWalletOptions
   /**
+   * Who pays for publishes: `gas` (`'sponsored'` | `'user'`) and `storage` (`'operator'` |
+   * `'user'`). Optional; the settings below decide when it's left out. When set, it supplies
+   * their defaults (e.g. `gas: 'user'` makes Thirdweb wallets unsponsored) and `initPublish`
+   * throws on a contradiction. See `resolvePublishPayment`.
+   */
+  payment?: import('./payment').PublishPaymentConfig
+  /**
    * EntryPoint v0.8 bundler for the permissionless EIP-7702 `SeedTxSender` used by non-Thirdweb
    * wallets. Setting it switches `accountMode` to `eip7702`. Not used by Thirdweb wallets: a local
    * twin's (v0.6) bundler goes in {@link ThirdwebWalletOptions.bundlerUrl}. A bundler that
@@ -123,7 +131,8 @@ export interface PublishConfig {
    */
   bundlerUrl?: string
   /**
-   * Paymaster / sponsorship endpoint for permissionless EIP-7702 sends.
+   * Paymaster / sponsorship endpoint for permissionless EIP-7702 sends. Defaults to `bundlerUrl`,
+   * so the bundler is asked to sponsor; set `payment: { gas: 'user' }` to send without a paymaster.
    */
   paymasterUrl?: string
   /**
@@ -305,6 +314,7 @@ export function getConfigRef(): PublishConfig | null {
  * For React apps, you can alternatively pass config to PublishProvider.
  */
 export function initPublish(c: PublishConfig): void {
+  assertPublishPaymentConfig(c)
   // Fail fast on chains without a known EAS deployment and no address overrides.
   const easChain = resolvePublishEasChain(c)
   // Point SDK reads (EAS sync, schema lookups) at the chain we publish to. Throws when
@@ -378,12 +388,12 @@ export type ResolvedThirdwebWalletOptions = {
 
 /** Applies defaults to {@link PublishConfig.thirdweb}. */
 export function resolveThirdwebWalletOptions(
-  config: Pick<PublishConfig, 'thirdweb'> | null | undefined,
+  config: Pick<PublishConfig, 'thirdweb' | 'payment'> | null | undefined,
 ): ResolvedThirdwebWalletOptions {
   const tw = config?.thirdweb ?? {}
   return {
     bundlerUrl: tw.bundlerUrl?.trim() || undefined,
-    sponsorGas: tw.sponsorGas ?? true,
+    sponsorGas: resolveSponsorGas(config ?? {}),
     modularWalletMode: tw.modularWalletMode ?? 'EIP7702',
   }
 }

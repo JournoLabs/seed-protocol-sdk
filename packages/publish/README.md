@@ -107,6 +107,34 @@ function App() {
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
+### Who pays
+
+A publish costs EVM gas (attestations, schema registration) and Arweave storage. Who pays follows
+from the sender your config selects:
+
+| Sender | Selected by | Gas |
+|---|---|---|
+| Thirdweb managed account | `useModularExecutor: true` | sponsored by Thirdweb unless `thirdweb.sponsorGas: false` |
+| Permissionless EIP-7702 | `bundlerUrl` (Recipe 2) | sponsored by `paymasterUrl`, else the bundler |
+| Connected wallet | neither | the user's ETH |
+
+Storage goes through the upload API at `uploadApiBaseUrl`, and its operator pays: directly on the
+bundler path, and on the L1 path by reimbursing the user's Arweave key before the upload.
+
+To state the intent instead, set `payment`. It fills in those settings' defaults, and `initPublish`
+throws `PublishPaymentConfigError` when a setting contradicts it:
+
+```typescript
+initPublish({
+  // ...
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  payment: { gas: 'user', storage: 'operator' }, // EIP-7702 sender without a paymaster
+})
+```
+
+`resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
+reports the same in `evm.userPays` / `arweave.userPays`. `storage: 'user'` is not supported yet.
+
 ### Choosing a chain
 
 Publishing works on any EVM chain with [EAS](https://github.com/ethereum-attestation-service/eas-contracts#deployments) deployed. Pass a viem `chain`; it defaults to Optimism Sepolia. The same chain drives viem reads, transaction routing and the Thirdweb wallet / ConnectButton. When `rpcUrl` is set, Thirdweb uses it too, so Seed's checks and Thirdweb's calls always reach the same node.
