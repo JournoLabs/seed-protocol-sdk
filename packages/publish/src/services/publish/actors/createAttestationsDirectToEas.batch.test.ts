@@ -40,6 +40,8 @@ type FakeTx =
   | { kind: 'multi'; schemas: string[] }
 const sentTxs = new Map<string, FakeTx>()
 const receiptMs = new Map<string, number>()
+/** 1-based number of the transaction that fails, if any. */
+let failTxNumber: number | null = null
 
 const updateVersionUid = mock(async (_: unknown) => {})
 const applyPropertyAttestationUidsFromPublish = mock(async (_: unknown) => {})
@@ -97,6 +99,7 @@ mock.module('../../../helpers/resolvePublishWallet', () => ({
     txSender: {
       address: PUBLISHER,
       sendTransaction: async (tx: FakeTx) => {
+        if (failTxNumber === sentTxs.size + 1) throw new Error('user rejected the transaction')
         const hash = `0xtx${sentTxs.size + 1}`
         sentTxs.set(hash, tx)
         receiptMs.set(hash, 1_700_000_000_000 + sentTxs.size * 1000)
@@ -201,5 +204,46 @@ describe('createAttestationsDirectToEas: related items published with the item',
     expect(relatedImage.persistSeedUid.mock.calls[0]).toEqual([PUBLISHER, 1_700_000_001_000])
 
     expect(result.publishedBatch?.seedUid?.toLowerCase()).toBe(POST_SEED)
+  })
+
+  test('a seed is recorded as soon as it is attested, so a later failure does not orphan it', async () => {
+    sentTxs.clear()
+    receiptMs.clear()
+    relatedImage.seedUid = undefined
+    relatedImage.persistSeedUid.mockClear()
+    // Image seed (tx 1), Image version (2), Image properties (3), then the Post seed (4) fails.
+    failTxNumber = 4
+    const item = {
+      seedLocalId: 'postLocalD1',
+      seedUid: undefined as string | undefined,
+      getPublishUploads: async () => [],
+      getPublishPayload: async () => requests(),
+      persistSeedUid: mock(async (_publisher?: string, _ms?: number) => {}),
+    }
+    const actor = createActor(createAttestationsDirectToEas, {
+      input: {
+        context: {
+          address: PUBLISHER,
+          account: {},
+          item,
+          arweaveTransactions: [],
+          publishUploads: [],
+          publishMode: 'patch',
+        } as any,
+        event: {},
+      },
+    })
+    actor.start()
+    try {
+      await expect(toPromise(actor)).rejects.toThrow('user rejected')
+    } finally {
+      failTxNumber = null
+    }
+
+    expect(relatedImage.seedUid).toBe(IMAGE_SEED)
+    expect(relatedImage.persistSeedUid).toHaveBeenCalledTimes(1)
+    expect(relatedImage.persistSeedUid.mock.calls[0]).toEqual([PUBLISHER, 1_700_000_001_000])
+    expect(item.seedUid).toBeUndefined()
+    expect(item.persistSeedUid).not.toHaveBeenCalled()
   })
 })
