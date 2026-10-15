@@ -475,3 +475,69 @@ describe('seedVitePlugin build options', () => {
     expect(user.worker.format).toBe('iife')
   })
 })
+
+describe('seedVitePlugin bare-globals scan', () => {
+  function scan(code: string): string[] {
+    const main = getMainPlugin()
+    const hook = main.generateBundle as unknown as (o: unknown, b: unknown) => void
+    const lines: string[] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    }
+    try {
+      hook.call({}, {}, { 'chunk.js': { type: 'chunk', code } })
+    } finally {
+      console.warn = warn
+    }
+    return lines
+      .map((l) => /line (\d+): `(\w+)`/.exec(l))
+      .filter((m): m is RegExpExecArray => !!m)
+      .map((m) => `${m[2]}@${m[1]}`)
+  }
+
+  it('reports free references to Node globals', () => {
+    const code = [
+      'export const env = process.env.API_URL',
+      'export const buf = Buffer.from("x")',
+      'export const dir = __dirname + __filename',
+      'global.foo = 1',
+      'if (typeof window !== "undefined") process.exit(1)',
+    ].join('\n')
+    expect(scan(code)).toEqual([
+      'process@1',
+      'Buffer@2',
+      '__dirname@3',
+      '__filename@3',
+      'global@4',
+      'process@5',
+    ])
+  })
+
+  it.each([
+    ['ternary typeof guard', 'export const a = typeof process === "object" ? process.env : {}'],
+    [
+      'if typeof guard',
+      'if ("object" === typeof process && "function" === typeof process.emit) {\n' +
+        '  process.emit("uncaughtException", new Error("x"))\n}',
+    ],
+    ['&& typeof guard', 'export const b = typeof Buffer !== "undefined" && Buffer.isBuffer(1)'],
+    ['try block', 'try { process.cwd() } catch {}'],
+    [
+      'local var (process polyfill)',
+      'var browser, process = (browser = {}); process.nextTick = () => {}',
+    ],
+    ['parameters', 'export function f(Buffer, { global }) { return Buffer.from(global) }'],
+    ['object keys', 'export const o = { process: 1, global() {}, __dirname: 2 }'],
+    ['member properties', 'export const m = window.process ?? window.Buffer'],
+    ['class members', 'export class C { process = 1; global() {} }'],
+    ['strings and comments', 'export const s = "process.env.X" // process.exit()'],
+    ['template text', 'export const t = `Buffer.from(${1})`'],
+  ])('ignores %s', (_label, code) => {
+    expect(scan(code)).toEqual([])
+  })
+
+  it('reports nothing for a chunk it cannot parse', () => {
+    expect(scan('process.env.X = (')).toEqual([])
+  })
+})
