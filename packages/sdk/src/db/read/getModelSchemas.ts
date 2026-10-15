@@ -4,7 +4,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import pluralize from 'pluralize'
-import { toSnakeCase } from '@/helpers'
+import { easName, matchEasName } from '@seedprotocol/eas'
 
 type ModelRecord = {
   id: number
@@ -18,6 +18,12 @@ const schemaStringToModelRecord = new Map<string, ModelRecord>()
 type GetModelSchemasReturn = {
   schemaStringToModelRecord: Map<string, ModelRecord>
   modelRecords: ModelRecord[]
+  /**
+   * The local model an EAS model schema (`bytes32 <name>`) stands for, matched as ADR 0008
+   * matches names: `bytes32 htmlpage` (an older SDK's name) finds HTMLPage. Undefined when
+   * nothing matches, or several models match equally well.
+   */
+  matchModelRecord: (schemaString: string) => ModelRecord | undefined
 }
 
 type GetModelSchemas = () => Promise<GetModelSchemasReturn>
@@ -66,13 +72,26 @@ export const getModelSchemas: GetModelSchemas = async () => {
       continue
     }
 
-    const schemaString = `bytes32 ${toSnakeCase(modelName)}`
+    const schemaString = `bytes32 ${easName(modelName)}`
 
     schemaStringToModelRecord.set(schemaString, foundModel)
+  }
+
+  // One candidate per name: same-named models in several schemas share one EAS schema.
+  const byName = new Map<string, ModelRecord>()
+  for (const record of modelRecords) {
+    if (record.name !== 'Seed') byName.set(record.name, record)
+  }
+  const candidates = [...byName.values()].map((record) => ({ value: record, name: record.name }))
+  const matchModelRecord = (schemaString: string): ModelRecord | undefined => {
+    if (!schemaString.startsWith('bytes32 ')) return undefined
+    const match = matchEasName(schemaString.slice('bytes32 '.length), candidates)
+    return match.kind === 'match' ? match.value : undefined
   }
 
   return {
     schemaStringToModelRecord,
     modelRecords,
+    matchModelRecord,
   }
 }
