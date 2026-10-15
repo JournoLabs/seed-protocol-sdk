@@ -107,6 +107,8 @@ export function useItemProperty(
         seedLocalId: resolvedSeedLocalId || undefined,
         seedUid: resolvedSeedUid || undefined,
         propertyName,
+        // An itemId may be a seedLocalId or a seedUid: tried as the local id first
+        itemId: itemId !== undefined && itemId !== '' ? itemId : undefined,
       }
     }
     return null
@@ -130,12 +132,18 @@ export function useItemProperty(
             seedLocalId: lookupMode.seedLocalId,
             seedUid: lookupMode.seedUid,
           }))
-        if (!found) {
+        // itemId may be a seedUid (an item synced from EAS): it was only ever looked up as a local id
+        const foundByUid =
+          !found && lookupMode.itemId
+            ? await ItemProperty.find({ propertyName: lookupMode.propertyName, seedUid: lookupMode.itemId })
+            : undefined
+        const result = found ?? foundByUid
+        if (!result) {
           logger(
             `[useItemProperty] no property found for Item.${lookupMode.seedLocalId || lookupMode.seedUid}.${lookupMode.propertyName}`,
           )
         }
-        return (found as IItemProperty | undefined) ?? null
+        return (result as IItemProperty | undefined) ?? null
       },
       // The ItemProperty instance cache is the cache; see useItem.
       initialData: () =>
@@ -201,6 +209,8 @@ type UseDebouncedItemPropertyParams =
 type UseDebouncedItemPropertyReturn = {
   property: IItemProperty | undefined
   setValue: (value: string) => void
+  /** Save a pending edit now instead of after the debounce delay (e.g. before navigating). */
+  flush: () => void
   isLoading: boolean
   error: Error | null
 }
@@ -224,7 +234,7 @@ export function useDebouncedItemProperty(
 
   const normalizedParams = useMemo(() => {
     if (itemId) {
-      return { seedLocalId: itemId, propertyName }
+      return { itemId, propertyName }
     }
     return { seedLocalId, seedUid, propertyName }
   }, [itemId, seedLocalId, seedUid, propertyName])
@@ -243,9 +253,13 @@ export function useDebouncedItemProperty(
     [debounceMs]
   )
 
+  // Save a pending edit when the component unmounts (or the delay changes); cancelling here lost
+  // the last keystrokes typed within the debounce window.
   useEffect(() => {
-    return () => debouncedPersist.cancel()
+    return () => debouncedPersist.flush()
   }, [debouncedPersist])
+
+  const flush = useCallback(() => debouncedPersist.flush(), [debouncedPersist])
 
   const setValue = useCallback(
     (value: string) => {
@@ -264,6 +278,7 @@ export function useDebouncedItemProperty(
   return {
     property,
     setValue,
+    flush,
     isLoading,
     error,
   }
@@ -393,6 +408,10 @@ async function fetchItemPropertiesList(
  * 
  * Uses useLiveQuery to watch for changes in the metadata table and automatically
  * updates the returned ItemProperty instances when changes occur.
+ *
+ * The list has one entry per model property, including ones the item has no value for yet
+ * (their `value` is null), plus a read-only `createdAt` entry built from the item's creation
+ * time. Filter on `propertyName` or `value` if you only want stored values.
  * 
  * @overload
  * @param props - Object with seedLocalId or seedUid
@@ -689,11 +708,6 @@ export const useDestroyItemProperty = (): UseDestroyItemPropertyReturn => {
     setIsLoading(true)
     try {
       await itemProperty.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = (itemProperty.getService().getSnapshot() as unknown as {
-        context: { _destroyError?: { message: string } | null }
-      }).context
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err

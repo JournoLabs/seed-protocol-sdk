@@ -41,12 +41,44 @@ export interface UnloadConfig<T extends object> {
 }
 
 /**
- * Unload an entity instance and clean up all resources
+ * Release one reference to a cached entity instance. When none remain, remove it from the
+ * caches, clean up its subscriptions and stop its service
  * 
  * @param instance - Entity instance to unload
  * @param config - Unload configuration
  */
 export function unloadEntity<T extends object>(instance: T, config: UnloadConfig<T>): void {
+  // Get cache keys for this instance
+  const cacheKeys = config.getCacheKeys(instance)
+
+  // Remove from all caches (decrement refCount, delete if 0)
+  let stillReferenced = false
+  for (const cache of config.caches) {
+    for (const key of cacheKeys) {
+      const entry = cache.get(key)
+      if (entry) {
+        entry.refCount -= 1
+        if (entry.refCount <= 0) {
+          cache.delete(key)
+
+          // Also remove from secondary caches if provided
+          if (config.secondaryCaches) {
+            for (const secondaryCache of config.secondaryCaches) {
+              secondaryCache.delete(key)
+            }
+          }
+        } else {
+          cache.set(key, entry)
+          stillReferenced = true
+        }
+      }
+    }
+  }
+
+  // Other holders (e.g. another hook that created the same cached instance) still use it:
+  // keep its subscriptions and service running. Stopping here broke them.
+  if (stillReferenced) return
+
   // Clean up liveQuery subscriptions
   const instanceState = config.instanceState.get(instance)
   if (instanceState) {
@@ -62,32 +94,7 @@ export function unloadEntity<T extends object>(instance: T, config: UnloadConfig
       }
     }
   }
-  
-  // Get cache keys for this instance
-  const cacheKeys = config.getCacheKeys(instance)
-  
-  // Remove from all caches (decrement refCount, delete if 0)
-  for (const cache of config.caches) {
-    for (const key of cacheKeys) {
-      const entry = cache.get(key)
-      if (entry) {
-        entry.refCount -= 1
-        if (entry.refCount <= 0) {
-          cache.delete(key)
-          
-          // Also remove from secondary caches if provided
-          if (config.secondaryCaches) {
-            for (const secondaryCache of config.secondaryCaches) {
-              secondaryCache.delete(key)
-            }
-          }
-        } else {
-          cache.set(key, entry)
-        }
-      }
-    }
-  }
-  
+
   // Call additional cleanup if provided
   if (config.onUnload) {
     try {

@@ -1170,25 +1170,19 @@ describe('React ItemProperty Hooks Integration Tests', () => {
       )
 
       // Create the model with properties
-      const newModel = Model.create('NewItemModel', schemaInstance, {
+      // Awaited: resolves once the model and its properties are written (Item.create rejects a
+      // model that has no row yet)
+      const newModel = await Model.create('NewItemModel', schemaInstance, {
         properties: {
           name: { dataType: 'Text' },
           description: { dataType: 'Text' },
         },
-        waitForReady: false,
       })
-
-      // Wait for model to be idle
-      await waitFor(
-        () => {
-          expect(newModel.getService().getSnapshot().value).toBe('idle')
-        },
-        { timeout: WAIT_TIMEOUT_MS }
-      )
 
       // Create an item
       const newItem = await Item.create({
         modelName: 'NewItemModel',
+        schemaName: 'Empty Test Schema Items',
         name: 'Test Item Name',
         description: 'Test Item Description',
       })

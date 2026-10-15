@@ -5,11 +5,11 @@ import {
   ensureImageLocal,
   normalizeArweaveTxIdForEnsure,
   type EnsureImageLocalResult,
-  type ItemProperty,
+  type IItemProperty,
 } from '@seedprotocol/sdk'
 
 export type UseEnsureLocalImageParams = {
-  imageProperty: ItemProperty<any>
+  imageProperty: IItemProperty<any>
   filename?: string
   width?: number
   /** When false, skip ensure. Default true. */
@@ -30,11 +30,12 @@ export type UseEnsureLocalImageReturn = {
   result: EnsureImageLocalResult | null
 }
 
-const readStorageTransactionId = (property: ItemProperty<any>): string | undefined => {
+const readStorageTransactionId = (property: IItemProperty<any>): string | undefined => {
   try {
-    const ctx = property.getService?.()?.getSnapshot?.()?.context as
-      | { storageTransactionId?: string }
+    const snapshot = property.getService?.()?.getSnapshot?.() as
+      | { context?: { storageTransactionId?: string } }
       | undefined
+    const ctx = snapshot?.context
     return ctx?.storageTransactionId || undefined
   } catch {
     return undefined

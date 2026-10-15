@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { BaseDb } from '@seedprotocol/sdk'
-import { Observable } from 'rxjs'
 import { useIsClientReady } from './client'
 
 /**
@@ -33,32 +32,63 @@ import { useIsClientReady } from './client'
 export function useLiveQuery<T>(
   query: ((sql: any) => any) | any | null | undefined
 ): T[] | undefined {
-  const [data, setData] = useState<T[] | undefined>(undefined)
-  const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null)
+  return useLiveQueryState<T>(query).data
+}
+
+/**
+ * Identity of a query for subscription purposes. A Drizzle builder is identified by its compiled
+ * SQL and parameters, so an inline (unmemoised) builder doesn't resubscribe on every render; that
+ * re-render/resubscribe cycle looped. A SQL tag function can only be identified by reference:
+ * memoise it (useCallback/useMemo).
+ */
+function queryKeyOf(query: unknown): unknown {
+  if (query && typeof query === 'object' && typeof (query as { toSQL?: unknown }).toSQL === 'function') {
+    try {
+      const { sql, params } = (query as { toSQL: () => { sql: string; params: unknown[] } }).toSQL()
+      return `sql:${sql}|${JSON.stringify(params)}`
+    } catch {
+      return query
+    }
+  }
+  return query
+}
+
+/**
+ * useLiveQuery with its error: `{ data, error }`. `data` is undefined until the first result and
+ * resets when the query changes; `error` is the last error from the live query, cleared by the
+ * next result.
+ */
+export function useLiveQueryState<T>(
+  query: ((sql: any) => any) | any | null | undefined
+): { data: T[] | undefined; error: Error | null } {
+  const [state, setState] = useState<{ data: T[] | undefined; error: Error | null }>({
+    data: undefined,
+    error: null,
+  })
   const isClientReady = useIsClientReady()
 
-  // Create Observable outside useEffect so it's stable and distinctUntilChanged can work
-  // Only recreate when query or isClientReady changes
+  const queryKey = queryKeyOf(query)
+  const queryRef = useRef(query)
+  queryRef.current = query
+
+  // Create Observable outside useEffect so it's stable and distinctUntilChanged can work.
+  // Only recreate when the query's identity or isClientReady changes.
   const observable = useMemo(() => {
-    if (!isClientReady || !query) {
+    const current = queryRef.current
+    if (!isClientReady || !current) {
       return null
     }
     try {
-      return BaseDb.liveQuery<T>(query)
+      return BaseDb.liveQuery<T>(current)
     } catch (error) {
       console.error('[useLiveQuery] Failed to create live query:', error)
       return null
     }
-  }, [query, isClientReady])
+  }, [queryKey, isClientReady])
 
   useEffect(() => {
-    // Cleanup previous subscription if it exists
-    if (subscriptionRef.current) {
-      subscriptionRef.current.unsubscribe()
-      subscriptionRef.current = null
-    }
-
-    // Don't subscribe if observable is null
+    // A new (or no) query: drop the previous query's rows (no re-render if already empty)
+    setState((prev) => (prev.data === undefined && prev.error === null ? prev : { data: undefined, error: null }))
     if (!observable) {
       return
     }
@@ -67,26 +97,17 @@ export function useLiveQuery<T>(
       next: (results) => {
         // New array reference so React re-renders when SQLocal mutates row objects in place
         // on the same backing array (Object.is would otherwise bail out of useState).
-        setData(results !== undefined ? [...results] : undefined)
+        setState({ data: results !== undefined ? [...results] : undefined, error: null })
       },
       error: (err) => {
         console.error('[useLiveQuery] Error:', err)
-        // Don't set data to undefined on error - keep last known good state
-        // This prevents UI flickering on transient errors
+        // Keep the last rows (no flicker on transient errors) and report the error
+        setState((prev) => ({ data: prev.data, error: err instanceof Error ? err : new Error(String(err)) }))
       },
     })
 
-    subscriptionRef.current = subscription
+    return () => subscription.unsubscribe()
+  }, [observable])
 
-    // Cleanup on unmount or observable change
-    return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe()
-        subscriptionRef.current = null
-      }
-    }
-  }, [observable]) // Only re-subscribe when observable changes
-
-  return data
+  return state
 }
-

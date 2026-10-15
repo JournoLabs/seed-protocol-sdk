@@ -32,6 +32,7 @@ export function useResolvedMediaRef(params: UseResolvedMediaRefParams): UseResol
 
   useEffect(() => {
     let cancelled = false
+    let blobUrl: string | undefined
     const go = async () => {
       if (!enabled || value == null || String(value).trim() === '') {
         if (!cancelled) {
@@ -47,7 +48,13 @@ export function useResolvedMediaRef(params: UseResolvedMediaRefParams): UseResol
       }
       try {
         const r = await resolveMediaRef(String(value), { treatAs })
-        if (cancelled) return
+        // A local blob URL is created for this result; nobody else revokes it.
+        const createdBlobUrl = r.status === 'ready' && r.source === 'localBlob' ? r.href : undefined
+        if (cancelled) {
+          if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl)
+          return
+        }
+        blobUrl = createdBlobUrl
         setResult(r)
         if (r.status === 'empty') {
           setStatus('empty')
@@ -66,6 +73,8 @@ export function useResolvedMediaRef(params: UseResolvedMediaRefParams): UseResol
     void go()
     return () => {
       cancelled = true
+      // Release the blob URL this effect created (value changed, refetch, or unmount)
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
     }
   }, [enabled, value, treatAs, tick])
 

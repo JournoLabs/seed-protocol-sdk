@@ -248,7 +248,12 @@ function UseDestroyModelPropertyTest({ modelProperty }: { modelProperty: ModelPr
   const handleDestroy = async () => {
     if (!modelProperty) return
     setStatus('destroying')
-    await destroy(modelProperty)
+    try {
+      await destroy(modelProperty)
+    } catch {
+      // The hook rejects and also sets `error`, which the test reads
+      return
+    }
     setStatus('destroyed')
   }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, DetailedHTMLProps, ImgHTMLAttributes } from
 import debug                                                                                    from 'debug'
 import { BaseFileManager } from '@seedprotocol/sdk'
 import { useItemProperty } from "./itemProperty"
-import { ItemProperty } from '@seedprotocol/sdk'
+import type { IItemProperty } from '@seedprotocol/sdk'
 import { useEnsureLocalImage } from './useEnsureLocalImage'
 
 const logger = debug('seedSdk:react:SeedImage')
@@ -46,7 +46,8 @@ function matchFileNameWithoutExtension(fileName: string, targetName: string): bo
 }
 
 export type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement> & {
-  imageProperty: ItemProperty<any>
+  /** The image property, e.g. from useItemProperty or item.properties. */
+  imageProperty: IItemProperty<any>
   alt?: string
   width?: number
   height?: number
@@ -232,14 +233,16 @@ const SeedImageInner = ({
   }
 
   return (
-    <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...imgProps} onError={handleError} />
+    <img
+      src={imgSrc}
+      alt={props.alt || imageProperty.propertyName || 'Image'}
+      width={width}
+      {...imgProps}
+      onError={handleError}
+    />
   )
 }
 
-export const SeedImage = React.memo(SeedImageInner, (prev, next) =>
-  prev.imageProperty === next.imageProperty &&
-  prev.width === next.width &&
-  prev.height === next.height &&
-  prev.filename === next.filename &&
-  prev.ensure === next.ensure
-)
+// Shallow comparison of all props: the old comparator ignored className, style, alt and handlers,
+// so changing them never re-rendered.
+export const SeedImage = React.memo(SeedImageInner)
