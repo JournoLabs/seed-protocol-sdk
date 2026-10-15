@@ -2,6 +2,10 @@ import { ClientManagerState, getClient } from '@seedprotocol/sdk'
 import { useSelector } from "@xstate/react"
 
 
+/**
+ * Whether `client.init` has finished and the client is ready (idle). SeedClientGate uses it to
+ * hold back its children; call it to wait for readiness in your own components.
+ */
 export const useIsClientReady = () => {
   const client = getClient()
 
