@@ -16,7 +16,6 @@ import { getPublishConfig } from '~/config'
 import { getPublishChainName } from '../../../helpers/chainConfig'
 import { verifyPublishChain } from '../../../helpers/verifyPublishChain'
 import { ManagedAccountPublishError } from '../../../errors'
-import { undeployedPublisherProblem } from '../helpers/undeployedSmartAccount'
 
 const activePublishProcesses = new Set<string>()
 
@@ -37,6 +36,8 @@ async function refuseUndeployedSmartAccount(
   publisherAddress: string,
   wallet: Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
 ): Promise<Error | null> {
+  // Loaded on this branch only: it pulls in the factory contract helpers.
+  const { undeployedPublisherProblem } = await import('../helpers/undeployedSmartAccount')
   const problem = await undeployedPublisherProblem(publisherAddress, wallet)
   if (problem === 'undeployed_smart_account') {
     return new ManagedAccountPublishError(
