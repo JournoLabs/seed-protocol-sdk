@@ -15,7 +15,7 @@ mock.module('@seedprotocol/sdk', () => ({
   },
 }))
 
-const { setPublishWallet } = await import('./publishWalletRegistry')
+const { clearPublishWallet, getPublishWallet, setPublishWallet } = await import('./publishWalletRegistry')
 
 describe('setPublishWallet', () => {
   test('replaces owned addresses with the wallet and keeps watched ones', async () => {
@@ -25,5 +25,12 @@ describe('setPublishWallet', () => {
       txSender: { address: wallet },
     } as never)
     expect(calls).toEqual([{ owned: [wallet], watched: stored.watched }])
+  })
+
+  test('disconnecting clears owned addresses and keeps watched ones', async () => {
+    calls.length = 0
+    await clearPublishWallet()
+    expect(getPublishWallet()).toBeNull()
+    expect(calls).toEqual([{ owned: [], watched: stored.watched }])
   })
 })

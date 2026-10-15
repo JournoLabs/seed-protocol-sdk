@@ -56,8 +56,22 @@ export function getPublishWallet(): PublishWalletSession | null {
   return session
 }
 
-export function clearPublishWallet(): void {
+/**
+ * Forget the publish wallet and stop treating its addresses as owned in the Seed SDK (watched
+ * addresses are kept). New drafts are then signed-out drafts, editable until a wallet connects
+ * and claims them; drafts stamped with the old wallet are read-only until it reconnects.
+ */
+export async function clearPublishWallet(): Promise<void> {
   session = null
+  if (!seedClient.isInitialized()) return
+  try {
+    const { watched } = await seedClient.getAddresses()
+    // A wallet connected while we read: its addresses win.
+    if (session) return
+    await seedClient.setAddresses({ owned: [], watched })
+  } catch (err) {
+    console.warn('[publishWalletRegistry] Failed to clear seed client owned addresses:', err)
+  }
 }
 
 /** Convenience for callers that only need signing. */
