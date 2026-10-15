@@ -734,6 +734,22 @@ export const addSchemaToDb = async (
   }
 
   if (existingSchemas.length > 0) {
+    // The row is per schema name and holds its latest version. A complete schema file can bring
+    // a version under its own id (SDK version bumps keep the id; imported files may not).
+    const isOtherVersionFile =
+      !!schemaFileId &&
+      !!existingSchemas[0].schemaFileId &&
+      existingSchemas[0].schemaFileId !== schemaFileId &&
+      existingSchemas[0].isDraft !== true &&
+      schema.version !== undefined &&
+      schema.version !== existingSchemas[0].version
+    if (isOtherVersionFile && schema.version! < existingSchemas[0].version) {
+      // An older version's file: rolling the row back to it would leave the newer version's id
+      // pointing at the older version's data.
+      logger(`Keeping schema "${schema.name}" at v${existingSchemas[0].version}; not replacing it with older v${schema.version}`)
+      return existingSchemas[0]
+    }
+
     // Update fields if provided
     const updates: Partial<typeof schemas.$inferInsert> = {}
     // Update schemaFileId if provided and different from existing (or if existing doesn't have one or is null)
@@ -745,9 +761,11 @@ export const addSchemaToDb = async (
       // 1. Existing schema is a draft (can be updated)
       // 2. Existing schema has no schemaFileId (should be set)
       // 3. We're explicitly setting isDraft to false (updating from draft to non-draft)
-      const shouldUpdate = existingSchemas[0].isDraft === true || 
-                          !existingSchemas[0].schemaFileId || 
-                          (isDraft === false && existingSchemas[0].isDraft === true)
+      // 4. It's a newer version's file: the row takes that version's data, so it takes its id too
+      const shouldUpdate = existingSchemas[0].isDraft === true ||
+                          !existingSchemas[0].schemaFileId ||
+                          (isDraft === false && existingSchemas[0].isDraft === true) ||
+                          isOtherVersionFile
       
       if (shouldUpdate) {
         logger(`Updating schemaFileId from "${existingSchemas[0].schemaFileId}" to "${schemaFileId}" for schema "${schema.name}"`)
