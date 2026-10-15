@@ -12,6 +12,7 @@ const { runSyncFromEas } = vi.hoisted(() => ({ runSyncFromEas: vi.fn() }))
 vi.mock('@/events/item/syncDbWithEas', () => ({ runSyncFromEas }))
 vi.mock('@/db/write/easSyncProcess', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/db/write/easSyncProcess')>()),
+  failInterruptedEasSyncProcessRows: vi.fn().mockResolvedValue(0),
   insertEasSyncProcessRow: vi.fn().mockResolvedValue(1),
   finalizeEasSyncProcessRow: vi.fn().mockResolvedValue(undefined),
 }))

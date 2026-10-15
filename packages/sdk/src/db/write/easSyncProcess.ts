@@ -10,6 +10,8 @@ function enqueueEasSyncDbWrite<T>(fn: () => Promise<T>): Promise<T> {
   return next
 }
 
+export const INTERRUPTED_SYNC_MESSAGE = 'Interrupted: the sync stopped before it finished (tab closed?)'
+
 const MAX_ERROR_MESSAGE_LENGTH = 500
 const MAX_ERROR_DETAILS_LENGTH = 2000
 
@@ -72,5 +74,29 @@ export async function finalizeEasSyncProcessRow(
         persistedSnapshot: JSON.stringify(params.persistedSnapshot),
       })
       .where(eq(easSyncProcesses.id, id))
+  })
+}
+
+/**
+ * Marks every `in_progress` row failed ("interrupted"). Called by a sync holding the `eas-sync` tab
+ * lock, before it inserts its own row: syncs take turns under that lock, so no other sync is
+ * running and such a row belongs to one whose tab closed or crashed. Returns how many it marked.
+ */
+export async function failInterruptedEasSyncProcessRows(): Promise<number> {
+  return enqueueEasSyncDbWrite(async () => {
+    const db = BaseDb.getAppDb()
+    if (!db) return 0
+    const now = Date.now()
+    const rows = await db
+      .update(easSyncProcesses)
+      .set({
+        status: 'failed',
+        completedAt: now,
+        updatedAt: now,
+        errorMessage: INTERRUPTED_SYNC_MESSAGE,
+      })
+      .where(eq(easSyncProcesses.status, 'in_progress'))
+      .returning({ id: easSyncProcesses.id })
+    return rows.length
   })
 }

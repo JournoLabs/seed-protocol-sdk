@@ -1,6 +1,7 @@
 import { assign, createActor, fromPromise, setup } from 'xstate'
 import { MachineIds } from '@/client/constants'
 import {
+  failInterruptedEasSyncProcessRows,
   finalizeEasSyncProcessRow,
   insertEasSyncProcessRow,
   type EasSyncRequestSource,
@@ -59,41 +60,47 @@ const runEasSync = fromPromise(
       runningSnapshot: Record<string, unknown>
     }
   }) => {
-    const rowId = await insertEasSyncProcessRow({
-      requestPayload: input.requestPayload,
-      persistedSnapshot: input.runningSnapshot,
-    })
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
-    try {
-      // Sync checks for rows and then inserts the rest (no unique index on uids), so syncs in
-      // different tabs take turns. A sync can run for minutes, so wait without a timeout.
-      await withDbTabLock('eas-sync', () => runSyncFromEas(toRunSyncArg(input.options)), {
-        timeoutMs: Infinity,
-      })
-      await finalizeEasSyncProcessRow(rowId, {
-        status: 'completed',
-        persistedSnapshot: {
-          phase: 'completed',
-          correlationIds: input.requestPayload.correlationIds,
-        },
-      })
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      const details =
-        err instanceof Error && err.stack
-          ? err.stack.slice(0, 2000)
-          : undefined
-      await finalizeEasSyncProcessRow(rowId, {
-        status: 'failed',
-        errorMessage: message,
-        errorDetails: details,
-        persistedSnapshot: {
-          phase: 'failed',
-          correlationIds: input.requestPayload.correlationIds,
-        },
-      })
-      throw err
-    }
+    // Sync checks for rows and then inserts the rest (no unique index on uids), so syncs in
+    // different tabs take turns. A sync can run for minutes, so wait without a timeout.
+    await withDbTabLock(
+      'eas-sync',
+      async () => {
+        // Under the lock no other sync runs, so rows still in progress were interrupted.
+        await failInterruptedEasSyncProcessRows()
+        const rowId = await insertEasSyncProcessRow({
+          requestPayload: input.requestPayload,
+          persistedSnapshot: input.runningSnapshot,
+        })
+        try {
+          await runSyncFromEas(toRunSyncArg(input.options))
+          await finalizeEasSyncProcessRow(rowId, {
+            status: 'completed',
+            persistedSnapshot: {
+              phase: 'completed',
+              correlationIds: input.requestPayload.correlationIds,
+            },
+          })
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err)
+          const details =
+            err instanceof Error && err.stack
+              ? err.stack.slice(0, 2000)
+              : undefined
+          await finalizeEasSyncProcessRow(rowId, {
+            status: 'failed',
+            errorMessage: message,
+            errorDetails: details,
+            persistedSnapshot: {
+              phase: 'failed',
+              correlationIds: input.requestPayload.correlationIds,
+            },
+          })
+          throw err
+        }
+      },
+      { timeoutMs: Infinity },
+    )
   },
 )
 
