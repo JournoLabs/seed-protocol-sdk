@@ -2,6 +2,8 @@ export {
   DOMAIN_OWNERSHIP_SCHEMA_DEF,
   DOMAIN_OWNERSHIP_SCHEMA_NAME,
   DOMAIN_OWNERSHIP_METHOD,
+  DOMAIN_OWNERSHIP_SCOPE_HOSTNAME,
+  DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE,
   createDomainOwnershipChallenge,
   verifyDomainOwnershipDns,
   lookupDomainRegistry,
