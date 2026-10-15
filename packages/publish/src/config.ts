@@ -1,4 +1,4 @@
-import { assertPublishPaymentConfig, resolveSponsorGas } from './payment'
+import { assertPublishPaymentConfig, resolveSponsorGas, resolveUseArweaveBundler } from './payment'
 import {
   DEFAULT_ARWEAVE_GRAPHQL_URL,
   setAdditionalSyncAddresses,
@@ -412,7 +412,7 @@ export function getPublishConfig(): ResolvedPublishConfig {
       '@seedprotocol/publish: Call initPublish() or ensure PublishProvider is mounted with config before using the publish package'
     )
   }
-  const useArweaveBundler = config.useArweaveBundler ?? false
+  const useArweaveBundler = resolveUseArweaveBundler(config)
   const arweaveUploadVerificationBaseUrl =
     config.arweaveUploadVerificationBaseUrl ?? config.uploadApiBaseUrl
   const arweaveGraphqlUrl = config.arweaveGraphqlUrl ?? DEFAULT_ARWEAVE_GRAPHQL_URL

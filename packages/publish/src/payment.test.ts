@@ -5,6 +5,7 @@ import {
   PublishPaymentConfigError,
   resolvePublishPayment,
   resolvePublishSender,
+  resolveUseArweaveBundler,
 } from './payment'
 
 describe('resolvePublishSender', () => {
@@ -45,8 +46,33 @@ describe('resolvePublishPayment', () => {
     expect(resolvePublishPayment({}).gas.payer).toBe('user')
   })
   test('storage: operator by default, path from useArweaveBundler', () => {
-    expect(resolvePublishPayment({}).storage).toEqual({ payer: 'operator', path: 'l1' })
-    expect(resolvePublishPayment({ useArweaveBundler: true }).storage).toEqual({ payer: 'operator', path: 'bundler' })
+    expect(resolvePublishPayment({}).storage).toEqual({ payer: 'operator', path: 'l1', uploadTo: 'upload-api' })
+    expect(resolvePublishPayment({ useArweaveBundler: true }).storage).toEqual({
+      payer: 'operator',
+      path: 'bundler',
+      uploadTo: 'upload-api',
+    })
+  })
+  test("storage 'user' uploads data items to Turbo (default endpoints)", () => {
+    expect(resolvePublishPayment({ payment: { storage: 'user' } }).storage).toEqual({
+      payer: 'user',
+      path: 'bundler',
+      uploadTo: 'turbo',
+      turbo: { uploadUrl: 'https://upload.ardrive.io', paymentUrl: 'https://payment.ardrive.io', paidBy: [] },
+    })
+  })
+  test("storage 'user' takes custom Turbo endpoints and paidBy", () => {
+    const { turbo } = resolvePublishPayment({
+      payment: {
+        storage: 'user',
+        userStorage: { uploadUrl: 'https://up.example/', paymentUrl: 'https://pay.example', paidBy: ['0xapp'] },
+      },
+    }).storage
+    expect(turbo).toEqual({ uploadUrl: 'https://up.example', paymentUrl: 'https://pay.example', paidBy: ['0xapp'] })
+  })
+  test("storage 'user' turns on the bundler path in the resolved config", () => {
+    expect(resolveUseArweaveBundler({ payment: { storage: 'user' } })).toBe(true)
+    expect(resolveUseArweaveBundler({})).toBe(false)
   })
 })
 
@@ -76,7 +102,13 @@ describe('assertPublishPaymentConfig', () => {
     expect(() => assertPublishPaymentConfig({ bundlerUrl: 'https://b', payment: { gas: 'user' } })).not.toThrow()
     expect(() => assertPublishPaymentConfig({ payment: { gas: 'user', storage: 'operator' } })).not.toThrow()
   })
-  test("storage 'user' is not supported yet", () => {
-    rejects({ payment: { storage: 'user' } }, 'not supported yet')
+  test("storage 'user' contradicts useArweaveBundler false", () => {
+    rejects({ useArweaveBundler: false, payment: { storage: 'user' } }, 'useArweaveBundler is false')
+  })
+  test("userStorage needs storage 'user'", () => {
+    rejects({ payment: { userStorage: { provider: 'turbo' } } }, "payment.storage is not 'user'")
+  })
+  test("storage 'user' passes", () => {
+    expect(() => assertPublishPaymentConfig({ payment: { storage: 'user' } })).not.toThrow()
   })
 })

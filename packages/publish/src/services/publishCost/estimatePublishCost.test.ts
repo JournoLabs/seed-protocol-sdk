@@ -117,6 +117,17 @@ describe('estimatePublishCost', () => {
     expect(estimate.evm.userPays).toBe(true)
   })
 
+  test("payment.storage 'user' reports storage as user-paid", async () => {
+    initPublish({
+      uploadApiBaseUrl: 'https://example.test',
+      payment: { storage: 'user' },
+      getTokenPrices: async () => ({ ethUsd: 1, arUsd: 1 }),
+    })
+    const estimate = await estimatePublishCost(dummyItem(), { work, rates })
+    expect(estimate.arweave.userPays).toBe(true)
+    expect(estimate.arweave.path).toBe('bundler')
+  })
+
   test('modular executor is sponsored by default (thirdweb.sponsorGas)', async () => {
     initPublish({
       uploadApiBaseUrl: 'https://example.test',

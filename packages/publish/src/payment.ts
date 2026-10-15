@@ -8,9 +8,32 @@ export type PublishGasPayer = 'sponsored' | 'user'
 
 /**
  * Who pays for Arweave storage: `'operator'` (the upload API at `uploadApiBaseUrl` funds it) or
- * `'user'`.
+ * `'user'` (see {@link PublishUserStorageConfig}).
  */
 export type PublishStoragePayer = 'operator' | 'user'
+
+/** Default Turbo endpoints (ArDrive). */
+export const DEFAULT_TURBO_UPLOAD_URL = 'https://upload.ardrive.io'
+export const DEFAULT_TURBO_PAYMENT_URL = 'https://payment.ardrive.io'
+
+/**
+ * How users pay for storage when `payment.storage` is `'user'`. The only provider so far is
+ * Turbo: data items, signed by the user's EVM key as on the bundler path, go straight to the
+ * Turbo upload service, which charges that address's Turbo credits (topped up with a card or
+ * crypto through Turbo). Items under Turbo's free-tier size are free.
+ */
+export interface PublishUserStorageConfig {
+  provider?: 'turbo'
+  /** Turbo upload service. Default {@link DEFAULT_TURBO_UPLOAD_URL}. */
+  uploadUrl?: string
+  /** Turbo payment service (balances, prices). Default {@link DEFAULT_TURBO_PAYMENT_URL}. */
+  paymentUrl?: string
+  /**
+   * Addresses whose shared Turbo credits pay first (Turbo's `x-paid-by`), e.g. an app wallet that
+   * approved credits for its users. The signer's own credits cover the rest.
+   */
+  paidBy?: string[]
+}
 
 /**
  * Who pays for a publish. Each field is optional: leave it out to keep what the lower-level
@@ -20,6 +43,8 @@ export type PublishStoragePayer = 'operator' | 'user'
 export interface PublishPaymentConfig {
   gas?: PublishGasPayer
   storage?: PublishStoragePayer
+  /** With `storage: 'user'`: the provider users pay. Defaults to Turbo. */
+  userStorage?: PublishUserStorageConfig
 }
 
 /**
@@ -40,6 +65,10 @@ export interface ResolvedPublishPayment {
   storage: {
     payer: PublishStoragePayer
     path: 'l1' | 'bundler'
+    /** Where uploads go: the upload API, or (user-paid) Turbo directly. */
+    uploadTo: 'upload-api' | 'turbo'
+    /** Set when `uploadTo` is `'turbo'`. */
+    turbo?: { uploadUrl: string; paymentUrl: string; paidBy: string[] }
   }
 }
 
@@ -82,10 +111,11 @@ export function resolveSponsorGas(config: Pick<PublishConfig, 'payment' | 'third
  *   `'user'`, which sends without one
  * - wallet: the user pays
  *
- * Storage goes through the upload API on both paths. On the bundler path the user's key signs
- * data items and the operator pays for them. On the L1 path the user's Arweave key pays the fee
- * and the upload API reimburses it before the upload; the second pass for deferred Html is not
- * reimbursed.
+ * Operator-paid storage goes through the upload API on both paths. On the bundler path the
+ * user's key signs data items and the operator pays for them. On the L1 path the user's Arweave
+ * key pays the fee and the upload API reimburses it before the upload; the second pass for
+ * deferred Html is not reimbursed. User-paid storage uploads data items to Turbo, charged to the
+ * signer's credits.
  */
 export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPayment {
   const sender = resolvePublishSender(config)
@@ -97,14 +127,38 @@ export function resolvePublishPayment(config: PaymentInputs): ResolvedPublishPay
   } else {
     gas = { payer: 'user' }
   }
+  const storagePayer = config.payment?.storage ?? 'operator'
+  if (storagePayer === 'user') {
+    const userStorage = config.payment?.userStorage ?? {}
+    return {
+      sender,
+      gas,
+      storage: {
+        payer: 'user',
+        path: 'bundler',
+        uploadTo: 'turbo',
+        turbo: {
+          uploadUrl: (userStorage.uploadUrl ?? DEFAULT_TURBO_UPLOAD_URL).replace(/\/$/, ''),
+          paymentUrl: (userStorage.paymentUrl ?? DEFAULT_TURBO_PAYMENT_URL).replace(/\/$/, ''),
+          paidBy: userStorage.paidBy ?? [],
+        },
+      },
+    }
+  }
   return {
     sender,
     gas,
     storage: {
-      payer: config.payment?.storage ?? 'operator',
+      payer: 'operator',
       path: config.useArweaveBundler ? 'bundler' : 'l1',
+      uploadTo: 'upload-api',
     },
   }
+}
+
+/** `useArweaveBundler` with `payment.storage: 'user'` as its default (user-paid storage uploads data items). */
+export function resolveUseArweaveBundler(config: Pick<PublishConfig, 'payment' | 'useArweaveBundler'>): boolean {
+  return config.useArweaveBundler ?? config.payment?.storage === 'user'
 }
 
 /**
@@ -139,9 +193,12 @@ export function assertPublishPaymentConfig(config: PaymentInputs): void {
     }
   }
 
-  if (payment.storage === 'user') {
+  if (payment.storage === 'user' && config.useArweaveBundler === false) {
     throw new PublishPaymentConfigError(
-      "payment.storage 'user' is not supported yet: uploads go through the upload API, whose operator pays.",
+      "payment.storage is 'user', which uploads data items to Turbo, but useArweaveBundler is false.",
     )
+  }
+  if (payment.userStorage && payment.storage !== 'user') {
+    throw new PublishPaymentConfigError("payment.userStorage is set but payment.storage is not 'user'.")
   }
 }

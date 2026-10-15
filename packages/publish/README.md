@@ -133,7 +133,30 @@ initPublish({
 ```
 
 `resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
-reports the same in `evm.userPays` / `arweave.userPays`. `storage: 'user'` is not supported yet.
+reports the same in `evm.userPays` / `arweave.userPays`.
+
+#### Users pay for storage (Turbo)
+
+`payment: { storage: 'user' }` sends data items (signed by the user's EVM key, as on the bundler path)
+straight to [Turbo](https://docs.ar.io/build/upload/bundling-services/), which charges that address's
+Turbo credits. Users top up through Turbo with a card or crypto. Items under Turbo's free-tier size
+cost nothing. Before uploading, the publish checks the balance covers the items and fails with
+`InsufficientStorageCreditsError` (with `address`, `requiredWinc`, `balanceWinc`) if not, so nothing
+is half-uploaded.
+
+```typescript
+initPublish({
+  // ...
+  payment: {
+    storage: 'user',
+    // Optional: other Turbo endpoints, or app wallets whose shared credits pay first (x-paid-by)
+    userStorage: { provider: 'turbo', paidBy: ['0xYourAppWallet'] },
+  },
+})
+```
+
+`getTurboBalanceWinc(endpoints, address)` and `getTurboPriceWinc(endpoints, bytes)` help show a
+balance or price before publishing.
 
 ### Choosing a chain
 

@@ -35,7 +35,11 @@ export {
   type PublishStoragePayer,
   type PublishSenderKind,
   type ResolvedPublishPayment,
+  type PublishUserStorageConfig,
+  DEFAULT_TURBO_UPLOAD_URL,
+  DEFAULT_TURBO_PAYMENT_URL,
 } from './payment'
+export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
 export type {
   PublishUploadData,
   GetPublishUploadDataOptions,

@@ -1,6 +1,8 @@
 import { EventObject, fromCallback } from 'xstate'
 import type { PublishMachineContext } from '../../../types'
 import { getPublishConfig } from '~/config'
+import { resolvePublishPayment } from '~/payment'
+import { uploadToTurbo } from '../helpers/uploadToTurbo'
 
 const BATCH_UPLOAD_TIMEOUT_MS = 120_000
 const importDynamic = new Function('s', 'return import(s)') as (specifier: string) => Promise<{
@@ -43,7 +45,20 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
   ({ sendBack, input: { context } }) => {
     const { signedDataItems } = context
 
-    const { uploadApiBaseUrl, useArweaveBundler } = getPublishConfig()
+    const config = getPublishConfig()
+    const { uploadApiBaseUrl, useArweaveBundler } = config
+    const { storage } = resolvePublishPayment(config)
+
+    if (storage.uploadTo === 'turbo' && storage.turbo) {
+      if (!signedDataItems || signedDataItems.length === 0) {
+        sendBack({ type: 'uploadComplete', result: 'done' })
+        return
+      }
+      uploadToTurbo(signedDataItems as unknown[], storage.turbo, context)
+        .then(() => sendBack({ type: 'uploadComplete', result: 'done' }))
+        .catch((error) => sendBack({ type: 'uploadError', error }))
+      return
+    }
 
     if (!useArweaveBundler || !uploadApiBaseUrl) {
       sendBack({
