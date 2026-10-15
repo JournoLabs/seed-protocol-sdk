@@ -971,7 +971,11 @@ export const loadOrCreateSchema = fromCallback<
           try {
             // Try to find file by schemaFileId in the complete schemas list
             const completeSchemas = await listCompleteSchemaFiles()
-            const idBasedMatch = completeSchemas.find((s) => s.schemaFileId === dbSchema.schemaFileId)
+            // Match version too: the row is per schema name, so after a new version is imported
+            // under a new id it can carry the newer version with the older version's schemaFileId.
+            const idBasedMatch = completeSchemas.find(
+              (s) => s.schemaFileId === dbSchema.schemaFileId && s.version === dbSchema.version,
+            )
             
             if (idBasedMatch) {
               logger(`Found schema file by schemaFileId: ${idBasedMatch.filePath}`)

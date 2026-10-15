@@ -273,7 +273,8 @@ export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[
 
     for (const file of files) {
       // Match filename pattern: {schemaFileId}_{schemaName}_v{version}.json
-      const match = file.match(/^(.+)_(.+)_v(\d+)\.json$/)
+      // Ids have no underscores but names can ("My_Schema"), so the id group stops at the first one
+      const match = file.match(/^(.+?)_(.+)_v(\d+)\.json$/)
       
       if (match) {
         const [, schemaFileId, schemaName, versionStr] = match
