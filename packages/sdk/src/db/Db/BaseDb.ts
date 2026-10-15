@@ -50,8 +50,11 @@ export abstract class BaseDb {
    * Execute a reactive query that emits new results whenever the underlying data changes.
    *
    * Supports two usage patterns:
-   * 1. SQL tag function: liveQuery((sql) => sql`SELECT * FROM models`)
-   * 2. Drizzle query builder (browser only): liveQuery(db.select().from(models))
+   * 1. SQL tag function (browser only): liveQuery((sql) => sql`SELECT * FROM models`)
+   * 2. Drizzle query builder: liveQuery(db.select().from(models))
+   *
+   * On Node only the query builder works (a tag function throws), and it is re-run every second;
+   * the observable emits when the result changes.
    */
   static liveQuery<T>(query: ((sql: any) => any) | any): Observable<T[]> {
     return BaseDb.requireImpl().liveQuery<T>(query)
