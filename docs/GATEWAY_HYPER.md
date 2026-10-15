@@ -166,11 +166,8 @@ only applied when set, so an app's own setter call survives client init.
 Resolve upload + GraphQL URLs once and pass into `initPublish`:
 
 ```typescript
-import {
-  resolveSeedGatewayEndpoints,
-  seedGatewayConfigFromSeedConfig,
-  initPublish,
-} from '@seedprotocol/sdk'
+import { resolveSeedGatewayEndpoints, seedGatewayConfigFromSeedConfig } from '@seedprotocol/sdk'
+import { initPublish } from '@seedprotocol/publish'
 import config from './seed.config'
 
 const gw = await resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))
@@ -191,7 +188,7 @@ initPublish({
    seed-gateway serve --upstream http://127.0.0.1:80 --key-file ./.seed/gateway-tunnel/operator.key.json
    ```
 
-3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional).
+3. Record the printed z32 key. Set `DEFAULT_SEED_GATEWAY_HYPER_KEY` after ops backup (optional), in both `packages/arweave/src/constants.ts` and `packages/gateway-hyper/src/constants.ts`.
 4. Each SDK user (Path A) runs:
 
    ```bash

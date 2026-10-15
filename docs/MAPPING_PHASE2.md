@@ -11,7 +11,8 @@ Package: [`packages/mapping`](../packages/mapping)
 - **UI:** props-driven `FieldMapper` via `@seedprotocol/mapping/react` (no `useCreateItem`, no router); default entry is headless-only
 - **Monorepo:** `build:mapping`, `publish:mapping`, sync-versions / publish-package wiring
 - **Done (UI):** PermaPress Feed Map uses shared `FieldMapper` property rows — see [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOFF.md)
-- **Not done:** npm publish of redesign (`0.6.0`), desktop `/import/map` migration
+- **Published:** the redesign shipped in `0.6.0`; mapping now releases with the other packages (npm `latest` 0.7.3 as of 2026-10-14)
+- **Not done:** desktop `/import/map` migration
 
 `FieldMapping` (source → property) stays separate from `FeedFieldManifest` (property → role). See package README.
 
@@ -41,7 +42,7 @@ checklist: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOF
 
 **Remaining for PermaPress**
 
-- [ ] Bump `@seedprotocol/mapping` to published `0.7.0` (off local `link:`)
+- [ ] Bump `@seedprotocol/mapping` to the published `latest` (off local `link:`)
 - [ ] Smoke: auto-map → save draft → publish run with extract/file resolve
 - [ ] Relation lookup: persist `lookup.entries` on the authors edge; host `renderLookup`
 
@@ -52,20 +53,18 @@ checklist: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](./FIELD_MAPPER_PERMAPRESS_HANDOF
 - Saved-map CRUD APIs in SDK or apps
 - Theme tokens / light mode; Storybook or visual tests for `FieldMapper`
 - Row-based `FieldMapper` redesign — **shipped** (Phases 1–5); see [FIELD_MAPPER_REDESIGN.md](./FIELD_MAPPER_REDESIGN.md)
-- First **npm publish** of redesign: `bun run publish:mapping` (requires `@seedprotocol/feed@sameVersion` on npm)
 
-### 4. First publish checklist
+### 4. Publishing
 
-1. Ensure version synced (`bun run sync-versions`)
-2. `bun run build:mapping`
-3. `cd packages/mapping && bun run test`
-4. `bun run publish:mapping`
+Mapping is released by the monorepo release pipeline with every other package; see
+[RELEASING.md](./RELEASING.md). It has no `@seedprotocol/*` dependencies (only `rss-parser`, plus
+React as a peer for `@seedprotocol/mapping/react`).
 
 ## Suggested new-thread prompt
 
 ```
 Continue Phase 2 for @seedprotocol/mapping per docs/MAPPING_PHASE2.md.
-Start with: <desktop migration | publish mapping 0.6.0 to npm>.
+Start with: <desktop migration | hardening>.
 FieldMapper redesign Phases 1–5 are shipped; PermaPress Feed Map already uses rows.
 ```
 

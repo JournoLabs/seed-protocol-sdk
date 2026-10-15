@@ -1,6 +1,7 @@
 # 0006. Schemas scope seeds on the client, not on-chain
 
 - **Status:** Accepted
+- **Implementation:** not started as of 2026-10-14 (no `seed_schemas` table or migration on `main`)
 - **Date:** 2026-10-07
 - **Scope:** `@seedprotocol/sdk` (local DB, EAS sync, item reads), `@seedprotocol/react` item hooks
 
