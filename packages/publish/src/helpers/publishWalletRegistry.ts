@@ -40,7 +40,9 @@ export async function setPublishWallet(
   owned.add(next.txSender.address.toLowerCase())
   if (next.publisherAddress) owned.add(next.publisherAddress.toLowerCase())
   try {
-    await seedClient.setAddresses({ owned: [...owned] })
+    // Watched addresses aren't the wallet's: keep them (setAddresses replaces both lists).
+    const { watched } = await seedClient.getAddresses()
+    await seedClient.setAddresses({ owned: [...owned], watched })
     const claimAs = next.publisherAddress ?? next.signer.address
     if (claimAs) {
       await seedClient.claimUnpublishedDrafts(claimAs)
