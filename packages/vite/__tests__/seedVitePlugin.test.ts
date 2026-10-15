@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveConfig } from 'vite'
+import { createLogger, resolveConfig } from 'vite'
 import { seedVitePlugin } from '../src/index.js'
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
@@ -388,3 +388,90 @@ function fnSafeConfigure(plugin: { configureServer?: unknown }, server: unknown)
   const fn = typeof hook === 'function' ? hook : hook && typeof hook === 'object' && 'handler' in hook ? (hook as { handler: Function }).handler : null
   fn?.(server)
 }
+
+describe('seedVitePlugin build options', () => {
+  function captureWarnings() {
+    const warnings: string[] = []
+    const logger = createLogger('silent')
+    logger.warn = (msg) => {
+      warnings.push(msg)
+    }
+    logger.warnOnce = logger.warn
+    return { logger, warnings }
+  }
+
+  async function resolveWith(command: 'serve' | 'build', userConfig: Record<string, unknown>) {
+    const { logger, warnings } = captureWarnings()
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        customLogger: logger,
+        plugins: seedVitePlugin({ includeNodePolyfills: true }),
+        ...userConfig,
+      },
+      command,
+    )
+    return { config, warnings }
+  }
+
+  for (const command of ['serve', 'build'] as const) {
+    it(`keeps the user's build.rollupOptions without warning (${command})`, async () => {
+      const userPlugin = { name: 'user-build-plugin' }
+      const { config, warnings } = await resolveWith(command, {
+        build: {
+          rollupOptions: {
+            output: { entryFileNames: 'app-[name].js' },
+            external: ['user-ext'],
+            plugins: [userPlugin],
+          },
+          commonjsOptions: { include: [/user-cjs/] },
+        },
+      })
+      expect(warnings.filter((w) => /rollupOptions.*rolldownOptions/.test(w))).toEqual([])
+
+      const options = config.build.rolldownOptions
+      expect(config.build.rollupOptions).toBe(options)
+      expect(options.output).toMatchObject({ entryFileNames: 'app-[name].js' })
+      expect((options.plugins as unknown[]).filter((p) => p === userPlugin)).toHaveLength(1)
+
+      const external = options.external as Array<string | RegExp>
+      expect(external.filter((e) => e === 'user-ext')).toHaveLength(1)
+      const isExternal = (id: string) =>
+        external.some((e) => (typeof e === 'string' ? e === id : e.test(id)))
+      expect(isExternal('better-sqlite3')).toBe(true)
+      expect(isExternal('better-sqlite3/lib/index.js')).toBe(true)
+      expect(isExternal('/app/node_modules/better-sqlite3/lib/index.js')).toBe(true)
+      expect(isExternal('better-sqlite3-helper')).toBe(false)
+
+      const cjsInclude = config.build.commonjsOptions.include as RegExp[]
+      expect(cjsInclude.map(String)).toEqual([
+        '/user-cjs/',
+        '/node_modules/',
+        String(/seed-protocol-sdk[\\/]+dist[\\/]/),
+      ])
+    })
+  }
+
+  it('wraps a user external function instead of replacing it', async () => {
+    const { config } = await resolveWith('build', {
+      build: { rolldownOptions: { external: (id: string) => id === 'user-ext' } },
+    })
+    const external = config.build.rolldownOptions.external as (
+      id: string,
+      importer: string | undefined,
+      isResolved: boolean,
+    ) => boolean
+    expect(typeof external).toBe('function')
+    expect(external('user-ext', undefined, false)).toBe(true)
+    expect(external('better-sqlite3', undefined, false)).toBe(true)
+    expect(external('react', undefined, false)).toBe(false)
+  })
+
+  it('defaults worker.format to es without overriding a user format', async () => {
+    const { config: defaults } = await resolveWith('build', {})
+    expect(defaults.worker.format).toBe('es')
+    const { config: user } = await resolveWith('build', { worker: { format: 'iife' } })
+    expect(user.worker.format).toBe('iife')
+  })
+})

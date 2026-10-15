@@ -1000,99 +1000,39 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     },
 
     config(userConfig) {
-      const existingBuild = userConfig.build ?? {}
-      const existingCommonjs = existingBuild.commonjsOptions ?? {}
-      const existingRollupOptions = existingBuild.rollupOptions ?? {}
-      const existingRolldownOptions = (existingBuild as Record<string, unknown>).rolldownOptions as
-        | Record<string, unknown>
-        | undefined
-      const existingExternal = existingRollupOptions.external ?? []
-
-      const include = [
-        // Anything the user already had
-        ...(Array.isArray(existingCommonjs.include)
-          ? existingCommonjs.include
-          : existingCommonjs.include
-          ? [existingCommonjs.include]
-          : []),
-        // Always process node_modules and the SDK dist so require() is transformed
-        /node_modules/,
-        /seed-protocol-sdk[\\/]+dist[\\/]/,
-      ]
-
-      // Exclude packages that are already ESM or have special worker handling
-      const exclude = [
-        ...(Array.isArray(existingCommonjs.exclude)
-          ? existingCommonjs.exclude
-          : existingCommonjs.exclude
-          ? [existingCommonjs.exclude]
-          : []),
-        // sqlocal is ESM and uses workers - don't transform it
-        /node_modules[\\/]+sqlocal[\\/]/,
-      ]
-
+      // Only this plugin's additions: Vite deep-merges them into the user's build
+      // config and concatenates arrays. Echoing `...userConfig.build` back also
+      // returned both `rollupOptions` and `rolldownOptions` (Vite 8 aliases one
+      // to the other), which made Vite warn on every run.
       const commonjsOptions = {
-        ...existingCommonjs,
-        include,
-        exclude,
+        // Always process node_modules and the SDK dist so require() is transformed
+        include: [/node_modules/, /seed-protocol-sdk[\\/]+dist[\\/]/],
+        // sqlocal is ESM and uses workers - don't transform it
+        exclude: [/node_modules[\\/]+sqlocal[\\/]/],
         transformMixedEsModules: true,
       }
 
       // Externalize Node.js-only packages that should never be bundled for the browser
-      const nodeOnlyPackages = [
-        'better-sqlite3', // Native SQLite binding (Node.js only)
-      ]
-
-      const isNodeOnlyExternal = (id: string) =>
-        nodeOnlyPackages.some(
-          (pkg) =>
-            id === pkg ||
-            id.startsWith(`${pkg}/`) ||
-            id.includes(`/${pkg}/`) ||
-            id.endsWith(`/${pkg}`)
-        )
-
-      const externalList = (id: string, importer?: string, isResolved?: boolean) => {
-        if (isNodeOnlyExternal(id)) return true
-        if (typeof existingExternal === 'function') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (existingExternal as any)(id, importer, isResolved ?? false)
-        }
-        if (Array.isArray(existingExternal)) {
-          return existingExternal.some((ext) => ext === id || id.startsWith(`${ext}/`))
-        }
-        return false
-      }
-
-      const rollupOptions = {
-        ...existingRollupOptions,
-        external: externalList,
-      }
-
-      const build: Record<string, unknown> = {
-        ...existingBuild,
-        commonjsOptions,
-      }
-      if (existingRolldownOptions) {
-        build.rolldownOptions = {
-          ...existingRolldownOptions,
-          external: externalList,
-        }
-      } else {
-        build.rollupOptions = rollupOptions
-      }
+      // (better-sqlite3: native SQLite binding, Node.js only), by bare id or resolved path.
+      const nodeOnlyExternal = [/^better-sqlite3(?:\/|$)/, /[\\/]better-sqlite3(?:[\\/]|$)/]
+      const userExternal = (userConfig.build?.rolldownOptions ?? userConfig.build?.rollupOptions)
+        ?.external
+      // A user external function can't be concatenated with patterns, so wrap it.
+      // Otherwise return patterns, which Vite appends to the user's list.
+      const external =
+        typeof userExternal === 'function'
+          ? (id: string, importer: string | undefined, isResolved: boolean) =>
+              nodeOnlyExternal.some((re) => re.test(id)) || userExternal(id, importer, isResolved)
+          : nodeOnlyExternal
 
       // Worker options are TOP-LEVEL in Vite config, not under build.
       // Default 'iife' breaks when workers use code-splitting (e.g. sqlocal).
-      const existingWorker = userConfig.worker ?? {}
-      const worker = {
-        ...existingWorker,
-        format: existingWorker.format ?? 'es',
-      }
-
       return {
-        build,
-        worker,
+        build: {
+          commonjsOptions,
+          rolldownOptions: { external },
+        },
+        ...(userConfig.worker?.format ? {} : { worker: { format: 'es' as const } }),
       }
     },
 
