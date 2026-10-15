@@ -11,6 +11,8 @@
 
 let epoch = 0
 const lastEvictionBySchema = new Map<string, number>()
+// Schemas whose destroy() is still running (by name)
+const destroyingSchemas = new Map<string, number>()
 // Single models destroyed (Model.destroy), by modelFileId
 const lastDestroyByModelId = new Map<string, number>()
 // Models whose destroy() is still deleting their rows
@@ -26,9 +28,33 @@ export function recordSchemaEviction(schemaName: string): void {
   lastEvictionBySchema.set(schemaName, epoch)
 }
 
-/** True when the schema's instances were evicted after `since` (an epoch from currentEvictionEpoch). */
+/**
+ * Called by Schema.destroy before it evicts the schema's models; `finishSchemaDestroy` once its rows
+ * are gone. The schema's actor stays live until then, and work it starts meanwhile (its live query
+ * reading a model row the drained write just landed) captures an epoch after the eviction, so the
+ * epoch alone can't tell it to stay away.
+ */
+export function recordSchemaDestroy(schemaName: string): void {
+  recordSchemaEviction(schemaName)
+  destroyingSchemas.set(schemaName, (destroyingSchemas.get(schemaName) ?? 0) + 1)
+}
+
+export function finishSchemaDestroy(schemaName: string): void {
+  const remaining = (destroyingSchemas.get(schemaName) ?? 1) - 1
+  if (remaining > 0) destroyingSchemas.set(schemaName, remaining)
+  else destroyingSchemas.delete(schemaName)
+  // Work that read a row during the destroy and checks after it must still see the eviction
+  recordSchemaEviction(schemaName)
+}
+
+/**
+ * True when the schema is being destroyed, or its instances were evicted after `since` (an epoch
+ * from currentEvictionEpoch).
+ */
 export function schemaEvictedSince(schemaName: string | null | undefined, since: number): boolean {
-  if (epoch === since || !schemaName) return false
+  if (!schemaName) return false
+  if (destroyingSchemas.has(schemaName)) return true
+  if (epoch === since) return false
   return (lastEvictionBySchema.get(schemaName) ?? 0) > since
 }
 
@@ -59,7 +85,10 @@ export function modelDestroyedSince(modelFileId: string | null | undefined, sinc
   return (lastDestroyByModelId.get(modelFileId) ?? 0) > since
 }
 
-/** True when any schema was evicted after `since` (cheap check before looking up which schemas apply). */
+/**
+ * True when any schema was evicted after `since` or is being destroyed (cheap check before looking up
+ * which schemas apply).
+ */
 export function anyEvictionSince(since: number): boolean {
-  return epoch !== since
+  return epoch !== since || destroyingSchemas.size > 0
 }
