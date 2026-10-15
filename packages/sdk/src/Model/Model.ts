@@ -20,7 +20,14 @@ import { findEntity } from '@/helpers/entity/entityFind'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
 import { unloadEntity } from '@/helpers/entity/entityUnload'
 import { isActorStopped } from '@/helpers/entity/entityCommon'
-import { currentEvictionEpoch, recordSchemaEviction, schemaEvictedSince } from '@/helpers/entity/evictionEpoch'
+import {
+  currentEvictionEpoch,
+  finishModelDestroy,
+  modelDestroyedSince,
+  recordModelDestroy,
+  recordSchemaEviction,
+  schemaEvictedSince,
+} from '@/helpers/entity/evictionEpoch'
 import {
   clearDestroySubscriptions,
   forceRemoveFromCaches,
@@ -1175,8 +1182,9 @@ export class Model {
             .limit(1)
           const record = rows[0]
           if (record?.modelName && record.schemaName && record.modelFileId) {
-            // Its schema was evicted while we read the row: don't bring the model back.
+            // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
             if (schemaEvictedSince(record.schemaName, evictionEpoch)) return undefined
+            if (modelDestroyedSince(record.modelFileId, evictionEpoch)) return undefined
             return this.create(record.modelName, record.schemaName, { id: record.modelFileId })
           }
         } catch (error) {
@@ -1248,8 +1256,11 @@ export class Model {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
           return undefined
         }
-        // Its schema was evicted while we read the row: don't bring the model back.
+        // Its schema was evicted, or it was destroyed, while we read the row: don't bring it back.
         if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
+          return undefined
+        }
+        if (modelDestroyedSince(record.modelFileId, evictionEpoch)) {
           return undefined
         }
 
@@ -1333,6 +1344,11 @@ export class Model {
       // Schema.destroy or test cleanup): don't bring the model back.
       if (schemaEvictedSince(schemaName, evictionEpoch)) {
         logger(`Model.createById: schema "${schemaName}" was evicted during the lookup of "${modelFileId}"`)
+        return undefined
+      }
+      // Destroyed while we read the row: destroy() clears the caches before it deletes the rows
+      if (modelDestroyedSince(modelFileId, evictionEpoch)) {
+        logger(`Model.createById: model "${modelFileId}" was destroyed during the lookup`)
         return undefined
       }
 
@@ -1440,8 +1456,11 @@ export class Model {
         if (!record.modelName || !record.schemaName || !record.modelFileId) {
           continue
         }
-        // Its schema was evicted while we read the rows: don't bring its models back.
+        // Its schema was evicted, or the model destroyed, while we read the rows: don't bring it back.
         if (schemaEvictedSince(record.schemaName, evictionEpoch)) {
+          continue
+        }
+        if (modelDestroyedSince(record.modelFileId, evictionEpoch)) {
           continue
         }
 
@@ -2040,6 +2059,9 @@ export class Model {
 
     clearDestroySubscriptions(this, { instanceState: modelInstanceState })
 
+    // Before the caches are cleared, so a lookup by id already reading the row doesn't re-cache it
+    if (modelFileId) recordModelDestroy(modelFileId)
+
     const cacheKeys: string[] = []
     if (modelFileId) cacheKeys.push(modelFileId)
     if (nameKey) cacheKeys.push(nameKey)
@@ -2052,7 +2074,7 @@ export class Model {
       ],
     })
 
-    await runDestroyLifecycle(this, {
+    const destroying = runDestroyLifecycle(this, {
       getService: (instance) =>
         instance._service as { send: (ev: unknown) => void; stop: () => void },
       doDestroy: async () => {
@@ -2094,6 +2116,11 @@ export class Model {
         }
       },
     })
+    try {
+      await destroying
+    } finally {
+      if (modelFileId) finishModelDestroy(modelFileId)
+    }
   }
 
   /**
