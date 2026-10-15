@@ -15,6 +15,7 @@ import { processSchemaFiles } from "./actors/processSchemaFiles"
 import { emitAcrossTabs } from "@/helpers/tabEvents"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
 import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
+import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import {
   ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
@@ -291,6 +292,8 @@ export const clientManagerMachine = setup({
         () => startLegacyItemStorageMigration(),
         // Also once, in the background: rows an older sync stored from other accounts' attestations.
         () => startForeignAttestationCleanup(),
+        // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
+        () => startCanonicalizeModelTypes(),
       ],
       on: {
         [SAVE_APP_STATE_SUCCESS]: {
