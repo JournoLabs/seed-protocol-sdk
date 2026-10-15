@@ -107,6 +107,81 @@ function App() {
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
 
+### Who pays
+
+A publish costs EVM gas (attestations, schema registration) and Arweave storage. Who pays follows
+from the sender your config selects:
+
+| Sender | Selected by | Gas |
+|---|---|---|
+| Thirdweb managed account | `useModularExecutor: true` | sponsored by Thirdweb unless `thirdweb.sponsorGas: false` |
+| Permissionless EIP-7702 | `bundlerUrl` (Recipe 2) | sponsored by `paymasterUrl`, else the bundler |
+| Connected wallet | neither | the user's ETH |
+
+Storage goes through the upload API at `uploadApiBaseUrl`, and its operator pays: directly on the
+bundler path, and on the L1 path by reimbursing the user's Arweave key before the upload.
+
+To state the intent instead, set `payment`. It fills in those settings' defaults, and `initPublish`
+throws `PublishPaymentConfigError` when a setting contradicts it:
+
+```typescript
+initPublish({
+  // ...
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  payment: { gas: 'user', storage: 'operator' }, // EIP-7702 sender without a paymaster
+})
+```
+
+`resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
+reports the same in `evm.userPays` / `arweave.userPays`.
+
+#### Users pay for storage (Turbo)
+
+`payment: { storage: 'user' }` sends data items (signed by the user's EVM key, as on the bundler path)
+straight to [Turbo](https://docs.ar.io/build/upload/bundling-services/), which charges that address's
+Turbo credits. Users top up through Turbo with a card or crypto. Items under Turbo's free-tier size
+cost nothing. Before uploading, the publish checks the balance covers the items and fails with
+`InsufficientStorageCreditsError` (with `address`, `requiredWinc`, `balanceWinc`) if not, so nothing
+is half-uploaded.
+
+```typescript
+initPublish({
+  // ...
+  payment: {
+    storage: 'user',
+    // Optional: other Turbo endpoints, or app wallets whose shared credits pay first (x-paid-by)
+    userStorage: { provider: 'turbo', paidBy: ['0xYourAppWallet'] },
+  },
+})
+```
+
+`getTurboBalanceWinc(endpoints, address)` and `getTurboPriceWinc(endpoints, bytes)` help show a
+balance or price before publishing.
+
+#### Approving and billing publishes
+
+`authorizePublish` runs before a publish spends anything (before schema registration, uploads and
+attestations). Use it to confirm the cost with the user, check a quota, or charge them. Return
+`false` or throw to refuse (the publish fails with `PublishNotAuthorizedError`); return `true` or
+nothing to go ahead; return `{ token }` to also send the token to the upload API as the
+`X-Seed-Publish-Authorization` header on that publish's requests, so the operator can meter or
+bill against it.
+
+```typescript
+initPublish({
+  // ...
+  authorizePublish: async ({ item, payment, getEstimate }) => {
+    const estimate = await getEstimate() // fetches prices; skip it if you don't need it
+    const { approved, receiptId } = await myBilling.charge(item.seedLocalId, estimate.totalUsd)
+    return approved ? { token: receiptId } : false
+  },
+})
+```
+
+It can also be passed per publish (`CreatePublishOptions.authorizePublish`). A publish resumed
+after a reload is not asked again once it got past this step; one restored before approval asks
+the config hook. The token is not sent to Turbo.
+
 ### Choosing a chain
 
 Publishing works on any EVM chain with [EAS](https://github.com/ethereum-attestation-service/eas-contracts#deployments) deployed. Pass a viem `chain`; it defaults to Optimism Sepolia. The same chain drives viem reads, transaction routing and the Thirdweb wallet / ConnectButton. When `rpcUrl` is set, Thirdweb uses it too, so Seed's checks and Thirdweb's calls always reach the same node.

@@ -26,6 +26,27 @@ export {
   type ArweaveDataItemInfoResult,
   type PublishAccountMode,
 } from './config'
+export {
+  resolvePublishPayment,
+  resolvePublishSender,
+  PublishPaymentConfigError,
+  type PublishPaymentConfig,
+  type PublishGasPayer,
+  type PublishStoragePayer,
+  type PublishSenderKind,
+  type ResolvedPublishPayment,
+  type PublishUserStorageConfig,
+  DEFAULT_TURBO_UPLOAD_URL,
+  DEFAULT_TURBO_PAYMENT_URL,
+} from './payment'
+export { InsufficientStorageCreditsError, getTurboBalanceWinc, getTurboPriceWinc } from './helpers/turbo'
+export {
+  PublishNotAuthorizedError,
+  PUBLISH_AUTHORIZATION_HEADER,
+  type AuthorizePublish,
+  type PublishAuthorization,
+  type PublishAuthorizationRequest,
+} from './authorization'
 export type {
   PublishUploadData,
   GetPublishUploadDataOptions,

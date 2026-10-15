@@ -89,7 +89,7 @@ jobs:
         env:
           SKIP_TESTS: '1'
         run: |
-          for pkg in eas arweave feed query vite sdk react; do
+          for pkg in eas arweave query feed vite sdk react; do
             (cd "packages/$pkg" && bun run build)
           done
 
