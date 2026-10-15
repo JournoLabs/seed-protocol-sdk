@@ -7,11 +7,23 @@ import type { EstimatePublishCostOptions, PublishCostEstimate, PublishWorkSummar
 const WINSTON_PER_AR = 1e12
 const WEI_PER_ETH = 1e18
 
+/**
+ * Whether the user's wallet pays publish gas, following the sender ensureWalletThenPublish picks:
+ * the modular executor publishes from a Thirdweb managed account (sponsored per
+ * `thirdweb.sponsorGas`), EIP-7702 with a bundler goes through the permissionless sender (sponsored
+ * when `paymasterUrl` is set), and anything else is a plain transaction from the user's EOA.
+ */
+function evmUserPaysFor(cfg: ReturnType<typeof getPublishConfig>): boolean {
+  if (cfg.useModularExecutor) return !cfg.thirdweb.sponsorGas
+  if (cfg.accountMode === 'eip7702' && cfg.bundlerUrl) return !cfg.paymasterUrl
+  return true
+}
+
 function readPublishFlags(): { evmUserPays: boolean; arweavePath: 'l1' | 'bundler' } {
   try {
     const cfg = getPublishConfig()
     return {
-      evmUserPays: !cfg.paymasterUrl,
+      evmUserPays: evmUserPaysFor(cfg),
       arweavePath: cfg.useArweaveBundler ? 'bundler' : 'l1',
     }
   } catch {
