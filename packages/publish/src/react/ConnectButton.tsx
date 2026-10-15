@@ -239,7 +239,7 @@ const ConnectButton: FC = () => {
     } catch {
       /* private mode / SSR */
     }
-    clearPublishWallet()
+    void clearPublishWallet()
     PublishManager.stopAll()
   }
 

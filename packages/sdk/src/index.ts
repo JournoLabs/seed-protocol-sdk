@@ -403,6 +403,8 @@ export type { SchemaFileFormat } from './imports'
 export { client } from './client'
 export type { SyncFromEasOptions } from './events/item/syncDbWithEas'
 export type { EasSyncProcessType } from './seedSchema/EasSyncProcessSchema'
+/** Turn off (or back on) retrying the startup EAS lookup and failed syncs when back online. */
+export { setRetriesWhenOnlineEnabled } from './helpers/retryWhenOnline'
 export {
   easSyncActor,
   startEasSyncActor,
