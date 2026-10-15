@@ -21,7 +21,8 @@
  * - the Release run for the current commit didn't fail (needs `gh`; skip with
  *   --skip-ci-check)
  *
- * Confirming means typing the version. If the push fails, the local commit and
+ * Confirming means typing the version. The release commit also adds a section to each
+ * package's CHANGELOG.md (scripts/changelog.js). If the push fails, the local commit and
  * tag are undone.
  */
 
@@ -40,6 +41,7 @@ import {
   retryProblems,
 } from './release-channel.js'
 import { syncVersions } from './sync-versions.js'
+import { formatCommitGroups, packageCommits, writeReleaseChangelogs } from './changelog.js'
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MAIN_BRANCH = process.env.MAIN_BRANCH || 'main'
@@ -196,7 +198,13 @@ async function main() {
   } catch {
     // No earlier release tag.
   }
-  const changes = lines(git(['log', '--oneline', '--no-merges', previousTag ? `${previousTag}..HEAD` : 'HEAD']))
+  const range = previousTag ? `${previousTag}..HEAD` : 'HEAD'
+  const changes = lines(git(['log', '--oneline', '--no-merges', range]))
+  // Packages whose CHANGELOG gets a section: listable commits since the last release
+  const changelogCounts = PUBLISH_ORDER.map((dir) => {
+    const listed = formatCommitGroups(packageCommits(rootDir, dir, range), dir)
+    return [dir, listed.split('\n').filter((l) => l.startsWith('- ')).length]
+  }).filter(([, count]) => count > 0)
 
   console.log(`\n${args.retry ? 'Retry' : 'Release'} ${tag}`)
   if (args.retry) {
@@ -210,6 +218,10 @@ async function main() {
   console.log(`  changes     ${changes.length} commit(s) since ${previousTag || 'the start'}`)
   for (const line of changes.slice(0, 15)) console.log(`                ${line}`)
   if (changes.length > 15) console.log(`                … and ${changes.length - 15} more`)
+  if (!args.retry) {
+    const summary = changelogCounts.map(([dir, count]) => `${dir} (${count})`).join(', ')
+    console.log(`  changelogs  ${summary || 'no listable commits'}; Unreleased notes move into the new section`)
+  }
   for (const w of warnings) console.log(`  ⚠️  ${w}`)
 
   if (problems.length > 0) {
@@ -249,6 +261,11 @@ async function main() {
     git(['checkout', '--', '.'])
     throw new Error(`Version sync changed more than package.json files (${unexpected.join(', ')}); reverted.`)
   }
+
+  const date = new Date().toISOString().slice(0, 10)
+  const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range })
+  if (changelogs.length > 0) git(['add', '--', ...changelogs])
+  console.log(`\nChangelogs: ${changelogs.length > 0 ? changelogs.join(', ') : 'none changed'}`)
 
   git(['commit', '--quiet', '-am', `chore: release ${target}`])
   git(['tag', '-a', tag, '-m', `Release ${target}`])

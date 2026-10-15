@@ -95,7 +95,23 @@ On confirmation it bumps every package, commits `chore: release X.Y.Z`, creates 
 annotated tag `vX.Y.Z`, and pushes `main` and the tag in one atomic push. If the
 push fails, it removes the local commit and tag again.
 
-By hand, the same thing is:
+### Changelogs
+
+The release commit also adds a `## X.Y.Z (date)` section to the CHANGELOG.md of each package
+that changed ([`changelog.js`](../scripts/changelog.js)). The section starts with the
+package's `## Unreleased` notes, if any, and ends with the commits since the last release
+that touched the package, grouped into Breaking, Features, Fixes and Other from their
+conventional-commit subjects (`fix(publish): ...`). test, ci, chore and version-bump commits
+are left out. The plan lists how many commits each changelog gets.
+
+So write `## Unreleased` notes for changes a user needs explained (breaking changes, new
+options, migrations); the commit list covers the rest. Commit subjects end up in the
+changelog, so write them for a reader.
+
+Sections from 0.5.1 to 0.7.3 were backfilled from git history. Versions published without
+a committed version bump (0.5.2, 0.6.1–0.6.2, 0.6.4–0.6.6) are folded into the next section.
+
+By hand, the same thing is (without the changelog sections):
 
 ```bash
 bun run new-version -- 0.7.3
