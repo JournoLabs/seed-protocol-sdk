@@ -1,6 +1,6 @@
 # 0008. One EAS name per property and model, matched loosely when reading
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-15
 - **Scope:** `@seedprotocol/sdk` (publish payload, EAS sync, model resolution, schema import),
   `@seedprotocol/eas`, `@seedprotocol/publish` (schema registration), `@seedprotocol/query`
