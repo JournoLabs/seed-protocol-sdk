@@ -30,7 +30,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { Subscription } from 'rxjs'
 import debug from 'debug'
-import { currentEvictionEpoch } from '@/helpers/entity/evictionEpoch'
+import { currentEvictionEpoch, finishSchemaDestroy, recordSchemaDestroy } from '@/helpers/entity/evictionEpoch'
 
 const logger = debug('seedSdk:schema:saveNewVersion')
 const saveDraftLogger = debug('seedSdk:schema:saveDraftToDb')
@@ -1849,6 +1849,22 @@ export class Schema {
       ],
     })
 
+    // Until its rows are gone, nothing may re-create this schema's models. Its own actor stays live
+    // till then, and its live query reacting to destroyStarted could read a model row the drained
+    // write had just landed and re-create (and re-write) that model after the delete below.
+    if (schemaName) recordSchemaDestroy(schemaName)
+    try {
+      await this._destroyRows(schemaFileId, schemaName, context.metadata?.name)
+    } finally {
+      if (schemaName) finishSchemaDestroy(schemaName)
+    }
+  }
+
+  private async _destroyRows(
+    schemaFileId: string | undefined,
+    schemaName: string | undefined,
+    metadataName: string | undefined,
+  ): Promise<void> {
     // The rows for this schema's models and properties are deleted below; evict their cached
     // instances too, or a re-import would get them back with dangling _dbIds.
     if (schemaName) {
@@ -1914,7 +1930,7 @@ export class Schema {
         const { listCompleteSchemaFiles } = await import('@/helpers/schema')
         const files = await listCompleteSchemaFiles().catch(() => [])
         const fs = await BaseFileManager.getFs()
-        const names = new Set([schemaName, context.metadata?.name].filter(Boolean))
+        const names = new Set([schemaName, metadataName].filter(Boolean))
         for (const file of files) {
           if (file.schemaFileId === schemaFileId || names.has(file.name)) {
             await fs.promises.unlink(file.filePath).catch(() => {})
