@@ -227,6 +227,8 @@ export interface PublishConfig {
   ) => Promise<ArweaveTransactionInfoResult[]>
   /**
    * Optional fallback: Arweave JWK for in-process signing (non-bundler path). Prefer passing at createPublish time.
+   * A publish restored after a reload never has the per-publish JWK (it is not saved to the
+   * database), so it signs with this one, or fails at creatingArweaveTransactions without it.
    */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
@@ -275,7 +277,11 @@ export interface CreatePublishOptions {
   signArweaveTransactions?: (
     uploads: SerializedPublishUpload[]
   ) => Promise<ArweaveTransactionInfoResult[]>
-  /** Required when NOT useArweaveBundler: JWK for in-process signing */
+  /**
+   * Required when NOT useArweaveBundler: JWK for in-process signing. Kept in memory only; it is
+   * stripped from the saved publish snapshot, so a publish resumed after a reload falls back to
+   * {@link PublishConfig.arweaveJwk}.
+   */
   arweaveJwk?: { kty: string; n: string; e: string; d?: string; [key: string]: unknown }
   /**
    * Extra tags for this publish only, appended after {@link PublishConfig.arweaveUploadTags}.

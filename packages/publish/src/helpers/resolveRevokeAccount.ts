@@ -7,6 +7,7 @@ import {
   isSmartWalletDeployed,
   getManagedAccountWallet,
   getConnectedManagedAccountAddress,
+  syncPublishInAppAuthToken,
 } from '~/helpers/thirdweb'
 import { getPublishThirdwebChain } from './thirdwebChain'
 
@@ -51,6 +52,8 @@ export async function resolveRevokeAccount(params: {
         : derivedManagedAccount
       const deployed = await isSmartWalletDeployed(managedAddress)
       if (deployed) {
+        // Same as ensureModularPublishBootstrap: the managed wallet reads the in-app session token.
+        syncPublishInAppAuthToken()
         const managedAccountWallet = getManagedAccountWallet()
         await managedAccountWallet.autoConnect({
           client: getClient(),

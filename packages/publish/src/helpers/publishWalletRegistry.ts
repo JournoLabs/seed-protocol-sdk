@@ -6,6 +6,11 @@ export type PublishWalletSession = PublishWallet & {
   ownedAddresses?: string[]
   /** Preferred publisher address for new seeds (defaults to signer.address). */
   publisherAddress?: string
+  /**
+   * Admin (EOA) of the smart account this session publishes from, when there is one. Lets publish
+   * tell an undeployed smart account from an EOA, which both have no bytecode.
+   */
+  adminAddress?: string
 }
 
 let session: PublishWalletSession | null = null

@@ -40,6 +40,10 @@ When using the publish package with `ConnectButton` and its publish flow:
    the next publish of its item attests it with the target's uid.
 
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
+   Direct EAS is used with `useDirectEas`, or when the publisher is an EOA (no bytecode). It
+   attests one transaction per Seed and records each Seed as soon as it is attested. A smart
+   account that is not deployed yet is refused rather than sent down this path: deploy it first,
+   then publish.
 
 You do not need to run schema setup yourself when using this flow.
 

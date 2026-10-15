@@ -68,6 +68,27 @@ export const GET_SEEDS_LEAN = graphql(/* GraphQL */ `
   }
 `) as TypedDocumentNode<{ itemSeeds: Attestation[] }>
 
+/**
+ * DomainOwnership sidecar attestations. Unlike GET_SEEDS it selects `expirationTime`, which
+ * {@link assessDomainOwnership} needs to report an expired claim.
+ */
+export const GET_DOMAIN_OWNERSHIPS = graphql(/* GraphQL */ `
+  query GetDomainOwnerships($where: AttestationWhereInput!) {
+    domainOwnerships: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {
+      id
+      decodedDataJson
+      attester
+      recipient
+      refUID
+      revoked
+      revocationTime
+      expirationTime
+      schemaId
+      timeCreated
+    }
+  }
+`) as TypedDocumentNode<{ domainOwnerships: Attestation[] }>
+
 export const GET_SEED_IDS = graphql(/* GraphQL */ `
   query GetSeedIds($where: AttestationWhereInput!) {
     itemSeedIds: attestations(where: $where, orderBy: [{ timeCreated: desc }]) {

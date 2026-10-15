@@ -9,46 +9,55 @@ type PublishProcessActor = {
 /** Never persist multi-megabyte binary fields to SQLite (periodic saves during bundler upload). */
 const HEAVY_PUBLISH_CONTEXT_KEYS = ['signedDataItems', 'arweaveUploadData'] as const
 
-function stripHeavyContextFields(
-  ctx: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (ctx == null || typeof ctx !== 'object') return ctx
-  const next = { ...ctx }
-  for (const k of HEAVY_PUBLISH_CONTEXT_KEYS) {
-    delete next[k]
-  }
-  return next
+/**
+ * Never persist key material. `arweaveJwk` holds the private `d`; an ethers HD wallet passed as
+ * `dataItemSigner` serializes its mnemonic. A restored publish falls back to the PublishProvider
+ * config for both (`context.x ?? config.x`), so the key must be configured again to sign after a reload.
+ */
+const SECRET_PUBLISH_CONTEXT_KEYS = ['arweaveJwk', 'dataItemSigner'] as const
+
+const STRIPPED_KEYS = new Set<string>([...HEAVY_PUBLISH_CONTEXT_KEYS, ...SECRET_PUBLISH_CONTEXT_KEYS])
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value == null || typeof value !== 'object') return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
 }
 
-function stripHeavyPublishSnapshot(snapshot: unknown): unknown {
-  if (snapshot == null || typeof snapshot !== 'object') return snapshot
-  const s = snapshot as Record<string, unknown>
-  const out: Record<string, unknown> = { ...s }
-  if (s.context != null && typeof s.context === 'object') {
-    out.context = stripHeavyContextFields(s.context as Record<string, unknown>)
+/**
+ * Child actor snapshots carry their `input` (`{ context }`), so the keys can appear anywhere in
+ * the tree, not only on the root context. Walks plain objects and arrays; class instances
+ * (Item, Uint8Array, …) are kept as they are.
+ */
+function stripPublishSnapshotFields(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return seen.get(value)
+    const out: unknown[] = []
+    seen.set(value, out)
+    for (const v of value) out.push(stripPublishSnapshotFields(v, seen))
+    return out
   }
-  const nested = s.snapshot
-  if (nested != null && typeof nested === 'object') {
-    const n = nested as Record<string, unknown>
-    const nestedOut: Record<string, unknown> = { ...n }
-    if (n.context != null && typeof n.context === 'object') {
-      nestedOut.context = stripHeavyContextFields(n.context as Record<string, unknown>)
-    }
-    out.snapshot = nestedOut
+  if (!isPlainObject(value)) return value
+  if (seen.has(value)) return seen.get(value)
+  const out: Record<string, unknown> = {}
+  seen.set(value, out)
+  for (const [k, v] of Object.entries(value)) {
+    if (STRIPPED_KEYS.has(k)) continue
+    out[k] = stripPublishSnapshotFields(v, seen)
   }
   return out
 }
 
-function getPersistableSnapshot(actor: PublishProcessActor): unknown {
+export function getPersistableSnapshot(actor: PublishProcessActor): unknown {
   try {
     const snap = actor.getPersistedSnapshot?.() ?? actor.getSnapshot()
-    return stripHeavyPublishSnapshot(snap)
+    return stripPublishSnapshotFields(snap)
   } catch {
     const snapshot = actor.getSnapshot()
     const ctx = snapshot.context
-    if (!ctx?.item) return stripHeavyPublishSnapshot(snapshot)
+    if (!ctx?.item) return stripPublishSnapshotFields(snapshot)
     const item = ctx.item as { seedLocalId?: string; modelName?: string; schemaId?: string }
-    return stripHeavyPublishSnapshot({
+    return stripPublishSnapshotFields({
       ...snapshot,
       context: {
         ...ctx,
