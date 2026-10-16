@@ -7,6 +7,7 @@ import {
   isPublishWallet,
   isSeedSigner,
   type PublishWallet,
+  type PublishWalletKind,
   type SeedSigner,
 } from '../seedSigner'
 import { getPublishThirdwebChain } from '../thirdwebChain'
@@ -19,6 +20,8 @@ export type FromThirdwebAccountOptions = {
    * Pass the secret-key client from the server, or omit this to use `getClient()`.
    */
   client?: ThirdwebClient
+  /** What the account is, when the caller knows (see PublishWalletKind). */
+  kind?: PublishWalletKind
 }
 
 /**
@@ -72,7 +75,7 @@ export function fromThirdwebAccount(
       return { transactionHash: result.transactionHash as Hex }
     },
   })
-  return { signer, txSender }
+  return { signer, txSender, ...(options?.kind && { kind: options.kind }) }
 }
 
 /**

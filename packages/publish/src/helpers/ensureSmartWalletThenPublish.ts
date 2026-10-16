@@ -77,7 +77,7 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    const wallet = fromThirdwebAccount(modularAccount)
+    const wallet = fromThirdwebAccount(modularAccount, { kind: 'smart' })
     return startPublish(item, managedAddress, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
@@ -86,7 +86,7 @@ export async function ensureSmartWalletThenPublish(
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
-    const wallet = fromThirdwebAccount(resolved.account)
+    const wallet = fromThirdwebAccount(resolved.account, { kind: 'smart' })
     return startPublish(item, resolved.address, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,

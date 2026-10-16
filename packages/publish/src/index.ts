@@ -77,6 +77,7 @@ export type {
   SeedTxSender,
   SeedTxRequest,
   PublishWallet,
+  PublishWalletKind,
 } from './helpers/seedSigner'
 export {
   fromEthersWallet,

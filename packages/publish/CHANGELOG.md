@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - **`useCanPublishItem`** starts `false` until its check finishes, and checks again when owned addresses change.
 - **Cost estimates:** Arweave L1 uploads are charged for at least 256 KiB each, a bundle once, and Turbo uploads of 100 KiB or less are free (`arweave.chargedBytes`). Testnet gas is priced at $0 (`evm.testnet`).
 - **Deprecated:** `useLocalWalletAccount` (always `null`), `gatewayTransport` and `modularAccountModuleData` (not read).
+- **Direct EAS needs a wallet that says it is an EOA.** A publisher with no bytecode attests straight to EAS only when the `PublishWallet` has `kind: 'eoa'` and signs as the publisher (or with `useDirectEas`). `fromEip1193Provider` and `fromEthersWallet` set `'eoa'`; `fromThirdwebAccount` takes `{ kind }`, and `ConnectButton` and the managed-account helpers set it. A wallet without a kind takes its registered session's kind when the signer matches, else it is refused. This replaces guessing admins through factory reads, which let an undeployed thirdweb smart wallet through.
 
 ### Added
 

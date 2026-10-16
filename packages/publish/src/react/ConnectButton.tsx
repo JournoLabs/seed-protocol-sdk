@@ -183,8 +183,13 @@ const ConnectButton: FC = () => {
       }
       lastSyncedOwnedKey.current = ownedKey
       try {
-        const publishWallet = fromThirdwebAccount(account)
         const adminAddress = activeWallet.getAdminAccount?.()?.address
+        // A wallet with a separate admin account, or the modular executor's ManagedAccount, is a
+        // smart account; otherwise the connected account is a plain key (in-app or injected).
+        const isSmart =
+          !!managedAddress ||
+          (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
+        const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
         await setPublishWallet({
           ...publishWallet,
           ownedAddresses: [...owned],

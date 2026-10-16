@@ -73,7 +73,7 @@ export async function fromEip1193Provider(
     },
   })
 
-  return { signer, txSender }
+  return { signer, txSender, kind: 'eoa' }
 }
 
 /** Convenience: wrap window.ethereum when present. */

@@ -1,5 +1,3 @@
-import type { Address } from 'viem'
-import { readFactoryGetAddress } from '~/helpers/contracts'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import type { PublishWallet } from '~/helpers/seedSigner'
 
@@ -7,42 +5,40 @@ function sameAddress(a: string | undefined, b: string | undefined): boolean {
   return !!a && !!b && a.toLowerCase() === b.toLowerCase()
 }
 
+export type DirectEasProblem =
+  | 'sender_is_not_publisher'
+  | 'smart_account'
+  | 'unknown_wallet_kind'
+  | 'signer_is_not_publisher'
+
 /**
  * For a publisher address with no bytecode, says why it must not attest straight to EAS, or
- * returns null when it can (an EOA).
+ * returns null when it may: the wallet says it is an EOA (`kind: 'eoa'`) and its signer is the
+ * publisher. An address with no code can be an EOA or an undeployed smart account, and the
+ * address alone can't tell (a thirdweb smart wallet's signer address is the smart account), so
+ * the wallet has to say (`useDirectEas` skips this check).
  *
  * - The wallet sends from another address: EAS would record that address as the attester.
- * - The publisher is the ManagedAccount factory address of a known admin (the wallet's signer,
- *   or an admin / owned address of the registered session): it is a smart account that is not
- *   deployed yet. Direct EAS would attest one transaction per Seed and deploy the account as a
- *   side effect, instead of the account's multiPublish.
+ * - `kind: 'smart'`: an undeployed smart account; direct EAS would attest one transaction per Seed
+ *   instead of the account's multiPublish.
+ * - No kind: unknown, refused rather than guessed.
+ * - An EOA whose signer isn't the publisher: it would attest as someone else.
  *
- * Factory reads that fail (no factory configured, RPC error) rule that admin out.
+ * A wallet passed without a kind takes the registered session's kind when it's the same signer.
  */
-export async function undeployedPublisherProblem(
+export function directEasProblem(
   publisherAddress: string,
   wallet: Partial<PublishWallet> | undefined,
-): Promise<'sender_is_not_publisher' | 'undeployed_smart_account' | null> {
+): DirectEasProblem | null {
   const sender = wallet?.txSender?.address
   if (sender && !sameAddress(sender, publisherAddress)) return 'sender_is_not_publisher'
 
   const session = getPublishWallet()
-  const candidates = new Set<string>()
-  for (const a of [
-    wallet?.signer?.address,
-    session?.adminAddress,
-    session?.signer.address,
-    ...(session?.ownedAddresses ?? []),
-  ]) {
-    if (a && !sameAddress(a, publisherAddress)) candidates.add(a.toLowerCase())
-  }
-  for (const admin of candidates) {
-    try {
-      const predicted = await readFactoryGetAddress(admin as Address)
-      if (sameAddress(predicted, publisherAddress)) return 'undeployed_smart_account'
-    } catch {
-      // Not a factory account for this admin, or no factory on this chain.
-    }
-  }
+  const kind =
+    wallet?.kind ??
+    (session && sameAddress(session.signer.address, wallet?.signer?.address) ? session.kind : undefined)
+  if (kind === 'smart') return 'smart_account'
+  if (kind !== 'eoa') return 'unknown_wallet_kind'
+  if (!sameAddress(wallet?.signer?.address, publisherAddress)) return 'signer_is_not_publisher'
   return null
 }
