@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/feed-hyper",
   "version": "0.7.4",
-  "description": "Hyperdrive / Hyperswarm distribution for Seed Protocol feeds",
+  "description": "Publish, seed and serve Seed Protocol feeds over Hyperdrive and Hyperswarm, with a localhost HTTP gateway and the seed-feed CLI",
+  "keywords": [
+    "seed-protocol",
+    "rss",
+    "feed",
+    "hyperdrive",
+    "hyperswarm",
+    "holepunch",
+    "p2p",
+    "cli"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
     "seed-feed": "./dist/bin.js"
   },
@@ -55,6 +66,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/feed-hyper"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/feed-hyper#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

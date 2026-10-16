@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/eas",
   "version": "0.7.4",
-  "description": "EAS GraphQL read client and helpers for Seed Protocol",
+  "description": "Read-only Ethereum Attestation Service (EAS) GraphQL client for Seed Protocol: seed, version and property attestation queries plus chain/indexer resolution",
+  "keywords": [
+    "seed-protocol",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "easscan",
+    "graphql",
+    "ethereum",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -56,6 +67,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/eas"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/eas#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

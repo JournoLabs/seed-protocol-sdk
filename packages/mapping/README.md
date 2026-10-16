@@ -1,6 +1,8 @@
 # @seedprotocol/mapping
 
-Source → Seed model property mapping helpers and a props-driven React UI.
+[![npm](https://img.shields.io/npm/v/@seedprotocol/mapping.svg)](https://www.npmjs.com/package/@seedprotocol/mapping)
+
+Source → Seed model property mapping helpers and a props-driven React UI. Part of [Seed Protocol](https://seedprotocol.io); the mapped property bag is what you write to items with [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk).
 
 Use this package to:
 
@@ -18,14 +20,18 @@ fetches, runs Readability, or loads Seed Identity items.
 (`derive.from` is a property name; `assemble.blocks` is a host-owned string list).
 A derive-only edge may omit `sourceId`. Sync and async `applyMapping` skip these jobs.
 
-## Install
+## Installation
 
 ```bash
-bun add @seedprotocol/mapping
+npm install @seedprotocol/mapping
 ```
 
 The default entry (`@seedprotocol/mapping`) is headless — no React peer required.
-For `FieldMapper`, also install React peers and import from `@seedprotocol/mapping/react`.
+For `FieldMapper`, also install the optional React peers (`react` and `react-dom`, 18 or 19) and import from `@seedprotocol/mapping/react`:
+
+```bash
+npm install react react-dom
+```
 
 RSS parsing uses `rss-parser` with the same custom fields as `@seedprotocol/feed`
 `parseRssString` (aligned, no hard dependency on the feed package barrel).
@@ -88,11 +94,12 @@ const { properties, errors } = await applyMappingAsync(
   {
     resolve: async ({ job, url, contentType, rawValue }) => {
       if (job === 'extract') return await hostExtractHtml(url!)
-      if (job === 'lookup') return await hostLookupIdentity(rawValue!)
       return await hostFetchAndStoreFile(url!, contentType)
     },
   },
 )
+// `resolve` is only called for extract/file edges; lookup edges apply their
+// stored `lookup.entries` (see below).
 ```
 
 ### Relation lookup (`resolve: 'lookup'`)
@@ -281,7 +288,7 @@ default html to assemble.
 
 Sync `applyMapping` preview lists pending **extract/file/derive/assemble** edges under `_pendingResolve`. Lookup refs from stored entries appear in the bag.
 
-See [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped). PermaPress: [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md).
+See [FIELD_MAPPER_REDESIGN.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FIELD_MAPPER_REDESIGN.md) for the row-layout design study (Phases 1–5 shipped).
 
 ## Relationship to `FeedFieldManifest`
 
@@ -298,4 +305,8 @@ Compose them: map + resolve into a plain item, then optionally normalize roles f
 - RSS: top-level item fields via `parseRssString` (no general XPath); structured enclosure / media:content
 - UI: self-contained dark theme (or `theme="none"` / `"structural"` for host paint); `layout` defaults to `rows` (`wires` deprecated); no desktop/Tailwind coupling; no media preview player
 
-See [MAPPING_PHASE2.md](../../docs/MAPPING_PHASE2.md) for remaining consumer work (desktop migration, npm publish), [FIELD_MAPPER_REDESIGN.md](../../docs/FIELD_MAPPER_REDESIGN.md) for the row-layout study, and [FIELD_MAPPER_PERMAPRESS_HANDOFF.md](../../docs/FIELD_MAPPER_PERMAPRESS_HANDOFF.md) for PermaPress.
+See [MAPPING_PHASE2.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/MAPPING_PHASE2.md) for remaining consumer work and [FIELD_MAPPER_REDESIGN.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FIELD_MAPPER_REDESIGN.md) for the row-layout study.
+
+## License
+
+MIT

@@ -1,9 +1,21 @@
 {
   "name": "@seedprotocol/publish",
   "version": "0.7.4",
-  "description": "Publish UI components and helpers for Seed Protocol",
+  "description": "Publish Seed Protocol items to Arweave and EAS: publish state machine, React provider and hooks, wallet integration and optional thirdweb adapters",
+  "keywords": [
+    "seed-protocol",
+    "publish",
+    "arweave",
+    "eas",
+    "ethereum-attestation-service",
+    "attestations",
+    "react",
+    "thirdweb",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -40,8 +52,6 @@
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
     "@seedprotocol/arweave": "workspace:*",
     "@seedprotocol/eas": "workspace:*",
-    "@seedprotocol/react": "workspace:*",
-    "@seedprotocol/sdk": "workspace:*",
     "@xstate/react": "^6.1.0",
     "arweave": "^1.15.7",
     "debug": "^4.4.1",
@@ -54,6 +64,8 @@
     "xstate": "^5.28.0"
   },
   "devDependencies": {
+    "@seedprotocol/react": "workspace:*",
+    "@seedprotocol/sdk": "workspace:*",
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -65,6 +77,8 @@
     "vite": "^8.0.0"
   },
   "peerDependencies": {
+    "@seedprotocol/sdk": "^0.7.0",
+    "@seedprotocol/react": "^0.7.0",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
     "thirdweb": "^5",
@@ -81,6 +95,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/publish"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/publish#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

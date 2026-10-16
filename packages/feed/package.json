@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/feed",
   "version": "0.7.4",
-  "description": "Feed generation (RSS, Atom, JSON) for Seed Protocol",
+  "description": "RSS 2.0, Atom and JSON Feed generation for Seed Protocol items, with HTTP handlers, ETag caching and RFC 5005 archives",
+  "keywords": [
+    "seed-protocol",
+    "rss",
+    "atom",
+    "json-feed",
+    "feed",
+    "syndication",
+    "eas",
+    "arweave"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -47,6 +58,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/feed"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/feed#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

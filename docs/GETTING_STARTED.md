@@ -296,7 +296,12 @@ The browser build stores files under the [Origin Private File System](https://de
 
 ## React hooks (browser)
 
-In a React app you can use hooks for schemas, models, items, and item properties. These are exported from the main package:
+In a React app you can use hooks for schemas, models, items, and item properties. These are exported from **`@seedprotocol/react`** (not from `@seedprotocol/sdk`):
+
+```bash
+npm install @seedprotocol/react react @tanstack/react-query
+```
+
 
 - `useSchema`, `useSchemas`, `useCreateSchema`, `useDestroySchema`
 - `useModel`, `useModels`, `useCreateModel`, `useDestroyModel`
@@ -307,7 +312,7 @@ In a React app you can use hooks for schemas, models, items, and item properties
 List hooks (`useSchemas`, `useItems`, `useModels`, `useItemProperties`, `useModelProperties`) use [TanStack React Query](https://tanstack.com/query/latest) for caching when used inside a React Query provider. Wrap your app (or the subtree that uses these hooks) with a provider so results are cached and shared across components.
 
 - **`useItems`** uses `staleTime: 0` on its query (unlike Seed’s default list `staleTime`) so the item list stays aligned with local SQLite and remounts can refetch when needed; it also reconciles against a live query. Schema-backed fields on each item (e.g. list relations such as `authors`) may be `undefined` until loaded—normalize in forms (e.g. default to `[]`).
-- **`includeEas` (default `false`)** — By default, `useItems` and `getItemsData` only return seeds whose `seeds.uid` is null or empty (local drafts / not yet linked to an on-chain seed attestation in SQLite). To list **both** local-only and already-attested items in one feed, pass **`includeEas: true`**. For “draft vs onchain” badges and EAS explorer links, prefer **`getSeedPublishState({ seedLocalId })`** from `@seedprotocol/sdk` (and `getPublishPendingDiff` for pre-publish change summaries) instead of inferring from `latestVersionUid` alone.
+- **`includeEas` (default `false`)** — By default, `useItems` and `Item.all` only return seeds whose `seeds.uid` is null or empty (local drafts / not yet linked to an on-chain seed attestation in SQLite). To list **both** local-only and already-attested items in one feed, pass **`includeEas: true`**. For “draft vs onchain” badges and EAS explorer links, prefer **`getSeedPublishState({ seedLocalId })`** from `@seedprotocol/sdk` (and `getPublishPendingDiff` for pre-publish change summaries) instead of inferring from `latestVersionUid` alone.
 - **EAS File/Image hydration** — In browser apps, after EAS sync the SDK now schedules OPFS asset download automatically and also lazily retries by transaction id when a File/Image property is resolved but the local blob is missing. Expect a short eventual-consistency window where metadata appears before binaries finish hydrating.
 
 ### Displaying Html properties
@@ -389,7 +394,8 @@ The SDK supports three ways to supply a React Query client:
    Wrap your app with `<SeedProvider>` after `client.init()`. The SDK creates and uses an internal QueryClient with Seed defaults.
 
    ```tsx
-   import { SeedProvider, client } from '@seedprotocol/sdk'
+   import { client } from '@seedprotocol/sdk'
+   import { SeedProvider } from '@seedprotocol/react'
 
    await client.init({ config: { ... } })
 
@@ -404,7 +410,7 @@ The SDK supports three ways to supply a React Query client:
    If you already have a QueryClient (e.g. from another part of your app), pass it so Seed hooks use the same cache. You can merge Seed defaults when creating it (see option 3).
 
    ```tsx
-   import { SeedProvider, getSeedQueryDefaultOptions } from '@seedprotocol/sdk'
+   import { SeedProvider, getSeedQueryDefaultOptions } from '@seedprotocol/react'
    import { QueryClient } from '@tanstack/react-query'
 
    const queryClient = new QueryClient({
@@ -420,7 +426,7 @@ The SDK supports three ways to supply a React Query client:
    If you want a single provider for your app and Seed, create a client with Seed defaults and pass it to TanStack’s `QueryClientProvider`, or merge Seed defaults into your existing client config.
 
    ```tsx
-   import { createSeedQueryClient, mergeSeedQueryDefaults } from '@seedprotocol/sdk'
+   import { createSeedQueryClient } from '@seedprotocol/react'
    import { QueryClientProvider } from '@tanstack/react-query'
 
    const queryClient = createSeedQueryClient()
@@ -432,7 +438,7 @@ The SDK supports three ways to supply a React Query client:
    To merge Seed defaults into your own defaults:
 
    ```tsx
-   import { mergeSeedQueryDefaults } from '@seedprotocol/sdk'
+   import { mergeSeedQueryDefaults } from '@seedprotocol/react'
    import { QueryClient } from '@tanstack/react-query'
 
    const queryClient = new QueryClient({
@@ -444,35 +450,35 @@ The SDK supports three ways to supply a React Query client:
 
 `useItem` and `useItemProperty` also use React Query, but they work without any provider (they fall back to a shared client with Seed defaults). Their cache is the SDK's instance cache: an item or property that is already loaded and ready (for example a row `useItems` just returned) comes back on the first render with `isLoading: false`, and is refreshed in the background.
 
-Example: create a schema and model in a component, then create and display an item and update its title.
+Example: create a model in a component, then create an item, display it, and update its title.
 
 ```tsx
-import { SeedProvider, useSchema, useCreateModel, useModel, useCreateItem, useItem } from '@seedprotocol/sdk'
+import { useEffect, useState } from 'react'
+import { SeedProvider, useSchema, useCreateModel, useModel, useCreateItem, useItem } from '@seedprotocol/react'
 
 function BlogEditor() {
-  const schema = useSchema('Blog')
-  const createModel = useCreateModel()
-  const Post = useModel('Post', 'Blog')
-  const createItem = useCreateItem()
-  const [itemId, setItemId] = useState<string | null>(null)
-  const item = useItem(itemId ?? '')
+  const { schema } = useSchema('Blog')
+  const { create: createModel } = useCreateModel()
+  const { model: Post } = useModel('Blog', 'Post') // (schemaName, modelName)
+  const { createItem } = useCreateItem()
+  const [seedLocalId, setSeedLocalId] = useState<string>()
+  const { item } = useItem({ modelName: 'Post', seedLocalId })
 
   useEffect(() => {
-    if (!schema) return
-    createModel?.('Post', schema, {
+    if (!schema || Post) return
+    createModel('Blog', 'Post', {
       properties: { title: { dataType: 'Text' }, content: { dataType: 'Text' } },
     })
-  }, [schema])
+  }, [schema, Post])
 
   const handleCreate = async () => {
-    if (!Post) return
-    const newItem = await Post.create({ title: 'New post', content: '' })
-    setItemId(newItem.seedLocalId ?? newItem.seedUid ?? null)
+    const newItem = await createItem('Post', { title: 'New post', content: '' })
+    setSeedLocalId(newItem?.seedLocalId)
   }
 
   return (
     <div>
-      <button onClick={handleCreate}>New post</button>
+      <button onClick={handleCreate} disabled={!Post}>New post</button>
       {item && (
         <input
           value={item.title ?? ''}
@@ -483,7 +489,7 @@ function BlogEditor() {
   )
 }
 
-// Wrap your app with SeedProvider so list hooks (useSchemas, useItems, etc.) use shared caching.
+// After client.init(), wrap your app with SeedProvider so list hooks (useSchemas, useItems, etc.) share a cache.
 root.render(
   <SeedProvider>
     <BlogEditor />

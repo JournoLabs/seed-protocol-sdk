@@ -1,9 +1,20 @@
 {
   "name": "@seedprotocol/vite",
   "version": "0.7.4",
-  "description": "Vite plugin for Seed Protocol browser/renderer apps",
+  "description": "Vite plugin for browser apps using @seedprotocol/sdk: Node polyfills, ZenFS aliases, CJS interop fixes and cross-origin isolation headers",
+  "keywords": [
+    "seed-protocol",
+    "vite",
+    "vite-plugin",
+    "zenfs",
+    "opfs",
+    "sqlite-wasm",
+    "polyfills",
+    "cross-origin-isolation"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -58,6 +69,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/vite"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/vite#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

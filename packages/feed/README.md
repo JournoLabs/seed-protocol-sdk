@@ -1,10 +1,35 @@
 # @seedprotocol/feed
 
-Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. Item assembly (Seed → Version → canonical properties, relation expand, Arweave rich-text hydrate) is provided by [`@seedprotocol/query`](../query); this package applies feed defaults (`link` / `guid` / `pubDate`) and serializes RSS/Atom/JSON Feed. For EAS-assembled feeds, relation fields are marked with `_feedFieldStorageModels` / `_feedListElementStorageModels` so `pickFeedItemContent` prefers **html** / **file** / **json** storage relations before the legacy `html` / `body` / `content` chain; feed output is **not** sanitized—see [FEED_RICH_FIELDS.md](../../docs/FEED_RICH_FIELDS.md) (including **Publishing feeds** and trust boundaries).
+[![npm](https://img.shields.io/npm/v/@seedprotocol/feed.svg)](https://www.npmjs.com/package/@seedprotocol/feed)
+
+Generates **RSS 2.0**, **Atom**, and **JSON Feed** from Seed items. Item assembly (Seed → Version → canonical properties, relation expand, Arweave rich-text hydrate) is provided by [`@seedprotocol/query`](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md); this package applies feed defaults (`link` / `guid` / `pubDate`) and serializes RSS/Atom/JSON Feed. For EAS-assembled feeds, relation fields are marked with `_feedFieldStorageModels` / `_feedListElementStorageModels` so `pickFeedItemContent` prefers **html** / **file** / **json** storage relations before the legacy `html` / `body` / `content` chain; feed output is **not** sanitized—see [FEED_RICH_FIELDS.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FEED_RICH_FIELDS.md) (including **Publishing feeds** and trust boundaries).
+
+Part of [Seed Protocol](https://seedprotocol.io); pairs with [`@seedprotocol/sdk`](https://www.npmjs.com/package/@seedprotocol/sdk).
+
+## Installation
+
+```bash
+npm install @seedprotocol/feed
+```
+
+Server-side (Node / Bun). Item assembly comes from `@seedprotocol/query`, which is installed as a dependency.
+
+## Usage
+
+```ts
+import { initializeFeedPlatform, handleFeedRequest } from '@seedprotocol/feed'
+
+await initializeFeedPlatform()
+
+// GET /:collection/:format  (format: rss | atom | json)
+const response: Response = await handleFeedRequest('posts', 'rss', request.headers.get('if-none-match'))
+```
+
+`handleArchiveFeedRequest(collection, year, month, format)` serves RFC 5005 monthly archives. `createFeed(items, schemaName, format)` serializes items you have already fetched (e.g. via `getFeedItemsBySchemaName`).
 
 ## P2P distribution
 
-HTTP hosting is optional. To publish the same generated feeds onto Hyperdrive / Hyperswarm (and serve them to classic RSS readers over localhost), use **`@seedprotocol/feed-hyper`** and its `seed-feed` CLI. See [packages/feed-hyper/README.md](../feed-hyper/README.md) and [docs/FEED_HYPER.md](../../docs/FEED_HYPER.md).
+HTTP hosting is optional. To publish the same generated feeds onto Hyperdrive / Hyperswarm (and serve them to classic RSS readers over localhost), use **`@seedprotocol/feed-hyper`** and its `seed-feed` CLI. See [packages/feed-hyper/README.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/feed-hyper/README.md) and [docs/FEED_HYPER.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/FEED_HYPER.md).
 
 Channel self-links use `feedUrl` from site config (`setSiteConfig` / `createFeed` overrides). Home/channel links use `siteUrl`.
 
@@ -16,7 +41,7 @@ Revoked attestations are excluded from feed queries by default. Items that have 
 
 ### Caching (dev mode)
 
-In development (`NODE_ENV=development`), caching is **disabled by default**. Set `CACHE_ENABLED=true` to enable in dev. Assembled Seed JSON (collection/item) is cached by [`@seedprotocol/query`](../query); this package caches serialized feed bodies, HTTP ETags, and image metadata. See `packages/feed/src/cache/README.md` and the query README.
+In development (`NODE_ENV=development`), caching is **disabled by default**. Set `CACHE_ENABLED=true` to enable in dev. Assembled Seed JSON (collection/item) is cached by [`@seedprotocol/query`](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md); this package caches serialized feed bodies, HTTP ETags, and image metadata. See [packages/feed/src/cache/README.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/feed/src/cache/README.md) and the [query README](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/packages/query/README.md).
 
 ### Arweave gateway URLs
 
@@ -66,3 +91,7 @@ EAS_CHAIN_ID=8453
 # FEED_ITEM_URL_BASE=https://base.easscan.org
 FEED_ITEM_URL_PATH=attestation/view
 ```
+
+## License
+
+MIT

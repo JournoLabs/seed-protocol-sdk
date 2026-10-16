@@ -1,9 +1,18 @@
 {
   "name": "@seedprotocol/arweave",
   "version": "0.7.4",
-  "description": "Arweave gateway client and helpers for Seed Protocol",
+  "description": "Arweave gateway client for Seed Protocol: transaction reads, read-gateway selection with health probing, and gateway endpoint resolution",
+  "keywords": [
+    "seed-protocol",
+    "arweave",
+    "arweave-gateway",
+    "permaweb",
+    "decentralized-storage",
+    "web3"
+  ],
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -55,6 +64,10 @@
     "type": "git",
     "url": "git+https://github.com/JournoLabs/seed-protocol-sdk.git",
     "directory": "packages/arweave"
+  },
+  "homepage": "https://github.com/JournoLabs/seed-protocol-sdk/tree/main/packages/arweave#readme",
+  "bugs": {
+    "url": "https://github.com/JournoLabs/seed-protocol-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

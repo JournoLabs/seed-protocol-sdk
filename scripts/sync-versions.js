@@ -79,7 +79,19 @@ function syncVersions(newVersion = null) {
 
   for (const name of SYNC_PACKAGES) {
     const { path: packagePath, pkg } = packages[name]
-    if (pkg.version !== targetVersion) {
+    // Internal peer ranges aren't rewritten at publish (only workspace: refs are), so keep
+    // them at ^<major>.<minor>.0; a stale ^0.6.0 rejects 0.7.x under 0.x caret rules.
+    const peerRange = `^${targetVersion.split('.').slice(0, 2).join('.')}.0`
+    let peersChanged = false
+    for (const dep of Object.keys(pkg.peerDependencies ?? {})) {
+      const value = pkg.peerDependencies[dep]
+      if (dep.startsWith('@seedprotocol/') && !value.startsWith('workspace:') && value !== peerRange) {
+        pkg.peerDependencies[dep] = peerRange
+        peersChanged = true
+        console.log(`[Version Sync] ${name} peer ${dep}: ${value} -> ${peerRange}`)
+      }
+    }
+    if (pkg.version !== targetVersion || peersChanged) {
       pkg.version = targetVersion
       writePackageJson(packagePath, pkg)
       console.log(`[Version Sync] Updated ${name} version to ${targetVersion}`)
