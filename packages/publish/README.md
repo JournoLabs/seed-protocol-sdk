@@ -34,6 +34,9 @@ initPublish({
   rpcUrl: import.meta.env.VITE_RPC_URL,
   chain: optimismSepolia,
   accountMode: 'eoa',
+  // Files (images, Html, ...) go to Arweave as data items the wallet signs. Without this, uploads
+  // take the L1 path, which needs an Arweave key: arweaveJwk or signArweaveTransactions.
+  useArweaveBundler: true,
 })
 
 function Connect() {
@@ -59,7 +62,9 @@ function App() {
 // Later, once the wallet is connected:
 // await item.publish()   // resolves when uploads and attestations are done
 // or, to start without waiting:
-// await ensureWalletThenPublish(item, { dataItemSigner: /* from useSeedWallet().signer */ })
+// const result = await ensureWalletThenPublish(item)  // signs data items with the wallet
+// if (result.outcome === 'started') watch(result.publish)   // the publish actor
+// if (result.outcome === 'already_publishing') ...          // this item is publishing already
 ```
 
 ### Recipe 2: EIP-1193 + permissionless EIP-7702 (gasless, no Thirdweb)

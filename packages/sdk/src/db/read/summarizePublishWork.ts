@@ -46,6 +46,8 @@ export type PublishWorkSummary = {
   attestationCount: number
   uploadCount: number
   uploadBytes: number
+  /** Size of each upload, in bytes (Arweave charges per transaction, not only per byte). */
+  uploadSizes: number[]
   /**
    * References the publish would attest to items whose seed was unpublished. When non-empty,
    * publishing fails with RelatedItemUnpublishedError before anything is sent.
@@ -145,6 +147,7 @@ async function addUpload(
   seen.add(key)
   acc.uploadCount += 1
   acc.uploadBytes += bytes
+  acc.uploadSizes.push(bytes)
 }
 
 async function addUploadFromPath(
@@ -511,6 +514,7 @@ export const summarizePublishWork = async (
     attestationCount: 0,
     uploadCount: 0,
     uploadBytes: 0,
+    uploadSizes: [],
     unpublishedRelatedItems: [],
   }
   const graph = await getPublishDraftGraph(item, { forceFullSnapshot })

@@ -150,6 +150,8 @@ const dataItemWallet = fromEthersWallet(automationWallet)
 const onChainWallet: PublishWallet = /* session-key UserOp PublishWallet */
 
 await PublishManager.ready()
+// dataItemSigner signs uploads on the bundler path (useArweaveBundler: true). On the L1 path, an
+// item with files also needs an Arweave key: pass arweaveJwk or signArweaveTransactions.
 const actor = await PublishManager.createPublish(item, managedAddress, onChainWallet, {
   dataItemSigner: dataItemWallet.signer,
 })
