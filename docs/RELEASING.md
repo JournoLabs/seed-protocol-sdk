@@ -48,9 +48,15 @@ GITHUB_REF=refs/heads/$(git branch --show-current) GITHUB_SHA=$(git rev-parse HE
    2. Runs `bun run build:all`. Tests are skipped here because the test job already
       ran them on this SHA.
    3. Publishes every package under the staging tag `ci-g{sha7}` with `--provenance`.
-   4. [`promote-dist-tag.js`](../scripts/promote-dist-tag.js) then points the real tag
-      at the new version for all packages together, and removes the staging tags.
-4. **github-release** (tags only) creates the GitHub Release.
+4. **promote**, only after every package published:
+   [`promote-dist-tag.js`](../scripts/promote-dist-tag.js) points the real tag at the
+   new version for every package, in publish order, and removes the staging tags. It
+   doesn't wait for the version to appear in `npm view`, whose reads have lagged
+   publishes by 3 to 8 minutes. It reads current tags from the registry's dist-tags
+   endpoint, which isn't CDN-cached, writes each tag straight away, and retries a
+   failed write every 15 seconds for up to 10 minutes per package
+   (`RELEASE_REGISTRY_WAIT_MS`).
+5. **github-release** (tags only) creates the GitHub Release.
 
 When the real tag moves:
 
@@ -60,7 +66,8 @@ When the real tag moves:
 - **`latest`:** only forward. Re-running an old release tag never moves `latest` back.
 
 Re-running a run is always safe. Packages already on npm at that version are skipped,
-and moving the tags is idempotent. The job summary lists the `bun add` lines for the
+and moving the tags is idempotent. When only **promote** failed, **Re-run failed jobs**
+re-runs it (and **github-release** after it) without rebuilding. The job summary lists the `bun add` lines for the
 version.
 
 To try the tag logic locally against the real registry, set `RELEASE_DRY_RUN=1`.
@@ -223,9 +230,12 @@ Done by a maintainer with publish rights and 2FA.
 - **A tag run failed before publishing anything:** fix it on `main`, then
   `bun run release -- --retry`. See [When a release fails before
   publishing](#when-a-release-fails-before-publishing).
-- **"… is not on the registry; not moving any tags":** npm's reads lag its publishes,
-  sometimes by minutes. The promote step waits up to 10 minutes for every package
-  (`RELEASE_REGISTRY_WAIT_MS`). If it still gives up, re-run the job: everything is
-  already published, so it goes straight to promoting.
+- **"could not point … at …":** npm still rejected a dist-tag write after 10 minutes
+  of retries. Packages earlier in publish order may already be on the new version.
+  Re-run the failed **promote** job to finish; it skips packages whose tag is already
+  there.
+- **"could not remove staging tag …" warning:** `npm dist-tag rm` reads the tags first
+  and refuses a tag that read doesn't show yet. The real tag has moved; the leftover
+  `ci-*` tag is untidy, not broken. Remove it with `npm dist-tag rm`.
 - **Tag "was not moved" in the summary:** a newer commit is on the branch. Its run
   moves the tag.

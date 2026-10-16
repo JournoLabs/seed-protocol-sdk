@@ -5,7 +5,15 @@
  *
  * Environment (from ci-version.js outputs):
  *   RELEASE_VERSION, RELEASE_DIST_TAG, RELEASE_CHANNEL (release | preview),
- *   RELEASE_BRANCH (preview only), GITHUB_SHA
+ *   RELEASE_STAGING_TAG, RELEASE_BRANCH (preview only), GITHUB_SHA
+ *   RELEASE_REGISTRY_WAIT_MS: how long to keep retrying each package's tag write
+ *   (default 10 minutes)
+ *
+ * Runs only after the publish job succeeded, which means npm accepted every
+ * package at this version. It doesn't wait for the version to show up in `npm view`:
+ * those reads lagged publishes by 3–8 minutes in v0.7.2 and #65. It reads the current
+ * tags from the dist-tags endpoint and writes the tag straight away, retrying only
+ * a write that fails.
  *
  * When the tag moves:
  * - preview: only if this run's SHA is still the branch head on the remote
@@ -20,53 +28,27 @@
 import { appendFileSync } from 'fs'
 import {
   PUBLISH_ORDER,
-  STAGING_TAG_PREFIX,
-  compareStable,
+  decideLatest,
+  fetchDistTags,
   listRemoteBranches,
-  npm,
   npmWrite,
+  retryUntil,
+  stagingTagsToRemove,
 } from './release-channel.js'
 
 const PACKAGES = PUBLISH_ORDER.map((name) => `@seedprotocol/${name}`)
 
 const RETRY_INTERVAL_MS = 15_000
-// Shared by all packages: once the slowest one is visible, the rest usually are too.
+// Per package, so one slow package can't use up the others' time.
 const REGISTRY_WAIT_MS = Number(process.env.RELEASE_REGISTRY_WAIT_MS ?? 10 * 60_000)
+// `npm dist-tag rm` refuses a tag its own read doesn't show yet. Shared by all
+// packages: on a re-run the staging tags are already gone, and each would wait the full time.
+const STAGING_REMOVE_WAIT_MS = 2 * 60_000
 
 function requireEnv(name) {
   const value = process.env[name]
   if (!value) throw new Error(`${name} must be set`)
   return value
-}
-
-/**
- * Dist-tags for a package, read together with `version` so the snapshot is at
- * least as new as its publish (and so includes the staging tag it was published
- * under). A bare `npm view <pkg> dist-tags` right after publishing can come from a
- * stale registry edge that has neither, even after the version itself is visible.
- * Retries while the version isn't there yet: reads can lag publishes by several
- * minutes (v0.7.2 packages still 404'd 3 minutes after publishing).
- * @param {string} packageName
- * @param {string} version
- * @param {number} deadline - epoch ms after which to give up
- * @returns {Promise<Record<string, string>>}
- */
-async function readTagsWithVersion(packageName, version, deadline) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return JSON.parse(
-        npm(['view', `${packageName}@${version}`, 'dist-tags', '--json', '--prefer-online'], {
-          capture: true,
-          quiet: true,
-        }),
-      )
-    } catch {
-      if (Date.now() + RETRY_INTERVAL_MS > deadline) break
-      console.log(`[promote] ${packageName}@${version} not visible on the registry yet (attempt ${attempt}); retrying`)
-      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS))
-    }
-  }
-  throw new Error(`${packageName}@${version} is not on the registry; not moving any tags`)
 }
 
 /**
@@ -80,12 +62,17 @@ function decidePreview(branch, sha) {
 }
 
 /**
- * @returns {{ move: boolean, reason: string }}
+ * Run an npm write, retrying until `deadline`.
+ * @param {string[]} args
+ * @param {number} deadline
  */
-function decideRelease(version, current) {
-  if (!current) return { move: true, reason: 'no current latest' }
-  if (compareStable(version, current) >= 0) return { move: true, reason: `current latest is ${current}` }
-  return { move: false, reason: `latest is already newer (${current})` }
+function npmWriteWithRetry(args, deadline) {
+  return retryUntil(() => npmWrite(args), {
+    deadline,
+    intervalMs: RETRY_INTERVAL_MS,
+    onRetry: (_error, attempt) =>
+      console.log(`[promote] npm ${args.join(' ')} failed (attempt ${attempt}); retrying`),
+  })
 }
 
 async function main() {
@@ -93,47 +80,54 @@ async function main() {
   const distTag = requireEnv('RELEASE_DIST_TAG')
   const channel = requireEnv('RELEASE_CHANNEL')
   const sha = requireEnv('GITHUB_SHA')
+  const stagingTag = process.env.RELEASE_STAGING_TAG
 
   if (channel === 'preview' && distTag === 'latest') {
     throw new Error('Refusing to point latest at a preview build')
   }
 
-  const deadline = Date.now() + REGISTRY_WAIT_MS
-  const tagsByPackage = new Map()
-  for (const packageName of PACKAGES) {
-    tagsByPackage.set(packageName, await readTagsWithVersion(packageName, version, deadline))
-  }
+  const tagsByPackage = new Map(
+    await Promise.all(PACKAGES.map(async (packageName) => [packageName, await fetchDistTags(packageName)])),
+  )
 
   const previewDecision = channel === 'preview' ? decidePreview(requireEnv('RELEASE_BRANCH'), sha) : null
   const results = []
 
+  // In publish order, so if a write still fails, the packages left on the old version
+  // are dependents of the ones that moved, never the other way round.
   for (const packageName of PACKAGES) {
     const tags = tagsByPackage.get(packageName)
-    const decision = previewDecision ?? decideRelease(version, tags.latest)
+    const decision = previewDecision ?? decideLatest(version, tags.latest)
     let status
     if (!decision.move) {
       status = `left ${distTag} at ${tags[distTag] ?? '(unset)'}: ${decision.reason}`
     } else if (tags[distTag] === version) {
       status = `${distTag} already at ${version}`
     } else {
-      npmWrite(['dist-tag', 'add', `${packageName}@${version}`, distTag])
+      try {
+        await npmWriteWithRetry(['dist-tag', 'add', `${packageName}@${version}`, distTag], Date.now() + REGISTRY_WAIT_MS)
+      } catch (error) {
+        throw new Error(
+          `could not point ${distTag} at ${packageName}@${version}: ${error.message}. ` +
+            `Already pointing at it: ${results.filter((r) => r.moved).map((r) => r.packageName).join(', ') || 'none'}. ` +
+            'Re-run the promote job to finish.',
+        )
+      }
       status = `${distTag} → ${version}`
     }
     results.push({ packageName, status, moved: decision.move })
     console.log(`[promote] ${packageName}: ${status}`)
   }
 
+  const stagingDeadline = Date.now() + STAGING_REMOVE_WAIT_MS
   for (const packageName of PACKAGES) {
-    const tags = tagsByPackage.get(packageName)
-    for (const [tag, tagged] of Object.entries(tags)) {
-      if (tag.startsWith(STAGING_TAG_PREFIX) && tagged === version) {
-        // A leftover staging tag is untidy, not broken; don't fail after the real tag moved.
-        try {
-          npmWrite(['dist-tag', 'rm', packageName, tag])
-          console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
-        } catch (error) {
-          console.warn(`[promote] ${packageName}: could not remove staging tag ${tag}: ${error.message}`)
-        }
+    for (const tag of stagingTagsToRemove({ tags: tagsByPackage.get(packageName), version, stagingTag })) {
+      // A leftover staging tag is untidy, not broken; don't fail after the real tag moved.
+      try {
+        await npmWriteWithRetry(['dist-tag', 'rm', packageName, tag], stagingDeadline)
+        console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
+      } catch (error) {
+        console.warn(`[promote] ${packageName}: could not remove staging tag ${tag}: ${error.message}`)
       }
     }
   }
