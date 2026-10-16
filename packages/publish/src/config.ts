@@ -142,9 +142,9 @@ export interface PublishConfig {
   /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
   /**
-   * Gateway transport for publish + read paths. Prefer resolving once via
-   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` at app bootstrap
-   * and passing `uploadApiBaseUrl` / `arweaveGraphqlUrl` from the result.
+   * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
+   * them once at app bootstrap with
+   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` and pass those instead.
    */
   gatewayTransport?: 'http-gateway' | 'hyper' | 'hybrid'
   /** Operator Gateway Hyper key (z32) — informational; sidecar is configured separately. */
@@ -171,7 +171,7 @@ export interface PublishConfig {
    * missing; accounts without the extension are skipped.
    */
   modularAccountModuleContract?: string
-  /** Unused: `installSeedExecutor()` takes no install data. */
+  /** @deprecated Not read: `installSeedExecutor()` takes no install data. */
   modularAccountModuleData?: string
   /**
    * Use the modular executor for multiPublish.
@@ -407,7 +407,6 @@ export interface ResolvedPublishConfig extends PublishConfig {
   /** EAS deployment for the publish chain (addresses, indexer and explorer URLs). */
   easChain: EasChainDeployment
   useDirectEas: boolean
-  modularAccountModuleData: string
   useModularExecutor: boolean
   useArweaveBundler: boolean
   /** Resolved: defaults to false. */
@@ -473,7 +472,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     schemaRegistryAddress: easChain.schemaRegistryAddress,
     easChain,
     useDirectEas: config.useDirectEas ?? false,
-    modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor,
     useArweaveBundler,
     arweaveUploadVerificationBaseUrl,
