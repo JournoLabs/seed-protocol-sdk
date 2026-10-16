@@ -2,10 +2,14 @@ import type { PublishUpload } from '@/types/publish'
 import type { IItem } from '@/interfaces/IItem'
 
 /**
- * Optional getter for the publisher address when creating new seeds.
- * When provided and the user is connected (e.g. via Thirdweb), new seeds will have
- * publisher set at creation time. If not provided or user is not connected, publisher
- * remains null until attestation (persistSeedUid).
+ * Optional getter for the publisher address when creating new seeds. The publisher makes a new
+ * draft owned: once owned addresses are set, a draft with no publisher is read-only.
+ *
+ * When it returns an address (e.g. a connected wallet), new seeds get it at creation. When there is
+ * no getter, or it returns nothing, a new seed gets the owned address if exactly one is set, and
+ * otherwise no publisher (until attestation, or claimUnpublishedDrafts). Register one when several
+ * owned addresses are set (e.g. an EOA and its smart account), to say which publishes.
+ * `@seedprotocol/publish` registers one from the connected wallet.
  */
 export type GetPublisherForNewSeeds = () => Promise<string | undefined>
 
