@@ -63,7 +63,7 @@ async function resolveUserWallet(
   userWallet?: PublishWallet,
 ): Promise<PublishWallet> {
   if (userWallet) return userWallet
-  return fromThirdwebAccount(await connectManagedAccount(managedAddress))
+  return fromThirdwebAccount(await connectManagedAccount(managedAddress), { kind: 'smart' })
 }
 
 async function assertExecutorModuleInstalled(managedAddress: string): Promise<void> {

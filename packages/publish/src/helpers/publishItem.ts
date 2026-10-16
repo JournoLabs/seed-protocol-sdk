@@ -98,6 +98,8 @@ export async function publishItem(item: IItem<any>, options?: ItemPublishOptions
   switch (result.outcome) {
     case 'started':
       break
+    case 'already_publishing':
+      throw new Error(`Publish of ${item.seedLocalId} did not start: it is already publishing in this tab or another.`)
     case 'no_wallet':
       throw new Error(
         'No publish wallet is connected. Connect one (useSeedWallet().connect, or setPublishWallet) before publishing.',
@@ -109,9 +111,5 @@ export async function publishItem(item: IItem<any>, options?: ItemPublishOptions
     case 'managed_not_ready':
       throw result.error
   }
-  const actor = await result.started
-  if (!actor) {
-    throw new Error(`Publish of ${item.seedLocalId} did not start: it is already publishing in this tab or another.`)
-  }
-  await waitForPublishActor(actor, item.seedLocalId)
+  await waitForPublishActor(result.publish, item.seedLocalId)
 }

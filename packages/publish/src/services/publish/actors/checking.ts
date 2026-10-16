@@ -28,30 +28,39 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
 }
 
 /**
- * Direct EAS is for EOAs (and `useDirectEas`). A publisher with no bytecode that is really an
- * undeployed smart account, or that the wallet does not send as, is refused rather than attested
- * one transaction per Seed from the wrong path.
+ * Direct EAS is for EOAs (and `useDirectEas`). A publisher with no bytecode is attested straight
+ * to EAS only when the wallet says it is an EOA and signs as the publisher; an undeployed smart
+ * account, an unknown wallet, or a wallet that sends as someone else is refused.
  */
-async function refuseUndeployedSmartAccount(
+async function refuseDirectEas(
   publisherAddress: string,
   wallet: Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
 ): Promise<Error | null> {
-  // Loaded on this branch only: it pulls in the factory contract helpers.
-  const { undeployedPublisherProblem } = await import('../helpers/undeployedSmartAccount')
-  const problem = await undeployedPublisherProblem(publisherAddress, wallet)
-  if (problem === 'undeployed_smart_account') {
-    return new ManagedAccountPublishError(
-      `The publishing smart account ${publisherAddress} is not deployed on ${getPublishChainName()} yet. Deploy it first (your wallet's setup flow, or deploySmartWalletContract from @seedprotocol/publish/thirdweb), then publish again.`,
-      'MANAGED_ACCOUNT_NOT_DEPLOYED',
-      publisherAddress,
-    )
+  const { directEasProblem } = await import('../helpers/undeployedSmartAccount')
+  const problem = directEasProblem(publisherAddress, wallet)
+  const chain = getPublishChainName()
+  switch (problem) {
+    case null:
+      return null
+    case 'smart_account':
+      return new ManagedAccountPublishError(
+        `The publishing smart account ${publisherAddress} is not deployed on ${chain} yet. Deploy it first (your wallet's setup flow, or deploySmartWalletContract from @seedprotocol/publish/thirdweb), then publish again.`,
+        'MANAGED_ACCOUNT_NOT_DEPLOYED',
+        publisherAddress,
+      )
+    case 'sender_is_not_publisher':
+      return new Error(
+        `The publish wallet sends as ${wallet?.txSender?.address}, not as the publisher ${publisherAddress}, which has no contract deployed on ${chain}. Attesting directly to EAS would record the wrong attester. Connect the publisher's wallet, or deploy the publisher's smart account first.`,
+      )
+    case 'signer_is_not_publisher':
+      return new Error(
+        `The publish wallet signs as ${wallet?.signer?.address}, not as the publisher ${publisherAddress}. Attesting directly to EAS would record the wrong attester.`,
+      )
+    case 'unknown_wallet_kind':
+      return new Error(
+        `The publisher ${publisherAddress} has no contract on ${chain}, and the publish wallet doesn't say whether it is an EOA or an undeployed smart account. Build it with fromEip1193Provider or fromEthersWallet, set kind: 'eoa' on the PublishWallet, or set useDirectEas to attest directly anyway.`,
+      )
   }
-  if (problem === 'sender_is_not_publisher') {
-    return new Error(
-      `The publish wallet sends as ${wallet?.txSender?.address}, not as the publisher ${publisherAddress}, which has no contract deployed on ${getPublishChainName()}. Attesting directly to EAS would record the wrong attester. Connect the publisher's wallet, or deploy the publisher's smart account first.`,
-    )
-  }
-  return null
 }
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
@@ -137,7 +146,7 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         }
 
         if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
-          const refusal = await refuseUndeployedSmartAccount(
+          const refusal = await refuseDirectEas(
             address.trim(),
             (wallet ?? account) as Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
           )

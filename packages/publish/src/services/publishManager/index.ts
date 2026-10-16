@@ -6,7 +6,6 @@ import { createPublish } from './actions/createPublish'
 import { retryAttestations } from './actions/retryAttestations'
 import { stopPublish } from './actions/stopPublish'
 import { stopAll } from './actions/stopAll'
-import { query } from './actions/query'
 import { addSubscription } from './actions/addSubscription'
 import { requestSavePublish } from './actions/requestSavePublish'
 import { publishDone } from './actions/publishDone'
@@ -40,7 +39,6 @@ type PublishManagerEvent =
   | { type: 'REMOVE_SUBSCRIPTION'; seedLocalId: string }
   | { type: 'RETRY_ATTESTATIONS'; seedLocalId: string; account?: unknown }
   | { type: 'STOP_PUBLISH'; seedLocalId: string }
-  | { type: 'QUERY'; seedLocalId: string }
   | { type: 'STOP_ALL' }
 
 export const publishManagerMachine = setup({
@@ -64,7 +62,6 @@ export const publishManagerMachine = setup({
     retryAttestations,
     stopPublish,
     stopAll,
-    query,
   } as unknown as Record<string, (args: unknown) => void>,
 }).createMachine({
   id: 'publishManager',
@@ -120,9 +117,6 @@ export const publishManagerMachine = setup({
         },
         STOP_PUBLISH: {
           actions: ['stopPublish'],
-        },
-        QUERY: {
-          actions: ['query'],
         },
         STOP_ALL: {
           actions: ['stopAll'],
@@ -245,7 +239,12 @@ export const PublishManager = {
   retryAttestations: (seedLocalId: string, account?: import('../../helpers/seedSigner').PublishWallet) =>
     publishManager.send({ type: 'RETRY_ATTESTATIONS', seedLocalId, account }),
   stopPublish: (seedLocalId: string) => publishManager.send({ type: 'STOP_PUBLISH', seedLocalId }),
-  query: (seedLocalId: string) => publishManager.send({ type: 'QUERY', seedLocalId }),
+  /**
+   * The current snapshot of a seed's publish (running, or settled this session), or undefined.
+   * A read only: it used to stop the publish it named, as stopPublish does without marking the row
+   * or releasing the lock.
+   */
+  query: (seedLocalId: string) => PublishManager.getPublish(seedLocalId)?.getSnapshot(),
   stopAll: () => publishManager.send({ type: 'STOP_ALL' }),
   getPublish: (seedLocalId: string) => {
     const ctx = publishManager.getSnapshot().context

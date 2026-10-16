@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `summarizePublishWork` returns `uploadSizes`, the size of each upload, next to `uploadCount` and `uploadBytes`. `@seedprotocol/publish` uses it to price Arweave uploads per transaction.
+
 ## 0.7.4 (2026-10-15)
 
 ### Commits

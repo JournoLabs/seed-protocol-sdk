@@ -145,7 +145,6 @@ const ConnectButton: FC = () => {
         return
       }
       await waitUntilSeedInitialized()
-      PublishManager.stopAll()
       const owned = new Set<string>([account.address.toLowerCase()])
       let managedAddress: string | undefined
       if (config.useModularExecutor) {
@@ -176,10 +175,21 @@ const ConnectButton: FC = () => {
       if (lastSyncedOwnedKey.current === ownedKey) {
         return
       }
+      // Another wallet took over: publishes started for the previous one stop (their rows stay
+      // for it to resume). Not on the first sync, where publishes restored from the DB need this
+      // wallet, nor on a re-sync of the same wallet.
+      if (lastSyncedOwnedKey.current !== null) {
+        PublishManager.stopAll()
+      }
       lastSyncedOwnedKey.current = ownedKey
       try {
-        const publishWallet = fromThirdwebAccount(account)
         const adminAddress = activeWallet.getAdminAccount?.()?.address
+        // A wallet with a separate admin account, or the modular executor's ManagedAccount, is a
+        // smart account; otherwise the connected account is a plain key (in-app or injected).
+        const isSmart =
+          !!managedAddress ||
+          (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
+        const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
         await setPublishWallet({
           ...publishWallet,
           ownedAddresses: [...owned],

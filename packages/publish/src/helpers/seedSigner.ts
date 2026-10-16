@@ -37,9 +37,18 @@ export interface SeedTxSender {
 }
 
 /** Bundle used by publish / revoke flows that need both signing and sending. */
+/**
+ * What account a PublishWallet publishes from. `'eoa'`: a plain key, whose address is the signer
+ * (publish may attest straight to EAS from it before it has any code). `'smart'`: a smart account
+ * (ManagedAccount, thirdweb smart wallet). Unset: unknown, treated like `'smart'` when choosing
+ * direct EAS.
+ */
+export type PublishWalletKind = 'eoa' | 'smart'
+
 export type PublishWallet = {
   signer: SeedSigner
   txSender: SeedTxSender
+  kind?: PublishWalletKind
 }
 
 const SEED_SIGNER_BRAND = Symbol.for('seedprotocol.SeedSigner')
@@ -113,7 +122,7 @@ export function fromEthersWallet(wallet: ethers.Wallet): PublishWallet {
       return { transactionHash: result.hash as Hex }
     },
   })
-  return { signer, txSender }
+  return { signer, txSender, kind: 'eoa' }
 }
 
 /**

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { initPublish, setConfigRef } from '~/config'
-import { combinePublishCostEstimate, estimatePublishCost } from './estimatePublishCost'
+import {
+  ARWEAVE_MIN_CHARGED_BYTES,
+  chargedUploadBytes,
+  combinePublishCostEstimate,
+  estimatePublishCost,
+} from './estimatePublishCost'
 import { heuristicPublishGas, PUBLISH_GAS_HEURISTICS } from './gasHeuristics'
 import { resetMarketRateCache } from './marketRates'
 import type { PublishWorkSummary } from './types'
@@ -157,5 +162,46 @@ describe('estimatePublishCost', () => {
     })
     const estimate = await estimatePublishCost(dummyItem(), { work, rates })
     expect(estimate.arweave.path).toBe('bundler')
+  })
+})
+
+describe('Arweave charges per transaction', () => {
+  const small = { ...work, uploadCount: 3, uploadBytes: 3_000, uploadSizes: [1_000, 1_000, 1_000] }
+
+  test('L1: each upload is charged for at least 256 KiB', () => {
+    expect(chargedUploadBytes(small, 'l1')).toBe(3 * ARWEAVE_MIN_CHARGED_BYTES)
+    const estimate = combinePublishCostEstimate(small, rates, { arweavePath: 'l1' })
+    expect(estimate.arweave.bytes).toBe(3_000)
+    expect(estimate.arweave.chargedBytes).toBe(3 * ARWEAVE_MIN_CHARGED_BYTES)
+    // 1 KB used to cost 1/262 of what Arweave charges.
+    expect(Number(estimate.arweave.ar)).toBeCloseTo((3 * ARWEAVE_MIN_CHARGED_BYTES * 1000) / 1e12, 12)
+  })
+
+  test('bundler: one transaction for the whole bundle', () => {
+    expect(chargedUploadBytes(small, 'bundler')).toBe(ARWEAVE_MIN_CHARGED_BYTES)
+    expect(chargedUploadBytes({ ...work, uploadSizes: [1_000_000] }, 'bundler')).toBe(1_000_000)
+  })
+
+  test('Turbo: uploads of 100 KiB or less are free', () => {
+    const mixed = { ...work, uploadCount: 2, uploadBytes: 1_001_000, uploadSizes: [1_000, 1_000_000] }
+    expect(chargedUploadBytes(mixed, 'bundler', 'turbo')).toBe(1_000_000)
+    expect(chargedUploadBytes(small, 'bundler', 'turbo')).toBe(0)
+  })
+
+  test('without upload sizes, uploads are equal parts of the total', () => {
+    expect(chargedUploadBytes({ uploadCount: 2, uploadBytes: 2_000 }, 'l1')).toBe(2 * ARWEAVE_MIN_CHARGED_BYTES)
+    expect(chargedUploadBytes({ uploadCount: 0, uploadBytes: 0 }, 'l1')).toBe(0)
+  })
+})
+
+describe('testnet gas', () => {
+  test('is worth $0, not mainnet ETH-USD', () => {
+    // 10 gwei, so mainnet gas is worth more than a rounded cent.
+    const pricier = { ...rates, gasPriceWei: 10_000_000_000n }
+    const estimate = combinePublishCostEstimate(work, pricier, { testnet: true })
+    expect(estimate.evm.testnet).toBe(true)
+    expect(Number(estimate.evm.eth)).toBeGreaterThan(0)
+    expect(estimate.evm.usd).toBe(0)
+    expect(combinePublishCostEstimate(work, pricier).evm.usd).toBeGreaterThan(0)
   })
 })

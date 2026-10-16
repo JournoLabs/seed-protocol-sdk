@@ -1,5 +1,6 @@
 import { checksumAddress, toSnakeCase } from './utils.js'
 import { pickLatestPropertyAttestationsByRefAndSchema } from './easPropertyCanonical.js'
+import { keepAttestationsFromRefAttester } from './easRefAttester.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
@@ -67,16 +68,51 @@ export const getItemPropertiesFromEas = async ({
 }
 
 /**
- * Canonical properties of the given versions. It doesn't check attesters: filter `getItemPropertiesFromEas`
- * results with `keepAttestationsFromRefAttester(properties, versions)` first when the versions may
- * not all be trusted (see easRefAttester.ts).
+ * Canonical properties of the given versions: the newest per version and property schema.
+ *
+ * By default only attestations from the right accounts count (easRefAttester.ts): a version must
+ * be attested by its seed's attester, and a property by its version's. Anyone can attest with any
+ * refUID, so without this another account's newer property would win. That costs two more
+ * requests (the versions and their seeds); pass `checkAttesters: false` when the versions are
+ * already known to be trusted.
  */
-export const getCanonicalItemPropertiesFromEas = async (props: {
+export const getCanonicalItemPropertiesFromEas = async ({
+  versionUids,
+  excludeRevoked,
+  checkAttesters = true,
+}: {
   versionUids: string[]
   excludeRevoked?: boolean
+  checkAttesters?: boolean
 }): Promise<Attestation[]> => {
-  const itemProperties = await getItemPropertiesFromEas(props)
-  return pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
+  const itemProperties = await getItemPropertiesFromEas({ versionUids, excludeRevoked })
+  if (!checkAttesters || itemProperties.length === 0) {
+    return pickLatestPropertyAttestationsByRefAndSchema(itemProperties)
+  }
+
+  const easClient = BaseEasClient.getEasClient()
+  const { itemVersions } = (await easClient.request(GET_VERSIONS, {
+    where: { id: { in: [...new Set(itemProperties.map((p) => p.refUID))] } },
+  })) as { itemVersions: Attestation[] }
+  const seedUids = [...new Set(itemVersions.map((v) => v.refUID))]
+  const { itemSeeds } = (await easClient.request(GET_SEEDS_LEAN, {
+    where: { id: { in: seedUids } },
+    take: seedUids.length,
+    skip: 0,
+  })) as { itemSeeds: Attestation[] }
+
+  // A version whose seed EAS didn't return can't be checked, so it doesn't count.
+  const knownSeedUids = new Set(itemSeeds.map((seed) => seed.id))
+  const trustedVersions = keepAttestationsFromRefAttester(
+    itemVersions.filter((version) => knownSeedUids.has(version.refUID)),
+    itemSeeds,
+  )
+  const trustedVersionUids = new Set(trustedVersions.map((version) => version.id))
+  const trustedProperties = keepAttestationsFromRefAttester(
+    itemProperties.filter((property) => trustedVersionUids.has(property.refUID)),
+    trustedVersions,
+  )
+  return pickLatestPropertyAttestationsByRefAndSchema(trustedProperties)
 }
 
 /**

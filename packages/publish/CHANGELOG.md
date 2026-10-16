@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking
+
+- **Direct EAS needs a wallet that says it is an EOA.** Without `useDirectEas`, a publisher with no contract attests straight to EAS only when its `PublishWallet` has `kind: 'eoa'` and signs as the publisher. `fromEip1193Provider` and `fromEthersWallet` set `kind: 'eoa'`; `fromThirdwebAccount(account, { kind })` takes it, and `ConnectButton` and the managed-account helpers set it. A wallet without a kind uses its registered session's kind when the signer is the same, and is refused otherwise. To migrate a hand-built wallet, set `kind`, or set `useDirectEas` to attest directly anyway. (Before, admins were guessed through factory reads, which let an undeployed thirdweb smart wallet through.)
+- **`initPublish` requires `uploadApiBaseUrl`** when the operator pays for storage (the default), and checks that it is an http(s) URL or a path from the page's origin.
+- **`PublishManager.query(seedLocalId)` only reads.** It returns the publish's current snapshot. It used to stop the publish.
+- **`ensureWalletThenPublish` / `ensureSmartWalletThenPublish`** wait for the publish to spawn (not to finish). `'started'` carries the actor as `publish`; a new `'already_publishing'` outcome means nothing started. `started` is deprecated and already resolved.
+
+### Changed
+
+- `useCanPublishItem` is `false` until its check finishes, and checks again when owned addresses change.
+- `ConnectButton` stops running publishes only when another wallet takes over, not on every wallet sync.
+- `pollForConfirmation` fails after 30 min, or after 12 failed status requests in a row.
+- Cost estimates: an Arweave L1 upload is charged for at least 256 KiB, a bundle once, and Turbo uploads up to 100 KiB are free (`arweave.chargedBytes`). Gas on a testnet is priced at $0 (`evm.testnet`).
+- Deprecated: `useLocalWalletAccount` (always `null`), and the `gatewayTransport` and `modularAccountModuleData` config fields (not read).
+
 ## 0.7.4 (2026-10-15)
 
 ### Commits

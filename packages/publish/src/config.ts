@@ -142,9 +142,9 @@ export interface PublishConfig {
   /** Upload API base URL (e.g. from VITE_UPLOAD_API_BASE_URL or NEXT_PUBLIC_UPLOAD_API_BASE_URL). Also used for bundler when useArweaveBundler is true. */
   uploadApiBaseUrl: string
   /**
-   * Gateway transport for publish + read paths. Prefer resolving once via
-   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` at app bootstrap
-   * and passing `uploadApiBaseUrl` / `arweaveGraphqlUrl` from the result.
+   * @deprecated Not read by publish. It uses `uploadApiBaseUrl` and `arweaveGraphqlUrl`: resolve
+   * them once at app bootstrap with
+   * `resolveSeedGatewayEndpoints(seedGatewayConfigFromSeedConfig(config))` and pass those instead.
    */
   gatewayTransport?: 'http-gateway' | 'hyper' | 'hybrid'
   /** Operator Gateway Hyper key (z32) — informational; sidecar is configured separately. */
@@ -171,7 +171,7 @@ export interface PublishConfig {
    * missing; accounts without the extension are skipped.
    */
   modularAccountModuleContract?: string
-  /** Unused: `installSeedExecutor()` takes no install data. */
+  /** @deprecated Not read: `installSeedExecutor()` takes no install data. */
   modularAccountModuleData?: string
   /**
    * Use the modular executor for multiPublish.
@@ -320,6 +320,36 @@ export function getConfigRef(): PublishConfig | null {
 }
 
 /**
+ * `uploadApiBaseUrl` is where uploads and the operator's storage payments go. With operator-paid
+ * storage (the default) it must be set, or requests would go to `undefined/api/upload/...`.
+ * Whenever it is set it must be an absolute http(s) URL, or in a browser a path from the page's
+ * origin (`/seed-api`).
+ */
+export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment'>): void {
+  const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
+  if (!raw) {
+    if ((c.payment?.storage ?? 'operator') === 'operator') {
+      throw new Error(
+        'initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave), unless payment.storage is "user".',
+      )
+    }
+    return
+  }
+  if (raw.startsWith('/') && !raw.startsWith('//')) return
+  let url: URL | undefined
+  try {
+    url = new URL(raw)
+  } catch {
+    url = undefined
+  }
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    throw new Error(
+      `initPublish: uploadApiBaseUrl must be an absolute http(s) URL or a path from the page's origin, got "${c.uploadApiBaseUrl}".`,
+    )
+  }
+}
+
+/**
  * Initialize the publish package. Call once before using PublishManager or other publish APIs.
  * Registers the config and SDK hooks: the publish executor behind `item.publish()`, the
  * revoke executor behind `item.unpublish()`, getPublisherForNewSeeds, etc. Until this runs,
@@ -328,6 +358,7 @@ export function getConfigRef(): PublishConfig | null {
  */
 export function initPublish(c: PublishConfig): void {
   assertPublishPaymentConfig(c)
+  assertUploadApiBaseUrl(c)
   // Fail fast on chains without a known EAS deployment and no address overrides.
   const easChain = resolvePublishEasChain(c)
   // Point SDK reads (EAS sync, schema lookups) at the chain we publish to. Throws when
@@ -376,7 +407,6 @@ export interface ResolvedPublishConfig extends PublishConfig {
   /** EAS deployment for the publish chain (addresses, indexer and explorer URLs). */
   easChain: EasChainDeployment
   useDirectEas: boolean
-  modularAccountModuleData: string
   useModularExecutor: boolean
   useArweaveBundler: boolean
   /** Resolved: defaults to false. */
@@ -442,7 +472,6 @@ export function getPublishConfig(): ResolvedPublishConfig {
     schemaRegistryAddress: easChain.schemaRegistryAddress,
     easChain,
     useDirectEas: config.useDirectEas ?? false,
-    modularAccountModuleData: config.modularAccountModuleData ?? '0x',
     useModularExecutor,
     useArweaveBundler,
     arweaveUploadVerificationBaseUrl,

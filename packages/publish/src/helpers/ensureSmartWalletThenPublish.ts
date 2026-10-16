@@ -8,7 +8,7 @@ import {
 import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
-import { PublishManager } from '../services/publishManager'
+import { startPublish } from './ensureWalletThenPublish'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
@@ -16,7 +16,7 @@ import { getPublishThirdwebChain } from './thirdwebChain'
 import { getPublishChainName } from './chainConfig'
 
 export type EnsureSmartWalletResult =
-  | { outcome: 'started'; started: import('./ensureWalletThenPublish').PublishStarted }
+  | Extract<import('./ensureWalletThenPublish').EnsureWalletThenPublishResult, { outcome: 'started' | 'already_publishing' }>
   | { outcome: 'no_address' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
@@ -77,22 +77,20 @@ export async function ensureSmartWalletThenPublish(
       }
     }
 
-    const wallet = fromThirdwebAccount(modularAccount)
-    const started = PublishManager.createPublish(item, managedAddress, wallet, {
+    const wallet = fromThirdwebAccount(modularAccount, { kind: 'smart' })
+    return startPublish(item, managedAddress, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
-    return { outcome: 'started', started }
   }
 
   const resolved = await resolveSmartWalletForPublish(activeAccount ?? null)
   if ('address' in resolved) {
-    const wallet = fromThirdwebAccount(resolved.account)
-    const started = PublishManager.createPublish(item, resolved.address, wallet, {
+    const wallet = fromThirdwebAccount(resolved.account, { kind: 'smart' })
+    return startPublish(item, resolved.address, wallet, {
       ...options,
       dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
     })
-    return { outcome: 'started', started }
   }
   return { outcome: 'needs_deploy' }
 }
