@@ -11,6 +11,9 @@ All notable changes to this package are documented in this file.
 - `getPublishPayload` attests `0` and `false`; only a missing or empty value is skipped.
 - `summarizePublishWork` returns `uploadSizes`, the size of each upload, next to `uploadCount` and `uploadBytes`. `@seedprotocol/publish` uses it to price Arweave uploads per transaction.
 - **A new draft gets the owned address when it is the only one.** With owned addresses set and no publisher getter (or one that returns nothing), new drafts used to have no publisher and be read-only. With exactly one owned address they are now that address's; with several, register `setGetPublisherForNewSeeds`.
+- Assigning a property the value it already has no longer adds a draft row next to a published value. The unchanged-value check compared `null` in the DB with the `undefined` that plain values pass for their ref fields, and compared the stored model type with the lowercased model name (`blogpost`), which isn't the stored form for multi-word or acronym names (`blog_post`).
+- Property rows written by an edit or an ItemStorage save store the model's EAS name as their model type (`blog_post` for BlogPost), like the rest of the DB. Before, they stored the lowercased name until the next `canonicalizeModelTypes` run.
+- `getEasSchemaUidForModel` asks EAS for the model's EAS name (`blog_post`), the name publish registers. Before, it asked for `blogpost` and missed multi-word and acronym models when no `model_uids` row covered them.
 - `applyArweaveL1TransactionIdLocal` is deprecated: it made local storage ids differ from the attested ones. `restoreDataItemIdsOverwrittenByL1` undoes it.
 
 ## 0.7.4 (2026-10-15)

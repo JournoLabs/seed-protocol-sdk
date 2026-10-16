@@ -1,4 +1,4 @@
-import { GET_SCHEMAS } from '@seedprotocol/eas'
+import { GET_SCHEMAS, easName } from '@seedprotocol/eas'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { BaseEasClient } from '@/helpers/EasClient/BaseEasClient'
 import { BaseQueryClient } from '@/helpers/QueryClient/BaseQueryClient'
@@ -36,24 +36,25 @@ export const getEasSchemaUidForModel = async (
     }
   }
 
-  const modeType = modelName.toLowerCase()
+  // The name publish registers the model's schema under (ADR 0008): `blog_post` for BlogPost.
+  const modelType = easName(modelName)
 
   let easSchemaUid: string | undefined
   try {
     // Misses are cached too (most local models have no EAS schema).
-    easSchemaUid = await cachedSchemaLookup(`model:${modeType}`, async () => {
+    easSchemaUid = await cachedSchemaLookup(`model:${modelType}`, async () => {
       const queryClient = BaseQueryClient.getQueryClient()
       const easClient = BaseEasClient.getEasClient()
 
       const modelSchemaQuery = await queryClient.fetchQuery({
-        queryKey: [`getEasSchemaUidForModel`, modeType],
+        queryKey: [`getEasSchemaUidForModel`, modelType],
         queryFn: async () =>
           easClient.request(GET_SCHEMAS, {
             where: {
               schemaNames: {
                 some: {
                   name: {
-                    equals: modeType,
+                    equals: modelType,
                   },
                 },
               },

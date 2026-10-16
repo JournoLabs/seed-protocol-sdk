@@ -155,6 +155,13 @@ describe('getEasSchemaUidForModel', () => {
     expect(request).toHaveBeenCalledTimes(2)
   })
 
+  it("asks EAS for the model's EAS name, as publish registers it", async () => {
+    schemas = [{ id: UID_A }]
+    expect(await getEasSchemaUidForModel('BlogPost')).toBe(UID_A)
+    const variables = request.mock.calls[0]?.[1] as { where: { schemaNames: { some: { name: { equals: string } } } } }
+    expect(variables.where.schemaNames.some.name.equals).toBe('blog_post')
+  })
+
   it('returns undefined instead of throwing when EAS is unreachable', async () => {
     failNext = true
     expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
