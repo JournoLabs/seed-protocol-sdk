@@ -66,27 +66,33 @@ gas per attestation whatever its type (`gasHeuristics.ts`).
 `INTERNAL_DATA_TYPES.Number.eas` becomes `'string'`. A Number property `wordCount` registers and
 attests under `string word_count`.
 
-Before encoding, publish turns the value into its canonical form: `String(Number(value))` for a
-finite number or numeric string (`'256'`, `'-1'`, `'1.5'`, `'1e+21'`). A value that isn't a
+Before encoding, publish turns the value into the decimal string `decodeEasNumber` (section 2)
+returns for it: integer strings stay exact, other finite numbers and numeric strings become
+`String(Number(value))` (`'256'`, `'-1'`, `'1.5'`, `'1e+21'`). So publish writes the form readers
+decode to. A value that isn't a
 finite number (`'abc'`, `NaN`, `Infinity`, `''`) fails publish validation with the code
-`publish_invalid_number`, naming the property. `0` is a value and is attested; the `if (!value)`
-skip in `getPublishPayload` must not drop it.
+`publish_invalid_number`, naming the property. `0` and `false` are values and are attested;
+`getPublishPayload` skips only a missing or empty value.
 
 The local value, its storage as text and its validation don't change. Reading values back as
 numbers is a separate item (batch 1).
 
 ### 2. Reading accepts every numeric encoding
 
-A new `decodeEasNumber(value, easType)` in `@seedprotocol/eas` returns the value's decimal
-string, or `undefined` if it isn't numeric. It accepts a JSON number, a numeric string, a bigint,
-and `{ type: 'BigNumber', hex }`, from any `uint*`, `int*` or `string` field.
+`decodeEasNumber(value)` in `@seedprotocol/eas` (`easValues.ts`) returns the value's decimal
+string, or `undefined` if it isn't numeric. It accepts a finite JSON number, a decimal or `0x`
+string, a bigint, and `{ type: 'BigNumber', hex }` (or `{ _hex }`). `isNumericEasType` says
+whether an EAS type is `uint*` or `int*`.
 
-Sync, query's `assembleSeeds` and `changelog`, and the local query source use it for every
-property whose local type is Number. So `uint8 word_count` attestations already on chain, and
-`uint256` or `int256` ones from other SDKs, keep syncing into `wordCount` as `'42'`.
+Sync uses it for every property whose local type is Number. So `uint8 word_count` attestations
+already on chain, and `uint256` or `int256` ones from other SDKs, sync into `wordCount` as
+`'42'`. A Date from a numeric field is decoded the same way, then turned from Unix seconds into an
+ISO string, which fixes the `BigNumber` text above for Date. Any other integer value that isn't a
+string is stored as its decimal string instead of JSON.
 
-Date values go through the same hex decoding, then from Unix seconds to an ISO string (publish
-writes Date as Unix seconds). That fixes the `BigNumber` text above for Date.
+Query's `assembleSeeds` and `changelog` don't know local types, so they decode any non-string
+value from a `uint*` or `int*` field to its decimal string. A Date comes back from them as Unix
+seconds. The local query source needs no change: it returns what sync stored.
 
 ### 3. Sync checks types, as ADR 0008 requires
 
@@ -111,8 +117,9 @@ for a Text one.
 
 A version that has both a `uint8 word_count` and a `string word_count` attestation has two
 canonical property attestations (`easPropertyCanonical` picks one per schema UID), and both
-resolve to `wordCount`. ADR 0008's tie rule applies: the names match at the same tier, so the
-newer one wins.
+are stored as `wordCount` rows. Which one the item reads is the existing rule for two rows of one
+property on one version, which this ADR doesn't change. A version gets both only if one publisher
+attests the same version twice, across SDK versions.
 
 An item published with `uint8` keeps that attestation until the property changes. Its next
 publish attests the changed value under `string word_count`. Unchanged properties aren't
@@ -142,8 +149,9 @@ republished.
 
 ### Migration and changelog notes
 
-No data migration. Rows synced before the change stay as they are; a Date stored as `BigNumber`
-text is fixed the next time its seed syncs.
+No data migration. Sync only inserts attestations it hasn't stored, so rows synced before the
+change stay as they are, including a Date stored as `BigNumber` text. Removing such a row lets the
+next sync store it decoded.
 
 `## Unreleased` notes, to add with the implementation:
 
@@ -156,10 +164,10 @@ text is fixed the next time its seed syncs.
   are decoded from Unix seconds instead of being stored as `BigNumber` JSON."
 - `@seedprotocol/eas`: "`decodeEasNumber` turns an indexer value (number, numeric string, bigint
   or `BigNumber` hex) into a decimal string."
-- `@seedprotocol/query`: "Number and Date property values from `uint*`/`int*` attestations are
-  decoded instead of being returned as JSON text."
-- `@seedprotocol/publish`: "Number properties register `string <name>` schemas." Only if
-  publish's own code changes; otherwise the sdk note covers it.
+- `@seedprotocol/query`: "Values from `uint*`/`int*` attestations come back as decimal strings
+  instead of the indexer's `BigNumber` JSON."
+- `@seedprotocol/publish`: "Number properties register `string <name>` EAS schemas instead of
+  `uint8 <name>` (through `@seedprotocol/sdk`'s data types)."
 
 ## Alternatives considered
 

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking
 
+- **Number properties register `string <name>` EAS schemas instead of `uint8 <name>`** (ADR 0010, through `@seedprotocol/sdk`'s data types). The first publish of a Number property after upgrading registers its new schema.
 - **Direct EAS needs a wallet that says it is an EOA.** Without `useDirectEas`, a publisher with no contract attests straight to EAS only when its `PublishWallet` has `kind: 'eoa'` and signs as the publisher. `fromEip1193Provider` and `fromEthersWallet` set `kind: 'eoa'`; `fromThirdwebAccount(account, { kind })` takes it, and `ConnectButton` and the managed-account helpers set it. A wallet without a kind uses its registered session's kind when the signer is the same, and is refused otherwise. To migrate a hand-built wallet, set `kind`, or set `useDirectEas` to attest directly anyway. (Before, admins were guessed through factory reads, which let an undeployed thirdweb smart wallet through.)
 - **`initPublish` requires `uploadApiBaseUrl`** when the operator pays for storage (the default), and checks that it is an http(s) URL or a path from the page's origin.
 - **`PublishManager.query(seedLocalId)` only reads.** It returns the publish's current snapshot. It used to stop the publish.

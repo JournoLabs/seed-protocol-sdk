@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- Values from `uint*` and `int*` property attestations come back as decimal strings. Before, `uint256` and other wide integers came back as the indexer's `{"type":"BigNumber","hex":…}` JSON (ADR 0010).
+
 ## 0.7.4 (2026-10-15)
 
 ### Commits
