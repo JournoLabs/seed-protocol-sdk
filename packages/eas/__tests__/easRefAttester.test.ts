@@ -56,3 +56,56 @@ describe('partitionByRefAttester', () => {
     expect(canonical.map((p) => p.id)).toEqual(['mine'])
   })
 })
+
+describe('getCanonicalItemPropertiesFromEas', () => {
+  const seedAtt = { id: seedUid, refUID: '0x0', attester: owner, timeCreated: 1 }
+  const ownVersion = { id: versionUid, refUID: seedUid, attester: owner, timeCreated: 2 }
+  const foreignVersionUid = '0x' + '04'.repeat(32)
+  const foreignVersion = { id: foreignVersionUid, refUID: seedUid, attester: other, timeCreated: 3 }
+  const properties = [
+    { id: 'mine', refUID: versionUid, schemaId, attester: owner, timeCreated: 10, revoked: false },
+    { id: 'theirs', refUID: versionUid, schemaId, attester: other, timeCreated: 20, revoked: false },
+    { id: 'their-version', refUID: foreignVersionUid, schemaId, attester: other, timeCreated: 30, revoked: false },
+  ]
+
+  const configure = async () => {
+    const { BaseEasClient } = await import('../src/EasClient/BaseEasClient.js')
+    const { BaseQueryClient } = await import('../src/QueryClient/BaseQueryClient.js')
+    BaseQueryClient.configure({
+      getQueryClient: () => ({
+        fetchQuery: ({ queryFn }: { queryFn: () => unknown }) => queryFn(),
+        getQueryData: () => undefined,
+        removeQueries: async () => {},
+      }),
+    } as never)
+    BaseEasClient.configure({
+      getEasClient: () =>
+        ({
+          request: async (doc: any) => {
+            const operation = doc.definitions[0].name.value as string
+            if (operation === 'GetProperties') return { itemProperties: properties }
+            if (operation === 'GetVersions') return { itemVersions: [ownVersion, foreignVersion] }
+            if (operation === 'GetSeedsLean') return { itemSeeds: [seedAtt] }
+            throw new Error(`unexpected ${operation}`)
+          },
+        }) as never,
+    })
+  }
+
+  it("ignores other accounts' versions and properties by default", async () => {
+    await configure()
+    const { getCanonicalItemPropertiesFromEas } = await import('../src/api.js')
+    const canonical = await getCanonicalItemPropertiesFromEas({ versionUids: [versionUid, foreignVersionUid] })
+    expect(canonical.map((p) => p.id)).toEqual(['mine'])
+  })
+
+  it('takes every attestation with checkAttesters: false', async () => {
+    await configure()
+    const { getCanonicalItemPropertiesFromEas } = await import('../src/api.js')
+    const canonical = await getCanonicalItemPropertiesFromEas({
+      versionUids: [versionUid, foreignVersionUid],
+      checkAttesters: false,
+    })
+    expect(canonical.map((p) => p.id).sort()).toEqual(['their-version', 'theirs'])
+  })
+})
