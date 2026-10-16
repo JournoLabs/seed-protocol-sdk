@@ -25,6 +25,7 @@ import {
   waitForPropertyInstances,
 } from '../../test-utils/getPublishPayloadIntegrationHelpers'
 import { waitForIdle } from '../../test-utils/waitForIdle'
+import { EMBEDDED_IMAGE_BYTE_LENGTH, embeddedImageBytes, embeddedImageDataUri } from '../../test-utils/embeddedImage'
 
 /**
  * Images embedded in the Html of a draft item related to the published one are co-published like
@@ -34,9 +35,7 @@ import { waitForIdle } from '../../test-utils/waitForIdle'
 const testDescribe = typeof window === 'undefined' ? (describe.sequential || describe) : describe.sequential
 
 const SCHEMA_NAME = 'Test Schema relatedDraftHtmlEmbed'
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-const DATA_URI = `data:image/png;base64,${TINY_PNG_B64}`
+const DATA_URI = embeddedImageDataUri()
 
 const schemaFile = () => ({
   $schema: 'https://seedprotocol.org/schemas/data-model/v1',
@@ -163,7 +162,9 @@ testDescribe('Html-embedded images of related draft items', () => {
   }
 
   it('are materialized, uploaded before the Html, rewritten and attested with the related item', async () => {
-    vi.spyOn(BaseArweaveClient, 'createTransaction').mockImplementation(async () => ({ id: 'unsigned', tags: [] }) as any)
+    const createTransaction = vi
+      .spyOn(BaseArweaveClient, 'createTransaction')
+      .mockImplementation(async () => ({ id: 'unsigned', tags: [] }) as any)
     const { note, article } = await createArticleWithDraftNote('draft note')
     const noteHtmlSeed = htmlContext(note, 'noteBody').propertyValue!
     expect(noteHtmlSeed).toBeTruthy()
@@ -176,12 +177,25 @@ testDescribe('Html-embedded images of related draft items', () => {
     expect(rows[0]!.htmlSeedLocalId).toBe(noteHtmlSeed)
     const imageSeedLocalId = rows[0]!.imageSeedLocalId
 
+    // The image's bytes wait in a file; its storageTransactionId stays empty until the upload.
+    const imageItem = await Item.find({ seedLocalId: imageSeedLocalId, modelName: 'Image' })
+    const st = imageItem!.allProperties['storageTransactionId']!
+    expect((st.getService().getSnapshot() as any).context.propertyValue ?? '').toBe('')
+
     // Phase 1 uploads the embedded image, not the Html that still embeds it.
     const phase1 = withTxIds(
       await getPublishUploads(article as any, [], undefined, { deferHtmlStorageSeedLocalIds: deferredHtmlSeedLocalIds }),
     )
     expect(phase1.map((u) => u.seedLocalId)).toContain(imageSeedLocalId)
     expect(phase1.map((u) => u.seedLocalId)).not.toContain(noteHtmlSeed)
+    expect(phase1.find((u) => u.seedLocalId === imageSeedLocalId)!.itemPropertyName).toBe('storageTransactionId')
+    // The image's own bytes are uploaded, tagged with its MIME type.
+    const imageTx = createTransaction.mock.calls.find(
+      ([data]) => (data as Uint8Array).byteLength === EMBEDDED_IMAGE_BYTE_LENGTH,
+    )
+    expect(imageTx).toBeDefined()
+    expect(new Uint8Array(imageTx![0] as Uint8Array)).toEqual(embeddedImageBytes())
+    expect(imageTx![1]?.tags).toContainEqual({ name: 'Content-Type', value: 'image/png' })
 
     // The Html is rewritten to the image's Arweave URL, then uploaded in phase 2.
     await rewriteHtmlEmbeddedImagesOnDisk(article.seedLocalId, phase1)
@@ -216,6 +230,7 @@ testDescribe('Html-embedded images of related draft items', () => {
 
     const summary = await summarizePublishWork(article as any)
     expect(summary.unpublishedRelatedItems).toEqual([])
+    expect(summary.uploadSizes).toContain(EMBEDDED_IMAGE_BYTE_LENGTH)
 
     await clearHtmlEmbeddedImageCoPublishRows(note.seedLocalId)
   }, 90000)

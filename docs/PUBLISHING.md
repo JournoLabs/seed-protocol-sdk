@@ -133,7 +133,8 @@ phase 1 uploads everything else, the Html files are rewritten on disk with the r
 gateway URLs, then phase 2 uploads the Html.
 
 - **`data:image/...;base64,...` in `<img src>`** (policy `materialize`, the default): each image
-  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Policy
+  becomes an Image seed uploaded in phase 1, and its `src` is rewritten to its URL. Until the
+  upload, the image's bytes are kept in the images folder as `<seed local id>.<extension>`. Policy
   `preserve` leaves data URIs in place.
 - **`seed:property/<name>`** as the whole value of a `src`, `href` or `poster` attribute: the URL of
   the same item's `<name>` property, which must be an Image, File or Json property (or a relation

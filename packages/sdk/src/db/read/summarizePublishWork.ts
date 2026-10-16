@@ -12,7 +12,7 @@ import {
   resolveSeedIdsFromRefString,
 } from '@/helpers/relationSeedRef'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
-import { getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
+import { findEmbeddedImageFilePath, getRelatedDraftsCoPublishedWith } from '@/helpers/htmlEmbeddedDataUriPublish'
 import { getPublishDraftGraph, type PublishDraftGraph } from '@/db/read/publishDraftGraph'
 
 /** The parts of the publish's draft graph that decide which refs a publish leaves for later. */
@@ -353,16 +353,8 @@ async function appendCoPublishImages(
     // and reported by collectUnpublishedEmbeddedImages) is not co-published.
     if (!imageItem || !isZeroUid(imageItem.seedUid)) continue
 
-    const st =
-      imageItem.internalProperties['storageTransactionId'] ??
-      imageItem.allProperties['storageTransactionId']
-    const stCtx = st ? propertyContext(st) : null
-    const stValue =
-      typeof stCtx?.propertyValue === 'string' ? (stCtx.propertyValue as string) : ''
-    const dataUriBytes = estimateDataUriByteLength(stValue)
-    if (dataUriBytes != null && dataUriBytes > 0) {
-      await addUpload(acc, seen, `seed:${imageItem.seedLocalId}`, dataUriBytes)
-    }
+    const filePath = await findEmbeddedImageFilePath(imageItem.seedLocalId)
+    if (filePath) await addUploadFromPath(acc, seen, filePath, `seed:${imageItem.seedLocalId}`)
 
     await summarizeItem(imageItem, publishMode, forceFullSnapshot, acc, seen, visited, graph)
   }
