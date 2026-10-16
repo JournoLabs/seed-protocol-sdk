@@ -1,4 +1,5 @@
 import { ActorRefFrom, createActor, SnapshotFrom } from 'xstate'
+import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { schemaMachine, SchemaMachineContext } from './service/schemaMachine'
 import { listCompleteSchemaFiles, listLatestSchemaFiles, loadAllSchemasFromDb } from '@/helpers/schema'
 import { writeFullSchemaNewVersion } from '@/helpers/updateSchema'
@@ -994,21 +995,32 @@ export class Schema {
                 }
           })
         }
+        const contextModel = context.models?.[modelName]
+        const fromContext = contextModel?.properties
+        // nameMatch lives only in the schema file (ADR 0009): keep each property's, found by id
+        // first so a renamed property keeps it.
+        const contextNameMatch = (ctx: { id?: string; name: string }) => {
+          const defs = Object.values(fromContext ?? {}) as { id?: string; nameMatch?: unknown }[]
+          const def = (ctx.id ? defs.find((d) => d?.id === ctx.id) : undefined) ?? fromContext?.[ctx.name]
+          return def?.nameMatch
+        }
         for (const ctx of propertyContexts) {
           if (!ctx.name) continue
           const { updates } = await convertPropertyToSchemaUpdate(ctx as any, modelName, ctx.name)
+          const nameMatch = contextNameMatch(ctx)
           properties[ctx.name] = {
             ...(ctx.id ? { id: ctx.id } : {}),
             ...updates,
             ...(ctx.validation ? { validation: ctx.validation } : {}),
             ...(ctx.htmlEmbeddedDataUriPolicy ? { htmlEmbeddedDataUriPolicy: ctx.htmlEmbeddedDataUriPolicy } : {}),
+            ...(nameMatch !== undefined ? { nameMatch } : {}),
           }
         }
 
         // No property instances loaded for this model: keep the definitions the schema has.
-        const fromContext = context.models?.[modelName]?.properties
         models[modelName] = {
           ...(modelInstance.id ? { id: modelInstance.id } : {}),
+          ...(contextModel?.nameMatch !== undefined ? { nameMatch: contextModel.nameMatch } : {}),
           properties: Object.keys(properties).length > 0 || !fromContext ? properties : fromContext,
         }
       } catch (error) {
@@ -1075,6 +1087,7 @@ export class Schema {
       models: modelsFromInstances, // Read from Model instances, not context.models
       enums: context.enums || {},
       migrations: context.migrations || [],
+      ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
     }
 
     // Update draft in database with current state
@@ -1120,6 +1133,7 @@ export class Schema {
 
     // Update database record: set isDraft = false and update schemaFileId
     if (dbSchema.length > 0) {
+      clearNameMatchLevels() // the stored schema file changes (ADR 0009)
       await db
         .update(schemasTable)
         .set({
@@ -1540,6 +1554,7 @@ export class Schema {
         models: modelsFromInstances, // Read from Model instances, not context.models
         enums: context.enums || {},
         migrations: context.migrations || [],
+        ...(context.nameMatch !== undefined && { nameMatch: context.nameMatch }),
       }
       
       // Log if there was a mismatch that we're fixing
@@ -1560,6 +1575,7 @@ export class Schema {
           
           // CRITICAL: Ensure schemaFileId column matches schema.id (schema.id is now guaranteed to match finalSchemaFileId)
           // Always update schemaFileId to match the id in the schema JSON to maintain consistency
+          clearNameMatchLevels() // the stored schema file changes (ADR 0009)
           const updateData: any = {
             name: finalNewName,
             schemaData: schemaDataString,
@@ -1657,6 +1673,7 @@ export class Schema {
             
             // Update the existing record with the new name
               // CRITICAL: Ensure schemaFileId matches schema.id
+              clearNameMatchLevels() // the stored schema file changes (ADR 0009)
               await db
               .update(schemasTable)
               .set({

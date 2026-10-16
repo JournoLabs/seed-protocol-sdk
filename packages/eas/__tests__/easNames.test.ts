@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   easName,
+  easNamesToFetch,
   easNameVariants,
   fuzzyNameKey,
+  isNameMatchLevel,
+  localNamesInBestMatchTier,
   matchEasName,
   nameMatchTier,
   normalizedNameKey,
@@ -94,5 +97,49 @@ describe('easNameVariants', () => {
   it("includes the name and what older SDKs published", () => {
     expect(easNameVariants('HTMLPage')).toEqual(['html_page', 'htmlpage'])
     expect(easNameVariants('title')).toEqual(['title'])
+  })
+})
+
+describe('nameMatch levels', () => {
+  // [local name, EAS name, relation, the loosest level that accepts it (undefined: none)]
+  const table: [string, string, boolean, 'exact' | 'normalized' | 'fuzzy' | undefined][] = [
+    ['HTMLPage', 'html_page', false, 'exact'],
+    ['HTMLPage', 'htmlpage', false, 'normalized'],
+    ['HTMLPage', 'html-page', false, 'normalized'],
+    ['title', 'Title', false, 'normalized'],
+    ['post', 'posts', false, 'fuzzy'],
+    ['author', 'author_id', true, 'fuzzy'],
+    ['author', 'author_id', false, undefined],
+    ['title', 'tile', false, undefined],
+  ]
+  const levels = ['exact', 'normalized', 'fuzzy'] as const
+
+  it.each(table)('%s vs %s (relation %s) first matches at %s', (local, eas, relation, loosest) => {
+    for (const level of levels) {
+      const accepted = loosest !== undefined && levels.indexOf(level) >= levels.indexOf(loosest)
+      const match = matchEasName(eas, [{ value: local, name: local, relation, level }])
+      expect(match.kind, `${level}`).toBe(accepted ? 'match' : 'none')
+      expect(localNamesInBestMatchTier(eas, [local], { relation, level }).size, `${level}`).toBe(accepted ? 1 : 0)
+    }
+  })
+
+  it('takes a level per local name', () => {
+    const level = (name: string) => (name === 'Post' ? 'exact' : 'fuzzy')
+    expect([...localNamesInBestMatchTier('posts', ['Post', 'Comment'], { level })]).toEqual([])
+    expect([...localNamesInBestMatchTier('comments', ['Post', 'Comment'], { level })]).toEqual(['Comment'])
+  })
+
+  it('isNameMatchLevel accepts only the three levels', () => {
+    expect(['exact', 'normalized', 'fuzzy'].every(isNameMatchLevel)).toBe(true)
+    expect([undefined, 'strict', 'Exact', 1].some(isNameMatchLevel)).toBe(false)
+  })
+
+  it('easNamesToFetch widens with the level', () => {
+    expect(easNamesToFetch('HTMLPage', 'exact')).toEqual(['html_page'])
+    const normalized = easNamesToFetch('HTMLPage', 'normalized')
+    expect(normalized).toEqual(expect.arrayContaining(['html_page', 'htmlpage', 'HTMLPage']))
+    expect(normalized).not.toContain('html_pages')
+    expect(easNamesToFetch('HTMLPage', 'fuzzy')).toEqual(expect.arrayContaining([...normalized, 'html_pages', 'htmlpages']))
+    expect(easNamesToFetch('HTMLPage')).toEqual(easNamesToFetch('HTMLPage', 'fuzzy'))
   })
 })

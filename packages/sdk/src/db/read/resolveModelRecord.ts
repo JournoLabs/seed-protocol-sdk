@@ -6,6 +6,7 @@ import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
 import { schemas as schemasTable } from '@/seedSchema/SchemaSchema'
 import { AmbiguousModelError } from '@/Model/errors'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
+import { nameMatchLevels } from '@/db/read/nameMatchLevels'
 
 /**
  * What is known about which model an item, property or lookup belongs to. Model names are only
@@ -116,13 +117,15 @@ const resolveModelRecordByNameOnly = async (
 /**
  * The model names a model name or EAS model type can refer to: the name itself, else the names
  * that match it in the tightest tier (ADR 0008, as Model.findByModelType matches): `new_model` →
- * "New model", `sync_storage_post` → "SyncStoragePost", `htmlpage` → "HTMLPage".
+ * "New model", `sync_storage_post` → "SyncStoragePost", `htmlpage` → "HTMLPage". Each name at its
+ * nameMatch level (ADR 0009).
  */
 const modelNamesForNameOrType = async (nameOrType: string, db: NonNullable<Db>): Promise<string[]> => {
   const rows = (await db.selectDistinct({ name: modelsTable.name }).from(modelsTable)) as { name: string }[]
   const names = rows.map((r) => r.name)
   if (names.includes(nameOrType)) return [nameOrType]
-  return [...localNamesInBestMatchTier(nameOrType, names)]
+  const levels = await nameMatchLevels(db)
+  return [...localNamesInBestMatchTier(nameOrType, names, { level: (name) => levels.model(name) })]
 }
 
 /**

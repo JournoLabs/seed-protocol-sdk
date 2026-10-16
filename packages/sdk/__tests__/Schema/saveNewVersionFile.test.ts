@@ -75,6 +75,42 @@ testDescribe('Schema.saveNewVersion writes a loadable file', () => {
     expect(schema.version).toBe(3)
   }, 60000)
 
+  it('keeps nameMatch at the schema, model and property level (ADR 0009)', async () => {
+    const schemaName = 'Test Schema Save File Name Match'
+    const now = new Date().toISOString()
+    const file: SchemaFileFormat = {
+      $schema: 'https://seedprotocol.org/schemas/data-model/v1',
+      version: 1,
+      id: generateId(),
+      nameMatch: 'normalized',
+      metadata: { name: schemaName, createdAt: now, updatedAt: now },
+      models: {
+        NmSavePost: {
+          id: generateId(),
+          nameMatch: 'exact',
+          properties: {
+            title: { id: generateId(), type: 'Text', nameMatch: 'fuzzy' },
+            body: { id: generateId(), type: 'Text' },
+          },
+        },
+      },
+      enums: {},
+      migrations: [],
+    }
+    await importJsonSchema({ contents: JSON.stringify(file) }, file.version)
+    const schema = Schema.create(schemaName, { waitForReady: false }) as Schema
+    await waitForSchemaIdle(schema)
+
+    await addModel(schema, 'NmSaveNote', { text: { dataType: 'Text' } })
+    const saved = await readSaved(await schema.saveNewVersion())
+
+    expect(saved.nameMatch).toBe('normalized')
+    expect(saved.models.NmSavePost.nameMatch).toBe('exact')
+    expect(saved.models.NmSavePost.properties.title.nameMatch).toBe('fuzzy')
+    expect(saved.models.NmSavePost.properties.body.nameMatch).toBeUndefined()
+    expect(saved.models.NmSaveNote.nameMatch).toBeUndefined()
+  }, 60000)
+
   it('saves a schema created only in code', async () => {
     const schemaName = 'Test Schema Save File Code Only'
     const schema = await Schema.create(schemaName)

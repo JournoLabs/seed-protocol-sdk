@@ -24,6 +24,7 @@ import { refreshCachedProperties } from './cachedPropertyRefresh'
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
+import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import {
   resolveModelRecord,
   resolveModelRecordByNameOrType,
@@ -636,6 +637,9 @@ export const addSchemaToDb = async (
     throw new Error('Database not found')
   }
 
+  // The stored schema file may change its nameMatch levels (ADR 0009).
+  clearNameMatchLevels()
+
   // First, try to find existing schema by schemaFileId (preferred for change tracking)
   if (schemaFileId) {
     const existingByFileId = await db
@@ -1196,6 +1200,9 @@ export const addModelsToDb = async (
   if (!db) {
     throw new Error('Database not found')
   }
+
+  // Model rows and their schema links decide which schema file's nameMatch applies (ADR 0009).
+  clearNameMatchLevels()
 
   // If schema is provided, add it to the database
   // Note: schema might already be a database record (with id) if passed from importJsonSchema
