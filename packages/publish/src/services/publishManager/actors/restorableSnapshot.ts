@@ -36,10 +36,10 @@ export function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
   if (BUNDLER_UPLOAD_STATES.has(stateValue as string) && parsed.context?.bundlerUploadNotNeeded !== true) {
     return false
   }
-  if (stateValue === 'pollingForConfirmation') {
+  if (stateValue === 'pollingForConfirmation' || stateValue === 'pollingForConfirmationPhase2') {
     if (!parsed.context?.reimbursementTransactionId || !parsed.context?.requestResponse) return false
   }
-  if (stateValue === 'uploadingData') {
+  if (stateValue === 'uploadingData' || stateValue === 'uploadingDataPhase2') {
     const txs = parsed.context?.arweaveTransactions
     const uploads = parsed.context?.publishUploads
     if (!Array.isArray(txs) || txs.length === 0 || !Array.isArray(uploads)) return false
