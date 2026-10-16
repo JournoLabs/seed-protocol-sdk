@@ -101,7 +101,8 @@ export async function signBundlerUploadDataList(
     }))
   } else {
     throw new Error(
-      '@seedprotocol/publish: useArweaveBundler requires signDataItems or dataItemSigner (pass at createPublish or in PublishProvider config)'
+      '@seedprotocol/publish: uploading data items needs signDataItems or a dataItemSigner (pass one at createPublish or in the PublishProvider config). ' +
+        "It must be an EOA's key: a smart account's signatures don't verify as Arweave data items, so pass its admin EOA's signer."
     )
   }
 

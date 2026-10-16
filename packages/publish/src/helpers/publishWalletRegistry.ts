@@ -11,6 +11,25 @@ export type PublishWalletSession = PublishWallet & {
    * tell an undeployed smart account from an EOA, which both have no bytecode.
    */
   adminAddress?: string
+  /**
+   * Signs Arweave data items (bundler and Turbo uploads). They need a plain ECDSA key: a smart
+   * account's signatures (EIP-1271/6492) don't verify as data items, so a smart wallet sets its
+   * admin EOA here. Without it, publish uses `signer` only when the wallet is an EOA.
+   */
+  dataItemSigner?: import('./seedSigner').SeedSigner
+}
+
+/**
+ * The data-item signer to default to for this wallet: its own `dataItemSigner`, else its signer
+ * when that is an EOA's (`kind: 'eoa'`, or a known EOA admin). Undefined for a smart account with
+ * no EOA signer, whose signatures data items can't use.
+ */
+export function defaultDataItemSigner(
+  wallet: (Partial<PublishWalletSession> & Pick<PublishWallet, 'signer'>) | null | undefined,
+): import('./seedSigner').SeedSigner | undefined {
+  if (!wallet) return undefined
+  if (wallet.dataItemSigner) return wallet.dataItemSigner
+  return wallet.kind === 'smart' ? undefined : wallet.signer
 }
 
 let session: PublishWalletSession | null = null

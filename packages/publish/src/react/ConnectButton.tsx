@@ -190,10 +190,20 @@ const ConnectButton: FC = () => {
           !!managedAddress ||
           (!!adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase())
         const publishWallet = fromThirdwebAccount(account, { kind: isSmart ? "smart" : "eoa" })
+        // Data items need an ECDSA signer. With the modular executor the connected account is an
+        // EOA (or EIP-7702 on one) acting for the ManagedAccount; otherwise a smart wallet's admin
+        // EOA signs them.
+        const adminAccount = activeWallet.getAdminAccount?.()
+        const dataItemSigner = managedAddress
+          ? publishWallet.signer
+          : isSmart && adminAccount && adminAccount.address.toLowerCase() !== account.address.toLowerCase()
+            ? fromThirdwebAccount(adminAccount, { kind: "eoa" }).signer
+            : undefined
         await setPublishWallet({
           ...publishWallet,
           ownedAddresses: [...owned],
           publisherAddress: managedAddress ?? account.address,
+          ...(dataItemSigner ? { dataItemSigner } : {}),
           ...(adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase()
             ? { adminAddress }
             : {}),
