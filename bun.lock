@@ -255,8 +255,8 @@
         "vite": "^8.0.0",
       },
       "peerDependencies": {
-        "@seedprotocol/react": "^0.7.0",
-        "@seedprotocol/sdk": "^0.7.0",
+        "@seedprotocol/react": "workspace:*",
+        "@seedprotocol/sdk": "workspace:*",
         "@tanstack/react-query": "^5",
         "react": "^18 || ^19",
         "react-dom": "^18 || ^19",
@@ -311,7 +311,7 @@
         "vite-plugin-dts": "^4.5.4",
       },
       "peerDependencies": {
-        "@seedprotocol/sdk": "^0.7.0",
+        "@seedprotocol/sdk": "workspace:*",
         "@tanstack/react-query": "^5",
         "react": "^18 || ^19",
       },
