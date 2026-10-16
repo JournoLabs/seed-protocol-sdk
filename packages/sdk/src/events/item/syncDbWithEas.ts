@@ -974,17 +974,15 @@ const insertSyncedProperties = async ({
     }
 
     // ADR 0010: numeric values decoded (Number as a decimal string, Date as ISO).
-    let propertyValue = syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
-    if (propertyValue === undefined) {
+    const decodedValue = syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
+    if (decodedValue === undefined) {
       console.warn(
         `[item/events] [syncDbWithEas] EAS property "${propertyNameSnake}" has a value that isn't a valid ${resolvedName.dataType}; skipping it`,
       )
       continue
     }
 
-    if (typeof propertyValue !== 'string') {
-      propertyValue = JSON.stringify(propertyValue)
-    }
+    const propertyValue = typeof decodedValue === 'string' ? decodedValue : JSON.stringify(decodedValue)
 
     if (isRelation && !isList) {
       const relatedSeed = itemSeeds.find(
