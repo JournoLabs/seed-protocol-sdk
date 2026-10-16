@@ -9,6 +9,8 @@ All notable changes to this package are documented in this file.
 - Synced Date values are stored as ISO strings. Before, sync stored the indexer's `{"type":"BigNumber","hex":…}` text. Rows synced before stay as they are.
 - `getPublishPayload` attests `0` and `false`; only a missing or empty value is skipped.
 - `summarizePublishWork` returns `uploadSizes`, the size of each upload, next to `uploadCount` and `uploadBytes`. `@seedprotocol/publish` uses it to price Arweave uploads per transaction.
+- **A new draft gets the owned address when it is the only one.** With owned addresses set and no publisher getter (or one that returns nothing), new drafts used to have no publisher and be read-only. With exactly one owned address they are now that address's; with several, register `setGetPublisherForNewSeeds`.
+- `applyArweaveL1TransactionIdLocal` is deprecated: it made local storage ids differ from the attested ones. `restoreDataItemIdsOverwrittenByL1` undoes it.
 
 ## 0.7.4 (2026-10-15)
 
