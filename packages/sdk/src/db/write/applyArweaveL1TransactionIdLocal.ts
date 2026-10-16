@@ -3,9 +3,11 @@ import { metadata } from '@/seedSchema'
 import { and, eq, or } from 'drizzle-orm'
 
 /**
- * After L1 confirmation, updates local `metadata` rows that still reference the ANS-104
- * DataItem id with the L1 bundle transaction id (for gateway URLs / validation). Does not
- * change on-chain attestations.
+ * @deprecated Don't use: it makes the local value differ from the attested one. It replaces
+ * local `metadata` rows' ANS-104 data item id with the L1 bundle transaction id, but the
+ * attestation holds the data item id, gateways serve a bundled data item by its own id, and
+ * `/raw/<bundle>` returns the whole bundle. Publish no longer calls it;
+ * restoreDataItemIdsOverwrittenByL1 undoes it.
  */
 export async function applyArweaveL1TransactionIdLocal(params: {
   seedLocalId: string
