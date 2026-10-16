@@ -9,6 +9,7 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getItemPropertyData } from '@/db/read/getItemProperty'
 import { getItemData } from '@/db/read/getItemData'
 import { and, eq } from 'drizzle-orm'
+import { easName } from '@seedprotocol/eas'
 import { metadata, type MetadataType } from '@/seedSchema'
 import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
 import { createMetadata } from '@/db/write/createMetadata'
@@ -114,7 +115,7 @@ export const saveItemStorage = fromCallback<
             {
               propertyName,
               propertyValue: filename,
-              modelType: (modelName ?? knownRow?.modelType ?? '').toLowerCase() || undefined,
+              modelType: (modelName ? easName(modelName) : knownRow?.modelType) || undefined,
               seedLocalId: draftSeedLocalId,
               seedUid: draftSeedUid,
               versionLocalId,

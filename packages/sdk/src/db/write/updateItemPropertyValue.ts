@@ -1,5 +1,6 @@
 import { metadata, MetadataType } from '@/seedSchema'
 import { and, eq, or, sql } from 'drizzle-orm'
+import { easName } from '@seedprotocol/eas'
 import { getSeedData } from '@/db/read/getSeedData'
 import { getVersionData } from '@/db/read/getVersionData'
 import { generateId } from '@/helpers'
@@ -117,11 +118,15 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       refResolvedDisplayValue: refResolvedDisplayValueFromDb,
     } = rows[0]
 
+    // Stored model types are the model's EAS name (ADR 0008): `blog_post` for BlogPost.
+    const modelTypeForName = modelName ? easName(modelName) : undefined
+
     if (
       propertyValueFromDb === newValue &&
-      modelType === modelName?.toLowerCase() &&
-      refSeedTypeFromDb === refSeedType &&
-      refResolvedValueFromDb === refResolvedValue
+      modelType === modelTypeForName &&
+      // The DB holds null where callers leave a field out (plain values pass no ref fields).
+      (refSeedTypeFromDb ?? null) === (refSeedType ?? null) &&
+      (refResolvedValueFromDb ?? null) === (refResolvedValue ?? null)
     ) {
       logger(
         `[db/write] [updateItemPropertyValue] value is the same as most recent record for property: ${propertyNameFromDb}`,
@@ -165,7 +170,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       localId: newLocalId,
       propertyName: propertyNameFromDb,
       propertyValue: safeNewValue ?? null,
-      modelType: modelType || modelName?.toLowerCase() || null,
+      modelType: modelType || modelTypeForName || null,
       seedUid: seedDataFromDb?.uid || null,
       seedLocalId: seedLocalIdFromDb,
       versionLocalId,
@@ -207,7 +212,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     localId: newLocalId,
     propertyName,
     propertyValue: safeNewValue ?? null,
-    modelType: modelName?.toLowerCase() || '',
+    modelType: modelName ? easName(modelName) : '',
     seedUid: seedUid || null,
     seedLocalId: seedLocalId || '',
     versionLocalId: versionLocalId || '',
