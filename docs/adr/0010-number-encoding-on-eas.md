@@ -1,6 +1,6 @@
 # 0010. Number properties are published as decimal strings
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-16
 - **Scope:** `@seedprotocol/sdk` (data type constants, publish payload, EAS sync, local query
   source), `@seedprotocol/eas` (value decoding), `@seedprotocol/query` (seed assembly, changelog),
