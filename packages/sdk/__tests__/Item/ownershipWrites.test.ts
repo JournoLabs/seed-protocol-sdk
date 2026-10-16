@@ -82,11 +82,18 @@ testDescribe('writes check ownership', () => {
   }, 30000)
 
   it('claimUnpublishedDrafts updates publisher on loaded items', async () => {
-    const item = await createDraftStampedBy(null, 'Unclaimed draft')
-    expect(item.publisher).toBeUndefined()
+    // With a single owned address a new draft is that address's; with two it gets no publisher
+    // (which one publishes isn't known), so there is something to claim.
+    await client.setAddresses({ owned: [UNPUBLISH_TEST_PUBLISHER, OTHER_PUBLISHER], watched: [] })
+    try {
+      const item = await createDraftStampedBy(null, 'Unclaimed draft')
+      expect(item.publisher).toBeUndefined()
 
-    await client.claimUnpublishedDrafts(UNPUBLISH_TEST_PUBLISHER)
+      await client.claimUnpublishedDrafts(UNPUBLISH_TEST_PUBLISHER)
 
-    expect(item.publisher).toBe(UNPUBLISH_TEST_PUBLISHER.toLowerCase())
+      expect(item.publisher).toBe(UNPUBLISH_TEST_PUBLISHER.toLowerCase())
+    } finally {
+      await client.setAddresses({ owned: [UNPUBLISH_TEST_PUBLISHER], watched: [] })
+    }
   }, 30000)
 })
