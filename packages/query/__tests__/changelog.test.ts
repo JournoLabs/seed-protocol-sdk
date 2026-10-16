@@ -15,7 +15,7 @@ function propAttestation(opts: {
   schemaId: string
   timeCreated: number
   name: string
-  value: string | string[]
+  value: unknown
   type?: string
 }): AttestationLike {
   return {
@@ -51,6 +51,17 @@ describe('decodePropertyAttestation / buildFlatSnapshotFromProperties', () => {
       value: 'Hello',
       camelName: undefined,
     })
+  })
+
+  // ADR 0010: the indexer gives uint8 as a number and uint256 as { type: 'BigNumber', hex }.
+  it.each([
+    ['uint8', 42, '42'],
+    ['uint256', { type: 'BigNumber', hex: '0x68f04700' }, '1760577280'],
+    ['int256', { type: 'BigNumber', hex: '-0x05' }, '-5'],
+    ['string', '1.5', '1.5'],
+  ])('decodes a %s value to its decimal string', (type, value, expected) => {
+    const att = propAttestation({ id: 'p1', refUID: 'v1', schemaId: 's', timeCreated: 10, name: 'word_count', value, type })
+    expect(decodePropertyAttestation(att)?.value).toBe(expected)
   })
 
   it('builds flat snapshot with camel alias for snake_case names', () => {

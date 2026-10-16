@@ -1,4 +1,6 @@
 import {
+  decodeEasNumber,
+  isNumericEasType,
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
   keepAttestationsFromRefAttester,
@@ -180,7 +182,9 @@ async function processItemProperty(
   if (isRelation && isList && Array.isArray(propertyValue)) {
     propertyValue = propertyValue.map((v) => String(v))
   } else if (typeof propertyValue !== 'string') {
-    propertyValue = JSON.stringify(propertyValue)
+    // ADR 0010: an integer value as its decimal string, not the indexer's `{ type: 'BigNumber', hex }`.
+    const decimal = isNumericEasType(easType) ? decodeEasNumber(propertyValue) : undefined
+    propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
   const seedUidForProperty = ctx.versionUidToSeedUid.get(property.refUID)

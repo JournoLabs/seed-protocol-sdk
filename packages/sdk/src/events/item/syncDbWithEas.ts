@@ -11,6 +11,7 @@ import {
 } from '@seedprotocol/eas'
 import { loadNameMatchLevels, nameMatchLevels } from '@/db/read/nameMatchLevels'
 import { normalizeDataType } from '@/helpers/property'
+import { easTypeFitsProperty, syncedPropertyValue } from '@/helpers/easValueTypes'
 import {
   easPropertyNameForPublish,
   listRelationEasPropertyName,
@@ -139,6 +140,8 @@ type SyncedPropertyName = {
   isList: boolean
   /** A list relation's ref model, until the related seeds say otherwise. */
   refSeedType?: string
+  /** The matched local property's data type; undefined when no local property matched. */
+  dataType?: string
 }
 
 const RELATION_DATA_TYPES = new Set(['Relation', 'Image', 'File', 'Html'])
@@ -158,6 +161,7 @@ const resolveSyncedPropertyName = (
   easPropertyName: string,
   value: unknown,
   modelSchema: Record<string, any> | undefined,
+  easType?: string,
 ): SyncedPropertyName | undefined => {
   const internal = easPropertyName === 'storage_transaction_id' || easPropertyName === 'storage_provider_transaction_id'
   if (modelSchema && !internal) {
@@ -185,6 +189,13 @@ const resolveSyncedPropertyName = (
     }
     if (match.kind === 'match') {
       const { key, def, isListRelation, isSingleRef } = match.value
+      // ADR 0008/0010: property types must agree. A mismatch is this property's, refused.
+      if (!easTypeFitsProperty(def?.dataType, easType, value)) {
+        console.warn(
+          `[item/events] [syncDbWithEas] EAS property "${easPropertyName}" is ${easType}, which doesn't fit local property "${key}" (${def?.dataType}); skipping it`,
+        )
+        return undefined
+      }
       if (isListRelation) {
         return { propertyName: key, isRelation: true, isList: true, refSeedType: def?.ref ? easName(def.ref) : undefined }
       }
@@ -195,7 +206,7 @@ const resolveSyncedPropertyName = (
           isList: false,
         }
       }
-      return { propertyName: key, isRelation: false, isList: false }
+      return { propertyName: key, isRelation: false, isList: false, dataType: normalizeDataType(def?.dataType) }
     }
     // A name one of the model's properties would match at a looser level than its nameMatch
     // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
@@ -947,7 +958,12 @@ const insertSyncedProperties = async ({
     const modelSchema = await modelSchemaForSyncedProperty(Model, property, state)
 
     // ADR 0008: the local property this EAS name stands for, and whether it's a relation.
-    const resolvedName = resolveSyncedPropertyName(propertyNameSnake, propertyMetadata.value, modelSchema)
+    const resolvedName = resolveSyncedPropertyName(
+      propertyNameSnake,
+      propertyMetadata.value,
+      modelSchema,
+      easDataType,
+    )
     if (!resolvedName) continue
     const { propertyName, isRelation, isList } = resolvedName
     const refValueType = isRelation && isList ? 'list' : undefined
@@ -957,11 +973,16 @@ const insertSyncedProperties = async ({
       continue
     }
 
-    let propertyValue = propertyMetadata.value
-
-    if (typeof propertyValue !== 'string') {
-      propertyValue = JSON.stringify(propertyValue)
+    // ADR 0010: numeric values decoded (Number as a decimal string, Date as ISO).
+    const decodedValue = syncedPropertyValue(resolvedName.dataType, easDataType, propertyMetadata.value)
+    if (decodedValue === undefined) {
+      console.warn(
+        `[item/events] [syncDbWithEas] EAS property "${propertyNameSnake}" has a value that isn't a valid ${resolvedName.dataType}; skipping it`,
+      )
+      continue
     }
+
+    const propertyValue = typeof decodedValue === 'string' ? decodedValue : JSON.stringify(decodedValue)
 
     if (isRelation && !isList) {
       const relatedSeed = itemSeeds.find(
