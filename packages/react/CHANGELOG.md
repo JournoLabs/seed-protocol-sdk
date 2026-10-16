@@ -2,12 +2,28 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Fixes
+
+- sdk, publish: one easName for every name that reaches EAS (eec5ded5)
+- export useIsClientReady (4d5f39fd)
+- media, JSON and image fixes; export the hooks react.md lists (d6cd5fc5)
+- item, item-property and live query hook fixes (6399e9a9)
+- sdk: hyphenated schema names aren't cut at the last hyphen (96745809)
+- schema hooks: lookup without creating, errors, deletes (ecd251d4)
+- model/readiness hooks: stable hook order, real DB readiness, lists that shrink (5c3f4ad8)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits
 
 #### Fixes
 
+- usePublishItem reports errors thrown before publishing starts (2d0d906f)
+- sdk: client.init fails when the configured schema cannot be loaded (c6cd9cff)
 - sdk: addressFilter 'owned' lists what isItemOwned says is owned (f31e5991)
 - progressive image URL tries the preferred read gateways (83a9dd02)
 - ci: wait longer for npm to show published versions before promoting (c884e492)

@@ -2,12 +2,71 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Breaking
+
+- Item.create rejects unknown models, unknown keys and invalid values (d51311c8)
+
+#### Features
+
+- warn when names collide on EAS; document migrations as not applied (6f2c1107)
+
+#### Fixes
+
+- schema import renames a property only when its id matches (7d8b0be9)
+- bring stored model types to their easName form after init (c28112f9)
+- sync matches EAS names to local models and properties (5f24b88f)
+- publish, react: one easName for every name that reaches EAS (eec5ded5)
+- remove other accounts' attestation rows an older sync stored, offline (4cd6cf42)
+- publish: addresses saved by init are announced; connecting keeps watched addresses (a8029bcc)
+- a sync interrupted by a closed tab no longer stays in progress (49a3869f)
+- retry the startup EAS lookup and failed syncs when back online (39393f40)
+- creating items and saving files works offline (d11ca6b8)
+- typing into a property no longer drops keystrokes (60d3f6ba)
+- an edited draft outranks synced values older than the edit (a3522102)
+- uploads with the same file name no longer overwrite each other (76f26b3d)
+- eas, query: only a seed's attester can add its versions and properties (73e23776)
+- Schema.destroy keeps its live query from re-creating models (252967bd)
+- isSqliteUniqueConstraintError ignores stack frames (6f8ccafe)
+- Schema.destroy deletes every version's file, by parsed id or name (0c4afafb)
+- a schema row takes a newer version file's id along with its data (9393aae4)
+- client.init uses config.dbConfig on Node (b29b9bef)
+- parse a multi-word schema name's file id, and match file version on id lookup (7495d5eb)
+- react: hyphenated schema names aren't cut at the last hyphen (96745809)
+- Schema.destroy deletes the schema's files so it stays destroyed (55e381f8)
+- unload() stops an entity only when its last reference is released (b985633c)
+- a lookup by id overlapping Model.destroy doesn't re-cache the model (d9c75537)
+- one lookup for a property's validation rules, with the stored-schema fallback (7929b9a0)
+- List of Relation reads back as an array (6cb1e8f0)
+- File property strings mean what they look like, and read the same after reload (24bf5ed1)
+- background draft saves report failures as lastSaveError (1b00f135)
+- declare Schema.name and ModelProperty.id (39f5906e)
+- saveNewVersion writes a schema file that loads again (619731d0)
+- Date values validate, and enum isn't given Text's default length limit (d3784321)
+- enforce validation rules on properties defined in code (d028b4ad)
+- validation rules combine instead of replacing each other (e816898b)
+
+#### Other
+
+- liveQuery JSDoc says which query forms each platform supports (c656708e)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits
 
+#### Breaking
+
+- remove the ./node property decorators (b47e7d7a)
+
 #### Features
 
+- item.publish() delegates to an executor @seedprotocol/publish registers (09335838)
+- export the error classes and types the docs reference (3856064e)
+- whenDeferredSchemaReloadsSettled for renameModelProperty's reload (e598609e)
+- whenDeferredSchemaReloadsSettled for renameModelProperty's reload (9ba79f4c)
 - announce every ZenFS file write to other tabs, coalesced (e3399336)
 - one-time migration writes legacy ItemStorage rows to their files (c494480b)
 - arweave: one read-side seam for Arweave content (8b84c616)
@@ -15,6 +74,28 @@ All notable changes to this package are documented in this file.
 
 #### Fixes
 
+- ModelProperty.create rejects when its row is not written (d5203423)
+- destroy() rejects on failure and works when items have values (f864a602)
+- loaded items take the publisher claimUnpublishedDrafts stamps (9c29fdc4)
+- ItemProperty.destroy checks ownership and deletes only its item's rows (b5496302)
+- assigning a property on an item you don't own is refused and rolled back (1dfe2061)
+- client.init keeps one config, applies new addresses, and onReady fires late (af1009f3)
+- a throwing event listener no longer breaks the code that emitted (78fa6bc4)
+- filesDir '.seed-alt/x' is resolved under .seed, not as a .seed path (b1c5d83d)
+- PropertyDataType accepts plain strings like 'Text' (2560e530)
+- require() loads the ESM build instead of a separate CJS build (02633c19)
+- find drizzle migrations and the SDK root from any working directory (c3be1cf0)
+- loadEasSdk falls back to import() outside plain Node (1156f764)
+- import on Node without the node-eas-lodash hook (c07bba90)
+- schema updates reach cached ModelProperty instances (3d8ac0ed)
+- default readyTimeout is 15s everywhere (a4ef917d)
+- client.init fails when the configured schema cannot be loaded (c6cd9cff)
+- type create() without waitForReady: false as a Promise (9cb1bdc7)
+- cached ModelProperty takes the renamed row's name after renameModelProperty (77038f83)
+- CommonJS entries load and match their types (1e5d325c)
+- schema reload renames the property row after renameModelProperty (4a73aa89)
+- Model.all waitForReady keeps models that are ready (ca4f6d84)
+- Model.create waitForReady waits for its properties to exist (3cbe77e1)
 - react: addressFilter 'owned' lists what isItemOwned says is owned (f31e5991)
 - browser: don't cut off bytes another context wrote when writing a stale OPFS file (c90c9ccc)
 - browser: overwrite OPFS files with shorter content without leaving the old tail (e746ff32)

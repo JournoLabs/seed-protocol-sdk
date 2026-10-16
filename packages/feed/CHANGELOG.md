@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Other
+
+- design docs and READMEs agree with the code (749df1a6)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits

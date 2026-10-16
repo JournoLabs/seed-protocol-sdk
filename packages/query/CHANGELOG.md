@@ -2,6 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Fixes
+
+- eas, sdk: only a seed's attester can add its versions and properties (73e23776)
+- throw when clients are registered on another copy of eas/arweave (aec6c2e7)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits

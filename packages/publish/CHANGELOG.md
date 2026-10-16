@@ -2,12 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Features
+
+- authorizePublish approves a publish before it spends (165481fa)
+- users can pay for storage with Turbo credits (7d22873e)
+- payment config and one resolution of who pays (f9fd4fe0)
+
+#### Fixes
+
+- ensureEasSchemas looks schemas up under the published name (1da9dc94)
+- sdk, react: one easName for every name that reaches EAS (eec5ded5)
+- disconnecting a wallet stops treating it as owned (d12c64c1)
+- sdk: addresses saved by init are announced; connecting keeps watched addresses (a8029bcc)
+- load the undeployed-account check only on the direct-EAS branch (b98ea731)
+- refuse direct EAS for an undeployed smart account (ef06cf94)
+- direct-EAS publish records each seed as it is attested (6819bb97)
+- domain ownership attests what was proven and honours expiry (8c5ef8e3)
+- revoke from the attester and skip already-revoked uids (220dcb0e)
+- keep arweaveJwk and dataItemSigner out of saved publish snapshots (01d2d008)
+- estimatePublishCost reports Arweave storage as not user-paid (0039b18d)
+- estimatePublishCost reports who pays gas from the real sender (4655d738)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits
 
+#### Features
+
+- register publishItem as the executor behind item.publish() (79e461ec)
+
 #### Other
 
+- item.publish() needs @seedprotocol/publish (b90bc321)
 - use the SDK's getPublishUploadData (fa8f2f84)
 
 ## 0.7.1 (2026-10-10)

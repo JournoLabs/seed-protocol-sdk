@@ -2,6 +2,20 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Features
+
+- easName and EAS name matching (ADR 0008) (2512d50b)
+
+#### Fixes
+
+- publish: domain ownership attests what was proven and honours expiry (8c5ef8e3)
+- sdk, query: only a seed's attester can add its versions and properties (73e23776)
+- query: throw when clients are registered on another copy of eas/arweave (aec6c2e7)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits

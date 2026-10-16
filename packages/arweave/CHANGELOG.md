@@ -2,6 +2,14 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Fixes
+
+- query: throw when clients are registered on another copy of eas/arweave (aec6c2e7)
+
 ## 0.7.3 (2026-10-14)
 
 ### Commits
