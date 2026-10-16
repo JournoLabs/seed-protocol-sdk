@@ -56,7 +56,7 @@ Feeds that include full HTML with inline `data:image/...;base64,...` URIs can pr
 
 - **Default:** `richTextDataUriImages: 'omit_items'` (applied inside `transformToFeedItems`).
 - **Site-wide opt-in:** set env **`FEED_INCLUDE_DATA_URI_HTML_ITEMS=true`** so `loadFeedConfig()` returns `richTextDataUriImages: 'include_items'` and those entries are kept.
-- **Per call:** pass the 9th argument to `createFeed`: `transformOverrides` with `{ richTextDataUriImages: 'include_items' }` (overrides env for that generation).
+- **Per call:** pass the 8th argument to `createFeed`: `transformOverrides` with `{ richTextDataUriImages: 'include_items' }` (overrides env for that generation).
 - **Detection helper:** `feedItemRichTextContainsDataUriImage(item)` scans the same sources as `pickFeedItemContent` (typed `html` / `file` / `json` fields and list slots when `_feed*` maps are present, then the legacy primary keys) plus excerpt keys (`summary`, `description`, `text` and capitalized variants) and requires both `data:image/` and `;base64,` in the string.
 
 If you publish HTML with embedded images, prefer **materialized** Image seeds and normal `https://` or Arweave URLs in stored HTML (see publish docs for `htmlEmbeddedDataUriPolicy` and two-phase L1 upload). Items that still contain data-URI images after publish remain eligible for omission unless you opt in as above.

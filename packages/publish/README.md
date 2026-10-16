@@ -6,7 +6,7 @@ Publish UI components and helpers for [Seed Protocol](https://seedprotocol.io): 
 
 The publish flow (ConnectButton, etc.) runs `ensureEasSchemasForItem` before `getPublishPayload`, which registers EAS schemas and adds naming attestations so EASSCAN displays them. If you build a custom publish flow that calls `item.getPublishPayload()` directly, you must run schema setup first or use this package's flow.
 
-`initPublish()` or `PublishProvider` registers the revocation executor, so `item.unpublish()` works when the publish package is configured. See [docs/ATTESTATION_REVOCATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
+**`item.publish()` and `item.unpublish()` need this package.** `initPublish()` (or `<PublishProvider config>`) registers the executors behind them: `publishItem` for `item.publish()` and the revocation executor for `item.unpublish()`. Until it runs, both throw. `item.publish(options)` passes `options` through as `CreatePublishOptions`, uses the wallet registered with `useSeedWallet().connect` or `setPublishWallet`, and resolves when the publish has finished (it rejects if it fails). See [docs/ATTESTATION_REVOCATION.md](https://github.com/JournoLabs/seed-protocol-sdk/blob/main/docs/ATTESTATION_REVOCATION.md) for permanence and UX guidance.
 
 **Badges / on-chain vs pending:** use `@seedprotocol/sdk` `getSeedPublishState` for “any on-chain anchor for this seed”, `getPublishPendingDiff` for per-property heads missing attestation UIDs, and `Item.all` (or `useItems` from `@seedprotocol/react`) with `includeEas` (compare `publishedVersionUid` vs `latestVersionUid`) for list rows. When a publish run finishes, observe `usePublishProcess(seedLocalId)` or the `publishProcesses` table instead of ad hoc window events.
 
@@ -68,7 +68,9 @@ function App() {
   )
 }
 
-// Later:
+// Later, once the wallet is connected:
+// await item.publish()   // resolves when uploads and attestations are done
+// or, to start without waiting:
 // await ensureWalletThenPublish(item, { dataItemSigner: /* from useSeedWallet().signer */ })
 ```
 
@@ -116,6 +118,81 @@ function App() {
 ```
 
 You can optionally pass `queryClient` or `queryClientRef` to customize the Seed QueryClient.
+
+### Who pays
+
+A publish costs EVM gas (attestations, schema registration) and Arweave storage. Who pays follows
+from the sender your config selects:
+
+| Sender | Selected by | Gas |
+|---|---|---|
+| Thirdweb managed account | `useModularExecutor: true` | sponsored by Thirdweb unless `thirdweb.sponsorGas: false` |
+| Permissionless EIP-7702 | `bundlerUrl` (Recipe 2) | sponsored by `paymasterUrl`, else the bundler |
+| Connected wallet | neither | the user's ETH |
+
+Storage goes through the upload API at `uploadApiBaseUrl`, and its operator pays: directly on the
+bundler path, and on the L1 path by reimbursing the user's Arweave key before the upload.
+
+To state the intent instead, set `payment`. It fills in those settings' defaults, and `initPublish`
+throws `PublishPaymentConfigError` when a setting contradicts it:
+
+```typescript
+initPublish({
+  // ...
+  bundlerUrl: import.meta.env.VITE_BUNDLER_URL,
+  payment: { gas: 'user', storage: 'operator' }, // EIP-7702 sender without a paymaster
+})
+```
+
+`resolvePublishPayment(getPublishConfig())` returns the resolved sender and payers; `estimatePublishCost`
+reports the same in `evm.userPays` / `arweave.userPays`.
+
+#### Users pay for storage (Turbo)
+
+`payment: { storage: 'user' }` sends data items (signed by the user's EVM key, as on the bundler path)
+straight to [Turbo](https://docs.ar.io/build/upload/bundling-services/), which charges that address's
+Turbo credits. Users top up through Turbo with a card or crypto. Items under Turbo's free-tier size
+cost nothing. Before uploading, the publish checks the balance covers the items and fails with
+`InsufficientStorageCreditsError` (with `address`, `requiredWinc`, `balanceWinc`) if not, so nothing
+is half-uploaded.
+
+```typescript
+initPublish({
+  // ...
+  payment: {
+    storage: 'user',
+    // Optional: other Turbo endpoints, or app wallets whose shared credits pay first (x-paid-by)
+    userStorage: { provider: 'turbo', paidBy: ['0xYourAppWallet'] },
+  },
+})
+```
+
+`getTurboBalanceWinc(endpoints, address)` and `getTurboPriceWinc(endpoints, bytes)` help show a
+balance or price before publishing.
+
+#### Approving and billing publishes
+
+`authorizePublish` runs before a publish spends anything (before schema registration, uploads and
+attestations). Use it to confirm the cost with the user, check a quota, or charge them. Return
+`false` or throw to refuse (the publish fails with `PublishNotAuthorizedError`); return `true` or
+nothing to go ahead; return `{ token }` to also send the token to the upload API as the
+`X-Seed-Publish-Authorization` header on that publish's requests, so the operator can meter or
+bill against it.
+
+```typescript
+initPublish({
+  // ...
+  authorizePublish: async ({ item, payment, getEstimate }) => {
+    const estimate = await getEstimate() // fetches prices; skip it if you don't need it
+    const { approved, receiptId } = await myBilling.charge(item.seedLocalId, estimate.totalUsd)
+    return approved ? { token: receiptId } : false
+  },
+})
+```
+
+It can also be passed per publish (`CreatePublishOptions.authorizePublish`). A publish resumed
+after a reload is not asked again once it got past this step; one restored before approval asks
+the config hook. The token is not sent to Turbo.
 
 ### Choosing a chain
 

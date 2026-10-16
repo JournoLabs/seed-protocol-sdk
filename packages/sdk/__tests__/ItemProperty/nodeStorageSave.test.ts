@@ -16,6 +16,7 @@ import { models as modelsTable, properties } from '@/seedSchema/ModelSchema'
 import { metadata } from '@/seedSchema/MetadataSchema'
 import { and, eq } from 'drizzle-orm'
 import { listRelationEasPropertyName } from '@/helpers/metadataPropertyNames'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Html saves in Node: saveHtml used to throw from NodeFileManager.getContentUrlFromPath, and
 // ItemProperty.save() resolved anyway, so raw HTML reached publish encoding.
@@ -38,7 +39,7 @@ testDescribe('Html property saves in Node', () => {
 
   const createPost = async () => {
     const item = await Item.create({ modelName: 'Post', title: 'Node html post' })
-    await waitForEntityIdle(item, { timeout: 10_000 })
+    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
     const html = item.allProperties['bodyHtml']
     expect(html).toBeDefined()
@@ -174,7 +175,7 @@ testDescribe('Html property saves in Node', () => {
       bodyHtml: '<p>raw</p>',
     })
     const item = (await Item.find({ modelName: 'Post', seedLocalId })) as Item<any>
-    await waitForEntityIdle(item, { timeout: 10_000 })
+    await waitForEntityIdle(item, { timeout: WAIT_TIMEOUT_MS })
     await waitForPropertyInstances(item)
 
     const result = await validateItemForPublish(item)

@@ -1,13 +1,16 @@
 import { ItemData } from '@/types'
 import { and, eq, gt, isNotNull, isNull, or, SQL, sql } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
 import { seeds } from '@/seedSchema'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { getVersionData } from './subqueries/versionData'
 import { batchLatestPublishedVersionBySeedLocalIds } from './batchLatestPublishedVersionBySeedLocalIds'
 import { getAddressesForItemsFilter } from '@/helpers/db'
-import { publisherInAddressListSql } from '@/helpers/ownership'
-import { ZERO_BYTES32 } from '@/helpers/constants'
+import {
+  ownedSeedsSql,
+  placeholderUidSql,
+  publisherInAddressListSql,
+} from '@/helpers/ownership'
 
 type GetItemsDataProps = {
   modelName?: string
@@ -45,18 +48,11 @@ export const getItemsData: GetItemsData = async ({
   const conditions: SQL[] = []
 
   if (!includeEas) {
-    conditions.push(
-      or(
-        isNull(seeds.uid),
-        eq(seeds.uid, ''),
-        eq(seeds.uid, 'NULL'),
-        eq(seeds.uid, ZERO_BYTES32),
-      ) as SQL,
-    )
+    conditions.push(placeholderUidSql(seeds.uid))
   }
 
   if (modelName) {
-    conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+    conditions.push(eq(seeds.type, easName(modelName)))
   }
 
   if (!modelFileId && schemaName && modelName) {
@@ -70,7 +66,7 @@ export const getItemsData: GetItemsData = async ({
 
   if (addressFilter === 'owned') {
     const ownedAddresses = await getAddressesForItemsFilter('owned')
-    conditions.push(publisherInAddressListSql(seeds.publisher, ownedAddresses))
+    conditions.push(ownedSeedsSql(ownedAddresses))
   } else if (addressFilter === 'watched') {
     const watchedAddresses = await getAddressesForItemsFilter('watched')
     conditions.push(publisherInAddressListSql(seeds.publisher, watchedAddresses))

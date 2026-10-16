@@ -1,13 +1,14 @@
 import { EventObject, fromCallback } from 'xstate'
 import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq, inArray } from 'drizzle-orm'
-import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
+import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { ClientManagerEvents } from '@/client/constants'
 import { ClientManagerContext, FromCallbackInput } from '@/types/machines'
 import debug from 'debug'
 import { GET_SCHEMAS } from '@seedprotocol/eas'
 import { withSeedDbLock } from '@/helpers/tabLocks'
+import { createRetryWhenOnline } from '@/helpers/retryWhenOnline'
 
 const logger = debug('seedSdk:client:actors:addModelsToDb')
 
@@ -47,6 +48,10 @@ export async function ensureModelStubs(
     return rows
   })
 }
+
+/** Retries the latest init's EAS schema lookup (see retryWhenOnline). */
+let retryModelUidsLookup: (() => Promise<void>) | undefined
+const modelUidsRetry = createRetryWhenOnline(() => void retryModelUidsLookup?.())
 
 export const addModelsToDb = fromCallback<
   EventObject,
@@ -105,7 +110,7 @@ export const addModelsToDb = fromCallback<
       // The EAS schema string depends only on the model name, so every same-name row shares its uid.
       schemaDefsByModelName.set(modelName, {
         dbIds: existingModels.filter((m) => m.name === modelName).map((m) => m.id),
-        schemaDef: `bytes32 ${toSnakeCase(modelName)}`,
+        schemaDef: `bytes32 ${easName(modelName)}`,
       })
     }
 
@@ -139,11 +144,16 @@ export const addModelsToDb = fromCallback<
             }),
         })
 
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('EAS query timeout after 10 seconds')), 10000)
-        )
+        let timeout: ReturnType<typeof setTimeout> | undefined
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('EAS query timeout after 10 seconds')), 10000)
+        })
 
-        const { schemas } = await Promise.race([queryPromise, timeoutPromise])
+        // Cleared, so a finished lookup doesn't keep a Node process alive for 10 s.
+        const { schemas } = await Promise.race([queryPromise, timeoutPromise]).finally(() =>
+          clearTimeout(timeout),
+        )
+        modelUidsRetry.succeeded()
 
         if (schemas && schemas.length > 0) {
           const db = BaseDb.getAppDb()
@@ -178,9 +188,13 @@ export const addModelsToDb = fromCallback<
         } else {
           logger('[client/actors] [addModelsToDb] Error fetching schemas (background):', error.message)
         }
+        // Probably offline: the startup sync waits for this lookup, so try again.
+        modelUidsRetry.schedule()
       }
     }
 
+    retryModelUidsLookup = fetchEasAndPopulateModelUids
+    modelUidsRetry.cancel()
     fetchEasAndPopulateModelUids()
 
     return hasModelsInDb

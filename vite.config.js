@@ -120,8 +120,9 @@ export default defineConfig({
             'react',
             'react-dom',
             // Imported lazily (some through workspace sources); discovering them mid-run reloads the
-            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
-            // parse5 (SDK dependencies) are root devDependencies too.
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml,
+            // parse5 and @tanstack/query-core (SDK/EAS dependencies) are root devDependencies too.
+            '@tanstack/query-core',
             '@tanstack/react-query',
             'arweave/bundles/web.bundle.js',
             'js-yaml',
@@ -204,8 +205,9 @@ export default defineConfig({
             'react',
             'react-dom',
             // Imported lazily (some through workspace sources); discovering them mid-run reloads the
-            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml and
-            // parse5 (SDK dependencies) are root devDependencies too.
+            // page and fails every file in flight. Entries resolve from the repo root, so js-yaml,
+            // parse5 and @tanstack/query-core (SDK/EAS dependencies) are root devDependencies too.
+            '@tanstack/query-core',
             '@tanstack/react-query',
             'arweave/bundles/web.bundle.js',
             'js-yaml',
@@ -292,6 +294,7 @@ export default defineConfig({
             'packages/sdk/__tests__/browser/db/Db.test.ts',
             // Browser-only: needs real OPFS and Workers. Runs in the `browser` project.
             'packages/sdk/__tests__/browser/helpers/opfsLockedMount.test.ts',
+            'packages/sdk/__tests__/browser/helpers/opfsOverwrite.test.ts',
             'packages/sdk/__tests__/browser/db/concurrentPrepareDb.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabCoordinator.test.ts',
             'packages/sdk/__tests__/browser/helpers/tabEvents.test.ts',

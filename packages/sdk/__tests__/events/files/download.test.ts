@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 const VALID_ARWEAVE_TX = 'JYeiPzuglpwr4cMRmCDFFmROnzXwdrDZAzg8vaZZRpY'
 
@@ -21,6 +22,9 @@ const mocks = vi.hoisted(() => {
     request: vi.fn(),
     getTransactionStatus: vi.fn(async () => ({ status: 200 })),
     getTransactionTags: vi.fn(async () => []),
+    getTransactionTagsByIds: vi.fn(async (_ids: string[], _opts?: unknown) => new Map<string, { name: string; value: string }[]>()),
+    getArweaveClient: vi.fn(() => ({ request: vi.fn() })),
+    getQueryData: vi.fn((_key: unknown): unknown => undefined),
     getHost: vi.fn(() => 'arweave.net'),
     getBaseUrl: vi.fn(() => 'https://arweave.net'),
     getMetadata: vi.fn(async () => null),
@@ -73,14 +77,21 @@ vi.mock('@/helpers', () => ({
     getQueryClient: () => ({
       fetchQuery: mocks.fetchQuery,
       removeQueries: mocks.removeQueries,
+      getQueryData: mocks.getQueryData,
     }),
   },
   BaseArweaveClient: {
     getTransactionStatus: mocks.getTransactionStatus,
     getTransactionTags: mocks.getTransactionTags,
+    getArweaveClient: mocks.getArweaveClient,
     getHost: mocks.getHost,
     getBaseUrl: mocks.getBaseUrl,
   },
+}))
+
+vi.mock('@seedprotocol/arweave', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTransactionTagsByIds: mocks.getTransactionTagsByIds,
 }))
 
 vi.mock('@/db/read/getMetadata', () => ({
@@ -143,7 +154,7 @@ describe('events/files/download dedupe', () => {
 
     await vi.waitFor(() => {
       expect(mocks.downloadFileByTransactionId).toHaveBeenCalledTimes(1)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
     expect(mocks.downloadAllFiles).toHaveBeenCalledTimes(0)
 
     deferred.resolve()
@@ -160,7 +171,7 @@ describe('events/files/download dedupe', () => {
 
     await vi.waitFor(() => {
       expect(mocks.downloadFileByTransactionId).toHaveBeenCalledTimes(1)
-    })
+    }, { timeout: WAIT_TIMEOUT_MS })
 
     deferred.resolve()
     const [r1, r2] = await Promise.all([p1, p2])
@@ -226,5 +237,83 @@ describe('events/files/download dedupe', () => {
     expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
       expect.objectContaining({ transactionId: VALID_ARWEAVE_TX }),
     )
+  })
+
+  describe('Content-SHA-256', () => {
+    const TX_B = 'B'.repeat(43)
+    const TX_C = 'C'.repeat(43)
+    const HASH_A = 'a'.repeat(64)
+    const HASH_B = 'b'.repeat(64)
+
+    const withEasTransactions = (ids: string[]) =>
+      mocks.fetchQuery.mockImplementation(async ({ queryKey, queryFn }: { queryKey: unknown[]; queryFn?: () => unknown }) => {
+        if (queryKey[0] === 'getFilesMetadata') {
+          return {
+            filesMetadata: ids.map((id, i) => ({
+              id: `meta-${i}`,
+              decodedDataJson: JSON.stringify([{ value: { value: id } }]),
+            })),
+          }
+        }
+        return queryFn ? queryFn() : []
+      })
+
+    it('looks the tags up in one batch, verifies downloads against them and records only verified hashes', async () => {
+      withEasTransactions([VALID_ARWEAVE_TX, TX_B, TX_C])
+      mocks.getTransactionTagsByIds.mockResolvedValueOnce(
+        new Map([
+          [VALID_ARWEAVE_TX, [{ name: 'Content-SHA-256', value: HASH_A }, { name: 'Content-Type', value: 'image/png' }]],
+          [TX_B, [{ name: 'Content-SHA-256', value: HASH_B }]],
+          // TX_C: not indexed yet, no tags
+        ]),
+      )
+      mocks.downloadAllFiles.mockResolvedValueOnce({
+        verifiedTransactionIds: [VALID_ARWEAVE_TX],
+        hashMismatchTransactionIds: [TX_B],
+        failedTransactionIds: [],
+      } as any)
+      mocks.getMetadata.mockImplementation(async ({ storageTransactionId }: any) => ({ localId: `row-${storageTransactionId}` }) as any)
+
+      const mod = await import('@/events/files/download')
+      await mod.downloadAllFilesBinaryRequestHandler()
+
+      expect(mocks.getTransactionTagsByIds).toHaveBeenCalledTimes(1)
+      expect(mocks.getTransactionTagsByIds.mock.calls[0]![0]).toEqual([VALID_ARWEAVE_TX, TX_B, TX_C])
+      expect(mocks.getTransactionTags).not.toHaveBeenCalled()
+      expect(mocks.downloadAllFiles).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transactionIds: [VALID_ARWEAVE_TX, TX_B, TX_C],
+          expectedContentHashes: { [VALID_ARWEAVE_TX]: HASH_A, [TX_B]: HASH_B },
+        }),
+      )
+      expect(mocks.saveMetadata).toHaveBeenCalledTimes(1)
+      expect(mocks.saveMetadata).toHaveBeenCalledWith({ localId: `row-${VALID_ARWEAVE_TX}` }, { contentHash: HASH_A })
+      mocks.getMetadata.mockImplementation(async () => null)
+    })
+
+    it('uses cached tags instead of asking again', async () => {
+      mocks.getQueryData.mockImplementation((key: any) =>
+        key[1] === VALID_ARWEAVE_TX ? [{ name: 'Content-SHA-256', value: HASH_A }] : undefined,
+      )
+      const mod = await import('@/events/files/download')
+      await mod.downloadTransactionIdWithDedupe(VALID_ARWEAVE_TX)
+
+      expect(mocks.getTransactionTagsByIds).not.toHaveBeenCalled()
+      expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
+        expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, expectedContentHash: HASH_A }),
+      )
+      mocks.getQueryData.mockImplementation(() => undefined)
+    })
+
+    it('a failed tag lookup does not stop the download (it is just unverified)', async () => {
+      mocks.getTransactionTagsByIds.mockRejectedValueOnce(new Error('graphql down'))
+      const mod = await import('@/events/files/download')
+      await expect(mod.downloadTransactionIdWithDedupe(VALID_ARWEAVE_TX)).resolves.toBe(true)
+
+      expect(mocks.downloadFileByTransactionId).toHaveBeenCalledWith(
+        expect.objectContaining({ transactionId: VALID_ARWEAVE_TX, expectedContentHash: undefined }),
+      )
+      expect(mocks.saveMetadata).not.toHaveBeenCalled()
+    })
   })
 })

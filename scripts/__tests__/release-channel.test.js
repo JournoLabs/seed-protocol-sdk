@@ -7,8 +7,14 @@ import {
   findCollidingBranches,
   isValidSemver,
   nextPatch,
+  previousReleasedTag,
+  PUBLISH_ORDER,
+  releaseVersionProblems,
+  retryProblems,
+  unreleasedTags,
   resolveRelease,
   stagingTag,
+  tagCommitFromLsRemote,
 } from '../release-channel.js'
 
 const SHA = '8b65a15e0c3d2f1a9b8c7d6e5f4a3b2c1d0e9f8a'
@@ -155,5 +161,110 @@ describe('resolveRelease', () => {
 describe('stagingTag', () => {
   it('uses the short SHA with a g prefix', () => {
     assert.equal(stagingTag(SHA), 'ci-g8b65a15')
+  })
+})
+
+describe('releaseVersionProblems', () => {
+  it('accepts a version newer than the committed one and npm latest', () => {
+    assert.deepEqual(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', npmLatest: '0.7.2' }), [])
+    assert.deepEqual(releaseVersionProblems({ target: '0.8.0', committed: '0.7.2', npmLatest: null }), [])
+  })
+
+  it('rejects prerelease and malformed versions', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.3-beta.1', committed: '0.7.2' })[0], /plain X\.Y\.Z/)
+    assert.match(releaseVersionProblems({ target: 'v0.7.3', committed: '0.7.2' })[0], /plain X\.Y\.Z/)
+  })
+
+  it('rejects versions that are not newer', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.2', committed: '0.7.2' })[0], /committed version/)
+    assert.match(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', npmLatest: '0.7.3' })[0], /npm `latest`/)
+  })
+
+  it('rejects versions already on npm', () => {
+    assert.match(releaseVersionProblems({ target: '0.7.3', committed: '0.7.2', published: true })[0], /already on npm/)
+  })
+})
+
+describe('tagCommitFromLsRemote', () => {
+  const OTHER = '1111111111111111111111111111111111111111'
+
+  it('returns the commit of a lightweight tag', () => {
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.2\n`, 'v0.7.2'), SHA)
+  })
+
+  it('peels an annotated tag to its commit', () => {
+    const output = `${OTHER}\trefs/tags/v0.7.2\n${SHA}\trefs/tags/v0.7.2^{}\n`
+    assert.equal(tagCommitFromLsRemote(output, 'v0.7.2'), SHA)
+  })
+
+  it('returns null when the tag is missing', () => {
+    assert.equal(tagCommitFromLsRemote('', 'v0.7.2'), null)
+    assert.equal(tagCommitFromLsRemote(`${SHA}\trefs/tags/v0.7.20\n`, 'v0.7.2'), null)
+  })
+})
+
+describe('unreleasedTags', () => {
+  const tags = ['v0.7.1', 'v0.7.2', 'v0.7.3', 'v0.7.4', 'v0.7.5', 'v1.0.0-rc.1', 'other']
+  const publishedVersions = new Set(['0.7.1', '0.7.2', '0.7.4'])
+
+  it('lists older tags whose version is on npm for no package', () => {
+    assert.deepEqual(unreleasedTags({ tags, released: '0.7.5', publishedVersions }), ['v0.7.3'])
+  })
+
+  it('never lists the released tag or newer ones', () => {
+    assert.deepEqual(unreleasedTags({ tags, released: '0.7.3', publishedVersions }), [])
+  })
+
+  it('sorts by version, not by name', () => {
+    assert.deepEqual(
+      unreleasedTags({ tags: ['v0.10.0', 'v0.9.0'], released: '0.11.0', publishedVersions: new Set() }),
+      ['v0.9.0', 'v0.10.0'],
+    )
+  })
+})
+
+describe('previousReleasedTag', () => {
+  it('skips tags that never reached npm', () => {
+    const tags = ['v0.7.1', 'v0.7.2', 'v0.7.3']
+    assert.equal(previousReleasedTag({ tags, released: '0.7.4', publishedVersions: new Set(['0.7.1', '0.7.2']) }), 'v0.7.2')
+  })
+
+  it('is null for the first release', () => {
+    assert.equal(previousReleasedTag({ tags: ['v0.1.0'], released: '0.1.0', publishedVersions: new Set() }), null)
+  })
+})
+
+describe('retryProblems', () => {
+  const ok = {
+    version: '0.7.3',
+    tagCommit: SHA,
+    tagInHead: true,
+    publishedPackages: [],
+    tagRunState: 'failure',
+  }
+
+  it('allows a failed tag nothing was published from', () => {
+    assert.deepEqual(retryProblems(ok), [])
+  })
+
+  it('needs the tag on origin', () => {
+    assert.match(retryProblems({ ...ok, tagCommit: null }).join(), /no v0\.7\.3 on origin/)
+  })
+
+  it('refuses a partly published version and points at re-running', () => {
+    assert.match(retryProblems({ ...ok, publishedPackages: ['eas', 'arweave'] }).join(), /Re-run v0\.7\.3's failed Release run/)
+  })
+
+  it('refuses a fully published version', () => {
+    assert.match(retryProblems({ ...ok, publishedPackages: [...PUBLISH_ORDER] }).join(), /nothing to retry/)
+  })
+
+  it('needs HEAD to contain the tag', () => {
+    assert.match(retryProblems({ ...ok, tagInHead: false }).join(), /doesn't contain/)
+  })
+
+  it('waits for a running tag run and refuses a successful one', () => {
+    assert.match(retryProblems({ ...ok, tagRunState: 'in_progress' }).join(), /still in_progress/)
+    assert.match(retryProblems({ ...ok, tagRunState: 'success' }).join(), /succeeded/)
   })
 })

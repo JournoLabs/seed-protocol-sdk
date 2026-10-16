@@ -1,7 +1,7 @@
 import { BaseFileManager } from './FileManager/BaseFileManager'
 import { SchemaFileFormat, JsonImportSchema } from '@/types/import'
 import { getLatestSchemaVersion } from './schema'
-import { createModelsFromJson, loadSchemaFromFile } from '@/imports/json'
+import { createModelsFromJson, jsonPropertiesToSchemaProperties, loadSchemaFromFile } from '@/imports/json'
 // Dynamic import to break circular dependency: helpers/db -> ModelProperty -> updateSchema -> helpers/db
 // import { addModelsToDb, addSchemaToDb } from './db'
 import { schemas, SchemaType } from '@/seedSchema/SchemaSchema'
@@ -15,6 +15,19 @@ import { generateId } from './index'
 import debug from 'debug'
 
 const logger = debug('seedSdk:helpers:updateSchema')
+
+// Schema reloads renameModelProperty deferred and that haven't finished yet
+const deferredSchemaReloads = new Set<Promise<void>>()
+
+/**
+ * Resolves once every schema reload deferred by renameModelProperty has finished (failures are logged,
+ * not thrown). For tests and teardown that must not overlap that reload.
+ */
+export async function whenDeferredSchemaReloadsSettled(): Promise<void> {
+  while (deferredSchemaReloads.size > 0) {
+    await Promise.all(deferredSchemaReloads)
+  }
+}
 
 /**
  * Schema property update definition
@@ -630,11 +643,21 @@ async function loadSchemaWithRenames(
   // Add schema to database with schemaFileId
   const schemaRecord = await addSchemaToDb(schemaInput as SchemaType, schemaFile.id)
 
+  // A cached Model keeps the properties it was created with (Model.create ignores the ones passed),
+  // so addModelsToDb must take changed properties from this file, as in loadSchemaFromFile
+  const propertyDefinitions = new Map(
+    Object.entries(importData.models).map(([modelName, modelDef]) => [
+      modelName,
+      jsonPropertiesToSchemaProperties(modelName, modelDef, propertyFileIds.get(modelName)),
+    ]),
+  )
+
   // Add models to database with model renames handled and schemaFileIds
   await addModelsToDb(modelDefinitions, schemaRecord, modelRenames, {
     schemaFileId: schemaFile.id,
     modelFileIds,
     propertyFileIds,
+    propertyDefinitions,
   })
 
   // Models are now Model instances, no registration needed
@@ -780,11 +803,16 @@ export async function renameModelProperty(
   // Defer loadSchemaFromFile to avoid sync cascade: it triggers addSchemaToDb/addModelsToDb,
   // which post to BroadcastChannel and cause React invalidates. Running that synchronously
   // can interrupt the save flow and cause freezes (e.g. updateContext/refetch loops).
-  setTimeout(() => {
-    loadSchemaFromFile(newFilePath).catch((err) => {
-      logger('Deferred loadSchemaFromFile after rename failed:', err)
-    })
-  }, 100)
+  const reload: Promise<void> = new Promise<void>((resolve) => setTimeout(resolve, 100))
+    .then(() => loadSchemaFromFile(newFilePath))
+    .then(
+      () => {},
+      (err) => {
+        logger('Deferred loadSchemaFromFile after rename failed:', err)
+      },
+    )
+    .finally(() => deferredSchemaReloads.delete(reload))
+  deferredSchemaReloads.add(reload)
 
   return newFilePath
 }

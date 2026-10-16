@@ -179,10 +179,14 @@ const ConnectButton: FC = () => {
       lastSyncedOwnedKey.current = ownedKey
       try {
         const publishWallet = fromThirdwebAccount(account)
+        const adminAddress = activeWallet.getAdminAccount?.()?.address
         await setPublishWallet({
           ...publishWallet,
           ownedAddresses: [...owned],
           publisherAddress: managedAddress ?? account.address,
+          ...(adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase()
+            ? { adminAddress }
+            : {}),
         })
       } catch (err) {
         lastSyncedOwnedKey.current = null
@@ -235,7 +239,7 @@ const ConnectButton: FC = () => {
     } catch {
       /* private mode / SSR */
     }
-    clearPublishWallet()
+    void clearPublishWallet()
     PublishManager.stopAll()
   }
 

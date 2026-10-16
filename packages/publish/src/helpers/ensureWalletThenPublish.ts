@@ -6,10 +6,18 @@ import { getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
+import { resolvePublishPayment } from '../payment'
 import type { ManagedAccountPublishError } from '../errors'
 
+/**
+ * `started` resolves with the spawned publish actor once it exists, or `undefined` when
+ * that seed is already publishing in this tab or another. It does not wait for the
+ * publish to finish; use {@link publishItem} (or `item.publish()`) for that.
+ */
+export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undefined>
+
 export type EnsureWalletThenPublishResult =
-  | { outcome: 'started' }
+  | { outcome: 'started'; started: PublishStarted }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
   | { outcome: 'needs_deploy' }
@@ -34,7 +42,8 @@ export async function ensureWalletThenPublish(
   options?: CreatePublishOptions,
 ): Promise<EnsureWalletThenPublishResult> {
   const config = getPublishConfig()
-  if (config.useModularExecutor) {
+  const payment = resolvePublishPayment(config)
+  if (payment.sender === 'modular') {
     // Modular / ManagedAccount Thirdweb bootstrap is adapter-only.
     const { ensureSmartWalletThenPublish } = await import('./ensureSmartWalletThenPublish')
     return ensureSmartWalletThenPublish(item, null, async () => {
@@ -49,15 +58,16 @@ export async function ensureWalletThenPublish(
   }
 
   // Upgrade EOA sender to permissionless EIP-7702 when configured.
-  if (config.accountMode === 'eip7702' && config.bundlerUrl) {
-    const sponsored = await createPermissionlessTxSender({
+  if (payment.sender === 'eip7702') {
+    const txSender = await createPermissionlessTxSender({
       signer: session.signer,
-      bundlerUrl: config.bundlerUrl,
+      bundlerUrl: config.bundlerUrl!,
       paymasterUrl: config.paymasterUrl,
+      sponsored: payment.gas.payer === 'sponsored',
     })
     session = {
       ...session,
-      txSender: sponsored,
+      txSender,
       publisherAddress: session.publisherAddress ?? session.signer.address,
     }
   }
@@ -68,9 +78,9 @@ export async function ensureWalletThenPublish(
     return { outcome: 'no_address' }
   }
 
-  PublishManager.createPublish(item, address, session, {
+  const started = PublishManager.createPublish(item, address, session, {
     ...options,
     dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? session.signer,
   })
-  return { outcome: 'started' }
+  return { outcome: 'started', started }
 }

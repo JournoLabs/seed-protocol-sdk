@@ -65,14 +65,14 @@ const post = await Post.create({ title: 'Hello', summary: '...' })
 post.title = 'Hello, world' // persisted by the SDK
 ```
 
-Publishing to EAS and Arweave is handled by [`@seedprotocol/publish`](packages/publish).
+`item.publish()` needs **[@seedprotocol/publish](packages/publish)**. The SDK builds the payload, but the uploads and EAS writes are done by an executor that the publish package registers when you call its `initPublish()` (or mount `<PublishProvider config>`). Without it, `publish()` throws an error saying so. `item.unpublish()` works the same way.
 
-For full guides on schema, models, properties, items and files, see **[the docs](https://seedprotocol.io)** and [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+For full guides on schema, models, properties, items, files, and the CLI, see **[the docs](https://seedprotocol.io)** and [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ## Module support
 
 - **ESM** (recommended): `import { Schema, Model, Item } from '@seedprotocol/sdk'`
-- **CommonJS**: `const { Schema, Model, Item } = require('@seedprotocol/sdk')`
+- **CommonJS**: `const { Schema, Model, Item } = require('@seedprotocol/sdk')`. The package is ESM-only; `require()` loads the same ESM build through Node's `require(esm)`, so it needs Node 20.19+ or 22.12+.
 
 ## Packages
 

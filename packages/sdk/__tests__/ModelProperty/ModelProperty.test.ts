@@ -19,7 +19,8 @@ import { cleanupTestSchemaData } from '../test-utils/cleanupTestDb'
 import { getPropertySchema } from '@/helpers/property'
 import type { Static } from '@sinclair/typebox'
 import type { TProperty } from '@/Schema'
-import { waitForModelPropertyIdle } from '../test-utils/waitForIdle'
+import { waitForModelPropertyIdle, waitForModelSettled } from '../test-utils/waitForIdle'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 // Schema names here must not match other test files': in the browser all files share one OPFS store, and
 // importing a same-name/same-version schema loads the other file's schema instead.
@@ -254,12 +255,13 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Find the property
       const foundProperty = await ModelProperty.find({
         propertyFileId: propertyFileId,
+        readyTimeout: WAIT_TIMEOUT_MS,
       })
 
       expect(foundProperty).toBeDefined()
@@ -299,7 +301,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Find with waitForReady: false - should return immediately
@@ -312,8 +314,11 @@ testDescribe('ModelProperty Integration Tests', () => {
       // Property might not be idle yet since we didn't wait
       const service = foundProperty!.getService()
       const state = service.getSnapshot().value
-      // State could be idle (if already loaded) or loading/waitingForDb
-      expect(['idle', 'loading', 'waitingForDb']).toContain(state)
+      // Any of modelPropertyMachine's states (it starts in idle; saveToSchema is compound, so its value is an object)
+      const stateName = typeof state === 'string' ? state : Object.keys(state)[0]
+      expect(['idle', 'validating', 'compareAndMarkDraft', 'saveToSchema']).toContain(stateName)
+      await waitForModelPropertyIdle(foundProperty!)
+      expect(foundProperty!.name).toBe('title')
     })
   })
 
@@ -338,7 +343,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const allProperties = await ModelProperty.all(modelFileId)
@@ -367,11 +372,12 @@ testDescribe('ModelProperty Integration Tests', () => {
       await waitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const allProperties = await ModelProperty.all(modelFileId, {
         waitForReady: true,
+        readyTimeout: WAIT_TIMEOUT_MS,
       })
       expect(allProperties.length).toBeGreaterThanOrEqual(1)
       for (const p of allProperties) {
@@ -643,7 +649,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       const testSchema = createTestSchema(schemaName)
       await importJsonSchema({ contents: JSON.stringify(testSchema) }, testSchema.version)
       const schema = Schema.create(schemaName, { waitForReady: false })
-      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 5000 })
+      await waitFor(schema.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const trackPendingWrite = vi.spyOn(ModelProperty, 'trackPendingWrite')
       try {
@@ -652,7 +658,7 @@ testDescribe('ModelProperty Integration Tests', () => {
           waitForReady: false,
         })
         const modelSnapshot = await waitFor(model.getService(), (snapshot) => snapshot.value === 'idle' && snapshot.context._dbId != null, {
-          timeout: 10000,
+          timeout: WAIT_TIMEOUT_MS,
         })
         const modelId = modelSnapshot.context._dbId as number
 
@@ -666,7 +672,7 @@ testDescribe('ModelProperty Integration Tests', () => {
           const instance = ModelProperty.getById(propertyFileId)
           if (!instance) throw new Error('content property instance not created yet')
           return instance
-        })
+        }, { timeout: WAIT_TIMEOUT_MS })
         await waitForModelPropertyIdle(property)
         await settleInitialWrite()
 
@@ -1010,7 +1016,7 @@ testDescribe('ModelProperty Integration Tests', () => {
             .from(propertiesTable)
             .where(eq(propertiesTable.schemaFileId, propertyFileId))
           expect(row?.dataType).toBe('Number')
-        }, { timeout: 5000 })
+        }, { timeout: WAIT_TIMEOUT_MS })
       }
     })
   })
@@ -1567,11 +1573,29 @@ testDescribe('ModelProperty Integration Tests', () => {
       property.name = newName
 
       await waitForModelPropertyIdle(property)
-
       expect(property.name).toBe(newName)
-      const snapshot = property.getService().getSnapshot()
-      expect(snapshot.value).toBe('idle')
-      expect(snapshot.value).not.toBe('error')
+
+      // The first idle can come before everything the rename and the still-loading model start
+      // (Model.create above isn't awaited; its loading re-creates this property by id). Wait for the
+      // model to settle and the rename to land in the DB, then for the property to be idle with the new name.
+      await waitForModelSettled(model)
+      await vi.waitFor(
+        async () => {
+          const rows = await BaseDb.getAppDb()!
+            .select({ name: propertiesTable.name })
+            .from(propertiesTable)
+            .where(eq(propertiesTable.schemaFileId, propertyFileId))
+          expect(rows.map((row) => row.name)).toEqual([newName])
+        },
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 },
+      )
+      await vi.waitFor(
+        () => {
+          expect(property.getService().getSnapshot().value).toBe('idle')
+          expect(property.name).toBe(newName)
+        },
+        { timeout: WAIT_TIMEOUT_MS, interval: 50 },
+      )
     })
   })
 
@@ -1614,7 +1638,7 @@ testDescribe('ModelProperty Integration Tests', () => {
       // The edit is compared against _originalValues, which are initialized after the first idle
       await vi.waitFor(
         () => expect((property as any)._getSnapshotContext()._originalValues).toBeDefined(),
-        { timeout: 5000, interval: 50 },
+        { timeout: WAIT_TIMEOUT_MS, interval: 50 },
       )
 
       property.dataType = 'Number'
@@ -1624,31 +1648,23 @@ testDescribe('ModelProperty Integration Tests', () => {
       expect(property.dataType).toBe('Number')
 
       const db = BaseDb.getAppDb()
-      if (db && modelId && schemaFileId) {
-        for (let i = 0; i < 30; i++) {
-          const propertyBySchemaFileId = await db
+      expect(db).toBeTruthy()
+      expect(modelId).toBeTruthy()
+      expect(schemaFileId).toBeTruthy()
+      await vi.waitFor(
+        async () => {
+          const propertyBySchemaFileId = await db!
             .select()
             .from(propertiesTable)
             .where(
               and(eq(propertiesTable.schemaFileId, schemaFileId), eq(propertiesTable.modelId, modelId))
             )
             .limit(1)
-          if (propertyBySchemaFileId.length > 0 && propertyBySchemaFileId[0].dataType === 'Number') {
-            break
-          }
-          await new Promise(resolve => setTimeout(resolve, 200))
-        }
-        const propertyBySchemaFileId = await db
-          .select()
-          .from(propertiesTable)
-          .where(
-            and(eq(propertiesTable.schemaFileId, schemaFileId), eq(propertiesTable.modelId, modelId))
-          )
-          .limit(1)
-
-        expect(propertyBySchemaFileId.length).toBe(1)
-        expect(propertyBySchemaFileId[0].dataType).toBe('Number')
-      }
+          expect(propertyBySchemaFileId.length).toBe(1)
+          expect(propertyBySchemaFileId[0].dataType).toBe('Number')
+        },
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 },
+      )
     })
 
     it('should persist property dataType changes across reloads (simulating page reload)', async () => {
@@ -1737,13 +1753,12 @@ testDescribe('ModelProperty Integration Tests', () => {
       const property = ModelProperty.create(propertyData, { waitForReady: false })
       await waitForModelPropertyIdle(property)
 
-      for (let i = 0; i < 50; i++) {
-        const ctx = (property as any)._getSnapshotContext()
-        if (ctx._originalValues != null) break
-        await new Promise(resolve => setTimeout(resolve, 100))
-      }
+      // _originalValues are initialized asynchronously, after the first idle
+      await vi.waitFor(
+        () => expect((property as any)._getSnapshotContext()._originalValues).toBeDefined(),
+        { timeout: WAIT_TIMEOUT_MS, interval: 50 },
+      )
       const contextBefore = (property as any)._getSnapshotContext()
-      expect(contextBefore._originalValues).toBeDefined()
       expect(contextBefore._originalValues?.dataType).toBe('Text')
 
       property.dataType = 'Number'
@@ -1754,12 +1769,12 @@ testDescribe('ModelProperty Integration Tests', () => {
       expect(property.isEdited).toBe(true)
 
       const db = BaseDb.getAppDb()
-      if (db) {
-        const contextAfter = (property as any)._getSnapshotContext()
-        const modelId = contextAfter.modelId
-
-        if (modelId) {
-          const dbProperties = await db
+      expect(db).toBeTruthy()
+      const modelId = (property as any)._getSnapshotContext().modelId
+      expect(modelId).toBeTruthy()
+      await vi.waitFor(
+        async () => {
+          const dbProperties = await db!
             .select()
             .from(propertiesTable)
             .where(
@@ -1773,8 +1788,9 @@ testDescribe('ModelProperty Integration Tests', () => {
           expect(dbProperties.length).toBeGreaterThan(0)
           expect(dbProperties[0].dataType).toBe('Number')
           expect(dbProperties[0].isEdited).toBe(true)
-        }
-      }
+        },
+        { timeout: WAIT_TIMEOUT_MS, interval: 100 },
+      )
     })
   })
 
@@ -1833,10 +1849,13 @@ testDescribe('ModelProperty Integration Tests', () => {
           }
         })
         
-        // Wait for property to stabilize
-        await waitForModelPropertyIdle(property, 10000)
+        // Wait for the property and the model (Model.create above isn't awaited, and its loading can
+        // drive this property through validating/compareAndMarkDraft again) to finish their work
+        await waitForModelPropertyIdle(property)
+        await waitForModelSettled(model)
+        await waitForModelPropertyIdle(property)
         
-        // Wait a bit more to ensure no additional callbacks
+        // Negative check: give a runaway loop time to show itself before counting callbacks
         await new Promise(resolve => setTimeout(resolve, 1000))
         
         // Unsubscribe
@@ -1845,9 +1864,9 @@ testDescribe('ModelProperty Integration Tests', () => {
         // Verify we didn't get an excessive number of callbacks
         expect(callbackCount).toBeLessThanOrEqual(maxExpectedCallbacks)
         
-        // Verify the property eventually reached idle state
-        const finalSnapshot = property.getService().getSnapshot()
-        expect(finalSnapshot.value).toBe('idle')
+        // Verify the property ends in idle
+        await waitForModelPropertyIdle(property)
+        expect(property.getService().getSnapshot().value).toBe('idle')
       }
     })
   })

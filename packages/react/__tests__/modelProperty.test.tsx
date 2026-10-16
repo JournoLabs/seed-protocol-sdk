@@ -28,6 +28,7 @@ import { createFastDestroyStub } from './test-utils/fastDestroyStub'
 import { waitFor as xstateWaitFor } from 'xstate'
 import { waitUntilOrThrow } from './test-utils/waitUntil'
 import { cleanupTestSchemaData } from '../../sdk/__tests__/test-utils/cleanupTestDb'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema with models and properties
 const testSchemaWithProperties: SchemaFileFormat = {
@@ -247,7 +248,12 @@ function UseDestroyModelPropertyTest({ modelProperty }: { modelProperty: ModelPr
   const handleDestroy = async () => {
     if (!modelProperty) return
     setStatus('destroying')
-    await destroy(modelProperty)
+    try {
+      await destroy(modelProperty)
+    } catch {
+      // The hook rejects and also sets `error`, which the test reads
+      return
+    }
     setStatus('destroyed')
   }
 
@@ -422,7 +428,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('properties-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const count = screen.getByTestId('properties-count')
@@ -464,7 +470,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
       // First get the model to get its ID
       const schema = Schema.create('Test Schema Properties', { waitForReady: false })
       // Bounded wait: checks the current state first (subscribe() alone misses an already-idle schema)
-      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle', 5000)
+      await waitUntilOrThrow(() => schema.getService().getSnapshot().value === 'idle', 'the schema to be idle')
 
       // Used to return early (and pass) when the schema or its Post wasn't loaded
       const postModel = schema.models?.find((m) => m.modelName === 'Post')
@@ -554,7 +560,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const isLoading = screen.getByTestId('is-loading')
           expect(isLoading.textContent).toBe('false')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -593,7 +599,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'LiveQuery Test Schema Properties')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Render component - should start with 1 property (name)
@@ -626,7 +632,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const initialCount = parseInt(screen.getByTestId('properties-count').textContent || '0')
           expect(initialCount).toBeGreaterThanOrEqual(1)
         },
-        { timeout: 5000, interval: 200 }
+        { timeout: WAIT_TIMEOUT_MS, interval: 200 }
       )
 
       // Add a property; the hook's live query on the properties table should pick it up
@@ -634,7 +640,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { name: 'addedLater', dataType: 'Text', modelName: 'TestModel' } as Parameters<typeof ModelProperty.create>[0],
         { waitForReady: false, schemaName: 'LiveQuery Test Schema Properties' },
       ) as ModelProperty
-      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       await waitFor(
         () => {
@@ -672,7 +678,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { name: 'addedLater', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
         { waitForReady: false, schemaName },
       ) as ModelProperty
-      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       await waitFor(
         () => {
@@ -680,7 +686,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const names = screen.getAllByTestId(/^property-\d+$/).map((el) => el.textContent)
           expect(names).toEqual(expect.arrayContaining(['headline', 'body', 'addedLater']))
         },
-        { timeout: 10000 },
+        { timeout: WAIT_TIMEOUT_MS },
       )
     })
   })
@@ -694,7 +700,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('property-status')
           expect(status.textContent).toBe('not-loaded')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
     })
 
@@ -728,9 +734,9 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         properties: { summary: { dataType: 'Text' } },
         waitForReady: false,
       })
-      await xstateWaitFor(lateModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+      await xstateWaitFor(lateModel.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
-      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: 5000 })
+      const propertyNameEl = await within(view.container).findByTestId('property-name', {}, { timeout: WAIT_TIMEOUT_MS })
       expect(propertyNameEl.textContent).toBe('summary')
     })
 
@@ -742,7 +748,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         { name: 'addedAtRuntime', dataType: 'Text', modelName: 'Article' } as Parameters<typeof ModelProperty.create>[0],
         { waitForReady: false, schemaName },
       ) as ModelProperty
-      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: 10000 })
+      await xstateWaitFor(added.getService(), (snapshot) => snapshot.value === 'idle', { timeout: WAIT_TIMEOUT_MS })
 
       const view = render(
         <UseModelPropertyTest schemaId={schemaName} modelName="Article" propertyName="addedAtRuntime" />,
@@ -904,7 +910,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const allSchemas = await loadAllSchemasFromDb()
           expect(allSchemas.some(s => s.schema.metadata?.name === 'Empty Test Schema Properties')).toBe(true)
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Render component with empty schema (must use SeedProvider so useIsClientReady and React Query work)
@@ -919,7 +925,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('properties-status')
           expect(status.textContent).toBe('loaded')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Verify properties count is 0 initially (model doesn't exist yet)
@@ -934,7 +940,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         () => {
           expect(schemaInstance.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Create the model with properties
@@ -951,7 +957,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         () => {
           expect(newModel.getService().getSnapshot().value).toBe('idle')
         },
-        { timeout: 10000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       // Wait for properties to appear in the UI
@@ -982,7 +988,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-property-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('create-property-is-loading').textContent).toBe('false')
@@ -997,7 +1003,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const btn = screen.getByTestId('create-property-button')
           expect(btn).toBeTruthy()
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('create-property-button').click()
@@ -1007,7 +1013,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           const status = screen.getByTestId('create-property-status')
           expect(status.textContent).toBe('created')
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const createdName = screen.getByTestId('created-property-name')
@@ -1025,7 +1031,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           expect(btn).toBeTruthy()
           expect(btn.hasAttribute('disabled')).toBe(true)
         },
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
@@ -1040,7 +1046,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
         () => {
           expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitFor(
@@ -1048,7 +1054,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
           expect(screen.getByTestId('destroy-property-error').textContent).toBe('stub destroy failed')
         },
-        { timeout: 2000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       screen.getByTestId('destroy-property-reset-error').click()
@@ -1065,7 +1071,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           () => {
             expect(model.getService().getSnapshot().value).toBe('idle')
           },
-          { timeout: 10000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         const props = await ModelProperty.all(model.id!, { waitForReady: true })
         const propertyToDestroy = props[0]
@@ -1081,7 +1087,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
             expect(btn).toBeTruthy()
             expect(btn.hasAttribute('disabled')).toBe(false)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         screen.getByTestId('destroy-property-button').click()
@@ -1090,7 +1096,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
           () => {
             expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('true')
           },
-          { timeout: 2000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
 
         await waitFor(
@@ -1098,7 +1104,7 @@ describe('React ModelProperty Hooks Integration Tests', () => {
             expect(screen.getByTestId('destroy-property-is-loading').textContent).toBe('false')
             expect(['destroyed', 'error']).toContain(screen.getByTestId('destroy-property-status').textContent)
           },
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
       } finally {
         model.unload()

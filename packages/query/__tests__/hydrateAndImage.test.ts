@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BaseArweaveClient } from '@seedprotocol/arweave'
+import { BaseArweaveClient, setArweaveContentReadTransform } from '@seedprotocol/arweave'
 import { enrichImageSeedClone } from '../src/imageRelationEnrichment'
 import {
   hydrateArweaveRichTextInItems,
@@ -61,6 +61,24 @@ describe('hydrateArweaveRichTextInItems', () => {
     const items = [{ html: url }] as Record<string, unknown>[]
     await hydrateArweaveRichTextInItems(items)
     expect(items[0]!.html).toBe(html)
+  })
+
+  it('hydrates through the Arweave content read transform', async () => {
+    const url = 'https://arweave.net/LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(htmlResponse('<p>sealed</p>')))
+    const seen: string[] = []
+    setArweaveContentReadTransform(({ bytes }, { transactionId }) => {
+      seen.push(transactionId)
+      return { bytes: new TextEncoder().encode(new TextDecoder().decode(bytes).replace('sealed', 'opened')) }
+    })
+    try {
+      const items = [{ html: url }] as Record<string, unknown>[]
+      await hydrateArweaveRichTextInItems(items)
+      expect(items[0]!.html).toBe('<p>opened</p>')
+      expect(seen).toEqual(['LqiubbBd7HAHsntdWbSqn0JoRjPcmZ6TQCNpJPthmAk'])
+    } finally {
+      setArweaveContentReadTransform(undefined)
+    }
   })
 
   it('fetches a transaction once, across calls, concurrent fields and gateways', async () => {

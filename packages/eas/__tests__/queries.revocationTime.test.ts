@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { print } from 'graphql'
-import { GET_PROPERTIES, GET_SEEDS, GET_VERSIONS } from '../src/queries.js'
+import { GET_DOMAIN_OWNERSHIPS, GET_PROPERTIES, GET_SEEDS, GET_VERSIONS } from '../src/queries.js'
 
 /**
  * Sync reads `revocationTime` (EAS seconds) off revoked attestations to record when they were
@@ -15,5 +15,14 @@ describe('sync queries select revocationTime', () => {
     const text = print(document)
     expect(text).toMatch(/\brevoked\b/)
     expect(text).toMatch(/\brevocationTime\b/)
+  })
+})
+
+/** assessDomainOwnership reports an expired claim from EAS `expirationTime`. */
+describe('domain ownership query', () => {
+  it('GET_DOMAIN_OWNERSHIPS selects expirationTime', () => {
+    const text = print(GET_DOMAIN_OWNERSHIPS)
+    expect(text).toMatch(/\bexpirationTime\b/)
+    expect(text).toMatch(/\brevoked\b/)
   })
 })

@@ -1,9 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { appState } from '@/seedSchema'
-import { persistInitAddresses } from '@/client/actors/saveConfig'
+import { persistInitAddresses, resetKeptStoredAddressesWarning } from '@/client/actors/saveConfig'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../test-utils/client-init'
+import { eventEmitter } from '@/eventBus'
+import { ADDRESSES_PERSISTED_EVENT } from '@/client/events'
 
 describe('persistInitAddresses', () => {
   let original: string | undefined
@@ -52,12 +54,37 @@ describe('persistInitAddresses', () => {
     expect(JSON.parse((await stored())!)).toEqual({ owned: [], watched: [] })
   })
 
-  it('saves addresses passed to init', async () => {
+  it('saves addresses passed to init, and emits addresses.persisted as setAddresses does', async () => {
+    const emit = vi.spyOn(eventEmitter, 'emit')
     await persistInitAddresses(
       BaseDb.getAppDb()!,
       { ownedAddresses: ['0xDEF'], watchedAddresses: ['0x123'] },
       { keepStoredWhenEmpty: true },
     )
     expect(JSON.parse((await stored())!)).toEqual({ owned: ['0xdef'], watched: ['0x123'] })
+    expect(emit).toHaveBeenCalledWith(ADDRESSES_PERSISTED_EVENT, { owned: ['0xdef'], watched: ['0x123'] })
+    emit.mockRestore()
+  })
+
+  it('keeps stored addresses in the leader tab when init has no addresses option, and warns once', async () => {
+    await store(connected)
+    resetKeptStoredAddressesWarning()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const omitted = { addresses: [], ownedAddresses: [], watchedAddresses: [], addressesProvided: false }
+      await persistInitAddresses(BaseDb.getAppDb()!, omitted, { keepStoredWhenEmpty: false })
+      await persistInitAddresses(BaseDb.getAppDb()!, omitted, { keepStoredWhenEmpty: false })
+      expect(await stored()).toBe(connected)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toContain('without `addresses`')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('clears in the leader tab when addresses: [] is passed explicitly', async () => {
+    await store(connected)
+    await persistInitAddresses(BaseDb.getAppDb()!, { ...none, addressesProvided: true }, { keepStoredWhenEmpty: false })
+    expect(JSON.parse((await stored())!)).toEqual({ owned: [], watched: [] })
   })
 })

@@ -126,6 +126,36 @@ describe('domainOwnership helpers', () => {
     expect(decoded.method).toBe(DOMAIN_OWNERSHIP_METHOD)
   })
 
+  it('decodeDomainOwnershipData reads the nested values easscan returns', () => {
+    const decodedSample = sampleDecoded()
+    // easscan (and SchemaEncoder.decodeData) nest each value as { name, type, value }.
+    const field = (name: string, type: string, value: unknown) => ({
+      name,
+      type,
+      signature: `${type} ${name}`,
+      value: { name, type, value },
+    })
+    const json = JSON.stringify([
+      field('domain', 'string', decodedSample.domain),
+      field('claimer', 'address', decodedSample.claimer),
+      field('method', 'string', decodedSample.method),
+      field('challengeHash', 'bytes32', decodedSample.challengeHash),
+      field('verifiedAt', 'uint64', String(decodedSample.verifiedAt)),
+      field('registryCreationDate', 'string', decodedSample.registryCreationDate),
+      field('registryExpirationDate', 'string', decodedSample.registryExpirationDate),
+      field('registryFingerprint', 'bytes32', decodedSample.registryFingerprint),
+      field('scope', 'string', decodedSample.scope),
+    ])
+    const decoded = decodeDomainOwnershipData(json)
+    expect(normalizeBytes32Hex(decoded.challengeHash)).toBe(
+      normalizeBytes32Hex(decodedSample.challengeHash),
+    )
+    expect(normalizeBytes32Hex(decoded.registryFingerprint)).toBe(
+      normalizeBytes32Hex(decodedSample.registryFingerprint),
+    )
+    expect(decoded.verifiedAt).toBe(decodedSample.verifiedAt)
+  })
+
   it('assessDomainOwnership detects expired, transferred, stale, and valid', () => {
     const decoded = sampleDecoded({
       verifiedAt: Math.floor(Date.now() / 1000) - 60,

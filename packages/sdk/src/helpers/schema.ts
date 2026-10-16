@@ -273,7 +273,8 @@ export async function listCompleteSchemaFiles(): Promise<CompleteSchemaFileInfo[
 
     for (const file of files) {
       // Match filename pattern: {schemaFileId}_{schemaName}_v{version}.json
-      const match = file.match(/^(.+)_(.+)_v(\d+)\.json$/)
+      // Ids have no underscores but names can ("My_Schema"), so the id group stops at the first one
+      const match = file.match(/^(.+?)_(.+)_v(\d+)\.json$/)
       
       if (match) {
         const [, schemaFileId, schemaName, versionStr] = match
@@ -741,10 +742,8 @@ export function getSchemaNameFromId(schemaId: string | null | undefined): string
   if (!schemaId) {
     return null
   }
-  const lastDashIndex = schemaId.lastIndexOf('-')
-  if (lastDashIndex === -1 || lastDashIndex === 0 || lastDashIndex === schemaId.length - 1) {
-    return null
-  }
-  return schemaId.substring(0, lastDashIndex)
+  // Only a numeric version suffix: names may contain hyphens ("my-app" must stay "my-app").
+  const match = /^(.+)-(\d+)$/.exec(schemaId)
+  return match ? match[1] : null
 }
 

@@ -15,6 +15,7 @@ import {
 import { fromEip1193Provider } from '../helpers/adapters/eip1193'
 import { getPublishConfig } from '../config'
 import { createPermissionlessTxSender } from '../helpers/adapters/permissionlessTxSender'
+import { resolvePublishPayment } from '../payment'
 
 export type SeedWalletStatus = 'disconnected' | 'connecting' | 'connected'
 
@@ -52,12 +53,14 @@ export function useSeedWallet(): UseSeedWalletResult {
       }
 
       const config = getPublishConfig()
+      const payment = resolvePublishPayment(config)
       let txSender = wallet.txSender
-      if (config.accountMode === 'eip7702' && config.bundlerUrl) {
+      if (payment.sender === 'eip7702') {
         txSender = await createPermissionlessTxSender({
           signer: wallet.signer,
-          bundlerUrl: config.bundlerUrl,
+          bundlerUrl: config.bundlerUrl!,
           paymasterUrl: config.paymasterUrl,
+          sponsored: payment.gas.payer === 'sponsored',
         })
       }
 
@@ -78,7 +81,7 @@ export function useSeedWallet(): UseSeedWalletResult {
   }, [])
 
   const disconnect = useCallback(() => {
-    clearPublishWallet()
+    void clearPublishWallet()
     setSession(null)
     setStatus('disconnected')
   }, [])

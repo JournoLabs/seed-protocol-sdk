@@ -8,6 +8,7 @@ import {
 } from '@seedprotocol/sdk'
 import { eq } from 'drizzle-orm'
 import { getPublishConfig } from '~/config'
+import { resolvePublishPayment } from '~/payment'
 import debug from 'debug'
 
 const logger = debug('seedProtocol:arweaveL1Finalize:worker')
@@ -55,11 +56,37 @@ async function runArweaveL1FinalizeTick(): Promise<void> {
 
   const uploadBase = config.arweaveUploadVerificationBaseUrl
   const graphqlUrl = config.arweaveGraphqlUrl
+  // User-paid uploads went to Turbo; the upload API doesn't know them, so finish from GraphQL.
+  const uploadedToTurbo = resolvePublishPayment(config).storage.uploadTo === 'turbo'
 
   for (const job of pending) {
     const dataItemId = job.dataItemId
     try {
       let l1TxId = job.l1TransactionId
+
+      if (uploadedToTurbo) {
+        const gql = await queryArweaveGatewayTransactionWithFallback(graphqlUrl, dataItemId)
+        const bundled = gql?.bundledInId ?? l1TxId ?? null
+        if (bundled && gql?.blockHeight != null) {
+          await applyArweaveL1TransactionIdLocal({
+            seedLocalId: job.seedLocalId,
+            versionLocalId: job.versionLocalId,
+            dataItemId,
+            l1TransactionId: bundled,
+          })
+          await db
+            .update(arweaveL1FinalizeJobs)
+            .set({
+              phase: 'confirmed',
+              statusJson: JSON.stringify(gql),
+              l1TransactionId: bundled,
+              bundleId: bundled,
+              updatedAt: Date.now(),
+            })
+            .where(eq(arweaveL1FinalizeJobs.id, job.id!))
+        }
+        continue
+      }
 
       if (!l1TxId) {
         const gql = await queryArweaveGatewayTransactionWithFallback(graphqlUrl, dataItemId)

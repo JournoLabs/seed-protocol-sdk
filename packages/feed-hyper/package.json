@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/feed-hyper",
-  "version": "0.7.1",
+  "version": "0.7.4",
   "description": "Publish, seed and serve Seed Protocol feeds over Hyperdrive and Hyperswarm, with a localhost HTTP gateway and the seed-feed CLI",
   "keywords": [
     "seed-protocol",

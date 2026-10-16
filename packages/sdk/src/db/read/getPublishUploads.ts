@@ -1,5 +1,10 @@
 import { BaseFileManager } from '@/helpers'
 import {
+  getStorageDirForDataType,
+  getItemStorageLocalFileName,
+  getItemStorageSubdir,
+} from '@/helpers/storageDir'
+import {
   isPublishedSeedRef,
   normalizeRelationPropertyValue,
   resolveSeedIdsFromRefString,
@@ -8,17 +13,29 @@ import { BaseArweaveClient } from '@/helpers/ArweaveClient/BaseArweaveClient'
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import debug from 'debug'
 import { IItem, IItemProperty } from '@/interfaces'
-import { getContentHash } from '@/helpers/crypto'
+import { buildArweaveContentTags, getContentSha256 } from '@/helpers/arweaveContentTags'
 import { Item } from '@/Item/Item'
 import type { ArweaveTransaction, TransactionTag } from '@/types/arweave'
-import { PublishUpload } from '@/types/publish'
+import type { PublishUpload, PublishUploadData } from '@/types/publish'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { htmlEmbeddedImageCoPublish } from '@/seedSchema/HtmlEmbeddedImageCoPublishSchema'
-import { eq } from 'drizzle-orm'
-import { ModelPropertyDataTypes, isDataType, normalizeDataType } from '@/helpers/property'
+import { and, eq } from 'drizzle-orm'
+import { metadata, type MetadataType } from '@/seedSchema'
+import { compareMetadataRowsLatestFirst } from '@/helpers/compareMetadataRowsLatestFirst'
+import { ModelPropertyDataTypes, isDataType } from '@/helpers/property'
 import { getPublishDraftGraph } from '@/db/read/publishDraftGraph'
+import { resolveUploadMimeType } from '@/helpers/mimeTypes'
+import { mapWithConcurrency } from '@/helpers/mapWithConcurrency'
+import { encodeCompositeUpload, type CompositeChild } from '@/helpers/compositeUpload'
+import {
+  convertVerbatimItemStorageRow,
+  isVerbatimItemStorageDraftRow,
+} from '@/db/write/convertVerbatimItemStorageRow'
 
 const logger = debug('seedSdk:item:getPublishUploads')
+
+/** L1 transactions {@link getPublishUploads} creates at once (each asks the gateway for price and anchor). */
+export const CREATE_TRANSACTION_CONCURRENCY = 4
 
 /** Optional tags merged into each Arweave tx after Content-SHA-256 / Content-Type. */
 export type GetPublishUploadsOptions = {
@@ -35,29 +52,22 @@ export type GetPublishUploadsOptions = {
   skipRelationRecursion?: boolean
 }
 
-const EXTENSION_TO_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  html: 'text/html',
-  htm: 'text/html',
-  json: 'application/json',
-  txt: 'text/plain',
-}
-
-const getMimeTypeFromPath = (filePathOrName: string): string | undefined => {
-  const ext = filePathOrName.split('.').pop()?.toLowerCase()
-  return ext ? EXTENSION_TO_MIME[ext] : undefined
-}
-
 const toUint8Array = async (data: Buffer | Blob): Promise<Uint8Array> => {
   if (typeof Blob !== 'undefined' && data instanceof Blob) {
     return new Uint8Array(await data.arrayBuffer())
   }
   return new Uint8Array(data as Buffer)
+}
+
+/** A local file's bytes plus its MIME type: the Blob's own type, else the name's extension, else a sniff of the bytes. */
+const readUploadFile = async (
+  filePath: string,
+  fileName: string = filePath,
+): Promise<{ bytes: Uint8Array; contentType: string | undefined }> => {
+  const data = await BaseFileManager.readFileAsBuffer(filePath)
+  const bytes = await toUint8Array(data)
+  const sourceType = typeof Blob !== 'undefined' && data instanceof Blob ? data.type : undefined
+  return { bytes, contentType: resolveUploadMimeType({ sourceType, fileName, bytes }) }
 }
 
 export const prepareArweaveTransaction = async (
@@ -66,18 +76,7 @@ export const prepareArweaveTransaction = async (
   contentType?: string,
   additionalTags?: TransactionTag[],
 ): Promise<ArweaveTransaction> => {
-  const tags: TransactionTag[] = []
-  if (contentHash) {
-    tags.push({ name: 'Content-SHA-256', value: contentHash })
-    logger('contentHash', contentHash)
-    logger('adding content hash tag')
-  }
-  if (contentType) {
-    tags.push({ name: 'Content-Type', value: contentType })
-  }
-  if (additionalTags?.length) {
-    tags.push(...additionalTags)
-  }
+  const tags = buildArweaveContentTags(contentHash, contentType, additionalTags)
 
   const tx = await BaseArweaveClient.createTransaction(data, {
     tags: tags.length ? tags : undefined,
@@ -86,21 +85,34 @@ export const prepareArweaveTransaction = async (
   return tx
 }
 
+type UploadTarget = Pick<
+  PublishUploadData,
+  'itemPropertyName' | 'itemPropertyLocalId' | 'seedLocalId' | 'versionLocalId'
+>
 
-const getStorageDirForDataType = (dataType: string): string => {
-  switch (normalizeDataType(dataType)) {
-    case 'Image':
-      return BaseFileManager.getFilesPath('images')
-    case 'File':
-      return BaseFileManager.getFilesPath('files')
-    case 'Html':
-      return BaseFileManager.getFilesPath('html')
-    case 'Json':
-      return BaseFileManager.getFilesPath('json')
-    default:
-      return BaseFileManager.getFilesPath('images')
+/**
+ * The one place an upload's bytes become a {@link PublishUploadData}: everything after this
+ * (Content-SHA-256, tags, the L1 transaction or the bundler DataItem, signing) works from what it
+ * returns. A future private-publish option that encrypts content belongs here, before the hash and
+ * tags are computed, so both publish paths pick it up.
+ */
+const buildPublishUploadData = (
+  data: Uint8Array,
+  contentType: string | undefined,
+  target: UploadTarget,
+  options: GetPublishUploadsOptions | undefined,
+): PublishUploadData => {
+  const contentHash = getContentSha256(data)
+  return {
+    data,
+    contentHash,
+    contentType,
+    tags: buildArweaveContentTags(contentHash, contentType, options?.arweaveUploadTags),
+    ...target,
   }
 }
+
+
 
 const DATA_URI_IMAGE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/i
 
@@ -117,12 +129,11 @@ function decodeDataUriImage(dataUri: string): { mimeType: string; bytes: Uint8Ar
   }
 }
 
-const getStorageSeedUploads = async (
+const getStorageSeedUploadData = async (
   itemStorageSeedProperties: IItemProperty<any>[],
   options?: GetPublishUploadsOptions,
-) => {
-  const uploads: PublishUpload[] = []
-  const extra = options?.arweaveUploadTags
+): Promise<PublishUploadData[]> => {
+  const uploads: PublishUploadData[] = []
 
   for (const itemProperty of itemStorageSeedProperties) {
     const snapshot = itemProperty.getService().getSnapshot()
@@ -171,36 +182,31 @@ const getStorageSeedUploads = async (
       continue
     }
 
-    const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-    const fileContents = await toUint8Array(fileBuffer)
+    const { bytes: fileContents, contentType } = await readUploadFile(filePath, refResolvedValue)
 
-    const contentHash = await getContentHash(fileContents)
-    const contentType = getMimeTypeFromPath(refResolvedValue)
-
-    const transaction = await prepareArweaveTransaction(
-      fileContents,
-      contentHash,
-      contentType,
-      extra,
+    uploads.push(
+      buildPublishUploadData(
+        fileContents,
+        contentType,
+        {
+          itemPropertyName: itemProperty.propertyName,
+          itemPropertyLocalId: itemProperty.localId,
+          seedLocalId,
+          versionLocalId: itemProperty.versionLocalId!,
+        },
+        options,
+      ),
     )
-
-    uploads.push({
-      itemPropertyName: itemProperty.propertyName,
-      itemPropertyLocalId: itemProperty.localId,
-      seedLocalId,
-      versionLocalId: itemProperty.versionLocalId!,
-      transactionToSign: transaction,
-    })
   }
 
   return uploads
 }
 
-async function appendCoPublishedImageUploads(
+async function appendCoPublishedImageUploadData(
   item: IItem<any>,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   options?: GetPublishUploadsOptions,
-): Promise<PublishUpload[]> {
+): Promise<PublishUploadData[]> {
   const appDb = BaseDb.getAppDb()
   if (!appDb || options?.onlyHtmlStorageSeedLocalIds?.length) return uploads
 
@@ -225,22 +231,21 @@ async function appendCoPublishedImageUploads(
       : ''
     const decoded = decodeDataUriImage(stValue)
 
-    const more: PublishUpload[] = []
+    const more: PublishUploadData[] = []
     if (decoded && st && st.localId && st.versionLocalId) {
-      const contentHash = await getContentHash(decoded.bytes)
-      const transaction = await prepareArweaveTransaction(
-        decoded.bytes,
-        contentHash,
-        decoded.mimeType,
-        options?.arweaveUploadTags,
+      more.push(
+        buildPublishUploadData(
+          decoded.bytes,
+          decoded.mimeType,
+          {
+            itemPropertyName: st.propertyName,
+            itemPropertyLocalId: st.localId,
+            seedLocalId: imageItem.seedLocalId,
+            versionLocalId: st.versionLocalId,
+          },
+          options,
+        ),
       )
-      more.push({
-        itemPropertyName: st.propertyName,
-        itemPropertyLocalId: st.localId,
-        seedLocalId: imageItem.seedLocalId,
-        versionLocalId: st.versionLocalId,
-        transactionToSign: transaction,
-      })
     }
     for (const u of more) {
       if (!seen.has(u.seedLocalId)) {
@@ -259,6 +264,124 @@ export type UploadProperty = {
 type ChildUploadData = {
   propertyName: string
   localStoragePath: string
+}
+
+const isUsablePath = (filePath: string | void | null | undefined): filePath is string =>
+  !!filePath && !filePath.endsWith('undefined') && !filePath.endsWith('null')
+
+/** The newest metadata row of an ItemStorage property, read from the DB (not the live query). */
+const getLatestItemStorageRow = async (
+  childProperty: IItemProperty<any>,
+): Promise<MetadataType | undefined> => {
+  const appDb = BaseDb.getAppDb()
+  const seedLocalId = childProperty.seedLocalId
+  const propertyName = childProperty.storagePropertyName || childProperty.propertyName
+  if (!appDb || !seedLocalId || !propertyName) return undefined
+  const where = [eq(metadata.seedLocalId, seedLocalId), eq(metadata.propertyName, propertyName)]
+  if (childProperty.versionLocalId) where.push(eq(metadata.versionLocalId, childProperty.versionLocalId))
+  const rows: MetadataType[] = await appDb.select().from(metadata).where(and(...where))
+  return [...rows].sort(compareMetadataRowsLatestFirst)[0]
+}
+
+/**
+ * Write a legacy ItemStorage draft row's verbatim content to `<seedUid or seedLocalId><extension>`
+ * and record it on the row (refResolvedValue, localStorageDir) and in the property context. The
+ * row's propertyValue is cleared once the file is written, so the row has the same shape as one a
+ * save makes and a later edit of the file never leaves stale text behind it.
+ */
+const migrateVerbatimItemStorageRow = async (
+  childProperty: IItemProperty<any>,
+  row: MetadataType,
+): Promise<string | undefined> => {
+  const seedId = row.seedUid || childProperty.seedUid || row.seedLocalId || childProperty.seedLocalId
+  if (!seedId || !row.localId) return undefined
+  const propertyDef = childProperty.propertyDef
+  const converted = await convertVerbatimItemStorageRow(row.localId, {
+    seedId,
+    localStorageDir: propertyDef?.localStorageDir || row.localStorageDir,
+    filenameSuffix: propertyDef?.filenameSuffix,
+  })
+  if (!converted) return undefined
+  const { fileName, filePath, localStorageDir, content } = converted
+  // The content is still the value: keep it as renderValue (the property may show it from propertyValue).
+  childProperty.getService().send({
+    type: 'updateContext',
+    refResolvedValue: fileName,
+    localStorageDir,
+    renderValue: content,
+  })
+  logger(`resolveItemStorageChildFile: wrote verbatim ${childProperty.propertyName} content to ${filePath}`)
+  return filePath
+}
+
+/**
+ * Local file of one ItemStorage child of a composite upload. Tries, in order: the property's
+ * localStoragePath (context set by save / hydration / the live query), its newest metadata row's
+ * refResolvedValue + localStorageDir, then (for a local draft whose propertyValue is the content
+ * itself, as rows made before Item.create saved ItemStorage values) that content written to its
+ * file, then (for a local draft, or no row) the name
+ * saveItemStorage gives a new file (`<seedUid or seedLocalId><extension>` in the model's storage
+ * directory). A published or derived row is never swapped for a local file of another name: that
+ * file would be older content.
+ *
+ * `missingLocalEdit` lists the paths tried when nothing exists although the newest row is a saved
+ * local edit (no attestation uid, not derived from one, refResolvedValue set by saveItemStorage):
+ * that edit's file should be there. A published or derived row without a file (e.g. content not
+ * downloaded, or a property the composite never had) is skipped as before.
+ */
+export const resolveItemStorageChildFile = async (
+  childProperty: IItemProperty<any>,
+): Promise<{ filePath?: string; missingLocalEdit?: string[] }> => {
+  const tried: string[] = []
+  const tryPath = async (filePath: string | void | null | undefined): Promise<string | undefined> => {
+    if (!isUsablePath(filePath) || tried.includes(filePath)) return undefined
+    tried.push(filePath)
+    return (await BaseFileManager.pathExists(filePath)) ? filePath : undefined
+  }
+
+  const fromContext = await tryPath(childProperty.localStoragePath)
+  if (fromContext) return { filePath: fromContext }
+
+  const row = await getLatestItemStorageRow(childProperty).catch((error) => {
+    logger('resolveItemStorageChildFile: metadata lookup failed', error)
+    return undefined
+  })
+  const propertyDef = childProperty.propertyDef
+  const dir = getItemStorageSubdir(propertyDef?.localStorageDir || row?.localStorageDir)
+
+  if (row?.refResolvedValue) {
+    const fromRow = await tryPath(BaseFileManager.getFilesPath(dir, row.refResolvedValue))
+    if (fromRow) return { filePath: fromRow }
+  }
+
+  const isLocalDraft = !!row && !row.uid && row.derivedFromUid == null
+
+  // A local draft holding the content itself (no file reference): what Item.create / createNewItem
+  // stored for ItemStorage values before they went through the save pipeline. Write it to the file a
+  // save would have, point the row and the property at it, and upload that.
+  if (row && isVerbatimItemStorageDraftRow(row)) {
+    const migrated = await migrateVerbatimItemStorageRow(childProperty, row).catch((error) => {
+      logger('resolveItemStorageChildFile: writing verbatim ItemStorage content failed', error)
+      return undefined
+    })
+    if (migrated) return { filePath: migrated }
+  }
+
+  const suffix = propertyDef?.filenameSuffix
+  const seedIds = !row || isLocalDraft
+    ? [row?.seedUid, childProperty.seedUid, row?.seedLocalId, childProperty.seedLocalId]
+    : []
+  for (const seedId of seedIds) {
+    if (!seedId) continue
+    const derived = await tryPath(
+      BaseFileManager.getFilesPath(dir, getItemStorageLocalFileName(seedId, suffix)),
+    )
+    if (derived) return { filePath: derived }
+  }
+
+  // saveItemStorage sets refResolvedValue on the draft row once the file is written. A draft row
+  // without one is the empty row createNewItem makes for every model property: nothing to upload.
+  return isLocalDraft && !!row?.refResolvedValue ? { missingLocalEdit: tried } : {}
 }
 
 /**
@@ -307,28 +430,14 @@ async function uploadPropertyWouldUpload(
   uploadProperty: UploadProperty,
   relatedItemProperty?: IItemProperty<any>,
 ): Promise<boolean> {
-  const childUploads: ChildUploadData[] = []
 
   for (const childProperty of uploadProperty.childProperties) {
-    const filePath = childProperty.localStoragePath
-
-    if (!filePath || filePath.endsWith('undefined')) {
-      continue
+    // Not strict: a local edit whose file is missing still means "would upload", so the publish
+    // goes ahead and fails loudly in processUploadPropertyData instead of skipping the upload.
+    const resolved = await resolveItemStorageChildFile(childProperty)
+    if (resolved.filePath || resolved.missingLocalEdit) {
+      return true
     }
-
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) {
-      continue
-    }
-
-    childUploads.push({
-      propertyName: childProperty.propertyName,
-      localStoragePath: filePath,
-    })
-  }
-
-  if (childUploads.length > 0) {
-    return true
   }
 
   if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -420,26 +529,27 @@ export async function itemHasPublishUploadCandidates(
   return false
 }
 
-const processUploadProperty = async (
+const processUploadPropertyData = async (
   uploadProperty: UploadProperty,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
-): Promise<PublishUpload[]> => {
-  const extra = options?.arweaveUploadTags
+): Promise<PublishUploadData[]> => {
   const itemProperty = uploadProperty.itemProperty
 
   const childUploads: ChildUploadData[] = []
 
   for (const childProperty of uploadProperty.childProperties) {
-    const filePath = childProperty.localStoragePath
+    const { filePath, missingLocalEdit } = await resolveItemStorageChildFile(childProperty)
 
-    if (!filePath || filePath.endsWith('undefined')) {
-      continue
-    }
-
-    const exists = await BaseFileManager.pathExists(filePath)
-    if (!exists) {
+    if (!filePath) {
+      if (missingLocalEdit) {
+        // Uploading without it would publish a composite that silently lacks this edit.
+        throw new Error(
+          `Cannot publish ${itemProperty.seedLocalId}: the local file for ${childProperty.propertyName} ` +
+            `was not found (looked in ${missingLocalEdit.join(', ')})`,
+        )
+      }
       continue
     }
 
@@ -450,7 +560,7 @@ const processUploadProperty = async (
   }
 
   let fileContents
-  let transaction: ArweaveTransaction
+  let fileContentType: string | undefined
 
   if (!childUploads || childUploads.length === 0) {
     if (relatedItemProperty && relatedItemProperty.localStoragePath) {
@@ -466,11 +576,13 @@ const processUploadProperty = async (
       }
 
       try {
-        const fileBuffer = await BaseFileManager.readFileAsBuffer(filePath)
-        fileContents = await toUint8Array(fileBuffer)
+        const read = await readUploadFile(filePath)
+        fileContents = read.bytes
+        fileContentType = read.contentType
       } catch (e) {
         const fs = await BaseFileManager.getFs()
         fileContents = await toUint8Array(fs.readFileSync(filePath))
+        fileContentType = resolveUploadMimeType({ fileName: filePath, bytes: fileContents })
       }
     }
     if (!fileContents) {
@@ -479,31 +591,26 @@ const processUploadProperty = async (
   }
 
   if (childUploads.length > 0) {
-    const separator = '===FILE_SEPARATOR==='
-    // let compositeFileContents = `${itemProperty.propertyName}${separator}${mainFileContents}`
-    let compositeFileContents = ''
-
+    // Composite of the item's ItemStorage files; see helpers/compositeUpload.ts for the format.
+    // Children are read as bytes: a binary child is base64-framed instead of decoded as text.
+    const children: CompositeChild[] = []
+    const fs = await BaseFileManager.getFs()
     for (const childUpload of childUploads) {
-      let childUploadContents
-
-      const fs = await BaseFileManager.getFs()
-
+      let childUploadContents: Uint8Array | string
       try {
-        childUploadContents = await fs.promises.readFile(
-          childUpload.localStoragePath,
-        )
+        childUploadContents = await fs.promises.readFile(childUpload.localStoragePath)
       } catch (e) {
         childUploadContents = fs.readFileSync(childUpload.localStoragePath)
       }
-
-      compositeFileContents += `${separator}${childUpload.propertyName}${separator}${childUploadContents}`
+      children.push({
+        name: childUpload.propertyName,
+        bytes:
+          typeof childUploadContents === 'string'
+            ? new TextEncoder().encode(childUploadContents)
+            : new Uint8Array(childUploadContents),
+      })
     }
-
-    if (typeof document !== 'undefined') {
-      fileContents = new TextEncoder().encode(compositeFileContents)
-    } else {
-      fileContents = Buffer.from(compositeFileContents)
-    }
+    fileContents = encodeCompositeUpload(children)
   }
 
   if (!fileContents) {
@@ -512,21 +619,12 @@ const processUploadProperty = async (
 
   const uint8Array = new Uint8Array(fileContents)
 
-  const contentHash = await getContentHash(uint8Array)
-
   let contentType: string | undefined
   if (childUploads.length === 0 && relatedItemProperty?.localStoragePath) {
-    contentType = getMimeTypeFromPath(relatedItemProperty.localStoragePath)
+    contentType = fileContentType
   } else if (childUploads.length > 0) {
     contentType = 'application/octet-stream'
   }
-
-  transaction = await prepareArweaveTransaction(
-    uint8Array,
-    contentHash,
-    contentType,
-    extra,
-  )
 
   let itemPropertyLocalId = relatedItemProperty
     ? relatedItemProperty.localId
@@ -535,13 +633,19 @@ const processUploadProperty = async (
     ? relatedItemProperty.propertyName
     : itemProperty.propertyName
 
-  uploads.push({
-    itemPropertyName,
-    itemPropertyLocalId,
-    seedLocalId: itemProperty.seedLocalId!,
-    versionLocalId: itemProperty.versionLocalId!,
-    transactionToSign: transaction,
-  })
+  uploads.push(
+    buildPublishUploadData(
+      uint8Array,
+      contentType,
+      {
+        itemPropertyName,
+        itemPropertyLocalId,
+        seedLocalId: itemProperty.seedLocalId!,
+        versionLocalId: itemProperty.versionLocalId!,
+      },
+      options,
+    ),
+  )
 
   return uploads
 }
@@ -551,12 +655,12 @@ const isDraftItem = (item: IItem<any>): boolean =>
   !item.seedUid || item.seedUid === '0x' + '0'.repeat(64)
 
 /** One item's own uploads: its files, storage seeds, Html-embedded images, and the items its storage relations point at. */
-const getItemOwnPublishUploads = async (
+const getItemOwnPublishUploadData = async (
   item: IItem<any>,
-  uploads: PublishUpload[],
+  uploads: PublishUploadData[],
   relatedItemProperty: IItemProperty<any> | undefined,
   options: GetPublishUploadsOptions | undefined,
-) => {
+): Promise<PublishUploadData[]> => {
   const { itemUploadProperties, itemRelationProperties, itemImageProperties } =
     await getSegmentedItemProperties(item)
 
@@ -564,11 +668,11 @@ const getItemOwnPublishUploads = async (
   // the related items published with it (whose Html can embed images too).
   const onlyDeferredHtml = !!options?.onlyHtmlStorageSeedLocalIds?.length
   if (onlyDeferredHtml) {
-    const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
     uploads.push(...storageSeedUploads)
   } else {
     for (const uploadProperty of itemUploadProperties) {
-      uploads = await processUploadProperty(
+      uploads = await processUploadPropertyData(
         uploadProperty,
         uploads,
         relatedItemProperty,
@@ -576,12 +680,12 @@ const getItemOwnPublishUploads = async (
       )
     }
 
-    const storageSeedUploads = await getStorageSeedUploads(itemImageProperties, options)
+    const storageSeedUploads = await getStorageSeedUploadData(itemImageProperties, options)
     uploads.push(...storageSeedUploads)
 
     // Images embedded in this item's Html: the published item's, and a related draft's published with it.
     if (!relatedItemProperty || isDraftItem(item)) {
-      uploads = await appendCoPublishedImageUploads(item, uploads, options)
+      uploads = await appendCoPublishedImageUploadData(item, uploads, options)
     }
   }
 
@@ -626,7 +730,7 @@ const getItemOwnPublishUploads = async (
       )
     }
 
-    uploads = await getItemOwnPublishUploads(relatedItem, uploads, relationProperty, {
+    uploads = await getItemOwnPublishUploadData(relatedItem, uploads, relationProperty, {
       ...options,
       skipRelationRecursion: true,
     })
@@ -636,16 +740,19 @@ const getItemOwnPublishUploads = async (
 }
 
 /**
- * Arweave uploads for a publish of `item`: its own, and those of every draft item the publish
- * carries along (reachable through relation and list properties, see publishDraftGraph.ts).
+ * Upload data for a publish of `item`: its own, and that of every draft item the publish carries
+ * along (reachable through relation and list properties, see publishDraftGraph.ts). Raw bytes plus
+ * Content-SHA-256 / Content-Type / configured tags; no Arweave transaction is created, so this
+ * does not touch the network. The bundler path in `@seedprotocol/publish` signs these as
+ * DataItems; {@link getPublishUploads} turns them into L1 transactions.
  */
-export const getPublishUploads = async (
+export const getPublishUploadData = async (
   item: IItem<any>,
-  uploads: PublishUpload[] = [],
+  uploads: PublishUploadData[] = [],
   relatedItemProperty?: IItemProperty<any>,
   options?: GetPublishUploadsOptions,
-) => {
-  uploads = await getItemOwnPublishUploads(item, uploads, relatedItemProperty, options)
+): Promise<PublishUploadData[]> => {
+  uploads = await getItemOwnPublishUploadData(item, uploads, relatedItemProperty, options)
 
   if (options?.skipRelationRecursion) {
     return uploads
@@ -653,8 +760,33 @@ export const getPublishUploads = async (
 
   const { drafts } = await getPublishDraftGraph(item, { strict: true })
   for (const { item: draft, via, viaList } of drafts) {
-    uploads = await getItemOwnPublishUploads(draft, uploads, viaList ? undefined : via, options)
+    uploads = await getItemOwnPublishUploadData(draft, uploads, viaList ? undefined : via, options)
   }
 
+  return uploads
+}
+
+/**
+ * Arweave L1 transactions for a publish of `item`: {@link getPublishUploadData}, each made into an
+ * unsigned transaction carrying the same tags.
+ */
+export const getPublishUploads = async (
+  item: IItem<any>,
+  uploads: PublishUpload[] = [],
+  relatedItemProperty?: IItemProperty<any>,
+  options?: GetPublishUploadsOptions,
+): Promise<PublishUpload[]> => {
+  const uploadData = await getPublishUploadData(item, [], relatedItemProperty, options)
+  // Each createTransaction fetches the price / anchor from the gateway: run a few at once.
+  const created = await mapWithConcurrency(uploadData, CREATE_TRANSACTION_CONCURRENCY, async (upload) => ({
+    itemPropertyName: upload.itemPropertyName,
+    itemPropertyLocalId: upload.itemPropertyLocalId,
+    seedLocalId: upload.seedLocalId,
+    versionLocalId: upload.versionLocalId,
+    transactionToSign: await BaseArweaveClient.createTransaction(upload.data, {
+      tags: upload.tags.length ? upload.tags : undefined,
+    }),
+  }))
+  uploads.push(...created)
   return uploads
 }

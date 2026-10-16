@@ -10,6 +10,7 @@ import {
   setPublishLockManagerForTests,
   tryHoldPublishLock,
 } from './publishLocks'
+import { TEST_TIMEOUT_MS, waitUntilOrThrow } from '../../../test-utils/waitUntil'
 
 /**
  * Stand-in for the origin-wide Web Locks manager (Bun has none). `otherTab` holds names the way
@@ -67,9 +68,13 @@ describe('publish locks', () => {
     expect(isHoldingPublishLock('seed-b')).toBe(false)
 
     releaseAllPublishLocks()
-    await new Promise((r) => setTimeout(r, 0))
-    expect(heldNames.has(publishLockName('seed-a'))).toBe(false)
-  })
+    expect(isHoldingPublishLock('seed-a')).toBe(false)
+    // The lock manager frees the name once the held callback's promise settles.
+    await waitUntilOrThrow(
+      () => !heldNames.has(publishLockName('seed-a')),
+      'the lock manager to free seed-a after releaseAllPublishLocks',
+    )
+  }, TEST_TIMEOUT_MS)
 
   test("restoreFromDb skips a publish another tab is running and resumes the rest", async () => {
     const { locks, otherTab } = fakeLockManager()
@@ -110,14 +115,14 @@ describe('publish locks', () => {
     })
     const actor = createActor(machine)
     actor.start()
-    await waitFor(() => restored !== undefined)
+    await waitUntilOrThrow(() => restored !== undefined, 'restoreFromDb to send RESTORE_FROM_DB_DONE')
 
     expect([...restored!.keys()]).toEqual(['seed-here'])
     expect(isHoldingPublishLock('seed-here')).toBe(true)
     expect(isHoldingPublishLock('seed-elsewhere')).toBe(false)
     restored!.forEach((process) => process.stop())
     actor.stop()
-  })
+  }, TEST_TIMEOUT_MS)
 
   test('createPublish refuses a seed another tab is publishing and releases the lock when done', async () => {
     process.env.SEED_PUBLISH_RESTORE_WAIT_MS = '0'
@@ -144,16 +149,10 @@ describe('publish locks', () => {
     expect(actor).toBeDefined()
     expect(isHoldingPublishLock('seed-mine')).toBe(true)
     if (actor!.getSnapshot().value === 'checking') actor!.send({ type: 'notOwner' })
-    await waitFor(() => PublishManager.getService().getSnapshot().context.settledPublishes.has('seed-mine'))
+    await waitUntilOrThrow(
+      () => PublishManager.getService().getSnapshot().context.settledPublishes.has('seed-mine'),
+      'publish seed-mine to settle',
+    )
     expect(isHoldingPublishLock('seed-mine')).toBe(false)
-  })
+  }, TEST_TIMEOUT_MS)
 })
-
-async function waitFor(predicate: () => boolean) {
-  const deadline = Date.now() + 4000
-  while (Date.now() < deadline) {
-    if (predicate()) return
-    await new Promise((r) => setTimeout(r, 15))
-  }
-  throw new Error('timed out waiting for condition')
-}

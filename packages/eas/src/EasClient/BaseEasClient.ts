@@ -1,6 +1,7 @@
 import type { Attestation } from '../graphql/gql/graphql.js'
 import type { GraphQLClient } from 'graphql-request'
 import type { IEasClient } from './IEasClient.js'
+import { markEasClientOwner } from '../moduleOwner.js'
 
 export abstract class BaseEasClient {
   private static _impl: IEasClient | null = null
@@ -12,6 +13,12 @@ export abstract class BaseEasClient {
       )
     }
     BaseEasClient._impl = impl
+    markEasClientOwner()
+  }
+
+  /** True once a platform (SDK, Node bootstrap, host app) has registered an implementation. */
+  static isConfigured(): boolean {
+    return BaseEasClient._impl != null
   }
 
   private static requireImpl(): IEasClient {

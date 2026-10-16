@@ -1,6 +1,7 @@
 import { assign, createActor, fromPromise, setup } from 'xstate'
 import { MachineIds } from '@/client/constants'
 import {
+  failInterruptedEasSyncProcessRows,
   finalizeEasSyncProcessRow,
   insertEasSyncProcessRow,
   type EasSyncRequestSource,
@@ -8,6 +9,7 @@ import {
 import { mergeEasSyncRequestIntents } from '@/events/item/mergeEasSyncOptions'
 import type { SyncFromEasOptions } from '@/events/item/syncDbWithEas'
 import debug from 'debug'
+import { createRetryWhenOnline } from '@/helpers/retryWhenOnline'
 import {
   isLeaderTab,
   onTabMessage,
@@ -58,43 +60,68 @@ const runEasSync = fromPromise(
       runningSnapshot: Record<string, unknown>
     }
   }) => {
-    const rowId = await insertEasSyncProcessRow({
-      requestPayload: input.requestPayload,
-      persistedSnapshot: input.runningSnapshot,
-    })
     const { runSyncFromEas } = await import('@/events/item/syncDbWithEas')
-    try {
-      // Sync checks for rows and then inserts the rest (no unique index on uids), so syncs in
-      // different tabs take turns. A sync can run for minutes, so wait without a timeout.
-      await withDbTabLock('eas-sync', () => runSyncFromEas(toRunSyncArg(input.options)), {
-        timeoutMs: Infinity,
-      })
-      await finalizeEasSyncProcessRow(rowId, {
-        status: 'completed',
-        persistedSnapshot: {
-          phase: 'completed',
-          correlationIds: input.requestPayload.correlationIds,
-        },
-      })
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      const details =
-        err instanceof Error && err.stack
-          ? err.stack.slice(0, 2000)
-          : undefined
-      await finalizeEasSyncProcessRow(rowId, {
-        status: 'failed',
-        errorMessage: message,
-        errorDetails: details,
-        persistedSnapshot: {
-          phase: 'failed',
-          correlationIds: input.requestPayload.correlationIds,
-        },
-      })
-      throw err
-    }
+    // Sync checks for rows and then inserts the rest (no unique index on uids), so syncs in
+    // different tabs take turns. A sync can run for minutes, so wait without a timeout.
+    await withDbTabLock(
+      'eas-sync',
+      async () => {
+        // Under the lock no other sync runs, so rows still in progress were interrupted.
+        await failInterruptedEasSyncProcessRows()
+        const rowId = await insertEasSyncProcessRow({
+          requestPayload: input.requestPayload,
+          persistedSnapshot: input.runningSnapshot,
+        })
+        try {
+          await runSyncFromEas(toRunSyncArg(input.options))
+          await finalizeEasSyncProcessRow(rowId, {
+            status: 'completed',
+            persistedSnapshot: {
+              phase: 'completed',
+              correlationIds: input.requestPayload.correlationIds,
+            },
+          })
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err)
+          const details =
+            err instanceof Error && err.stack
+              ? err.stack.slice(0, 2000)
+              : undefined
+          await finalizeEasSyncProcessRow(rowId, {
+            status: 'failed',
+            errorMessage: message,
+            errorDetails: details,
+            persistedSnapshot: {
+              phase: 'failed',
+              correlationIds: input.requestPayload.correlationIds,
+            },
+          })
+          throw err
+        }
+      },
+      { timeoutMs: Infinity },
+    )
   },
 )
+
+/**
+ * Automatic syncs that failed (probably offline), merged and run again once the device is back
+ * online. A failed `client_api` sync isn't retried: its caller gets the error.
+ */
+let failedSyncOptions: SyncFromEasOptions[] = []
+const syncRetry = createRetryWhenOnline(() => {
+  const options = mergeEasSyncRequestIntents(failedSyncOptions)
+  failedSyncOptions = []
+  runInLeaderTab('retry', () => {
+    startEasSyncActor()
+    easSyncActor.send({
+      type: 'REQUEST',
+      correlationId: newCorrelationId(),
+      options,
+      source: 'retry',
+    })
+  })
+})
 
 const initialContext: EasSyncMachineContext = {
   runOptions: {},
@@ -173,19 +200,28 @@ export const easSyncMachine = setup({
         }),
         onDone: {
           target: 'afterRun',
-          actions: assign({
-            lastFinishedCorrelationIds: ({ context }) => [
-              ...context.activeCorrelationIds,
-            ],
-            lastFinishedStatus: () => 'success',
-            lastFinishedError: () => null,
-            activeCorrelationIds: () => [],
-            runOptions: () => ({}),
-          }),
+          actions: [
+            () => syncRetry.succeeded(),
+            assign({
+              lastFinishedCorrelationIds: ({ context }) => [
+                ...context.activeCorrelationIds,
+              ],
+              lastFinishedStatus: () => 'success',
+              lastFinishedError: () => null,
+              activeCorrelationIds: () => [],
+              runOptions: () => ({}),
+            }),
+          ],
         },
         onError: {
           target: 'afterRun',
           actions: [
+            // Before the assign below clears runOptions.
+            ({ context }) => {
+              if (context.activePrimarySource === 'client_api') return
+              failedSyncOptions.push(context.runOptions)
+              syncRetry.schedule()
+            },
             assign({
               lastFinishedCorrelationIds: ({ context }) => [
                 ...context.activeCorrelationIds,

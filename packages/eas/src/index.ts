@@ -5,6 +5,8 @@ export * from './easEndpoint.js'
 export * from './domainOwnership.js'
 export * from './publishAuthorization.js'
 export * from './easPropertyCanonical.js'
+export * from './easRefAttester.js'
+export * from './easNames.js'
 export * from './easRevokedFilter.js'
 export * from './easUid.js'
 export * from './publishedBy.js'
@@ -16,6 +18,12 @@ export type { IEasClient } from './EasClient/IEasClient.js'
 export * from './QueryClient/BaseQueryClient.js'
 export type { IQueryClientFactory } from './QueryClient/IQueryClientFactory.js'
 export type { IQueryClient, FetchQueryOptions } from './QueryClient/IQueryClient.js'
+export { DefaultEasClient, DefaultQueryClient, ensureEasPlatform } from './default/index.js'
+export {
+  assertSingleEasModule,
+  DuplicateEasModuleError,
+  resetEasClientOwnerForTests,
+} from './moduleOwner.js'
 export * from './stores/schemaUidCache.js'
 export type {
   Attestation,

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import {
   getAddressesForItemsFilter,
+  ownedSeedsSql,
+  placeholderUidSql,
   publisherInAddressListSql,
   Item,
   eventEmitter,
@@ -11,7 +13,7 @@ import { orderBy } from 'lodash-es'
 import debug from 'debug'
 import type { ModelValues } from '@seedprotocol/sdk'
 import { Subscription } from 'xstate'
-import type { IItem, IItemProperty } from '@seedprotocol/sdk'
+import type { IItem, IItemProperty, ItemPublishOptions } from '@seedprotocol/sdk'
 import { useIsClientReady } from './client'
 import { useSeedAddressRevision } from './SeedSessionContext'
 import { useLiveQuery } from './liveQuery'
@@ -19,7 +21,7 @@ import { useSeedQueryClient } from './queryClient'
 import { BaseDb } from '@seedprotocol/sdk'
 import { seeds } from '@seedprotocol/sdk'
 import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/sdk'
 import type { SeedType } from '@seedprotocol/sdk'
 import { getVersionData } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -313,13 +315,16 @@ export const useItems: UseItems = ({
       if (addressesForFilter === null) return null
     }
     const conditions: any[] = []
+    // Same predicates as getItemsData, so the live query and the fetched list agree.
     if (!includeEas) {
-      conditions.push(or(isNull(seeds.uid), eq(seeds.uid, '')) as any)
+      conditions.push(placeholderUidSql(seeds.uid) as any)
     }
     if (modelName) {
-      conditions.push(eq(seeds.type, toSnakeCase(modelName)))
+      conditions.push(eq(seeds.type, easName(modelName)))
     }
-    if (addressFilter === 'owned' || addressFilter === 'watched') {
+    if (addressFilter === 'owned') {
+      conditions.push(ownedSeedsSql(addressesForFilter ?? []) as any)
+    } else if (addressFilter === 'watched') {
       conditions.push(
         publisherInAddressListSql(seeds.publisher, addressesForFilter ?? []) as any,
       )
@@ -411,18 +416,27 @@ export const useItems: UseItems = ({
     queryClient.invalidateQueries({ queryKey })
   }, [isClientReady, seedsTableData, queryClient, queryKey])
 
+  // Same array while the data is the same, so `items` can be an effect/memo dependency.
+  const sortedItems = useMemo(
+    () =>
+      orderBy(
+        items,
+        [
+          (item) =>
+            item.lastVersionPublishedAt ||
+            item.attestationCreatedAt ||
+            item.createdAt,
+        ],
+        ['desc'],
+      ),
+    [items],
+  )
+
   return {
-    items: orderBy(
-      items,
-      [
-        (item) =>
-          item.lastVersionPublishedAt ||
-          item.attestationCreatedAt ||
-          item.createdAt,
-      ],
-      ['desc'],
-    ),
-    isLoading,
+    items: sortedItems,
+    // Before the client is ready the query is disabled, which TanStack reports as not loading:
+    // count it as loading so an empty list isn't shown as "no items" first.
+    isLoading: isLoading || !isClientReady,
     error: queryError as Error | null,
   }
 }
@@ -437,15 +451,18 @@ export type UseCreateItemReturn = {
 export const useCreateItem = (): UseCreateItemReturn => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  // A ref, not the isLoading state: two calls before a re-render both saw isLoading false.
+  const inFlightRef = useRef(false)
 
   const resetError = useCallback(() => setError(null), [])
 
   const createItem = useCallback(
     async (modelName: string, itemData?: Record<string, any>): Promise<Item<any> | undefined> => {
-      if (isLoading) {
+      if (inFlightRef.current) {
         logger('[useCreateItem] [createItem] already creating item, skipping')
         return undefined
       }
+      inFlightRef.current = true
 
       setError(null)
       // Flush loading=true synchronously so the UI (and tests) can observe it before async work runs.
@@ -461,12 +478,13 @@ export const useCreateItem = (): UseCreateItemReturn => {
         setError(err instanceof Error ? err : new Error(String(err)))
         return undefined
       } finally {
+        inFlightRef.current = false
         // Defer clearing loading so React can commit the loading=true render first.
         // Otherwise the test (or UI) may never observe isLoading true (same continuation batching).
         queueMicrotask(() => setIsLoading(false))
       }
     },
-    [isLoading],
+    [],
   )
 
   return {
@@ -478,7 +496,11 @@ export const useCreateItem = (): UseCreateItemReturn => {
 }
 
 type UsePublishItemReturn = {
-  publishItem: (item: Item<any> | undefined) => void
+  /**
+   * Calls `item.publish(options)`, which needs @seedprotocol/publish: `initPublish()` or
+   * `<PublishProvider config>` must have run, or `error` reports that publishing is not configured.
+   */
+  publishItem: (item: Item<any> | undefined, options?: ItemPublishOptions) => void
   isLoading: boolean
   error: Error | null
   resetError: () => void
@@ -492,12 +514,14 @@ export const usePublishItem = (): UsePublishItemReturn => {
 
   const resetError = useCallback(() => setError(null), [])
 
-  const publishItem = useCallback((item: Item<any> | undefined) => {
+  const publishItem = useCallback((item: Item<any> | undefined, options?: ItemPublishOptions) => {
     if (!item) return
     setPublishingItem(item)
     setError(null)
-    item.publish().catch(() => {
-      // Error is surfaced via service state subscription; avoid unhandled rejection
+    // The promise is the one source of errors: it also rejects before the item machine
+    // starts (publishing not configured, item not owned, already publishing).
+    item.publish(options).catch((err: unknown) => {
+      setError(err instanceof Error ? err : new Error(String(err)))
     })
   }, [])
 
@@ -512,19 +536,11 @@ export const usePublishItem = (): UsePublishItemReturn => {
     subscriptionRef.current?.unsubscribe()
     const service = publishingItem.getService()
     const subscription = service.subscribe((snapshot: any) => {
-      const value = snapshot?.value
-      const ctx = snapshot?.context
-      setIsLoading(value === 'publishing')
-      const publishError = ctx?._publishError
-      setError(publishError ? new Error(publishError.message) : null)
+      setIsLoading(snapshot?.value === 'publishing')
     })
 
     subscriptionRef.current = subscription
-    const snap = service.getSnapshot()
-    setIsLoading(snap?.value === 'publishing')
-    const ctx = snap?.context
-    const publishError = ctx?._publishError
-    setError(publishError ? new Error(publishError.message) : null)
+    setIsLoading(service.getSnapshot()?.value === 'publishing')
 
     return () => {
       subscriptionRef.current?.unsubscribe()

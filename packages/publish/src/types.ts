@@ -112,6 +112,10 @@ export interface PublishMachineContext {
    * Optional callback when publish succeeds with a resolved attestation batch (tool PublishedBy flow).
    */
   onPublished?: import('./services/publishedBy').OnPublishedCallback
+  /** Approves the publish before anything is spent (per publish, else `PublishConfig.authorizePublish`). */
+  authorizePublish?: import('./authorization').AuthorizePublish
+  /** What `authorizePublish` returned; its token goes to the upload API. Persisted for resume. */
+  publishAuthorization?: import('./authorization').PublishAuthorization
   /** Resolved batch from attest actors; set on transition to success. */
   publishedBatch?: import('./services/publishedBy').PublishedBatchResult | null
   [key: string]: unknown

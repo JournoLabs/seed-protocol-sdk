@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createActor, createMachine } from 'xstate'
 import { of, type Subscription } from 'rxjs'
 import { setupEntityLiveQuery } from '@/helpers/entity/entityLiveQuery'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 /** An idle entity: its snapshot never changes unless the test sends an event. */
 const createIdleEntity = () => {
@@ -33,7 +34,7 @@ describe('setupEntityLiveQuery', () => {
   it('sets up when the entity id is available at once', async () => {
     const entity = createIdleEntity()
     const { queryInitialData, updateContext } = setup(entity, async () => 7)
-    await vi.waitFor(() => expect(updateContext).toHaveBeenCalledWith(entity, ['child-1']))
+    await vi.waitFor(() => expect(updateContext).toHaveBeenCalledWith(entity, ['child-1']), { timeout: WAIT_TIMEOUT_MS })
     expect(queryInitialData).toHaveBeenCalledWith(7)
   })
 

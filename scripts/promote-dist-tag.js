@@ -22,13 +22,16 @@ import {
   PUBLISH_ORDER,
   STAGING_TAG_PREFIX,
   compareStable,
-  getDistTags,
   listRemoteBranches,
   npm,
   npmWrite,
 } from './release-channel.js'
 
 const PACKAGES = PUBLISH_ORDER.map((name) => `@seedprotocol/${name}`)
+
+const RETRY_INTERVAL_MS = 15_000
+// Shared by all packages: once the slowest one is visible, the rest usually are too.
+const REGISTRY_WAIT_MS = Number(process.env.RELEASE_REGISTRY_WAIT_MS ?? 10 * 60_000)
 
 function requireEnv(name) {
   const value = process.env[name]
@@ -37,18 +40,30 @@ function requireEnv(name) {
 }
 
 /**
- * Registry reads can lag just behind a publish; retry before giving up.
+ * Dist-tags for a package, read together with `version` so the snapshot is at
+ * least as new as its publish (and so includes the staging tag it was published
+ * under). A bare `npm view <pkg> dist-tags` right after publishing can come from a
+ * stale registry edge that has neither, even after the version itself is visible.
+ * Retries while the version isn't there yet: reads can lag publishes by several
+ * minutes (v0.7.2 packages still 404'd 3 minutes after publishing).
  * @param {string} packageName
  * @param {string} version
+ * @param {number} deadline - epoch ms after which to give up
+ * @returns {Promise<Record<string, string>>}
  */
-async function waitForVersion(packageName, version) {
-  for (let attempt = 1; attempt <= 6; attempt++) {
+async function readTagsWithVersion(packageName, version, deadline) {
+  for (let attempt = 1; ; attempt++) {
     try {
-      npm(['view', `${packageName}@${version}`, 'version', '--prefer-online'], { capture: true })
-      return
+      return JSON.parse(
+        npm(['view', `${packageName}@${version}`, 'dist-tags', '--json', '--prefer-online'], {
+          capture: true,
+          quiet: true,
+        }),
+      )
     } catch {
-      if (attempt === 6) break
-      await new Promise((resolve) => setTimeout(resolve, 10_000))
+      if (Date.now() + RETRY_INTERVAL_MS > deadline) break
+      console.log(`[promote] ${packageName}@${version} not visible on the registry yet (attempt ${attempt}); retrying`)
+      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS))
     }
   }
   throw new Error(`${packageName}@${version} is not on the registry; not moving any tags`)
@@ -83,11 +98,11 @@ async function main() {
     throw new Error('Refusing to point latest at a preview build')
   }
 
+  const deadline = Date.now() + REGISTRY_WAIT_MS
+  const tagsByPackage = new Map()
   for (const packageName of PACKAGES) {
-    await waitForVersion(packageName, version)
+    tagsByPackage.set(packageName, await readTagsWithVersion(packageName, version, deadline))
   }
-
-  const tagsByPackage = new Map(PACKAGES.map((name) => [name, getDistTags(name)]))
 
   const previewDecision = channel === 'preview' ? decidePreview(requireEnv('RELEASE_BRANCH'), sha) : null
   const results = []
@@ -112,8 +127,13 @@ async function main() {
     const tags = tagsByPackage.get(packageName)
     for (const [tag, tagged] of Object.entries(tags)) {
       if (tag.startsWith(STAGING_TAG_PREFIX) && tagged === version) {
-        npmWrite(['dist-tag', 'rm', packageName, tag])
-        console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
+        // A leftover staging tag is untidy, not broken; don't fail after the real tag moved.
+        try {
+          npmWrite(['dist-tag', 'rm', packageName, tag])
+          console.log(`[promote] ${packageName}: removed staging tag ${tag}`)
+        } catch (error) {
+          console.warn(`[promote] ${packageName}: could not remove staging tag ${tag}: ${error.message}`)
+        }
       }
     }
   }

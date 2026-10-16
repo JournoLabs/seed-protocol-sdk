@@ -181,11 +181,13 @@ const config = [
       postProcess(),
     ],
   },
-  // CommonJS build - Node.js only
+  // CommonJS build of the Vite plugin only, for CommonJS vite configs.
+  // The SDK entries have no CJS build: package.json's "require" conditions
+  // point at the ESM files, which Node 20.19+ / 22.12+ loads via require(esm).
+  // One module graph means no second copy of the SDK's singletons.
   {
     input: {
-      'main.cjs': 'src/node/index.ts', // We'll create this
-      'vite.cjs': 'src/vite/index.ts', // Vite plugin CommonJS build
+      'vite.cjs': 'src/vite/index.ts',
     },
     output: [
       {
@@ -194,8 +196,10 @@ const config = [
         sourcemap: true,
         preserveModules: false,
         entryFileNames: '[name]',
-        // CJS chunks go under dist/cjs/ so they do not overwrite ESM chunks in dist/
-        chunkFileNames: 'cjs/[name]-[hash].js',
+        // CJS chunks go under dist/cjs/ so they do not overwrite ESM chunks in dist/.
+        // They need the .cjs extension: the package is "type": "module", so Node
+        // would load .js chunks as ESM and every require()d export would be undefined.
+        chunkFileNames: 'cjs/[name]-[hash].cjs',
       },
     ],
     external: (id) => {

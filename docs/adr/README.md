@@ -14,8 +14,10 @@ ADR records the decision a study led to.
 | [0003](0003-icons-vendored-from-lucide.md) | Vendor Lucide icons instead of depending on an icon package | Accepted |
 | [0004](0004-opfs-files-manager-behavior.md) | OPFSFilesManager: thumbnails, grouping, downloads, and deletes | Accepted |
 | [0005](0005-shared-design-system.md) | A shared design system for exported UI | Proposed |
-| [0006](0006-schema-scoped-seeds.md) | Schemas scope seeds on the client, not on-chain | Accepted |
+| [0006](0006-schema-scoped-seeds.md) | Schemas scope seeds on the client, not on-chain | Accepted (not implemented yet) |
 | [0007](0007-ci-publishing-and-branch-prereleases.md) | Publish from CI with trusted publishing, and prerelease every branch | Accepted |
+| [0008](0008-schema-names-on-eas.md) | One EAS name per property and model, matched loosely when reading | Accepted |
+| [0009](0009-name-match-strictness.md) | A schema sets how strictly EAS names match its models and properties | Accepted |
 
 ## Writing one
 

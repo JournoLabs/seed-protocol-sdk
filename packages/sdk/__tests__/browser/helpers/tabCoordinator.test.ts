@@ -4,15 +4,27 @@ import {
   onTabMessage,
   resetTabCoordinationForTests,
   startTabCoordination,
+  TAB_ID,
   whenLeaderTab,
 } from '@/helpers/tabCoordinator'
 import { easSyncActor, requestEasSyncFromAddressChange, requestEasSyncFromModelsInit } from '@/events/item/easSyncManager'
 import { otherTab } from '../../test-utils/otherTab'
+import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 describe('tab coordination', () => {
   const filesDir = `/tab-coord-${Math.random().toString(36).slice(2, 8)}`
   const dbKey = `${filesDir}/db/seed.db`
   let tab: ReturnType<typeof otherTab> | undefined
+
+  /** This tab's leader-lock request is queued behind the other tab's: it follows, not leads. */
+  const waitForQueuedLeaderRequest = () =>
+    vi.waitFor(
+      async () => {
+        const { pending = [] } = await navigator.locks.query()
+        expect(pending.map((lock) => lock.name)).toContain(`seed:leader:${dbKey}`)
+      },
+      { timeout: WAIT_TIMEOUT_MS },
+    )
 
   afterEach(async () => {
     vi.restoreAllMocks()
@@ -26,7 +38,7 @@ describe('tab coordination', () => {
     await tab.send({ type: 'lead', name: `seed:leader:${dbKey}` }, 'leading')
 
     startTabCoordination({ filesDir })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitForQueuedLeaderRequest()
     expect(isLeaderTab()).toBe(false)
 
     const tookOver = whenLeaderTab()
@@ -39,16 +51,18 @@ describe('tab coordination', () => {
     const sent = vi.spyOn(easSyncActor, 'send').mockImplementation(() => {})
     tab = otherTab()
     await tab.send({ type: 'lead', name: `seed:leader:${dbKey}` }, 'leading')
-    await tab.send({ type: 'listen', channel: `seed:tabs:${dbKey}` }, 'listening')
+    await tab.listen(`seed:tabs:${dbKey}`)
     startTabCoordination({ filesDir })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitForQueuedLeaderRequest()
 
     requestEasSyncFromModelsInit()
     requestEasSyncFromModelsInit()
     requestEasSyncFromAddressChange(['0xabc'])
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(
+      () => expect(tab!.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'], from: TAB_ID }]),
+      { timeout: WAIT_TIMEOUT_MS },
+    )
     expect(sent).not.toHaveBeenCalled()
-    expect(tab.heard).toEqual([{ type: 'eas-sync-address-change', addresses: ['0xabc'] }])
 
     const tookOver = whenLeaderTab()
     await tab.send({ type: 'step-down' }, 'stepped-down')
@@ -66,7 +80,25 @@ describe('tab coordination', () => {
     tab = otherTab()
     const message = { type: 'eas-sync-address-change', addresses: ['0xdef'] }
     await tab.send({ type: 'post', channel: `seed:tabs:${dbKey}`, message }, 'posted')
-    await vi.waitFor(() => expect(received).toEqual([message]))
+    await vi.waitFor(() => expect(received).toEqual([message]), { timeout: WAIT_TIMEOUT_MS })
+    unsubscribe()
+  })
+
+  it("ignores messages carrying this tab's id", async () => {
+    startTabCoordination({ filesDir })
+    const received: unknown[] = []
+    const unsubscribe = onTabMessage((message) => received.push(message))
+
+    tab = otherTab()
+    const channel = `seed:tabs:${dbKey}`
+    const own = { type: 'files-changed', paths: ['/own'], from: TAB_ID }
+    const other = { type: 'files-changed', paths: ['/other'], from: 'another-tab' }
+    await tab.send({ type: 'post', channel, message: own }, 'posted')
+    await tab.send({ type: 'post', channel, message: other }, 'posted')
+    await vi.waitFor(() => expect(received).toEqual([other]), { timeout: WAIT_TIMEOUT_MS })
+    // The worker posts from a fresh channel each time; give the first one time to arrive too.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(received).toEqual([other])
     unsubscribe()
   })
 

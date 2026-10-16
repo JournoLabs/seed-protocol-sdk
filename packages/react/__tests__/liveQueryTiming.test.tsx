@@ -21,6 +21,7 @@ import { waitFor as xstateWaitFor } from 'xstate'
 import { Observable } from 'rxjs'
 import { waitForItemPersisted } from './test-utils/persistence'
 import { waitUntil, waitUntilOrThrow } from './test-utils/waitUntil'
+import { WAIT_TIMEOUT_MS } from '../../sdk/__tests__/test-utils/timeouts'
 
 // Test schema
 const testSchema: SchemaFileFormat = {
@@ -138,7 +139,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -150,7 +151,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Test Item', value: 'Test Value' })
@@ -258,7 +259,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -270,7 +271,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Existing Item', value: 'Existing Value' })
@@ -375,7 +376,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -387,7 +388,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Transaction Test Item', value: 'Initial Value' })
@@ -452,7 +453,7 @@ describe('LiveQuery Timing Investigation', () => {
         await xstateWaitFor(
           nameProperty.getService(),
           (snapshot) => snapshot.value === 'idle',
-          { timeout: 5000 }
+          { timeout: WAIT_TIMEOUT_MS }
         )
         const updateTime = performance.now() - updateStart
 
@@ -512,7 +513,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         model.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       const item = await Item.create({
@@ -524,7 +525,7 @@ describe('LiveQuery Timing Investigation', () => {
       await xstateWaitFor(
         item.getService(),
         (snapshot) => snapshot.value === 'idle',
-        { timeout: 5000 }
+        { timeout: WAIT_TIMEOUT_MS }
       )
 
       await waitForItemPersisted(item, { name: 'Drizzle Test Item', value: 'Drizzle Test Value' })

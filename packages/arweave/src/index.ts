@@ -7,9 +7,15 @@ export * from './types/gateway.js'
 export * from './types/arweave.js'
 export type { SeedConfigGatewayInput, ClientGatewayContextInput } from './types/seedConfig.js'
 export * from './ArweaveClient/queries.js'
+export * from './ArweaveClient/transactionTagsByIds.js'
 export * from './ArweaveClient/BaseArweaveClient.js'
 export { BaseArweaveClient as ArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
 export type { IArweaveClient } from './ArweaveClient/IArweaveClient.js'
+export {
+  assertSingleArweaveModule,
+  DuplicateArweaveModuleError,
+  resetArweaveClientOwnerForTests,
+} from './moduleOwner.js'
 export * from './ArweaveClient/selectReadGateway.js'
 export * from './ArweaveClient/uploadApiVerification.js'
 export * from './ArweaveClient/arweaveL1UploadApi.js'
@@ -18,3 +24,4 @@ export * from './gateway/gatewayCircuitBreaker.js'
 export * from './gateway/resolveSeedGatewayEndpoints.js'
 export * from './gateway/seedGatewayConfig.js'
 export * from './gateway/readBaseUrls.js'
+export * from './content/arweaveContent.js'

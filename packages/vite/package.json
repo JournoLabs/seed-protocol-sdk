@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/vite",
-  "version": "0.7.1",
+  "version": "0.7.4",
   "description": "Vite plugin for browser apps using @seedprotocol/sdk: Node polyfills, ZenFS aliases, CJS interop fixes and cross-origin isolation headers",
   "keywords": [
     "seed-protocol",
@@ -37,6 +37,7 @@
     "prepublishOnly": "bun run build && node ../../scripts/sync-versions.js"
   },
   "dependencies": {
+    "@rollup/pluginutils": "^5.1.0",
     "debug": "^4.4.1",
     "vite-plugin-node-polyfills": "^0.27.0"
   },

@@ -44,11 +44,20 @@ class SeedEventEmitter {
     return this
   }
 
+  /**
+   * Calls every listener. A listener that throws is logged and skipped: the others still
+   * run, and the error never reaches the SDK code that emitted the event (which may be
+   * midway through a save).
+   */
   emit(event: EventKey, ...args: any[]): boolean {
     const set = this.listeners.get(event)
     if (!set || set.size === 0) return false
     for (const listener of [...set]) {
-      listener(...args)
+      try {
+        listener(...args)
+      } catch (error) {
+        console.error(`[seed] listener for "${String(event)}" threw:`, error)
+      }
     }
     return true
   }

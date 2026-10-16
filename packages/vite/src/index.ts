@@ -1,4 +1,6 @@
 import type { ConfigEnv, Plugin, PreviewServer, UserConfig, ViteDevServer } from 'vite'
+import { parseAst } from 'vite'
+import { attachScopes, type AttachedScope } from '@rollup/pluginutils'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -9,18 +11,19 @@ const _req = createRequire(import.meta.url)
 
 export interface SeedVitePluginOptions {
   /**
-   * Additional modules to alias to ZenFS equivalents.
+   * Modules to alias to ZenFS (`@zenfs/core`, or `@zenfs/core/promises` for ids
+   * containing "promises"). The list replaces the default; to add a module, pass
+   * the defaults plus yours.
    * @default ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']
    */
   fsModules?: string[]
 
   /**
-   * Whether to inject automatic ZenFS initialization script into index.html.
-   * When true, injects a &lt;script type="module"&gt; that imports from '@zenfs/core'/'@zenfs/dom'.
-   * Browsers cannot resolve those bare specifiers, so the script fails at runtime unless you use
-   * an import map or load ZenFS another way. Prefer false and initialize ZenFS in your entry:
-   * import { configure } from '@zenfs/core'; import { IndexedDB } from '@zenfs/dom';
-   * await configure({ mounts: { '/': IndexedDB } });
+   * Whether to inject a ZenFS initialization script into index.html that mounts
+   * IndexedDB at `/`. Leave this false with the SDK: `client.init()` mounts OPFS
+   * at `/` itself, so apps do not configure ZenFS, and this mount would only be
+   * replaced. The script also imports the bare specifiers '@zenfs/core' and
+   * '@zenfs/dom', which browsers cannot resolve without an import map.
    * @default false
    */
   autoInit?: boolean
@@ -48,6 +51,8 @@ export interface SeedVitePluginOptions {
    * Applied in configureServer and configurePreviewServer, including writeHead,
    * because Vite `server.headers` is not copied onto Framework-Mode HTML responses.
    * Set `false` to disable. Pass `{ coop, coep, corp }` to override values.
+   * A COOP/COEP/CORP value you set yourself in `server.headers` or `preview.headers`
+   * (any letter case) wins over both this option and the defaults, for that server.
    * @default true (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`)
    */
   isolationHeaders?: boolean | {
@@ -58,32 +63,11 @@ export interface SeedVitePluginOptions {
 }
 
 // Node.js globals that are undefined in browsers and will throw at runtime.
-// Keyed by identifier; value is the safe typeof-guard pattern so we can skip those.
-const BROWSER_DANGEROUS_GLOBALS: Record<string, RegExp> = {
-  global:     /\btypeof\s+global\b/,
-  process:    /\btypeof\s+process\b/,
-  Buffer:     /\btypeof\s+Buffer\b/,
-  __dirname:  /\btypeof\s+__dirname\b/,
-  __filename: /\btypeof\s+__filename\b/,
-}
-
-/**
- * Strip JS string literals, template literals, and comments from source text
- * so that identifier searches don't false-positive on string content.
- * This is intentionally approximate — good enough for a lint-style warning pass.
- */
-function stripStringsAndComments(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))   // /* block comments */
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))          // // line comments
-    .replace(/`(?:[^`\\]|\\.)*`/gs, (m) => '`' + ' '.repeat(m.length - 2) + '`')  // template literals
-    .replace(/"(?:[^"\\]|\\.)*"/g, (m) => '"' + ' '.repeat(m.length - 2) + '"')   // double-quoted strings
-    .replace(/'(?:[^'\\]|\\.)*'/g, (m) => "'" + ' '.repeat(m.length - 2) + "'")   // single-quoted strings
-}
+const BROWSER_DANGEROUS_GLOBALS = new Set(['global', 'process', 'Buffer', '__dirname', '__filename'])
 
 interface GlobalHit {
   global: string
-  /** zero-based character offset in the stripped source */
+  /** zero-based character offset in the chunk */
   offset: number
   /** 1-based line number */
   line: number
@@ -91,30 +75,163 @@ interface GlobalHit {
   context: string
 }
 
-function findDangerousGlobals(rawCode: string): GlobalHit[] {
-  const stripped = stripStringsAndComments(rawCode)
-  const hits: GlobalHit[] = []
+// Loose ESTree node: we only read type, positions and child nodes.
+type AstNode = { type: string; start: number; end: number; [key: string]: unknown }
+type AstPath = { node: AstNode; key: string; parent: AstPath | null }
 
-  for (const [name, typeofGuard] of Object.entries(BROWSER_DANGEROUS_GLOBALS)) {
-    // Skip globalThis when checking 'global'
-    const re = new RegExp(`(?<![.\\w$])\\b${name}\\b(?!This)(?![\\w$])`, 'g')
-    let m: RegExpExecArray | null
-    while ((m = re.exec(stripped)) !== null) {
-      const offset = m.index
-      // Check for typeof guard in the ~20 chars before the match
-      const before = stripped.slice(Math.max(0, offset - 20), offset)
-      if (typeofGuard.test(before)) continue
+function isAstNode(value: unknown): value is AstNode {
+  return !!value && typeof value === 'object' && typeof (value as AstNode).type === 'string'
+}
 
-      // Compute 1-based line number from raw source (positions are preserved because
-      // we replace with equal-length spaces, so offsets are stable)
-      const linesBefore = rawCode.slice(0, offset).split('\n')
-      const line = linesBefore.length
-      const colOffset = linesBefore.at(-1)?.length ?? 0
-      const rawLine = rawCode.split('\n')[line - 1] ?? ''
-      const ctx = rawLine.slice(Math.max(0, colOffset - 40), colOffset + name.length + 40).trim()
+/** Whether an Identifier at `key` of `parent` reads a variable (not a property name or label). */
+function isVariableReference(parent: AstNode, key: string): boolean {
+  switch (parent.type) {
+    case 'MemberExpression':
+      return key !== 'property' || !!parent.computed
+    case 'Property':
+    case 'MethodDefinition':
+    case 'PropertyDefinition':
+    case 'AccessorProperty':
+      return key !== 'key' || !!parent.computed
+    case 'LabeledStatement':
+    case 'BreakStatement':
+    case 'ContinueStatement':
+    case 'MetaProperty':
+      return false
+    case 'ImportSpecifier':
+      return key !== 'imported'
+    case 'ExportSpecifier':
+      return key !== 'exported'
+    default:
+      return true
+  }
+}
 
-      hits.push({ global: name, offset, line, context: ctx })
+function containsTypeofOf(node: AstNode, name: string): boolean {
+  if (
+    node.type === 'UnaryExpression' &&
+    node.operator === 'typeof' &&
+    isAstNode(node.argument) &&
+    node.argument.type === 'Identifier' &&
+    node.argument.name === name
+  ) {
+    return true
+  }
+  for (const key of Object.keys(node)) {
+    const child = node[key]
+    if (Array.isArray(child)) {
+      if (child.some((c) => isAstNode(c) && containsTypeofOf(c, name))) return true
+    } else if (isAstNode(child) && containsTypeofOf(child, name)) {
+      return true
     }
+  }
+  return false
+}
+
+/**
+ * Whether the reference only runs behind a guard: the consequent of a
+ * `typeof name` test (`if`, `?:`, `&&`/`||`), or a try block.
+ */
+function isGuarded(path: AstPath, name: string): boolean {
+  for (let child = path; child.parent; child = child.parent) {
+    const ancestor = child.parent.node
+    const viaKey = child.key
+    if (
+      (ancestor.type === 'IfStatement' || ancestor.type === 'ConditionalExpression') &&
+      viaKey !== 'test' &&
+      containsTypeofOf(ancestor.test as AstNode, name)
+    ) {
+      return true
+    }
+    if (
+      ancestor.type === 'LogicalExpression' &&
+      viaKey === 'right' &&
+      containsTypeofOf(ancestor.left as AstNode, name)
+    ) {
+      return true
+    }
+    if (ancestor.type === 'TryStatement' && viaKey === 'block') return true
+  }
+  return false
+}
+
+/**
+ * Find free references to Node-only globals in a bundled chunk. Skips names
+ * the chunk declares itself (e.g. the process polyfill's own `var process`),
+ * `typeof` checks, property names, and uses behind a `typeof` guard or `try`.
+ * Best-effort: a chunk that fails to parse reports nothing.
+ */
+function findDangerousGlobals(code: string): GlobalHit[] {
+  let program: AstNode
+  let rootScope: AttachedScope
+  try {
+    program = parseAst(code) as unknown as AstNode
+    rootScope = attachScopes(program as never, 'scope')
+  } catch {
+    return []
+  }
+
+  const hits: GlobalHit[] = []
+  const lineStarts = [0]
+  for (let i = code.indexOf('\n'); i !== -1; i = code.indexOf('\n', i + 1)) lineStarts.push(i + 1)
+  const lineIndexOf = (offset: number) => {
+    let lo = 0
+    let hi = lineStarts.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (lineStarts[mid]! <= offset) lo = mid
+      else hi = mid - 1
+    }
+    return lo
+  }
+  // Iterative walk: bundled chunks can nest deeper than the call stack allows.
+  const stack: Array<{ path: AstPath; scope: AttachedScope }> = [
+    { path: { node: program, key: '', parent: null }, scope: rootScope },
+  ]
+  while (stack.length > 0) {
+    const { path, scope: outerScope } = stack.pop()!
+    const { node } = path
+    const scope = (node.scope as AttachedScope | undefined) ?? outerScope
+
+    if (
+      node.type === 'Identifier' &&
+      BROWSER_DANGEROUS_GLOBALS.has(node.name as string) &&
+      path.parent
+    ) {
+      const name = node.name as string
+      const parent = path.parent.node
+      const isTypeofOperand = parent.type === 'UnaryExpression' && parent.operator === 'typeof'
+      if (
+        !isTypeofOperand &&
+        isVariableReference(parent, path.key) &&
+        !scope.contains(name) &&
+        !isGuarded(path, name)
+      ) {
+        const lineIndex = lineIndexOf(node.start)
+        const lineStart = lineStarts[lineIndex]!
+        const lineEnd = lineStarts[lineIndex + 1] ?? code.length
+        const context = code
+          .slice(Math.max(lineStart, node.start - 40), Math.min(lineEnd, node.end + 40))
+          .trim()
+        hits.push({ global: name, offset: node.start, line: lineIndex + 1, context })
+      }
+      continue
+    }
+
+    const children: AstPath[] = []
+    for (const key of Object.keys(node)) {
+      if (key === 'scope') continue
+      const value = node[key]
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (isAstNode(item)) children.push({ node: item, key, parent: path })
+        }
+      } else if (isAstNode(value)) {
+        children.push({ node: value, key, parent: path })
+      }
+    }
+    // Reverse so hits come out in source order.
+    for (let i = children.length - 1; i >= 0; i--) stack.push({ path: children[i]!, scope })
   }
 
   return hits
@@ -167,6 +284,40 @@ const APP_OPTIONAL_OPTIMIZE_INCLUDES = [
   'isows',
 ] as const
 
+/**
+ * Seed packages whose module-level state (registered EAS / query / Arweave clients, EAS chain,
+ * Arweave gateway) must be one copy per page. With the SDK excluded from prebundling, Vite can
+ * find these one at a time; a package prebundled in a later optimizer pass can load as its own
+ * module instance, and query then throws DuplicateEasModuleError. Prebundling them together in
+ * the first pass, and deduping the ones the app resolves, keeps one copy.
+ */
+const SEED_SHARED_STATE_PACKAGES = [
+  '@seedprotocol/eas',
+  '@seedprotocol/arweave',
+  '@seedprotocol/query',
+] as const
+
+/**
+ * `include` entries: the bare name when the app resolves the package itself, else the nested
+ * form through the SDK (bun installs it under @seedprotocol/sdk). `dedupe` only gets packages
+ * the app root resolves: Vite resolves deduped packages from the root, so a nested-only one
+ * would fail to resolve.
+ */
+function seedSharedStateDeps(appRoot: string): { include: string[]; dedupe: string[] } {
+  const include: string[] = []
+  const dedupe: string[] = []
+  const sdkAtRoot = isResolvableFromRoot('@seedprotocol/sdk', appRoot)
+  for (const pkg of SEED_SHARED_STATE_PACKAGES) {
+    if (isResolvableFromRoot(pkg, appRoot)) {
+      include.push(pkg)
+      dedupe.push(pkg)
+    } else if (sdkAtRoot) {
+      include.push(`@seedprotocol/sdk > ${pkg}`)
+    }
+  }
+  return { include, dedupe }
+}
+
 /** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
 
@@ -186,6 +337,39 @@ function resolveIsolationHeaders(
     'Cross-Origin-Embedder-Policy': overrides.coep ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy'],
     'Cross-Origin-Resource-Policy': overrides.corp ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Resource-Policy'],
   }
+}
+
+/**
+ * Isolation headers the user has not set in `headers` (case-insensitive), so a
+ * config() hook can add them without replacing the user's values.
+ */
+function isolationHeadersNotSetBy(
+  isolationHeaders: Record<string, string>,
+  headers: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const userKeys = new Set(Object.keys(headers ?? {}).map((key) => key.toLowerCase()))
+  return Object.fromEntries(
+    Object.entries(isolationHeaders).filter(([key]) => !userKeys.has(key.toLowerCase())),
+  )
+}
+
+/**
+ * The isolation headers the middleware sends: the user's `headers` value where
+ * they set one, else ours.
+ */
+function effectiveIsolationHeaders(
+  isolationHeaders: Record<string, string>,
+  headers: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const userValues = new Map(
+    Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+  )
+  return Object.fromEntries(
+    Object.entries(isolationHeaders).map(([key, value]) => {
+      const userValue = userValues.get(key.toLowerCase())
+      return [key, userValue == null ? value : String(userValue)]
+    }),
+  )
 }
 
 function applyIsolationHeaderMiddleware(
@@ -667,7 +851,6 @@ function optimizeDepsRolldownPatch(
  * - Aliases path → path-browserify
  * - Ensures CommonJS in SDK dist is transformed by Vite's CommonJS plugin
  * - Allowlists linked SDK / sqlocal worker paths on server.fs.allow for Vite dev
- * - Optionally injects a simple ZenFS initialization script
  * - Optionally wires up vite-plugin-node-polyfills with safe defaults
  *
  * This plugin assumes the SDK does not bundle Node-only code in the browser entry.
@@ -676,9 +859,7 @@ function optimizeDepsRolldownPatch(
  *
  * For the renderer build:
  * - Use the SDK's ESM entry: import from '@seedprotocol/sdk' (resolves to dist/main.js).
- * - When autoInit is false (default), initialize ZenFS in your entry:
- *   import { configure } from '@zenfs/core'; import { IndexedDB } from '@zenfs/dom';
- *   await configure({ mounts: { '/': IndexedDB } });
+ * - Do not configure ZenFS yourself: `client.init()` mounts OPFS at `/`.
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const {
@@ -690,6 +871,9 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   } = options
 
   const isolationHeaders = resolveIsolationHeaders(isolationHeadersOption)
+  // Replaced in configResolved by the values the user's server/preview headers leave us.
+  let serverIsolationHeaders = isolationHeaders
+  let previewIsolationHeaders = isolationHeaders
   let htmlNodeEnv = 'production'
 
   const log = (...args: unknown[]) => {
@@ -718,6 +902,16 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     enforce: 'pre',
 
     configResolved(resolvedConfig) {
+      if (isolationHeaders) {
+        serverIsolationHeaders = effectiveIsolationHeaders(
+          isolationHeaders,
+          resolvedConfig.server.headers,
+        )
+        previewIsolationHeaders = effectiveIsolationHeaders(
+          isolationHeaders,
+          resolvedConfig.preview.headers,
+        )
+      }
       const addedAllowPaths = ensureDevServerFsAllow(resolvedConfig.server.fs.allow)
       if (addedAllowPaths.length > 0) {
         log(
@@ -757,13 +951,17 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
 
       addRendererCompatibilityAliases(aliasEntries)
-      addNodePolyfillShimAliases(aliasEntries, polyfillShimPaths)
+      // Node polyfill shim aliases come from seed-protocol:polyfill-resolve, ahead of all others.
 
-      const existingResolve = userConfig.resolve ?? {}
-      const mergedAlias = mergeAliasEntries(
-        normalizeAliasEntries(existingResolve.alias),
-        aliasEntries,
-      )
+      // Vite merges a returned alias list *before* the existing one, so returning ours
+      // would let it shadow the user's. Append to the config in place instead (Vite's
+      // documented escape hatch when merging can't express the order), skipping finds
+      // the user already set, so user aliases still match first.
+      userConfig.resolve = {
+        ...userConfig.resolve,
+        alias: mergeAliasEntries(normalizeAliasEntries(userConfig.resolve?.alias), aliasEntries),
+      }
+      const userDedupe = new Set(userConfig.resolve.dedupe ?? [])
 
       const desiredOptimizeIncludes = [
         '@zenfs/core',
@@ -775,6 +973,8 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         ...desiredOptimizeIncludes.filter((dep) => !!resolvePackageFile(dep, 'package.json')),
         ...APP_OPTIONAL_OPTIMIZE_INCLUDES.filter((dep) => isResolvableFromRoot(dep, appRoot)),
       ]
+
+      const sharedStateDeps = seedSharedStateDeps(appRoot)
 
       const existingOptimize = userConfig.optimizeDeps
       const debugOptimizeAliases = debugShimOptimizeAliasObject()
@@ -792,6 +992,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
         ],
         include: [
           ...resolvableOptimizeIncludes,
+          ...sharedStateDeps.include,
           ...EAS_OPTIMIZE_INCLUDES,
           ...CJS_OPTIMIZE_INCLUDES,
         ],
@@ -823,19 +1024,18 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           'process.browser': 'true',
           'process.platform': '"browser"',
         },
+        // Only this plugin's dedupe entries: Vite concatenates them onto the user's.
         resolve: {
-          ...existingResolve,
-          alias: mergedAlias,
           // Prevent duplicate React/thirdweb instances when @seedprotocol/publish is workspace-linked.
           // Multiple copies break context (e.g. useActiveAccount must be used within ThirdwebProvider).
           // Also dedupe XState and Seed packages: two xstate copies cause Object.assign _version errors;
           // two @seedprotocol/sdk copies leave BaseDb facade / Db.appDb on different module instances
           // ("App DB not found", undefined.$with on PostsPage).
+          // Two eas / arweave / query copies split registered clients and chain (see SEED_SHARED_STATE_PACKAGES).
           // Two @zenfs copies leave configureSingle / WebAccess on different module instances
           // and can remount OPFS against a stale handle.
           dedupe: Array.from(
             new Set([
-              ...(existingResolve.dedupe ?? []),
               'react',
               'react-dom',
               'thirdweb',
@@ -845,28 +1045,28 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
               '@seedprotocol/react',
               '@seedprotocol/publish',
               '@seedprotocol/feed',
+              ...sharedStateDeps.dedupe,
               '@zenfs/core',
               '@zenfs/dom',
-            ])
-          ),
+            ]),
+          ).filter((dep) => !userDedupe.has(dep)),
         },
         optimizeDeps,
+        // Only the headers the user has not set: Vite deep-merges these into theirs.
+        // Preview falls back to server.headers when preview.headers is unset, so
+        // only touch preview.headers when the user set it.
         ...(isolationHeaders
           ? {
               server: {
-                ...(userConfig.server ?? {}),
-                headers: {
-                  ...(userConfig.server?.headers ?? {}),
-                  ...isolationHeaders,
-                },
+                headers: isolationHeadersNotSetBy(isolationHeaders, userConfig.server?.headers),
               },
-              preview: {
-                ...(userConfig.preview ?? {}),
-                headers: {
-                  ...(userConfig.preview?.headers ?? {}),
-                  ...isolationHeaders,
-                },
-              },
+              ...(userConfig.preview?.headers
+                ? {
+                    preview: {
+                      headers: isolationHeadersNotSetBy(isolationHeaders, userConfig.preview.headers),
+                    },
+                  }
+                : {}),
             }
           : {}),
       }
@@ -884,16 +1084,18 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     config(userConfig) {
       if (Object.keys(polyfillShimAliasObj).length === 0) return
 
-      const existingResolve = userConfig.resolve ?? {}
-      const mergedAlias = withPreferredPolyfillAliases(
-        normalizeAliasEntries(existingResolve.alias),
-        polyfillShimPaths,
-      )
+      // Rewrite resolve.alias in place rather than returning it: this drops entries
+      // (a returned list can only add), and Vite would concatenate a returned copy
+      // onto the existing list, duplicating every alias.
+      userConfig.resolve = {
+        ...userConfig.resolve,
+        alias: withPreferredPolyfillAliases(
+          normalizeAliasEntries(userConfig.resolve?.alias),
+          polyfillShimPaths,
+        ),
+      }
 
       return {
-        resolve: {
-          alias: mergedAlias,
-        },
         optimizeDeps: {
           rolldownOptions: optimizeDepsRolldownPatch(undefined, {
             // Later merges overwrite vite-plugin-node-polyfills' serve-time
@@ -945,107 +1147,47 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
     enforce: 'post',
 
     configureServer(server) {
-      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+      if (serverIsolationHeaders) applyIsolationHeaderMiddleware(server, serverIsolationHeaders)
     },
 
     configurePreviewServer(server) {
-      if (isolationHeaders) applyIsolationHeaderMiddleware(server, isolationHeaders)
+      if (previewIsolationHeaders) applyIsolationHeaderMiddleware(server, previewIsolationHeaders)
     },
 
     config(userConfig) {
-      const existingBuild = userConfig.build ?? {}
-      const existingCommonjs = existingBuild.commonjsOptions ?? {}
-      const existingRollupOptions = existingBuild.rollupOptions ?? {}
-      const existingRolldownOptions = (existingBuild as Record<string, unknown>).rolldownOptions as
-        | Record<string, unknown>
-        | undefined
-      const existingExternal = existingRollupOptions.external ?? []
-
-      const include = [
-        // Anything the user already had
-        ...(Array.isArray(existingCommonjs.include)
-          ? existingCommonjs.include
-          : existingCommonjs.include
-          ? [existingCommonjs.include]
-          : []),
-        // Always process node_modules and the SDK dist so require() is transformed
-        /node_modules/,
-        /seed-protocol-sdk[\\/]+dist[\\/]/,
-      ]
-
-      // Exclude packages that are already ESM or have special worker handling
-      const exclude = [
-        ...(Array.isArray(existingCommonjs.exclude)
-          ? existingCommonjs.exclude
-          : existingCommonjs.exclude
-          ? [existingCommonjs.exclude]
-          : []),
-        // sqlocal is ESM and uses workers - don't transform it
-        /node_modules[\\/]+sqlocal[\\/]/,
-      ]
-
+      // Only this plugin's additions: Vite deep-merges them into the user's build
+      // config and concatenates arrays. Echoing `...userConfig.build` back also
+      // returned both `rollupOptions` and `rolldownOptions` (Vite 8 aliases one
+      // to the other), which made Vite warn on every run.
       const commonjsOptions = {
-        ...existingCommonjs,
-        include,
-        exclude,
+        // Always process node_modules and the SDK dist so require() is transformed
+        include: [/node_modules/, /seed-protocol-sdk[\\/]+dist[\\/]/],
+        // sqlocal is ESM and uses workers - don't transform it
+        exclude: [/node_modules[\\/]+sqlocal[\\/]/],
         transformMixedEsModules: true,
       }
 
       // Externalize Node.js-only packages that should never be bundled for the browser
-      const nodeOnlyPackages = [
-        'better-sqlite3', // Native SQLite binding (Node.js only)
-      ]
-
-      const isNodeOnlyExternal = (id: string) =>
-        nodeOnlyPackages.some(
-          (pkg) =>
-            id === pkg ||
-            id.startsWith(`${pkg}/`) ||
-            id.includes(`/${pkg}/`) ||
-            id.endsWith(`/${pkg}`)
-        )
-
-      const externalList = (id: string, importer?: string, isResolved?: boolean) => {
-        if (isNodeOnlyExternal(id)) return true
-        if (typeof existingExternal === 'function') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (existingExternal as any)(id, importer, isResolved ?? false)
-        }
-        if (Array.isArray(existingExternal)) {
-          return existingExternal.some((ext) => ext === id || id.startsWith(`${ext}/`))
-        }
-        return false
-      }
-
-      const rollupOptions = {
-        ...existingRollupOptions,
-        external: externalList,
-      }
-
-      const build: Record<string, unknown> = {
-        ...existingBuild,
-        commonjsOptions,
-      }
-      if (existingRolldownOptions) {
-        build.rolldownOptions = {
-          ...existingRolldownOptions,
-          external: externalList,
-        }
-      } else {
-        build.rollupOptions = rollupOptions
-      }
+      // (better-sqlite3: native SQLite binding, Node.js only), by bare id or resolved path.
+      const nodeOnlyExternal = [/^better-sqlite3(?:\/|$)/, /[\\/]better-sqlite3(?:[\\/]|$)/]
+      const userExternal = (userConfig.build?.rolldownOptions ?? userConfig.build?.rollupOptions)
+        ?.external
+      // A user external function can't be concatenated with patterns, so wrap it.
+      // Otherwise return patterns, which Vite appends to the user's list.
+      const external =
+        typeof userExternal === 'function'
+          ? (id: string, importer: string | undefined, isResolved: boolean) =>
+              nodeOnlyExternal.some((re) => re.test(id)) || userExternal(id, importer, isResolved)
+          : nodeOnlyExternal
 
       // Worker options are TOP-LEVEL in Vite config, not under build.
       // Default 'iife' breaks when workers use code-splitting (e.g. sqlocal).
-      const existingWorker = userConfig.worker ?? {}
-      const worker = {
-        ...existingWorker,
-        format: existingWorker.format ?? 'es',
-      }
-
       return {
-        build,
-        worker,
+        build: {
+          commonjsOptions,
+          rolldownOptions: { external },
+        },
+        ...(userConfig.worker?.format ? {} : { worker: { format: 'es' as const } }),
       }
     },
 

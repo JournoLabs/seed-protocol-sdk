@@ -1,7 +1,9 @@
 # Removes a deleted branch's dist-tag from every public package. See docs/RELEASING.md.
 #
 # `delete` runs this file from the default branch. npm trusted publishing names
-# this file (dist-tag permission only), so keep the filename.
+# this file and the `cleanup` environment (dist-tag permission only), so keep the
+# filename. The environment is limited to the default branch, so a branch can't
+# borrow the configuration by pushing its own copy of this file.
 
 name: Clean up branch dist-tags
 
@@ -16,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: '24'
+  # Node comes from .nvmrc (setup-node node-version-file), shared with local runs.
   NPM_VERSION: '12.2.0'
 
 jobs:
@@ -24,15 +26,16 @@ jobs:
     name: Remove branch dist-tag
     if: github.event.ref_type == 'branch'
     runs-on: ubuntu-latest
+    environment: cleanup
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm install -g "npm@$NPM_VERSION"

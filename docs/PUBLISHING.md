@@ -12,7 +12,14 @@ You can publish **incremental** property updates on the **same** Version (patch 
 
 ## Publish flow (recommended)
 
-When using the publish package (`@seedprotocol/publish`) with `ConnectButton` and its publish flow:
+Publishing needs the publish package (`@seedprotocol/publish`). The SDK prepares payloads but
+does not upload or attest on its own: `item.publish(options)` hands the item to the executor
+that `initPublish()` / `<PublishProvider config>` registers (`setPublishExecutor(publishItem)`),
+and throws if none is registered. It resolves when the publish has finished and rejects if it
+failed; attestation failures that wait for `PublishManager.retryAttestations` also reject.
+`options` are the publish package's `CreatePublishOptions`.
+
+When using the publish package with `ConnectButton` and its publish flow:
 
 1. **ensureEasSchemasForItem** runs before `getPublishPayload`. It:
    - Registers EAS schemas for each item property via the SchemaRegistry contract
@@ -33,6 +40,10 @@ When using the publish package (`@seedprotocol/publish`) with `ConnectButton` an
    the next publish of its item attests it with the target's uid.
 
 3. The payload is sent to the publish contract (or direct EAS, depending on config).
+   Direct EAS is used with `useDirectEas`, or when the publisher is an EOA (no bytecode). It
+   attests one transaction per Seed and records each Seed as soon as it is attested. A smart
+   account that is not deployed yet is refused rather than sent down this path: deploy it first,
+   then publish.
 
 You do not need to run schema setup yourself when using this flow.
 
@@ -99,6 +110,8 @@ The publish package’s verification step checks that each **expected schema** i
 ## Arweave upload tags
 
 Optional metadata tags (e.g. `App-Name`) are merged into each Arweave upload **after** `Content-SHA-256` and `Content-Type`.
+
+Both publish paths (L1 transactions via `getPublishUploads`, bundler DataItems via `getPublishUploadData`) build uploads with the SDK's `getPublishUploadData`, so they upload the same bytes with the same tags. **`Content-SHA-256`** is the lowercase hex **SHA-256** of the uploaded bytes (`getContentSha256`). SDK 0.7.2 and earlier wrote a SHA3-256 digest under that tag on the L1 transaction path; to check a tag value read from Arweave against bytes, use `contentSha256TagMatches`, which accepts both. During files download the SDK looks up these tags in one batched GraphQL request and verifies the downloaded bytes against them: a gateway serving bytes that don't match is skipped for the next one, a transaction no gateway serves matching bytes for is not saved (and is retried on a later run), and only a verified value is copied into `metadata.content_hash`. A transaction without the tag (older uploads, or one not indexed yet) is downloaded unverified.
 
 ### With `@seedprotocol/publish`
 

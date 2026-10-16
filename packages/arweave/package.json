@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/arweave",
-  "version": "0.7.1",
+  "version": "0.7.4",
   "description": "Arweave gateway client for Seed Protocol: transaction reads, read-gateway selection with health probing, and gateway endpoint resolution",
   "keywords": [
     "seed-protocol",

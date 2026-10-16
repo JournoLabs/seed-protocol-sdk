@@ -19,7 +19,9 @@ const UID_B = '0x' + 'b'.repeat(64)
 /** Stub EAS indexer: answers every schema query with `schemas`, counting requests. */
 let schemas: Array<{ id: string }> = []
 let failNext = false
+let offline = false
 const request = vi.fn(async () => {
+  if (offline) throw new TypeError('fetch failed')
   if (failNext) {
     failNext = false
     throw new Error('indexer unavailable')
@@ -31,6 +33,7 @@ beforeEach(() => {
   resetSchemaUidCaches()
   schemas = []
   failNext = false
+  offline = false
   request.mockClear()
   BaseQueryClient.configure(new NodeQueryClient())
   BaseEasClient.configure({ getEasClient: () => ({ request }) as never })
@@ -150,5 +153,33 @@ describe('getEasSchemaUidForModel', () => {
     expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
     expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
     expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns undefined instead of throwing when EAS is unreachable', async () => {
+    failNext = true
+    expect(await getEasSchemaUidForModel('Article')).toBeUndefined()
+    // Not cached as a miss: found once EAS answers again.
+    schemas = [{ id: UID_A }]
+    expect(await getEasSchemaUidForModel('Article')).toBe(UID_A)
+  })
+})
+
+describe('getEasSchemaUidForModel with a model_uids row', () => {
+  /** A drizzle-shaped stub: select().from().innerJoin().where().limit() resolves `rows`. */
+  const stubDb = (rows: Array<{ uid: string }>) => {
+    const chain = {
+      from: () => chain,
+      innerJoin: () => chain,
+      where: () => chain,
+      limit: async () => rows,
+    }
+    vi.spyOn(BaseDb, 'getAppDb').mockReturnValue({ select: () => chain } as never)
+  }
+
+  it('uses the stored UID without asking EAS, so it works offline', async () => {
+    stubDb([{ uid: UID_B }])
+    offline = true
+    expect(await getEasSchemaUidForModel('Post')).toBe(UID_B)
+    expect(request).not.toHaveBeenCalled()
   })
 })

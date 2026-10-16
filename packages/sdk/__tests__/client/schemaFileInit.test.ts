@@ -15,6 +15,10 @@ import {
 } from '../test-utils/client-init'
 import * as fs from 'fs'
 import * as path from 'path'
+import { createActor, fromCallback, waitFor } from 'xstate'
+import { clientManagerMachine } from '@/client/clientManagerMachine'
+import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
+import { WAIT_TIMEOUT_MS } from '../test-utils/timeouts'
 
 const testDescribe = typeof window === 'undefined'
   ? (describe.sequential || describe)
@@ -92,18 +96,20 @@ testDescribe('schemaFile init', () => {
     })
   })
 
-  describe('when schema file is missing', () => {
+  /**
+   * A schema the app passes in config must fail init when it cannot be loaded, not leave a
+   * "ready" client with none of its models. The shared Node client is already initialized (and
+   * init skips when ready), so these drive the client machine with the real processSchemaFiles
+   * actor and the other steps stubbed.
+   */
+  describe('when the configured schema cannot be loaded', () => {
+    let filesDir: string | undefined
+
     beforeAll(async () => {
-      if (typeof window !== 'undefined') {
-        return
-      }
-      await setupTestEnvironment({
-        testFileUrl: import.meta.url,
-        timeout: SETUP_HOOK_TIMEOUT_MS,
-        configOverrides: {
-          config: { schemaFile: 'nonexistent-schema.json' },
-        },
-      })
+      if (typeof window !== 'undefined') return
+      await setupTestEnvironment({ testFileUrl: import.meta.url, timeout: SETUP_HOOK_TIMEOUT_MS })
+      const { client } = await import('@/client')
+      filesDir = client.getService().getSnapshot().context.filesDir
     }, SETUP_HOOK_TIMEOUT_MS)
 
     afterAll(async () => {
@@ -111,12 +117,82 @@ testDescribe('schemaFile init', () => {
       await teardownTestEnvironment()
     })
 
-    it('succeeds without failing (graceful degradation)', async () => {
+    function schemaProcessingActor(config: { schemaFile?: string; schema?: string }) {
+      const succeed = (type: string) => fromCallback(({ sendBack }) => { sendBack({ type }) })
+      return createActor(
+        clientManagerMachine.provide({
+          actors: {
+            platformClassesInit: succeed(ClientManagerEvents.PLATFORM_CLASSES_READY),
+            fileSystemInit: succeed(ClientManagerEvents.FILE_SYSTEM_READY),
+            dbInit: succeed(ClientManagerEvents.DB_READY),
+            saveConfig: succeed(ClientManagerEvents.SAVE_CONFIG_SUCCESS),
+            addModelsToStore: succeed(ClientManagerEvents.ADD_MODELS_TO_STORE_SUCCESS),
+            addModelsToDb: succeed(ClientManagerEvents.ADD_MODELS_TO_DB_SUCCESS),
+          },
+        }),
+        {
+          input: {
+            isInitialized: false,
+            addressesSet: false,
+            isSaving: false,
+            syncFromEasOnAddressChange: false,
+            filesDir,
+            ...config,
+          },
+        },
+      )
+    }
+
+    async function runInit(config: { schemaFile?: string; schema?: string }) {
+      const actor = schemaProcessingActor(config)
+      actor.start()
+      actor.send({ type: 'init', options: { config: {}, addresses: [] } })
+      const snapshot = await waitFor(
+        actor,
+        (s) => s.value === ClientManagerState.INIT_FAILED || s.value === ClientManagerState.IDLE,
+        { timeout: WAIT_TIMEOUT_MS },
+      )
+      actor.stop()
+      return snapshot
+    }
+
+    it('fails init when schemaFile does not exist, naming the option and path', async () => {
       if (typeof window !== 'undefined') return
 
-      const db = BaseDb.getAppDb()
-      expect(db).toBeDefined()
-      // Client initialized successfully despite missing schema file
+      const snapshot = await runInit({ schemaFile: 'nonexistent-schema.json' })
+
+      expect(snapshot.value).toBe(ClientManagerState.INIT_FAILED)
+      expect(String(snapshot.context.initError)).toContain('config.schemaFile')
+      expect(String(snapshot.context.initError)).toContain('nonexistent-schema.json')
+    })
+
+    it('fails init when schema points at invalid JSON', async () => {
+      if (typeof window !== 'undefined') return
+      fs.writeFileSync(path.join(process.cwd(), 'broken-schema.json'), '{ not json')
+
+      const snapshot = await runInit({ schema: 'broken-schema.json' })
+
+      expect(snapshot.value).toBe(ClientManagerState.INIT_FAILED)
+      expect(String(snapshot.context.initError)).toContain('config.schema')
+      expect(String(snapshot.context.initError)).toContain('broken-schema.json')
+    })
+
+    it('a later init with a loadable schema succeeds after a failed one', async () => {
+      if (typeof window !== 'undefined') return
+      const failed = await runInit({ schemaFile: 'nonexistent-schema.json' })
+      expect(failed.value).toBe(ClientManagerState.INIT_FAILED)
+
+      fs.writeFileSync(
+        path.join(process.cwd(), 'retry-schema.json'),
+        JSON.stringify({
+          name: `${SCHEMA_NAME}Retry`,
+          models: { RetryNote: { properties: { body: { type: 'Text' } } } },
+        }),
+      )
+      const snapshot = await runInit({ schemaFile: 'retry-schema.json' })
+
+      expect(snapshot.context.initError).toBeUndefined()
+      expect(snapshot.value).toBe(ClientManagerState.IDLE)
     })
   })
 })

@@ -1,4 +1,5 @@
 import { waitFor } from '@testing-library/react'
+import { WAIT_TIMEOUT_MS } from '../../../sdk/__tests__/test-utils/timeouts'
 
 /**
  * Bounded wait for a condition that the calling test tolerates never becoming true.
@@ -26,7 +27,7 @@ export async function waitUntil(
 export async function waitUntilOrThrow(
   condition: () => boolean | Promise<boolean>,
   description: string,
-  timeout = 2000,
+  timeout = WAIT_TIMEOUT_MS,
 ): Promise<void> {
   if (!(await waitUntil(condition, timeout))) {
     throw new Error(`Timed out after ${timeout}ms waiting for ${description}`)

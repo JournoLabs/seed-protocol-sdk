@@ -79,7 +79,7 @@ async function debugSchemaModels() {
 
     // Step 4: Create Schema instance
     console.log('Step 4: Creating Schema instance...')
-    const schema = Schema.create(schemaName)
+    const schema = Schema.create(schemaName, { waitForReady: false })
     console.log('✓ Schema instance created\n')
 
     // Step 5: Wait for schema to load

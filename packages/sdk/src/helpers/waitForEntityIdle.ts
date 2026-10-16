@@ -1,5 +1,11 @@
 import { waitFor } from 'xstate'
 
+/**
+ * Default readyTimeout for create/find/all with waitForReady. Loads that touch OPFS and the DB can take
+ * several seconds on slow devices and CI runners; a load that is really stuck still errors.
+ */
+export const DEFAULT_READY_TIMEOUT_MS = 15_000
+
 /** Any entity that exposes an xstate actor via getService(). Loosely typed so Schema/Model/Item/ModelProperty (different machine contexts) are all accepted. */
 interface EntityWithService {
   getService(): any
@@ -18,7 +24,7 @@ export async function waitForEntityIdle(
     throwOnError?: boolean
   } = {}
 ): Promise<void> {
-  const { timeout = 5000, throwOnError = true } = options
+  const { timeout = DEFAULT_READY_TIMEOUT_MS, throwOnError = true } = options
   const service = entity.getService()
   const currentSnapshot = service.getSnapshot()
 

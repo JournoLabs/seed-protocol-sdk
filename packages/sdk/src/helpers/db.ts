@@ -11,17 +11,20 @@ import { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { DbQueryResult, ModelDefinitions, ResultObject } from '@/types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { SQLiteTableWithColumns } from 'drizzle-orm/sqlite-core'
-import { toSnakeCase } from 'drizzle-orm/casing'
+import { easName } from '@seedprotocol/eas'
+import { listRelationEasPropertyName, toMetadataPropertyName } from '@/helpers/metadataPropertyNames'
 import { and, eq, isNull, SQL } from 'drizzle-orm'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { SchemaType, schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas, ModelSchemaType } from '@/seedSchema/ModelSchemaSchema'
 import { InferInsertModel } from 'drizzle-orm'
 import { ModelPropertyMachineContext } from '@/ModelProperty/service/modelPropertyMachine'
+import { refreshCachedProperties } from './cachedPropertyRefresh'
 // Dynamic import to break circular dependency: Model -> ... -> helpers/db -> ModelProperty -> ... -> Model
 // import { ModelProperty } from '@/ModelProperty/ModelProperty'
 import debug from 'debug'
 import { isSqliteUniqueConstraintError } from '@/helpers/isSqliteUniqueConstraintError'
+import { clearNameMatchLevels } from '@/db/read/nameMatchLevels'
 import {
   resolveModelRecord,
   resolveModelRecordByNameOrType,
@@ -195,7 +198,7 @@ export async function migrateMetadataForPropertyRename(
   }
 
   // Fallback: update metadata with null propertyId (legacy rows) by propertyName + modelType
-  const modelType = toSnakeCase(modelName)
+  const modelType = easName(modelName)
   const toUpdateByFallback = await db
     .select({ localId: metadata.localId })
     .from(metadata)
@@ -233,6 +236,59 @@ export async function migrateMetadataForPropertyRename(
     )
   }
   return total
+}
+
+/**
+ * Moves a renamed property's metadata rows to its new name: rows linked by propertyId, and legacy
+ * rows without one by name and model type. Each stored form of the name moves to the same form of
+ * the new one: the key (`author` → `writer`), a single relation's `<key>Id` (`authorId` →
+ * `writerId`), a list relation's storage name (`authorIdentityIds` → `writerIdentityIds`).
+ * Returns the number of rows moved.
+ */
+export async function moveMetadataToRenamedProperty(
+  db: NonNullable<ReturnType<typeof BaseDb.getAppDb>>,
+  {
+    propertyId,
+    modelType,
+    oldName,
+    newName,
+    propertyDef,
+  }: {
+    propertyId: number
+    modelType: string
+    oldName: string
+    newName: string
+    propertyDef?: { dataType?: string; refValueType?: string; ref?: string; refModelName?: string }
+  },
+): Promise<number> {
+  const forms = (name: string) => [
+    name,
+    toMetadataPropertyName(name, propertyDef?.dataType, propertyDef?.refValueType),
+    listRelationEasPropertyName(name, propertyDef) ?? name,
+  ]
+  const oldForms = forms(oldName)
+  const newForms = forms(newName)
+  let moved = 0
+  const seen = new Set<string>()
+  for (let i = 0; i < oldForms.length; i++) {
+    const from = oldForms[i]!
+    const to = newForms[i]!
+    if (from === to || seen.has(from)) continue
+    seen.add(from)
+    const byId = await db
+      .update(metadata)
+      .set({ propertyName: to })
+      .where(and(eq(metadata.propertyId, propertyId), eq(metadata.propertyName, from)))
+      .returning({ localId: metadata.localId })
+    const legacy = await db
+      .update(metadata)
+      .set({ propertyName: to })
+      .where(and(isNull(metadata.propertyId), eq(metadata.propertyName, from), eq(metadata.modelType, modelType)))
+      .returning({ localId: metadata.localId })
+    moved += byId.length + legacy.length
+  }
+  if (moved > 0) logger(`[moveMetadataToRenamedProperty] moved ${moved} metadata rows ${oldName} -> ${newName}`)
+  return moved
 }
 
 export const getObjectForRow = (row: any): ResultObject => {
@@ -581,6 +637,9 @@ export const addSchemaToDb = async (
     throw new Error('Database not found')
   }
 
+  // The stored schema file may change its nameMatch levels (ADR 0009).
+  clearNameMatchLevels()
+
   // First, try to find existing schema by schemaFileId (preferred for change tracking)
   if (schemaFileId) {
     const existingByFileId = await db
@@ -733,6 +792,22 @@ export const addSchemaToDb = async (
   }
 
   if (existingSchemas.length > 0) {
+    // The row is per schema name and holds its latest version. A complete schema file can bring
+    // a version under its own id (SDK version bumps keep the id; imported files may not).
+    const isOtherVersionFile =
+      !!schemaFileId &&
+      !!existingSchemas[0].schemaFileId &&
+      existingSchemas[0].schemaFileId !== schemaFileId &&
+      existingSchemas[0].isDraft !== true &&
+      schema.version !== undefined &&
+      schema.version !== existingSchemas[0].version
+    if (isOtherVersionFile && schema.version! < existingSchemas[0].version) {
+      // An older version's file: rolling the row back to it would leave the newer version's id
+      // pointing at the older version's data.
+      logger(`Keeping schema "${schema.name}" at v${existingSchemas[0].version}; not replacing it with older v${schema.version}`)
+      return existingSchemas[0]
+    }
+
     // Update fields if provided
     const updates: Partial<typeof schemas.$inferInsert> = {}
     // Update schemaFileId if provided and different from existing (or if existing doesn't have one or is null)
@@ -744,9 +819,11 @@ export const addSchemaToDb = async (
       // 1. Existing schema is a draft (can be updated)
       // 2. Existing schema has no schemaFileId (should be set)
       // 3. We're explicitly setting isDraft to false (updating from draft to non-draft)
-      const shouldUpdate = existingSchemas[0].isDraft === true || 
-                          !existingSchemas[0].schemaFileId || 
-                          (isDraft === false && existingSchemas[0].isDraft === true)
+      // 4. It's a newer version's file: the row takes that version's data, so it takes its id too
+      const shouldUpdate = existingSchemas[0].isDraft === true ||
+                          !existingSchemas[0].schemaFileId ||
+                          (isDraft === false && existingSchemas[0].isDraft === true) ||
+                          isOtherVersionFile
       
       if (shouldUpdate) {
         logger(`Updating schemaFileId from "${existingSchemas[0].schemaFileId}" to "${schemaFileId}" for schema "${schema.name}"`)
@@ -1115,6 +1192,7 @@ export const addModelsToDb = async (
     schemaFileId?: string
     modelFileIds?: Map<string, string>
     propertyFileIds?: Map<string, Map<string, string>>
+    propertyDefinitions?: Map<string, { [propertyName: string]: any }>
   },
 ) => {
   const db = BaseDb.getAppDb()
@@ -1122,6 +1200,9 @@ export const addModelsToDb = async (
   if (!db) {
     throw new Error('Database not found')
   }
+
+  // Model rows and their schema links decide which schema file's nameMatch applies (ADR 0009).
+  clearNameMatchLevels()
 
   // If schema is provided, add it to the database
   // Note: schema might already be a database record (with id) if passed from importJsonSchema
@@ -1150,6 +1231,9 @@ export const addModelsToDb = async (
   const modelRecords = new Map<string, NewModelRecord>()
   const modelProcessingErrors: Array<{ modelName: string; error: string }> = []
   
+  // Property rows this call changed, so cached ModelProperty instances can be given the new values
+  const updatedPropertyFileIds: string[] = []
+
   for (const [modelName, modelClass] of Object.entries(models)) {
     try {
       const modelFileId = schemaFileData?.modelFileIds?.get(modelName)
@@ -1198,8 +1282,13 @@ export const addModelsToDb = async (
     
     // If context properties are empty, try modelClass.properties (for backward compatibility)
     // but convert ModelProperty instances to object format
+    // Property definitions read from the schema file win: a cached Model keeps the properties it
+    // was created with, so after a rename its context still has the old name.
+    const filePropertyDefinitions = schemaFileData?.propertyDefinitions?.get(modelName)
     let schema: { [propertyName: string]: any } = {}
-    if (Object.keys(contextProperties).length > 0) {
+    if (filePropertyDefinitions) {
+      schema = filePropertyDefinitions
+    } else if (Object.keys(contextProperties).length > 0) {
       schema = contextProperties
     } else if (Object.keys(pendingProperties).length > 0) {
       // Use pending property definitions (from JSON import)
@@ -1223,7 +1312,8 @@ export const addModelsToDb = async (
       
       // Get property schemaFileId if available
       let propertyFileId = schemaFileData?.propertyFileIds?.get(modelName)?.get(propertyName)
-      
+      const propertyFileIdGenerated = !propertyFileId
+
       // If no propertyFileId from map, generate a random ID
       // IDs should be generated in the import process before calling addModelsToDb
       if (!propertyFileId) {
@@ -1286,32 +1376,8 @@ export const addModelsToDb = async (
         propertyData.refValueType = null
       }
 
-      // If not found by name, try to find by position/characteristics (for renamed properties)
-      if (!existingProperty) {
-        // Look for unmatched DB properties that could be this renamed property
-        // Match by: same dataType, same refModelId (if applicable), and not matching any schema property name
-        const potentialMatches = allDbProperties.filter((p: PropertyType) => 
-          !matchedDbPropertyIds.has(p.id!) &&
-          !schemaPropertyNames.has(p.name) && // This DB property doesn't match any schema property name
-          p.dataType === propertyValues.dataType &&
-          (expectedRefModelId === null 
-            ? p.refModelId === null 
-            : p.refModelId === expectedRefModelId) &&
-          (propertyValues.refValueType 
-            ? p.refValueType === propertyValues.refValueType 
-            : p.refValueType === null)
-        )
-        
-        // If we find exactly one match, or if we're at the same position index, use it
-        // For now, use the first match (could be enhanced to use position more precisely)
-        if (potentialMatches.length > 0) {
-          const matchedProperty = potentialMatches[0]
-          existingProperty = matchedProperty
-          logger(
-            `Found renamed property: ${modelName}:${matchedProperty.name} -> ${propertyName} (matched by characteristics)`,
-          )
-        }
-      }
+      // ADR 0008: a rename needs the property's id. A name that matches no stored property by id
+      // or name is a new property, even if one of the same type was removed in the same edit.
 
       if (existingProperty) {
         // Mark this DB property as matched
@@ -1349,6 +1415,10 @@ export const addModelsToDb = async (
         // Ensure schemaFileId is updated if we have it
         // Preserve existing isEdited value if it was true (local edits take precedence)
         const updateData = { ...propertyData }
+        // A generated id must not replace the one the row already has from its schema file
+        if (propertyFileIdGenerated && existingProperty.schemaFileId) {
+          updateData.schemaFileId = existingProperty.schemaFileId
+        }
         if (existingProperty.isEdited === true) {
           // Preserve isEdited = true if property was locally edited
           delete updateData.isEdited
@@ -1372,6 +1442,18 @@ export const addModelsToDb = async (
             .update(properties)
             .set(updateData)
             .where(eq(properties.id, existingProperty.id!))
+          const updatedFileId = updateData.schemaFileId ?? existingProperty.schemaFileId
+          if (updatedFileId) updatedPropertyFileIds.push(updatedFileId)
+        }
+        if (existingProperty.name !== propertyName) {
+          // Renamed (matched by id): its values move to the new name.
+          await moveMetadataToRenamedProperty(db, {
+            propertyId: existingProperty.id!,
+            modelType: easName(modelName),
+            oldName: existingProperty.name,
+            newName: propertyName,
+            propertyDef: propertyValues,
+          })
         }
       } else {
         // Property doesn't exist, create it with schemaFileId
@@ -1450,6 +1532,9 @@ export const addModelsToDb = async (
   } else if (schemaRecord && !schemaRecord.id) {
     logger(`Warning: schemaRecord provided but has no id, cannot create join table entries`)
   }
+
+  // A cached instance is otherwise never re-read from its row (createById returns it as is)
+  await refreshCachedProperties(updatedPropertyFileIds)
 }
 
 /**

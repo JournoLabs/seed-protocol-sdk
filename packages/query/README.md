@@ -159,7 +159,16 @@ Feed still owns serialized RSS/Atom/JSON bodies, HTTP `ETag` / 304, and image-me
 
 ## Init
 
-Call `initializeQueryPlatform()` once (registers Node EAS + Arweave clients), or rely on `getSeed` / `queryBySchema` which initialize automatically.
+Call `initializeQueryPlatform()` once, or rely on `getSeed` / `queryBySchema` which initialize automatically.
+
+Init only fills in what is missing. EAS and Arweave clients that are already registered, such as SeedClient's in a page or process running the SDK, are used as they are, along with the SDK's chain and Arweave gateway. So query can run beside SeedClient without replacing its clients.
+
+- **EAS:** registers the default fetch-based EAS and query clients (`ensureEasPlatform()` from `@seedprotocol/eas`) when none are registered.
+- **Arweave:** with no Arweave client registered, the Node entry registers the Node client. The browser entry only sets the read gateway, because query only needs the host. It never loads `@seedprotocol/eas/node` or `@seedprotocol/arweave/node`.
+- **`arweaveDomain`:** when passed, it always sets the gateway host.
+- **One copy of each package:** if the clients were registered on another copy of `@seedprotocol/eas` or `@seedprotocol/arweave`, for example a second install or a separate Vite pre-bundle, every query call throws `DuplicateEasModuleError` or `DuplicateArweaveModuleError`. It doesn't quietly use other clients and another chain. To fix it, install every `@seedprotocol/*` package at the same version and only once (`npm ls @seedprotocol/eas`). With Vite, `seedVitePlugin` pre-bundles eas, arweave and query together.
+
+`source: 'remote'` (the default) always reads EAS, even when a local source is registered.
 
 For local reads, also ensure the SDK client has initialized (registers `registerLocalQuerySource`) or call `registerSeedQueryLocalSource()` / `registerLocalQuerySource` yourself.
 

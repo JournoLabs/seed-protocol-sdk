@@ -294,6 +294,20 @@ export const createAttestationsDirectToEas = fromPromise(
       if (r.localId && r.seedUid !== ZERO_BYTES32) resolvedUids[r.localId] = r.seedUid
     }
 
+    const itemWithPersist = item as {
+      seedUid?: string
+      seedLocalId?: string
+      persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
+    }
+    const persistCreatedSeed = async (seedLocalId: string, seedUid: string, attestationMs: number) => {
+      if (seedLocalId === item.seedLocalId) {
+        itemWithPersist.seedUid = seedUid
+        await persistSeedUidSafely(itemWithPersist, address, attestationMs)
+      } else {
+        await recordRelatedSeedUid({ seedLocalId, seedUid, publisherAddress: address, attestationCreatedAtMs: attestationMs })
+      }
+    }
+
     for (let i = 0; i < normalizedRequests.length; i++) {
       const request = normalizedRequests[i] as NormalizedRequest
       let newSeedUid = request.seedUid
@@ -322,6 +336,10 @@ export const createAttestationsDirectToEas = fromPromise(
         if (request.localId) {
           createdSeeds.set(request.localId, { seedUid: seedUidFromReceipt, attestationMs: lastAttestationMs })
           resolvedUids[request.localId] = seedUidFromReceipt
+          // Record the seed now: each attestation is its own transaction, so a later one failing
+          // must not leave this seed on chain with no local row pointing at it (a retry would
+          // attest a second seed for the same item).
+          await persistCreatedSeed(request.localId, seedUidFromReceipt, lastAttestationMs)
         }
         batchExtraUids.push(seedUidFromReceipt)
         logger('created Seed attestation', newSeedUid)
@@ -428,24 +446,18 @@ export const createAttestationsDirectToEas = fromPromise(
 
     // The publishing item gets its own request's seed (requests are not ordered root-first: a
     // related item can be request [0]); every related item records the seed created for it.
-    persistSeedUidFromPublishResult(item as { seedUid?: string; seedLocalId?: string }, normalizedRequests)
-    const itemWithPersist = item as {
-      persistSeedUid?: (publisher?: string, attestationCreatedAtMs?: number) => Promise<void>
-    }
+    // Seeds created above were recorded as they were attested. An item whose seed already existed
+    // still gets its seed uid set and persisted here.
+    persistSeedUidFromPublishResult(itemWithPersist, normalizedRequests)
     const rootRequest =
       normalizedRequests.find((r) => r.localId === item.seedLocalId) ?? normalizedRequests[0]
-    if (rootRequest?.seedUid && rootRequest.seedUid !== ZERO_BYTES32) {
+    if (
+      rootRequest?.seedUid &&
+      rootRequest.seedUid !== ZERO_BYTES32 &&
+      !(item.seedLocalId && createdSeeds.has(item.seedLocalId))
+    ) {
       const rootSeedMs = createdSeeds.get(rootRequest.localId)?.attestationMs ?? lastAttestationMs
       await persistSeedUidSafely(itemWithPersist, address, rootSeedMs)
-    }
-    for (const [seedLocalId, { seedUid, attestationMs }] of createdSeeds) {
-      if (seedLocalId === rootRequest?.localId) continue
-      await recordRelatedSeedUid({
-        seedLocalId,
-        seedUid,
-        publisherAddress: address,
-        attestationCreatedAtMs: attestationMs,
-      })
     }
 
     try {

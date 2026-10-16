@@ -3,7 +3,8 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { metadata, seeds, versions } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import { getItemsData } from '@/db/read/getItems'
-import { isItemOwned } from '@/helpers/ownership'
+import { isItemOwned, isSeedRowOwned, type SeedOwnershipRow } from '@/helpers/ownership'
+import { ZERO_BYTES32 } from '@/helpers/constants'
 import { getAddressesForItemsFilter } from '@/helpers/db'
 import { setAdditionalSyncAddresses } from '@/helpers/publishConfig'
 import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
@@ -78,14 +79,63 @@ testDescribe('ownership address policy', () => {
     expect(await client.getAddresses()).toEqual({ owned: [], watched: [] })
   })
 
-  it('empty owned + addressFilter owned returns no rows', async () => {
+  it('empty owned + addressFilter owned lists only local unsealed drafts', async () => {
     const { client } = await import('@/client')
-    const localId = `empty-owned-${Date.now()}`
-    await insertListedSeed({ localId, publisher: OWNED })
+    const t = Date.now()
+    const stampedId = `empty-owned-${t}`
+    const draftId = `empty-owned-draft-${t}`
+    await insertListedSeed({ localId: stampedId, publisher: OWNED })
+    await insertListedSeed({ localId: draftId, publisher: null, uid: null })
     await client.setAddresses({ owned: [] })
 
     const rows = await getItemsData({ includeEas: true, addressFilter: 'owned' })
-    expect(rows).toEqual([])
+    const ids = rows.map((r) => r.seedLocalId)
+    expect(ids).toContain(draftId)
+    expect(ids).not.toContain(stampedId)
+    expect(await isItemOwned({ seedLocalId: draftId })).toBe(true)
+  })
+
+  it('addressFilter owned lists a row exactly when isSeedRowOwned is true', async () => {
+    const { client } = await import('@/client')
+    const prefix = `parity-${Date.now()}-`
+    const OTHER = '0xdef0000000000000000000000000000000000009'
+    const raw = (attester: string) => JSON.stringify({ attester })
+    const cases: Record<string, SeedOwnershipRow> = {
+      draftNull: { publisher: null, uid: null, attestationRaw: null },
+      draftBlank: { publisher: '', uid: '', attestationRaw: '' },
+      draftNULL: { publisher: null, uid: 'NULL', attestationRaw: null },
+      draftZero: { publisher: null, uid: ` ${ZERO_BYTES32} `, attestationRaw: null },
+      draftClaimed: { publisher: OWNED, uid: null, attestationRaw: null },
+      stampedOwned: { publisher: OWNED_CHECKSUM, uid: REAL_UID, attestationRaw: null },
+      stampedOther: { publisher: OTHER, uid: REAL_UID, attestationRaw: null },
+      realUidNoPublisher: { publisher: null, uid: REAL_UID, attestationRaw: null },
+      attesterOwned: { publisher: null, uid: REAL_UID, attestationRaw: raw(OWNED_CHECKSUM) },
+      attesterOwnedBlankPublisher: { publisher: '', uid: REAL_UID, attestationRaw: raw(OWNED) },
+      attesterOther: { publisher: null, uid: REAL_UID, attestationRaw: raw(OTHER) },
+      attesterNoUid: { publisher: null, uid: null, attestationRaw: raw(OWNED) },
+      attesterMissing: { publisher: null, uid: REAL_UID, attestationRaw: '{}' },
+      malformedRaw: { publisher: null, uid: REAL_UID, attestationRaw: 'not json' },
+      publisherWinsOverAttester: { publisher: OTHER, uid: REAL_UID, attestationRaw: raw(OWNED) },
+    }
+    for (const [name, row] of Object.entries(cases)) {
+      await insertListedSeed({ localId: `${prefix}${name}`, ...row })
+    }
+
+    for (const owned of [[], [OWNED], [OWNED_CHECKSUM, OTHER]]) {
+      await client.setAddresses({ owned })
+      const persisted = await getAddressesForItemsFilter('owned')
+      const rows = await getItemsData({ includeEas: true, addressFilter: 'owned' })
+      const listed = rows
+        .map((r) => r.seedLocalId)
+        .filter((id): id is string => !!id && id.startsWith(prefix))
+        .map((id) => id.slice(prefix.length))
+        .sort()
+      const expected = Object.entries(cases)
+        .filter(([, row]) => isSeedRowOwned(row, persisted))
+        .map(([name]) => name)
+        .sort()
+      expect({ owned, listed }).toEqual({ owned, listed: expected })
+    }
   })
 
   it('matches checksummed publisher to lowercase owned and excludes nulls', async () => {

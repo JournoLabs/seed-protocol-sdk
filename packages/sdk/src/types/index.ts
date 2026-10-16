@@ -37,9 +37,13 @@ export interface WebpackConfigContext {
 export type Environment = 'browser' | 'node' | 'react-native'
 
 
+/** Where the Node SQLite database lives (`config.dbConfig`). The browser keeps its database in OPFS and ignores it. */
 export interface DbConfig {
+  /** libsql URL or file path for the database. Default: `<filesDir>/db/seed.db`. */
   dbUrl?: string
+  /** @deprecated Unused — schema is the static SDK seedSchema + prebuilt SQL migrations */
   schemaDir?: string
+  /** Directory the SDK's migration SQL is copied to and run from. Default: `<filesDir>/db`. */
   outDir?: string
 }
 
@@ -67,13 +71,17 @@ export interface SeedConfig {
   }
   filesDir?: string
   dbConfig?: DbConfig
-  /** Path to schema JSON file (e.g. 'schema.json'). Node: relative to process.cwd(); Browser: relative to working dir */
+  /**
+   * Path to schema JSON file (e.g. 'schema.json'). Node: relative to process.cwd(); Browser: relative to working dir.
+   * `client.init` rejects if the file cannot be read or imported.
+   */
   schemaFile?: string
   /**
    * Single canonical schema for the app. When provided:
    * - Loaded automatically at init (no separate import needed)
    * - Always applied on each app start (add/update models & properties)
    * - No "already exists with different content" errors
+   * - `client.init` rejects if it cannot be read or applied
    * - string: path to schema file (Node: relative to process.cwd(); Browser: relative to working dir)
    * - object: complete SchemaFileFormat inlined
    */
@@ -97,6 +105,13 @@ export type AddressConfiguration =
 
 export interface SeedConstructorOptions {
   config: SeedConfig
+  /**
+   * Addresses to save at init. Leave it out to keep the addresses already stored (the
+   * SDK warns once when it does). Pass `[]` (or `{ owned: [] }`) to clear them, e.g.
+   * before a wallet connects. In a second tab, `[]` keeps the first tab's addresses
+   * (docs/MULTI_TAB.md). Calling init again with only different addresses applies them
+   * like `client.setAddresses`.
+   */
   readonly addresses?: AddressConfiguration
   /**
    * When true, after `setAddresses` persists to app_state, the SDK runs `runSyncFromEas`
@@ -120,6 +135,15 @@ export interface SeedConstructorOptions {
 export interface CreateWaitOptions {
   waitForReady?: boolean
   readyTimeout?: number
+}
+
+export interface ItemCreateOptions extends CreateWaitOptions {
+  /**
+   * Item.create rejects unknown keys and values that break their property's type or rules
+   * (ItemCreateValidationError). Pass false only to import data that is already stored or
+   * attested as-is; the values are then written unchecked.
+   */
+  validate?: boolean
 }
 
 export type ClientCallback = (event: any) => void

@@ -6,6 +6,7 @@ import { eq, sql } from 'drizzle-orm'
 import { firstValueFrom, take, timeout } from 'rxjs'
 import { setupTestEnvironment, SETUP_HOOK_TIMEOUT_MS } from '../../test-utils/client-init'
 import { BaseFileManager } from '@/helpers'
+import { waitUntilOrThrow } from '../../test-utils/waitUntil'
 
 describe('Browser Db Integration Tests', () => {
   beforeAll(async () => {
@@ -283,7 +284,7 @@ describe('Browser Db Integration Tests', () => {
       })
 
       // Wait for initial emission
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await waitUntilOrThrow(() => emissions.length >= 1, 'initial liveQuery emission')
 
       // Trigger multiple updates that don't change the data
       await db
@@ -299,14 +300,20 @@ describe('Browser Db Integration Tests', () => {
         .set({ name: 'UpdatedDistinctModel' })
         .where(eq(models.id, model.id!))
 
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      await waitUntilOrThrow(
+        () => emissions.some((rows) => rows[0]?.name === 'UpdatedDistinctModel'),
+        'liveQuery emission after the update',
+      )
 
       subscription.unsubscribe()
 
       // Should have at least initial emission and the update emission
       // distinctUntilChanged should prevent duplicate emissions for same data
-      expect(emissions.length).toBeGreaterThanOrEqual(1)
-    }, 10000)
+      expect(emissions.length).toBeGreaterThanOrEqual(2)
+      for (let i = 1; i < emissions.length; i++) {
+        expect(emissions[i]).not.toEqual(emissions[i - 1])
+      }
+    })
   })
 
   describe('Error Handling', () => {

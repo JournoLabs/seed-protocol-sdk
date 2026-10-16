@@ -8,7 +8,7 @@ import { SnapshotFrom, Subscription } from "xstate"
 import { schemaMachine, SEED_PROTOCOL_SCHEMA_NAME } from '@seedprotocol/sdk'
 import { useLiveQuery } from "./liveQuery"
 import { BaseDb, schemas as schemasTable } from '@seedprotocol/sdk'
-import { desc } from "drizzle-orm"
+import { desc, eq, or } from "drizzle-orm"
 import type { SchemaType as DbSchemaType } from '@seedprotocol/sdk'
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -31,44 +31,46 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
 
   const isClientReady = useIsClientReady()
 
-  const loadSchema = useCallback((identifier: string) => {
+  const loadSchema = useCallback(async (identifier: string, isCurrent: () => boolean) => {
     setIsLoading(true)
     setError(null)
     try {
+      // Look the schema up only: Schema.create would add a draft schema for a name that doesn't
+      // exist (e.g. a typo), so check the schemas table first.
+      if (!(await schemaExists(identifier))) {
+        if (!isCurrent()) return
+        setSchema(null)
+        setIsLoading(false)
+        return
+      }
+      if (!isCurrent()) return
       const schemaInstance = Schema.create(identifier, {
         waitForReady: false,
       }) as Schema
       setSchema(schemaInstance)
 
       const service = schemaInstance.getService()
-      const initialSnapshot = service.getSnapshot()
-
-      // Set initial loading state based on whether status is 'idle'
-      const isIdle = initialSnapshot.value === 'idle'
-      if (isIdle) {
-        flushSync(() => setIsLoading(false))
-        setError(null)
-      } else {
-        setIsLoading(true)
-      }
-
-      // Subscribe to all status changes and update isLoading based on whether status is 'idle'
-      subscriptionRef.current = service.subscribe((snapshot: SchemaSnapshot) => {
-        const isIdle = snapshot.value === 'idle'
-        if (isIdle) {
+      const apply = (snapshot: SchemaSnapshot) => {
+        if (snapshot.value === 'idle') {
           flushSync(() => setIsLoading(false))
           setError(null)
+        } else if (snapshot.value === 'error') {
+          // A failed load used to report isLoading: true, error: null forever.
+          const err = snapshot.context._loadingError?.error
+          setIsLoading(false)
+          setError(err instanceof Error ? err : new Error(`Failed to load schema "${identifier}"`))
         } else {
           setIsLoading(true)
         }
-      })
-
+      }
+      apply(service.getSnapshot())
+      subscriptionRef.current = service.subscribe(apply)
     } catch (error) {
       logger('[useSchema] Error creating schema:', error)
+      if (!isCurrent()) return
       setError(error as Error)
       setSchema(null)
       setIsLoading(false)
-      return null
     }
   }, [])
 
@@ -92,10 +94,12 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
       return
     }
 
-    loadSchema(schemaIdentifier)
-    
+    let current = true
+    void loadSchema(schemaIdentifier, () => current)
+
     // Cleanup function to unsubscribe when effect re-runs or component unmounts
     return () => {
+      current = false
       if (subscriptionRef.current) {
         subscriptionRef.current.unsubscribe()
         subscriptionRef.current = null
@@ -109,6 +113,19 @@ export const useSchema = (schemaIdentifier: string | null | undefined) => {
     error,
   }
 
+}
+
+/** Whether a schema with this name or schema file id is stored (or is the built-in one). */
+async function schemaExists(identifier: string): Promise<boolean> {
+  if (identifier === SEED_PROTOCOL_SCHEMA_NAME) return true
+  const db = BaseDb.getAppDb()
+  if (!db) return true // can't tell yet: let Schema.create resolve it
+  const rows = await db
+    .select({ id: schemasTable.id })
+    .from(schemasTable)
+    .where(or(eq(schemasTable.name, identifier), eq(schemasTable.schemaFileId, identifier)))
+    .limit(1)
+  return rows.length > 0
 }
 
 const SEED_SCHEMAS_QUERY_KEY = ['seed', 'schemas'] as const
@@ -169,6 +186,7 @@ export const useSchemas = () => {
 
     const currentSchemasSet = new Set<string>()
     for (const schema of schemasRef.current) {
+      if (schema.metadata?.name === SEED_PROTOCOL_SCHEMA_NAME) continue
       const schemaFileId = schema.id || schema.schemaFileId
       if (schemaFileId) {
         currentSchemasSet.add(schemaFileId)
@@ -204,7 +222,10 @@ export const useSchemas = () => {
       tableDataSchemasSet.size > 0 &&
       [...tableDataSchemasSet].some((id) => !currentSchemasSet.has(id))
 
-    if (!setsAreEqual && tableHasNewRows) {
+    // A listed schema whose rows are gone was deleted (Schema.destroy): refetch so it leaves.
+    const tableLostRows = [...currentSchemasSet].some((id) => !tableDataSchemasSet.has(id))
+
+    if (!setsAreEqual && (tableHasNewRows || tableLostRows)) {
       queryClient.invalidateQueries({ queryKey: SEED_SCHEMAS_QUERY_KEY })
     }
   }, [isClientReady, schemasTableData, queryClient])
@@ -280,9 +301,6 @@ export const useDestroySchema = (): UseDestroySchemaReturn => {
     setIsLoading(true)
     try {
       await schema.destroy()
-      // destroy() reports DB failures via the service context instead of throwing
-      const ctx = schema.getService().getSnapshot().context as { _destroyError?: { message: string } | null }
-      if (ctx._destroyError) setError(new Error(ctx._destroyError.message))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       throw err
@@ -301,6 +319,10 @@ export const useDestroySchema = (): UseDestroySchemaReturn => {
   }
 }
 
+/**
+ * One Schema instance per stored schema name, each at its latest version (despite the name, not
+ * one per version). Instances are released on unmount; ones other hooks also use keep running.
+ */
 export const useAllSchemaVersions = () => {
   const [schemaInstances, setSchemaInstances] = useState<Schema[] | undefined | null>()
   const schemaInstancesRef = useRef<Map<string, Schema>>(new Map())

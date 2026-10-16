@@ -55,7 +55,8 @@ export function useEasSyncProcessById(
     [db, id],
   )
   const records = useLiveQuery(query)
-  const isLoading = records === undefined
+  // Without an id (or before the DB is open) there is nothing to load: not loading forever
+  const isLoading = query != null && records === undefined
   const record = records && records.length > 0 ? (records[0] as EasSyncProcessRecord) : null
   return { record, isLoading }
 }

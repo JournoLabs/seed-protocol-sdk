@@ -1,25 +1,9 @@
 import { BaseEasClient } from '../EasClient/BaseEasClient.js'
-import type { IEasClient } from '../EasClient/IEasClient.js'
-import { getEasEndpoint } from '../easEndpoint.js'
-import { GraphQLClient } from 'graphql-request'
+import { DefaultEasClient } from '../default/EasClient.js'
 
-export class NodeEasClient implements IEasClient {
-  private easClient: { url: string; client: GraphQLClient } | undefined
-
-  /** Reads the endpoint per call so SDK / publish chain config applied after import takes effect. */
-  getEasClient(): GraphQLClient {
-    const url = getEasEndpoint()
-    if (this.easClient?.url !== url) {
-      this.easClient = { url, client: new GraphQLClient(url) }
-    }
-    return this.easClient.client
-  }
-}
+export class NodeEasClient extends DefaultEasClient {}
 
 /** @deprecated Prefer NodeEasClient */
 export const EasClient = NodeEasClient
 
 BaseEasClient.configure(new NodeEasClient())
-
-const _check: IEasClient = new NodeEasClient()
-void _check

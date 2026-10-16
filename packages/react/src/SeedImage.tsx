@@ -2,7 +2,7 @@ import React, { useState, useEffect, DetailedHTMLProps, ImgHTMLAttributes } from
 import debug                                                                                    from 'debug'
 import { BaseFileManager } from '@seedprotocol/sdk'
 import { useItemProperty } from "./itemProperty"
-import { ItemProperty } from '@seedprotocol/sdk'
+import type { IItemProperty } from '@seedprotocol/sdk'
 import { useEnsureLocalImage } from './useEnsureLocalImage'
 
 const logger = debug('seedSdk:react:SeedImage')
@@ -46,7 +46,8 @@ function matchFileNameWithoutExtension(fileName: string, targetName: string): bo
 }
 
 export type SeedImageProps = DetailedHTMLProps<ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement> & {
-  imageProperty: ItemProperty<any>
+  /** The image property, e.g. from useItemProperty or item.properties. */
+  imageProperty: IItemProperty<any>
   alt?: string
   width?: number
   height?: number
@@ -81,7 +82,7 @@ const SeedImageInner = ({
   // Resolved filename: explicit override, or from property
   const resolvedFilename = filenameOverride ?? (property?.refResolvedValue ?? property?.value) as string | undefined
 
-  const { status: ensureStatus, gatewayHref } = useEnsureLocalImage({
+  const { status: ensureStatus, gatewayHref, onGatewayError } = useEnsureLocalImage({
     imageProperty: property ?? imageProperty,
     filename: filenameOverride,
     width,
@@ -224,15 +225,24 @@ const SeedImageInner = ({
     (ensure && !hasContentUrl ? gatewayHref : undefined) ||
     'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
+  // A gateway that 404s (e.g. the image hasn't propagated there yet) moves on to the next one.
+  const { onError: onErrorProp, ...imgProps } = props
+  const handleError: React.ReactEventHandler<HTMLImageElement> = (event) => {
+    if (gatewayHref && imgSrc === gatewayHref) onGatewayError()
+    onErrorProp?.(event)
+  }
+
   return (
-    <img src={imgSrc} alt={props.alt || imageProperty.propertyName || 'Image'} {...props} />
+    <img
+      src={imgSrc}
+      alt={props.alt || imageProperty.propertyName || 'Image'}
+      width={width}
+      {...imgProps}
+      onError={handleError}
+    />
   )
 }
 
-export const SeedImage = React.memo(SeedImageInner, (prev, next) =>
-  prev.imageProperty === next.imageProperty &&
-  prev.width === next.width &&
-  prev.height === next.height &&
-  prev.filename === next.filename &&
-  prev.ensure === next.ensure
-)
+// Shallow comparison of all props: the old comparator ignored className, style, alt and handlers,
+// so changing them never re-rendered.
+export const SeedImage = React.memo(SeedImageInner)

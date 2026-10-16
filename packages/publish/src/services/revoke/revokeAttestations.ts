@@ -1,8 +1,11 @@
 import { prepareEasMultiRevoke } from '~/helpers/easDirect'
-import { waitForPublishReceipt } from '~/helpers/chainClient'
+import { getPublishPublicClient, waitForPublishReceipt } from '~/helpers/chainClient'
+import { easAbi } from '~/helpers/abi/eas'
+import { findRevertData } from '~/helpers/describeRevert'
 import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { fromThirdwebAccount } from '~/helpers/adapters/thirdwebAccount'
 import type { PublishWallet } from '~/helpers/seedSigner'
+import type { Hex } from 'viem'
 import { getPublishConfig } from '~/config'
 import { verifyPublishChain } from '~/helpers/verifyPublishChain'
 import {
@@ -48,9 +51,129 @@ async function isAutomationRevoke(
   }
 }
 
+const ALREADY_REVOKED_SELECTOR = '0x905e7107'
+const ACCESS_DENIED_SELECTOR = '0x4ca88867'
+
+function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase()
+}
+
+function revertMatches(err: unknown, name: string, selector: string): boolean {
+  const data = findRevertData(err)
+  if (data?.toLowerCase().startsWith(selector)) return true
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes(name) || msg.toLowerCase().includes(selector)
+}
+
+/**
+ * Picks the wallet that sends `multiRevoke`: it must be the attester, since EAS lets only the
+ * attester revoke. The registered wallet is used when it is the attester. Otherwise (no wallet
+ * registered, or the registered one is a different account, e.g. the in-app admin wallet that
+ * ConnectButton registers under `useModularExecutor` while the ManagedAccount attested) the
+ * connected Thirdweb account is resolved to the attester's account. When that fails and a wallet
+ * is registered, the registered wallet is kept: the automation check below, or EAS's
+ * AccessDenied, then says why it cannot revoke.
+ */
+async function resolveRevokeWallet(attester: string | null): Promise<PublishWallet> {
+  const registered = getPublishWallet()
+  if (registered && (!attester || sameAddress(registered.txSender.address, attester))) {
+    return registered
+  }
+  try {
+    const { getConnectedAccount } = await import('~/helpers/thirdweb')
+    const { resolveRevokeAccount } = await import('~/helpers/resolveRevokeAccount')
+    const account = await getConnectedAccount()
+    if (!account) {
+      throw new Error('No wallet connected. Connect a wallet to revoke attestations.')
+    }
+    const revokeAccount = await resolveRevokeAccount({ account, attester })
+    if (!registered || sameAddress(revokeAccount.address, attester)) {
+      return fromThirdwebAccount(revokeAccount)
+    }
+  } catch (err) {
+    if (registered) return registered
+    if (err instanceof Error && err.message.includes('No wallet connected')) throw err
+    if (err instanceof Error && err.message.includes('Revocation not supported')) throw err
+    throw new Error(
+      'No wallet connected. Use useSeedWallet / setPublishWallet, or @seedprotocol/publish/thirdweb ConnectButton.',
+      { cause: err },
+    )
+  }
+  return registered
+}
+
+/**
+ * UIDs among `uids` that EAS already shows as revoked. A failed read counts as not revoked:
+ * the revoke is then sent, and an AlreadyRevoked revert is handled by the caller.
+ */
+async function findRevokedUids(uids: readonly Hex[]): Promise<Set<string>> {
+  const revoked = new Set<string>()
+  const { easContractAddress } = getPublishConfig()
+  if (!easContractAddress || uids.length === 0) return revoked
+  let client: ReturnType<typeof getPublishPublicClient>
+  try {
+    client = getPublishPublicClient()
+  } catch {
+    return revoked
+  }
+  await Promise.all(
+    uids.map(async (uid) => {
+      try {
+        const attestation = await client.readContract({
+          address: easContractAddress as Hex,
+          abi: easAbi,
+          functionName: 'getAttestation',
+          args: [uid],
+        })
+        if (attestation.revocationTime > 0n) revoked.add(uid.toLowerCase())
+      } catch {
+        // Unknown state: leave it in the batch.
+      }
+    }),
+  )
+  return revoked
+}
+
+/**
+ * Sends one per-schema `multiRevoke`, leaving out uids EAS already shows as revoked. EAS reverts
+ * the whole batch on one already-revoked uid, so on AlreadyRevoked the state is read again and
+ * the rest are sent once more. A batch of one that reverts AlreadyRevoked is done.
+ */
+async function revokeBatch(
+  txSender: PublishWallet['txSender'],
+  req: { schema: Hex; data: Array<{ uid: Hex; value?: bigint }> },
+): Promise<void> {
+  let data = req.data
+  for (let attempt = 0; ; attempt++) {
+    const revoked = await findRevokedUids(data.map((d) => d.uid))
+    data = data.filter((d) => !revoked.has(d.uid.toLowerCase()))
+    if (data.length === 0) return
+    try {
+      const result = await txSender.sendTransaction(prepareEasMultiRevoke([{ schema: req.schema, data }]))
+      await waitForPublishReceipt(result.transactionHash)
+      return
+    } catch (err: unknown) {
+      if (revertMatches(err, 'AccessDenied', ACCESS_DENIED_SELECTOR)) {
+        throw new Error(
+          'Only the original attester can revoke attestations. Connect the wallet that published this item.',
+        )
+      }
+      if (!revertMatches(err, 'AlreadyRevoked', ALREADY_REVOKED_SELECTOR)) throw err
+      if (data.length === 1) return
+      if (attempt > 0) {
+        throw new Error(
+          `multiRevoke for schema ${req.schema} reverted with AlreadyRevoked, and EAS could not be read to tell which of its ${data.length} attestations are already revoked. Retry the revoke.`,
+          { cause: err },
+        )
+      }
+    }
+  }
+}
+
 /**
  * Revokes the Seed attestation and all Version and metadata attestations on EAS.
- * Prefer the registered publish wallet; fall back to Thirdweb connected account when present.
+ * Sends from the attester: the registered publish wallet when it is the attester, else the
+ * connected Thirdweb account resolved to the attester (see {@link resolveRevokeWallet}).
  *
  * Only the attester's owner can revoke: `multiRevoke` goes to EAS from the publishing account
  * (for a ManagedAccount, a UserOp `execute(EAS, multiRevoke)`). The Seed executor has no revoke,
@@ -72,26 +195,7 @@ export async function revokeAttestations(params: {
     )
   }
 
-  let wallet: PublishWallet | null = getPublishWallet()
-  if (!wallet) {
-    try {
-      const { getConnectedAccount } = await import('~/helpers/thirdweb')
-      const { resolveRevokeAccount } = await import('~/helpers/resolveRevokeAccount')
-      const account = await getConnectedAccount()
-      if (!account) {
-        throw new Error('No wallet connected. Connect a wallet to revoke attestations.')
-      }
-      const revokeAccount = await resolveRevokeAccount({ account, attester })
-      wallet = fromThirdwebAccount(revokeAccount)
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('No wallet connected')) throw err
-      if (err instanceof Error && err.message.includes('Revocation not supported')) throw err
-      throw new Error(
-        'No wallet connected. Use useSeedWallet / setPublishWallet, or @seedprotocol/publish/thirdweb ConnectButton.',
-        { cause: err },
-      )
-    }
-  }
+  const wallet = await resolveRevokeWallet(attester)
 
   const txSender = wallet.txSender
   if (await isAutomationRevoke(wallet, attester)) {
@@ -144,22 +248,7 @@ export async function revokeAttestations(params: {
 
   for (const req of requests) {
     if (req.data.length === 0) continue
-    const multiRevokeTx = prepareEasMultiRevoke([req])
-    try {
-      const result = await txSender.sendTransaction(multiRevokeTx)
-      await waitForPublishReceipt(result.transactionHash)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('AccessDenied') || msg.includes('0x4ca88867')) {
-        throw new Error(
-          'Only the original attester can revoke attestations. Connect the wallet that published this item.',
-        )
-      }
-      if (msg.includes('AlreadyRevoked')) {
-        continue
-      }
-      throw err
-    }
+    await revokeBatch(txSender, req)
   }
 
   const revokedAt = Math.floor(Date.now() / 1000)

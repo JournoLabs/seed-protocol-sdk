@@ -31,11 +31,13 @@ await client.init({
 })
 ```
 
+Leaving `addresses` out keeps the addresses stored from an earlier session (the SDK warns once); `addresses: []` clears them. `client.init` runs once: calling it again with the same `config` resolves at once and applies any new `addresses`, while a different `config` throws (call `client.stop()` first). `client.onReady(cb)` also fires when the client is already ready.
+
 ### Address session
 
 Three different address lists, do not mix them:
 
-- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only. An empty owned list returns no rows (it does not skip the filter).
+- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only and always agree. An empty owned list matches only local unsealed drafts (no publisher, no real uid, no `attestationRaw`), so users can write before connecting a wallet; it does not skip the filter.
 - **`publisherAddress`** — who new seeds/versions/metadata are stamped with (usually the managed account). Set via the publish wallet session, not by putting the module contract in `owned`.
 - **`getAdditionalSyncAddresses`** — extra EAS indexers (legacy executor module). Used for sync and revoke only, never for ownership.
 
@@ -60,7 +62,7 @@ Schema, Model, ModelProperty, Item, and ItemProperty each run a small state mach
 
 - **Default:** `create()` returns a **Promise** that resolves when the entity is **ready** (state machine in the idle state). You should **`await`** the result before using the entity.
 - **Opt-out:** Pass **`{ waitForReady: false }`** as the last argument to get the entity **immediately** (synchronous return). Use this when you manage readiness yourself (e.g. internal loops that call `waitForEntityIdle` later) or when you only need a reference.
-- **Timeout:** When waiting, you can pass **`readyTimeout`** (milliseconds; default `5000`) in the same options object, e.g. `{ readyTimeout: 10000 }`.
+- **Timeout:** When waiting, you can pass **`readyTimeout`** (milliseconds; default `15000`) in the same options object, e.g. `{ readyTimeout: 30000 }`.
 
 So in normal app code you’ll write:
 
@@ -128,6 +130,43 @@ const Post = await Model.create('Post', 'Blog', {
   },
 })
 ```
+
+### Matching names from other publishers (`nameMatch`)
+
+Models and properties are shared on EAS: any app's `Post` publishes under `bytes32 post`, and a
+property `title` under `string title`. When the SDK syncs, it matches the names it finds there to
+your models and properties, and by default it matches loosely, so `htmlpage`, `HTMLPage` and
+`html_pages` all reach your `HTMLPage` model. A schema file can make that stricter with
+`nameMatch`, on a property, a model or the whole schema (the most specific one set wins):
+
+```json
+{
+  "name": "Blog",
+  "nameMatch": "normalized",
+  "models": {
+    "Post": {
+      "nameMatch": "exact",
+      "properties": {
+        "title": { "type": "Text" },
+        "tags": { "type": "List", "refValueType": "Text", "nameMatch": "fuzzy" }
+      }
+    }
+  }
+}
+```
+
+| `nameMatch` | Accepts for `HTMLPage` |
+|---|---|
+| `exact` | only `html_page`, the name this SDK publishes |
+| `normalized` | also case and separator differences: `htmlpage`, `HtmlPage`, `html-page` |
+| `fuzzy` (default) | also a plural `s` (`html_pages`); for relations, a trailing `id`/`ids` (`author_id`) |
+
+Use `exact` when nothing from another publisher should be pulled in unless it uses your exact
+names. Note that seeds published by older SDK versions (`htmlpage`) are then not found either.
+`nameMatch` is read from the schema file (`config.schema` or an imported
+schema file); models created with `Model.create` in code use their schema's level. Tightening it
+affects later syncs only: data already synced stays. See
+[ADR 0009](adr/0009-name-match-strictness.md).
 
 ---
 

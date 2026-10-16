@@ -3,6 +3,7 @@ import { ensureReadGatewaySelected } from '../ArweaveClient/selectReadGateway.js
 import { getArweaveReadGatewayHostsForPrimary } from '../constants.js'
 import { getPreferredArweaveReadBaseUrls, getResolvedSeedGatewayEndpoints } from './gatewayState.js'
 import { getReadGatewayHostsForConfig } from './resolveSeedGatewayEndpoints.js'
+import { readArweaveContentResponse } from '../content/arweaveContent.js'
 
 /** Per-gateway timeout for {@link fetchArweaveRawFromBaseUrl}; a hung gateway must not block the next one. */
 export const DEFAULT_ARWEAVE_RAW_READ_TIMEOUT_MS = 10_000
@@ -96,6 +97,7 @@ export async function fetchArweaveRawFromBaseUrl(
  * GET `/raw/{id}` across read gateways and return the first non-empty body as text. Preferred
  * gateways go first and are tried before any read-gateway probe; a just-published item is served
  * by the gateway it was uploaded through well before it reaches L1 or the public hosts.
+ * The body goes through `transformArweaveContent` (see `content/arweaveContent.ts`).
  */
 export async function fetchArweaveRawTextAcrossGateways(
   transactionId: string,
@@ -109,7 +111,8 @@ export async function fetchArweaveRawTextAcrossGateways(
       const res = await fetchArweaveRawFromBaseUrl(base, transactionId, options)
       if (!res) continue
       try {
-        const text = await res.text()
+        const { bytes } = await readArweaveContentResponse(res, { transactionId })
+        const text = new TextDecoder().decode(bytes)
         if (text.length > 0) return text
       } catch {
         /* body read failed — next gateway */

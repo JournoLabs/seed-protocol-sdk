@@ -4,9 +4,14 @@ import type { ThirdwebClient } from 'thirdweb'
 const prepareTransaction = mock((opts: { client: unknown }) => ({ client: opts.client }))
 const sendTransaction = mock(async () => ({ transactionHash: '0x' + '11'.repeat(32) }))
 
+// TODO: replace thirdweb/EAS module mocks in publish tests with a real local chain
+// (Anvil + deployed EAS), reusing the test-chain setup from permapress / seed-protocol.
 mock.module('thirdweb', () => ({
   prepareTransaction,
   sendTransaction,
+  // Unused here, but modules that import them must still link under this mock.
+  deploySmartAccount: mock(async () => {}),
+  getContract: mock(() => ({})),
   defineChain: (chain: unknown) => chain,
   createThirdwebClient: (opts: { clientId?: string; secretKey?: string }) => ({
     clientId: opts.clientId ?? 'from-secret',

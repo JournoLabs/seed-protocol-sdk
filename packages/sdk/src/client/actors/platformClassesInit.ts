@@ -28,6 +28,16 @@ type InitEvent = {
   options: SeedConstructorOptions
 }
 
+/**
+ * Whether a relative filesDir already names the .seed directory or a path inside
+ * it ('.seed', '.seed/files', './.seed/files'). '.seed-alt/x' is not: it is
+ * resolved under .seed like any other relative path.
+ */
+export function isUnderDotSeed(relativePath: string): boolean {
+  const firstSegment = relativePath.split(/[\\/]+/).find((segment) => segment !== '' && segment !== '.')
+  return firstSegment === '.seed'
+}
+
 export const platformClassesInit = fromCallback<
 EventObject, 
 FromCallbackInput<ClientManagerContext, InitEvent>
@@ -143,8 +153,8 @@ FromCallbackInput<ClientManagerContext, InitEvent>
         const dirName = normalizedFilesDir.slice(1) || 'app-files'
         normalizedFilesDir = path.join(dotSeedDir, dirName)
       } else if (!path.isAbsolute(normalizedFilesDir)) {
-        // If it's a relative path, check if it already starts with .seed
-        if (normalizedFilesDir.startsWith('.seed') || normalizedFilesDir.startsWith('.seed/')) {
+        // If it's a relative path, check if it is already under .seed
+        if (isUnderDotSeed(normalizedFilesDir)) {
           // Already relative to project root, resolve it
           normalizedFilesDir = path.resolve(normalizedFilesDir)
         } else {
@@ -167,6 +177,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
       gatewaySidecarPort: gatewayConfig.hyper?.localSidecarPort,
       gatewayProxyBaseUrl: resolvedGateway.proxyBaseUrl ?? gatewayConfig.proxyBaseUrl,
       addresses: normalizedAddresses.owned,
+      addressesProvided: addresses !== undefined,
       ownedAddresses: normalizedAddresses.owned,
       watchedAddresses: normalizedAddresses.watched,
       filesDir: normalizedFilesDir,

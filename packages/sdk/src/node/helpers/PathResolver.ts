@@ -119,9 +119,16 @@ export class NodePathResolver implements IPathResolver {
       return rootWithNodeModules
     }
     
-    // Default to production environment
-    // This should be {projectDir}/node_modules/@seedprotocol/sdk/dist
-    return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
+    // Production: {sdk package}/dist. Resolve the installed package rather than
+    // assuming it sits under the working directory: hoisted monorepos, packaged
+    // Electron apps and scripts run from another directory all differ.
+    try {
+      const { createRequire } = process.getBuiltinModule('node:module')
+      const pkgJson = createRequire(import.meta.url).resolve('@seedprotocol/sdk/package.json')
+      return path.join(path.dirname(pkgJson), 'dist')
+    } catch {
+      return path.join(rootWithNodeModules, 'node_modules', '@seedprotocol', 'sdk', 'dist')
+    }
   }
 
   getNodeModulesDir(): string {

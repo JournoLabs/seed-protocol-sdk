@@ -126,6 +126,131 @@ export function compareStable(a, b) {
 }
 
 /**
+ * Why `target` can't be released, given the committed version and what npm has
+ * on `latest`. Empty when it can.
+ * @param {{ target: string, committed: string, npmLatest?: string | null, published?: boolean }} input
+ * @returns {string[]}
+ */
+export function releaseVersionProblems({ target, committed, npmLatest = null, published = false }) {
+  if (!STABLE_RE.test(target)) {
+    return [`Release versions must be plain X.Y.Z; got "${target}".`]
+  }
+  const problems = []
+  if (STABLE_RE.test(committed) && compareStable(target, committed) <= 0) {
+    problems.push(`${target} is not newer than the committed version ${committed}.`)
+  }
+  if (npmLatest && STABLE_RE.test(npmLatest) && compareStable(target, npmLatest) <= 0) {
+    problems.push(`${target} is not newer than ${npmLatest} on npm \`latest\`.`)
+  }
+  if (published) {
+    problems.push(`${target} is already on npm.`)
+  }
+  return problems
+}
+
+/**
+ * Versions from release tags (vX.Y.Z); other tags are ignored.
+ * @param {string[]} tags
+ * @returns {string[]}
+ */
+function releaseTagVersions(tags) {
+  return tags.filter((t) => /^v\d+\.\d+\.\d+$/.test(t)).map((t) => t.slice(1))
+}
+
+/**
+ * Release tags older than `released` whose version is on npm for no package: a release that failed
+ * before publishing and was skipped instead of retried. A version some packages have is left alone:
+ * re-running its Release run publishes the rest.
+ * @param {{ tags: string[], released: string, publishedVersions: Set<string> }} input
+ * @returns {string[]} tags, oldest first
+ */
+export function unreleasedTags({ tags, released, publishedVersions }) {
+  return releaseTagVersions(tags)
+    .filter((v) => compareStable(v, released) < 0 && !publishedVersions.has(v))
+    .sort(compareStable)
+    .map((v) => `v${v}`)
+}
+
+/**
+ * The newest release tag older than `released` whose version reached npm, or null.
+ * The changelog starts here, so a skipped failed tag doesn't hide the changes it carried.
+ * @param {{ tags: string[], released: string, publishedVersions: Set<string> }} input
+ * @returns {string | null}
+ */
+export function previousReleasedTag({ tags, released, publishedVersions }) {
+  const older = releaseTagVersions(tags)
+    .filter((v) => compareStable(v, released) < 0 && publishedVersions.has(v))
+    .sort(compareStable)
+  return older.length > 0 ? `v${older[older.length - 1]}` : null
+}
+
+/**
+ * Why the committed version's failed release can't be retried by moving its tag to HEAD.
+ * Empty when it can.
+ * @param {{
+ *   version: string,
+ *   tagCommit: string | null,
+ *   tagInHead: boolean,
+ *   publishedPackages: string[],
+ *   tagRunState: string | null,
+ * }} input - publishedPackages: packages that already have `version` on npm;
+ *   tagRunState: the latest Release run for the tag (success, failure, in_progress, …), null if unknown
+ * @returns {string[]}
+ */
+export function retryProblems({ version, tagCommit, tagInHead, publishedPackages, tagRunState }) {
+  const tag = `v${version}`
+  if (!tagCommit) {
+    return [`There is no ${tag} on origin to retry; \`bun run release\` cuts the next version.`]
+  }
+  const problems = []
+  if (publishedPackages.length === PUBLISH_ORDER.length) {
+    problems.push(`${version} is already on npm for every package; there is nothing to retry.`)
+  } else if (publishedPackages.length > 0) {
+    // npm versions can't be replaced, so moving the tag would ship different code under one version.
+    problems.push(
+      `${version} is already on npm for ${publishedPackages.join(', ')}. Re-run ${tag}'s failed Release run ` +
+        'instead: it skips published packages and publishes the rest from the same commit.',
+    )
+  }
+  if (!tagInHead) {
+    problems.push(`HEAD doesn't contain ${tag}'s commit ${tagCommit.slice(0, 7)}; retry from a commit after it.`)
+  }
+  if (tagRunState === 'in_progress' || tagRunState === 'queued' || tagRunState === 'waiting') {
+    problems.push(`${tag}'s Release run is still ${tagRunState}; let it finish first.`)
+  } else if (tagRunState === 'success') {
+    problems.push(`${tag}'s Release run succeeded; there is nothing to retry.`)
+  }
+  return problems
+}
+
+/**
+ * Every version of a package on the npm registry. Empty for a package that doesn't exist yet;
+ * throws on any other failure, so a registry outage never reads as "not published".
+ * @param {string} packageName - e.g. @seedprotocol/sdk
+ * @returns {Promise<Set<string>>}
+ */
+export async function fetchPublishedVersions(packageName) {
+  const res = await fetch(`https://registry.npmjs.org/${packageName.replace('/', '%2f')}`, {
+    headers: { accept: 'application/vnd.npm.install-v1+json' },
+  })
+  if (res.status === 404) return new Set()
+  if (!res.ok) throw new Error(`npm registry returned ${res.status} for ${packageName}`)
+  const body = await res.json()
+  return new Set(Object.keys(body.versions ?? {}))
+}
+
+/**
+ * Versions on npm for each package in PUBLISH_ORDER.
+ * @returns {Promise<Map<string, Set<string>>>} package dir name → versions
+ */
+export async function fetchPublishedVersionsByPackage() {
+  const entries = await Promise.all(
+    PUBLISH_ORDER.map(async (dir) => [dir, await fetchPublishedVersions(`@seedprotocol/${dir}`)]),
+  )
+  return new Map(entries)
+}
+
+/**
  * @param {string} sha - full commit SHA
  */
 export function stagingTag(sha) {
@@ -196,14 +321,43 @@ export function listRemoteBranches(remote = 'origin') {
 }
 
 /**
- * Run npm. Returns stdout when `capture` is set, otherwise streams output.
- * @param {string[]} args
- * @param {{ capture?: boolean }} [options]
+ * The commit a tag points at, from `git ls-remote --tags` output. Annotated tags
+ * are peeled (`^{}`) to their commit.
+ * @param {string} lsRemoteOutput
+ * @param {string} tag - e.g. v0.7.2
+ * @returns {string | null}
  */
-export function npm(args, { capture = false } = {}) {
+export function tagCommitFromLsRemote(lsRemoteOutput, tag) {
+  let direct = null
+  for (const line of lsRemoteOutput.split('\n')) {
+    if (!line) continue
+    const [sha, ref] = line.split('\t')
+    if (ref === `refs/tags/${tag}^{}`) return sha
+    if (ref === `refs/tags/${tag}`) direct = sha
+  }
+  return direct
+}
+
+/**
+ * The commit a tag on the remote points at right now, or null if there is no such tag.
+ * @param {string} tag
+ * @param {string} [remote]
+ */
+export function remoteTagCommit(tag, remote = 'origin') {
+  return tagCommitFromLsRemote(git(['ls-remote', '--tags', remote, `refs/tags/${tag}`, `refs/tags/${tag}^{}`]), tag)
+}
+
+/**
+ * Run npm. Returns stdout when `capture` is set, otherwise streams output.
+ * `quiet` drops stderr, for expected failures the caller retries.
+ * @param {string[]} args
+ * @param {{ capture?: boolean, quiet?: boolean }} [options]
+ */
+export function npm(args, { capture = false, quiet = false } = {}) {
+  const stderr = quiet ? 'ignore' : 'inherit'
   const output = execFileSync('npm', args, {
     encoding: 'utf-8',
-    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+    stdio: capture ? ['ignore', 'pipe', stderr] : ['inherit', 'inherit', stderr],
   })
   return capture ? output.trim() : ''
 }

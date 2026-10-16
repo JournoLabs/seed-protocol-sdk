@@ -34,6 +34,7 @@ export const modelPropertyMachine = setup({
       | { type: 'initializeOriginalValues'; originalValues: Partial<Static<typeof TProperty>>; schemaName?: string; isEdited?: boolean }
       | { type: 'clearEdited' }
       | { type: 'setSchemaName'; schemaName: string }
+      | { type: 'syncedFromStorage'; values: Partial<Static<typeof TProperty>> }
       | { type: 'saveToSchema' }
       | { type: 'saveToSchemaSuccess' }
       | { type: 'saveToSchemaError'; error: Error }
@@ -178,6 +179,16 @@ export const modelPropertyMachine = setup({
       actions: assign(({ context, event }) => ({
         ...context,
         _schemaName: event.schemaName,
+      })),
+    },
+    // The property's row and schema file already have these values (e.g. after a schema update reloaded
+    // them), so unlike updateContext it isn't an edit: no validation, draft marking or saveToSchema.
+    syncedFromStorage: {
+      actions: assign(({ context, event }) => ({
+        ...event.values,
+        _originalValues: context._originalValues
+          ? { ...context._originalValues, ...event.values }
+          : context._originalValues,
       })),
     },
     destroyStarted: {

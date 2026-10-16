@@ -15,11 +15,13 @@ export type PublishWorkSummary = {
 }
 
 export type PublishCostEstimate = {
+  /** Cost of the publish whoever pays it; see `evm.userPays` / `arweave.userPays`. */
   totalUsd: number
   evm: {
     eth: string
     usd: number
     gas: bigint
+    /** Whether the user's wallet pays this gas, or a sponsor (paymaster / Thirdweb) does. */
     userPays: boolean
   }
   arweave: {
@@ -28,6 +30,11 @@ export type PublishCostEstimate = {
     bytes: number
     uploadCount: number
     path: 'l1' | 'bundler'
+    /**
+     * Whether the user pays for storage (`payment.storage`). With the default `'operator'` the
+     * upload API funds it: on the bundler path directly, on the L1 path by reimbursing the user's
+     * Arweave key before the upload (the deferred-Html second pass is not reimbursed).
+     */
     userPays: boolean
   }
   prices: {

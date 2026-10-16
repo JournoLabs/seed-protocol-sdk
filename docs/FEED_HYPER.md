@@ -34,7 +34,7 @@ HTTP gateways do **not** replace key verification. A client that only fetches HT
    ```
 
 2. Record the printed z32 key. Back up `/var/seed/feed-store` offline.
-3. Set `DEFAULT_SEED_FEED_HYPER_KEY` in `@seedprotocol/sdk` and release.
+3. Set `DEFAULT_SEED_FEED_HYPER_KEY` in `packages/arweave/src/constants.ts` (`@seedprotocol/sdk` and `@seedprotocol/feed-hyper` re-export it) and release.
 4. Keep the publisher process running (or run `seed-feed seed <key>` on a second host).
 
 ### Always-on seeder
