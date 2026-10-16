@@ -1,0 +1,9 @@
+tarballs/
+*.log
+layout.bak
+*/node_modules/
+*/.next*/
+*/next-env.d.ts
+*/tsconfig.tsbuildinfo
+*/package-lock.json
+*/AGENTS.md

@@ -1,70 +1,151 @@
 # Next.js and webpack support: plan
 
-Status: draft, 2026-10-16. Nothing here is built yet.
+Status: spike done 2026-10-16; nothing shipped yet. Spike apps and how to rerun them are in
+[spikes/README.md](../spikes/README.md).
+
+## Decisions
+
+- **Browser only.** We recommend using the SDK only in the browser in Next apps. No server-side
+  support (route handlers, server components reading seeds) until a real user brings a use case
+  with details. The integration only has to keep server builds from breaking.
+- **Next 15 and 16.** In last week's npm downloads, 16 was 72% of `next` and 15 was 21%, almost all
+  of it 15.5, which still gets backports. Next 15 builds with webpack by default, and that path
+  works with the same config as 16 (see below), so supporting 15 costs little. Turbopack on 15 is
+  covered once the SDK fixes below land; until then document webpack for 15.
 
 ## Where things stand
 
-`@seedprotocol/vite` (`packages/vite/src/index.ts`, about 1,300 lines) is the only supported bundler integration. What exists for webpack is a 25-line `withSeed(config, webpack, isServer)` in two places: `packages/sdk/src/node/webpack/index.ts` (exported from `@seedprotocol/sdk/node`) and the private, "experimental" `packages/webpack`. It strips `node:` prefixes, aliases `fs` to `@zenfs/core` and `path` to `path-browserify` on the client, and externalizes `@sqlite.org/sqlite-wasm`, `chokidar` and `arweave` on the server. The last app that used it, `../seed-test-nextjs`, is Next 14 against a 2024 SDK. Treat it as a starting point, not as working code.
+`@seedprotocol/vite` (`packages/vite/src/index.ts`, about 1,300 lines) is the only supported bundler
+integration. For webpack there is a 25-line `withSeed(config, webpack, isServer)` in two places:
+`packages/sdk/src/node/webpack/index.ts` (exported from `@seedprotocol/sdk/node`) and the private
+`packages/webpack`. Nothing covers Turbopack, which Next 16 uses by default for `next dev` and
+`next build`. Turbopack doesn't run webpack plugins; it reads `turbopack.resolveAlias`,
+`turbopack.rules` and the rest of `next.config`.
 
-Two facts shape the design:
+## What the spike found
 
-1. **Next 16 builds with Turbopack by default**, for `next dev` and `next build`. Webpack is opt-in (`--webpack`). Turbopack doesn't run webpack plugins; it only reads `turbopack.resolveAlias`, `turbopack.rules` (a subset of webpack loaders) and the rest of `next.config`. A webpack-only helper would not apply to most new Next apps.
-2. **Next renders client components on the server.** A Vite SPA never runs SDK code in Node; a Next app does, on every SSR pass, unless the code is gated. Some of the work is in the SDK and `@seedprotocol/react`, not in bundler config.
+The spike installed the SDK from packed tarballs (0.7.4 plus local main) into a plain App Router
+app and ran `next dev` and `next build && next start` under both bundlers, on Next 16.4.2 and
+15.5.28. Each run created an item, reloaded, and checked the item was still there, in Playwright's
+Chromium.
 
-## What the Vite plugin does, and what each piece becomes
+This config is enough for the browser round trip, including OPFS persistence:
 
-Most of the Vite plugin works around Vite's dev-time ESM serving and Rolldown pre-bundling. Webpack and Turbopack bundle CommonJS natively, so several items should disappear. The spike (step 1) confirms which.
+- `turbopack.resolveAlias`: `fs`, `node:fs`, `fs/promises`, `node:fs/promises` aliased to
+  `@zenfs/core` / `@zenfs/core/promises` under the `browser` condition only.
+- `webpack()`, client compiler only: a `NormalModuleReplacementPlugin` that strips the `node:`
+  prefix (webpack otherwise fails with `UnhandledSchemeError` on `node:crypto`, `node:fs`,
+  `node:path`), and the same `fs` aliases.
+- `headers()`: COOP `same-origin`, COEP `credentialless`, CORP `same-origin` on `/:path*`. Next
+  applies these to `/_next/static` too, and they hold under `next start`.
 
-| Vite plugin piece | Why it exists | Next / webpack equivalent |
-|---|---|---|
-| COOP/COEP/CORP headers on dev and preview servers | OPFS and SQLite WASM need cross-origin isolation | `async headers()` in `next.config`. Unlike Vite, this also covers `next start` in production. Static export (`output: 'export'`) still needs host headers, same as Vite. Plain webpack: `devServer.headers`. |
-| `fs` → ZenFS aliases | SDK browser code imports `fs` | Client-only alias. Webpack: `resolve.alias` in the client compiler. Turbopack: `resolveAlias` with a `{ browser: ... }` conditional so the server keeps real `fs`. |
-| Node polyfills (`buffer`, `path`, `events`, `util`, `string_decoder`) and the `stream` stub | Vite ships none | Next provides client fallbacks for most Node core modules in both bundlers. Likely nothing to do; verify. Plain webpack 5 needs `resolve.fallback` entries. |
-| Inline `global` / `process` script in `index.html` | CJS wrappers evaluate before module polyfills load | Webpack's `node.global` / `ProvidePlugin`; Next already defines `process.env.*`. No HTML injection (Next has no `index.html`). |
-| `optimizeDeps.include` lists, `debug` and `nanoid-dictionary` shims, `EAS__factory` fix | Vite serves raw CJS to the browser in dev | Expected to be unnecessary: webpack and Turbopack handle CJS. Keep the spike app importing these paths to prove it. |
-| `arweave` shim | Arweave's ESM entry breaks in Vite | Check whether arweave's `browser` field resolves correctly in both bundlers. |
-| `resolve.dedupe` for React, xstate, Seed packages, ZenFS | Two module instances break shared state (`DuplicateEasModuleError`, "App DB not found") | Alias each package to the single path resolved from the app root (webpack `resolve.alias`, Turbopack `resolveAlias`). Mostly matters for linked/monorepo installs. |
-| `better-sqlite3` external | Node-only native binding | Client: alias to `false`. Server: `serverExternalPackages`. |
-| `worker.format: 'es'` | sqlocal's worker uses code splitting | Webpack 5 and Turbopack both handle `new Worker(new URL(..., import.meta.url), { type: 'module' })`. Verify with sqlocal. |
-| `server.fs.allow` for linked SDK paths | Vite dev server sandbox | No equivalent needed. |
-| `FileManager` `path-browserify` import rewrite | Default-import interop | Probably unnecessary; verify. If needed, fix the SDK source instead of rewriting in a plugin. |
-| Bare-globals warning in `generateBundle` | Catch `process`/`Buffer` leaks before runtime | Port as a webpack `processAssets` hook (reuse `findDangerousGlobals`). Turbopack has no hook for it; skip there. |
-| `autoInit` ZenFS script | Legacy | Don't port. `client.init()` mounts OPFS itself. |
+| Next | Bundler | dev | build + start |
+|---|---|---|---|
+| 16.4.2 | Turbopack | works | works |
+| 16.4.2 | webpack | works | works |
+| 15.5.28 | webpack (default) | not run | works |
+| 15.5.28 | Turbopack | init fails | build fails |
 
-## Work the bundler config can't do
+Most of the Vite plugin isn't needed. With no polyfill config, no `global`/`process` shims, no
+pre-bundling lists and no `debug`, `nanoid-dictionary`, arweave or EAS interop fixes, both bundlers
+handled every CommonJS dependency the round trip touches. Prerendering the page, which renders
+`SeedProvider` and `SeedClientGate` on the server, didn't throw. The sqlocal and SQLite workers and
+the WASM file were emitted and loaded under both bundlers. Not tested: publishing, images,
+`@seedprotocol/feed` (which pulls `sax` / `stream`), and multi-tab.
 
-**The SDK pulls its Node platform into client bundles.** `platformClassesInit.ts:89-92` picks a platform at runtime with `await import('../../platform/index.browser')` or `import('../../platform/index.node')`. Bundlers follow both dynamic imports, so a client build tries to bundle `index.node`, which imports `child_process`, `@libsql/client`, `drizzle-orm/libsql/migrator`, `@seedprotocol/eas/node` and `@seedprotocol/arweave/node`. Vite gets away with it through externals and polyfills. In Next this means either a long list of client aliases to `false` or, better, an SDK change: route the platform choice through a `package.json` `imports` entry (`#platform` with `browser` / `node` conditions) kept external in the SDK's own build, so each bundler resolves only one side. That benefits Vite too. The `./platform` export already has those conditions; main code doesn't use it.
+The problems are mostly in the SDK and React packages, not in bundler config:
 
-**`@seedprotocol/react` has no `'use client'` boundary.** Only `OPFSImage.tsx` carries the directive. `SeedProvider` is the first thing an App Router app puts in `app/layout.tsx`, which is a server component, so importing it there fails. The React build needs `'use client'` at the top of its output chunks (a Rolldown banner, or per-entry), and the package should be checked for module-scope browser access.
+1. **`SeedProvider` can't be imported in a server-component layout.** `app/layout.tsx` is a server
+   component by default; importing `SeedProvider` there fails the build with
+   `TypeError: createContext is not a function`. `@seedprotocol/react` has no `'use client'`
+   directive (only `OPFSImage.tsx` does). The spike works around it with a `providers.tsx`
+   client wrapper, which is what every Next user would otherwise have to write.
+2. **The SDK's Node platform ships to the browser.** `platformClassesInit.ts` picks the platform
+   with `await import('./platform.browser.js')` or `import('./platform.node.js')` at runtime, and
+   bundlers follow both. The browser never loads the Node chunk, but it's built and shipped: about
+   153 KB gzipped under Turbopack and 52 KB under webpack, including the web build of
+   `@libsql/client` and the libsql migrator. It's also why the `fs` and `node:` config above is
+   needed for the client at all, and probably why Next 15's Turbopack build fails (it tries to parse
+   `@libsql/hrana-client/LICENSE` as JavaScript). Pointing both branches at the existing
+   `@seedprotocol/sdk/platform` export, which already has `browser` / `node` conditions, did not fix
+   the Next 15 build on its own, so the libsql reference comes from more than that import. Find
+   every route from the browser entry to `@libsql/client` before claiming the fix.
+3. **The sqlocal blob-wrap breaks relative asset URLs.** `createSqlocalDrizzle.ts` starts sqlocal's
+   module worker from a `blob:` URL that imports the real worker (a workaround for Chrome profiles
+   that kill HTTPS module workers, commit bda9edb9). Inside a blob worker, root-relative URLs can't
+   be resolved: Next 15's Turbopack dev build emits the WASM as `/_next/static/media/sqlite3.*.wasm`
+   and the worker's `fetch` fails with "Failed to parse URL". Next 16's Turbopack strips
+   `type: 'module'` from workers, so the wrap never applies there, and webpack's output also passed.
+   Options: resolve relative URLs against the page origin in the blob source, or only wrap when the
+   Chrome failure actually happens.
+4. **Installing the SDK installs Vite.** `@seedprotocol/sdk` has a runtime dependency on
+   `@seedprotocol/vite` (for the `@seedprotocol/sdk/vite` re-export), which brings
+   `vite-plugin-node-polyfills`, and npm installs its `vite` peer, so Vite 8 and Rolldown land in a
+   Next app's `node_modules`. Move `@seedprotocol/vite` to an optional peer of the SDK, or drop
+   the re-export in the next breaking release.
 
-**SSR of client components.** Even with the directive, `SeedProvider` and the hooks run once on the server. `client.init()` must never start there. `SeedClientGate` and `useIsClientReady` probably cover the render side; confirm nothing at module scope touches `window`, OPFS or workers. Document `dynamic(() => import(...), { ssr: false })` as the fallback for apps that hit something we miss.
+Smaller notes:
 
-**Server-side SDK use** (route handlers, server components reading seeds) is a separate question: it would run the Node platform with libsql inside Next's server. Out of scope for the first release; note it as unsupported and make sure the server build doesn't break if the SDK is imported there by accident.
+- Every init logs a `SQLITE_CONSTRAINT_UNIQUE` warning on an insert into `models` or `properties`,
+  under both bundlers and in prod and dev. Not Next-specific as far as the spike shows; worth
+  checking whether Vite apps log it too.
+- The desktop app's built-in browser can't start a worker from inside another worker over `http:`,
+  so SQLite's OPFS proxy worker fails there and storage silently falls back to memory. Real
+  Chromium is fine. Use Playwright for this kind of check.
+- The plain webpack 5 plugin (outside Next) and Rspack were not tested.
 
 ## Package shape
 
-Recommended: two published packages built on a shared core.
+Recommended: `@seedprotocol/next` for Next, `@seedprotocol/webpack` for plain webpack 5, and a
+shared core inlined into both.
 
-- **`@seedprotocol/next`**: `withSeed(nextConfig, options)` returning a new `NextConfig`. It composes the user's existing `webpack` function, merges into `turbopack.resolveAlias` and `turbopack.rules`, wraps `headers()`, and appends to `serverExternalPackages` and `transpilePackages`. Same option names as Vite where they mean the same thing (`isolationHeaders`, `fsModules`, `debug`). Peer dependency `next >=16` (decide whether to support 15, which still defaults to webpack).
-- **`@seedprotocol/webpack`**: a `SeedWebpackPlugin` class (`apply(compiler)`) for plain webpack 5 apps, and the piece `withSeed` uses for Next's webpack mode. Writing it against the public compiler API should make it work under Rspack too; test that, then claim it.
-- **Shared core** (private workspace package, inlined into both at build time so it never becomes a runtime dependency): package resolution including the bun nested-install candidates (`resolvePackageFile`, `pushBunPackageCandidates`), the shared-state package list, isolation header defaults and `findDangerousGlobals`. Move these out of `packages/vite/src/index.ts` so the three integrations can't drift. Check that `scripts/check-internal-deps` and `check-browser-entry-graph.js` accept an inlined private package.
+- **`@seedprotocol/next`**: `withSeed(nextConfig, options)` returning a new `NextConfig`. It
+  composes the user's `webpack` function, merges into `turbopack.resolveAlias`, and wraps
+  `headers()` so the user's own COOP/COEP/CORP values win, as the Vite plugin does. Option names
+  match Vite where they mean the same thing (`isolationHeaders`, `fsModules`, `debug`). Peer
+  `next >=15.5`. After the SDK fixes, the config it adds should be small: the `fs` aliases may
+  still be needed for ZenFS, while the `node:` strip should become unnecessary once the Node
+  platform is out of the client graph.
+- **`@seedprotocol/webpack`**: a `SeedWebpackPlugin` (`apply(compiler)`) holding the client-side
+  webpack logic, used by `withSeed` in webpack mode and usable on its own. Given how little the
+  webpack path needs, this could start as an export of `@seedprotocol/next` and split out only if
+  someone asks for non-Next webpack support.
+- **Shared core** (private workspace package, inlined at build time): isolation header defaults,
+  the `fs` module list, package resolution including the bun nested-install candidates. Move these
+  out of `packages/vite/src/index.ts` so the integrations can't drift. Check that
+  `scripts/check-internal-deps.js` and `check-browser-entry-graph.js` accept an inlined package.
 
-The alternative is one `@seedprotocol/webpack` package with a `/next` subpath. Fewer packages, but Next users search for "next", and the Turbopack half has nothing to do with webpack.
-
-Retire the old helpers: deprecate `withSeed` from `@seedprotocol/sdk/node` (keep it one release, re-exporting or warning), and replace the private `packages/webpack` contents rather than keeping both.
+Retire the old helpers: deprecate `withSeed` from `@seedprotocol/sdk/node` for one release, and
+replace the contents of the private `packages/webpack`.
 
 ## Steps
 
-1. **Spike.** Create a Next 16 App Router fixture (`packages/next/__tests__/fixtures/next-app`) that imports `SeedProvider`, inits the client, creates and reads an item, and loads an image through `SeedImage`. Run `next dev` and `next build && next start` under Turbopack and under `--webpack`. Record every failure. This turns the "verify" cells in the table into a concrete list and probably shrinks the work considerably.
-2. **SDK and React fixes** found by the spike: `#platform` split, `'use client'` on the React build, SSR guards. These land first because they change what the config has to do. Each needs the Vite consumer test (`packages/vite/__tests__/integration/consumer.test.ts`) to stay green.
-3. **Extract the shared core** from the Vite plugin, with no behavior change.
-4. **`@seedprotocol/webpack`** plugin, tested with a plain webpack 5 fixture build.
-5. **`@seedprotocol/next`** `withSeed`, Turbopack first since it's the default. Unit tests for config composition (user `webpack` fn still called, user headers win over ours as in Vite, user aliases not shadowed), plus an integration test that builds the fixture both ways and checks the response headers and a client-side item round trip in a browser.
-6. **Docs and release**: README per package, a Next section in `docs/GETTING_STARTED.md`, production hosting notes (static export, Vercel headers, Safari not supporting `COEP: credentialless`), changelog entries, and the release pipeline's package list.
+1. ~~Spike~~ (done; see above).
+2. **SDK and React fixes**, each with the Vite consumer test
+   (`packages/vite/__tests__/integration/consumer.test.ts`) still passing:
+   - `'use client'` at the top of `@seedprotocol/react`'s output chunks.
+   - Keep the Node platform out of browser graphs. Route platform selection through a conditional
+     export or `imports` entry, and trace every other path to `@libsql/client` from the browser
+     entry. Done when Next 15.5 `next build --turbopack` passes with the config above and the client
+     bundle has no libsql code.
+   - Fix the sqlocal blob-wrap for relative asset URLs. Done when Next 15.5 Turbopack dev passes
+     the probe.
+   - Make `@seedprotocol/vite` an optional peer of the SDK instead of a dependency.
+3. **Rerun the spike** against the fixed packages to settle what config `withSeed` still needs.
+4. **Extract the shared core** from the Vite plugin, with no behavior change.
+5. **`@seedprotocol/next`**: `withSeed` with unit tests for config composition (user `webpack`
+   function still called, user headers win, user aliases not shadowed) and an integration test that
+   turns the spike app into a fixture: build under both bundlers, check the response headers, run
+   the probe's create-reload round trip in Playwright.
+6. **Docs and release**: package README, a Next section in `docs/GETTING_STARTED.md` that states
+   the browser-only recommendation, production hosting notes (static export needs host headers;
+   Safari doesn't support `COEP: credentialless`), changelog entries, and the release pipeline's
+   package list.
 
 ## Open questions
 
-- Minimum Next version: 16 only, or 15 as well?
-- Should Rspack support be stated, or left untested?
-- Is server-side SDK use in Next (route handlers, server components) something PermaPress or others need soon? If yes, it changes the `serverExternalPackages` work from "don't break" to "make it run".
-- `packages/vite/README.md` tells users to call `configure({ mounts: { '/': IndexedDB } })` in their entry, while `VITE_RENDERER.md` and the `autoInit` docstring say `client.init()` mounts OPFS and apps shouldn't configure ZenFS. The README looks stale; fix it before copying it for the new packages.
+- Rspack: test it, or leave it unclaimed?
+- `packages/vite/README.md` tells users to call `configure({ mounts: { '/': IndexedDB } })` in
+  their entry, while `VITE_RENDERER.md` and the `autoInit` docstring say `client.init()` mounts OPFS
+  itself. The spike app never configured ZenFS and persistence worked, which supports
+  `VITE_RENDERER.md`. Fix the README before copying it.
