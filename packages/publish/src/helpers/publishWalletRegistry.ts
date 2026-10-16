@@ -17,6 +17,11 @@ export type PublishWalletSession = PublishWallet & {
    * admin EOA here. Without it, publish uses `signer` only when the wallet is an EOA.
    */
   dataItemSigner?: import('./seedSigner').SeedSigner
+  /**
+   * Deploys the publisher's smart account (kind 'smart') when it has no code yet. Publish calls it
+   * before a first publish instead of refusing it; ConnectButton sets it for its smart wallet.
+   */
+  deploy?: () => Promise<void>
 }
 
 /**

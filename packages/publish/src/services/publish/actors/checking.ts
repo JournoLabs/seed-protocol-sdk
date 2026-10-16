@@ -2,7 +2,8 @@ import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from 'xstate'
-import { getAccountCodeKind } from '~/helpers/chainClient'
+import { getAccountCodeKind, readUntil } from '~/helpers/chainClient'
+import { getPublishWallet } from '~/helpers/publishWalletRegistry'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import {
@@ -34,12 +35,11 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
  * to EAS only when the wallet says it is an EOA and signs as the publisher; an undeployed smart
  * account, an unknown wallet, or a wallet that sends as someone else is refused.
  */
-async function refuseDirectEas(
+function directEasRefusal(
+  problem: import('../helpers/undeployedSmartAccount').DirectEasProblem | null,
   publisherAddress: string,
   wallet: Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
-): Promise<Error | null> {
-  const { directEasProblem } = await import('../helpers/undeployedSmartAccount')
-  const problem = directEasProblem(publisherAddress, wallet)
+): Error | null {
   const chain = getPublishChainName()
   switch (problem) {
     case null:
@@ -63,6 +63,14 @@ async function refuseDirectEas(
         `The publisher ${publisherAddress} has no contract on ${chain}, and the publish wallet doesn't say whether it is an EOA or an undeployed smart account. Build it with fromEip1193Provider or fromEthersWallet, set kind: 'eoa' on the PublishWallet, or set useDirectEas to attest directly anyway.`,
       )
   }
+}
+
+/** The registered session's deploy, when it publishes as this address. */
+function deployerFor(publisherAddress: string): (() => Promise<void>) | undefined {
+  const session = getPublishWallet()
+  const sessionPublisher = session?.publisherAddress ?? session?.txSender.address
+  if (!session?.deploy || !sessionPublisher) return undefined
+  return sessionPublisher.toLowerCase() === publisherAddress.toLowerCase() ? session.deploy : undefined
 }
 
 export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachineContext>>(
@@ -148,10 +156,28 @@ export const checking = fromCallback<EventObject, FromCallbackInput<PublishMachi
         }
 
         if (attestationStrategy === 'directEas' && !getPublishConfig().useDirectEas) {
-          const refusal = await refuseDirectEas(
-            address.trim(),
-            (wallet ?? account) as Partial<import('~/helpers/seedSigner').PublishWallet> | undefined,
-          )
+          const publishWallet = (wallet ?? account) as
+            | Partial<import('~/helpers/seedSigner').PublishWallet>
+            | undefined
+          const { directEasProblem } = await import('../helpers/undeployedSmartAccount')
+          let problem = directEasProblem(address.trim(), publishWallet)
+          // An undeployed smart account: deploy it (one transaction), then publish through it.
+          if (problem === 'smart_account') {
+            const deploy = deployerFor(address.trim())
+            if (deploy) {
+              await deploy()
+              // Read again until the RPC has the deploy's block (load-balanced nodes lag).
+              const codeKind = await readUntil(
+                () => getAccountCodeKind(address.trim()),
+                (kind) => kind === 'contract',
+              )
+              if (codeKind === 'contract') {
+                attestationStrategy = 'multiPublish'
+                problem = null
+              }
+            }
+          }
+          const refusal = attestationStrategy === 'directEas' ? directEasRefusal(problem, address.trim(), publishWallet) : null
           if (refusal) {
             activePublishProcesses.delete(item.seedLocalId)
             sendBack({ type: 'checkingFailed', error: refusal })

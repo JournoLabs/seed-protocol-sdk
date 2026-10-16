@@ -9,6 +9,7 @@ import {
 } from "thirdweb/react"
 import { client as seedClient } from "@seedprotocol/sdk"
 import {
+  deploySmartWalletContract,
   getClient,
   getConnectedManagedAccountAddress,
   getManagedAccountWallet,
@@ -204,6 +205,10 @@ const ConnectButton: FC = () => {
           ownedAddresses: [...owned],
           publisherAddress: managedAddress ?? account.address,
           ...(dataItemSigner ? { dataItemSigner } : {}),
+          // A new user's smart wallet has no code until its first transaction: publish deploys it.
+          ...(isSmart && !managedAddress
+            ? { deploy: async () => { await deploySmartWalletContract(account) } }
+            : {}),
           ...(adminAddress && adminAddress.toLowerCase() !== account.address.toLowerCase()
             ? { adminAddress }
             : {}),
