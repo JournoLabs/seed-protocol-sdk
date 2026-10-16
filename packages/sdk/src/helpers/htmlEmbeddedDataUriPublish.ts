@@ -12,6 +12,7 @@ import { Item } from '@/Item/Item'
 import { waitForEntityIdle } from '@/helpers/waitForEntityIdle'
 import { ModelPropertyDataTypes, type HtmlEmbeddedDataUriPolicy } from '@/helpers/property'
 import { normalizeRelationPropertyValue, resolveSeedIdsFromRefString } from '@/helpers/relationSeedRef'
+import { getExtensionForMimeType } from '@/helpers/mimeTypes'
 
 export const HTML_EMBEDDED_MAX_IMAGES_PER_DOC = 50
 export const HTML_EMBEDDED_MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -41,6 +42,8 @@ export type HtmlEmbeddedExtractEntry = {
   stableKey: string
   byteLength: number
   mimeType: string
+  /** The image's decoded bytes. */
+  bytes: Uint8Array
 }
 
 export class HtmlEmbeddedDataUriLimitError extends Error {
@@ -115,7 +118,7 @@ export async function extractDataUriImagesFromHtml(html: string): Promise<HtmlEm
             }
             seenUris.add(src)
             const stableKey = await getContentHash(binary)
-            found.push({ dataUri: src, stableKey, byteLength, mimeType: mimeRaw })
+            found.push({ dataUri: src, stableKey, byteLength, mimeType: mimeRaw, bytes: binary })
           }
         }
       }
@@ -322,23 +325,45 @@ async function deleteCoPublishRowsForParent(appDb: ReturnType<typeof BaseDb.getA
 }
 
 /**
- * Create an Image item and persist a data URI into its storageTransactionId (same path as user paste).
+ * Name of the file holding an embedded image's bytes in the images folder: `<imageSeedLocalId>.<ext>`,
+ * the extension following the image's MIME type (one of {@link ALLOWED_MIMES}).
  */
-export async function createImageItemFromDataUri(dataUri: string): Promise<{ seedLocalId: string }> {
+export function embeddedImageFileName(imageSeedLocalId: string, mimeType: string): string {
+  return `${imageSeedLocalId}.${getExtensionForMimeType(mimeType) ?? 'bin'}`
+}
+
+/** Path of the file {@link createImageItemFromBytes} wrote for an Image seed, or undefined if there is none. */
+export async function findEmbeddedImageFilePath(imageSeedLocalId: string): Promise<string | undefined> {
+  for (const mimeType of ALLOWED_MIMES) {
+    const filePath = BaseFileManager.getFilesPath('images', embeddedImageFileName(imageSeedLocalId, mimeType))
+    if (await BaseFileManager.pathExists(filePath)) return filePath
+  }
+  return undefined
+}
+
+/**
+ * Create an Image item for an embedded image and write its bytes to the images folder, where publish
+ * reads them for upload ({@link findEmbeddedImageFilePath}). Its storageTransactionId stays empty
+ * until the upload writes the transaction id, as for any other storage seed.
+ */
+export async function createImageItemFromBytes(
+  bytes: Uint8Array,
+  mimeType: string,
+): Promise<{ seedLocalId: string }> {
   const imageItem = await Item.create({
     modelName: 'Image',
     modelFileId: INTERNAL_STORAGE_MODEL_FILE_IDS.image,
   })
   await waitForEntityIdle(imageItem, { timeout: 60_000 })
-  const st =
-    imageItem.internalProperties['storageTransactionId'] ??
-    imageItem.allProperties['storageTransactionId']
-  if (!st) {
-    throw new Error('Image item missing storageTransactionId property')
+  const filePath = BaseFileManager.getFilesPath('images', embeddedImageFileName(imageItem.seedLocalId, mimeType))
+  await BaseFileManager.createDirIfNotExists(BaseFileManager.getFilesPath('images'))
+  const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  try {
+    await BaseFileManager.saveFile(filePath, data)
+  } catch {
+    const fs = await BaseFileManager.getFs()
+    fs.writeFileSync(filePath, bytes)
   }
-  st.value = dataUri
-  await st.save()
-  await waitForEntityIdle(imageItem, { timeout: 60_000 })
   return { seedLocalId: imageItem.seedLocalId }
 }
 
@@ -432,7 +457,7 @@ async function prepareHtmlEmbeddedImagesOfItem(
     deferred.add(htmlSeedLocalId.trim())
 
     for (const ent of extracted) {
-      const { seedLocalId: imageSeedLocalId } = await createImageItemFromDataUri(ent.dataUri)
+      const { seedLocalId: imageSeedLocalId } = await createImageItemFromBytes(ent.bytes, ent.mimeType)
       const now = Date.now()
       await appDb.insert(htmlEmbeddedImageCoPublish).values({
         parentSeedLocalId: item.seedLocalId,
