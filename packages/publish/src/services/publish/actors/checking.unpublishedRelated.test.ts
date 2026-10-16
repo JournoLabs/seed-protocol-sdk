@@ -23,10 +23,14 @@ mock.module('@seedprotocol/sdk', () => ({
   getUnpublishedRelatedItems: async () => harness.unpublished,
   RelatedItemUnpublishedError,
 }))
-mock.module('~/helpers/chainClient', () => ({ isContractDeployed: async () => true }))
+mock.module('~/helpers/chainClient', () => ({
+  getAccountCodeKind: async () => 'contract',
+  readUntil: async <T,>(read: () => Promise<T>) => read(),
+}))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => false }))
 mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem }))
 mock.module('~/config', () => ({ getPublishConfig: () => ({ useModularExecutor: true }) }))
+mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => null }))
 mock.module('../../../helpers/chainConfig', () => ({ getPublishChainName: () => 'test chain' }))
 mock.module('../../../helpers/verifyPublishChain', () => ({ verifyPublishChain: async () => {} }))
 

@@ -290,7 +290,19 @@ export const createSignedDataItemWithAccount = async (
     message: { raw: placeholderHex },
   })
   const digest = ethers.hashMessage(PLACEHOLDER_MESSAGE)
-  const pubKeyHex = ethers.SigningKey.recoverPublicKey(digest, placeholderSig)
+  let pubKeyHex: string
+  try {
+    pubKeyHex = ethers.SigningKey.recoverPublicKey(digest, placeholderSig)
+  } catch {
+    pubKeyHex = ''
+  }
+  // The data item's owner is the key that signs. A smart account's signatures (EIP-1271/6492)
+  // don't recover to its address, which would make the item someone else's or invalid.
+  if (!pubKeyHex || ethers.computeAddress(pubKeyHex).toLowerCase() !== account.address.toLowerCase()) {
+    throw new Error(
+      `@seedprotocol/publish: ${account.address} can't sign Arweave data items: its signatures don't recover to its address (a smart account?). Pass an EOA's signer as dataItemSigner, such as the smart account's admin.`,
+    )
+  }
   const ownerBytes = ethers.getBytes(pubKeyHex)
 
   // 2. Build signature data (deep-hash) and sign it

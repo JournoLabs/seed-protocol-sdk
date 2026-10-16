@@ -2,7 +2,7 @@ import type { Item } from '@seedprotocol/sdk'
 import { PublishManager } from '../services/publishManager'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
-import { getPublishWallet } from './publishWalletRegistry'
+import { defaultDataItemSigner, getPublishWallet } from './publishWalletRegistry'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
@@ -96,6 +96,7 @@ export async function ensureWalletThenPublish(
 
   return startPublish(item, address, session, {
     ...options,
-    dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? session.signer,
+    // A smart account can't sign data items: use the session's EOA signer (defaultDataItemSigner).
+    dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? defaultDataItemSigner(session),
   })
 }

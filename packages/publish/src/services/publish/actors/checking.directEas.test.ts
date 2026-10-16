@@ -14,7 +14,14 @@ const SMART = '0x' + '5'.repeat(40)
 
 const harness = {
   useDirectEas: false,
-  session: null as null | { signer: { address: string }; kind?: 'eoa' | 'smart' },
+  codeKind: 'none' as 'none' | 'eip7702-delegated' | 'contract',
+  session: null as null | {
+    signer: { address: string }
+    txSender?: { address: string }
+    kind?: 'eoa' | 'smart'
+    publisherAddress?: string
+    deploy?: () => Promise<void>
+  },
 }
 
 mock.module('@seedprotocol/sdk', () => ({
@@ -24,7 +31,10 @@ mock.module('@seedprotocol/sdk', () => ({
   getUnpublishedRelatedItems: async () => [],
   RelatedItemUnpublishedError,
 }))
-mock.module('~/helpers/chainClient', () => ({ isContractDeployed: async () => false }))
+mock.module('~/helpers/chainClient', () => ({
+  getAccountCodeKind: async () => harness.codeKind,
+  readUntil: async <T,>(read: () => Promise<T>) => read(),
+}))
 mock.module('~/helpers/publishWalletRegistry', () => ({ getPublishWallet: () => harness.session }))
 mock.module('../helpers/itemNeedsArweave', () => ({ itemNeedsArweaveUpload: async () => false }))
 mock.module('../helpers/ensureEasSchemas', () => ({ ensureEasSchemasForItem: async () => {} }))
@@ -115,5 +125,48 @@ describe('checking: direct EAS for publishers with no bytecode', () => {
     const verdict = await runChecking(SMART, wallet(SMART, 'smart'))
     expect(verdict.type).toBe('skipArweave')
     expect(verdict.attestationStrategy).toBe('directEas')
+  }, TEST_TIMEOUT_MS)
+
+  test('an EIP-7702 delegated EOA still publishes straight to EAS (its second publish too)', async () => {
+    harness.useDirectEas = false
+    harness.session = null
+    harness.codeKind = 'eip7702-delegated'
+    try {
+      const verdict = await runChecking(EOA, wallet(EOA, 'eoa'))
+      expect(verdict.attestationStrategy).toBe('directEas')
+    } finally {
+      harness.codeKind = 'none'
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test("a new user's smart account is deployed on first publish, then publishes through multiPublish", async () => {
+    harness.useDirectEas = false
+    let deployed = 0
+    harness.session = {
+      signer: { address: SMART },
+      txSender: { address: SMART },
+      kind: 'smart',
+      publisherAddress: SMART,
+      deploy: async () => {
+        deployed += 1
+        harness.codeKind = 'contract'
+      },
+    }
+    try {
+      const verdict = await runChecking(SMART, wallet(SMART, 'smart'))
+      expect(deployed).toBe(1)
+      expect(verdict.attestationStrategy).toBe('multiPublish')
+    } finally {
+      harness.codeKind = 'none'
+      harness.session = null
+    }
+  }, TEST_TIMEOUT_MS)
+
+  test('a smart account with no way to deploy it is still refused', async () => {
+    harness.useDirectEas = false
+    harness.session = { signer: { address: SMART }, kind: 'smart', publisherAddress: SMART }
+    const verdict = await runChecking(SMART, wallet(SMART, 'smart'))
+    expect(verdict.error?.code).toBe('MANAGED_ACCOUNT_NOT_DEPLOYED')
+    harness.session = null
   }, TEST_TIMEOUT_MS)
 })

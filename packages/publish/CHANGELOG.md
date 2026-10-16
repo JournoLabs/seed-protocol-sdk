@@ -19,6 +19,12 @@ All notable changes to this project will be documented in this file.
 - `pollForConfirmation` fails after 30 min, or after 12 failed status requests in a row.
 - Cost estimates: an Arweave L1 upload is charged for at least 256 KiB, a bundle once, and Turbo uploads up to 100 KiB are free (`arweave.chargedBytes`). Gas on a testnet is priced at $0 (`evm.testnet`).
 - Deprecated: `useLocalWalletAccount` (always `null`), and the `gatewayTransport` and `modularAccountModuleData` config fields (not read).
+- **A new user's smart wallet is deployed on its first publish.** With the default `ConnectButton` (no `useModularExecutor`), an undeployed account used to be refused with `MANAGED_ACCOUNT_NOT_DEPLOYED`. `PublishWalletSession.deploy` deploys it; `ConnectButton` sets it.
+- **Data items are signed by an EOA.** `PublishWalletSession.dataItemSigner` holds the key that signs Arweave data items; `ConnectButton` sets it to a smart wallet's admin EOA, and the publish helpers no longer default to a smart account's signer, whose signatures don't verify as data items. Data-item signing checks the signer's key is its address.
+- **A bundler or Turbo publish restored after a reload no longer skips its upload.** Its signed data items aren't saved, so it can't resume mid-upload: restore marks it interrupted, to publish again. `uploadViaBundler` fails with `MissingSignedDataItemsError` instead of reporting an upload it didn't do.
+- **Local storage ids stay the attested data item ids.** The L1-finalize worker no longer replaces them with the bundle's L1 id; ids it replaced are set back where the bundle has one file per version (`restoreDataItemIdsOverwrittenByL1`).
+- **Html with embedded images gets its second pass on the direct-EAS route, and on L1 it's funded** (its own reimbursement request) instead of needing AR in the user's key.
+- **EIP-7702 wallets attest directly after their first publish too:** a delegated EOA's code no longer counts as a deployed contract.
 
 ## 0.7.4 (2026-10-15)
 

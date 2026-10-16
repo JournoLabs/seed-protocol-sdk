@@ -9,6 +9,7 @@ import { fromThirdwebAccount } from './adapters/thirdwebAccount'
 import { isPublishWallet, isSeedSigner, type PublishWallet, type SeedSigner } from './seedSigner'
 import { ethers } from 'ethers'
 import { startPublish } from './ensureWalletThenPublish'
+import { getPublishWallet } from './publishWalletRegistry'
 import type { CreatePublishOptions } from '../config'
 import { getPublishConfig } from '../config'
 import { ManagedAccountPublishError } from '../errors'
@@ -89,7 +90,9 @@ export async function ensureSmartWalletThenPublish(
     const wallet = fromThirdwebAccount(resolved.account, { kind: 'smart' })
     return startPublish(item, resolved.address, wallet, {
       ...options,
-      dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? wallet.signer,
+      // The smart account can't sign data items; ConnectButton registers its admin EOA for that.
+      dataItemSigner:
+        coerceDataItemSigner(options?.dataItemSigner) ?? getPublishWallet()?.dataItemSigner,
     })
   }
   return { outcome: 'needs_deploy' }

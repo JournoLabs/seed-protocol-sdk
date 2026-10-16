@@ -42,6 +42,17 @@ const getNodeFsPromises = async () => {
  * When signDataItems is used, the callback handles upload (e.g. ArConnect) so signedDataItems
  * is undefined — we skip the upload step and send uploadComplete immediately.
  */
+/** The data items to upload are gone, e.g. the publish was restored after a reload. */
+export class MissingSignedDataItemsError extends Error {
+  readonly code = 'SIGNED_DATA_ITEMS_MISSING'
+  constructor() {
+    super(
+      'The signed data items to upload are missing (they are not saved with the publish, so a publish resumed after a reload has none). Publish again.',
+    )
+    this.name = 'MissingSignedDataItemsError'
+  }
+}
+
 export const uploadViaBundler = fromCallback<EventObject, { context: PublishMachineContext }>(
   ({ sendBack, input: { context } }) => {
     const { signedDataItems } = context
@@ -50,11 +61,20 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
     const { uploadApiBaseUrl, useArweaveBundler } = config
     const { storage } = resolvePublishPayment(config)
 
-    if (storage.uploadTo === 'turbo' && storage.turbo) {
-      if (!signedDataItems || signedDataItems.length === 0) {
+    // No items: either there is nothing to upload (the app's signDataItems uploaded them itself,
+    // or there were none), or they were lost (they aren't saved with the publish, so a publish
+    // restored after a reload has none). Finishing on the second would attest data items that
+    // were never uploaded.
+    if (!signedDataItems || signedDataItems.length === 0) {
+      if (context.bundlerUploadNotNeeded) {
         sendBack({ type: 'uploadComplete', result: 'done' })
-        return
+      } else {
+        sendBack({ type: 'uploadError', error: new MissingSignedDataItemsError() })
       }
+      return
+    }
+
+    if (storage.uploadTo === 'turbo' && storage.turbo) {
       uploadToTurbo(signedDataItems as unknown[], storage.turbo, context)
         .then(() => sendBack({ type: 'uploadComplete', result: 'done' }))
         .catch((error) => sendBack({ type: 'uploadError', error }))
@@ -72,12 +92,6 @@ export const uploadViaBundler = fromCallback<EventObject, { context: PublishMach
     }
 
     const bundlerUrl = `${uploadApiBaseUrl.replace(/\/$/, '')}/api/upload/arweave/batch`
-
-    if (!signedDataItems || signedDataItems.length === 0) {
-      // signDataItems path: external signer (e.g. ArConnect) already uploaded; skip and proceed
-      sendBack({ type: 'uploadComplete', result: 'done' })
-      return
-    }
 
     const _uploadViaBundler = async () => {
       const items = signedDataItems as unknown[]

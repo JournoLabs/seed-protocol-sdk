@@ -67,6 +67,12 @@ export interface PublishMachineContext {
    */
   signedDataItems?: { id: string; raw: Uint8Array }[]
   /**
+   * uploadViaBundler has nothing to send: the app's `signDataItems` uploaded the data items itself,
+   * or there were none. Saved with the publish (unlike signedDataItems), so a restored publish can
+   * tell this from items it lost on reload.
+   */
+  bundlerUploadNotNeeded?: boolean
+  /**
    * Per-publish: sign DataItems when useArweaveBundler (from createPublish options).
    * Each upload has `tags` (content + arweaveUploadTags); use when building DataItems.
    */

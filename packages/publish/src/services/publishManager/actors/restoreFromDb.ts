@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm'
 import { publishMachine } from '../../publish'
 import { subscribe } from './subscribe'
 import { tryHoldPublishLock } from '../publishLocks'
+import { markInProgressPublishInterrupted } from './savePublish'
+import { isRestorableSnapshot, type PersistedSnapshot } from './restorableSnapshot'
 
 const RESTORE_DB_WAIT_MS = 60_000
 const RESTORE_DB_POLL_MS = 2_000
@@ -26,45 +28,6 @@ async function waitForDb(maxWaitMs: number, pollMs: number): Promise<boolean> {
     await new Promise((r) => setTimeout(r, pollMs))
   }
   return false
-}
-
-/** Minimal snapshot shape for restore; avoids excessive type recursion from SnapshotFrom<typeof publishMachine>.
- * Older rows may omit `context.attestationStrategy`; publish guards then fall back to `useDirectEas`. */
-interface PersistedSnapshot {
-  status?: string
-  value?: string | Record<string, unknown>
-  context?: {
-    item?: { seedLocalId?: string; modelName?: string; schemaId?: string }
-    modelName?: string
-    schemaId?: string
-    reimbursementTransactionId?: string
-    requestResponse?: unknown
-    arweaveTransactions?: unknown[]
-    publishUploads?: unknown[]
-  }
-}
-
-function getStateValue(parsed: PersistedSnapshot): string {
-  const v = parsed.value
-  if (typeof v === 'string') return v
-  if (v && typeof v === 'object') {
-    const keys = Object.keys(v)
-    return (keys[0] ?? '') as string
-  }
-  return ''
-}
-
-function isRestorableSnapshot(parsed: PersistedSnapshot): boolean {
-  const stateValue = getStateValue(parsed)
-  if (stateValue === 'pollingForConfirmation') {
-    if (!parsed.context?.reimbursementTransactionId || !parsed.context?.requestResponse) return false
-  }
-  if (stateValue === 'uploadingData') {
-    const txs = parsed.context?.arweaveTransactions
-    const uploads = parsed.context?.publishUploads
-    if (!Array.isArray(txs) || txs.length === 0 || !Array.isArray(uploads)) return false
-  }
-  return true
 }
 
 /**
@@ -169,7 +132,11 @@ export const restoreFromDb = fromCallback<EventObject, RestoreFromDbInput>(
         if (parsed.status === 'done') continue
         const seedLocalId = parsed.context?.item?.seedLocalId ?? publishProcessRecord.seedLocalId
         if (!seedLocalId) continue
-        if (!isRestorableSnapshot(parsed)) continue
+        if (!isRestorableSnapshot(parsed)) {
+          // Can't resume: mark it interrupted so it doesn't stay in progress, and can be published again.
+          await markInProgressPublishInterrupted(seedLocalId).catch(() => {})
+          continue
+        }
         // Another open tab is already running this publish; it keeps it.
         if (!(await tryHoldPublishLock(seedLocalId))) continue
 
