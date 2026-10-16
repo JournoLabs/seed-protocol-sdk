@@ -22,7 +22,7 @@ _Also covers 0.6.4, 0.6.5, 0.6.6, published from commits in this range._
 
 _Also covers 0.6.1, 0.6.2, published from commits in this range._
 
-_Written as mapping 0.8.0._
+_Derive and assemble. This file used to list them under `0.8.0`, a mapping version that was never published. They first shipped in 0.6.3._
 
 - `ResolveJob` adds `'derive' | 'assemble'`. `FieldMapping.sourceId` is optional so a derive-only edge is legal.
 - Persist `derive?: { from: string; fallback?: boolean }` and `assemble?: { blocks: string[] }` on the edge. Mutators pass them through, including copy + `derive` fallback. Empty `sourceId` is omitted.
@@ -32,7 +32,8 @@ _Written as mapping 0.8.0._
 - Sync and async `applyMapping` skip derive/assemble (host apply stays host-owned). Package does not slugify or assemble HTML.
 - `resolvedSourceId` only suffixes `extract` / `file`.
 - Package `autoMap` is unchanged: it does not inject derive-only slug or default html to assemble.
-_Written as mapping 0.7.0._
+
+_Relation lookup, listed in this file under `0.7.0` before the monorepo reached that number. It first shipped in 0.6.2._
 
 - Relation lookup is an edge-local stored intent: `FieldMapping.lookup.entries` as `{ value, ref }[]`. `ref` is opaque (`seedLocalId` or `seedUid`). Empty entries are a valid unassigned map.
 - `applyMapping` (sync) applies lookup entries and emits refs. Unmatched values are omitted. `applyMappingAsync` reports unmatched on `errors[]` and no longer calls the host `resolve` callback for lookup.
