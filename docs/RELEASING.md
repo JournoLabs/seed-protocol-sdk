@@ -102,14 +102,16 @@ that changed ([`changelog.js`](../scripts/changelog.js)). The section starts wit
 package's `## Unreleased` notes, if any, and ends with the commits since the last release
 that touched the package, grouped into Breaking, Features, Fixes and Other from their
 conventional-commit subjects (`fix(publish): ...`). test, ci, chore and version-bump commits
-are left out. The plan lists how many commits each changelog gets.
+are left out, and so are changes to the CHANGELOG.md itself. The plan lists how many
+commits each changelog gets.
 
 So write `## Unreleased` notes for changes a user needs explained (breaking changes, new
 options, migrations); the commit list covers the rest. Commit subjects end up in the
 changelog, so write them for a reader.
 
-Sections from 0.5.1 to 0.7.3 were backfilled from git history. Versions published without
+Sections from 0.5.1 to 0.7.4 were backfilled from git history. Versions published without
 a committed version bump (0.5.2, 0.6.1–0.6.2, 0.6.4–0.6.6) are folded into the next section.
+0.7.3 was published from a retry, so its section lists the commits up to the moved tag.
 
 By hand, the same thing is (without the changelog sections):
 
@@ -137,6 +139,10 @@ It moves the committed version's tag from the failed commit to HEAD and pushes i
 which starts a new tag run. HEAD must contain the old tag's commit, and the old run
 must have finished. Like a new release, it checks CI for HEAD, prints the plan, and
 asks you to type the version.
+
+A retry doesn't touch the changelogs. The commits it adds after the release commit are
+missing from that version's section, and the next release starts at the moved tag, so add
+them to the section by hand.
 
 It refuses when some packages already published that version. npm can't replace them,
 so re-run the failed run instead: it publishes the rest from the same commit.

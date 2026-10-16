@@ -101,12 +101,13 @@ export function addReleaseSection(text, { version, date, commitGroups }) {
 
 /**
  * Commits in `range` (e.g. `v0.7.2..HEAD`) that touched packages/<dir>, newest first, without merges.
+ * Changes to the package's CHANGELOG.md don't count, so changelog edits don't list themselves.
  * @param {string} rootDir
  * @param {string} dir
  * @param {string} range
  */
 export function packageCommits(rootDir, dir, range) {
-  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x09%s', range, '--', `packages/${dir}`], {
+  const out = execFileSync('git', ['log', '--no-merges', '--format=%H%x09%s', range, '--', `packages/${dir}`, `:(exclude)packages/${dir}/CHANGELOG.md`], {
     cwd: rootDir,
     encoding: 'utf-8',
   }).trim()
