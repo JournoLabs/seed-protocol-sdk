@@ -163,8 +163,8 @@ your models and properties, and by default it matches loosely, so `htmlpage`, `H
 
 Use `exact` when nothing from another publisher should be pulled in unless it uses your exact
 names. Note that seeds published by older SDK versions (`htmlpage`) are then not found either.
-`nameMatch` is read from the schema file (`config.schema`, `seedSchema.json` or an imported
-file); models created with `Model.create` in code use their schema's level. Tightening it
+`nameMatch` is read from the schema file (`config.schema` or an imported
+schema file); models created with `Model.create` in code use their schema's level. Tightening it
 affects later syncs only: data already synced stays. See
 [ADR 0009](adr/0009-name-match-strictness.md).
 
