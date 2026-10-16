@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build, createServer, type ViteDevServer } from 'vite'
+import { build, createLogger, createServer, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { seedVitePlugin } from '../../src/index.js'
 
@@ -140,6 +140,38 @@ describe('seedVitePlugin consumer integration', () => {
     expect(code).not.toMatch(/from ['"]node:crypto['"]/)
     expect(code).not.toMatch(/from ['"]node:path['"]/)
   }, 60_000)
+
+  it.each([false, true])(
+    'builds the default app without plugin warnings (polyfills %s)',
+    async (polyfills) => {
+      // Regression: the bare-globals scan flagged typeof checks and the process
+      // polyfill's own `var process`, and the build config echo made Vite warn
+      // about rollupOptions + rolldownOptions on every run.
+      const warnings: string[] = []
+      const logger = createLogger('silent')
+      logger.warn = (msg) => {
+        warnings.push(msg)
+      }
+      logger.warnOnce = logger.warn
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation((...args) => {
+        warnings.push(args.map(String).join(' '))
+      })
+      try {
+        await build({
+          root: fixtureRoot,
+          configFile: false,
+          customLogger: logger,
+          plugins: consumerPlugins(polyfills),
+          resolve: { alias: consumerAliases() },
+          build: { write: false, minify: false },
+        })
+      } finally {
+        consoleWarn.mockRestore()
+      }
+      expect(warnings.filter((w) => /seed-vite-plugin|rolldownOptions/.test(w))).toEqual([])
+    },
+    60_000,
+  )
 
   it('serves cold-cache prebundled deps that parse with node polyfills on', async () => {
     // Regression: the polyfills optimizer banner was registered twice, so every

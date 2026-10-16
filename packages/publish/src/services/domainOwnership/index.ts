@@ -34,6 +34,7 @@ import { verifyDomainOwnershipDns, type VerifyDomainOwnershipDnsResult } from '.
 import {
   fingerprintFromRegistrySnapshot,
   lookupDomainRegistry,
+  normalizeHostname,
   normalizeRegistrableDomain,
   type DomainRegistrySnapshot,
 } from './registry'
@@ -42,6 +43,8 @@ export {
   DOMAIN_OWNERSHIP_SCHEMA_DEF,
   DOMAIN_OWNERSHIP_SCHEMA_NAME,
   DOMAIN_OWNERSHIP_METHOD,
+  DOMAIN_OWNERSHIP_SCOPE_HOSTNAME,
+  DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE,
 } from '@seedprotocol/eas'
 
 export { createDomainOwnershipChallenge }
@@ -195,7 +198,13 @@ export async function attestDomainOwnership(
       ? getDomainOwnershipSchemaUid()
       : await ensureDomainOwnershipSchema(params.wallet)
 
-  const domain = normalizeRegistrableDomain(params.domain)
+  const scope = params.scope ?? DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE
+  // Record the domain the challenge was on: a hostname-scoped challenge must not be widened to
+  // its registrable domain.
+  const domain =
+    scope === DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE
+      ? normalizeRegistrableDomain(params.domain)
+      : normalizeHostname(params.domain)
   const claimer = params.claimer.trim()
   if (!/^0x[0-9a-fA-F]{40}$/.test(claimer)) {
     throw new Error('@seedprotocol/publish: attestDomainOwnership requires a valid claimer address')
@@ -214,7 +223,6 @@ export async function attestDomainOwnership(
   })
   const registryCreationDate = params.registrySnapshot.creationDate ?? ''
   const registryExpirationDate = params.registrySnapshot.expirationDate ?? ''
-  const scope = params.scope ?? DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE
   const method = params.method ?? DOMAIN_OWNERSHIP_METHOD
   const expirationTime = resolveExpirationTime({
     verifiedAt,
@@ -460,6 +468,7 @@ export async function assessDomainOwnershipLive(params: {
 
   const assessed = assessDomainOwnership({
     decoded,
+    expirationTime: row.expirationTime,
     registrySnapshot,
     now: params.now,
   })

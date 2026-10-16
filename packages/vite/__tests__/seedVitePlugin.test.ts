@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveConfig } from 'vite'
+import { createLogger, resolveConfig } from 'vite'
 import { seedVitePlugin } from '../src/index.js'
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
@@ -59,9 +59,12 @@ describe('seedVitePlugin renderer hardening', () => {
 
   it('merges renderer compatibility aliases and optimizeDeps includes', () => {
     const configPlugin = getConfigPlugin()
-    const result = configPlugin.config!({ resolve: { alias: [] }, optimizeDeps: {} })
+    const userConfig: Record<string, any> = { resolve: { alias: [] }, optimizeDeps: {} }
+    const result = callConfig(configPlugin, userConfig)
 
-    const aliases = result?.resolve?.alias
+    // Aliases are appended to the config in place (see the config hook), not returned.
+    expect(result?.resolve?.alias).toBeUndefined()
+    const aliases = userConfig.resolve.alias
     expect(Array.isArray(aliases)).toBe(true)
 
     const aliasKeys = (aliases as Array<{ find: string | RegExp; replacement: string }>).map(
@@ -144,6 +147,50 @@ describe('seedVitePlugin renderer hardening', () => {
     } finally {
       fs.rmSync(bareRoot, { recursive: true, force: true })
       fs.rmSync(appRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('prebundles eas / arweave / query together and dedupes the ones the app resolves', () => {
+    const shared = ['@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/query']
+    const writePkg = (dir: string, name: string) => {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }))
+    }
+    const roots: string[] = []
+    const mkRoot = () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
+      roots.push(root)
+      return root
+    }
+    try {
+      const configPlugin = getConfigPlugin()
+
+      // Hoisted (npm): the app resolves each package.
+      const hoisted = mkRoot()
+      writePkg(path.join(hoisted, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+      for (const pkg of shared) writePkg(path.join(hoisted, 'node_modules', pkg), pkg)
+      const h = callConfig(configPlugin, { root: hoisted })
+      for (const pkg of shared) {
+        expect(h.optimizeDeps.include).toContain(pkg)
+        expect(h.resolve.dedupe).toContain(pkg)
+      }
+
+      // Nested under the SDK only (bun): prebundle through the SDK, never dedupe from the root.
+      const nested = mkRoot()
+      writePkg(path.join(nested, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+      const n = callConfig(configPlugin, { root: nested })
+      for (const pkg of shared) {
+        expect(n.optimizeDeps.include).toContain(`@seedprotocol/sdk > ${pkg}`)
+        expect(n.resolve.dedupe).not.toContain(pkg)
+      }
+
+      // No SDK and no packages: nothing added.
+      const bare = callConfig(configPlugin, { root: mkRoot() })
+      for (const pkg of shared) {
+        expect(bare.optimizeDeps.include.some((dep: string) => dep.endsWith(pkg))).toBe(false)
+      }
+    } finally {
+      for (const root of roots) fs.rmSync(root, { recursive: true, force: true })
     }
   })
 
@@ -252,6 +299,75 @@ describe('seedVitePlugin renderer hardening', () => {
     expect(applied['Cross-Origin-Opener-Policy']).toBe('same-origin')
   })
 
+  it('lets user server/preview isolation headers win over the plugin values', async () => {
+    const plugins = seedVitePlugin({ includeNodePolyfills: false })
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins,
+        server: {
+          headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' },
+        },
+        preview: { headers: { 'cross-origin-opener-policy': 'same-origin-allow-popups' } },
+      },
+      'serve',
+    )
+    expect(config.server.headers).toEqual({
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'X-App': 'dev',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    })
+    // A lower-case user key is not shadowed by our capitalized one.
+    expect(config.preview.headers).toEqual({
+      'cross-origin-opener-policy': 'same-origin-allow-popups',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    })
+
+    // The writeHead middleware sends the user's values too, not ours.
+    const main = plugins.find((p) => p.name === 'seed-protocol:main')!
+    for (const [hookName, expected] of [
+      ['configureServer', { coep: 'require-corp', coop: 'same-origin' }],
+      ['configurePreviewServer', { coep: 'credentialless', coop: 'same-origin-allow-popups' }],
+    ] as const) {
+      const applied: Record<string, string> = {}
+      let middleware: ((req: unknown, res: unknown, next: () => void) => void) | undefined
+      const hook = (main as Record<string, any>)[hookName]
+      const fn = typeof hook === 'function' ? hook : hook.handler
+      fn({ middlewares: { use: (m: typeof middleware) => { middleware = m } } })
+      middleware!(
+        {},
+        {
+          getHeader: (key: string) => applied[key],
+          setHeader: (key: string, value: string) => { applied[key] = value },
+          writeHead: () => {},
+        },
+        () => {},
+      )
+      expect(applied['Cross-Origin-Embedder-Policy']).toBe(expected.coep)
+      expect(applied['Cross-Origin-Opener-Policy']).toBe(expected.coop)
+    }
+  })
+
+  it('leaves preview inheriting server.headers when the user sets no preview headers', async () => {
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: seedVitePlugin({ includeNodePolyfills: false }),
+        server: { headers: { 'Cross-Origin-Embedder-Policy': 'require-corp', 'X-App': 'dev' } },
+      },
+      'serve',
+    )
+    expect(config.preview.headers).toEqual(config.server.headers)
+    expect(config.preview.headers?.['X-App']).toBe('dev')
+    expect(config.preview.headers?.['Cross-Origin-Embedder-Policy']).toBe('require-corp')
+  })
+
   it('skips isolation headers when isolationHeaders is false', () => {
     const configPlugin = getConfigPlugin({ isolationHeaders: false })
     const result = callConfig(configPlugin, { resolve: { alias: [] }, optimizeDeps: {} })
@@ -265,6 +381,87 @@ describe('seedVitePlugin renderer hardening', () => {
     })
     expect(used).toBe(false)
   })
+})
+
+describe('seedVitePlugin resolved resolve.alias / dedupe', () => {
+  type ResolvedAlias = { find: string | RegExp; replacement: string }
+  const findKey = (find: string | RegExp) => (typeof find === 'string' ? find : find.toString())
+
+  async function resolveResolve(
+    resolve: Record<string, unknown>,
+    includeNodePolyfills: boolean,
+  ) {
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: seedVitePlugin({ includeNodePolyfills }),
+        resolve,
+      },
+      'serve',
+    )
+    return config.resolve as unknown as { alias: ResolvedAlias[]; dedupe: string[] }
+  }
+
+  const userAliasArray = () => [
+    { find: 'arweave', replacement: '/user/arweave.js' },
+    { find: /^debug$/, replacement: '/user/debug.js' },
+    { find: 'user-lib', replacement: '/user/lib.js' },
+  ]
+  const userAliasObject = () => ({
+    arweave: '/user/arweave.js',
+    'user-lib': '/user/lib.js',
+  })
+
+  for (const includeNodePolyfills of [false, true]) {
+    for (const [form, makeAlias] of [
+      ['array', userAliasArray],
+      ['object', userAliasObject],
+    ] as const) {
+      it(`keeps ${form}-form user aliases once and ahead of the plugin's (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
+        const { alias } = await resolveResolve({ alias: makeAlias() }, includeNodePolyfills)
+
+        const keys = alias.map((entry) => findKey(entry.find))
+        const duplicates = keys.filter((key, i) => keys.indexOf(key) !== i)
+        expect(duplicates).toEqual([])
+
+        const userIndex = (replacement: string) =>
+          alias.findIndex((entry) => entry.replacement === replacement)
+        const pluginArweave = keys.indexOf('/^arweave$/')
+        expect(pluginArweave).toBeGreaterThan(-1)
+        expect(userIndex('/user/arweave.js')).toBeGreaterThan(-1)
+        expect(userIndex('/user/arweave.js')).toBeLessThan(pluginArweave)
+        expect(userIndex('/user/lib.js')).toBeGreaterThan(-1)
+
+        // Node polyfill shims match first, and the polyfills plugin's bare string
+        // aliases (which would also catch subpaths such as `buffer/`) are dropped.
+        const shimBuffer = keys.indexOf('/^buffer$/')
+        expect(shimBuffer).toBeGreaterThan(-1)
+        expect(shimBuffer).toBeLessThan(userIndex('/user/arweave.js'))
+        for (const bare of ['buffer', 'node:buffer', 'process', 'node:process', 'global']) {
+          expect(keys).not.toContain(bare)
+        }
+
+        if (form === 'array') {
+          // Same find as the plugin's debug shim: the user's entry replaces it.
+          const debugEntries = alias.filter((entry) => findKey(entry.find) === '/^debug$/')
+          expect(debugEntries.map((entry) => entry.replacement)).toEqual(['/user/debug.js'])
+        }
+      })
+    }
+
+    it(`keeps user dedupe entries once (polyfills ${includeNodePolyfills ? 'on' : 'off'})`, async () => {
+      const { dedupe } = await resolveResolve(
+        { dedupe: ['user-dep', 'react'] },
+        includeNodePolyfills,
+      )
+      expect(dedupe.filter((dep) => dep === 'user-dep')).toHaveLength(1)
+      expect(dedupe.filter((dep) => dep === 'react')).toHaveLength(1)
+      expect(dedupe).toContain('@seedprotocol/sdk')
+      expect(new Set(dedupe).size).toBe(dedupe.length)
+    })
+  }
 })
 
 describe('seedVitePlugin resolved optimizer config (node polyfills on)', () => {
@@ -319,3 +516,156 @@ function fnSafeConfigure(plugin: { configureServer?: unknown }, server: unknown)
   const fn = typeof hook === 'function' ? hook : hook && typeof hook === 'object' && 'handler' in hook ? (hook as { handler: Function }).handler : null
   fn?.(server)
 }
+
+describe('seedVitePlugin build options', () => {
+  function captureWarnings() {
+    const warnings: string[] = []
+    const logger = createLogger('silent')
+    logger.warn = (msg) => {
+      warnings.push(msg)
+    }
+    logger.warnOnce = logger.warn
+    return { logger, warnings }
+  }
+
+  async function resolveWith(command: 'serve' | 'build', userConfig: Record<string, unknown>) {
+    const { logger, warnings } = captureWarnings()
+    const config = await resolveConfig(
+      {
+        root: testDir,
+        configFile: false,
+        customLogger: logger,
+        plugins: seedVitePlugin({ includeNodePolyfills: true }),
+        ...userConfig,
+      },
+      command,
+    )
+    return { config, warnings }
+  }
+
+  for (const command of ['serve', 'build'] as const) {
+    it(`keeps the user's build.rollupOptions without warning (${command})`, async () => {
+      const userPlugin = { name: 'user-build-plugin' }
+      const { config, warnings } = await resolveWith(command, {
+        build: {
+          rollupOptions: {
+            output: { entryFileNames: 'app-[name].js' },
+            external: ['user-ext'],
+            plugins: [userPlugin],
+          },
+          commonjsOptions: { include: [/user-cjs/] },
+        },
+      })
+      expect(warnings.filter((w) => /rollupOptions.*rolldownOptions/.test(w))).toEqual([])
+
+      const options = config.build.rolldownOptions
+      expect(config.build.rollupOptions).toBe(options)
+      expect(options.output).toMatchObject({ entryFileNames: 'app-[name].js' })
+      expect((options.plugins as unknown[]).filter((p) => p === userPlugin)).toHaveLength(1)
+
+      const external = options.external as Array<string | RegExp>
+      expect(external.filter((e) => e === 'user-ext')).toHaveLength(1)
+      const isExternal = (id: string) =>
+        external.some((e) => (typeof e === 'string' ? e === id : e.test(id)))
+      expect(isExternal('better-sqlite3')).toBe(true)
+      expect(isExternal('better-sqlite3/lib/index.js')).toBe(true)
+      expect(isExternal('/app/node_modules/better-sqlite3/lib/index.js')).toBe(true)
+      expect(isExternal('better-sqlite3-helper')).toBe(false)
+
+      const cjsInclude = config.build.commonjsOptions.include as RegExp[]
+      expect(cjsInclude.map(String)).toEqual([
+        '/user-cjs/',
+        '/node_modules/',
+        String(/seed-protocol-sdk[\\/]+dist[\\/]/),
+      ])
+    })
+  }
+
+  it('wraps a user external function instead of replacing it', async () => {
+    const { config } = await resolveWith('build', {
+      build: { rolldownOptions: { external: (id: string) => id === 'user-ext' } },
+    })
+    const external = config.build.rolldownOptions.external as (
+      id: string,
+      importer: string | undefined,
+      isResolved: boolean,
+    ) => boolean
+    expect(typeof external).toBe('function')
+    expect(external('user-ext', undefined, false)).toBe(true)
+    expect(external('better-sqlite3', undefined, false)).toBe(true)
+    expect(external('react', undefined, false)).toBe(false)
+  })
+
+  it('defaults worker.format to es without overriding a user format', async () => {
+    const { config: defaults } = await resolveWith('build', {})
+    expect(defaults.worker.format).toBe('es')
+    const { config: user } = await resolveWith('build', { worker: { format: 'iife' } })
+    expect(user.worker.format).toBe('iife')
+  })
+})
+
+describe('seedVitePlugin bare-globals scan', () => {
+  function scan(code: string): string[] {
+    const main = getMainPlugin()
+    const hook = main.generateBundle as unknown as (o: unknown, b: unknown) => void
+    const lines: string[] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    }
+    try {
+      hook.call({}, {}, { 'chunk.js': { type: 'chunk', code } })
+    } finally {
+      console.warn = warn
+    }
+    return lines
+      .map((l) => /line (\d+): `(\w+)`/.exec(l))
+      .filter((m): m is RegExpExecArray => !!m)
+      .map((m) => `${m[2]}@${m[1]}`)
+  }
+
+  it('reports free references to Node globals', () => {
+    const code = [
+      'export const env = process.env.API_URL',
+      'export const buf = Buffer.from("x")',
+      'export const dir = __dirname + __filename',
+      'global.foo = 1',
+      'if (typeof window !== "undefined") process.exit(1)',
+    ].join('\n')
+    expect(scan(code)).toEqual([
+      'process@1',
+      'Buffer@2',
+      '__dirname@3',
+      '__filename@3',
+      'global@4',
+      'process@5',
+    ])
+  })
+
+  it.each([
+    ['ternary typeof guard', 'export const a = typeof process === "object" ? process.env : {}'],
+    [
+      'if typeof guard',
+      'if ("object" === typeof process && "function" === typeof process.emit) {\n' +
+        '  process.emit("uncaughtException", new Error("x"))\n}',
+    ],
+    ['&& typeof guard', 'export const b = typeof Buffer !== "undefined" && Buffer.isBuffer(1)'],
+    ['try block', 'try { process.cwd() } catch {}'],
+    [
+      'local var (process polyfill)',
+      'var browser, process = (browser = {}); process.nextTick = () => {}',
+    ],
+    ['parameters', 'export function f(Buffer, { global }) { return Buffer.from(global) }'],
+    ['object keys', 'export const o = { process: 1, global() {}, __dirname: 2 }'],
+    ['member properties', 'export const m = window.process ?? window.Buffer'],
+    ['class members', 'export class C { process = 1; global() {} }'],
+    ['strings and comments', 'export const s = "process.env.X" // process.exit()'],
+    ['template text', 'export const t = `Buffer.from(${1})`'],
+  ])('ignores %s', (_label, code) => {
+    expect(scan(code)).toEqual([])
+  })
+
+  it('reports nothing for a chunk it cannot parse', () => {
+    expect(scan('process.env.X = (')).toEqual([])
+  })
+})

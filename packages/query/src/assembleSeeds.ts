@@ -1,6 +1,7 @@
 import {
   setSchemaUidForSchemaDefinition,
   pickLatestPropertyAttestationsByRefAndSchema,
+  keepAttestationsFromRefAttester,
 } from '@seedprotocol/eas'
 import { getArweaveUrlForTransaction } from './arweaveUrl.js'
 import {
@@ -232,9 +233,11 @@ async function processSeeds(
   // Revoked versions come back too (marked), in the same request, only so a seed whose versions
   // were all revoked can be told from one that never had a version; they are never used below.
   const requested = new Set(seedUids)
-  const allVersions = opts.versions
+  const fetchedVersions = opts.versions
     ? opts.versions.filter((v) => requested.has(v.refUID))
     : await dataSource.getVersionsForSeeds(seedUids, { includeRevoked: true })
+  // Anyone can attest with any refUID: only the seed's attester's versions count.
+  const allVersions = keepAttestationsFromRefAttester(fetchedVersions, seeds)
   const itemVersions = allVersions.filter((v) => v.revoked !== true)
 
   if (opts.dropSeedsWithOnlyRevokedVersions) {
@@ -271,8 +274,10 @@ async function processSeeds(
 
   if (latestVersionUids.length === 0) return
 
-  const rawProperties =
-    await dataSource.getPropertiesForVersionUids(latestVersionUids)
+  const rawProperties = keepAttestationsFromRefAttester(
+    await dataSource.getPropertiesForVersionUids(latestVersionUids),
+    itemVersions,
+  )
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
   for (let i = 0; i < itemProperties.length; i++) {

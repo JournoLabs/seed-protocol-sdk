@@ -16,4 +16,5 @@ export {
 export type {
   JsonImportSchema,
   SchemaFileFormat,
+  SchemaNameMatch,
 } from '../types/import'

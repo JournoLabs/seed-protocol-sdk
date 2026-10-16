@@ -2,7 +2,7 @@ import { checksumAddress } from './utils.js'
 import { withExcludeRevokedFilter } from './easRevokedFilter.js'
 import { BaseEasClient } from './EasClient/BaseEasClient.js'
 import { BaseQueryClient } from './QueryClient/BaseQueryClient.js'
-import { GET_SEEDS } from './queries.js'
+import { GET_DOMAIN_OWNERSHIPS } from './queries.js'
 import {
   DOMAIN_OWNERSHIP_SCHEMA_NAME,
   decodeDomainOwnershipData,
@@ -89,7 +89,7 @@ export async function getDomainOwnershipFromEas(
   const queryClient = BaseQueryClient.getQueryClient()
   const easClient = BaseEasClient.getEasClient()
 
-  const { itemSeeds } = (await queryClient.fetchQuery({
+  const { domainOwnerships } = (await queryClient.fetchQuery({
     queryKey: [
       'getDomainOwnershipFromEas',
       excludeRevoked,
@@ -99,15 +99,15 @@ export async function getDomainOwnershipFromEas(
       [...(claimers ?? [])].map((c) => c.toLowerCase()).sort(),
     ],
     queryFn: async () =>
-      easClient.request(GET_SEEDS, {
+      easClient.request(GET_DOMAIN_OWNERSHIPS, {
         where,
       }),
-  })) as { itemSeeds: Attestation[] }
+  })) as { domainOwnerships: Attestation[] }
 
-  if (!domains?.length) return itemSeeds
+  if (!domains?.length) return domainOwnerships
 
   const want = new Set(domains.map(normalizeDomainFilter))
-  return itemSeeds.filter((row) => {
+  return domainOwnerships.filter((row) => {
     try {
       const decoded = decodeDomainOwnershipData(row.decodedDataJson ?? '[]')
       return want.has(decoded.domain)

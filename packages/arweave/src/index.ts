@@ -11,6 +11,11 @@ export * from './ArweaveClient/transactionTagsByIds.js'
 export * from './ArweaveClient/BaseArweaveClient.js'
 export { BaseArweaveClient as ArweaveClient } from './ArweaveClient/BaseArweaveClient.js'
 export type { IArweaveClient } from './ArweaveClient/IArweaveClient.js'
+export {
+  assertSingleArweaveModule,
+  DuplicateArweaveModuleError,
+  resetArweaveClientOwnerForTests,
+} from './moduleOwner.js'
 export * from './ArweaveClient/selectReadGateway.js'
 export * from './ArweaveClient/uploadApiVerification.js'
 export * from './ArweaveClient/arweaveL1UploadApi.js'

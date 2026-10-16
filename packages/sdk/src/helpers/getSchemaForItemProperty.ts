@@ -1,5 +1,5 @@
 import { type EASSchema, type SchemaWhereInput, GET_SCHEMAS } from '@seedprotocol/eas'
-import { toSnakeCase, BaseEasClient, BaseQueryClient } from '@/helpers'
+import { easName, BaseEasClient, BaseQueryClient } from '@/helpers'
 import type { EIP712MessageTypes } from '@ethereum-attestation-service/eas-sdk'
 
 // Extract TypedData type from EIP712MessageTypes
@@ -25,7 +25,7 @@ export const getEasSchemaForItemProperty: GetSchemaForProperty = async ({
   easDataType,
 }): Promise<EASSchema | void> => {
   try {
-    const propertyNameSnakeCase = toSnakeCase(propertyName)
+    const propertyNameSnakeCase = easName(propertyName)
     const isMissingSchemaUid =
       !schemaUid || schemaUid === 'null' || schemaUid === 'undefined'
 

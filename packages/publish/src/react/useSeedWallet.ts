@@ -81,7 +81,7 @@ export function useSeedWallet(): UseSeedWalletResult {
   }, [])
 
   const disconnect = useCallback(() => {
-    clearPublishWallet()
+    void clearPublishWallet()
     setSession(null)
     setStatus('disconnected')
   }, [])

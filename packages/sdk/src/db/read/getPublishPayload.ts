@@ -1,3 +1,4 @@
+import { easName } from '@seedprotocol/eas'
 import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
 // Dynamic import to break circular dependency with getItem -> BaseItem
 // import { getItem } from '@/db/read/getItem'
@@ -14,8 +15,6 @@ import type {
 } from '@ethereum-attestation-service/eas-sdk'
 import { loadEasSdk } from '@/helpers/easSdk'
 
-import { toSnakeCase } from '@/helpers'
-import { toSnakeCase as toSnakeCaseDb } from 'drizzle-orm/casing'
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
 import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
@@ -32,7 +31,11 @@ import { parseListPropertyValueFromStorage } from '@/helpers/listPropertyValueFr
 import { getSegmentedItemProperties } from '@/helpers/getSegmentedItemProperties'
 import { draftWalkProperties } from '@/db/read/publishDraftGraph'
 import { getPropertySchema } from '@/helpers/property'
-import { listRelationEasPropertyName, type PropertySchemaEntry } from '@/helpers/metadataPropertyNames'
+import {
+  easPropertyNameForPublish,
+  listRelationEasPropertyName,
+  type PropertySchemaEntry,
+} from '@/helpers/metadataPropertyNames'
 import { modelPropertiesToObject } from '@/helpers/model'
 import { IItemProperty } from '@/interfaces'
 import { camelCase, upperFirst } from 'lodash-es'
@@ -312,23 +315,23 @@ const getPropertyData = async (
     return null
   }
 
-  const ip = itemProperty as IItemProperty<any> & { storagePropertyName?: string }
-  // List of Relation: the EAS name always comes from the property definition (authors → authorIdentityIds),
-  // never from whatever name the ItemProperty was constructed with or a cached schemaUid.
-  const listRelationName = listRelationEasPropertyName(
-    itemProperty.propertyName,
-    itemProperty.propertyDef as PropertySchemaEntry | undefined,
-  )
-  const nameForEas =
-    listRelationName ??
-    (ip.storagePropertyName && ip.storagePropertyName.length > 0
-      ? ip.storagePropertyName
-      : itemProperty.propertyName)
-  const propertyNameForSchema = toSnakeCase(nameForEas)
+  // ADR 0008: list relations publish under their storage name (authors → author_identity_ids),
+  // single relations under their schema key (author), never the local authorId.
+  const propertyDef = itemProperty.propertyDef as
+    | (PropertySchemaEntry & { name?: string; refValueType?: string })
+    | undefined
+  const listRelationName = listRelationEasPropertyName(itemProperty.propertyName, propertyDef)
+  const propertyNameForSchema = easPropertyNameForPublish(itemProperty.propertyName, propertyDef)
 
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
-  let schemaUid: string | undefined = listRelationName ? undefined : itemProperty.schemaUid
+  // A cached schemaUid was looked up under the property's own name: trust it only when that is
+  // the name published (not for a list relation, or a single relation stored as authorId).
+  const storageName =
+    (itemProperty as IItemProperty<any> & { storagePropertyName?: string }).storagePropertyName ||
+    itemProperty.propertyName
+  let schemaUid: string | undefined =
+    !listRelationName && easName(storageName) === propertyNameForSchema ? itemProperty.schemaUid : undefined
   if (!schemaUid) {
     schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: schemaDef })
   }
@@ -375,7 +378,7 @@ const ensurePropertyDefs = async (targetItem: IItem<any>) => {
           const normalizedModelName = upperFirst(camelCase(targetItem.modelName))
           let model = Model.resolve(normalizedModelName, targetScope)
           if (!model?.properties?.length && !targetScope.modelFileId) {
-            model = Model.findByModelType(toSnakeCaseDb(targetItem.modelName))
+            model = Model.findByModelType(easName(targetItem.modelName))
           }
           const modelFound = !!model
           const propsCount = model?.properties?.length ?? 0
@@ -671,7 +674,7 @@ const processBasicProperties = async (
     const attestationEntry: Omit<AttestationRequest, 'data'> & {
       data: AttestationRequestData[]
       _propertyName?: string
-      /** Same as encode step (getPropertyData); resolvePublishPayloadValues must use this, not toSnakeCase(propertyName). */
+      /** Same as encode step (getPropertyData); resolvePublishPayloadValues must use this, not easName(propertyName). */
       _propertyNameForSchema?: string
       _schemaDef?: string
       _unresolvedValue?: string
@@ -2110,7 +2113,7 @@ export const resolvePublishPayloadValues = async (
         (entry._propertyNameForSchema || entry._propertyName)
       ) {
         const fieldName =
-          entry._propertyNameForSchema ?? toSnakeCase(entry._propertyName as string)
+          entry._propertyNameForSchema ?? easName(entry._propertyName as string)
         const resolvedValues: string[] = []
         let allSlotsResolved = true
         for (const id of rawList) {
@@ -2163,7 +2166,7 @@ export const resolvePublishPayloadValues = async (
       const easType = (entry._easDataType as 'bytes32' | 'string') || 'bytes32'
       if (resolvedUid && entry._schemaDef && (entry._propertyNameForSchema || entry._propertyName)) {
         const fieldName =
-          entry._propertyNameForSchema ?? toSnakeCase(entry._propertyName as string)
+          entry._propertyNameForSchema ?? easName(entry._propertyName as string)
         const valueForEncode =
           easType === 'bytes32' ? padUidForBytes32Schema(resolvedUid) : resolvedUid
         const dataEncoder = new SchemaEncoder(entry._schemaDef)

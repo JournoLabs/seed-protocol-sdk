@@ -39,6 +39,7 @@ import { eventEmitter } from '@/eventBus'
 // Note: TProperty is used as a type, so we can import it separately. ModelPropertyDataTypes is used at runtime.
 import type { TProperty } from '@/Schema'
 import { createReactiveProxy } from '@/helpers/reactiveProxy'
+import { hasPendingPropertyWrite, propertyWriteKey } from '@/helpers/propertyWriteQueue'
 import {
   ModelPropertyDataTypes,
   isDataType,
@@ -705,7 +706,20 @@ export class ItemProperty<PropertyType> implements IItemProperty<PropertyType> {
               
               const metaRow = metadataRows[0]
               logger(`[ItemProperty._setupLiveQuerySubscription] Metadata updated in database for propertyName: ${propertyName}`)
-              
+
+              // While this property has a save pending, the row is older than the value in memory
+              // (the user may still be typing): showing it would drop keystrokes, and another tab's
+              // write would replace the value being typed. The save sets the context itself.
+              const { context } = this._service.getSnapshot()
+              if (
+                context.isSaving ||
+                hasPendingPropertyWrite(
+                  propertyWriteKey(context.seedLocalId ?? context.seedUid, context.propertyName),
+                )
+              ) {
+                return
+              }
+
               // Update context with metadata changes
               this._service.send({
                 type: 'updateContext',

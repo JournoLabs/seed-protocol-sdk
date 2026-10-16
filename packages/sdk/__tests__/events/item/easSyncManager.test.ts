@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createActor } from 'xstate'
-import { easSyncMachine } from '@/events/item/easSyncManager'
+import { easSyncActor, easSyncMachine, requestEasSyncFromModelsInit } from '@/events/item/easSyncManager'
+import { cancelAllRetriesWhenOnline, setRetriesWhenOnlineEnabled } from '@/helpers/retryWhenOnline'
 import { WAIT_TIMEOUT_MS } from '../../test-utils/timeouts'
 
 // vi.mock rather than vi.spyOn on the module namespace: ESM namespaces aren't configurable in browser
@@ -11,6 +12,7 @@ const { runSyncFromEas } = vi.hoisted(() => ({ runSyncFromEas: vi.fn() }))
 vi.mock('@/events/item/syncDbWithEas', () => ({ runSyncFromEas }))
 vi.mock('@/db/write/easSyncProcess', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/db/write/easSyncProcess')>()),
+  failInterruptedEasSyncProcessRows: vi.fn().mockResolvedValue(0),
   insertEasSyncProcessRow: vi.fn().mockResolvedValue(1),
   finalizeEasSyncProcessRow: vi.fn().mockResolvedValue(undefined),
 }))
@@ -63,5 +65,29 @@ describe('easSyncMachine', () => {
     expect(runSpy).toHaveBeenLastCalledWith({ addresses: ['0xAa', '0xbb'] })
 
     actor.stop()
+  })
+
+  it('runs a failed automatic sync again later (offline at startup)', async () => {
+    const previousRetrySetting = setRetriesWhenOnlineEnabled(true)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      runSpy.mockRejectedValueOnce(new TypeError('fetch failed'))
+      requestEasSyncFromModelsInit()
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(easSyncActor.getSnapshot().value).toBe('idle'))
+      expect(easSyncActor.getSnapshot().context.lastFinishedStatus).toBe('failed')
+
+      await vi.advanceTimersByTimeAsync(15_000)
+      await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() =>
+        expect(easSyncActor.getSnapshot().context.lastFinishedStatus).toBe('success'),
+      )
+      // A full sync failed, so the retry is a full sync too.
+      expect(runSpy).toHaveBeenLastCalledWith(undefined)
+    } finally {
+      cancelAllRetriesWhenOnline()
+      setRetriesWhenOnlineEnabled(previousRetrySetting)
+      vi.useRealTimers()
+    }
   })
 })

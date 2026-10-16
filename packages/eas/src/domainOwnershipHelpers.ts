@@ -15,6 +15,9 @@ export const DOMAIN_OWNERSHIP_METHOD = 'dns-txt-challenge'
 /** Default scope: registrable domain (eTLD+1). */
 export const DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE = 'registrable'
 
+/** Exact-hostname scope: the challenge was published on this hostname, not on its eTLD+1. */
+export const DOMAIN_OWNERSHIP_SCOPE_HOSTNAME = 'hostname'
+
 /** Underscored DNS owner-name prefix (IETF domain control validation style). */
 export const DOMAIN_OWNERSHIP_TXT_LABEL = '_seedprotocol-challenge'
 
@@ -162,6 +165,10 @@ function asBytes32(value: unknown): `0x${string}` {
   if (typeof value === 'string') return normalizeBytes32Hex(value) as `0x${string}`
   if (value && typeof value === 'object' && 'hex' in (value as object)) {
     return normalizeBytes32Hex(String((value as { hex: string }).hex)) as `0x${string}`
+  }
+  // EAS decodedDataJson nests each field's value: { name, type, value }.
+  if (value && typeof value === 'object' && 'value' in (value as object)) {
+    return asBytes32((value as { value: unknown }).value)
   }
   return normalizeBytes32Hex(String(value ?? '')) as `0x${string}`
 }

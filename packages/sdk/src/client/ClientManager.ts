@@ -35,6 +35,7 @@ import {
 } from '@/db/write/removeLocalCopiesForAddresses'
 import { claimUnpublishedDrafts } from '@/db/write/claimUnpublishedDrafts'
 import { Item } from '@/Item/Item'
+import { cancelAllRetriesWhenOnline } from '@/helpers/retryWhenOnline'
 
 const logger               = debug('seedSdk:client')
 
@@ -314,12 +315,14 @@ const clientInstance = {
   stop: () => {
     ensureInitialized();
     activeInitConfig = undefined
+    cancelAllRetriesWhenOnline()
     unregisterSeedQueryLocalSource()
     clientManager.stop();
   },
   unload: () => {
     ensureInitialized();
     activeInitConfig = undefined
+    cancelAllRetriesWhenOnline()
     unregisterSeedQueryLocalSource()
     clientManager.stop();
     subscription.unsubscribe();

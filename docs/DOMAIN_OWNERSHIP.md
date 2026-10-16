@@ -55,6 +55,7 @@ const live = await assessDomainOwnershipLive({
 - **Value:** `token=<base64url>,addr=<claimer>,expiry=<ISO-8601>`
 - Token has ≥128 bits of entropy; default challenge TTL is **72 hours**.
 - Domains are normalized to the **registrable** eTLD+1 via `rdapper` / `tldts` unless `normalizeRegistrable: false`.
+- With `normalizeRegistrable: false` the challenge is on the hostname as given and its scope defaults to `hostname` (`DOMAIN_OWNERSHIP_SCOPE_HOSTNAME`); the attestation records that hostname, never its eTLD+1. Scope `registrable` on a subdomain is refused.
 
 Verification queries `node:dns` plus Cloudflare and Google DNS-over-HTTPS. Success requires a **DNSSEC-authenticated** match or a **quorum of ≥2** matching sources.
 

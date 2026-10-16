@@ -1,12 +1,13 @@
 import {
   DOMAIN_OWNERSHIP_CHALLENGE_TTL_MS,
   DOMAIN_OWNERSHIP_METHOD,
+  DOMAIN_OWNERSHIP_SCOPE_HOSTNAME,
   DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE,
   buildDomainOwnershipTxtValue,
   domainOwnershipTxtName,
   hashDomainOwnershipChallenge,
 } from '@seedprotocol/eas'
-import { normalizeRegistrableDomain } from './registry'
+import { normalizeHostname, normalizeRegistrableDomain } from './registry'
 
 export type DomainOwnershipChallenge = {
   /** Opaque id for caller correlation (not required by verify). */
@@ -52,13 +53,14 @@ export function createDomainOwnershipChallenge(params: {
   /** Override challenge TTL (ms). Default 72h. */
   ttlMs?: number
   now?: number
-  /** When false, skip eTLD+1 normalization (hostname scope). Default true. */
+  /**
+   * When false, skip eTLD+1 normalization: the challenge is on the hostname as given, and the
+   * scope defaults to {@link DOMAIN_OWNERSHIP_SCOPE_HOSTNAME}. Default true.
+   */
   normalizeRegistrable?: boolean
 }): DomainOwnershipChallenge {
-  const domain =
-    params.normalizeRegistrable === false
-      ? params.domain.trim().toLowerCase().replace(/\.$/, '')
-      : normalizeRegistrableDomain(params.domain)
+  const hostnameOnly = params.normalizeRegistrable === false
+  const domain = hostnameOnly ? normalizeHostname(params.domain) : normalizeRegistrableDomain(params.domain)
   if (!domain || domain.includes(' ')) {
     throw new Error('@seedprotocol/publish: createDomainOwnershipChallenge requires a valid domain')
   }
@@ -68,7 +70,14 @@ export function createDomainOwnershipChallenge(params: {
       '@seedprotocol/publish: createDomainOwnershipChallenge requires a 20-byte hex claimer address',
     )
   }
-  const scope = params.scope ?? DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE
+  const scope =
+    params.scope ?? (hostnameOnly ? DOMAIN_OWNERSHIP_SCOPE_HOSTNAME : DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE)
+  // A TXT record on a subdomain proves nothing about the rest of the registrable domain.
+  if (scope === DOMAIN_OWNERSHIP_SCOPE_REGISTRABLE && domain !== normalizeRegistrableDomain(domain)) {
+    throw new Error(
+      `@seedprotocol/publish: createDomainOwnershipChallenge cannot use scope "registrable" for "${domain}", which is not a registrable domain. Use the hostname scope or challenge ${normalizeRegistrableDomain(domain)}.`,
+    )
+  }
   const ttlMs = params.ttlMs ?? DOMAIN_OWNERSHIP_CHALLENGE_TTL_MS
   const now = params.now ?? Date.now()
   const expiresAt = new Date(now + ttlMs).toISOString()

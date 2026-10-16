@@ -14,6 +14,8 @@ import { saveConfig } from "./actors/saveConfig"
 import { processSchemaFiles } from "./actors/processSchemaFiles"
 import { emitAcrossTabs } from "@/helpers/tabEvents"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
+import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
+import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import {
   ADDRESSES_PERSISTED_EVENT,
   parseAddressesPersistedPayload,
@@ -288,6 +290,10 @@ export const clientManagerMachine = setup({
         // In the background after init: the app is usable at once, the properties table holds the
         // current storage settings by now, and a failure never fails init.
         () => startLegacyItemStorageMigration(),
+        // Also once, in the background: rows an older sync stored from other accounts' attestations.
+        () => startForeignAttestationCleanup(),
+        // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
+        () => startCanonicalizeModelTypes(),
       ],
       on: {
         [SAVE_APP_STATE_SUCCESS]: {

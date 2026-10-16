@@ -88,7 +88,7 @@ export { BaseFileManager as FileManager } from './helpers'
 export { BaseEasClient as EasClient } from './helpers'
 export { getEasSchemaForItemProperty } from './helpers/getSchemaForItemProperty'
 export { setSchemaUidForSchemaDefinition, setSchemaUidForModel } from './stores/eas'
-export { listRelationEasPropertyName } from './helpers/metadataPropertyNames'
+export { listRelationEasPropertyName, easPropertyNameForPublish } from './helpers/metadataPropertyNames'
 
 export {
   getModelSchemasFromEas,
@@ -155,6 +155,9 @@ export {
 export type { SeedRssImageRelationRef } from '@seedprotocol/arweave'
 export {
   pickLatestPropertyAttestationsByRefAndSchema,
+  easName,
+  matchEasName,
+  type NameMatchLevel,
   isPlaceholderUid,
   isValidEasAttestationUid,
   normalizeBytes32Hex,
@@ -397,12 +400,14 @@ export {
   syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './imports'
-export type { SchemaFileFormat } from './imports'
+export type { SchemaFileFormat, SchemaNameMatch } from './imports'
 
 
 export { client } from './client'
 export type { SyncFromEasOptions } from './events/item/syncDbWithEas'
 export type { EasSyncProcessType } from './seedSchema/EasSyncProcessSchema'
+/** Turn off (or back on) retrying the startup EAS lookup and failed syncs when back online. */
+export { setRetriesWhenOnlineEnabled } from './helpers/retryWhenOnline'
 export {
   easSyncActor,
   startEasSyncActor,
