@@ -25,6 +25,8 @@ export type CreateArweaveDataItemsResult = {
   publishUploads: PublishUpload[]
   /** Signed DataItems for uploadViaBundler (dataItemSigner path only). */
   signedDataItems?: unknown[]
+  /** Nothing for uploadViaBundler to send: signDataItems uploaded the items itself, or there were none. */
+  bundlerUploadNotNeeded: boolean
 }
 
 type PublishInput = { input: { context: PublishMachineContext; event: unknown } }
@@ -115,6 +117,7 @@ export async function signBundlerUploadDataList(
     arweaveTransactions,
     publishUploads,
     signedDataItems,
+    bundlerUploadNotNeeded: !!signDataItems || uploadDataList.length === 0,
   }
 }
 

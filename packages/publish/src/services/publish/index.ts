@@ -319,6 +319,7 @@ export const publishMachine = setup({
             arweaveTransactions : ( { event, }, ) => event.output.arweaveTransactions as ArweaveTransactionInfo[],
             publishUploads : ( { event, }, ) => event.output.publishUploads as PublishUpload[],
             signedDataItems : ( { event, }, ) => (event.output as { signedDataItems?: { id: string; raw: Uint8Array }[] }).signedDataItems,
+            bundlerUploadNotNeeded : ( { event, }, ) => (event.output as { bundlerUploadNotNeeded?: boolean }).bundlerUploadNotNeeded === true,
           },),
         },
         onError : {
@@ -420,6 +421,8 @@ export const publishMachine = setup({
             signedDataItems: ({ event }) =>
               (event.output as { signedDataItems?: PublishMachineContext['signedDataItems'] })
                 .signedDataItems,
+            bundlerUploadNotNeeded: ({ event }) =>
+              (event.output as { bundlerUploadNotNeeded?: boolean }).bundlerUploadNotNeeded === true,
             uploaderState: () => undefined,
             currentTransactionIndex: () => undefined,
           }),
