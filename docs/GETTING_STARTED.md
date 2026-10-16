@@ -131,6 +131,43 @@ const Post = await Model.create('Post', 'Blog', {
 })
 ```
 
+### Matching names from other publishers (`nameMatch`)
+
+Models and properties are shared on EAS: any app's `Post` publishes under `bytes32 post`, and a
+property `title` under `string title`. When the SDK syncs, it matches the names it finds there to
+your models and properties, and by default it matches loosely, so `htmlpage`, `HTMLPage` and
+`html_pages` all reach your `HTMLPage` model. A schema file can make that stricter with
+`nameMatch`, on a property, a model or the whole schema (the most specific one set wins):
+
+```json
+{
+  "name": "Blog",
+  "nameMatch": "normalized",
+  "models": {
+    "Post": {
+      "nameMatch": "exact",
+      "properties": {
+        "title": { "type": "Text" },
+        "tags": { "type": "List", "refValueType": "Text", "nameMatch": "fuzzy" }
+      }
+    }
+  }
+}
+```
+
+| `nameMatch` | Accepts for `HTMLPage` |
+|---|---|
+| `exact` | only `html_page`, the name this SDK publishes |
+| `normalized` | also case and separator differences: `htmlpage`, `HtmlPage`, `html-page` |
+| `fuzzy` (default) | also a plural `s` (`html_pages`); for relations, a trailing `id`/`ids` (`author_id`) |
+
+Use `exact` when nothing from another publisher should be pulled in unless it uses your exact
+names. Note that seeds published by older SDK versions (`htmlpage`) are then not found either.
+`nameMatch` is read from the schema file (`config.schema`, `seedSchema.json` or an imported
+file); models created with `Model.create` in code use their schema's level. Tightening it
+affects later syncs only: data already synced stays. See
+[ADR 0009](adr/0009-name-match-strictness.md).
+
 ---
 
 ## 2. Create an item from a model

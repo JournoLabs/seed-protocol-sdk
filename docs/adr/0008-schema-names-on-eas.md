@@ -54,8 +54,8 @@ on chain under those names.
 **Where this is going.** As more apps use the SDK, schemas that mean the same thing will differ in
 small ways (`htmlPage` vs `HTMLPage` vs `html_page`, `post` vs `posts`). Matching names that are
 meant to be the same is a feature to build on, not a bug to patch once. How strictly a developer
-wants that matching is a separate, configurable choice: the `nameMatch` design
-(side-session note `name-match-strictness-design.md`, to become ADR 0009).
+wants that matching is a separate, configurable choice: `nameMatch`
+([ADR 0009](0009-name-match-strictness.md)).
 
 ## Decision
 
@@ -81,7 +81,8 @@ No code turns an EAS name back into a local name by changing its case. Instead, 
 matched against the local candidates, models for a seed type and the model's properties for a
 property attestation, by comparing keys:
 
-- **exact key:** `easName(local) === easName(eas)`.
+- **exact key:** `easName(local) === easName(eas)`. ADR 0009 narrows this to
+  `easName(local) === eas`, the name publish writes.
 - **normalized key:** both lowercased, with every non-alphanumeric character removed.
   `html_page`, `htmlpage`, `HTMLPage` and `html-page` share `htmlpage`. This is how seeds
   published under the old names are found.
@@ -168,7 +169,7 @@ loading.
 
 ## How this fits `nameMatch`
 
-The `nameMatch` design (approved 2026-10-15, to become ADR 0009) sets the default level to what
+[ADR 0009](0009-name-match-strictness.md) (`nameMatch`) sets the default level to what
 this ADR ships, which is `fuzzy`. So an existing schema file sees old-name seeds and `author_id`
 relations with no change. Its other answers this ADR relies on:
 
@@ -178,8 +179,7 @@ relations with no change. Its other answers this ADR relies on:
 - **No `aliases`** for now. If they are added later, they count as exact keys at every level.
 
 This ADR defines what `fuzzy` means (section 2: plural `s` and relation `id`/`ids`, no edit
-distance). ADR 0009 adds the setting and where it's stored. Until it ships, every name behaves as
-`fuzzy`.
+distance). ADR 0009 adds the setting and where it's stored.
 
 ## Alternatives considered
 
