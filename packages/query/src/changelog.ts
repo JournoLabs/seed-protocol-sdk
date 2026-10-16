@@ -1,3 +1,4 @@
+import { decodeEasNumber, isNumericEasType } from '@seedprotocol/eas'
 import { parseEasPropertyMetadata } from './parseEasPropertyMetadata.js'
 import { parseEasRelationPropertyName } from './parseEasRelationPropertyName.js'
 import type {
@@ -78,7 +79,9 @@ export function decodePropertyAttestation(
   if (isRelation && isList && Array.isArray(propertyValue)) {
     propertyValue = propertyValue.map((v) => String(v))
   } else if (typeof propertyValue !== 'string') {
-    propertyValue = JSON.stringify(propertyValue)
+    // ADR 0010: an integer value as its decimal string, not the indexer's `{ type: 'BigNumber', hex }`.
+    const decimal = isNumericEasType(easType) ? decodeEasNumber(propertyValue) : undefined
+    propertyValue = decimal ?? JSON.stringify(propertyValue)
   }
 
   const camelName = toCamelCase(propertyNameSnake)
