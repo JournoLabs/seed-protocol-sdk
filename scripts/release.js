@@ -11,7 +11,9 @@
  *
  * --retry is for a release that failed before anything published: it moves that
  * version's tag to HEAD (which must contain the old tag's commit, e.g. with fixes
- * on top) and pushes it again, instead of skipping to the next patch.
+ * on top) and pushes it again, instead of skipping to the next patch. When HEAD adds
+ * commits or Unreleased notes to the packages, it first commits them into that version's
+ * CHANGELOG sections (only CHANGELOG.md changes) and tags that commit.
  *
  * Before asking for confirmation it checks that:
  * - you're on main with a clean tree, not behind origin/main
@@ -41,7 +43,7 @@ import {
   retryProblems,
 } from './release-channel.js'
 import { syncVersions } from './sync-versions.js'
-import { formatCommitGroups, packageCommits, writeReleaseChangelogs } from './changelog.js'
+import { planReleaseChangelogs, writeReleaseChangelogs } from './changelog.js'
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MAIN_BRANCH = process.env.MAIN_BRANCH || 'main'
@@ -200,26 +202,41 @@ async function main() {
   }
   const range = previousTag ? `${previousTag}..HEAD` : 'HEAD'
   const changes = lines(git(['log', '--oneline', '--no-merges', range]))
-  // Packages whose CHANGELOG gets a section: listable commits since the last release
-  const changelogCounts = PUBLISH_ORDER.map((dir) => {
-    const listed = formatCommitGroups(packageCommits(rootDir, dir, range), dir)
-    return [dir, listed.split('\n').filter((l) => l.startsWith('- ')).length]
-  }).filter(([, count]) => count > 0)
+  const date = new Date().toISOString().slice(0, 10)
+  // A retry adds what came after the failed release commit to its sections; a release
+  // adds new sections for everything since the last release
+  const changelogRange = args.retry ? (retriedTagCommit ? `${retriedTagCommit}..HEAD` : null) : range
+  const changelogPlan = changelogRange
+    ? planReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range: changelogRange, extend: args.retry })
+    : []
 
   console.log(`\n${args.retry ? 'Retry' : 'Release'} ${tag}`)
   if (args.retry) {
+    const to = changelogPlan.length > 0 ? 'a changelog commit on HEAD' : `${head.slice(0, 7)} (HEAD)`
     console.log(`  version     ${target}, already committed  (npm latest: ${latest ?? 'unknown'})`)
-    console.log(`  tag         moves ${retriedTagCommit ? retriedTagCommit.slice(0, 7) : '?'} → ${head.slice(0, 7)} (HEAD)`)
+    console.log(`  tag         moves ${retriedTagCommit ? retriedTagCommit.slice(0, 7) : '?'} → ${to}`)
   } else {
     console.log(`  version     ${committed} → ${target}  (npm latest: ${latest ?? 'unknown'})`)
   }
   console.log(`  packages    ${PUBLISH_ORDER.length}: ${PUBLISH_ORDER.join(', ')}`)
-  console.log(`  pushes      ${ahead} unpushed commit(s) on ${MAIN_BRANCH}${args.retry ? '' : ' + the release commit'} + ${tag}`)
+  const newCommit = !args.retry ? ' + the release commit' : changelogPlan.length > 0 ? ' + the changelog commit' : ''
+  console.log(`  pushes      ${ahead} unpushed commit(s) on ${MAIN_BRANCH}${newCommit} + ${tag}`)
   console.log(`  changes     ${changes.length} commit(s) since ${previousTag || 'the start'}`)
   for (const line of changes.slice(0, 15)) console.log(`                ${line}`)
   if (changes.length > 15) console.log(`                … and ${changes.length - 15} more`)
-  if (!args.retry) {
-    const summary = changelogCounts.map(([dir, count]) => `${dir} (${count})`).join(', ')
+  if (args.retry) {
+    // Everything the retry adds, since it lands in a commit CI hasn't seen
+    if (changelogPlan.length === 0) console.log(`  changelogs  nothing to add to ${target}; tags HEAD as it is`)
+    else console.log(`  changelogs  add to the ${target} sections (commits since ${retriedTagCommit.slice(0, 7)}):`)
+    for (const { path, commitLines, movesUnreleased } of changelogPlan) {
+      console.log(`                ${path}${movesUnreleased ? ' (+ its Unreleased notes)' : ''}`)
+      for (const line of commitLines) console.log(`                  ${line}`)
+    }
+  } else {
+    const summary = changelogPlan
+      .filter(({ commitLines }) => commitLines.length > 0)
+      .map(({ path, commitLines }) => `${path.split('/')[1]} (${commitLines.length})`)
+      .join(', ')
     console.log(`  changelogs  ${summary || 'no listable commits'}; Unreleased notes move into the new section`)
   }
   for (const w of warnings) console.log(`  ⚠️  ${w}`)
@@ -241,15 +258,27 @@ async function main() {
   }
 
   if (args.retry) {
-    git(['tag', '-f', '-a', tag, '-m', `Release ${target}`, head])
+    // The commits after the failed release commit belong to this version: the next release's
+    // changelog starts at the moved tag. Only CHANGELOG.md files change, and the tag run
+    // repeats the tests on the tagged commit.
+    const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range: changelogRange, extend: true })
+    if (changelogs.length > 0) {
+      git(['add', '--', ...changelogs])
+      git(['commit', '--quiet', '-m', `chore: release ${target} (retry changelog)`])
+      console.log(`\nChangelogs: ${changelogs.join(', ')}`)
+    }
+    const tagged = git(['rev-parse', 'HEAD'])
+    git(['tag', '-f', '-a', tag, '-m', `Release ${target}`, tagged])
     try {
       // Both or neither, as for a new release; + replaces the failed tag on origin.
       execFileSync('git', ['push', '--atomic', 'origin', MAIN_BRANCH, `+refs/tags/${tag}`], { stdio: 'inherit' })
     } catch {
       git(['fetch', '--quiet', 'origin', `+refs/tags/${tag}:refs/tags/${tag}`])
-      throw new Error(`Push failed; ${tag} is back where origin has it (${retriedTagCommit.slice(0, 7)}).`)
+      git(['reset', '--hard', '--quiet', head])
+      const undone = changelogs.length > 0 ? 'removed the changelog commit, and ' : ''
+      throw new Error(`Push failed; ${undone}${tag} is back where origin has it (${retriedTagCommit.slice(0, 7)}).`)
     }
-    console.log(`\n✅ Moved ${tag} to ${head.slice(0, 7)} and pushed it. CI publishes it to npm \`latest\` once tests pass.`)
+    console.log(`\n✅ Moved ${tag} to ${tagged.slice(0, 7)} and pushed it. CI publishes it to npm \`latest\` once tests pass.`)
     console.log(`   Runs: gh run list --workflow release.yml --branch ${tag}`)
     return
   }
@@ -262,7 +291,6 @@ async function main() {
     throw new Error(`Version sync changed more than package.json files (${unexpected.join(', ')}); reverted.`)
   }
 
-  const date = new Date().toISOString().slice(0, 10)
   const changelogs = writeReleaseChangelogs({ rootDir, packages: PUBLISH_ORDER, version: target, date, range })
   if (changelogs.length > 0) git(['add', '--', ...changelogs])
   console.log(`\nChangelogs: ${changelogs.length > 0 ? changelogs.join(', ') : 'none changed'}`)

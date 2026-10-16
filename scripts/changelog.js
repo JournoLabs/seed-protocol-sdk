@@ -4,6 +4,9 @@
  * A release section is the package's hand-written `## Unreleased` notes, if any, followed by
  * the commits since the last release that touched the package, grouped by conventional-commit
  * type. test/ci/chore commits are left out: they don't change what the package does.
+ *
+ * `bun run release -- --retry` moves a release tag past the release commit; it merges the
+ * commits it adds (and any new Unreleased notes) into that version's existing section.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -100,6 +103,94 @@ export function addReleaseSection(text, { version, date, commitGroups }) {
 }
 
 /**
+ * `#### Title` blocks of a Commits list → [title, lines] in order. Text before the first
+ * heading is kept under the title ''.
+ * @param {string} block
+ * @returns {[string, string[]][]}
+ */
+function parseCommitGroups(block) {
+  const groups = []
+  let current = ['', []]
+  for (const line of block.split('\n')) {
+    const heading = /^#### (.+?)\s*$/.exec(line)
+    if (heading) {
+      if (current[0] || current[1].length > 0) groups.push(current)
+      current = [heading[1], []]
+    } else if (line.trim()) {
+      current[1].push(line)
+    }
+  }
+  if (current[0] || current[1].length > 0) groups.push(current)
+  return groups
+}
+
+/**
+ * Two Commits lists merged: `added` lines go on top of their group (they're newer), lines
+ * already listed aren't repeated, and groups keep the Breaking/Features/Fixes/Other order.
+ * @param {string} existing
+ * @param {string} added
+ */
+export function mergeCommitGroups(existing, added) {
+  const merged = new Map(parseCommitGroups(existing))
+  for (const [title, lines] of parseCommitGroups(added)) {
+    const old = merged.get(title) ?? []
+    merged.set(title, [...lines.filter((l) => !old.includes(l)), ...old])
+  }
+  const order = GROUPS.map(([, title]) => title)
+  const rank = (title) => (order.includes(title) ? order.indexOf(title) : order.length)
+  const titles = [...merged.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : rank(a) - rank(b)))
+  return titles
+    .filter((title) => merged.get(title).length > 0)
+    .map((title) => (title ? `#### ${title}\n\n${merged.get(title).join('\n')}` : merged.get(title).join('\n')))
+    .join('\n\n')
+}
+
+/**
+ * The CHANGELOG text with more notes and commits in the existing `## version` section, for a
+ * retried release: Unreleased notes go after the section's notes, commits into its Commits
+ * list. Without a section for the version, adds one as addReleaseSection does.
+ * @param {string} text
+ * @param {{ version: string, date: string, commitGroups: string }} release
+ */
+export function extendReleaseSection(text, { version, date, commitGroups }) {
+  const { header, unreleased, rest } = splitChangelog(text)
+  if (!unreleased && !commitGroups) return text
+  const heading = new RegExp(`^## ${version.replace(/\./g, '\\.')}(?![\\w.-])[^\\n]*(?:\\n|$)`, 'm').exec(rest)
+  if (!heading) return addReleaseSection(text, { version, date, commitGroups })
+
+  const bodyStart = heading.index + heading[0].length
+  const nextSection = rest.slice(bodyStart).search(/^## /m)
+  const bodyEnd = nextSection === -1 ? rest.length : bodyStart + nextSection
+  const body = rest.slice(bodyStart, bodyEnd)
+
+  // The section is notes, then `### Commits`, then (rarely) more ### blocks after it
+  let notes = body
+  let commits = ''
+  let after = ''
+  const commitsHeading = /^### Commits[^\n]*(?:\n|$)/m.exec(body)
+  if (commitsHeading) {
+    notes = body.slice(0, commitsHeading.index)
+    const list = body.slice(commitsHeading.index + commitsHeading[0].length)
+    const nextBlock = list.search(/^### /m)
+    commits = nextBlock === -1 ? list : list.slice(0, nextBlock)
+    after = nextBlock === -1 ? '' : list.slice(nextBlock)
+  }
+
+  const allNotes = [notes.trim(), unreleased].filter(Boolean).join('\n\n')
+  const allCommits = mergeCommitGroups(commits, commitGroups)
+  const parts = [heading[0].trimEnd()]
+  if (allNotes) parts.push(allNotes)
+  if (allCommits) parts.push(`### Commits\n\n${allCommits}`)
+  if (after.trim()) parts.push(after.trim())
+  const section = parts.join('\n\n') + '\n'
+
+  const before = rest.slice(0, heading.index)
+  const following = rest.slice(bodyEnd)
+  const top = header.trim() ? header.trimEnd() + '\n' : HEADER
+  return `${top}\n${before}${section}${following ? `\n${following.trimEnd()}\n` : ''}`
+}
+
+/**
  * Commits in `range` (e.g. `v0.7.2..HEAD`) that touched packages/<dir>, newest first, without merges.
  * Changes to the package's CHANGELOG.md don't count, so changelog edits don't list themselves.
  * @param {string} rootDir
@@ -119,20 +210,37 @@ export function packageCommits(rootDir, dir, range) {
 }
 
 /**
- * Writes the release section into each package's CHANGELOG.md. Returns the files it changed.
- * @param {{ rootDir: string, packages: string[], version: string, date: string, range: string }} options
+ * The CHANGELOG.md changes a release makes, without writing them: one entry per package whose
+ * file changes, with the commit lines it lists. `extend` (a retry) merges into the existing
+ * `## version` section instead of adding a new one.
+ * @param {{ rootDir: string, packages: string[], version: string, date: string, range: string, extend?: boolean }} options
+ * @returns {{ path: string, file: string, text: string, commitLines: string[], movesUnreleased: boolean }[]}
  */
-export function writeReleaseChangelogs({ rootDir, packages, version, date, range }) {
-  const changed = []
+export function planReleaseChangelogs({ rootDir, packages, version, date, range, extend = false }) {
+  const plan = []
   for (const dir of packages) {
     const file = join(rootDir, 'packages', dir, 'CHANGELOG.md')
     const before = existsSync(file) ? readFileSync(file, 'utf-8') : ''
     const commitGroups = formatCommitGroups(packageCommits(rootDir, dir, range), dir)
-    const after = addReleaseSection(before, { version, date, commitGroups })
-    if (after !== before) {
-      writeFileSync(file, after)
-      changed.push(`packages/${dir}/CHANGELOG.md`)
-    }
+    const after = (extend ? extendReleaseSection : addReleaseSection)(before, { version, date, commitGroups })
+    if (after === before) continue
+    plan.push({
+      path: `packages/${dir}/CHANGELOG.md`,
+      file,
+      text: after,
+      commitLines: commitGroups.split('\n').filter((l) => l.startsWith('- ')),
+      movesUnreleased: !!splitChangelog(before).unreleased,
+    })
   }
-  return changed
+  return plan
+}
+
+/**
+ * Writes the release section into each package's CHANGELOG.md. Returns the files it changed.
+ * @param {{ rootDir: string, packages: string[], version: string, date: string, range: string, extend?: boolean }} options
+ */
+export function writeReleaseChangelogs(options) {
+  const plan = planReleaseChangelogs(options)
+  for (const { file, text } of plan) writeFileSync(file, text)
+  return plan.map(({ path }) => path)
 }
