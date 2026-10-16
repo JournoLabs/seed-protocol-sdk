@@ -93,17 +93,16 @@ export function publisherIsInOwnedSet(
 
 /**
  * Shared ownership predicate.
- * - Session has owned addresses: only a publisher in that set is owned (null is never owned).
- * - Session has no owned addresses: local unsealed drafts are owned so pre-connect authoring works.
+ * - A local unsealed draft (never given a publisher) is owned whatever the owned addresses are:
+ *   it belongs to no wallet yet, and the next wallet to connect claims it (claimUnpublishedDrafts).
+ * - Any other row is owned when its publisher (or attester) is in the owned addresses.
  */
 export function isSeedRowOwned(
   row: SeedOwnershipRow,
   ownedAddresses: readonly string[],
 ): boolean {
   const publisher = resolvePublisherFromSeedRow(row)
-  if (ownedAddresses.length === 0) {
-    return isLocalUnsealedDraft({ ...row, publisher: publisher ?? row.publisher })
-  }
+  if (isLocalUnsealedDraft({ ...row, publisher: publisher ?? row.publisher })) return true
   return publisherIsInOwnedSet(publisher, ownedAddresses)
 }
 
@@ -155,8 +154,8 @@ export function localUnsealedDraftSql(): SQL {
 
 /**
  * SQL for `addressFilter: 'owned'`: a row passes exactly when {@link isSeedRowOwned} is true.
- * - Empty owned → local unsealed drafts (pre-connect authoring), not every row.
- * - Owned set → `lower(trim(publisher))` in the set, or, when publisher is blank, the
+ * - Local unsealed drafts always pass.
+ * - Otherwise `lower(trim(publisher))` is in the owned set, or, when publisher is blank, the
  *   `attestationRaw.attester` ({@link resolvePublisherFromSeedRow}). `json_valid` guards
  *   `json_extract`, which throws on malformed JSON.
  */
@@ -167,20 +166,17 @@ export function ownedSeedsSql(ownedAddresses: readonly string[]): SQL {
   }
   const attester = sql`CASE WHEN json_valid(${seeds.attestationRaw}) THEN lower(trim(json_extract(${seeds.attestationRaw}, '$.attester'))) END`
   return or(
+    localUnsealedDraftSql(),
     inArray(sql<string>`lower(trim(${seeds.publisher}))`, normalized),
     and(isBlankSql(seeds.publisher), inArray(attester, normalized)),
   ) as SQL
 }
 
 /**
- * Checks if the current user owns the item (publisher is in persisted owned addresses).
- *
- * When the session has owned addresses, only a matching publisher is owned —
- * `publisher IS NULL` is not treated as owned. Call `claimUnpublishedDrafts`
- * after connect to stamp local drafts.
- *
- * When owned is empty, local unsealed drafts (no publisher, no real uid, no
- * attestationRaw) are still owned so create/edit works before a wallet is connected.
+ * Checks if the current user owns the item: its publisher is in the persisted owned addresses,
+ * or it's a local unsealed draft (no publisher, no real uid, no attestationRaw). Such a draft
+ * was made with no wallet connected and is editable until `claimUnpublishedDrafts`, which
+ * connecting a wallet calls, gives it that wallet as publisher.
  *
  * Does not include `getAdditionalSyncAddresses` (those are extra EAS indexers,
  * not wallets the user controls).

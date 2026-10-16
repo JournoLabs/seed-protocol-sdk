@@ -3,8 +3,7 @@ import { metadata, MetadataType } from '@/seedSchema'
 import { generateId } from '@/helpers'
 import { getPropertyIdForModelAndName, getPropertyIdForSchemaFileId } from '@/helpers/db'
 import { PropertyType } from '@/types'
-import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
-import { normalizePublisher } from '@/helpers/addresses'
+import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 import { BaseDb } from '../Db/BaseDb'
 import { getEasSchemaUidForExactDefinition } from '@/stores/eas'
 import { INTERNAL_DATA_TYPES } from '@/helpers/constants'
@@ -48,7 +47,8 @@ export const createMetadata: CreateMetadata = async (
 
   metadataValues.localId = generateId()
 
-  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  // A property row belongs to its seed's wallet (none yet for a draft made with no wallet connected).
+  const publisher = await getSeedPublisher(metadataValues.seedLocalId)
   if (publisher) {
     metadataValues.publisher = publisher
   }

@@ -15,6 +15,7 @@ import { processSchemaFiles } from "./actors/processSchemaFiles"
 import { emitAcrossTabs } from "@/helpers/tabEvents"
 import { startLegacyItemStorageMigration } from "@/db/migrateLegacyItemStorageRows"
 import { startForeignAttestationCleanup } from "@/db/removeForeignAttestationRows"
+import { startAlignRowPublishers } from "@/db/alignRowPublishers"
 import { startCanonicalizeModelTypes } from "@/db/canonicalizeModelTypes"
 import {
   ADDRESSES_PERSISTED_EVENT,
@@ -292,6 +293,8 @@ export const clientManagerMachine = setup({
         () => startLegacyItemStorageMigration(),
         // Also once, in the background: rows an older sync stored from other accounts' attestations.
         () => startForeignAttestationCleanup(),
+        // Also once: version and property rows get their seed's publisher (rows from older edits had none).
+        () => startAlignRowPublishers(),
         // Stored model types to the ADR 0008 form (html_page), so exact type filters find old rows.
         () => startCanonicalizeModelTypes(),
       ],

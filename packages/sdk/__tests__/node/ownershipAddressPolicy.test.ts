@@ -138,7 +138,7 @@ testDescribe('ownership address policy', () => {
     }
   })
 
-  it('matches checksummed publisher to lowercase owned and excludes nulls', async () => {
+  it('matches checksummed publisher to lowercase owned; a real uid without publisher is excluded', async () => {
     const { client } = await import('@/client')
     const t = Date.now()
     const checksumId = `checksum-${t}`
@@ -162,10 +162,11 @@ testDescribe('ownership address policy', () => {
     const ids = rows.map((r) => r.seedLocalId)
     expect(ids).toContain(checksumId)
     expect(ids).not.toContain(nullUidId)
-    expect(ids).not.toContain(draftId)
+    // A local draft with no publisher belongs to no wallet yet, so it's listed as owned.
+    expect(ids).toContain(draftId)
   })
 
-  it('isItemOwned uses the same set/case/null policy, with empty-owned draft exception', async () => {
+  it('isItemOwned uses the same set/case policy; local drafts with no publisher are always owned', async () => {
     const { client } = await import('@/client')
     const t = Date.now()
     const draftId = `owned-draft-${t}`
@@ -182,7 +183,7 @@ testDescribe('ownership address policy', () => {
     expect(await isItemOwned({ seedLocalId: stampedId })).toBe(false)
 
     await client.setAddresses({ owned: [OWNED] })
-    expect(await isItemOwned({ seedLocalId: draftId })).toBe(false)
+    expect(await isItemOwned({ seedLocalId: draftId })).toBe(true)
     expect(await isItemOwned({ seedLocalId: stampedId })).toBe(true)
   })
 
