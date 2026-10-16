@@ -35,6 +35,7 @@ import {
 } from '@/helpers/entity/entityDestroy'
 import { getModelsData } from '@/db/read/getModelsData'
 import { localNamesInBestMatchTier } from '@seedprotocol/eas'
+import { currentNameMatchLevels } from '@/db/read/nameMatchLevels'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { AmbiguousModelError } from './errors'
 import { getDraftSaveError, trackDraftSave } from '@/helpers/entity/draftSaveErrors'
@@ -1107,12 +1108,15 @@ export class Model {
   /**
    * Find Model by modelType (an EAS model name, as seeds.type stores it). Matched as ADR 0008
    * matches EAS names: `new_model` finds "New model", and `htmlpage` (an older SDK's name) finds
-   * "HTMLPage". Only the tightest matching tier counts; matches in several schemas are ambiguous.
+   * "HTMLPage", unless HTMLPage's nameMatch (ADR 0009) is `exact`. Only the tightest matching tier
+   * counts; matches in several schemas are ambiguous.
    */
   static findByModelType(modelType: string): Model | undefined {
     if (!modelType) return undefined
     const cachedNames = [...this.instanceCacheByName.keys()].map((key) => key.slice(key.lastIndexOf(':') + 1))
-    const best = localNamesInBestMatchTier(modelType, cachedNames)
+    // Each name at its nameMatch level (ADR 0009), as last loaded.
+    const levels = currentNameMatchLevels()
+    const best = localNamesInBestMatchTier(modelType, cachedNames, { level: (name) => levels.model(name) })
     return this._getUniqueCachedModel(modelType, (cachedModelName) => best.has(cachedModelName))
   }
 

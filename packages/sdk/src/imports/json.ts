@@ -10,6 +10,7 @@ import { ModelDefinitions, ModelClassType } from '@/types'
 import { generateId } from '@/helpers'
 import { easName } from '@seedprotocol/eas'
 import { easPropertyNameForPublish } from '@/helpers/metadataPropertyNames'
+import { clearNameMatchLevels, warnOnInvalidNameMatch } from '@/db/read/nameMatchLevels'
 import { getContentHash, getDeterministicIdsWithPrefix } from '@/helpers/crypto'
 import debug from 'debug'
 // Dynamic import to break circular dependency: ClientManager -> processSchemaFiles -> imports/json -> ClientManager
@@ -228,6 +229,7 @@ function getSchemaContentForComparison(schema: SchemaFileFormat): string {
     version: schema.version,
     models: {},
     enums: schema.enums || {},
+    nameMatch: schema.nameMatch,
   }
   for (const modelName of Object.keys(schema.models || {}).sort()) {
     const model = schema.models![modelName]
@@ -241,10 +243,12 @@ function getSchemaContentForComparison(schema: SchemaFileFormat): string {
         refValueType: prop.refValueType ?? items?.type,
         model: prop.model ?? items?.model,
         storage: prop.storage,
+        nameMatch: prop.nameMatch,
       }
     }
     ;(normalized.models as Record<string, unknown>)[modelName] = {
       description: model.description,
+      nameMatch: model.nameMatch,
       properties: props,
     }
   }
@@ -315,6 +319,7 @@ export const transformImportToSchemaFile = (
     $schema: 'https://seedprotocol.org/schemas/data-model/v1',
     version,
     id: schemaId,
+    ...(importData.nameMatch !== undefined && { nameMatch: importData.nameMatch }),
     metadata: {
       name: importData.name,
       createdAt: now,
@@ -368,6 +373,7 @@ export const parseJsonImportContent = (
     const models = normalizeSchemaModels(data.models) as JsonImportSchema['models']
     return {
       name: schemaName,
+      ...(data.nameMatch !== undefined && { nameMatch: data.nameMatch }),
       models,
     }
   } catch (error) {
@@ -726,6 +732,7 @@ export async function importJsonSchema(
   }
 
   warnOnEasNameCollisions(schemaFile)
+  warnOnInvalidNameMatch(schemaFile)
 
   // Check if this is an internal SDK schema (should not create files in app directory)
   const isInternal = isInternalSchema(schemaFile.metadata.name, schemaFile.id)
@@ -1120,6 +1127,7 @@ async function applySchemaToDb(
     throw new Error('Database not found')
   }
 
+  warnOnInvalidNameMatch(schemaFile)
   const schemaData = JSON.stringify(schemaFile, null, 2)
   const schemaRecord = await addSchemaToDb(schemaInput, schemaFile.id, schemaData, false)
 
@@ -1438,6 +1446,7 @@ export const loadSchemaFromFile = async (
             .update(schemasTable)
             .set({ schemaData: updatedSchemaData })
             .where(eq(schemasTable.id, schemaRecord.id))
+          clearNameMatchLevels()
           
           if (schemaFileUpdated) {
             logger(`Updated schemaData in database with actual property IDs for schema "${schemaName}"`)

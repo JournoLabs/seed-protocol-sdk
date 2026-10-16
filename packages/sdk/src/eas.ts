@@ -20,7 +20,8 @@ export type {
   GetPublishedByFromEasParams,
 } from '@seedprotocol/eas'
 
-import { easNameVariants } from '@seedprotocol/eas'
+import { easNamesToFetch } from '@seedprotocol/eas'
+import { nameMatchLevels } from '@/db/read/nameMatchLevels'
 import { withExcludeRevokedFilter } from '@seedprotocol/eas'
 import { BaseEasClient } from '@seedprotocol/eas'
 import { BaseQueryClient } from '@seedprotocol/eas'
@@ -46,16 +47,13 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   const OR: Record<string, unknown>[] = []
   const hasImageModel = modelNames.includes('Image')
 
-  // ADR 0008: every name the model can match at the fuzzy level that an SDK may have published
-  // (its EAS name, the older simple snake_case, separators dropped, a plural or singular form).
-  // The caller matches the results to local models.
+  // ADR 0008/0009: every name an SDK may have published that the model can match at its
+  // nameMatch level (at fuzzy: its EAS name, the older simple snake_case, separators dropped, a
+  // plural or singular form). The caller matches the results to local models.
+  const levels = await nameMatchLevels()
   const schemaNames = new Set<string>()
   for (const modelName of modelNames) {
-    for (const variant of easNameVariants(modelName)) {
-      schemaNames.add(variant)
-      schemaNames.add(variant.endsWith('s') ? variant.slice(0, -1) : `${variant}s`)
-    }
-    schemaNames.add(modelName)
+    for (const name of easNamesToFetch(modelName, levels.model(modelName))) schemaNames.add(name)
   }
   for (const name of schemaNames) {
     OR.push({ schema: { equals: `bytes32 ${name}` } })
@@ -70,7 +68,7 @@ export const getModelSchemasFromEas: GetModelSchemasFromEas = async () => {
   }
 
   const modelSchemas = await queryClient.fetchQuery({
-    queryKey: [`getSchemasAllModels`, [...modelNames].sort()],
+    queryKey: [`getSchemasAllModels`, [...schemaNames].sort()],
     queryFn: async () =>
       easClient.request(GET_SCHEMAS, {
         where: {

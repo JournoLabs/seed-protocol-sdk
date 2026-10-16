@@ -5,9 +5,11 @@ import {
   Attestation,
   SchemaWhereInput,
   easName,
+  isNameMatchLevel,
   matchEasName,
   partitionByRefAttester,
 } from '@seedprotocol/eas'
+import { loadNameMatchLevels, nameMatchLevels } from '@/db/read/nameMatchLevels'
 import { normalizeDataType } from '@/helpers/property'
 import {
   easPropertyNameForPublish,
@@ -168,6 +170,8 @@ const resolveSyncedPropertyName = (
         value: { key, def, isListRelation, isSingleRef },
         name: easPropertyNameForPublish(key, { ...def, name: key }),
         relation: isListRelation || isSingleRef,
+        // ADR 0009: set by modelSchemaForSyncedProperty from the schema file.
+        level: isNameMatchLevel(def?.nameMatch) ? def.nameMatch : undefined,
       }
     })
     const match = matchEasName(easPropertyName, candidates)
@@ -192,6 +196,11 @@ const resolveSyncedPropertyName = (
         }
       }
       return { propertyName: key, isRelation: false, isList: false }
+    }
+    // A name one of the model's properties would match at a looser level than its nameMatch
+    // allows is that property's, refused (ADR 0009): don't store it under a name of its own.
+    if (matchEasName(easPropertyName, candidates.map((c) => ({ ...c, level: 'fuzzy' as const }))).kind !== 'none') {
+      return undefined
     }
   }
 
@@ -223,7 +232,14 @@ const modelSchemaForSyncedProperty = async (
   const model = await skipSeedOnAmbiguousModel({ seedLocalId, seedUid }, 'easSync.metadata', async () =>
     resolveSyncedSeedModel(Model, modelType, { seedLocalId, seedUid }),
   )
-  return model?.properties ? modelPropertiesToObject(model.properties) : undefined
+  if (!model?.properties) return undefined
+  // Each property's nameMatch level (ADR 0009), for resolveSyncedPropertyName.
+  const levels = await nameMatchLevels()
+  const schema = modelPropertiesToObject(model.properties)
+  for (const [key, def] of Object.entries(schema)) {
+    schema[key] = { ...def, nameMatch: levels.property(model.modelName ?? '', key, model.id) }
+  }
+  return schema
 }
 
 /**
@@ -1169,6 +1185,9 @@ export const runSyncFromEas = async (options?: SyncFromEasOptions): Promise<void
   await assertLocalDbChain()
 
   const appDb = BaseDb.getAppDb()
+
+  // ADR 0009: this run matches names at the levels the stored schema files set now.
+  await loadNameMatchLevels(appDb)
 
   const { matchModelRecord } = await getModelSchemas()
 

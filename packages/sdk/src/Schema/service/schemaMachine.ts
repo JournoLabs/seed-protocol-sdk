@@ -27,6 +27,7 @@ export type SchemaMachineContext = {
   }
   models?: {
     [modelName: string]: {
+      nameMatch?: SchemaFileFormat['nameMatch']
       properties: {
         [propertyName: string]: any
       }
@@ -35,6 +36,8 @@ export type SchemaMachineContext = {
   enums?: {
     [enumName: string]: any
   }
+  /** The schema file's top-level nameMatch (ADR 0009). */
+  nameMatch?: SchemaFileFormat['nameMatch']
   migrations?: Array<{
     version: number
     timestamp: string
@@ -256,6 +259,7 @@ export const schemaMachine = setup({
                   models: event.schema.models,
                   enums: event.schema.enums,
                   migrations: event.schema.migrations,
+                  nameMatch: event.schema.nameMatch,
                   _isDraft: false,
                   _isEdited: event.schemaRecord?.isEdited ?? false,
                   _editedProperties: new Set<string>(),
@@ -300,6 +304,7 @@ export const schemaMachine = setup({
                 metadata: ({ context, event }) => context.metadata ?? event.schema.metadata,
                 enums: ({ context, event }) => context.enums ?? event.schema.enums,
                 migrations: ({ context, event }) => context.migrations ?? event.schema.migrations,
+                nameMatch: ({ context, event }) => context.nameMatch ?? event.schema.nameMatch,
               }),
             },
             writeError: {
@@ -587,6 +592,7 @@ export const schemaMachine = setup({
               models: event.schema.models,
               enums: event.schema.enums,
               migrations: event.schema.migrations,
+              nameMatch: event.schema.nameMatch,
               _isDraft: false,
               _editedProperties: new Set<string>(),
               _validationErrors: undefined,
@@ -620,6 +626,7 @@ export const schemaMachine = setup({
                   models: context.models,
                   enums: context.enums,
                   migrations: context.migrations,
+                  nameMatch: context.nameMatch,
                 },
               },
             })

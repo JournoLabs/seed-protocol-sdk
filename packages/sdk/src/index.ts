@@ -400,7 +400,7 @@ export {
   syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './imports'
-export type { SchemaFileFormat } from './imports'
+export type { SchemaFileFormat, SchemaNameMatch } from './imports'
 
 
 export { client } from './client'

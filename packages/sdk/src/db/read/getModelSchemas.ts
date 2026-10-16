@@ -5,6 +5,7 @@ import { models as modelsTable, modelUids } from '@/seedSchema'
 import { eq } from 'drizzle-orm'
 import pluralize from 'pluralize'
 import { easName, matchEasName } from '@seedprotocol/eas'
+import { nameMatchLevels } from '@/db/read/nameMatchLevels'
 
 type ModelRecord = {
   id: number
@@ -20,8 +21,9 @@ type GetModelSchemasReturn = {
   modelRecords: ModelRecord[]
   /**
    * The local model an EAS model schema (`bytes32 <name>`) stands for, matched as ADR 0008
-   * matches names: `bytes32 htmlpage` (an older SDK's name) finds HTMLPage. Undefined when
-   * nothing matches, or several models match equally well.
+   * matches names: `bytes32 htmlpage` (an older SDK's name) finds HTMLPage, unless HTMLPage's
+   * nameMatch is `exact` (ADR 0009). Undefined when nothing matches, or several models match
+   * equally well.
    */
   matchModelRecord: (schemaString: string) => ModelRecord | undefined
 }
@@ -82,7 +84,13 @@ export const getModelSchemas: GetModelSchemas = async () => {
   for (const record of modelRecords) {
     if (record.name !== 'Seed') byName.set(record.name, record)
   }
-  const candidates = [...byName.values()].map((record) => ({ value: record, name: record.name }))
+  // ADR 0009: each model's name matches at its own nameMatch level.
+  const levels = await nameMatchLevels(appDb)
+  const candidates = [...byName.values()].map((record) => ({
+    value: record,
+    name: record.name,
+    level: levels.model(record.name),
+  }))
   const matchModelRecord = (schemaString: string): ModelRecord | undefined => {
     if (!schemaString.startsWith('bytes32 ')) return undefined
     const match = matchEasName(schemaString.slice('bytes32 '.length), candidates)
