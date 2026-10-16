@@ -2,7 +2,78 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.7.4 (2026-10-15)
+
+### Commits
+
+#### Features
+
+- authorizePublish approves a publish before it spends (165481fa)
+- users can pay for storage with Turbo credits (7d22873e)
+- payment config and one resolution of who pays (f9fd4fe0)
+
+#### Fixes
+
+- ensureEasSchemas looks schemas up under the published name (1da9dc94)
+- sdk, react: one easName for every name that reaches EAS (eec5ded5)
+- disconnecting a wallet stops treating it as owned (d12c64c1)
+- sdk: addresses saved by init are announced; connecting keeps watched addresses (a8029bcc)
+- load the undeployed-account check only on the direct-EAS branch (b98ea731)
+- refuse direct EAS for an undeployed smart account (ef06cf94)
+- direct-EAS publish records each seed as it is attested (6819bb97)
+- domain ownership attests what was proven and honours expiry (8c5ef8e3)
+- revoke from the attester and skip already-revoked uids (220dcb0e)
+- keep arweaveJwk and dataItemSigner out of saved publish snapshots (01d2d008)
+- estimatePublishCost reports Arweave storage as not user-paid (0039b18d)
+- estimatePublishCost reports who pays gas from the real sender (4655d738)
+
+## 0.7.3 (2026-10-14)
+
+### Commits
+
+#### Features
+
+- register publishItem as the executor behind item.publish() (79e461ec)
+
+#### Other
+
+- item.publish() needs @seedprotocol/publish (b90bc321)
+- use the SDK's getPublishUploadData (fa8f2f84)
+
+## 0.7.1 (2026-10-10)
+
+### Commits
+
+#### Features
+
+- sdk: seed:property/<name> placeholders in Html resolve to the property's upload (ef4c28e9)
+
+#### Fixes
+
+- direct-to-EAS publish attests every list member's seed uid (9ff27038)
+- sdk: publish the full graph of related drafts (c115dc30)
+
+## 0.7.0 (2026-10-08)
+
+### Commits
+
+#### Features
+
+- sdk: elect a leader tab for automatic EAS sync and the L1 worker (1d828074)
+- sdk: record version revocations in versions.revoked_at (09649128)
+
+#### Fixes
+
+- resume each in-progress publish in one tab only (8d2c0d18)
+- sdk: co-publish images embedded in related drafts' Html (0c47942e)
+- direct-to-EAS publish records every request's own seed (0c4732ac)
+- record every request of a one-transaction publish (a1875916)
+- match each multiPublish request to its own receipt events (7505a50d)
+- sdk: a patch publish's existing version uid is not recorded again (ecce0332)
+- sdk: publishing a reference to an unpublished item fails (3c05c13c)
+- sdk: propagate property revocations and replacements to stored metadata (13ddb58d)
+
+## 0.6.10 (2026-10-04)
 
 ### Breaking
 
@@ -15,20 +86,116 @@ All notable changes to this project will be documented in this file.
 - **`seedPaymaster(client, chain, bundlerUrl?)`** is exported from `@seedprotocol/publish/thirdweb` for smart wallets the SDK doesn't build, such as a server's `smartWallet()` with an automation session key: pass it as `overrides.paymaster` when `sponsorGas` is on.
 - **Executor install race in `enrollPublishAutomation`:** turning on automation could fail with "The Seed executor is not installed for this ManagedAccount" right after a successful `installSeedExecutor`, because the follow-up `isInitialized` read hit a load-balanced RPC node that hadn't seen the block yet. The install is now confirmed from the receipt's `SeedExecutorInstalled` and `ModuleInitialized` logs, and the readiness check uses the EAS from that event instead of re-reading. When the executor was already installed, the `isInitialized` read is retried briefly. `ensureAutomationSessionKey` retries the `isActiveSigner` read after `addSessionKey` for the same reason.
 - **Failed executor installs report why:** an install whose receipt lacks the install events (a reverted transaction, or a sponsored EIP-7702 relayer transaction that succeeded while the inner call reverted) throws `EXECUTOR_MODULE_NOT_INSTALLED` with the decoded revert reason, instead of a misleading "not installed" from the readiness check.
-- **List-of-relation EAS names:** a list relation such as `staff` (List → Identity) was attested as `bytes32[] staff` or `bytes32[] staff_identity_ids` depending on whether the model was loaded before the item. `getPublishPayload` and `ensureEasSchemasForItem` now derive the name from the property definition with `listRelationEasPropertyName` (exported from `@seedprotocol/sdk`) and ignore a cached `schemaUid` for list relations. `ensureEasSchemasForItem` refuses to register a list-relation schema that doesn't end in `_ids`. Locally, `createMetadata` writes list-relation rows under the storage name (`staffIdentityIds`), and an `ItemProperty` that receives its schema after construction moves to the storage name while `propertyName` stays `staff`. Already-published data (`author_identity_ids` and the like) is unchanged.
-- **Missing property schemas fail publish validation:** when a property's EAS schema can't be found, `getPublishPayload` now reports `publish_schema_not_found` instead of attesting the value under the Version schema. Call `ensureEasSchemasForItem` first, as the publish flow already does.
-- **`parseEasRelationPropertyName`** (`@seedprotocol/query`) pluralizes list names with `pluralize`: `staff_identity_ids` → `staff` (was `staffs`). Single relations return the singular (`cover_image_id` → `cover`).
-- **Failed UserOps on the permissionless / EIP-7702 sender:** a UserOp that failed inside a successful bundle transaction was returned as a success, so publish went on with no attestations. It now throws with the decoded revert reason.
-- **Readable publish failures:** every publish route now simulates `multiPublish` from the sending account before sending, and a call that would revert throws `PUBLISH_PREFLIGHT_FAILED` with the decoded Seed, EAS or `Error(string)` reason (automation keeps `AUTOMATION_PREFLIGHT_FAILED`). Outside automation, a simulation that can't run doesn't block the send. thirdweb's bare `UserOp failed at txHash: 0x…` (usually out of gas) and its undecodable custom-error message are rewritten to say what happened, as `ManagedAccountPublishError` with code `USEROP_FAILED_NO_REASON` (no revert reason; usually out of gas) or `USEROP_REVERTED`, keeping the original as `underlyingCause`. Failed UserOps on the permissionless sender use the same codes.
-- **Publish automation on legacy ManagedAccounts:** `enrollPublishAutomation` no longer fails when the account is an ERC-7504 Router (`Router: function does not exist`) instead of ModularCore. Those accounts cannot `installModule`; enroll adds the module-only session key and attests the sidecar. ModularCore accounts still require the executor module to be installed.
-- **EAS schema lookup:** `ensureEasSchemasForItem` normalizes property data types (`html` → `Html`) before choosing the on-chain schema, so an existing `bytes32 html` schema is reused instead of registering `string html`. `normalizeDataType` is exported from `@seedprotocol/sdk`.
-- **Automation schema registration:** session keys no longer send SchemaRegistry or EAS UserOps when a schema is missing. Publish fails first with `schema "…" is not registered; automation keys can't register schemas`. Register once with the owner wallet via `ensureEasSchemasForItem`.
-- **First-time modular publish:** `isAutomationSessionActive` returns `false` when the ManagedAccount has no bytecode instead of throwing `MODULAR_SIGNER_ACTIVATION_FAILED` on viem `0x` / “not a contract”. Interactive first publish can reach `runModularExecutorPublishPrep` / `autoDeployManagedAccount`. Deployed-account RPC or `isActiveSigner` read failures still throw so unattended automation does not fall through to in-app bootstrap.
 
 ### Added
 
 - **`readFactorySeedExecutor(factory?)`:** the executor and EAS that a ManagedAccount factory's `SeedExecutorRouterExtension` pins, or `null` when it routes none. Compare it with `modularAccountModuleContract` at startup instead of finding a stale address at the first publish or enroll.
 - **`assertExecutorModuleReadyForAccount(address, { installedEas, readAttempts })`:** pass the EAS confirmed from an install receipt to skip the read, or retry a not-initialized read.
+
+### Commits
+
+#### Breaking
+
+- confirm executor installs from the receipt, not a lagging read (e111c5d0)
+
+#### Other
+
+- Fixing gas estimation. v0.6.10 (d5b161a1)
+
+## 0.6.9 (2026-10-03)
+
+### Commits
+
+#### Breaking
+
+- encode multiPublish with publishIndex for SeedProtocolExtension (69318de1)
+
+#### Other
+
+- one multiPublish struct for the extension and the executor (ab765b75)
+
+## 0.6.8 (2026-10-03)
+
+### Fixed
+
+- **List-of-relation EAS names:** a list relation such as `staff` (List → Identity) was attested as `bytes32[] staff` or `bytes32[] staff_identity_ids` depending on whether the model was loaded before the item. `getPublishPayload` and `ensureEasSchemasForItem` now derive the name from the property definition with `listRelationEasPropertyName` (exported from `@seedprotocol/sdk`) and ignore a cached `schemaUid` for list relations. `ensureEasSchemasForItem` refuses to register a list-relation schema that doesn't end in `_ids`. Locally, `createMetadata` writes list-relation rows under the storage name (`staffIdentityIds`), and an `ItemProperty` that receives its schema after construction moves to the storage name while `propertyName` stays `staff`. Already-published data (`author_identity_ids` and the like) is unchanged.
+- **Missing property schemas fail publish validation:** when a property's EAS schema can't be found, `getPublishPayload` now reports `publish_schema_not_found` instead of attesting the value under the Version schema. Call `ensureEasSchemasForItem` first, as the publish flow already does.
+- **`parseEasRelationPropertyName`** (`@seedprotocol/query`) pluralizes list names with `pluralize`: `staff_identity_ids` → `staff` (was `staffs`). Single relations return the singular (`cover_image_id` → `cover`).
+- **Failed UserOps on the permissionless / EIP-7702 sender:** a UserOp that failed inside a successful bundle transaction was returned as a success, so publish went on with no attestations. It now throws with the decoded revert reason.
+- **Readable publish failures:** every publish route now simulates `multiPublish` from the sending account before sending, and a call that would revert throws `PUBLISH_PREFLIGHT_FAILED` with the decoded Seed, EAS or `Error(string)` reason (automation keeps `AUTOMATION_PREFLIGHT_FAILED`). Outside automation, a simulation that can't run doesn't block the send. thirdweb's bare `UserOp failed at txHash: 0x…` (usually out of gas) and its undecodable custom-error message are rewritten to say what happened, as `ManagedAccountPublishError` with code `USEROP_FAILED_NO_REASON` (no revert reason; usually out of gas) or `USEROP_REVERTED`, keeping the original as `underlyingCause`. Failed UserOps on the permissionless sender use the same codes.
+- **EAS schema lookup:** `ensureEasSchemasForItem` normalizes property data types (`html` → `Html`) before choosing the on-chain schema, so an existing `bytes32 html` schema is reused instead of registering `string html`. `normalizeDataType` is exported from `@seedprotocol/sdk`.
+- **Automation schema registration:** session keys no longer send SchemaRegistry or EAS UserOps when a schema is missing. Publish fails first with `schema "…" is not registered; automation keys can't register schemas`. Register once with the owner wallet via `ensureEasSchemasForItem`.
+
+### Commits
+
+#### Features
+
+- error codes for failed UserOps (72211c67)
+- twin robustness and a twin.json config helper (b72399a9)
+- local twin support and the contract rollout's client changes (65bbde80)
+- verify the publish chain before writing; hold EAS sync until the chain is known (5f4fc0ee)
+- sdk: record the EAS chain in the local DB and refuse cross-chain writes (7d8af9d5)
+- sdk: read EAS from the configured chain and register base schemas on new chains (91e0290e)
+- make the publish chain and EAS addresses configurable (811b8fc5)
+
+#### Fixes
+
+- attest list relations under one EAS name (55d6cbe2)
+- readable UserOp failures and a pre-send check on every route (06f8674d)
+- rollout and twin follow-ups from protocol review (415c9c1b)
+- check executor module readiness before automation publish and revoke (4e8a4f8a)
+- treat relations to published seed uids as already published (8133d761)
+- normalize EAS schema types and refuse automation registration (b68fef38)
+
+#### Other
+
+- Lots of bug fixes (a3a7f146)
+
+## 0.6.7 (2026-10-01)
+
+_Also covers 0.6.4, 0.6.5, 0.6.6, published from commits in this range._
+
+### Fixed
+
+- **Publish automation on legacy ManagedAccounts:** `enrollPublishAutomation` no longer fails when the account is an ERC-7504 Router (`Router: function does not exist`) instead of ModularCore. Those accounts cannot `installModule`; enroll adds the module-only session key and attests the sidecar. ModularCore accounts still require the executor module to be installed.
+- **First-time modular publish:** `isAutomationSessionActive` returns `false` when the ManagedAccount has no bytecode instead of throwing `MODULAR_SIGNER_ACTIVATION_FAILED` on viem `0x` / “not a contract”. Interactive first publish can reach `runModularExecutorPublishPrep` / `autoDeployManagedAccount`. Deployed-account RPC or `isActiveSigner` read failures still throw so unattended automation does not fall through to in-app bootstrap.
+
+### Commits
+
+#### Features
+
+- add PublishedBy batch sidecar attest/revoke/query APIs (14233083)
+
+#### Fixes
+
+- support Node server publishes without a browser Thirdweb client (7ef2fe66)
+- import listCreatedAttestationPairsFromReceipt for PublishedBy batch (4da2fc80)
+
+#### Other
+
+- Final edits (687d320b)
+- Build fixes (15ab8cdc)
+- Fixing Vite plugin bugs (59fad217)
+- Fix first-publish failing when the ManagedAccount is still undeployed. (84a921d6)
+
+## 0.6.3 (2026-09-25)
+
+_Also covers 0.6.1, 0.6.2, published from commits in this range._
+
+### Commits
+
+#### Other
+
+- Fixing item ownership bugs/gaps (2539c65c)
+- Adding publish cost estimator tooling (6d2f170c)
+- Fixing bug so uid doesn't depend on CreatedAttestation (5e64192b)
+
+## 0.5.3 (2026-09-17)
+
+_Also covers 0.5.2, published from commits in this range._
+
+### Added
+
 - **Publish automation grants:** ManagedAccount-hosted session keys (executor-module-only `approvedTargets`), `seedprotocol.publishAuthorization` sidecar, `enrollPublishAutomation` / `revokePublishAutomation`, and `assertStorageBoundToIdentity`. See `docs/PUBLISH_AUTOMATION.md`.
 - **`prepareEasMultiRevoke`:** When `modularAccountModuleContract` is set, routes `multiRevoke` to the executor module so automation session keys can revoke as the ManagedAccount.
 - **`resolveRevokeAccount` / `revokeAttestations`:** No longer hard-block ManagedAccount attesters; legacy module-attester path attempts ManagedAccount + executor revoke when configured.
@@ -39,6 +206,41 @@ All notable changes to this project will be documented in this file.
 
 - **Domain ownership tooling:** `createDomainOwnershipChallenge`, multi-resolver DNS TXT verify, RDAP snapshot via `rdapper`, `ensureDomainOwnershipSchema` / `attestDomainOwnership` / `revokeDomainOwnership`, `verifyAndAttestDomainOwnership`, and `assessDomainOwnershipLive`. See `docs/DOMAIN_OWNERSHIP.md`.
 - Dependency: `@seedprotocol/eas`, `rdapper`.
+
+### Commits
+
+#### Features
+
+- route automation session keys through the executor (5894cbc2)
+- add ManagedAccount publish automation enrollment (db6d752f)
+
+#### Other
+
+- Add domain ownership DNS challenge, RDAP snapshot, and EAS sidecar tooling. (c51a1226)
+
+## 0.5.1 (2026-08-29)
+
+### Commits
+
+#### Features
+
+- add permissionless EIP-7702 sender for gasless publish (1c907e64)
+- add EIP-1193 PublishWallet and useSeedWallet (fb5dfdab)
+- make Thirdweb an optional peer behind /thirdweb (2bc918dc)
+- resolve chain and RPC from PublishConfig (23b24b66)
+
+#### Fixes
+
+- sync in-app auth tokens for managed wallet connect (4e1caadf)
+- sdk: guard BaseDb readiness before platform classes init (425883c3)
+
+#### Other
+
+- replace setPlatformClass with instance + static facade (0bca44b7)
+- Fixing imports/exports (3869c666)
+- document EIP-1193, permissionless, and Thirdweb recipes (221e007f)
+- split SeedSigner and SeedTxSender (11c0d8e1)
+- Decouple publish contract/tx layer via SeedSigner and viem. (537c0e15)
 
 ## 0.5.0
 
