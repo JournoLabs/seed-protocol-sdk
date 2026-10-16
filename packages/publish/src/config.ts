@@ -320,6 +320,36 @@ export function getConfigRef(): PublishConfig | null {
 }
 
 /**
+ * `uploadApiBaseUrl` is where uploads and the operator's storage payments go. With operator-paid
+ * storage (the default) it must be set, or requests would go to `undefined/api/upload/...`.
+ * Whenever it is set it must be an absolute http(s) URL, or in a browser a path from the page's
+ * origin (`/seed-api`).
+ */
+export function assertUploadApiBaseUrl(c: Pick<PublishConfig, 'uploadApiBaseUrl' | 'payment'>): void {
+  const raw = typeof c.uploadApiBaseUrl === 'string' ? c.uploadApiBaseUrl.trim() : ''
+  if (!raw) {
+    if ((c.payment?.storage ?? 'operator') === 'operator') {
+      throw new Error(
+        'initPublish: uploadApiBaseUrl is required (the upload API that stores files on Arweave), unless payment.storage is "user".',
+      )
+    }
+    return
+  }
+  if (raw.startsWith('/') && !raw.startsWith('//')) return
+  let url: URL | undefined
+  try {
+    url = new URL(raw)
+  } catch {
+    url = undefined
+  }
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    throw new Error(
+      `initPublish: uploadApiBaseUrl must be an absolute http(s) URL or a path from the page's origin, got "${c.uploadApiBaseUrl}".`,
+    )
+  }
+}
+
+/**
  * Initialize the publish package. Call once before using PublishManager or other publish APIs.
  * Registers the config and SDK hooks: the publish executor behind `item.publish()`, the
  * revoke executor behind `item.unpublish()`, getPublisherForNewSeeds, etc. Until this runs,
@@ -328,6 +358,7 @@ export function getConfigRef(): PublishConfig | null {
  */
 export function initPublish(c: PublishConfig): void {
   assertPublishPaymentConfig(c)
+  assertUploadApiBaseUrl(c)
   // Fail fast on chains without a known EAS deployment and no address overrides.
   const easChain = resolvePublishEasChain(c)
   // Point SDK reads (EAS sync, schema lookups) at the chain we publish to. Throws when

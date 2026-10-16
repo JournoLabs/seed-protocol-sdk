@@ -145,7 +145,6 @@ const ConnectButton: FC = () => {
         return
       }
       await waitUntilSeedInitialized()
-      PublishManager.stopAll()
       const owned = new Set<string>([account.address.toLowerCase()])
       let managedAddress: string | undefined
       if (config.useModularExecutor) {
@@ -175,6 +174,12 @@ const ConnectButton: FC = () => {
       const ownedKey = [...owned].sort().join(",")
       if (lastSyncedOwnedKey.current === ownedKey) {
         return
+      }
+      // Another wallet took over: publishes started for the previous one stop (their rows stay
+      // for it to resume). Not on the first sync, where publishes restored from the DB need this
+      // wallet, nor on a re-sync of the same wallet.
+      if (lastSyncedOwnedKey.current !== null) {
+        PublishManager.stopAll()
       }
       lastSyncedOwnedKey.current = ownedKey
       try {

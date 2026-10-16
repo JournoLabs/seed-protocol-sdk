@@ -100,6 +100,10 @@ describe('PublishManager on Node', () => {
     const actor = await spawned
     expect(actor).toBeDefined()
     expect(PublishManager.getPublish(item.seedLocalId)).toBe(actor)
+    // query only reads: the publish keeps running.
+    expect(PublishManager.query(item.seedLocalId)).toBe(actor!.getSnapshot())
+    expect(PublishManager.getService().getSnapshot().context.publishProcesses.get(item.seedLocalId)).toBe(actor)
+    expect(PublishManager.query('seed-never-published')).toBeUndefined()
 
     const duplicate = await PublishManager.createPublish(item, address)
     expect(duplicate).toBeUndefined()
