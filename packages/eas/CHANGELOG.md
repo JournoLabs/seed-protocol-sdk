@@ -6,6 +6,7 @@
 
 - **Faster Version and property reads:** the `attestationFields` fragment (used by `GET_VERSIONS`, `GET_PROPERTIES`, `GET_ALL_PROPERTIES_FOR_ALL_VERSIONS`, `GET_FILES_METADATA`, `GET_IMAGE_VERSIONS`) no longer selects `schema { schemaNames }`. easscan resolves that join slowly (properties for ~170 versions: ~1.8 s with it, ~0.26 s without). Version and property attestations from these queries no longer carry `schema`; read `schemaId` instead.
 - **`getSeedsBySchemaName`** fetches seeds without the schema join and sets `schema.schemaNames` to the requested name. A new optional 4th argument `{ uidPrefix }` limits it to seeds whose UID starts with the prefix (easscan matches case-sensitively: pass lowercase with `0x`).
+- **`getCanonicalItemPropertiesFromEas` checks attesters by default:** a version counts only if its seed's attester made it, and a property only if its version's attester did. Pass `checkAttesters: false` to skip the two extra requests when the versions are trusted.
 
 ### Added
 

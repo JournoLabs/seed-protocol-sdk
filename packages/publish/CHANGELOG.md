@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 - **EAS schema lookup:** `ensureEasSchemasForItem` normalizes property data types (`html` → `Html`) before choosing the on-chain schema, so an existing `bytes32 html` schema is reused instead of registering `string html`. `normalizeDataType` is exported from `@seedprotocol/sdk`.
 - **Automation schema registration:** session keys no longer send SchemaRegistry or EAS UserOps when a schema is missing. Publish fails first with `schema "…" is not registered; automation keys can't register schemas`. Register once with the owner wallet via `ensureEasSchemasForItem`.
 - **First-time modular publish:** `isAutomationSessionActive` returns `false` when the ManagedAccount has no bytecode instead of throwing `MODULAR_SIGNER_ACTIVATION_FAILED` on viem `0x` / “not a contract”. Interactive first publish can reach `runModularExecutorPublishPrep` / `autoDeployManagedAccount`. Deployed-account RPC or `isActiveSigner` read failures still throw so unattended automation does not fall through to in-app bootstrap.
+- **`ConnectButton` no longer stops running publishes on every wallet sync.** It stops them only when another wallet takes over; publishes restored from the DB keep running on the first sync.
+- **`PublishManager.query(seedLocalId)` is a read.** It returns the publish's current snapshot; it used to stop the publish without marking its row or releasing its lock.
+- **`pollForConfirmation` gives up:** after 30 min, or after 12 failed status requests in a row, instead of polling forever.
+- **`initPublish` checks `uploadApiBaseUrl`:** required with operator-paid storage (the default), and an http(s) URL or a path from the page's origin when set.
+- **`ensureWalletThenPublish` / `ensureSmartWalletThenPublish` report `'started'` only once the publish spawned**, with its actor as `publish`, and `'already_publishing'` when nothing started. `started` stays, already resolved.
+- **`PublishProvider` initializes its `config` during render**, so children such as `ConnectButton` can read it on their first render.
+- **`useCanPublishItem`** starts `false` until its check finishes, and checks again when owned addresses change.
+- **Cost estimates:** Arweave L1 uploads are charged for at least 256 KiB each, a bundle once, and Turbo uploads of 100 KiB or less are free (`arweave.chargedBytes`). Testnet gas is priced at $0 (`evm.testnet`).
+- **Deprecated:** `useLocalWalletAccount` (always `null`), `gatewayTransport` and `modularAccountModuleData` (not read).
 
 ### Added
 
