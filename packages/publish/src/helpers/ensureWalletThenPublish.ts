@@ -9,19 +9,35 @@ import { createPermissionlessTxSender } from './adapters/permissionlessTxSender'
 import { resolvePublishPayment } from '../payment'
 import type { ManagedAccountPublishError } from '../errors'
 
-/**
- * `started` resolves with the spawned publish actor once it exists, or `undefined` when
- * that seed is already publishing in this tab or another. It does not wait for the
- * publish to finish; use {@link publishItem} (or `item.publish()`) for that.
- */
+/** @deprecated Already resolved: use the result's `publish`. */
 export type PublishStarted = Promise<import('xstate').ActorRef<any, any> | undefined>
 
+/**
+ * `started`: the publish was spawned; `publish` is its actor. It hasn't finished: use
+ * {@link publishItem} (or `item.publish()`) to wait for that. `already_publishing`: that seed is
+ * already publishing in this tab or another, so nothing started.
+ */
 export type EnsureWalletThenPublishResult =
-  | { outcome: 'started'; started: PublishStarted }
+  | {
+      outcome: 'started'
+      publish: import('xstate').ActorRef<any, any>
+      /** @deprecated Already resolved with `publish`. */
+      started: PublishStarted
+    }
+  | { outcome: 'already_publishing' }
   | { outcome: 'no_address' }
   | { outcome: 'no_wallet' }
   | { outcome: 'needs_deploy' }
   | { outcome: 'managed_not_ready'; error: ManagedAccountPublishError }
+
+/** Spawns the publish and reports whether it started (waits for the spawn, not the publish). */
+export async function startPublish(
+  ...args: Parameters<typeof PublishManager.createPublish>
+): Promise<{ outcome: 'started'; publish: import('xstate').ActorRef<any, any>; started: PublishStarted } | { outcome: 'already_publishing' }> {
+  const publish = await PublishManager.createPublish(...args)
+  if (!publish) return { outcome: 'already_publishing' }
+  return { outcome: 'started', publish, started: Promise.resolve(publish) }
+}
 
 function coerceDataItemSigner(
   signer: CreatePublishOptions['dataItemSigner'] | SeedSigner | PublishWallet | undefined,
@@ -78,9 +94,8 @@ export async function ensureWalletThenPublish(
     return { outcome: 'no_address' }
   }
 
-  const started = PublishManager.createPublish(item, address, session, {
+  return startPublish(item, address, session, {
     ...options,
     dataItemSigner: coerceDataItemSigner(options?.dataItemSigner) ?? session.signer,
   })
-  return { outcome: 'started', started }
 }

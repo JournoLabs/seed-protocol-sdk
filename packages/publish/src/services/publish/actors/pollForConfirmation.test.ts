@@ -18,7 +18,10 @@ describe('waitForArweaveConfirmation', () => {
   test('rejects after too many failed requests in a row, with the last error as cause', async () => {
     const error = await waitForArweaveConfirmation(async () => {
       throw new Error('gateway down')
-    }, 'tx', fast).catch((e) => e as Error)
+    }, 'tx', fast).then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    )
     expect(error.message).toContain('failed 3 times in a row')
     expect((error.cause as Error).message).toBe('gateway down')
   })
@@ -27,7 +30,10 @@ describe('waitForArweaveConfirmation', () => {
     const error = await waitForArweaveConfirmation(async () => ({ confirmed: null }), 'tx', {
       intervalMs: 5,
       timeoutMs: 30,
-    }).catch((e) => e as Error)
+    }).then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    )
     expect(error.message).toContain('was not confirmed within')
   })
 })

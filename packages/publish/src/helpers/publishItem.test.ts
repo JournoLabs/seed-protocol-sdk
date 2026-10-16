@@ -78,7 +78,7 @@ describe('waitForPublishActor', () => {
 describe('publishItem', () => {
   test('starts the manager, passes options through, and waits for the publish', async () => {
     const actor = fakePublishActor('success')
-    ensureResult = { outcome: 'started', started: Promise.resolve(actor) }
+    ensureResult = { outcome: 'started', publish: actor, started: Promise.resolve(actor) }
     const done = publishItem(item, { publishMode: 'new_version' })
     await Bun.sleep(0)
     actor.send({ type: 'finish' })
@@ -99,7 +99,7 @@ describe('publishItem', () => {
   })
 
   test('rejects when the seed is already publishing', async () => {
-    ensureResult = { outcome: 'started', started: Promise.resolve(undefined) }
+    ensureResult = { outcome: 'already_publishing' }
     await expect(publishItem(item)).rejects.toThrow('already publishing in this tab or another')
   })
 })

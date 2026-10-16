@@ -8,7 +8,8 @@ const getConnectedManagedAccountAddressMock = mock(() =>
 const getConnectedModularAccountMock = mock(() =>
   Promise.resolve({ address: '0xmodular0000000000000000000000000000000002' } as import('thirdweb/wallets').Account),
 )
-const createPublishMock = mock(() => {})
+// createPublish resolves the spawned publish actor.
+const createPublishMock = mock(async () => ({ id: 'publish-actor' }))
 const resolveSmartWalletForPublishMock = mock(() => Promise.resolve({ needsDeploy: true as const }))
 const ensureEip7702ModularAccountReadyMock = mock(() => Promise.resolve())
 
