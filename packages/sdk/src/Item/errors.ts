@@ -8,7 +8,9 @@ export type ItemCreateProblem = {
 
 /**
  * Thrown by Item.create when values don't fit the model: unknown keys, wrong types, or values
- * that break the property's validation rules. Nothing is written.
+ * that break the property's validation rules. Nothing is left written: most values are checked
+ * before anything is written, and File/Image/Html/ItemStorage values, checked as they're saved,
+ * have their draft removed.
  */
 export class ItemCreateValidationError extends Error {
   readonly modelName: string
