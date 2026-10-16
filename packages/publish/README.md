@@ -18,7 +18,7 @@ npm install @seedprotocol/publish @seedprotocol/sdk @seedprotocol/react react re
 npm install thirdweb
 ```
 
-Peer dependencies: `@seedprotocol/sdk` and `@seedprotocol/react` (same minor version as this package), `react` / `react-dom` 18 or 19, `@tanstack/react-query` 5, and optionally `thirdweb` 5. The SDK is a peer so your app and this package share one SDK instance (one client, one local database).
+Peer dependencies: `@seedprotocol/sdk` and `@seedprotocol/react` (the same version as this package; all Seed Protocol packages are released together), `react` / `react-dom` 18 or 19, `@tanstack/react-query` 5, and optionally `thirdweb` 5. The SDK is a peer so your app and this package share one SDK instance (one client, one local database).
 
 ## Setup
 

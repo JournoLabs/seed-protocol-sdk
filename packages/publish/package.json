@@ -77,8 +77,8 @@
     "vite": "^8.0.0"
   },
   "peerDependencies": {
-    "@seedprotocol/sdk": "^0.7.0",
-    "@seedprotocol/react": "^0.7.0",
+    "@seedprotocol/sdk": "workspace:*",
+    "@seedprotocol/react": "workspace:*",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
     "thirdweb": "^5",
