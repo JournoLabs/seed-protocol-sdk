@@ -1,4 +1,4 @@
-import { easName } from '@seedprotocol/eas'
+import { decodeEasNumber, easName } from '@seedprotocol/eas'
 import { getItemModelScope, resolveModelRecord } from '@/db/read/resolveModelRecord'
 // Dynamic import to break circular dependency with getItem -> BaseItem
 // import { getItem } from '@/db/read/getItem'
@@ -506,7 +506,8 @@ const processBasicProperties = async (
         else if (pv && typeof pv === 'object' && typeof pv.seedLocalId === 'string') value = pv.seedLocalId
       }
     }
-    if (!value) {
+    // 0 and false are values (ADR 0010); only a missing or empty value is skipped.
+    if (value == null || value === '') {
       continue
     }
     // Patch mode skips properties that already have an EAS uid. storageTransactionId must still
@@ -642,6 +643,21 @@ const processBasicProperties = async (
     if (easDataType === 'uint256' && (typeof value === 'string' || value instanceof Date)) {
       const ms = value instanceof Date ? value.getTime() : new Date(value).getTime()
       value = BigInt(Math.floor(ms / 1000))
+    }
+
+    // ADR 0010: Number attests as its decimal string, in the form readers decode it to.
+    if (matchesDataType(propertyDef?.dataType, ModelPropertyDataTypes.Number)) {
+      const decimal = decodeEasNumber(value)
+      if (decimal === undefined) {
+        addValidationError(
+          ctx,
+          `Invalid value for property: ${basicProperty.propertyName}. Expected a finite number, got ${JSON.stringify(value)}.`,
+          basicProperty.propertyName,
+          'publish_invalid_number',
+        )
+        continue
+      }
+      value = decimal
     }
 
     let data = [

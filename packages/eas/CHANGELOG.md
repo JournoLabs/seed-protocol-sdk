@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- `decodeEasNumber(value)` turns an indexer value (JSON number, decimal or hex string, bigint, or `{ type: 'BigNumber', hex }`) into its decimal string, and `isNumericEasType` says whether an EAS type is `uint*` or `int*` (ADR 0010).
 - **`getCanonicalItemPropertiesFromEas` checks attesters by default:** a version counts only if its seed's attester made it, and a property only if its version's attester did. It makes two more requests (the versions and their seeds); pass `checkAttesters: false` when the versions are already trusted.
 
 ## 0.7.4 (2026-10-15)

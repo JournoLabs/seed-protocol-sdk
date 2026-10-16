@@ -35,8 +35,9 @@ export const INTERNAL_DATA_TYPES = {
   Text: {
     eas: 'string',
   },
+  // ADR 0010: decimal strings, so negatives, fractions and values above 255 publish.
   Number: {
-    eas: 'uint8',
+    eas: 'string',
   },
   Image: {
     eas: 'bytes32',
