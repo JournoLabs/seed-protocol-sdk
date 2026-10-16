@@ -111,7 +111,8 @@ changelog, so write them for a reader.
 
 Sections from 0.5.1 to 0.7.4 were backfilled from git history. Versions published without
 a committed version bump (0.5.2, 0.6.1–0.6.2, 0.6.4–0.6.6) are folded into the next section.
-0.7.3 was published from a retry, so its section lists the commits up to the moved tag.
+0.7.3 was published from a retry before retries updated the changelogs; its section was
+completed by hand.
 
 By hand, the same thing is (without the changelog sections):
 
@@ -140,9 +141,15 @@ which starts a new tag run. HEAD must contain the old tag's commit, and the old 
 must have finished. Like a new release, it checks CI for HEAD, prints the plan, and
 asks you to type the version.
 
-A retry doesn't touch the changelogs. The commits it adds after the release commit are
-missing from that version's section, and the next release starts at the moved tag, so add
-them to the section by hand.
+The commits after the old tag's commit ship in this version too, and the next release's
+changelog starts at the moved tag, so the retry adds them to the version's existing
+`## X.Y.Z` sections: commits go on top of their groups in the Commits list, and any new
+`## Unreleased` notes go after the section's notes. The plan lists every line it adds.
+They go in a `chore: release X.Y.Z (retry changelog)` commit that changes only
+CHANGELOG.md files, and the tag goes on that commit rather than on the HEAD whose CI run
+it checked. That's the same as a new release, whose release commit CI hasn't seen
+either, and the tag run repeats the tests. When there's nothing to add, it tags HEAD
+as it is. If the push fails, it removes the changelog commit along with the local tag.
 
 It refuses when some packages already published that version. npm can't replace them,
 so re-run the failed run instead: it publishes the rest from the same commit.
