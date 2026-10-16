@@ -8,7 +8,7 @@
  * Reading: an EAS name is never turned back into a local name. It is matched against the local
  * candidates by key, at a {@link NameMatchLevel}:
  *
- * - `exact`: `easName(local) === easName(eas)`.
+ * - `exact`: the EAS name is exactly `easName(local)`, what this SDK publishes.
  * - `normalized`: lowercase alphanumerics only. `html_page`, `htmlpage`, `HTMLPage` and
  *   `html-page` are the same; this finds seeds published under older SDKs' names.
  * - `fuzzy`: the normalized key without a trailing plural `s`, and for relations without a
@@ -33,6 +33,12 @@ export const easName = (name: string): string =>
     .toLowerCase()
 
 export type NameMatchLevel = 'exact' | 'normalized' | 'fuzzy'
+
+/** The levels, tightest first. */
+export const NAME_MATCH_LEVELS: readonly NameMatchLevel[] = ['exact', 'normalized', 'fuzzy']
+
+export const isNameMatchLevel = (value: unknown): value is NameMatchLevel =>
+  typeof value === 'string' && (NAME_MATCH_LEVELS as readonly string[]).includes(value)
 
 /** How closely two names matched: the tightest level that accepts them. */
 export type NameMatchTier = NameMatchLevel
@@ -68,7 +74,7 @@ export function nameMatchTier(
   name: string,
   options: { relation?: boolean } = {},
 ): NameMatchTier | undefined {
-  if (easName(localName) === easName(name)) return 'exact'
+  if (easName(localName) === name) return 'exact'
   if (normalizedNameKey(localName) === normalizedNameKey(name)) return 'normalized'
   if (fuzzyNameKey(localName, options) === fuzzyNameKey(name, options)) return 'fuzzy'
   return undefined
@@ -120,21 +126,25 @@ export function matchEasName<T>(
 }
 
 /**
- * The local names an EAS name matches in the tightest tier that has any (each name at `level`).
- * Several names can share a tier, e.g. `New model` and `NewModel` for `new_model`: the caller
- * decides whether that's ambiguous (models in different schemas) or the same thing.
+ * The local names an EAS name matches in the tightest tier that has any (each name at `level`, or
+ * at the level `level(localName)` returns). Several names can share a tier, e.g. `New model` and
+ * `NewModel` for `new_model`: the caller decides whether that's ambiguous (models in different
+ * schemas) or the same thing.
  */
 export function localNamesInBestMatchTier(
   name: string,
   localNames: Iterable<string>,
-  options: { relation?: boolean; level?: NameMatchLevel } = {},
+  options: { relation?: boolean; level?: NameMatchLevel | ((localName: string) => NameMatchLevel) } = {},
 ): Set<string> {
-  const level = options.level ?? DEFAULT_NAME_MATCH_LEVEL
+  const levelOf =
+    typeof options.level === 'function'
+      ? options.level
+      : () => (options.level as NameMatchLevel | undefined) ?? DEFAULT_NAME_MATCH_LEVEL
   let best: NameMatchTier | undefined
   let names = new Set<string>()
   for (const localName of localNames) {
-    const tier = nameMatchTier(localName, name, options)
-    if (!tier || !isNameMatchAllowed(tier, level)) continue
+    const tier = nameMatchTier(localName, name, { relation: options.relation })
+    if (!tier || !isNameMatchAllowed(tier, levelOf(localName))) continue
     if (best === undefined || compareNameMatchTiers(tier, best) < 0) {
       best = tier
       names = new Set([localName])
@@ -153,4 +163,19 @@ export function localNamesInBestMatchTier(
 export function easNameVariants(name: string): string[] {
   const legacy = name.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
   return [...new Set([easName(name), legacy, normalizedNameKey(name)])]
+}
+
+/**
+ * The EAS names to fetch schemas under for a local model name at `level`: at `exact` its EAS name
+ * only; at `normalized` also {@link easNameVariants} and the name as written; at `fuzzy` also a
+ * plural or singular form of each. Fetching is a superset: results are still filtered with
+ * {@link matchEasName}.
+ */
+export function easNamesToFetch(name: string, level: NameMatchLevel = DEFAULT_NAME_MATCH_LEVEL): string[] {
+  if (level === 'exact') return [easName(name)]
+  const names = new Set<string>([...easNameVariants(name), name])
+  if (level === 'fuzzy') {
+    for (const variant of [...names]) names.add(variant.endsWith('s') ? variant.slice(0, -1) : `${variant}s`)
+  }
+  return [...names]
 }
