@@ -2,7 +2,7 @@ import type { PublishMachineContext } from '../../../types'
 
 type FromCallbackInput<T> = { context: T; event?: unknown }
 import { EventObject, fromCallback } from 'xstate'
-import { isContractDeployed } from '~/helpers/chainClient'
+import { getAccountCodeKind } from '~/helpers/chainClient'
 import { itemNeedsArweaveUpload } from '../helpers/itemNeedsArweave'
 import { ensureEasSchemasForItem } from '../helpers/ensureEasSchemas'
 import {
@@ -23,8 +23,10 @@ async function resolveAttestationStrategy(publisherAddress: string): Promise<'mu
   const cfg = getPublishConfig()
   if (cfg.useDirectEas) return 'directEas'
   if (cfg.useModularExecutor) return 'multiPublish'
-  const deployed = await isContractDeployed(publisherAddress)
-  return deployed ? 'multiPublish' : 'directEas'
+  // An EIP-7702 delegated EOA has code, but it is an EOA with no Seed extension: it attests
+  // directly, like an EOA with no code.
+  const kind = await getAccountCodeKind(publisherAddress)
+  return kind === 'contract' ? 'multiPublish' : 'directEas'
 }
 
 /**
