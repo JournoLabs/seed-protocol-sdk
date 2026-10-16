@@ -44,69 +44,81 @@ export const createNewItem = async ({
 
   const newSeedId = await createSeed({ type: seedType, modelFileId })
 
-  const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
-
-  // Build set of all properties to create metadata for: union of model schema + propertyData
-  // This ensures we create metadata for ALL model properties even when creating with no initial values
-  // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
-  const allPropertyNames = new Set<string>(Object.keys(propertyData))
-  if (propertySchemas) {
-    for (const name of Object.keys(propertySchemas)) {
-      allPropertyNames.add(name)
-    }
+  try {
+    return await writeVersionAndRows(newSeedId)
+  } catch (error) {
+    // The rows are separate inserts (no transaction): remove what was written so a failure leaves
+    // no half-made draft.
+    const { discardNewDraft } = await import('./discardNewDraft')
+    await discardNewDraft(newSeedId).catch(() => undefined)
+    throw error
   }
 
-  for (const propertyName of allPropertyNames) {
-    const propertyValue = propertyData[propertyName]
-    const propertyRecordSchema = propertySchemas?.[propertyName]
+  async function writeVersionAndRows(newSeedId: string): Promise<CreateNewItemReturnType> {
+    const newVersionId = await createVersion({ seedLocalId: newSeedId, seedType: easName(modelName) })
 
-    // ItemStorage content lives in the property's file (`<seedLocalId><extension>`), as a save puts
-    // it; the row records where. Stored verbatim in the row, publish would never upload it.
-    const isItemStorageValue =
-      propertyRecordSchema?.storageType === 'ItemStorage' &&
-      propertyValue != null &&
-      propertyValue !== ''
-    const insertRow = (
-      storageFields?: { refResolvedValue: string; localStorageDir: string; refValueType: string },
-    ) =>
-      createMetadata(
-        {
-          seedLocalId: newSeedId,
-          versionLocalId: newVersionId,
-          propertyName,
-          propertyValue: storageFields ? undefined : propertyValue,
-          ...storageFields,
-          modelName,
-        } as Parameters<typeof createMetadata>[0],
-        propertyRecordSchema,
-        { skipValidation: true, modelFileId },
-      )
-
-    if (!isItemStorageValue) {
-      await insertRow()
-      continue
+    // Build set of all properties to create metadata for: union of model schema + propertyData
+    // This ensures we create metadata for ALL model properties even when creating with no initial values
+    // (fixes first-item persistence: loadOrCreateItem needs metadata rows to run createItemPropertyInstances)
+    const allPropertyNames = new Set<string>(Object.keys(propertyData))
+    if (propertySchemas) {
+      for (const name of Object.keys(propertySchemas)) {
+        allPropertyNames.add(name)
+      }
     }
 
-    // File and row under the file's lock, like every writer of a local draft's file (see
-    // withItemStorageFileLock). The seed is new, so nothing else should be writing it yet.
-    const target = {
-      seedId: newSeedId,
-      localStorageDir: propertyRecordSchema.localStorageDir,
-      filenameSuffix: propertyRecordSchema.filenameSuffix,
-    }
-    await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
-      const written = await writeItemStorageFile(target, propertyValue as string | Blob | ArrayBuffer)
-      await insertRow({
-        refResolvedValue: written.fileName,
-        localStorageDir: written.localStorageDir,
-        refValueType: 'file',
+    for (const propertyName of allPropertyNames) {
+      const propertyValue = propertyData[propertyName]
+      const propertyRecordSchema = propertySchemas?.[propertyName]
+
+      // ItemStorage content lives in the property's file (`<seedLocalId><extension>`), as a save puts
+      // it; the row records where. Stored verbatim in the row, publish would never upload it.
+      const isItemStorageValue =
+        propertyRecordSchema?.storageType === 'ItemStorage' &&
+        propertyValue != null &&
+        propertyValue !== ''
+      const insertRow = (
+        storageFields?: { refResolvedValue: string; localStorageDir: string; refValueType: string },
+      ) =>
+        createMetadata(
+          {
+            seedLocalId: newSeedId,
+            versionLocalId: newVersionId,
+            propertyName,
+            propertyValue: storageFields ? undefined : propertyValue,
+            ...storageFields,
+            modelName,
+          } as Parameters<typeof createMetadata>[0],
+          propertyRecordSchema,
+          { skipValidation: true, modelFileId },
+        )
+
+      if (!isItemStorageValue) {
+        await insertRow()
+        continue
+      }
+
+      // File and row under the file's lock, like every writer of a local draft's file (see
+      // withItemStorageFileLock). The seed is new, so nothing else should be writing it yet.
+      const target = {
+        seedId: newSeedId,
+        localStorageDir: propertyRecordSchema.localStorageDir,
+        filenameSuffix: propertyRecordSchema.filenameSuffix,
+      }
+      await withItemStorageFileLock(getItemStorageFilePath(target), async () => {
+        const written = await writeItemStorageFile(target, propertyValue as string | Blob | ArrayBuffer)
+        await insertRow({
+          refResolvedValue: written.fileName,
+          localStorageDir: written.localStorageDir,
+          refValueType: 'file',
+        })
       })
-    })
-  }
+    }
 
-  return {
-    modelName,
-    seedLocalId: newSeedId,
-    versionLocalId: newVersionId,
+    return {
+      modelName,
+      seedLocalId: newSeedId,
+      versionLocalId: newVersionId,
+    }
   }
 } 

@@ -42,7 +42,7 @@ import { getItemData } from '@/db/read/getItemData'
 import { getItemsData } from '@/db/read/getItems'
 import { isVersionRevoked } from '@/db/read/subqueries/liveVersion'
 import { getLatestVersionRow } from '@/db/read/getLatestVersionRow'
-import { ItemProperty } from '@/ItemProperty/ItemProperty'
+import { ItemProperty, ItemPropertySaveValidationError } from '@/ItemProperty/ItemProperty'
 import { getItemProperties } from '@/db/read/getItemProperties'
 import { createNewItem } from '@/db/write/createNewItem'
 import { BaseDb } from '@/db/Db/BaseDb'
@@ -953,21 +953,34 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
     if (!waitForReady && pipelineValues.length === 0) return proxiedInstance
     try {
       await this.waitForItemInstanceReadyForRead(proxiedInstance, readyTimeout)
+      await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     } catch (err) {
-      try {
-        proxiedInstance.unload()
-      } catch {
-        /* best-effort cache cleanup */
-      }
+      // A rejected create leaves nothing behind, so a retry doesn't make a second draft.
+      await this.discardCreatedItem(proxiedInstance, seedLocalId)
       throw err
     }
-    await this.savePipelineValues(proxiedInstance, pipelineValues, readyTimeout)
     return proxiedInstance
+  }
+
+  /** Stops a just-created item and deletes what create wrote (see discardNewDraft). */
+  private static async discardCreatedItem(item: Item<any>, seedLocalId: string): Promise<void> {
+    try {
+      this.dropCachedInstancesForSeedIds([seedLocalId])
+    } catch {
+      /* best-effort cache cleanup */
+    }
+    try {
+      const { discardNewDraft } = await import('@/db/write/discardNewDraft')
+      await discardNewDraft(seedLocalId)
+    } catch (error) {
+      itemLogger(`Item.create: could not remove the draft ${seedLocalId} after a failure:`, error)
+    }
   }
 
   /**
    * Run each File/Image/Html/ItemStorage initial value through its ItemProperty save pipeline (sequentially, to
-   * avoid SQLite write contention). Rejects on the first failure; the item itself has been created.
+   * avoid SQLite write contention). Rejects on the first failure, with ItemCreateValidationError when the
+   * value breaks its property's rules; Item.create then removes the item.
    */
   private static async savePipelineValues(
     item: Item<any>,
@@ -985,6 +998,15 @@ export class Item<T extends ModelValues<ModelSchema>> implements IItem<T> {
       try {
         await property.save()
       } catch (error) {
+        if (error instanceof ItemPropertySaveValidationError) {
+          const { ItemCreateValidationError } = await import('./errors')
+          const created = new ItemCreateValidationError(
+            item.modelName,
+            error.validationErrors.map((e) => ({ property: propertyName, code: e.code, message: e.message })),
+          )
+          ;(created as Error & { cause?: unknown }).cause = error
+          throw created
+        }
         throw new Error(
           `Item.create: failed to save ${item.modelName}.${propertyName} for item ${item.seedLocalId}: ` +
             (error instanceof Error ? error.message : String(error)),
