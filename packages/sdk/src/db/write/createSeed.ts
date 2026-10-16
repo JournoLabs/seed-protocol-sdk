@@ -22,10 +22,9 @@ export const createSeed = async ({ type, seedUid, modelFileId }: CreateSeedProps
 
   const newSeedLocalId = generateId()
 
-  // Without a publisher a draft is read-only once owned addresses are set (isSeedRowOwned). So
-  // when nothing supplies one (no getter, as in Node scripts, or no wallet connected yet) and
-  // exactly one owned address is set, the draft is that address's. With several, which one would
-  // publish isn't known: register a getter with setGetPublisherForNewSeeds.
+  // When nothing supplies a publisher (no getter, as in Node scripts, or no wallet connected yet)
+  // and exactly one owned address is set, the draft is that address's. With several, which one would
+  // publish isn't known: the draft gets none, stays editable, and the next wallet to connect claims it.
   let publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
   if (!publisher) {
     const owned = await getOwnedAddressesFromDb()

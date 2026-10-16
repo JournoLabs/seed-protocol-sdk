@@ -37,8 +37,8 @@ Leaving `addresses` out keeps the addresses stored from an earlier session (the 
 
 Three different address lists, do not mix them:
 
-- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` use this set only and always agree. An empty owned list matches only local unsealed drafts (no publisher, no real uid, no `attestationRaw`), so users can write before connecting a wallet; it does not skip the filter.
-- **`publisherAddress`** — who new seeds/versions/metadata are stamped with (usually the managed account). Set via the publish wallet session, not by putting the module contract in `owned`.
+- **`owned`** — wallets the user controls (EOA + smart/managed account). Persisted lowercased in `app_state`. `addressFilter: 'owned'` and `isItemOwned` always agree: an item is owned when its publisher is in this set, or when it's a local unsealed draft (no publisher, no real uid, no `attestationRaw`). Such a draft was made with no wallet connected and belongs to the next wallet that connects. An empty owned list matches only those drafts; it does not skip the filter.
+- **`publisherAddress`** — who new seeds are stamped with (usually the managed account); a seed's versions and property rows take the seed's publisher. Set via the publish wallet session, not by putting the module contract in `owned`.
 - **`getAdditionalSyncAddresses`** — extra EAS indexers (legacy executor module). Used for sync and revoke only, never for ownership.
 
 After connect, stamp leftover local drafts:

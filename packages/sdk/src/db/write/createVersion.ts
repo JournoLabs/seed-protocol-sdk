@@ -1,8 +1,7 @@
 import { generateId } from '@/helpers'
 import { versions } from '@/seedSchema'
 import { BaseDb } from '../Db/BaseDb'
-import { getPublisherForNewSeedsWithTimeout } from '@/helpers/publishConfig'
-import { normalizePublisher } from '@/helpers/addresses'
+import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 
 type CreateVersionProps = {
   seedLocalId?: string
@@ -22,7 +21,8 @@ export const createVersion: CreateVersion = async ({
 
   const newVersionLocalId = generateId()
 
-  const publisher = normalizePublisher(await getPublisherForNewSeedsWithTimeout())
+  // A version belongs to its seed's wallet (none yet for a draft made with no wallet connected).
+  const publisher = await getSeedPublisher(seedLocalId)
 
   await appDb.insert(versions).values({
     localId: newVersionLocalId,

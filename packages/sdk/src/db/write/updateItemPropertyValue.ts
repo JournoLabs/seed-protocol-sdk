@@ -8,6 +8,7 @@ import { getMetadataPropertyNamesForQuery } from '@/helpers/metadataPropertyName
 import { METADATA_LATEST_FIRST_ORDER_SQL } from '@/helpers/compareMetadataRowsLatestFirst'
 import debug from 'debug'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
 
 type UpdateItemPropertyValueResult = {
@@ -165,9 +166,12 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
     // Here we don't have a local-only record so we need to create a new one
     const newLocalId = generateId()
+    // The row belongs to its seed's wallet, like createMetadata's.
+    const publisher = await getSeedPublisher(seedLocalIdFromDb ?? seedLocalId)
 
     await appDb.insert(metadata).values({
       localId: newLocalId,
+      ...(publisher && { publisher }),
       propertyName: propertyNameFromDb,
       propertyValue: safeNewValue ?? null,
       modelType: modelType || modelTypeForName || null,
@@ -208,8 +212,11 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
     }
   }
 
+  const publisher = await getSeedPublisher(seedLocalId)
+
   await appDb.insert(metadata).values({
     localId: newLocalId,
+    ...(publisher && { publisher }),
     propertyName,
     propertyValue: safeNewValue ?? null,
     modelType: modelName ? easName(modelName) : '',
