@@ -156,7 +156,15 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
-    external: ['@seedprotocol/feed', '@seedprotocol/eas', '@seedprotocol/arweave', '@seedprotocol/query', '@seedprotocol/vite'],
+    external: [
+      '@seedprotocol/feed',
+      '@seedprotocol/eas',
+      '@seedprotocol/arweave',
+      '@seedprotocol/query',
+      '@seedprotocol/vite',
+      // Resolved by the consumer through package.json `imports` (browser vs Node platform).
+      '#seed-node-platform',
+    ],
     plugins: [
       alias({
         entries: [

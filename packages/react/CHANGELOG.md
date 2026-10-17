@@ -4,6 +4,7 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+- The package is marked `'use client'`, so a React Server Components app (Next.js App Router) can import `SeedProvider` and the components into a server component such as `app/layout.tsx`. Before, that failed with `createContext is not a function`.
 - `SeedProvider` takes `config`, `addresses` and `onInitError` and starts the client itself: `<SeedProvider config={config}>` replaces wrapping the app in `SeedClientGate`. Children render straight away and the hooks report loading until the client is ready; `SeedClientGate` is still there for its loading screen. Init runs again only when `config` changes or `addresses` holds different values.
 - `SeedClientGate`'s `schema` prop takes the SDK's `SchemaFileInput`, so a schema needs only `metadata.name` and `models`.
 

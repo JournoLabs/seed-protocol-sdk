@@ -1,5 +1,7 @@
 /**
  * Webpack / Next.js config helper for Seed Protocol apps.
+ * @deprecated Use `withSeed` from `@seedprotocol/next`, which covers Turbopack and webpack and
+ * sets the cross-origin isolation headers.
  */
 export const withSeed = (config: any, webpack: any, isServer: boolean) => {
   config.plugins.push(

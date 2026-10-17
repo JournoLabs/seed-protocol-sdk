@@ -6,6 +6,13 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
+import {
+  DEFAULT_FS_MODULES,
+  effectiveIsolationHeaders,
+  isolationHeadersNotSetBy,
+  resolveIsolationHeaders,
+  zenfsModuleFor,
+} from '@seedprotocol/bundler-core'
 
 const _req = createRequire(import.meta.url)
 
@@ -237,12 +244,6 @@ function findDangerousGlobals(code: string): GlobalHit[] {
   return hits
 }
 
-const DEFAULT_FS_MODULES = [
-  'fs',
-  'fs/promises',
-  'node:fs',
-  'node:fs/promises',
-]
 const SDK_DIST_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ARWEAVE_SHIM_FILE = path.join(SDK_DIST_DIR, 'arweave-default-shim.js')
 const DEBUG_SHIM_FILE = path.join(SDK_DIST_DIR, 'debug-default-shim.js')
@@ -320,57 +321,6 @@ function seedSharedStateDeps(appRoot: string): { include: string[]; dedupe: stri
 
 /** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
-
-const DEFAULT_ISOLATION_HEADERS = {
-  'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'credentialless',
-  'Cross-Origin-Resource-Policy': 'same-origin',
-} as const
-
-function resolveIsolationHeaders(
-  option: SeedVitePluginOptions['isolationHeaders'],
-): Record<string, string> | null {
-  if (option === false) return null
-  const overrides = typeof option === 'object' && option ? option : {}
-  return {
-    'Cross-Origin-Opener-Policy': overrides.coop ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Opener-Policy'],
-    'Cross-Origin-Embedder-Policy': overrides.coep ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy'],
-    'Cross-Origin-Resource-Policy': overrides.corp ?? DEFAULT_ISOLATION_HEADERS['Cross-Origin-Resource-Policy'],
-  }
-}
-
-/**
- * Isolation headers the user has not set in `headers` (case-insensitive), so a
- * config() hook can add them without replacing the user's values.
- */
-function isolationHeadersNotSetBy(
-  isolationHeaders: Record<string, string>,
-  headers: Record<string, unknown> | undefined,
-): Record<string, string> {
-  const userKeys = new Set(Object.keys(headers ?? {}).map((key) => key.toLowerCase()))
-  return Object.fromEntries(
-    Object.entries(isolationHeaders).filter(([key]) => !userKeys.has(key.toLowerCase())),
-  )
-}
-
-/**
- * The isolation headers the middleware sends: the user's `headers` value where
- * they set one, else ours.
- */
-function effectiveIsolationHeaders(
-  isolationHeaders: Record<string, string>,
-  headers: Record<string, unknown> | undefined,
-): Record<string, string> {
-  const userValues = new Map(
-    Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
-  )
-  return Object.fromEntries(
-    Object.entries(isolationHeaders).map(([key, value]) => {
-      const userValue = userValues.get(key.toLowerCase())
-      return [key, userValue == null ? value : String(userValue)]
-    }),
-  )
-}
 
 function applyIsolationHeaderMiddleware(
   server: ViteDevServer | PreviewServer,
@@ -863,7 +813,7 @@ function optimizeDepsRolldownPatch(
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
   const {
-    fsModules = DEFAULT_FS_MODULES,
+    fsModules = [...DEFAULT_FS_MODULES],
     autoInit = false,
     debug = false,
     includeNodePolyfills = true,
@@ -927,9 +877,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       }
       const aliasEntries: AliasEntry[] = []
       for (const mod of fsModules) {
-        const isPromises = mod.includes('promises')
-        const target = isPromises ? '@zenfs/core/promises' : '@zenfs/core'
-        aliasEntries.push({ find: mod, replacement: target })
+        aliasEntries.push({ find: mod, replacement: zenfsModuleFor(mod) })
       }
 
       const eventEmitterEsm = resolvePackageFile('eventemitter3', 'dist/eventemitter3.esm.js')
