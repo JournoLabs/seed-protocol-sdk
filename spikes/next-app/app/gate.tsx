@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { SeedProvider, SeedClientGate } from '@seedprotocol/react'
+import { SeedClientGate } from '@seedprotocol/react'
 import type { SeedConstructorOptions, SchemaFileFormat } from '@seedprotocol/sdk'
 
 const initConfig: SeedConstructorOptions = {
@@ -24,19 +24,18 @@ const schema: SchemaFileFormat = {
   },
 }
 
-export function Providers({ children }: { children: ReactNode }) {
+// Client component because onInitError is a function, which a server component can't pass.
+export function Gate({ children }: { children: ReactNode }) {
   return (
-    <SeedProvider>
-      <SeedClientGate
-        initConfig={initConfig}
-        schema={schema}
-        onInitError={(err) => {
-          console.error('[spike] init failed', err)
-          ;(window as any).__spikeInitError = String((err as Error)?.stack ?? err)
-        }}
-      >
-        {children}
-      </SeedClientGate>
-    </SeedProvider>
+    <SeedClientGate
+      initConfig={initConfig}
+      schema={schema}
+      onInitError={(err) => {
+        console.error('[spike] init failed', err)
+        ;(window as any).__spikeInitError = String((err as Error)?.stack ?? err)
+      }}
+    >
+      {children}
+    </SeedClientGate>
   )
 }
