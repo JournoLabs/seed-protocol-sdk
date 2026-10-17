@@ -98,7 +98,7 @@ export default defineConfig({
         plugins: [
           react(),
           tsConfigPaths({ projects: ['./packages/sdk/tsconfig.json'] }),
-          ...seedVitePlugin({ autoInit: false, debug: false }),
+          ...seedVitePlugin(),
         ],
         resolve: {
           alias: [
@@ -185,7 +185,7 @@ export default defineConfig({
         plugins: [
           react(),
           tsConfigPaths({ projects: ['./packages/react/tsconfig.json', './packages/sdk/tsconfig.json'] }),
-          ...seedVitePlugin({ autoInit: false, debug: false }),
+          ...seedVitePlugin(),
         ],
         resolve: {
           alias: [

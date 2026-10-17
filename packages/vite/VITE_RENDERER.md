@@ -1,65 +1,45 @@
-# Vite renderer integration (`@seedprotocol/vite`)
+# What `seedVitePlugin()` sets, and why
 
-Use `seedVitePlugin()` in Vite/Electron renderer configs so browser apps can import `@seedprotocol/sdk` without per-app CJS/ESM workarounds.
+`@seedprotocol/sdk/vite` re-exports this package's `seedVitePlugin` for backward compatibility. `@seedprotocol/vite` is an optional peer of the SDK, so install it in your app to use either import.
 
-`@seedprotocol/sdk/vite` re-exports this package for backward compatibility. The SDK lists this package as an optional peer, so it must be installed in your app either way.
+## Settings and what needs them
 
-## Quick start
+These were checked with a Vite 8.3 + React 19 app that installs only `@seedprotocol/sdk`, `@seedprotocol/react`, `@seedprotocol/publish` and their peers, with npm, pnpm and bun, and once more with the Seed packages linked (`file:`) from a checkout, each under `vite dev` and `vite build` + `vite preview` in Chromium. The app initializes the SDK, creates an item with Text, Html, Image and File values, reads it back through `useItems`, `Item.find` and a drizzle query, publishes it (Arweave data items to a local upload stub, attestations to a local EAS chain), downloads the uploaded files into OPFS, and syncs the item from EAS into a fresh browser profile.
 
-```ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { seedVitePlugin } from '@seedprotocol/vite'
+| Setting | Needed for | Now |
+|---------|------------|-----|
+| COOP / COEP headers (also in `writeHead`) | Keeping the database in OPFS. Without them the page isn't cross-origin isolated: the SDK falls back to an in-memory database, or fails with `DB_NOT_PERSISTENT` where that check exists. | default |
+| `worker.format: 'es'` | Production builds. With Vite's `'iife'` default, init fails with `Failed query` because SQLite's worker can't load. | default, unless you set a format |
+| `optimizeDeps.rolldownOptions.output.strictExecutionOrder` | `vite dev` when the app imports `@seedprotocol/sdk/drizzle`. drizzle-orm's modules import each other in a cycle, the pre-bundle splits them across the two entries' chunks, and `class PgTable extends Table` runs before `Table` exists: `Cannot read properties of undefined (reading 'Symbol')`. Importing `drizzle-orm` directly didn't trigger it. | default, unless you set it |
+| `resolve.dedupe` | Linked installs. Without it a linked `@seedprotocol/react` loads its own React and hooks fail (`Invalid hook call`). Only packages the app root resolves are listed; Vite resolves deduplicated packages from the root. | default |
+| `server.fs.allow` for the SDK, sqlocal and SQLite WASM | Linked installs under `vite dev`: the sqlocal worker and the WASM file are outside the app, so Vite refuses to serve them. | default, dev server only |
+| Node polyfills, `global` / `process` defines and HTML shims, `stream` stub | Nothing the SDK, `@seedprotocol/react` or `@seedprotocol/publish` does. Publish's batch upload used the `Buffer` global in 0.7.5 and earlier. `@seedprotocol/feed` and `@seedprotocol/mapping` in the browser were not tested. | `includeNodePolyfills: true` |
+| `fs` → ZenFS aliases | Nothing in the SDK. In 0.7.5 and earlier its browser entry kept a bare `import 'fs'`, which Vite stubbed and webpack failed on. | `fsModules` |
+| Warnings about Node globals in production chunks | Diagnostics. | `debug: true` |
+| `optimizeDeps.exclude` of the SDK, drizzle-orm, sqlocal, better-sqlite3 | Nothing. It broke pnpm: an excluded package imported from a pre-bundled one has to resolve from the app root, which pnpm doesn't hoist to (`sqlocal/drizzle`, or `pluralize` with the SDK excluded). | removed |
+| `optimizeDeps.include` lists (nested EAS SDK, `pluralize`, ZenFS, `debug`, Seed shared-state packages, viem and others) | Only needed because the SDK was excluded from pre-bundling, so Vite served its CommonJS dependencies raw. | removed |
+| Interop aliases for `debug`, `arweave`, `eventemitter3`, `nanoid-dictionary` and the ZenFS entry files | Same: CommonJS/UMD interop for an SDK served unbundled. | removed |
+| `build.commonjsOptions`, `better-sqlite3` as a build external | Nothing. The SDK's browser build doesn't reference better-sqlite3 since its Node platform moved behind `#seed-node-platform`. | removed |
+| FileManager `path-browserify` import rewrite | Nothing. That import is only in the SDK's Node entry. | removed |
+| `autoInit` (ZenFS IndexedDB mount script) | Nothing. `client.init()` mounts OPFS itself, and the script's bare imports need an import map. | removed |
 
-export default defineConfig({
-  plugins: [react(), ...seedVitePlugin()],
-})
-```
+Not covered by these checks: Electron renderers, React Router Framework Mode and SSR, Yarn, and a real Arweave gateway.
 
-Recommended: **Vite 8** and **@vitejs/plugin-react 6** (aligned with this monorepo).
+`vite build` prints that it externalized `fs`-like Node modules for a few dependencies: `node:dns` (`@seedprotocol/publish`, only for domain ownership checks), `net` (rdapper, same) and `crypto` (thirdweb's x402 signing). None of these run in the paths above.
 
-## What the plugin configures automatically
+## Upgrading from 0.7
 
-- **Node polyfills** (`vite-plugin-node-polyfills`) with browser-safe defaults (optional via `includeNodePolyfills: false`). Default `include` is `path`, `buffer`, `events`, `string_decoder`, `util` — **not** `stream` or `crypto` (those pull `stream-browserify` and break Vite SSR / React Router SPA prerender). Use `includeNodePolyfills: false` for Framework Mode / prerender. The SDK aliases injected shim imports (`…/shims/buffer`, `…/shims/global`, `…/shims/process`) plus `buffer` / `process` / `global` (and `node:` variants) to absolute paths from the SDK install.
-- **Cross-origin isolation headers** (`COOP: same-origin`, `COEP: credentialless`, `CORP: same-origin`) on the Vite dev and preview servers, including `writeHead` (Framework-Mode HTML handlers ignore `server.headers` alone). A COOP/COEP/CORP value you set in `server.headers` or `preview.headers` wins over the plugin's for that server (`preview` falls back to `server.headers`, as in Vite). Opt out with `isolationHeaders: false`. Production hosts must set the same headers themselves.
-- **FS aliases** (`fs` → `@zenfs/core`, etc.) and **ZenFS stable ESM entrypoints** (`@zenfs/core`, `@zenfs/core/path`, `@zenfs/dom`).
-- **`nanoid-dictionary`** → `dist/dictionary.esm.js` (avoids broken UMD `browser` field with namespace imports).
-- **`debug` interop shim** so `import debug from 'debug'` works in the renderer.
-- **`optimizeDeps.include`** for fragile deps: `debug`, `pluralize`, `random`, `seedrandom`, `@georgedoescode/generative-utils`, `nanoid-dictionary`, nested eas-sdk, plus ZenFS/viem helpers when installed.
-- **SDK dist CommonJS** handling and **FileManager** import-shape fix (`path-browserify` default → `import * as path from 'path'`).
-- **Inline `global` / `process` shims** in `index.html` for early CJS wrapper evaluation. `process.env.NODE_ENV` follows Vite `mode` (not hardcoded `"production"`), so React Refresh works during `vite serve`.
-
-You do not need to configure ZenFS yourself: `client.init()` mounts OPFS at `/` before the SDK touches files. Leave `autoInit` at its default (`false`).
-
-## Migrating from app-local fixes
-
-If you previously added aliases/plugins like permapress’s `createRendererResolveAliases`, `rendererOptimizeDepsInclude`, or `permapress-sdk-import-fix`, you can remove them after upgrading to an SDK release that includes this hardening—**as long as** you use `...seedVitePlugin()` in the renderer config.
-
-After upgrading:
-
-1. Bump `@seedprotocol/sdk` to the release with renderer hardening.
-2. Align **Vite 8** and **@vitejs/plugin-react 6** with your app. You do **not** need a direct `vite-plugin-node-polyfills` dependency unless you set `includeNodePolyfills: false` and wire the plugin yourself. The SDK depends on **vite-plugin-node-polyfills ≥ 0.27** (inject-based; avoids Vite 8 double-banner errors from 0.25).
-3. Clear Vite cache: delete `node_modules/.vite` (and Electron renderer cache dirs if applicable).
-4. Restart dev server.
-5. Ensure plugins are spread: `plugins: [react(), ...seedVitePlugin()]` (the helper returns an array).
-
-## Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `includeNodePolyfills` | `true` | Add `vite-plugin-node-polyfills` (no `stream`/`crypto`). Set `false` for React Router Framework Mode / prerender |
-| `isolationHeaders` | `true` | Dev/preview COOP/COEP/CORP (writeHead-safe). `false` to disable, or `{ coop, coep, corp }` to override. Default COEP is `credentialless`. Values in your own `server.headers` / `preview.headers` win |
-| `autoInit` | `false` | Inject a script into `index.html` that mounts IndexedDB at `/`. Leave `false` with the SDK: `client.init()` mounts OPFS itself, and the script's bare `@zenfs/*` imports need an import map |
-| `fsModules` | `fs`, `fs/promises`, `node:fs`, `node:fs/promises` | Modules aliased to ZenFS. Your list replaces the default, so include the defaults when adding a module |
-| `debug` | `false` | Plugin diagnostic logging (not the `debug` npm package) |
+1. Delete `node_modules/.vite` and restart the dev server.
+2. If a dependency of your app needs Node built-ins or the `Buffer` / `process` globals in the browser (you'll see `ReferenceError: Buffer is not defined` or Vite's "has been externalized for browser compatibility" error at runtime), set `includeNodePolyfills: true`. Run `vite build` with `debug: true` to list Node globals left in your chunks.
+3. If your code imports `fs` in the browser, set `fsModules: ['fs', 'fs/promises', 'node:fs', 'node:fs/promises']`.
+4. Remove `autoInit` from your options.
+5. Remove workarounds copied from older plugin versions or app configs: `optimizeDeps.exclude` entries for Seed packages, sqlocal, drizzle-orm or SQLite WASM; `optimizeDeps.include` entries for the SDK's dependencies; aliases for `nanoid-dictionary`, `debug` or the ZenFS entry files; FileManager import rewrites.
 
 ## Troubleshooting
 
-- **`Failed to resolve import "vite-plugin-node-polyfills/shims/…"`** or **optimizer `Could not load vite-plugin-node-polyfills/shims/buffer`** (often via `readable-stream` → `buffer`): use an SDK build that absolute-aliases those shims (including for `optimizeDeps`), spread `...seedVitePlugin()`, and clear `node_modules/.vite`. You should not need to add `vite-plugin-node-polyfills` to the app unless you disabled `includeNodePolyfills`.
-- **`Identifier '__buffer_polyfill' has already been declared`**: Vite 8 can apply the polyfills globals banner twice (especially on optimized deps). Use a current SDK build (dedupes the banner on serve), polyfills **≥ 0.27**, delete `node_modules/.vite`, and restart.
-- **`does not provide an export named 'default'`** for `…/shims/process/dist/index.cjs?import` (or buffer/global): the SDK must alias shims to the ESM `index.js` build, not the CJS `index.cjs` from `require.resolve`. Upgrade/rebuild the SDK and clear `.vite`.
-- **`does not provide an export named 'default'`** for `debug` or similar: ensure `...seedVitePlugin()` is in `plugins`, clear `.vite` cache, and confirm the SDK version includes the debug shim.
-- **ZenFS / dictionary errors**: confirm `@zenfs/core`, `@zenfs/dom`, and `nanoid-dictionary` are installed (SDK optional deps / your app dependencies).
-- **React Refresh / `injectIntoGlobalHook is not a function`**: an older plugin hardcoded `process.env.NODE_ENV` to `"production"` in dev. Upgrade `@seedprotocol/vite` and do not overlay a restore-NODE_ENV plugin.
-- **`module is not defined` during SPA prerender**: set `includeNodePolyfills: false`. Do not alias `crypto` → `crypto-browserify` (that pulls `stream`).
-- **Production OPFS / SQLite WASM**: the plugin only covers Vite `serve` / `preview`. Set `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (or `require-corp`) on the HTML document at the host (nginx, Netlify `_headers`, etc.). Framework-Mode HTML handlers need those headers on `writeHead`, not only `server.headers`.
+- **`Failed to resolve import "sqlocal/drizzle"`** or **`does not provide an export named 'default'`** under pnpm: something lists the SDK, sqlocal or drizzle-orm in `optimizeDeps.exclude`. Remove those entries.
+- **`sqlocal worker failed to start`** or **`expected magic word 00 61 73 6d`** under `vite dev` with a linked SDK: the worker or WASM file is outside `server.fs.allow`. Use `seedVitePlugin()`, or add the SDK, sqlocal and `@sqlite.org/sqlite-wasm` directories to `server.fs.allow`.
+- **`Invalid hook call`** with a linked `@seedprotocol/react`: two Reacts. Use `seedVitePlugin()`, or add `react` and `react-dom` to `resolve.dedupe`.
+- **`DuplicateEasModuleError`** or **`DuplicateArweaveModuleError`**: two copies of a Seed package. Check `npm ls @seedprotocol/eas`, keep Seed packages out of `optimizeDeps.exclude`, and dedupe them when they are linked.
+- **`Cannot read properties of undefined (reading 'Symbol')`** under `vite dev`: drizzle-orm's pre-bundled chunks ran out of order. Use `seedVitePlugin()`, or set `optimizeDeps.rolldownOptions.output.strictExecutionOrder: true`.
+- **`Failed query`** at init in a production build only: workers built as `'iife'`. Set `worker.format: 'es'`.

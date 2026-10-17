@@ -1,6 +1,7 @@
 import { EventObject, fromCallback } from 'xstate'
 import { ClientManagerEvents } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
+import { isTestOrSeedDev } from '@/helpers/environment'
 import { DEFAULT_ARWEAVE_HOST } from '@/helpers/constants'
 import { ClientManagerContext, FromCallbackInput, } from '@/types'
 import { appState } from '@/seedSchema'
@@ -108,7 +109,7 @@ export const saveConfig = fromCallback<
 
       if (!appDb) {
         // In test environments, continue anyway
-        if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+        if (isTestOrSeedDev()) {
           logger('[internal/actors] [saveConfig] App DB not found, but continuing in test environment')
           return
         }
@@ -175,7 +176,7 @@ export const saveConfig = fromCallback<
     } catch (error: any) {
       logger('[internal/actors] [saveConfig] Error saving config:', error)
       // In test environments, continue anyway
-      if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+      if (isTestOrSeedDev()) {
         logger('[internal/actors] [saveConfig] Continuing despite error in test environment')
         return
       }
@@ -192,7 +193,7 @@ export const saveConfig = fromCallback<
     .catch((error: any) => {
       logger('[internal/actors] [saveConfig] Error in saveConfig promise chain:', error)
       // In test environments, still send success to allow state machine to progress
-      if (process.env.NODE_ENV === 'test' || process.env.IS_SEED_DEV) {
+      if (isTestOrSeedDev()) {
         logger('[internal/actors] [saveConfig] Sending success despite error in test environment')
         sendBack({ type: ClientManagerEvents.SAVE_CONFIG_SUCCESS })
       } else {

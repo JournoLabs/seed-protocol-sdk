@@ -6,6 +6,9 @@ import { ClientManagerEvents, ClientManagerState } from '@/client/constants'
 import { BaseDb } from '@/db/Db/BaseDb'
 import type { ClientManagerContext } from '@/types/machines'
 
+// Browser runs have no `process` global (no Node polyfills); these cases set env vars on one.
+;(globalThis as { process?: { env: Record<string, string | undefined> } }).process ??= { env: {} }
+
 const baseContext: ClientManagerContext = {
   isInitialized: false,
   addressesSet: false,
@@ -43,7 +46,8 @@ describe('saveAppState failure', () => {
     vi.restoreAllMocks()
   })
 
-  it('sends saveAppStateError when App DB is missing outside test env', async () => {
+  // Browser builds compile process.env.NODE_ENV in, so only a Node run can leave the test env.
+  it.skipIf(typeof window !== 'undefined')('sends saveAppStateError when App DB is missing outside test env', async () => {
     process.env.NODE_ENV = 'production'
     delete process.env.IS_SEED_DEV
     vi.spyOn(BaseDb, 'getAppDb').mockReturnValue(undefined as never)

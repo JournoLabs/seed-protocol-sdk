@@ -15,6 +15,8 @@ All notable changes to this package are documented in this file.
 
 - **A changed schema with a pinned `id` loads at init even when its `version` didn't change.** Before, `config.schema` whose content changed but whose `id` and `version` matched a schema file the device had stored loaded that old file and dropped the new content without an error: new models were missing (`Failed to save property …: no schema found for …`) and removed ones stayed. Now the stored file is overwritten with a console warning to bump `version`. `importJsonSchema` with a complete schema throws `Schema … already exists with different content` in that case instead of loading the old file.
 - Models a schema drops are unlinked from it when the schema loads, whether the change came with a new `version` or not. Before, a new version kept every model the previous one had linked. The models' rows and items stay. Schemas with draft edits are left as they are.
+- Client init's "continue in a test environment" checks read `IS_SEED_DEV` only where a `process` global exists. In a browser without Node polyfills, a missing app DB or a failed config save threw `process is not defined` instead of its own error.
+- The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
 
 ## 0.7.5 (2026-10-17)
 

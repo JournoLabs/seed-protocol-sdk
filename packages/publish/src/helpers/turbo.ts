@@ -4,7 +4,7 @@
  * bring its own signers and a large dependency tree for four calls.
  */
 
-import { computeAddress } from 'ethers'
+import { computeAddress, hexlify } from 'ethers'
 
 export type TurboEndpoints = { uploadUrl: string; paymentUrl: string }
 
@@ -133,5 +133,5 @@ export function ethereumSignerOfDataItem(raw: Uint8Array): string | undefined {
   const sigType = raw[0]! | (raw[1]! << 8)
   if (sigType !== 3) return undefined
   const owner = raw.subarray(2 + 65, 2 + 65 + 65)
-  return computeAddress('0x' + Buffer.from(owner).toString('hex'))
+  return computeAddress(hexlify(owner))
 }

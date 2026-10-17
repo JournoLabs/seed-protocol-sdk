@@ -16,6 +16,9 @@ import {
   mergePrimaryHostWithDefaults,
 } from '@/helpers/constants'
 
+// Browser runs have no `process` global (no Node polyfills); these cases set env vars on one.
+;(globalThis as { process?: { env: Record<string, string | undefined> } }).process ??= { env: {} }
+
 describe('mergePrimaryHostWithDefaults', () => {
   it('dedupes case-insensitively and preserves primary first', () => {
     expect(mergePrimaryHostWithDefaults('a.com', ['b.net', 'A.com', 'c.io'])).toEqual(['a.com', 'b.net', 'c.io'])

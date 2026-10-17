@@ -8,14 +8,14 @@ import { assertTurboCanPay, ethereumSignerOfDataItem, uploadDataItemToTurbo } fr
 type DataItemLike = {
   raw?: Uint8Array
   filename?: string
-  getRaw?: () => Buffer | Promise<Buffer>
+  getRaw?: () => Uint8Array | Promise<Uint8Array>
 }
 
 const importDynamic = new Function('s', 'return import(s)') as (specifier: string) => Promise<{
-  readFile: (path: string) => Promise<Buffer>
+  readFile: (path: string) => Promise<Uint8Array>
 }>
 
-async function readNodeFile(filename: string): Promise<Buffer> {
+async function readNodeFile(filename: string): Promise<Uint8Array> {
   if (typeof window !== 'undefined') {
     throw new Error('DataItem.filename requires Node.js fs access. In browser runtime, provide DataItem.raw or DataItem.getRaw().')
   }
@@ -24,14 +24,12 @@ async function readNodeFile(filename: string): Promise<Buffer> {
 }
 
 /** Raw bytes of one signed DataItem (raw, getRaw() or a Node file). */
-async function rawBytesOf(item: unknown): Promise<Buffer> {
+async function rawBytesOf(item: unknown): Promise<Uint8Array> {
   const o = item as DataItemLike
-  if (o.raw != null && (o.raw instanceof Uint8Array || Buffer.isBuffer(o.raw))) {
-    return Buffer.isBuffer(o.raw) ? o.raw : Buffer.from(o.raw)
-  }
+  if (o.raw instanceof Uint8Array) return o.raw
   if (typeof o.getRaw === 'function') {
     const resolved = await o.getRaw()
-    return Buffer.isBuffer(resolved) ? resolved : Buffer.from(resolved)
+    return resolved instanceof Uint8Array ? resolved : new Uint8Array(resolved)
   }
   if (o.filename != null) return readNodeFile(o.filename)
   throw new Error('Cannot get raw bytes from DataItem')

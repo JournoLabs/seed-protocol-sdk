@@ -24,8 +24,8 @@ export class DuplicateEasModuleError extends Error {
       'Two copies of @seedprotocol/eas are loaded, and EAS clients were registered on the other copy ' +
         '(e.g. by SeedClient). Reads through this copy would use different clients and a different chain. ' +
         'Make sure every @seedprotocol/* package is the same version and installed once (`npm ls @seedprotocol/eas`). ' +
-        'With Vite, use seedVitePlugin (or list @seedprotocol/eas and @seedprotocol/query in optimizeDeps.include ' +
-        'and resolve.dedupe) so they are pre-bundled together.',
+        'With Vite, keep @seedprotocol/* packages out of optimizeDeps.exclude so they are pre-bundled together, ' +
+        'and dedupe them (seedVitePlugin does) when they are linked into the app.',
     )
     this.name = 'DuplicateEasModuleError'
   }
