@@ -753,11 +753,15 @@ const processRelationOrImageProperty = async (
   buildOpts?: PublishBuildOpts,
 ): Promise<MultiPublishPayload> => {
   const forceFullSnapshot = buildOpts?.forceFullSnapshot === true
-  let relationOrImageSchemaUid = relationOrImageProperty.schemaUid
-  if (!relationOrImageSchemaUid && relationOrImageProperty.propertyDef) {
+  // Resolve from the definition like every other property; the cached schemaUid was found by
+  // name alone and can belong to a schema of another type.
+  let relationOrImageSchemaUid: string | undefined
+  if (relationOrImageProperty.propertyDef) {
     const propertyData = await getPropertyData(relationOrImageProperty, ctx)
     if (!propertyData) return multiPublishPayload
     relationOrImageSchemaUid = propertyData.schemaUid
+  } else {
+    relationOrImageSchemaUid = relationOrImageProperty.schemaUid
   }
   if (!relationOrImageSchemaUid) {
     addValidationError(
@@ -1181,12 +1185,9 @@ async function resolveHtmlPropertySchemaUidByHtmlSeed(
     const c = 'context' in snap ? snap.context : null
     const pv = typeof (c as any)?.propertyValue === 'string' ? (c as any).propertyValue.trim() : ''
     if (pv !== want) continue
-    let uid = p.schemaUid
-    if (!uid) {
-      const pd = await getPropertyData(p, ctx)
-      uid = pd?.schemaUid
-    }
-    return uid
+    // Resolved like the Html property's own attestation, so a schema it lacks fails here too. The
+    // caller only checks that a uid was found: embedded images don't update the Html property.
+    return (await getPropertyData(p, ctx))?.schemaUid
   }
   addValidationError(
     ctx,
