@@ -194,6 +194,37 @@ describe('seedVitePlugin renderer hardening', () => {
     }
   })
 
+  it('ignores NODE_PATH and prebundles through the SDK under pnpm', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-vite-root-'))
+    const previousNodePath = process.env.NODE_PATH
+    const writePkg = (dir: string, name: string) => {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }))
+    }
+    try {
+      // pnpm: only direct deps sit in the app's node_modules; the rest are in the virtual
+      // store's hoist folder, which pnpm's bin shims put on NODE_PATH and Vite doesn't search.
+      writePkg(path.join(root, 'node_modules/@seedprotocol/sdk'), '@seedprotocol/sdk')
+      const storeModules = path.join(root, 'node_modules/.pnpm/node_modules')
+      for (const pkg of ['pluralize', 'kerium', '@seedprotocol/eas']) {
+        writePkg(path.join(storeModules, pkg), pkg)
+      }
+      process.env.NODE_PATH = storeModules
+
+      const result = callConfig(getConfigPlugin(), { root })
+      const includes: string[] = result.optimizeDeps.include
+      expect(includes).toContain('@seedprotocol/sdk > pluralize')
+      expect(includes).not.toContain('pluralize')
+      expect(includes).not.toContain('kerium')
+      expect(includes).toContain('@seedprotocol/sdk > @seedprotocol/eas')
+      expect(includes).not.toContain('@seedprotocol/eas')
+    } finally {
+      if (previousNodePath === undefined) delete process.env.NODE_PATH
+      else process.env.NODE_PATH = previousNodePath
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('returns only its own optimizeDeps additions (Vite concatenates arrays)', () => {
     const configPlugin = getConfigPlugin()
     const result = callConfig(configPlugin, {

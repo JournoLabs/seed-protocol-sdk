@@ -319,8 +319,22 @@ function seedSharedStateDeps(appRoot: string): { include: string[]; dedupe: stri
   return { include, dedupe }
 }
 
-/** CJS packages Seed ESM default-imports. Always include (do not gate on resolve). */
+/**
+ * CJS packages Seed ESM default-imports. Always included: without pre-bundling, the browser
+ * gets raw CJS and the SDK's default import fails.
+ */
 const CJS_OPTIMIZE_INCLUDES = ['pluralize'] as const
+
+/**
+ * The bare name when the app resolves the package, else the nested form through the SDK
+ * (pnpm keeps SDK dependencies out of the app's node_modules).
+ */
+function cjsOptimizeIncludes(appRoot: string): string[] {
+  const sdkAtRoot = isResolvableFromRoot('@seedprotocol/sdk', appRoot)
+  return CJS_OPTIMIZE_INCLUDES.map((pkg) =>
+    sdkAtRoot && !isResolvableFromRoot(pkg, appRoot) ? `@seedprotocol/sdk > ${pkg}` : pkg,
+  )
+}
 
 function applyIsolationHeaderMiddleware(
   server: ViteDevServer | PreviewServer,
@@ -363,10 +377,19 @@ function pushBunPackageCandidates(
   }
 }
 
-/** Whether a package is installed where Vite's optimizer looks for it (the app root upward). */
+/**
+ * Whether a package is installed where Vite's optimizer looks for it: the node_modules folders
+ * from the app root upward. Not `require.resolve.paths()`, which adds NODE_PATH; pnpm's bin
+ * shims set that to node_modules/.pnpm/node_modules, which Vite doesn't search.
+ */
 function isResolvableFromRoot(packageName: string, root: string): boolean {
-  const lookupDirs = createRequire(path.join(root, 'package.json')).resolve.paths(packageName) ?? []
-  return lookupDirs.some((dir) => fs.existsSync(path.join(dir, packageName, 'package.json')))
+  let dir = path.resolve(root)
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'node_modules', packageName, 'package.json'))) return true
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
 }
 
 function resolvePackageFile(packageName: string, relativePath: string): string | undefined {
@@ -942,7 +965,7 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
           ...resolvableOptimizeIncludes,
           ...sharedStateDeps.include,
           ...EAS_OPTIMIZE_INCLUDES,
-          ...CJS_OPTIMIZE_INCLUDES,
+          ...cjsOptimizeIncludes(appRoot),
         ],
         // Keep `global` shim in optimizer Rolldown options; top-level Vite `define`
         // can be rejected by Rolldown in some consumer setups.
