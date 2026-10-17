@@ -17,6 +17,7 @@ All notable changes to this package are documented in this file.
 - Models a schema drops are unlinked from it when the schema loads, whether the change came with a new `version` or not. Before, a new version kept every model the previous one had linked. The models' rows and items stay. Schemas with draft edits are left as they are.
 - Client init's "continue in a test environment" checks read `IS_SEED_DEV` only where a `process` global exists. In a browser without Node polyfills, a missing app DB or a failed config save threw `process is not defined` instead of its own error.
 - The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
+- `item.publish()` works on the direct-EAS (EOA) path. It failed every time with `Creating attestations for … failed: Cannot set property seedUid of #<Item> which has only a getter`, because it handed `@seedprotocol/publish` the item's raw instance, where `seedUid` can't be assigned, instead of the item it was called on. `publishItem(item)` was not affected.
 
 ## 0.7.5 (2026-10-17)
 
