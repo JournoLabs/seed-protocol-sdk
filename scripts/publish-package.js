@@ -31,8 +31,6 @@
  * - `--provenance` — publish with npm provenance (CI only; see docs/RELEASING.md)
  *
  * Without a terminal (CI), any prompt fails instead of waiting for input.
- *
- * Experimental packages (cli, ghost) are private and not publishable via this script.
  */
 
 import { readFileSync } from 'fs'

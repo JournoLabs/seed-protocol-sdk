@@ -12,10 +12,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const rootDir = join(__dirname, '..')
 
-/**
- * Supported packages synced to the SDK version. Experimental packages
- * (cli, ghost) are private and intentionally excluded.
- */
+/** Packages synced to the SDK version. */
 const SYNC_PACKAGES = [
   'sdk',
   'react',
