@@ -1,12 +1,27 @@
-import React, { type ReactNode, useMemo, useEffect } from 'react'
+import React, { type ReactNode, useMemo, useEffect, useRef } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { createSeedQueryClient } from './queryClient'
-import { eventEmitter, EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@seedprotocol/sdk'
+import { client, eventEmitter, EAS_SEED_DATA_SYNCED_TO_DB_EVENT } from '@seedprotocol/sdk'
+import type { SeedConfig, SeedConstructorOptions } from '@seedprotocol/sdk'
 import { SeedAddressRevisionProvider } from './SeedSessionContext'
 
 export type SeedProviderProps = {
   children: ReactNode
+  /**
+   * Starts the Seed client with this config (`client.init`) when the provider mounts. Children
+   * render straight away; the hooks report loading until the client is ready. Leave it out when you
+   * call `client.init` yourself or start the client with `SeedClientGate`. Init runs again when
+   * the config object changes, so define it outside the component.
+   */
+  config?: SeedConfig
+  /** Addresses passed to `client.init` with `config`. See `SeedConstructorOptions.addresses`. */
+  addresses?: SeedConstructorOptions['addresses']
+  /**
+   * Called when `client.init` fails, e.g. with `DatabaseNotPersistentError` (`DB_NOT_PERSISTENT`)
+   * or `FileSystemLockedError` (`OPFS_LOCKED`). Without it the error is logged.
+   */
+  onInitError?: (err: unknown) => void
   /** Optional: use your own QueryClient. If not provided, a default client with Seed options is created. */
   queryClient?: QueryClient
   /** Optional: ref to receive the QueryClient instance (e.g. for tests). */
@@ -69,15 +84,44 @@ function SeedProviderEventSubscriber({ queryClient }: { queryClient: QueryClient
   return null
 }
 
+function SeedClientInit({ config, addresses, onInitError }: Pick<SeedProviderProps, 'addresses' | 'onInitError'> & { config: SeedConfig }) {
+  // Refs, so inline callbacks and address arrays don't re-run init on every render.
+  const onInitErrorRef = useRef(onInitError)
+  onInitErrorRef.current = onInitError
+  const addressesRef = useRef(addresses)
+  addressesRef.current = addresses
+  const addressesKey = JSON.stringify(addresses ?? null)
+
+  useEffect(() => {
+    const options: SeedConstructorOptions =
+      addressesRef.current === undefined ? { config } : { config, addresses: addressesRef.current }
+    client.init(options).catch((err: unknown) => {
+      if (onInitErrorRef.current) {
+        onInitErrorRef.current(err)
+      } else {
+        console.error('[SeedProvider] client init failed', err)
+      }
+    })
+  }, [config, addressesKey])
+  return null
+}
+
 /**
  * Provider that supplies a React Query client to Seed list hooks (useSchemas, useItems, useModels, etc.)
- * so results are cached and shared across components. Wrap your app (or the subtree that uses Seed hooks)
- * after calling client.init().
+ * so results are cached and shared across components. Wrap your app (or the subtree that uses Seed hooks).
  *
- * - No props: uses an internal QueryClient with Seed defaults.
+ * - config prop: starts the client with `client.init({ config, addresses })`.
+ * - No queryClient prop: uses an internal QueryClient with Seed defaults.
  * - queryClient prop: use your own client (e.g. merge getSeedQueryDefaultOptions when creating it).
  */
-export function SeedProvider({ children, queryClient: queryClientProp, queryClientRef }: SeedProviderProps) {
+export function SeedProvider({
+  children,
+  config,
+  addresses,
+  onInitError,
+  queryClient: queryClientProp,
+  queryClientRef,
+}: SeedProviderProps) {
   const queryClient = useMemo(
     () => queryClientProp ?? createSeedQueryClient(),
     [queryClientProp]
@@ -98,6 +142,7 @@ export function SeedProvider({ children, queryClient: queryClientProp, queryClie
     <QueryClientProvider client={queryClient}>
       <SeedAddressRevisionProvider queryClient={queryClient}>
         <SeedProviderEventSubscriber queryClient={queryClient} />
+        {config && <SeedClientInit config={config} addresses={addresses} onInitError={onInitError} />}
         {children}
       </SeedAddressRevisionProvider>
     </QueryClientProvider>
