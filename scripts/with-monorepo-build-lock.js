@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Exclusive lock around package builds that rimraf `dist`.
- * Prevents concurrent build:sdk / build:all from deleting a dependency's dist
+ * Prevents concurrent build / build:all from deleting a dependency's dist
  * while another package's tsc is resolving it (TS2307 flakiness).
  *
  * Usage: node scripts/with-monorepo-build-lock.js <build-command>
@@ -115,7 +115,7 @@ function runCommand(command, extraEnv = {}) {
 }
 
 async function main() {
-  // Reentrant: build:all holds the lock while nested build:eas/arweave/query also wrap.
+  // Reentrant: build:all holds the lock while nested package builds (sdk build:dev) also wrap.
   if (process.env.SEED_MONOREPO_BUILD_LOCK === '1') {
     await runCommand(buildCommand)
     return
@@ -124,7 +124,7 @@ async function main() {
   await acquireLock()
   try {
     // Skip nested package pre-build test suites while holding the lock.
-    // Otherwise build:sdk → build:query → vitest → npm run build → build:sdk deadlocks.
+    // Otherwise build → a package build → vitest → bun run build → build deadlocks.
     await runCommand(buildCommand, {
       SEED_MONOREPO_BUILD_LOCK: '1',
       SKIP_TESTS: '1',
