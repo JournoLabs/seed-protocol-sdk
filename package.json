@@ -49,7 +49,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "node scripts/with-monorepo-build-lock.js \"node scripts/build-packages.js eas arweave query vite sdk\"",
+    "build": "node scripts/with-monorepo-build-lock.js \"node scripts/build-packages.js bundler-core eas arweave query vite sdk\"",
     "build:all": "node scripts/build-with-tests.js \"bun run sync-versions && node scripts/build-packages.js\"",
     "test": "node scripts/test-all.js",
     "test:watch": "vitest",
