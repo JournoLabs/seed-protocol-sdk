@@ -34,10 +34,7 @@ jobs:
       - name: Build workspace packages the tests import
         env:
           SKIP_TESTS: '1'
-        run: |
-          for pkg in eas arweave query feed vite sdk react; do
-            (cd "packages/$pkg" && bun run build)
-          done
+        run: node scripts/build-packages.js eas arweave query feed vite sdk react
 
       - name: Run tests
         run: bun run test
