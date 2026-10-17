@@ -4,6 +4,9 @@ import type { TunnelMeta, TunnelResponseMeta } from '../types'
 /** Maximum single frame payload (64 MiB). */
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024
 
+/** Largest single stream write. Secret-stream's limit is 16 MiB - 1. */
+export const WRITE_CHUNK_BYTES = 1024 * 1024
+
 type ByteWaiter = {
   length: number
   resolve: (buf: Buffer) => void
@@ -13,41 +16,24 @@ type ByteWaiter = {
 /**
  * Per-stream byte buffer. HyperDHT duplexes do not reliably support `unshift`,
  * so we accumulate and slice locally instead of pushing leftovers back.
+ *
+ * Once the stream ends, errors or closes, every pending and later read that the
+ * buffer cannot satisfy rejects. A destroyed stream emits `close` without `end`,
+ * so listening for `end` alone would leave reads waiting forever.
  */
 class StreamByteReader {
   private buffer = Buffer.alloc(0)
   private waiters: ByteWaiter[] = []
-  private ended = false
-  private readonly onData: (chunk: Buffer) => void
-  private readonly onError: (err: Error) => void
-  private readonly onEnd: () => void
+  private failure: Error | null = null
 
-  constructor(private readonly stream: Readable) {
-    this.onData = (chunk: Buffer) => {
+  constructor(stream: Readable) {
+    stream.on('data', (chunk: Buffer) => {
       this.buffer = Buffer.concat([this.buffer, chunk])
       this.drain()
-    }
-    this.onError = (err: Error) => {
-      const waiters = this.waiters.splice(0)
-      for (const w of waiters) w.reject(err)
-    }
-    this.onEnd = () => {
-      this.ended = true
-      this.drain()
-      if (this.waiters.length > 0) {
-        const waiters = this.waiters.splice(0)
-        for (const w of waiters) {
-          w.reject(
-            new Error(
-              `Unexpected end of stream (expected ${w.length} bytes, got ${this.buffer.length})`,
-            ),
-          )
-        }
-      }
-    }
-    stream.on('data', this.onData)
-    stream.on('error', this.onError)
-    stream.on('end', this.onEnd)
+    })
+    stream.on('error', (err: Error) => this.fail(err))
+    stream.on('end', () => this.fail(new Error('Unexpected end of stream')))
+    stream.on('close', () => this.fail(new Error('Stream closed')))
   }
 
   readExact(length: number): Promise<Buffer> {
@@ -58,17 +44,26 @@ class StreamByteReader {
       }
       this.waiters.push({ length, resolve, reject })
       this.drain()
-      if (this.ended && this.waiters.length > 0) {
-        const waiters = this.waiters.splice(0)
-        for (const w of waiters) {
-          w.reject(
-            new Error(
-              `Unexpected end of stream (expected ${w.length} bytes, got ${this.buffer.length})`,
-            ),
-          )
-        }
-      }
+      this.rejectWaiters()
     })
+  }
+
+  private fail(err: Error): void {
+    this.failure ??= err
+    this.drain()
+    this.rejectWaiters()
+  }
+
+  private rejectWaiters(): void {
+    if (!this.failure || this.waiters.length === 0) return
+    const waiters = this.waiters.splice(0)
+    for (const w of waiters) {
+      w.reject(
+        new Error(
+          `${this.failure.message} (expected ${w.length} bytes, got ${this.buffer.length})`,
+        ),
+      )
+    }
   }
 
   private drain(): void {
@@ -100,6 +95,10 @@ function readExact(stream: Readable, length: number): Promise<Buffer> {
 
 function writeBuffer(stream: Writable, buf: Buffer): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (stream.destroyed) {
+      reject(new Error('Stream closed'))
+      return
+    }
     // HyperDHT duplexes often never invoke write(callback). Use return value + drain.
     try {
       const ok = stream.write(buf)
@@ -107,30 +106,49 @@ function writeBuffer(stream: Writable, buf: Buffer): Promise<void> {
         resolve()
         return
       }
-      const onDrain = () => {
+      const cleanup = () => {
+        stream.off('drain', onDrain)
         stream.off('error', onError)
+        stream.off('close', onClose)
+      }
+      const onDrain = () => {
+        cleanup()
         resolve()
       }
       const onError = (err: Error) => {
-        stream.off('drain', onDrain)
+        cleanup()
         reject(err)
+      }
+      const onClose = () => {
+        cleanup()
+        reject(new Error('Stream closed'))
       }
       stream.once('drain', onDrain)
       stream.once('error', onError)
+      stream.once('close', onClose)
     } catch (err) {
       reject(err instanceof Error ? err : new Error(String(err)))
     }
   })
 }
 
-export async function writeFrame(stream: Writable, payload: Buffer): Promise<void> {
-  if (payload.length > MAX_FRAME_BYTES) {
-    throw new Error(`Frame too large: ${payload.length} bytes (max ${MAX_FRAME_BYTES})`)
+function assertFrameSize(length: number): void {
+  if (length > MAX_FRAME_BYTES) {
+    throw new Error(`Frame too large: ${length} bytes (max ${MAX_FRAME_BYTES})`)
   }
+}
+
+export async function writeFrame(stream: Writable, payload: Buffer): Promise<void> {
+  assertFrameSize(payload.length)
   const header = Buffer.alloc(4)
   header.writeUInt32BE(payload.length, 0)
-  // Single write — HyperDHT can drop/stall subsequent writes in the same turn.
-  await writeBuffer(stream, Buffer.concat([header, payload]))
+  // The header goes out with the first chunk. Secret-stream rejects any single write over
+  // 16 MiB, so larger payloads are split, waiting for drain between chunks.
+  const first = payload.subarray(0, WRITE_CHUNK_BYTES)
+  await writeBuffer(stream, Buffer.concat([header, first]))
+  for (let offset = first.length; offset < payload.length; offset += WRITE_CHUNK_BYTES) {
+    await writeBuffer(stream, payload.subarray(offset, offset + WRITE_CHUNK_BYTES))
+  }
 }
 
 export async function readFrame(stream: Readable): Promise<Buffer> {
@@ -139,9 +157,7 @@ export async function readFrame(stream: Readable): Promise<Buffer> {
   if (length === 0) {
     return Buffer.alloc(0)
   }
-  if (length > MAX_FRAME_BYTES) {
-    throw new Error(`Frame too large: ${length} bytes (max ${MAX_FRAME_BYTES})`)
-  }
+  assertFrameSize(length)
   return readExact(stream, length)
 }
 
@@ -150,6 +166,8 @@ export async function writeTunnelRequest(
   meta: TunnelMeta,
   body: Buffer,
 ): Promise<void> {
+  // Check the body before writing meta so an oversized body leaves the stream in sync.
+  assertFrameSize(body.length)
   const metaFrame = Buffer.from(JSON.stringify(meta), 'utf8')
   await writeFrame(stream, metaFrame)
   await writeFrame(stream, body)
@@ -173,6 +191,8 @@ export async function writeTunnelResponse(
   meta: TunnelResponseMeta,
   body: Buffer,
 ): Promise<void> {
+  // Check the body before writing meta so an oversized body leaves the stream in sync.
+  assertFrameSize(body.length)
   const metaFrame = Buffer.from(JSON.stringify(meta), 'utf8')
   await writeFrame(stream, metaFrame)
   await writeFrame(stream, body)
