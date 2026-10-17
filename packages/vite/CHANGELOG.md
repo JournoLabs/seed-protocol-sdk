@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Breaking: `seedVitePlugin()` defaults cut to what the SDK needs.** By default it now sets cross-origin isolation headers, `worker.format: 'es'`, and, for Seed packages linked from outside the app, `resolve.dedupe` and `server.fs.allow`. [VITE_RENDERER.md](VITE_RENDERER.md) lists what each setting is for and how that was tested, plus upgrade steps.
+- **Breaking: `seedVitePlugin()` defaults cut to what the SDK needs.** By default it now sets cross-origin isolation headers, `worker.format: 'es'`, `optimizeDeps.rolldownOptions.output.strictExecutionOrder: true` (drizzle-orm's dev pre-bundle failed with `Cannot read properties of undefined (reading 'Symbol')` when the app imports `@seedprotocol/sdk/drizzle`), and, for Seed packages linked from outside the app, `resolve.dedupe` and `server.fs.allow`. [VITE_RENDERER.md](VITE_RENDERER.md) lists what each setting is for and how that was tested, plus upgrade steps.
   - `includeNodePolyfills` defaults to `false`. It now also covers the `global` / `process` defines and `index.html` shims and the `stream` stub.
   - `fsModules` defaults to `[]`: no `fs` → ZenFS aliases.
   - `autoInit` is removed.

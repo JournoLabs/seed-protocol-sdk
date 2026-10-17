@@ -35,10 +35,11 @@ Don't list `@seedprotocol/*` packages, `sqlocal`, `drizzle-orm` or `@sqlite.org/
 
 - **Cross-origin isolation headers** on the dev and preview servers: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: credentialless`, `Cross-Origin-Resource-Policy: same-origin`. They are also set in `writeHead`, so React Router Framework Mode HTML responses get them. Without them the page isn't cross-origin isolated and the SDK can't keep its database in OPFS.
 - **`worker.format: 'es'`**, unless you set a format. SQLite's worker code-splits, which Vite's default `'iife'` worker format can't do, so the database never opens in a production build.
+- **`optimizeDeps.rolldownOptions.output.strictExecutionOrder: true`**, unless you set it. drizzle-orm's modules import each other in a cycle; when your app imports both `@seedprotocol/sdk` and `@seedprotocol/sdk/drizzle`, the dev pre-bundle can otherwise run them out of order and fail with `Cannot read properties of undefined (reading 'Symbol')`.
 - **`resolve.dedupe`** for React, thirdweb, xstate, ZenFS and the Seed packages, each only when your app root resolves it. A linked Seed package otherwise loads its own React (hooks fail) or its own copy of a Seed package.
 - **`server.fs.allow`** for the SDK, sqlocal and SQLite WASM directories when they are outside your app, so `vite dev` can serve the database worker and WASM file of a linked SDK.
 
-With an SDK installed from npm in the app itself, only the first two matter, and you can set them without the plugin:
+With an SDK installed from npm in the app itself, only the first three matter, and you can set them without the plugin:
 
 ```ts
 const isolation = {
@@ -51,6 +52,7 @@ export default defineConfig({
   server: { headers: isolation },
   preview: { headers: isolation },
   worker: { format: 'es' },
+  optimizeDeps: { rolldownOptions: { output: { strictExecutionOrder: true } } },
 })
 ```
 

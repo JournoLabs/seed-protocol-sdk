@@ -140,8 +140,8 @@ function applyIsolationHeaderMiddleware(
 
 /**
  * The Vite settings a browser app using @seedprotocol/sdk needs: cross-origin isolation headers
- * on the dev and preview servers, ES module workers, and, for SDK packages installed outside
- * the app root, deduplication and dev-server file access. Node polyfills and `fs` aliases are
+ * on the dev and preview servers, ES module workers, in-order dev pre-bundles, and, for SDK
+ * packages installed outside the app root, deduplication and dev-server file access. Node polyfills and `fs` aliases are
  * opt-in.
  */
 export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
@@ -182,6 +182,14 @@ export function seedVitePlugin(options: SeedVitePluginOptions = {}): Plugin[] {
       // concatenates arrays.
       return {
         resolve: { dedupe },
+        // drizzle-orm's modules import each other in a cycle. When the app imports both
+        // @seedprotocol/sdk and @seedprotocol/sdk/drizzle, the dev pre-bundle splits them across
+        // chunks that can run out of order, and drizzle throws "Cannot read properties of
+        // undefined (reading 'Symbol')" at startup. Production builds aren't affected.
+        ...(userConfig.optimizeDeps?.rolldownOptions?.output &&
+        'strictExecutionOrder' in userConfig.optimizeDeps.rolldownOptions.output
+          ? {}
+          : { optimizeDeps: { rolldownOptions: { output: { strictExecutionOrder: true } } } }),
         // SQLite's worker code-splits, which the default 'iife' worker format can't do: the
         // database never opens in a production build.
         ...(userConfig.worker?.format ? {} : { worker: { format: 'es' as const } }),

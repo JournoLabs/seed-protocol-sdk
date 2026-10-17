@@ -84,17 +84,28 @@ function middlewareHeaders(
 }
 
 describe('seedVitePlugin defaults', () => {
-  it('is one plugin that adds no aliases, pre-bundling, defines or HTML', () => {
+  it('is one plugin that adds no aliases, pre-bundling lists, defines or HTML', () => {
     const plugins = seedVitePlugin()
     expect(plugins.map((p) => p.name)).toEqual(['seed-protocol:config'])
 
     const userConfig: Record<string, any> = {}
     const result = callConfig(plugins[0]!, userConfig)
     expect(userConfig.resolve).toBeUndefined()
-    expect(result.optimizeDeps).toBeUndefined()
+    expect(result.optimizeDeps).toEqual({ rolldownOptions: { output: { strictExecutionOrder: true } } })
     expect(result.define).toBeUndefined()
     expect(result.build).toBeUndefined()
     expect(plugins[0]!.transformIndexHtml).toBeUndefined()
+  })
+
+  it('runs dev pre-bundle chunks in order unless the user decides', async () => {
+    for (const includeNodePolyfills of [false, true]) {
+      const { config } = await resolveWith('serve', { includeNodePolyfills })
+      expect(config.optimizeDeps.rolldownOptions?.output).toMatchObject({ strictExecutionOrder: true })
+    }
+    const { config: user } = await resolveWith('serve', {}, {
+      optimizeDeps: { rolldownOptions: { output: { strictExecutionOrder: false } } },
+    })
+    expect(user.optimizeDeps.rolldownOptions?.output).toMatchObject({ strictExecutionOrder: false })
   })
 
   it('defaults worker.format to es without overriding a user format', async () => {
