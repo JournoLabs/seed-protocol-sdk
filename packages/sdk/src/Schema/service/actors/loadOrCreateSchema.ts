@@ -5,7 +5,7 @@ import { getLatestSchemaVersion, listCompleteSchemaFiles } from '@/helpers/schem
 import { SchemaFileFormat, type JsonImportSchema } from '@/types/import'
 import { BaseFileManager, generateId, } from '@/helpers'
 import { addModelsToDb, addSchemaToDb, loadModelsFromDbForSchema } from '@/helpers/db'
-import { createModelsFromJson, getRefValueType } from '@/imports/json'
+import { createModelsFromJson, createRowsWrittenSignal, getRefValueType } from '@/imports/json'
 import { BaseDb } from '@/db/Db/BaseDb'
 import { schemas } from '@/seedSchema/SchemaSchema'
 import { modelSchemas } from '@/seedSchema/ModelSchemaSchema'
@@ -319,8 +319,15 @@ export const loadOrCreateSchema = fromCallback<
               }
             }
             
-            // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-            const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+            // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+            // addModelsToDb below writes their rows; the models adopt them once it has run.
+            const rowsWritten = createRowsWrittenSignal()
+            const modelDefinitions = await createModelsFromJson(
+              importData,
+              modelFileIds,
+              propertyFileIds,
+              schemaRecord ? rowsWritten.promise : undefined,
+            )
             
             // Add models to database and link them to the schema with schemaFileIds
             if (Object.keys(modelDefinitions).length > 0 && schemaRecord) {
@@ -328,7 +335,7 @@ export const loadOrCreateSchema = fromCallback<
                 schemaFileId: schemaFile.id,
                 modelFileIds,
                 propertyFileIds,
-              })
+              }).finally(rowsWritten.settle)
               logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for Seed Protocol schema`)
               
               // Verify properties are persisted (important for browser environments)
@@ -481,8 +488,15 @@ export const loadOrCreateSchema = fromCallback<
                 }
               }
               
-              // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs
-              const modelDefinitions = await createModelsFromJson(importData, modelFileIds, propertyFileIds)
+              // Convert JSON models to Model classes, passing modelFileIds and propertyFileIds so Model instances use correct IDs.
+              // addModelsToDb below writes their rows; the models adopt them once it has run.
+              const rowsWritten = createRowsWrittenSignal()
+              const modelDefinitions = await createModelsFromJson(
+                importData,
+                modelFileIds,
+                propertyFileIds,
+                rowsWritten.promise,
+              )
               
               
               // Verify all expected models are in modelDefinitions
@@ -496,7 +510,7 @@ export const loadOrCreateSchema = fromCallback<
                   schemaFileId: schemaFile.id,
                   modelFileIds,
                   propertyFileIds,
-                })
+                }).finally(rowsWritten.settle)
                 logger(`Added ${Object.keys(modelDefinitions).length} models and their properties to database for existing Seed Protocol schema`)
                 
                 // Small delay to ensure database writes are visible (important for browser environments)
