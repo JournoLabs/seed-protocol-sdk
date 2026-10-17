@@ -16,7 +16,7 @@ import type {
 import { loadEasSdk } from '@/helpers/easSdk'
 
 import { getEasSchemaUidForModel } from './getSchemaUidForModel'
-import { getEasSchemaUidForSchemaDefinition } from '@/stores/eas'
+import { getEasSchemaUidForSchemaDefinition, getSchemaUidForSchemaDefinitionFromCache } from '@/stores/eas'
 import { getCorrectId } from '@/helpers'
 import { isValidEasAttestationUid } from '@/helpers/easUid'
 import { getLatestPublishedVersionRow } from '@/db/read/getLatestPublishedVersionRow'
@@ -325,13 +325,17 @@ const getPropertyData = async (
 
   const schemaDef = `${easDataType} ${propertyNameForSchema}`
 
-  // A cached schemaUid was looked up under the property's own name: trust it only when that is
-  // the name published (not for a list relation, or a single relation stored as authorId).
+  // The UID ensureEasSchemasForItem resolved for this exact definition comes first. A cached
+  // schemaUid was looked up under the property's own name, which matches any type: Optimism
+  // Sepolia has `bytes32 storage_transaction_id` beside `string storage_transaction_id`, and
+  // attesting a string under the bytes32 one reads back as 0x…20. Trust the cached one only when
+  // that name is the one published (not for a list relation, or a single relation stored as authorId).
   const storageName =
     (itemProperty as IItemProperty<any> & { storagePropertyName?: string }).storagePropertyName ||
     itemProperty.propertyName
   let schemaUid: string | undefined =
-    !listRelationName && easName(storageName) === propertyNameForSchema ? itemProperty.schemaUid : undefined
+    getSchemaUidForSchemaDefinitionFromCache(schemaDef) ??
+    (!listRelationName && easName(storageName) === propertyNameForSchema ? itemProperty.schemaUid : undefined)
   if (!schemaUid) {
     schemaUid = await getEasSchemaUidForSchemaDefinition({ schemaText: schemaDef })
   }

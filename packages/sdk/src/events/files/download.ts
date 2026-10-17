@@ -95,14 +95,11 @@ const normalizeArweaveTxId = (raw: string | null | undefined): string | undefine
   if (ARWEAVE_TX_ID_RE.test(t)) return t
   const m = t.match(/^([a-z0-9_-]{43})(?:\.[^/]+)?$/i)
   if (m) return m[1]
-  // Values may be full gateway URLs or paths; scan for the embedded tx id.
-  const embedded = t.match(/[a-z0-9_-]{43}/gi)
-  if (embedded) {
-    for (const candidate of embedded) {
-      if (ARWEAVE_TX_ID_RE.test(candidate)) return candidate
-    }
-  }
-  return undefined
+  // Values may be full gateway URLs or paths; scan for an embedded tx id. It must be 43 characters
+  // on its own, not the start of a longer run: the first 43 of a bytes32 value (`0x0000…0020`,
+  // an EAS UID) are in the alphabet too.
+  const embedded = t.match(/(?<![a-z0-9_-])[a-z0-9_-]{43}(?![a-z0-9_-])/gi)
+  return embedded?.[0]
 }
 
 const mergeAddressLists = (a: string[] | undefined, b: string[] | undefined): string[] => {
@@ -455,7 +452,11 @@ export const downloadTransactionIdWithDedupe = async (transactionId: string): Pr
     return false
   }
 
-  const normalizedTxId = normalizeArweaveTxId(transactionId) ?? transactionId.trim()
+  const normalizedTxId = normalizeArweaveTxId(transactionId)
+  if (!normalizedTxId) {
+    logger(`[download] not an Arweave transaction id: ${transactionId}`)
+    return false
+  }
 
   const existing = lazyDownloadInFlightByTransactionId.get(normalizedTxId)
   if (existing) {
