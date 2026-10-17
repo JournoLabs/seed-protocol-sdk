@@ -265,9 +265,9 @@ export async function queryBySchema(
 }
 
 /**
- * The cached items, by seedUid, of the seeds nothing they depend on changed for since each was
- * last checked (one change request for all; see findChangedItems). Changed items are dropped so
- * the caller assembles them again.
+ * Cached items, by seedUid, for the seeds whose dependencies haven't changed since each was last
+ * checked (one change request for all; see findChangedItems). Changed items are dropped so the
+ * caller assembles them again.
  */
 async function getUnchangedCachedItems(
   requests: Array<{ seedUid: string; optionsKey: string }>,
