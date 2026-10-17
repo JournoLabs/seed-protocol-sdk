@@ -117,6 +117,16 @@
       },
       "default": "./dist/platform.node.js"
     },
+    "./drizzle": {
+      "import": {
+        "types": "./dist/src/drizzle/index.d.ts",
+        "default": "./dist/drizzle.js"
+      },
+      "require": {
+        "types": "./dist/src/drizzle/index.d.ts",
+        "default": "./dist/drizzle.js"
+      }
+    },
     "./vite": {
       "import": {
         "types": "./dist/src/vite/index.d.ts",

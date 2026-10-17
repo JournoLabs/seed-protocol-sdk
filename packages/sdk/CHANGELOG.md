@@ -8,6 +8,8 @@ All notable changes to this package are documented in this file.
 
 - The SDK has no peer dependencies. `@zenfs/core` (2.5.6), `@zenfs/dom` (1.2.9), `xstate` and `drizzle-orm` are regular dependencies, so installing `@seedprotocol/sdk` installs them; apps don't need to add them or match the ZenFS versions. The SDK no longer depends on `@tanstack/react-query` (its browser query cache uses `@tanstack/query-core`); `@seedprotocol/react` still declares React Query as a peer. `fsevents` is gone from the optional dependencies; nothing used it.
 
+- New `@seedprotocol/sdk/drizzle` entry re-exports `drizzle-orm` (`eq`, `and`, `like`, `sql`, ...) from the copy the SDK uses. Import query operators from there to query the SDK's tables without installing `drizzle-orm` or keeping it on the SDK's 0.44 range.
+
 ## 0.7.5 (2026-10-17)
 
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.
