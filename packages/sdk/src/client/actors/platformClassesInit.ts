@@ -17,7 +17,7 @@ import {
 import { setPreferredArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { configureEasReadChain } from '@seedprotocol/eas'
 import { normalizeAddressConfig } from '@/helpers/addresses'
-import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
+import { applySeedConfigDefaults } from '../seedConfigDefaults'
 import { startTabCoordination } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -47,11 +47,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     return
   }
 
-  // Validate synchronously before starting async operations
-  // This ensures errors are handled immediately, preventing unhandled rejections
-  const { config } = options
-  const { endpoints } = config || {}
-  
   // Track if the operation is cancelled
   let cancelled = false
 
@@ -65,12 +60,9 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     }
 
     const { addresses } = options
-    const config = normalizeSeedConfigEndpoints(options.config)
-
-    // Validate required endpoints - this should happen early in the initialization process.
-    // Node fills these from filesDir; browser callers still pass them.
-    if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
-      throw new Error('Config must include endpoints with filePaths and files')
+    const config = applySeedConfigDefaults(options.config)
+    if (!config) {
+      throw new Error('client.init requires a config')
     }
 
     const { configurePlatform } = await import('../../platform/configurePlatform')
@@ -112,7 +104,7 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     setResolvedSeedGatewayEndpoints(resolvedGateway)
     BaseArweaveClient.setHost(`${resolvedGateway.arweaveProtocol}://${resolvedGateway.arweaveHost}`)
 
-    // Note: Validation already happened above, but we have endpoints here for path normalization
+    // filesDir falls back to endpoints.files (applySeedConfigDefaults fills both)
 
     let normalizedFilesDir = filesDir || endpoints?.files
     // jsdom (and any env with both Node + window) is "browser" for SDK: PathResolver is OPFS/virtual.
