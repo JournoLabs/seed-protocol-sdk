@@ -1,6 +1,6 @@
 {
   "name": "@seedprotocol/eas",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Read-only Ethereum Attestation Service (EAS) GraphQL client for Seed Protocol: seed, version and property attestation queries plus chain/indexer resolution",
   "keywords": [
     "seed-protocol",

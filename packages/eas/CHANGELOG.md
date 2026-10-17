@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.7.6 (2026-10-17)
+
+### Commits
+
+#### Breaking
+
+- vite: cut seedVitePlugin defaults to what the SDK needs (5312b28d)
+
+#### Fixes
+
+- sdk: publish properties under the schema for their exact definition (0de66bb5)
+
 ## 0.7.5 (2026-10-17)
 
 - `decodeEasNumber(value)` turns an indexer value (JSON number, decimal or hex string, bigint, or `{ type: 'BigNumber', hex }`) into its decimal string, and `isNumericEasType` says whether an EAS type is `uint*` or `int*` (ADR 0010).

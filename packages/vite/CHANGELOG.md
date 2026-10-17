@@ -1,6 +1,6 @@
 # @seedprotocol/vite
 
-## Unreleased
+## 0.7.6 (2026-10-17)
 
 - **Breaking: `seedVitePlugin()` defaults cut to what the SDK needs.** By default it now sets cross-origin isolation headers, `worker.format: 'es'`, `optimizeDeps.rolldownOptions.output.strictExecutionOrder: true` (drizzle-orm's dev pre-bundle failed with `Cannot read properties of undefined (reading 'Symbol')` when the app imports `@seedprotocol/sdk/drizzle`), and, for Seed packages linked from outside the app, `resolve.dedupe` and `server.fs.allow`. [VITE_RENDERER.md](VITE_RENDERER.md) lists what each setting is for and how that was tested, plus upgrade steps.
   - `includeNodePolyfills` defaults to `false`. It now also covers the `global` / `process` defines and `index.html` shims and the `stream` stub.
@@ -10,6 +10,25 @@
   - The Node-globals build warning only runs with `debug: true`.
 - `resolve.dedupe` only lists packages the app root resolves, and `server.fs.allow` finds sqlocal and SQLite WASM in pnpm and bun stores.
 - No longer depends on `debug`.
+
+### Commits
+
+#### Breaking
+
+- cut seedVitePlugin defaults to what the SDK needs (5312b28d)
+- sdk: make @seedprotocol/vite an optional peer (cc594f7e)
+
+#### Features
+
+- next: add @seedprotocol/next with withSeed (bc640fa8)
+
+#### Fixes
+
+- run dev pre-bundle chunks in order (985df2a0)
+
+#### Other
+
+- document the new defaults and what each setting is for (3a304d7f)
 
 ## 0.7.5 (2026-10-17)
 

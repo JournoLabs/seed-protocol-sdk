@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.6 (2026-10-17)
 
 A request the operator's upstream never answers no longer blocks the tunnel for good.
 
@@ -27,6 +27,16 @@ A request the operator's upstream never answers no longer blocks the tunnel for 
 - The operator no longer forwards hop-by-hop request headers or the client's `Host`. The
   upstream sees its own host, with the original in `X-Forwarded-Host`. Check any Traefik
   rule that matched on the forwarded `Host`.
+
+### Commits
+
+#### Features
+
+- pool tunnel streams so a slow request stalls only its own (48f974dd)
+
+#### Fixes
+
+- time out and abandon stuck tunnel requests (4ef38f89)
 
 ## 0.7.5 (2026-10-17)
 

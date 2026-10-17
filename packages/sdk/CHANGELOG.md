@@ -2,7 +2,7 @@
 
 All notable changes to this package are documented in this file.
 
-## Unreleased
+## 0.7.6 (2026-10-17)
 
 - **Breaking: browser `client.init` fails with `DatabaseNotPersistentError` (`code === 'DB_NOT_PERSISTENT'`) when SQLite can't store its database in OPFS.** OPFS storage needs `SharedArrayBuffer`, which browsers only expose on pages served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). Before, a page without those headers started normally on an in-memory database and lost every item on reload, with only a console warning from SQLite. `@seedprotocol/vite` sets the headers on the Vite dev and preview servers; production hosting has to send them too. `SeedClientGate`'s `onInitError` receives the error.
 
@@ -19,6 +19,41 @@ All notable changes to this package are documented in this file.
 - The browser entry (`dist/main.js`) no longer has a bare `import 'fs'` left over from tree-shaking. Vite warned about it, and webpack and Turbopack failed to resolve it without an `fs` alias.
 - `item.publish()` works on the direct-EAS (EOA) path. It failed every time with `Creating attestations for … failed: Cannot set property seedUid of #<Item> which has only a getter`, because it handed `@seedprotocol/publish` the item's raw instance, where `seedUid` can't be assigned, instead of the item it was called on. `publishItem(item)` was not affected.
 - **A property edited after its seed is published attests on the next patch `publish()`.** The edit went into a new draft row, but the property kept the published row's `localId` and `uid`, so patch Publish skipped it as already attested and the edit never reached EAS. Basic, Relation, List, Image, File, Html and ItemStorage properties were affected. Each later edit also added another draft row, and setting the published value back left the draft in place. Publish now also points a property at its newest draft row when its context still names a published one (another tab's edit, or a metadata update the browser's live query dropped while the property was saving).
+
+### Commits
+
+#### Breaking
+
+- fail browser init when the database can't persist to OPFS (30bb7697)
+- make @seedprotocol/vite an optional peer (cc594f7e)
+
+#### Features
+
+- default filesDir and endpoints, accept a minimal schema (4f6e8a8d)
+- re-export drizzle-orm as @seedprotocol/sdk/drizzle (887d8a90)
+- next: add @seedprotocol/next with withSeed (bc640fa8)
+
+#### Fixes
+
+- arweave: time out status checks and fall back to other gateways (b6c851f5)
+- point an edited published property at its draft row (8fe23390)
+- a Model only takes the row with its own id (f178b936)
+- catch child-instance load failures in entity live queries (c1691717)
+- resolve property schema UIDs by exact definition everywhere (c0dffe4d)
+- don't read a tx id out of a bytes32 value (22b14058)
+- publish properties under the schema for their exact definition (0de66bb5)
+- pass the reactive proxy to the publish executor (4ff701d8)
+- read IS_SEED_DEV only where process exists (3c8f7752)
+- load a changed schema whose pinned id and version match the stored file (cd7153a8)
+- schema import writes each model and property row once (48fad4fb)
+- model and property inserts no longer fail when the row exists (f77a1e01)
+- keep the Node platform out of browser bundles (7d2e8dab)
+- keep schema-file model fields when merging model rows on load (264d2764)
+
+#### Other
+
+- note why legacy bytes32 storage_transaction_id attestations aren't recovered (ee460f98)
+- resolve the Node filesDir in the Node platform (ecd8cff7)
 
 ## 0.7.5 (2026-10-17)
 
