@@ -18,7 +18,7 @@ import { setPreferredArweaveReadBaseUrls } from '@/helpers/gateway/gatewayState'
 import { configureEasReadChain } from '@seedprotocol/eas'
 import { BasePathResolver } from '@/helpers/PathResolver/BasePathResolver'
 import { normalizeAddressConfig } from '@/helpers/addresses'
-import { normalizeSeedConfigEndpoints } from '../nodeEndpointDefaults'
+import { applySeedConfigDefaults } from '../seedConfigDefaults'
 import { startTabCoordination } from '@/helpers/tabCoordinator'
 
 const logger = debug('seedSdk:ClientManager:initialize')
@@ -56,11 +56,6 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     return
   }
 
-  // Validate synchronously before starting async operations
-  // This ensures errors are handled immediately, preventing unhandled rejections
-  const { config } = options
-  const { endpoints } = config || {}
-  
   // Track if the operation is cancelled
   let cancelled = false
 
@@ -74,12 +69,9 @@ FromCallbackInput<ClientManagerContext, InitEvent>
     }
 
     const { addresses } = options
-    const config = normalizeSeedConfigEndpoints(options.config)
-
-    // Validate required endpoints - this should happen early in the initialization process.
-    // Node fills these from filesDir; browser callers still pass them.
-    if (!config?.endpoints || !config.endpoints.filePaths || !config.endpoints.files) {
-      throw new Error('Config must include endpoints with filePaths and files')
+    const config = applySeedConfigDefaults(options.config)
+    if (!config) {
+      throw new Error('client.init requires a config')
     }
 
     // Prefer the condition-resolved factory when available; fall back to explicit

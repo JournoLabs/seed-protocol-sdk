@@ -10,6 +10,9 @@ All notable changes to this package are documented in this file.
 
 - New `@seedprotocol/sdk/drizzle` entry re-exports `drizzle-orm` (`eq`, `and`, `like`, `sql`, ...) from the copy the SDK uses. Import query operators from there to query the SDK's tables without installing `drizzle-orm` or keeping it on the SDK's 0.44 range.
 
+- `client.init({ config: { schema } })` is enough. `filesDir` defaults to `endpoints.files`, then `'.seed'`, and `endpoints` defaults to `filesDir`, in the browser too. Before, browser init failed with `Config must include endpoints with filePaths and files`, and Node init did unless `filesDir` was set.
+- `SeedConfig.schema` takes a `SchemaFileInput`: a schema file whose `$schema`, `version`, `metadata.createdAt`, `metadata.updatedAt`, `enums` and `migrations` may be left out. `version` defaults to 1. A schema object without `$schema` used to fail with `Schema name is required` although `metadata.name` was set.
+
 ## 0.7.5 (2026-10-17)
 
 - Publishing Html with an embedded `data:image/...` image no longer fails with `ItemPropertySaveValidationError` before anything uploads. Each embedded image's bytes are written to the images folder instead of into its Image seed's `storageTransactionId`, a Text property limited to 255 characters, which any real image's data URI exceeds. This broke in 0.7.2, when `save()` began throwing on validation errors; before, the save was rejected without an error and publish uploaded the image from the property's in-memory value.

@@ -401,7 +401,7 @@ export {
   syncSchemaFromSource,
   transformImportToSchemaFile,
 } from './imports'
-export type { SchemaFileFormat, SchemaNameMatch } from './imports'
+export type { SchemaFileFormat, SchemaFileInput, SchemaNameMatch } from './imports'
 
 
 export { client } from './client'
