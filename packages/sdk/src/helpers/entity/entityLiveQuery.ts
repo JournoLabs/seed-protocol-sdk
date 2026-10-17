@@ -138,7 +138,14 @@ export function setupEntityLiveQuery<T extends { getService(): any }>(
             // Create child instances if provided (before updating context; not for a stopped entity)
             if (isActorStopped(instance.getService())) return
             if (config.createChildInstances && ids.length > 0) {
-              await config.createChildInstances(ids)
+              // Nothing awaits this handler, so a child that fails to load (its row deleted while it
+              // loads, say) would be an unhandled rejection. Skip this result; a later one tries again.
+              try {
+                await config.createChildInstances(ids)
+              } catch (error) {
+                logger(`createChildInstances failed: ${error}`)
+                return
+              }
             }
             
             // Update context with new IDs
