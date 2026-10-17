@@ -57,6 +57,11 @@ type AssembleContext = {
   latestVersionUidsBySeedUid: Map<string, string>
   /** Requested seeds left out because every version is revoked; not fetched again as related. */
   droppedSeedUids: Set<string>
+  /**
+   * The seeds asked for, in order. Only these become records: a related seed is fetched to expand
+   * relations into, even when it has the requested schema.
+   */
+  requestedSeedUids: Set<string>
 }
 
 function createAssembleContext(): AssembleContext {
@@ -69,7 +74,18 @@ function createAssembleContext(): AssembleContext {
     versionsBySeedUid: new Map(),
     latestVersionUidsBySeedUid: new Map(),
     droppedSeedUids: new Set(),
+    requestedSeedUids: new Set(),
   }
+}
+
+/** Requested seeds still assembled (not dropped), in request order, with their items. */
+function requestedItems(ctx: AssembleContext): Array<[string, Record<string, unknown>]> {
+  const items: Array<[string, Record<string, unknown>]> = []
+  for (const seedUid of ctx.requestedSeedUids) {
+    const item = ctx.assembledItems.get(seedUid)
+    if (item) items.push([seedUid, item])
+  }
+  return items
 }
 
 function ensureSeedIdentity(clone: Record<string, unknown>, seedUid: string): void {
@@ -289,12 +305,8 @@ async function processSeeds(
   }
 }
 
-function resolveRelationPropertiesToUrls(ctx: AssembleContext, schemaName: string): void {
-  const itemsToProcess = Array.from(ctx.assembledItems.entries()).filter(
-    ([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName,
-  )
-
-  for (const [, item] of itemsToProcess) {
+function resolveRelationPropertiesToUrls(ctx: AssembleContext): void {
+  for (const [, item] of requestedItems(ctx)) {
     const keysToProcess = Object.keys(item).filter(
       (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
     )
@@ -396,18 +408,10 @@ function resolveRelationPropertiesToUrls(ctx: AssembleContext, schemaName: strin
   }
 }
 
-function expandRelationProperties(
-  ctx: AssembleContext,
-  schemaName: string,
-  expandRelations: boolean,
-): void {
+function expandRelationProperties(ctx: AssembleContext, expandRelations: boolean): void {
   if (!expandRelations) return
 
-  const itemsToProcess = Array.from(ctx.assembledItems.entries()).filter(
-    ([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName,
-  )
-
-  for (const [, item] of itemsToProcess) {
+  for (const [, item] of requestedItems(ctx)) {
     const keysToProcess = Object.keys(item).filter(
       (k) => !k.startsWith('_') && !RESERVED_KEYS.has(k),
     )
@@ -485,31 +489,29 @@ function toSeedRecords(
   ctx: AssembleContext,
   schemaName: string,
 ): AssembledRecord[] {
-  return Array.from(ctx.assembledItems.entries())
-    .filter(([seedUid]) => ctx.seedUidToModelType.get(seedUid) === schemaName)
-    .map(([seedUid, item]) => {
-      const versionUid = ctx.latestVersionUidsBySeedUid.get(seedUid) ?? ''
-      if (versionUid) {
-        item.versionUid = versionUid
-      }
-      ensureSeedIdentity(item, seedUid)
-      const timeCreated =
-        typeof item.timeCreated === 'number' ? item.timeCreated : 0
-      const attester =
-        typeof item.attester === 'string'
-          ? item.attester
-          : typeof item.Attester === 'string'
-            ? item.Attester
-            : undefined
-      return {
-        seedUid,
-        schemaName,
-        attester,
-        timeCreated,
-        versionUid,
-        data: item,
-      }
-    })
+  return requestedItems(ctx).map(([seedUid, item]) => {
+    const versionUid = ctx.latestVersionUidsBySeedUid.get(seedUid) ?? ''
+    if (versionUid) {
+      item.versionUid = versionUid
+    }
+    ensureSeedIdentity(item, seedUid)
+    const timeCreated =
+      typeof item.timeCreated === 'number' ? item.timeCreated : 0
+    const attester =
+      typeof item.attester === 'string'
+        ? item.attester
+        : typeof item.Attester === 'string'
+          ? item.Attester
+          : undefined
+    return {
+      seedUid,
+      schemaName,
+      attester,
+      timeCreated,
+      versionUid,
+      data: item,
+    }
+  })
 }
 
 /**
@@ -546,6 +548,7 @@ export async function assembleSeedsWithDependencies(
   const hydrateStorage = options?.hydrateStorage !== false
 
   const ctx = createAssembleContext()
+  for (const seed of seeds) if (seed) ctx.requestedSeedUids.add(seed.id)
 
   await processSeeds(ctx, seeds, dataSource, {
     dropSeedsWithOnlyRevokedVersions: true,
@@ -565,8 +568,8 @@ export async function assembleSeedsWithDependencies(
     await processSeeds(ctx, relatedSeeds, dataSource, { versions: relatedVersions })
   }
 
-  resolveRelationPropertiesToUrls(ctx, schemaName)
-  expandRelationProperties(ctx, schemaName, expandRelations)
+  resolveRelationPropertiesToUrls(ctx)
+  expandRelationProperties(ctx, expandRelations)
 
   const records = toSeedRecords(ctx, schemaName)
 

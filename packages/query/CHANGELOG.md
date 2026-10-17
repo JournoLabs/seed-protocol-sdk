@@ -2,6 +2,10 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+- `queryBySchema`, `queryBySchemaForMonth` and `getSeed` return only the seeds asked for. Before, a seed related to one of them that had the same schema (a post linking to another post) came back as an extra record, past `limit`, with its own relations unexpanded, and that record went into the item cache.
+
 ## 0.7.5 (2026-10-17)
 
 - Values from `uint*` and `int*` property attestations come back as decimal strings. Before, `uint256` and other wide integers came back as the indexer's `{"type":"BigNumber","hex":…}` JSON (ADR 0010).
