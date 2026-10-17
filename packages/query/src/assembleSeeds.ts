@@ -217,6 +217,31 @@ async function processItemProperty(
   ctx.assembledItems.set(seedUidForProperty, existingItem)
 }
 
+/**
+ * A version of a seed to assemble instead of its latest. `asOf` (unix seconds) also leaves out
+ * property attestations made after it, so later patches to that version don't show.
+ */
+export type VersionPin = {
+  versionUid: string
+  asOf?: number
+}
+
+function lowercaseKeys<T>(map: ReadonlyMap<string, T>): Map<string, T> {
+  return new Map([...map].map(([key, value]) => [key.toLowerCase(), value]))
+}
+
+/** The seed's live version `pin` names, if it existed by `pin.asOf`. */
+function pinnedVersion(
+  versions: AttestationLike[],
+  pin: VersionPin,
+): AttestationLike | undefined {
+  const needle = pin.versionUid.toLowerCase()
+  const version = versions.find((v) => v.id.toLowerCase() === needle)
+  if (!version) return undefined
+  if (pin.asOf !== undefined && version.timeCreated > pin.asOf) return undefined
+  return version
+}
+
 async function processSeeds(
   ctx: AssembleContext,
   seeds: AttestationLike[],
@@ -228,6 +253,8 @@ async function processSeeds(
      * seeds (and possibly others, which are ignored), so the request isn't made again.
      */
     versions?: AttestationLike[]
+    /** Versions to assemble instead of the latest, by lowercase seed UID (see VersionPin). */
+    pins?: ReadonlyMap<string, VersionPin>
   } = {},
 ): Promise<void> {
   const seedUids: string[] = []
@@ -281,7 +308,26 @@ async function processSeeds(
     ctx.versionsBySeedUid.set(seedUid, [...existingVersions, itemVersion])
   }
 
+  // Each seed's assembled version: the pinned one, else the latest. A pinned seed without that
+  // version (not the seed's, revoked, or created after `asOf`) is left out, like a seed whose
+  // versions were all revoked.
   const latestVersionUids: string[] = []
+  const asOfByVersionUid = new Map<string, number>()
+  for (const seedUid of seedUids) {
+    const pin = opts.pins?.get(seedUid.toLowerCase())
+    if (!pin) continue
+    const pinned = pinnedVersion(ctx.versionsBySeedUid.get(seedUid) ?? [], pin)
+    if (!pinned) {
+      ctx.assembledItems.delete(seedUid)
+      ctx.seedUidToModelType.delete(seedUid)
+      ctx.versionsBySeedUid.delete(seedUid)
+      ctx.droppedSeedUids.add(seedUid)
+      continue
+    }
+    latestVersionUids.push(pinned.id)
+    ctx.latestVersionUidsBySeedUid.set(seedUid, pinned.id)
+    if (pin.asOf !== undefined) asOfByVersionUid.set(pinned.id, pin.asOf)
+  }
   for (const [seedUid, versions] of ctx.versionsBySeedUid.entries()) {
     if (ctx.latestVersionUidsBySeedUid.has(seedUid)) continue
     const sortedVersions = [...versions].sort((a, b) => b.timeCreated - a.timeCreated)
@@ -297,7 +343,10 @@ async function processSeeds(
   const rawProperties = keepAttestationsFromRefAttester(
     await dataSource.getPropertiesForVersionUids(latestVersionUids),
     itemVersions,
-  )
+  ).filter((property) => {
+    const asOf = asOfByVersionUid.get(property.refUID)
+    return asOf === undefined || property.timeCreated <= asOf
+  })
   const itemProperties = pickLatestPropertyAttestationsByRefAndSchema(rawProperties)
 
   for (let i = 0; i < itemProperties.length; i++) {
@@ -535,6 +584,11 @@ export type AssembleRequest = {
   schemaName?: string
   /** Versions of the seeds already fetched with `includeRevoked: true` (see getSeed). */
   versions?: AttestationLike[]
+  /**
+   * Versions to assemble instead of the latest, by seed UID. Applies to `seeds` only: related
+   * seeds are always assembled at their latest version.
+   */
+  pins?: ReadonlyMap<string, VersionPin>
 }
 
 /**
@@ -574,6 +628,7 @@ export async function assembleSeedRecords(
   await processSeeds(ctx, seeds, dataSource, {
     dropSeedsWithOnlyRevokedVersions: true,
     versions: request.versions,
+    pins: request.pins && lowercaseKeys(request.pins),
   })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(
