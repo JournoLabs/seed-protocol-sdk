@@ -2,6 +2,25 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+A request the operator's upstream never answers no longer blocks the tunnel for good.
+
+- The client abandons a request once the stream has been idle for `requestTimeoutMs`
+  (default 60 s), answers 504, destroys the stream and reconnects for the next request.
+  `createGatewayProxy` and `connectTunnel` take `requestTimeoutMs` and `connectTimeoutMs`;
+  `seed-gateway connect` takes `--request-timeout-ms`.
+- `forwardHttp` and `runOnTunnel` take `{ signal, timeoutMs }`. `handleFetch` passes
+  `request.signal`, and `handleNode` and the sidecar abort when the caller disconnects.
+- The operator answers 504 once its upstream socket has been idle for `upstreamTimeoutMs`
+  (default 30 s; `seed-gateway serve --upstream-timeout-ms`), and 502 for other upstream
+  failures, instead of holding or dropping the stream.
+- Responses larger than 16 MiB (up to the 64 MiB frame limit) are sent in 1 MiB writes.
+  Before, secret-stream rejected them and the stream was torn down.
+- The operator no longer forwards hop-by-hop request headers or the client's `Host`. The
+  upstream sees its own host, with the original in `X-Forwarded-Host`. Check any Traefik
+  rule that matched on the forwarded `Host`.
+
 ## 0.7.5 (2026-10-17)
 
 ### Commits

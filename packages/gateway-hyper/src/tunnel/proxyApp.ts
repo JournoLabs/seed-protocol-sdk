@@ -34,7 +34,12 @@ export function createGatewayProxy(options: CreateGatewayProxyOptions = {}): Gat
   const ensureSession = async (): Promise<TunnelSession> => {
     if (session) return session
     if (starting) return starting
-    starting = createTunnelSession({ key, storePath: options.storePath }).then((s) => {
+    starting = createTunnelSession({
+      key,
+      storePath: options.storePath,
+      requestTimeoutMs: options.requestTimeoutMs,
+      connectTimeoutMs: options.connectTimeoutMs,
+    }).then((s) => {
       session = s
       starting = null
       return s

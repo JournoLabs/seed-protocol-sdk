@@ -16,6 +16,11 @@ export type ServeTunnelOptions = {
   keyFile?: string
   /** Directory for DHT state (optional, in-memory if unset) */
   storePath?: string
+  /**
+   * Answer 504 once the upstream socket has been idle this long, waiting for headers or
+   * body. Default 30 000; 0 disables.
+   */
+  upstreamTimeoutMs?: number
 }
 
 export type ServeTunnelResult = {
@@ -34,6 +39,14 @@ export type ConnectTunnelOptions = {
   port?: number
   /** Optional store path for DHT client state */
   storePath?: string
+  /**
+   * Abandon a request once the tunnel stream has sent and received nothing for this long,
+   * answer 504, and reconnect for the next request. Keep it above the operator's
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   */
+  requestTimeoutMs?: number
+  /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
+  connectTimeoutMs?: number
 }
 
 export type ConnectTunnelResult = {
@@ -65,6 +78,14 @@ export type CreateGatewayProxyOptions = {
   storePath?: string
   /** Start the Hyper session immediately (default: lazy on first request) */
   eager?: boolean
+  /**
+   * Abandon a request once the tunnel stream has sent and received nothing for this long,
+   * answer 504, and reconnect for the next request. Keep it above the operator's
+   * `upstreamTimeoutMs` so the operator's own 504 arrives first. Default 60 000; 0 disables.
+   */
+  requestTimeoutMs?: number
+  /** Give up opening the HyperDHT connection after this long. Default 30 000; 0 disables. */
+  connectTimeoutMs?: number
 }
 
 export type GatewayProxy = {

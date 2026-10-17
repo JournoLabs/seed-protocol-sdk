@@ -8,17 +8,26 @@ import { parseArgs } from 'node:util'
 import { connectTunnel, serveTunnel } from './index'
 
 const USAGE = `Usage:
-  seed-gateway serve [--upstream http://127.0.0.1:80] [--key-file <path>]
+  seed-gateway serve [--upstream http://127.0.0.1:80] [--key-file <path>] [--upstream-timeout-ms 30000]
       Operator: accept Hyper connections and proxy them to a local upstream (Traefik).
       Default --key-file: ./.seed/gateway-tunnel/operator.key.json (created on first run).
+      Answers 504 when the upstream is idle for --upstream-timeout-ms (0 disables).
 
-  seed-gateway connect <key> [--host 127.0.0.1] [--port 1984]
-      Client: dial an operator key and expose a localhost HTTP sidecar.`
+  seed-gateway connect <key> [--host 127.0.0.1] [--port 1984] [--request-timeout-ms 60000]
+      Client: dial an operator key and expose a localhost HTTP sidecar.
+      Abandons a request and reconnects when the tunnel is idle for --request-timeout-ms.`
 
 function fail(message: string): never {
   console.error(`[Seed Protocol] ${message}`)
   console.error(USAGE)
   process.exit(1)
+}
+
+function parseMs(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined
+  const ms = Number(value)
+  if (!Number.isInteger(ms) || ms < 0) fail(`${flag} must be a whole number of milliseconds`)
+  return ms
 }
 
 function waitForSignal(): Promise<void> {
@@ -51,6 +60,8 @@ async function main(argv: string[]): Promise<void> {
       },
       host: { type: 'string', default: '127.0.0.1' },
       port: { type: 'string', default: '1984' },
+      'upstream-timeout-ms': { type: 'string' },
+      'request-timeout-ms': { type: 'string' },
     },
   })
 
@@ -60,7 +71,11 @@ async function main(argv: string[]): Promise<void> {
     console.log(`[Seed Protocol] Gateway tunnel upstream: ${upstream}`)
     console.log(`[Seed Protocol] Operator key file: ${keyFile}`)
 
-    const session = await serveTunnel({ upstream, keyFile })
+    const session = await serveTunnel({
+      upstream,
+      keyFile,
+      upstreamTimeoutMs: parseMs(values['upstream-timeout-ms'], '--upstream-timeout-ms'),
+    })
     console.log(`[Seed Protocol] Operator key (z32): ${session.key}`)
     console.log('[Seed Protocol] Share this key with SDK users (gatewayHyperKey).')
     console.log('[Seed Protocol] Press Ctrl+C to stop.')
@@ -79,6 +94,7 @@ async function main(argv: string[]): Promise<void> {
       key,
       host: values.host,
       port: parseInt(values.port, 10) || 1984,
+      requestTimeoutMs: parseMs(values['request-timeout-ms'], '--request-timeout-ms'),
     })
     console.log(`[Seed Protocol] Local sidecar: ${session.baseUrl}`)
     console.log(
