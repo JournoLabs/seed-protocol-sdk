@@ -24,8 +24,8 @@ export class DuplicateArweaveModuleError extends Error {
       'Two copies of @seedprotocol/arweave are loaded, and the Arweave client was registered on the other copy ' +
         '(e.g. by SeedClient). Reads through this copy would use a different client and gateway. ' +
         'Make sure every @seedprotocol/* package is the same version and installed once (`npm ls @seedprotocol/arweave`). ' +
-        'With Vite, use seedVitePlugin (or list @seedprotocol/arweave and @seedprotocol/query in optimizeDeps.include ' +
-        'and resolve.dedupe) so they are pre-bundled together.',
+        'With Vite, keep @seedprotocol/* packages out of optimizeDeps.exclude so they are pre-bundled together, ' +
+        'and dedupe them (seedVitePlugin does) when they are linked into the app.',
     )
     this.name = 'DuplicateArweaveModuleError'
   }

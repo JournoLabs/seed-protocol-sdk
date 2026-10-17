@@ -8,13 +8,7 @@ export default defineConfig({
       name: 'copy-vite-shims',
       closeBundle() {
         mkdirSync(resolve(__dirname, 'dist'), { recursive: true })
-        for (const file of [
-          'debug-default-shim.js',
-          'arweave-default-shim.js',
-          'stream-default-shim.js',
-        ]) {
-          cpSync(resolve(__dirname, 'src', file), resolve(__dirname, 'dist', file))
-        }
+        cpSync(resolve(__dirname, 'src/stream-default-shim.js'), resolve(__dirname, 'dist/stream-default-shim.js'))
       },
     },
   ],
