@@ -7,4 +7,5 @@
 declare module '#seed-node-platform' {
   import type { PlatformServices } from '@/platform/types'
   export function createPlatformServices(): PlatformServices
+  export function resolveFilesDir(filesDir: string): string
 }
