@@ -3,6 +3,7 @@ import {
   CHANGE_CHECK_OVERLAP_SECONDS,
   checkWindowAged,
   checkedAtFor,
+  findChangedItems,
   findChangedSeeds,
 } from '../src/cache/changes.js'
 import type { QueryDataSource } from '../src/source/types.js'
@@ -80,6 +81,39 @@ describe('findChangedSeeds', () => {
   it('returns null when the source cannot list changes', async () => {
     const source = { kind: 'remote' } as unknown as QueryDataSource
     expect(await findChangedSeeds(source, deps, { checkedAt: 0, seenChangeKeys: [] })).toBeNull()
+  })
+})
+
+describe('findChangedItems', () => {
+  const checks = new Map([
+    ['0xA', { dependencies: deps.get('0xA')!, checkedAt: 500, seenChangeKeys: ['0xseen:0'] }],
+    ['0xB', { dependencies: deps.get('0xB')!, checkedAt: 900, seenChangeKeys: [] }],
+  ])
+
+  it('asks once, from the oldest check', async () => {
+    const source = sourceWithChanges([])
+    await findChangedItems(source, checks)
+    expect(source.listChangesSince).toHaveBeenCalledTimes(1)
+    expect(source.listChangesSince.mock.calls[0]![0].since).toBe(500)
+  })
+
+  it("counts a change only for items checked before it, and skips each item's seen keys", async () => {
+    const found = await findChangedItems(
+      sourceWithChanges([
+        { ...change('0xvB2', '0xB'), timeCreated: 800 }, // before B's check
+        { ...change('0xseen', '0xvA'), timeCreated: 600 }, // seen by A
+        { ...change('0xvI2', '0xI'), timeCreated: 700 }, // new version of A's related image
+      ]),
+      checks,
+    )
+    expect([...found!.changed]).toEqual(['0xA'])
+    expect(found!.seenChangeKeys.get('0xA')).toEqual(['0xseen:0', '0xvI2:0'])
+    expect(found!.seenChangeKeys.get('0xB')).toEqual([])
+  })
+
+  it('returns null when the source cannot list changes', async () => {
+    const source = { kind: 'remote' } as unknown as QueryDataSource
+    expect(await findChangedItems(source, checks)).toBeNull()
   })
 })
 

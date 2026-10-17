@@ -19,6 +19,7 @@ ADR records the decision a study led to.
 | [0008](0008-schema-names-on-eas.md) | One EAS name per property and model, matched loosely when reading | Accepted |
 | [0009](0009-name-match-strictness.md) | A schema sets how strictly EAS names match its models and properties | Accepted |
 | [0010](0010-number-encoding-on-eas.md) | Number properties are published as decimal strings | Accepted |
+| [0011](0011-reading-a-seed-at-a-version.md) | Reading a seed at a version takes a time as well as a version uid | Accepted |
 
 ## Writing one
 

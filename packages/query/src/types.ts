@@ -69,11 +69,29 @@ export type PropertyChangelogEntry = {
 
 export type ChangelogEntry = VersionChangelogEntry | PropertyChangelogEntry
 
+/**
+ * Which state of a seed to assemble instead of its latest. `versionUid` names one of the seed's
+ * versions; `asOf` (unix seconds) leaves out attestations made after it: versions created later,
+ * and property attestations made later (a `patch` publish adds them to the current version).
+ * With `asOf` alone, the seed's newest version created by then. Related seeds are still
+ * assembled at their latest version.
+ */
+export type VersionPin = {
+  versionUid?: string
+  asOf?: number
+}
+
 /** Options for `getSeed` (changelog is single-seed only). */
-export type GetSeedOptions = AssembleOptions & {
+export type GetSeedOptions = AssembleOptions & VersionPin & {
   /** Default `'data'`. */
   include?: ChangelogInclude
   changelog?: ChangelogOptions
+}
+
+/** Options for `getSeeds`: the assemble options, plus versions to read for some of the seeds. */
+export type GetSeedsOptions = AssembleOptions & {
+  /** By seed UID (any case). A seed without its pinned version is left out of the result. */
+  pins?: ReadonlyMap<string, VersionPin>
 }
 
 export type GetSeedResult = SeedRecord & {

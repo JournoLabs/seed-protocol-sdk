@@ -72,3 +72,50 @@ export async function findChangedSeeds(
   }
   return { changed, seenChangeKeys: changes.map(changeKey) }
 }
+
+/** A cached item to check: what it depends on, and its own check window. */
+export type ItemChangeCheck = ChangeCheck & { dependencies: SeedDependencies }
+
+/**
+ * Like findChangedSeeds for items checked at different times: one request from the oldest
+ * `checkedAt`, then each item counts only changes after its own `checkedAt` that it hasn't seen.
+ * `seenChangeKeys` is per item. Returns null when the data source can't list changes.
+ */
+export async function findChangedItems(
+  dataSource: QueryDataSource,
+  checks: Map<string, ItemChangeCheck>,
+): Promise<{ changed: Set<string>; seenChangeKeys: Map<string, string[]> } | null> {
+  if (!dataSource.listChangesSince) return null
+  const changed = new Set<string>()
+  const seenChangeKeys = new Map<string, string[]>()
+  if (checks.size === 0) return { changed, seenChangeKeys }
+
+  const refUIDs = new Set<string>()
+  const ids = new Set<string>()
+  let since = Infinity
+  for (const check of checks.values()) {
+    for (const uid of check.dependencies.refUIDs) refUIDs.add(uid)
+    for (const uid of check.dependencies.ids) ids.add(uid)
+    since = Math.min(since, check.checkedAt)
+  }
+  const changes = await dataSource.listChangesSince({
+    refUIDs: [...refUIDs],
+    ids: [...ids],
+    since,
+  })
+
+  for (const [seedUid, check] of checks) {
+    const refs = new Set(check.dependencies.refUIDs)
+    const own = new Set(check.dependencies.ids)
+    const seen = new Set(check.seenChangeKeys)
+    const keys: string[] = []
+    for (const change of changes) {
+      if (change.timeCreated <= check.checkedAt && change.revocationTime <= check.checkedAt) continue
+      if (!refs.has(change.refUID) && !own.has(change.id)) continue
+      keys.push(changeKey(change))
+      if (!seen.has(changeKey(change))) changed.add(seedUid)
+    }
+    seenChangeKeys.set(seedUid, keys)
+  }
+  return { changed, seenChangeKeys }
+}
