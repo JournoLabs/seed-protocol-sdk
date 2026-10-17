@@ -1,5 +1,6 @@
 import { initializeQueryPlatform } from './bootstrap.js'
 import {
+  assembleSeedRecords,
   assembleSeedsWithDependencies,
   type SeedDependencies,
 } from './assembleSeeds.js'
@@ -11,10 +12,12 @@ import {
 import {
   checkedAtFor,
   checkWindowAged,
+  findChangedItems,
   findChangedSeeds,
   nowSeconds,
+  type ItemChangeCheck,
 } from './cache/changes.js'
-import type { CachedRecordMeta } from './cache/types.js'
+import type { CachedItemData, CachedRecordMeta } from './cache/types.js'
 import {
   normalizeSourceMode,
   resolveQuerySource,
@@ -25,9 +28,12 @@ import type {
   AssembleOptions,
   GetSeedOptions,
   GetSeedResult,
+  GetSeedsOptions,
   QueryBySchemaOptions,
   QueryBySchemaResult,
+  AttestationLike,
   SeedRecord,
+  VersionPin,
 } from './types.js'
 
 const NO_DEPENDENCIES: SeedDependencies = { refUIDs: [], ids: [] }
@@ -259,36 +265,59 @@ export async function queryBySchema(
 }
 
 /**
- * The cached item for a seed if nothing it depends on changed since it was last checked (see
- * findChangedSeeds); otherwise drops it and returns null so the caller assembles it again.
+ * The cached items, by seedUid, of the seeds nothing they depend on changed for since each was
+ * last checked (one change request for all; see findChangedItems). Changed items are dropped so
+ * the caller assembles them again.
  */
+async function getUnchangedCachedItems(
+  requests: Array<{ seedUid: string; optionsKey: string }>,
+  dataSource: QueryDataSource,
+): Promise<Map<string, GetSeedResult>> {
+  const cache = getQueryCacheManager()
+  const cachedBySeedUid = new Map<string, CachedItemData>()
+  await Promise.all(
+    requests.map(async ({ seedUid, optionsKey }) => {
+      const cached = await cache.getItem(seedUid, optionsKey)
+      if (cached) cachedBySeedUid.set(seedUid, cached)
+    }),
+  )
+  const hits = new Map<string, GetSeedResult>()
+  if (cachedBySeedUid.size === 0) return hits
+
+  const startedAt = nowSeconds()
+  const checks = new Map<string, ItemChangeCheck>()
+  for (const [seedUid, cached] of cachedBySeedUid) checks.set(seedUid, cached)
+  const found = await findChangedItems(dataSource, checks)
+  for (const [seedUid, cached] of cachedBySeedUid) {
+    if (!found || found.changed.has(seedUid)) {
+      await cache.clearItem(seedUid, cached.optionsKey)
+      continue
+    }
+    if (checkWindowAged(cached, startedAt)) {
+      await cache.setItem({
+        ...cached,
+        checkedAt: checkedAtFor(startedAt),
+        seenChangeKeys: found.seenChangeKeys.get(seedUid) ?? [],
+      })
+    }
+    hits.set(seedUid, cached.record)
+  }
+  return hits
+}
+
 async function getUnchangedCachedItem(
   seedUid: string,
   optionsKey: string,
   dataSource: QueryDataSource,
 ): Promise<GetSeedResult | null> {
-  const cache = getQueryCacheManager()
-  const cached = await cache.getItem(seedUid, optionsKey)
-  if (!cached) return null
+  const hits = await getUnchangedCachedItems([{ seedUid, optionsKey }], dataSource)
+  return hits.get(seedUid) ?? null
+}
 
-  const startedAt = nowSeconds()
-  const found = await findChangedSeeds(
-    dataSource,
-    new Map([[seedUid, cached.dependencies]]),
-    cached,
-  )
-  if (!found || found.changed.has(seedUid)) {
-    await cache.clearItem(seedUid, optionsKey)
-    return null
-  }
-  if (checkWindowAged(cached, startedAt)) {
-    await cache.setItem({
-      ...cached,
-      checkedAt: checkedAtFor(startedAt),
-      seenChangeKeys: found.seenChangeKeys,
-    })
-  }
-  return cached.record
+/** The pin in `options`, if it names a version or a time. */
+function pinOf(options: VersionPin | undefined): VersionPin | undefined {
+  if (options?.versionUid === undefined && options?.asOf === undefined) return undefined
+  return { versionUid: options.versionUid, asOf: options.asOf }
 }
 
 export async function getSeed(
@@ -344,9 +373,12 @@ export async function getSeed(
   let result: GetSeedResult | null = null
   let dependencies: SeedDependencies = { refUIDs: [trimmed], ids: [trimmed] }
 
+  const pin = pinOf(options)
   const assembleData = async (): Promise<SeedRecord | null> => {
-    const assembled = await assembleSeedsWithDependencies(schemaName, [seed], options, dataSource, {
+    const assembled = await assembleSeedRecords([seed], options, dataSource, {
+      schemaName,
       versions,
+      pins: pin && new Map([[trimmed, pin]]),
     })
     const record = assembled.records[0]
     if (record) dependencies = assembled.dependencies.get(record.seedUid) ?? dependencies
@@ -402,6 +434,111 @@ export async function getSeed(
     if (stored) result = stored.record
   }
 
+  return result
+}
+
+/**
+ * Many seeds, of any schemas, keyed by UID as given (first spelling of each, in order). Seeds
+ * not found, revoked, or without their pinned version are left out. Uncached seeds are
+ * assembled together, in one set of requests (see assembleSeedRecords), and cached ones are
+ * checked for changes in one request; records are shared with `getSeed` (same item cache).
+ * A seed can be read at one version per call.
+ */
+export async function getSeeds(
+  seedUids: readonly string[],
+  options?: GetSeedsOptions,
+): Promise<Map<string, SeedRecord>> {
+  await initializeQueryPlatform()
+
+  // Read lowercase (EAS indexes UIDs lowercase and matches them case-sensitively); keyed as given.
+  const givenByUid = new Map<string, string>()
+  for (const given of seedUids) {
+    if (typeof given !== 'string' || given.trim() === '') continue
+    const uid = given.trim().toLowerCase()
+    if (!givenByUid.has(uid)) givenByUid.set(uid, given.trim())
+  }
+  const requested = [...givenByUid.keys()]
+  if (requested.length === 0) return new Map()
+
+  const pins = new Map<string, VersionPin>()
+  for (const [uid, pin] of options?.pins ?? []) {
+    const active = pinOf(pin)
+    if (active) pins.set(uid.trim().toLowerCase(), active)
+  }
+  const optionsKeyFor = (seedUid: string) =>
+    buildAssembleOptionsKey({ ...options, ...pins.get(seedUid) })
+
+  const mode = normalizeSourceMode(options?.source)
+  const resolved = resolveQuerySource(mode)
+  const found = new Map<string, SeedRecord>()
+
+  /** Reads `uids` from `dataSource` into `found`; returns the ones whose seed it doesn't have. */
+  const readFrom = async (
+    dataSource: QueryDataSource,
+    allowCache: boolean,
+    uids: string[],
+  ): Promise<string[]> => {
+    const useCache = shouldUseCache(options, allowCache) && dataSource.kind === 'remote'
+    let toFetch = uids
+    if (useCache) {
+      const hits = await getUnchangedCachedItems(
+        uids.map((seedUid) => ({ seedUid, optionsKey: optionsKeyFor(seedUid) })),
+        dataSource,
+      )
+      for (const [seedUid, record] of hits) found.set(seedUid, record)
+      toFetch = uids.filter((uid) => !hits.has(uid))
+    }
+    if (toFetch.length === 0) return []
+
+    const startedAt = nowSeconds()
+    const [seeds, versions] = await Promise.all([
+      dataSource.getSeedsByUids(toFetch),
+      dataSource.getVersionsForSeeds(toFetch, { includeRevoked: true }),
+    ])
+    const seedByUid = new Map(seeds.map((seed) => [seed.id.toLowerCase(), seed]))
+    const missing = toFetch.filter((uid) => !seedByUid.has(uid))
+    // Like getSeed: a seed without a schema name isn't assembled.
+    const toAssemble = toFetch
+      .map((uid) => seedByUid.get(uid))
+      .filter((seed): seed is AttestationLike => !!seed?.schema?.schemaNames?.[0]?.name)
+
+    const assembled = await assembleSeedRecords(toAssemble, options, dataSource, {
+      versions,
+      pins,
+    })
+    for (const record of assembled.records) {
+      let result: SeedRecord = record
+      if (useCache) {
+        const stored = await getQueryCacheManager().setItem({
+          record,
+          optionsKey: optionsKeyFor(record.seedUid.toLowerCase()),
+          dependencies: assembled.dependencies.get(record.seedUid) ?? {
+            refUIDs: [record.seedUid],
+            ids: [record.seedUid],
+          },
+          checkedAt: checkedAtFor(startedAt),
+          seenChangeKeys: [],
+          lastUpdated: startedAt,
+        })
+        // The cached record (frozen outside production), so a fresh result behaves like a cache hit.
+        if (stored) result = stored.record
+      }
+      found.set(record.seedUid.toLowerCase(), result)
+    }
+    return missing
+  }
+
+  const missing = await readFrom(resolved.dataSource, resolved.useQueryCache, requested)
+  // auto: seeds the local source doesn't have → remote
+  if (missing.length > 0 && mode === 'auto' && resolved.dataSource.kind === 'local') {
+    await readFrom(getRemoteQueryDataSource(), true, missing)
+  }
+
+  const result = new Map<string, SeedRecord>()
+  for (const [uid, given] of givenByUid) {
+    const record = found.get(uid)
+    if (record) result.set(given, record)
+  }
   return result
 }
 

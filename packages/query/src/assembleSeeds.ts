@@ -21,7 +21,7 @@ import {
 } from './fieldStorageModel.js'
 import { getRemoteQueryDataSource } from './source/remote.js'
 import type { QueryDataSource } from './source/types.js'
-import type { AssembleOptions, AttestationLike, SeedRecord } from './types.js'
+import type { AssembleOptions, AttestationLike, SeedRecord, VersionPin } from './types.js'
 
 const IMAGE_SCHEMA = 'image'
 
@@ -217,29 +217,28 @@ async function processItemProperty(
   ctx.assembledItems.set(seedUidForProperty, existingItem)
 }
 
-/**
- * A version of a seed to assemble instead of its latest. `asOf` (unix seconds) also leaves out
- * property attestations made after it, so later patches to that version don't show.
- */
-export type VersionPin = {
-  versionUid: string
-  asOf?: number
+/** Pins that name a version or a time, by lowercase seed UID. */
+function activePins(pins: ReadonlyMap<string, VersionPin>): Map<string, VersionPin> {
+  const active = new Map<string, VersionPin>()
+  for (const [seedUid, pin] of pins) {
+    if (pin.versionUid !== undefined || pin.asOf !== undefined) active.set(seedUid.toLowerCase(), pin)
+  }
+  return active
 }
 
-function lowercaseKeys<T>(map: ReadonlyMap<string, T>): Map<string, T> {
-  return new Map([...map].map(([key, value]) => [key.toLowerCase(), value]))
-}
-
-/** The seed's live version `pin` names, if it existed by `pin.asOf`. */
+/** The seed's live version `pin` names (else its newest), if it was created by `pin.asOf`. */
 function pinnedVersion(
   versions: AttestationLike[],
   pin: VersionPin,
 ): AttestationLike | undefined {
+  const asOf = pin.asOf
+  const candidates =
+    asOf === undefined ? versions : versions.filter((v) => v.timeCreated <= asOf)
+  if (pin.versionUid === undefined) {
+    return [...candidates].sort((a, b) => b.timeCreated - a.timeCreated)[0]
+  }
   const needle = pin.versionUid.toLowerCase()
-  const version = versions.find((v) => v.id.toLowerCase() === needle)
-  if (!version) return undefined
-  if (pin.asOf !== undefined && version.timeCreated > pin.asOf) return undefined
-  return version
+  return candidates.find((v) => v.id.toLowerCase() === needle)
 }
 
 async function processSeeds(
@@ -628,7 +627,7 @@ export async function assembleSeedRecords(
   await processSeeds(ctx, seeds, dataSource, {
     dropSeedsWithOnlyRevokedVersions: true,
     versions: request.versions,
-    pins: request.pins && lowercaseKeys(request.pins),
+    pins: request.pins && activePins(request.pins),
   })
 
   const relatedSeedUidsArray = Array.from(ctx.relatedSeedUids).filter(

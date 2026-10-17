@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { assembleSeedRecords, type VersionPin } from '../src/assembleSeeds'
+import { assembleSeedRecords } from '../src/assembleSeeds'
+import type { VersionPin } from '../src/types'
 import type { QueryDataSource } from '../src/source/types'
 import type { AttestationLike } from '../src/types'
 
