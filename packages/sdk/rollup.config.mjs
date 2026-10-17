@@ -5,6 +5,7 @@ import commonjs from '@rollup/plugin-commonjs'
 import alias from '@rollup/plugin-alias'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { isBuiltin } from 'node:module'
 import json from '@rollup/plugin-json'
 import MagicString from 'magic-string'
 
@@ -155,6 +156,10 @@ const config = [
         entryFileNames: '[name].js',
       },
     ],
+    // A Node built-in whose bindings are all tree-shaken away (markdown.ts's readFileSync) would
+    // otherwise stay as a bare `import 'fs'` in main.js, which webpack and Turbopack can't
+    // resolve for the browser and Vite warns about.
+    treeshake: { moduleSideEffects: (id, external) => !(external && isBuiltin(id)) },
     external: [
       '@seedprotocol/feed',
       '@seedprotocol/eas',
