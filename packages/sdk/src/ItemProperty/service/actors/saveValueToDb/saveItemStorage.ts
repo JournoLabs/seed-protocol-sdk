@@ -207,8 +207,10 @@ export const saveItemStorage = fromCallback<
       // the browser's metadata live query, which Node does not have at all.
       refResolvedValue: fileName,
       localStorageDir,
-      // Point the property at the draft row when the edit moved off a published row.
-      ...(propertyData.localId !== localId && { localId: propertyData.localId }),
+      // Point the property at the draft row when the edit moved off a published row, and drop the
+      // published row's uid with it: patch Publish skips a property that has one.
+      localId: propertyData.localId ?? localId,
+      uid: propertyData.uid ?? undefined,
     })
 
     return true

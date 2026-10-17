@@ -11,8 +11,14 @@ import { BaseDb } from '@/db/Db/BaseDb'
 import { getSeedPublisher } from '@/db/read/getSeedPublisher'
 const logger = debug('seedSdk:write:updateItemPropertyValue')
 
+/**
+ * The row that holds the value after the write. `uid` is that row's attestation uid: set only when
+ * the value was unchanged and the newest row is published, so a caller can tell a pending draft
+ * (no uid) from an attested value. An edit of a published row lands in a new draft row.
+ */
 type UpdateItemPropertyValueResult = {
   localId: string
+  uid: string | null
   schemaUid: string
 }
 
@@ -100,6 +106,25 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))) as (MetadataType & { localId?: string | null })[]
   }
 
+  // A localId can name a published row that an edit has since moved off (a property whose context
+  // went stale). Compare with, and write to, the property's newest row instead: otherwise every save
+  // adds another draft, and setting the published value back looks unchanged and keeps the draft.
+  const localIdRow = localIdParam ? rows.find((row) => row.localId === localIdParam) : undefined
+  if (localIdRow?.uid && localIdRow.propertyName && localIdRow.seedLocalId) {
+    const newestRows = (await appDb
+      .select()
+      .from(metadata)
+      .where(
+        and(
+          eq(metadata.propertyName, localIdRow.propertyName),
+          eq(metadata.seedLocalId, localIdRow.seedLocalId),
+        ),
+      )
+      .orderBy(sql.raw(METADATA_LATEST_FIRST_ORDER_SQL))
+      .limit(1)) as (MetadataType & { localId?: string | null })[]
+    if (newestRows.length > 0) rows = newestRows
+  }
+
   if (rows && rows.length > 0) {
     const {
       localId,
@@ -132,7 +157,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
       logger(
         `[db/write] [updateItemPropertyValue] value is the same as most recent record for property: ${propertyNameFromDb}`,
       )
-      return
+      return localId == null ? undefined : { localId, uid: uid ?? null, schemaUid: schemaUid ?? '' }
     }
 
     // This means we already have a local-only record so we should just update that one
@@ -158,7 +183,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
         .set(updatePayload as Partial<typeof metadata.$inferInsert>)
         .where(eq(metadata.localId, localId))
 
-      return
+      return { localId, uid: null, schemaUid: schemaUid ?? '' }
     }
 
     const seedDataFromDb = seedLocalId ? await getSeedData({ seedLocalId }) : null
@@ -190,6 +215,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
     return {
       localId: newLocalId,
+      uid: null,
       schemaUid: schemaUid ?? '',
     }
   }
@@ -234,6 +260,7 @@ export const updateItemPropertyValue: UpdateItemPropertyValue = async ({
 
   return {
     localId: newLocalId,
+    uid: null,
     schemaUid: schemaUid ?? '',
   }
 
